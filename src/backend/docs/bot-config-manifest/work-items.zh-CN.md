@@ -1826,6 +1826,31 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 
 ---
 
+**进展（已落地，PR inclusionAI/Avernet#1836）。**spec 第 3 版
+（`specs/2026-09-02-manifest-lifecycle-apply-points/`）把本项收窄为 `PUT`、teclaw
+创建与 startup-script 别名视图，并加入了投递策略缝。逐条验收：
+
+- **teclaw 第一份 artifact 带着 manifest**——在平台管理路径上成立：创建 job 先只写
+  bot 记录，对着它跑唯一一个容器前阶段（每个类目写平台状态——store 后端的端口把
+  字节写进 bot-data 对象存储、索引行写进 `ac_bot_config_managed_files`；激活只记录
+  不投影），再开通；composer 读索引并写出 `ownership` 映射（引擎契约 §9）。
+- **teclaw 创建、解除拒绝**——已完成；轮询走
+  `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`。
+- **`PUT` 生效**——已完成：`PUT` 先存，再以 `put` 触发器启动一次 apply；响应的
+  `apply` 字段报告它；未 ACTIVE 与 script 的提示放在 `warnings`。两个引擎系都不重启
+  （有测试钉住）。
+- **别名视图**——已完成；`write_through_script` / `script_body` 加一个只改 `script`
+  段的文本拼接。
+- **缝**——`DeliveryStrategy`（`apply/delivery.py`）：`ArcaDelivery` 就是今天的行为；
+  `TeclawDelivery` 在开关打开时把所有类目放到容器前、走 store 后端端口、最后整包
+  重投一次；开关关闭时保持 W8 之前的逐文件形态。
+- **开关**——`user_config.bot_config_manifest.teclaw_platform_managed`，默认**关**；
+  等 teclaw 引擎实现 `ownership`（R-O1/R-O2/R-O3）后再翻开，翻开前先对每个已有
+  manifest 的 teclaw bot 显式 apply 一次让索引落上文件。
+- **推迟**（spec D-1 与 *Follow-ups*）：重新发布与重启作为 apply 点；平台管理的
+  teclaw 文件在发布时的 gather；关闭步骤重投失败在报告 `notes` 之外的健康面；
+  ARCA 的绑定前端口。
+
 #### W9 — `cli_tools` —— 已推迟 · #1477
 
 **Owner.** `totalfrank` · 0.25 天 · 第 4 天 · 设计（§7）

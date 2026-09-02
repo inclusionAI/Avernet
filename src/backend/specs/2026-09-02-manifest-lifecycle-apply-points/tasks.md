@@ -338,20 +338,21 @@ Conventions every task assumes:
 
 ## Group G — Docs and the sweep
 
-## [ ] Task 21: Docs
-- **Files:** `core/bot_config_manifest/README.md`, `managed_files/README.md`,
-  `core/config_compose/README.md`, `core/skill_center/README.md` (boundary rows),
+## [x] Task 21: Docs
+- **Files:** `core/bot_config_manifest/README.md` (its boundary rows landed with
+  Tasks 8–12; `config_compose` and `skill_center` needed none — the compose side
+  reaches the reader through a Protocol), `managed_files/README.md` (Task 8),
   `docs/bot-config-manifest/user-manual.zh-CN.md`,
   `docs/bot-config-manifest/{work-items,work-items.zh-CN}.md`,
-  the config reference for the switch
+  the config reference for the switch (`configs/application.yaml`)
 - **Done when:**
-  - [ ] README: "Lifecycle apply points and the delivery seam (W8)" — the
+  - [x] README: "Lifecycle apply points and the delivery seam (W8)" — the
         strategy, the two families side by side, the switch and when to flip
         it, the store and index, the closing redeliver, the alias view, the
         trigger vocabulary, the deferrals.
-  - [ ] User manual §4.6, §5.5, §7, and a new teclaw subsection (first
+  - [x] User manual §4.6, §5.5, §7, and a new teclaw subsection (first
         artifact, whole-artifact convergence, the switch).
-  - [ ] Work-items W8 (both languages): a progress block — what landed per
+  - [x] Work-items W8 (both languages): a progress block — what landed per
         criterion, the seam, the switch's default and its condition, the
         deferrals (restart/republish, publish gather, health surface, ARCA
         pre-binding port).

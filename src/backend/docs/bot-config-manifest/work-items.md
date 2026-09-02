@@ -2256,6 +2256,38 @@ manifest level, so there is no de-activation for W8 to place.)
 
 ---
 
+**Progress (landed, PR inclusionAI/Avernet#1836).** Spec revision 3
+(`specs/2026-09-02-manifest-lifecycle-apply-points/`) narrowed the item to
+`PUT`, teclaw creation and the startup-script alias view, and added the
+delivery seam. Per criterion:
+
+- **The first teclaw artifact carries the manifest** — yes, on the
+  platform-managed path: the creation job records the bot, runs the single
+  pre-container phase against the record (every construct writes platform
+  state — the store-backed ports write bytes to the bot-data store and an
+  index row to `ac_bot_config_managed_files`; activation records without
+  projecting), then provisions; the composer reads the index and emits the
+  `ownership` map (engine contract §9).
+- **teclaw creation, the refusal lifted** — done; the poll walks
+  `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`.
+- **`PUT` takes effect** — done: `PUT` stores, then starts an apply under
+  trigger `put`; the response's `apply` field reports it; the not-ACTIVE and
+  script notes ride in `warnings`. No restart on either family (pinned).
+- **The alias view** — done; `write_through_script` / `script_body` and a
+  textual splice of the `script` section.
+- **The seam** — `DeliveryStrategy` (`apply/delivery.py`): `ArcaDelivery` is
+  today's behaviour; `TeclawDelivery` runs every construct pre-container over
+  store-backed ports with one closing whole-artifact redeliver when the switch
+  is on, and the pre-W8 per-file shape when it is off.
+- **The switch** — `user_config.bot_config_manifest.teclaw_platform_managed`,
+  default **off**; flip once the teclaw engine implements `ownership`
+  (R-O1/R-O2/R-O3), after explicitly applying each existing teclaw bot's
+  manifest so the index is populated.
+- **Deferred** (spec D-1 and *Follow-ups*): restart and republish as apply
+  points; the publish gather for platform-managed teclaw files; a health
+  surface for a failed closing redeliver beyond the report's `notes`; an ARCA
+  pre-binding port.
+
 #### W9 — `cli_tools` — deferred · #1477
 
 **Goal.** Command-line tools the model can invoke, installed declaratively.

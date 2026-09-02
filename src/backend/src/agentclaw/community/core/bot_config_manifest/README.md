@@ -380,10 +380,10 @@ the seam's `persist` resolves the storage key itself and returns it.
 no materialiser can act on: the document sits inert and nothing has been created.
 Here the same acceptance costs a Passport application, a user's authorization
 click and a live bot before the failure appears, so such a construct is refused
-at submission. The extra teclaw refusal is structural rather than a missing
-materialiser — teclaw composes a config artifact at provision time, a different
-mechanism from this pre/post-container delivery — and W8 (#1476) owns that arm,
-including lifting the refusal.
+at submission. Every engine family creates here since W8 (#1476): what a family
+cannot deliver is the validator's per-construct refusal (`script` on teclaw is
+`unsupported_script`), and which order the creation runs in is the delivery
+strategy's `creation_sequence` — see *Lifecycle apply points* below.
 
 ### Operational precondition
 
@@ -396,6 +396,71 @@ create-with-manifest still answers `202` and its poll sits at
 `AWAITING_AUTHORIZATION` until the creation deadline retires it as
 `AUTHORIZATION_EXPIRED`. Neither ever completes. It is the first thing to check
 when a creation or an apply appears stuck.
+
+## Lifecycle apply points and the delivery seam (W8, #1476)
+
+Two engine families deliver a bot's configuration by opposite mechanisms, and
+the apply engine must not know which it is running for. `apply/delivery.py`
+names the difference: a `DeliveryStrategy` owns the phase each construct
+belongs to, the write ports the materialisers are handed, the creation sequence
+the W13 job runs, and the step that closes an apply — and nothing else. The
+orchestrator sees phases and the materialisers see ports; neither learns the
+family.
+
+|  | ARCA (`ArcaDelivery`) | teclaw, switch **on** (`TeclawDelivery`) | teclaw, switch **off** |
+| --- | --- | --- | --- |
+| Phases | `script` PRE_CONTAINER, the rest ON_CONTAINER — `APPLY_ORDER`'s own table | every construct PRE_CONTAINER (`script` is refused by the validator) | the rest ON_CONTAINER, as before W8 |
+| Ports | the device-backed services | the store-backed ports over `managed_files/` + record-only activation | the device-backed services |
+| Closing step | none — the owning services project as they write | one whole-artifact redeliver to the running container, none when unbound | none |
+| Creation sequence | `PRE_CREATE_ON`: phase A, create + provision, wait ACTIVE, phase B | `RECORD_PRE_PROVISION`: record, the single phase against it, provision, wait ACTIVE | `PRE_CREATE_ON` |
+
+**The platform is the source of truth for what a manifest applies, on both
+families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
+the delivery, so the platform holds its own copy of every manifest-delivered
+file: bytes in the bot-data object store under the promotion key layout with a
+`_manifest` segment, one index row per file in `ac_bot_config_managed_files`
+(`managed_files/`, see its README). The teclaw composer reads that index for
+every category the platform asserts and writes the artifact's **`ownership`**
+map (`platform` / `engine` per category; `mcp` always `platform`; ARCA
+artifacts carry no map) — the engine contract's §9. A local skill the manifest
+installs rides as a `SkillRef` with a store address plus its files as resources
+refs; the collector emits it only while the bot has the skill active.
+
+**The switch.** `user_config.bot_config_manifest.teclaw_platform_managed`
+(default `false`), read once at boot by `DeliveryStrategyFactory` and nowhere
+else, strict about booleans. It stays off until the teclaw engine implements
+the `ownership` map (R-O1/R-O2/R-O3); off, teclaw runs the shape it ran before
+W8 and the only artifact change is an all-`engine` map. **Before flipping it on
+an existing deployment, explicitly apply each teclaw bot's manifest once** so
+the index carries its files: the composer asserts `platform` from the stored
+manifest, and an empty index under an asserted category means "remove the
+area" to an engine that honours the map.
+
+**`PUT` starts an apply** (§2.6): the document is stored and validated exactly
+as before, then both phases are started under trigger `put`; the response's
+`apply` field says `RUNNING` with the id or `NOT_STARTED` with why, and the
+write is a `200` either way. `warnings` carries the script delivery note and,
+on a bot that is not `ACTIVE` whose strategy has container-bound constructs,
+the note that those will be recorded as failed. Restart and republish are
+**not** apply points in this iteration (spec D-1): a change to the git repo a
+manifest ref points at is picked up by an explicit apply or the next `PUT`.
+
+**The alias view** (§2.2): on a bot with a manifest the legacy
+`…/startup-script` routes are a view of its `script` section —
+`write_through_script` splices the section (`schema/splice.py`, a textual
+splice that keeps every other byte), stores through the same validation and
+writes the row with the substituted body; `script_body` answers `GET`. A bot
+without a manifest is served exactly as before.
+
+**Trigger vocabulary** (`apply/triggers.py`): `explicit`, `put`,
+`create:pre_container`, `create:on_container`. The apply record's column is 32
+wide and a test pins every trigger to it.
+
+**Deferred, recorded.** Restart and republish as apply points; the publish
+gather for platform-managed teclaw files (the promotion step still snapshots
+the container); a health surface for a failed closing redeliver beyond the
+report's `notes`; and an ARCA pre-binding port (ARCA still needs the container
+for every non-script construct).
 
 ## Where the HTTP seam is
 
