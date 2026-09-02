@@ -42,7 +42,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
     GIT_CHECKOUT_MEMBER_LIMIT,
+    GIT_CHECKOUT_UNPACKED_LIMIT,
     GIT_FETCH_TIMEOUT_S,
+    GIT_SINGLE_FILE_LIMIT,
 )
 from agentclaw.community.log import get_logger
 
@@ -55,6 +57,41 @@ _SHA_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 #: symlink (``payload -> /etc`` is exactly the W2 hazard), ``160000`` is a
 #: gitlink/submodule — both refused before any byte is read.
 _ALLOWED_MODES = frozenset({"100644", "100755"})
+
+
+def _require_safe(what: str, value: Optional[str]) -> None:
+    """A subpath is refused if absolute or escaping — the PUT-time rule
+    re-asked at apply time, because a stored document may have drifted."""
+    if value is None:
+        return
+    if value.startswith("/") or value.startswith("\\"):
+        raise FetchRefusedError(f"{what} must be relative, got {value!r}")
+    parts = value.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise FetchRefusedError(f"{what} may not contain '..': {value!r}")
+
+
+def _is_plain_name(name: str) -> bool:
+    if name.startswith("/") or ".." in name.replace("\\", "/").split("/"):
+        return False
+    return not name.startswith("~")
+
+
+def _under_subpath(member: str, subpath: Optional[str]) -> Optional[str]:
+    """The member's path relative to ``subpath`` (segment-boundary matched),
+    or ``None`` when outside it — the skills materialiser's own arithmetic,
+    on members the enumeration already proved plain."""
+    _require_safe("subpath", subpath)
+    if subpath is None or subpath == "":
+        return member
+    prefix = subpath.replace("\\", "/").strip("/")
+    parts = member.split("/")
+    mine = [p for p in prefix.split("/") if p]
+    if len(parts) <= len(mine):
+        return None
+    if parts[: len(mine)] != mine:
+        return None
+    return "/".join(parts[len(mine) :])
 
 
 @dataclass(frozen=True)
@@ -126,16 +163,98 @@ class GitCheckout:
 
     ``members`` is the tree enumerated by ``git ls-tree`` at fetch time —
     every member a plain file — and the readers below walk **only** those
-    paths, so nothing outside the enumeration is ever touched.
+    paths, so nothing outside the enumeration is ever touched. ``subpath``
+    is the spec's own, remembered so a reader called bare re-uses what the
+    document declared instead of silently meaning "the whole tree".
     """
 
     root: Path
     sha: str
     url: str
     ref: str
-    # (mode, path) pairs; the guarded readers land with the next wave over
-    # this module and are the only sanctioned way to reach these.
+    # (mode, path) pairs; the readers below are the only sanctioned way to
+    # reach these.
     members: Tuple[Tuple[str, str], ...] = ()
+    subpath: Optional[str] = None
+
+    # ── the readers ─────────────────────────────────────────────────────────
+    #
+    # Only enumerated members are read, only from this checkout's own root,
+    # and only inside the limits: the enumeration proved every member a plain
+    # file at fetch time, so a reader cannot be walked out of the temp dir by
+    # anything the repository author left in the tree.
+
+    def files(
+        self, subpath: Optional[str] = None
+    ) -> list[tuple[str, bytes]]:
+        """Every file under ``subpath`` as (relative path, bytes).
+
+        Raises ``FetchRefusedError`` — the pre-wire class — for an unsafe
+        subpath, an empty selection, or a limit blown while reading.
+        """
+        if subpath is None:
+            subpath = self.subpath
+        selected = [
+            (mode, _under_subpath(name, subpath), name)
+            for mode, name in self.members
+        ]
+        selected = [(m, r, n) for m, r, n in selected if r is not None]
+        if not selected:
+            raise FetchRefusedError(
+                f"the git tree contains nothing under subpath {subpath!r}"
+            )
+        out: list[tuple[str, bytes]] = []
+        total = 0
+        for mode, rel, name in selected:
+            payload = self._read_member(name, mode)
+            total += len(payload)
+            if total > GIT_CHECKOUT_UNPACKED_LIMIT:
+                raise FetchRefusedError(
+                    "git checkout exceeds the "
+                    f"{GIT_CHECKOUT_UNPACKED_LIMIT}-byte unpacked cap"
+                )
+            out.append((rel, payload))
+        return out
+
+    def read_file(self, subpath: Optional[str] = None) -> bytes:
+        """The single file a subpath names — the identity-category road."""
+        if subpath is None:
+            subpath = self.subpath
+        _require_safe("subpath", subpath)
+        if subpath is None or subpath == "":
+            raise FetchRefusedError(
+                "read_file: the source's subpath must name a single file"
+            )
+        hit = [(mode, name) for mode, name in self.members if name == subpath]
+        if not hit:
+            # No member equals the subpath exactly: either it names a
+            # directory (members live under it) or it names nothing.
+            if any(name.startswith(subpath + "/") for _, name in self.members):
+                raise FetchRefusedError(
+                    f"subpath {subpath!r} names a directory, not a single file"
+                )
+            raise FetchRefusedError(
+                f"the git tree has no file at subpath {subpath!r}"
+            )
+        mode, name = hit[0]
+        payload = self._read_member(name, mode)
+        if len(payload) > GIT_SINGLE_FILE_LIMIT:
+            raise FetchRefusedError(
+                "a single git tree file exceeds the "
+                f"{GIT_SINGLE_FILE_LIMIT}-byte cap: {subpath!r}"
+            )
+        return payload
+
+    def _read_member(self, name: str, mode: str) -> bytes:
+        if not _is_plain_name(name):
+            raise FetchRefusedError(f"refusing to read git member {name!r}")
+        base = self.root.resolve()
+        target = (self.root / name).resolve()
+        if base != target and base not in target.parents:
+            raise FetchRefusedError(
+                f"git member {name!r} resolves outside the checkout"
+            )
+        return target.read_bytes()
 
 
 class GitSourceClient(Protocol):
@@ -204,7 +323,8 @@ class SubprocessGitClient:
                 urlparse(spec.url).netloc, spec.ref, sha, len(members),
             )
             return GitCheckout(
-                root=root, sha=sha, url=spec.url, ref=spec.ref, members=members
+                root=root, sha=sha, url=spec.url, ref=spec.ref, members=members,
+                subpath=spec.subpath,
             )
         except FetchRefusedError:
             self._discard(root)

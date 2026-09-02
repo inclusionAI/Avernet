@@ -120,3 +120,134 @@ def test_a_failed_git_command_is_a_fetch_failure_and_cleans_up(monkeypatch, tmp_
         p.name for p in Path(tempfile.gettempdir()).glob("manifest-git-*")
     )
     assert leftovers_after == leftovers_before, "a failed fetch must leave no temp dir"
+
+
+def _git(argv: list[str], *, cwd: Path) -> str:
+    return subprocess.run(
+        argv, cwd=cwd, capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _serve_repo(
+    tmp_path: Path,
+    *,
+    allow_any_sha: bool = False,
+    symlink_member: bool = False,
+    gitlink_member: bool = False,
+) -> Path:
+    """A bare repo on disk serving one committed tree over file://."""
+    work = tmp_path / "src"
+    (work / "pkg").mkdir(parents=True)
+    (work / "pkg" / "skill.md").write_text("# a skill\n")
+    (work / "root.txt").write_text("root\n")
+    _git(["git", "init", "--quiet", "-b", "main"], cwd=work)
+    if symlink_member:
+        (work / "pkg" / "escape").symlink_to("/etc")
+    _git(["git", "add", "."], cwd=work)
+    if gitlink_member:
+        # A gitlink row without its submodule contents: exactly the shape a
+        # submodule author leaves in the index. Added after ``git add .`` —
+        # ``git add .`` stages the deletion of index rows with no on-disk
+        # path, so an earlier cacheinfo add would be wiped before the commit.
+        _git(
+            ["git", "update-index", "--add", "--cacheinfo",
+             "160000,1111111111111111111111111111111111111111,vendor/sub"],
+            cwd=work,
+        )
+    _git(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "--quiet", "-m", "one"],
+        cwd=work,
+    )
+    bare = tmp_path / "bare.git"
+    subprocess.run(
+        ["git", "clone", "--quiet", "--bare", str(work), str(bare)],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    if allow_any_sha:
+        _git(["git", "config", "uploadpack.allowAnySHA1InWant", "true"], cwd=bare)
+    return bare
+
+
+def _client() -> SubprocessGitClient:
+    return SubprocessGitClient(allowed_schemes=frozenset({"https", "file"}))
+
+
+@pytest.fixture
+def serve(tmp_path):
+    return _serve_repo(tmp_path)
+
+
+def test_fetch_by_branch_and_read_the_tree(serve):
+    bare = serve
+    checkout = _client().fetch(
+        GitSourceSpec(url=f"file://{bare}", ref="main", subpath="pkg")
+    )
+    assert checkout.sha
+    assert checkout.files() == [("skill.md", b"# a skill\n")]
+
+
+def test_read_file_requires_the_subpath_to_name_exactly_one_file(serve):
+    checkout = _client().fetch(
+        GitSourceSpec(url=f"file://{serve}", ref="main", subpath="pkg")
+    )
+    with pytest.raises(FetchRefusedError, match="directory|single file"):
+        checkout.read_file()
+    checkout_file = _client().fetch(
+        GitSourceSpec(url=f"file://{serve}", ref="main", subpath="root.txt")
+    )
+    assert checkout_file.read_file() == b"root\n"
+
+
+def test_subpath_escape_is_refused(serve):
+    checkout = _client().fetch(
+        GitSourceSpec(url=f"file://{serve}", ref="main")
+    )
+    for bad in ("../root.txt", "/etc/passwd", "pkg/../../root.txt"):
+        with pytest.raises(FetchRefusedError):
+            checkout.files(bad)
+
+
+def test_a_symlink_member_is_refused(tmp_path):
+    bare = _serve_repo(tmp_path, symlink_member=True)
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+
+
+def test_a_gitlink_member_is_refused(tmp_path):
+    bare = _serve_repo(tmp_path, gitlink_member=True)
+    with pytest.raises(FetchRefusedError, match="forbidden member"):
+        _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+
+
+def test_unknown_ref_is_a_fetch_failure(serve):
+    with pytest.raises(FetchFailedError):
+        _client().fetch(GitSourceSpec(url=f"file://{serve}", ref="no-such-branch"))
+
+
+def test_a_sha_ref_fetches_when_the_server_allows_it(tmp_path):
+    bare = _serve_repo(tmp_path, allow_any_sha=True)
+    first = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    again = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref=first.sha))
+    assert again.sha == first.sha
+
+
+def test_a_moved_tag_resolves_to_the_new_commit(tmp_path):
+    bare = _serve_repo(tmp_path)
+    first = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="main"))
+    # Push a second commit through a fresh clone, then move a tag to it.
+    work2 = tmp_path / "src2"
+    subprocess.run(
+        ["git", "clone", "--quiet", str(bare), str(work2)],
+        cwd=tmp_path, capture_output=True, text=True, check=True,
+    )
+    (work2 / "new.txt").write_text("new\n")
+    _git(["git", "add", "."], cwd=work2)
+    _git(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+          "commit", "--quiet", "-m", "two"], cwd=work2)
+    _git(["git", "push", "--quiet", "origin", "main"], cwd=work2)
+    _git(["git", "tag", "release"], cwd=work2)
+    _git(["git", "push", "--quiet", "-f", "origin", "release"], cwd=work2)
+    second = _client().fetch(GitSourceSpec(url=f"file://{bare}", ref="release"))
+    assert second.sha != first.sha
+    assert any(path == "new.txt" for _, path in second.members)
