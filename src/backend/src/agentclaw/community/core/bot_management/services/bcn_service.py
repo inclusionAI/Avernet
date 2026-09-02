@@ -633,6 +633,9 @@ class BcnService:
         claim: bool | None = None,
         dream: bool | None = None,
         match: str = "any",
+        visibility: str | None = None,
+        status: str | None = None,
+        user_visibility: str | None = None,
     ) -> List[Dict[str, Any]]:
         """查询满足任务模式开关的 provider bot roster(BCS provider 路由,Bearer)。
 
@@ -642,12 +645,20 @@ class BcnService:
         BcnService 方法一致直接返回 BCN 响应原结构(``{"items": [...]}`` 取 ``items``)。
 
         ``claim``/``dream`` 为 ``None`` 表示该开关不过滤(不下发 query)；``match`` 为 any|all。
+        ``visibility``、``status``、``user_visibility`` 为 ``None`` 表示不按对应
+        返回字段过滤；环境由 ``get_current_env`` 自动选择 pre/prod provider。
         非 prod/pre 或凭据空时抛 :class:`BcnServiceError`(BBS 调用方按 fail-open 处理)。
         """
         env = get_current_env()
-        # 进程内 TTL 缓存命中优先(同 env/claim/dream/match 的重复/并发拉收敛为秒级命中);
+        visibility = visibility.strip() if visibility is not None else None
+        status = status.strip() if status is not None else None
+        user_visibility = (
+            user_visibility.strip() if user_visibility is not None else None
+        )
+        # 进程内 TTL 缓存命中优先(同 env/任务模式/元数据过滤条件的重复请求
+        # 收敛为秒级命中);
         # 命中外网成功后再回填,异常不缓存。
-        cache_key = (env, claim, dream, match)
+        cache_key = (env, claim, dream, match, visibility, status, user_visibility)
         cached = self._roster_cache_get(cache_key)
         if cached is not None:
             logger.info(
@@ -671,12 +682,23 @@ class BcnService:
             params["task_claim_mode"] = "true" if claim else "false"
         if dream is not None:
             params["task_dream_mode"] = "true" if dream else "false"
+        for name, value in ((
+            ("visibility", visibility),
+            ("status", status),
+            ("user_visibility", user_visibility),
+        )):
+            if value:
+                params[name] = value
         logger.info(
-            "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s",
+            "[BcnService.list_bots_by_task_modes] GET %s claim=%s dream=%s match=%s "
+            "visibility=%s status=%s user_visibility=%s",
             path,
             claim,
             dream,
             match,
+            visibility,
+            status,
+            user_visibility,
         )
         try:
             response = self._http.get(

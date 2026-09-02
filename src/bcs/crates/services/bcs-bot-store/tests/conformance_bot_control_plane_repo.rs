@@ -1293,6 +1293,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: None,
             task_dream_mode: None,
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (none, none)");
@@ -1313,6 +1316,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: Some(true),
             task_dream_mode: None,
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (claim=true, none)");
@@ -1328,6 +1334,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: None,
             task_dream_mode: Some(true),
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (none, dream=true)");
@@ -1343,6 +1352,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: Some(true),
             task_dream_mode: Some(true),
             match_mode: TaskModeMatch::All,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (both=true, all)");
@@ -1355,6 +1367,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: Some(true),
             task_dream_mode: Some(true),
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (both=true, any)");
@@ -1375,6 +1390,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: Some(false),
             task_dream_mode: None,
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list (claim=false, none)");
@@ -1390,6 +1408,9 @@ async fn persistent_control_plane_list_by_task_modes_covers_all_match_arms() {
             task_claim_mode: None,
             task_dream_mode: None,
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await
         .expect("list prod env");

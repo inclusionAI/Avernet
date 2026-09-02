@@ -3426,6 +3426,25 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             }
             (None, None, _) => {}
         }
+        if let Some(visibility) = query.visibility.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+            sql.push_str(" AND visibility = ?");
+            params.push(Value::from(visibility));
+        }
+        if let Some(status) = query.status {
+            sql.push_str(" AND status = ?");
+            params.push(Value::from(match status {
+                bcs_service_api::ActorStatus::Online => "online",
+                bcs_service_api::ActorStatus::Hidden => "hidden",
+            }));
+        }
+        if let Some(user_visibility) = query.user_visibility {
+            sql.push_str(" AND user_visibility = ?");
+            params.push(Value::from(match user_visibility {
+                bcs_service_api::application::v1::UserVisibility::Public => "public",
+                bcs_service_api::application::v1::UserVisibility::Protected => "protected",
+                bcs_service_api::application::v1::UserVisibility::Private => "private",
+            }));
+        }
         sql.push_str(" ORDER BY gmt_create DESC, bot_uuid ASC");
         let rows = self
             .db_query(&sql, params)

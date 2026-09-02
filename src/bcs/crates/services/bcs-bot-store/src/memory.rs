@@ -2203,7 +2203,18 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 (None, Some(dream), _) => bot.task_dream_mode == dream,
                 (None, None, _) => true,
             };
-            if passes {
+            if passes
+                && query
+                    .visibility
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .is_none_or(|visibility| bot.visibility == visibility)
+                && query.status.is_none_or(|status| bot.status == status)
+                && query
+                    .user_visibility
+                    .is_none_or(|visibility| bot.user_visibility == visibility)
+            {
                 records.push(bot);
             }
         }

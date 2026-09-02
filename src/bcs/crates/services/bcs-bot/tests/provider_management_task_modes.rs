@@ -30,6 +30,9 @@ async fn list_provider_bots_by_task_modes_errors_when_control_plane_not_configur
             task_claim_mode: None,
             task_dream_mode: None,
             match_mode: TaskModeMatch::Any,
+            visibility: None,
+            status: None,
+            user_visibility: None,
         })
         .await;
 

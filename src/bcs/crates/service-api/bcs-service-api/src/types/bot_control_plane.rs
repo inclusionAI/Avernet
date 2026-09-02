@@ -101,14 +101,18 @@ pub enum TaskModeMatch {
     All,
 }
 
-/// Roster query for physical bots by the task-mode toggles. Each mode is optional;
-/// when both are omitted the query returns all physical bots in the environment.
+/// Roster query for physical bots by task modes and returned roster metadata.
+/// Each filter is optional; omitted filters do not constrain the result. The
+/// query is always scoped to the supplied environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BotTaskModesQuery {
     pub env: String,
     pub task_claim_mode: Option<bool>,
     pub task_dream_mode: Option<bool>,
     pub match_mode: TaskModeMatch,
+    pub visibility: Option<String>,
+    pub status: Option<ActorStatus>,
+    pub user_visibility: Option<UserVisibility>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
