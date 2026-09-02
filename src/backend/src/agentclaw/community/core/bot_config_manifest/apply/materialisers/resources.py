@@ -37,6 +37,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    EntryOutcome,
     EntryResult,
 )
 from agentclaw.community.core.bot_config_manifest.apply.registry import (
@@ -287,7 +288,67 @@ class ResourcesMaterialiser(Materialiser):
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
     ) -> Sequence[EntryResult]:
-        return ()  # replaced by the delivery stage (W6)
+        """Execute: replace each declared tree, rewrite each file.
+
+        Half-written windows are v1's documented narrowing (the transport
+        has no rename): a mid-write stop leaves the tree in an unknown
+        state and the member's result row says ``failed`` — the report is
+        the source of truth, no rollback is attempted. The platform-side
+        unpack already kept a bad archive from reaching this far.
+        """
+        entity_type, entity_id = _coords(ctx)
+        results: list[EntryResult] = []
+        # 1) Directory sentinels first — one delete per declared tree. A
+        # tree's replace removes everything under ``path``, including files
+        # the new archive no longer ships and hand-added ones (the
+        # ownership rule). Sentinels produce no EntryResult: an ownership
+        # action, not an entry.
+        for planned in plan.entries:
+            if planned.intent.value is not None:
+                continue
+            await self._resources.delete(
+                entity_type=entity_type,
+                entity_id=entity_id,
+                bot_id=ctx.bot_id,
+                engine_type=ctx.engine_type,
+                path=planned.intent.identity,
+            )
+        # 2) then each member file, in declaration order
+        for planned in plan.entries:
+            identity = planned.intent.identity
+            data = planned.intent.value
+            if data is None:
+                continue
+            target_dir, _, filename = identity.rpartition("/")
+            try:
+                await self._resources.upload_file(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    bot_id=ctx.bot_id,
+                    engine_type=ctx.engine_type,
+                    target_dir=target_dir,
+                    filename=filename,
+                    data=data,
+                )
+            except Exception:  # noqa: BLE001 — surfaced per entry, not as text
+                # Deliberately composed, not interpolated: the report's
+                # reason may never carry raw exception text (a transport
+                # error can quote a header, a header can carry a token).
+                results.append(
+                    EntryResult(
+                        self.construct,
+                        identity,
+                        EntryOutcome.FAILED,
+                        "resource delivery failed",
+                    )
+                )
+                continue
+            results.append(
+                EntryResult(
+                    self.construct, identity, EntryOutcome(planned.outcome)
+                )
+            )
+        return tuple(results)
 
 
 def _coords(ctx: ApplyContext) -> tuple[str, str]:

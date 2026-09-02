@@ -370,3 +370,117 @@ def test_plan_classifies_the_directory_sentinel_within_the_report_vocabulary():
         "fresh/": "created",
         "fresh/a.txt": "created",
     }
+
+
+# --- write: delivery through the one write chain (Task 5) ---
+
+
+def _write_through(m, ctx, entries):
+    resolved = _run(m.resolve(ctx, entries))
+    assert resolved.ok, [f.reason for f in resolved.failures]
+    plan = _run(m.plan(ctx, resolved.intents))
+    return plan, _run(m.write(ctx, plan))
+
+
+def test_write_replaces_the_tree_then_uploads_every_member():
+    svc = FakeResourceFileService(exists_paths={"wrap/old.txt"})
+    archive = _tgz({"a.txt": b"AAA", "sub/b.txt": b"BBB"})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    plan, results = _write_through(
+        m,
+        ctx,
+        [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+    )
+    # One delete per declared tree, first: the replace removes everything
+    # under "wrap/" — including files the new archive no longer ships and
+    # hand-added ones (the ownership rule).
+    assert svc.deleted == ["wrap/"]
+    assert svc.writes == {
+        ("wrap", "a.txt"): b"AAA",
+        ("wrap/sub", "b.txt"): b"BBB",
+    }
+    # The sentinel is an ownership action, not an entry: only its member
+    # files report.
+    assert [r.identity for r in results] == ["wrap/a.txt", "wrap/sub/b.txt"]
+    assert all(r.outcome.value == "created" for r in results)
+
+
+def test_write_addresses_the_bot_owner():
+    """The write chain gets the owner's address, the router's own way."""
+    svc = FakeResourceFileService()
+    archive = _tgz({"a.txt": b"AAA"})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(
+        bot_id="b_1",
+        owner_id="u_owner",
+        entity_id="man-storage-key",
+        engine_type="claude_code",
+    )
+    _write_through(
+        m, ctx, [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t"}]
+    )
+    assert svc.delete_calls == [
+        {
+            "entity_type": "staff",
+            "entity_id": "u_owner",
+            "bot_id": "b_1",
+            "engine_type": "claude_code",
+            "path": "wrap/",
+        }
+    ]
+    assert svc.upload_calls == [
+        {
+            "entity_type": "staff",
+            "entity_id": "u_owner",
+            "bot_id": "b_1",
+            "engine_type": "claude_code",
+            "target_dir": "wrap",
+            "filename": "a.txt",
+        }
+    ]
+
+
+def test_write_is_player_setup_convergent():
+    """Applying N times equals applying once: same writes, same deletes, no growth."""
+    archive = _tgz({"a.txt": b"AAA"})
+    for _ in range(2):
+        svc = FakeResourceFileService()
+        m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+        ctx = make_context(engine_type="claude_code")
+        _write_through(
+            m,
+            ctx,
+            [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+        )
+        assert svc.writes == {("wrap", "a.txt"): b"AAA"}
+        assert svc.deleted == ["wrap/"]
+
+
+def test_write_failure_yields_failed_entry_per_member():
+    class _Buggy(FakeResourceFileService):
+        async def upload_file(self, **kw):
+            if kw["filename"] == "b.txt":
+                raise RuntimeError("transport down")
+            return await super().upload_file(**kw)
+
+    svc = _Buggy(exists_paths=set())
+    archive = _tgz({"a.txt": b"A", "b.txt": "B".encode()})
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(archive))
+    ctx = make_context(engine_type="claude_code")
+    plan, results = _write_through(
+        m,
+        ctx,
+        [{"path": "wrap/", "unpack": "tar.gz", "source": "https://x/t.tgz"}],
+    )
+    outcomes = {(r.identity, r.outcome.value) for r in results}
+    assert ("wrap/b.txt", "failed") in outcomes
+    assert ("wrap/a.txt", "failed") not in outcomes
+    # The report row states the failure in its own words, never raw
+    # exception text that might carry a credential.
+    assert all(
+        "transport down" not in (r.reason or "")
+        for r in results
+        if r.outcome.value == "failed"
+    )
+    assert svc.writes == {("wrap", "a.txt"): b"A"}

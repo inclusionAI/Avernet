@@ -678,6 +678,10 @@ class FakeResourceFileService:
     def __init__(self, exists_paths: set[str] | None = None) -> None:
         self.writes: dict[tuple[str, str], bytes] = {}
         self.deleted: list[str] = []
+        # Full addressing of every call, so a test can pin *how* the write
+        # stage addressed the workspace — same rationale as exists_probes.
+        self.upload_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[dict[str, Any]] = []
         self.exists_probes: list[dict[str, Any]] = []
         self._exists = set(exists_paths or ())
 
@@ -696,6 +700,16 @@ class FakeResourceFileService:
         data: bytes,
         preserve_structure: bool = False,
     ) -> dict[str, Any]:
+        self.upload_calls.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "target_dir": target_dir,
+                "filename": filename,
+            }
+        )
         self.writes[(target_dir, filename)] = data
         self._exists.add(f"{target_dir}/{filename}".replace("//", "/"))
         return {"path": f"{target_dir}/{filename}"}
@@ -709,6 +723,15 @@ class FakeResourceFileService:
         engine_type: str,
         path: str,
     ) -> bool:
+        self.delete_calls.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "path": path,
+            }
+        )
         self.deleted.append(path)
         self._exists.discard(path)
         return True
