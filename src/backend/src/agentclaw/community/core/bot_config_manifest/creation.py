@@ -219,6 +219,7 @@ class BotCreationManifestSeam:
         start_job: Callable[..., None],
         find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
+        purge_managed_files: Optional[Callable[[str, str], int]] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_service
@@ -226,6 +227,10 @@ class BotCreationManifestSeam:
         self._is_teclaw = is_teclaw
         self._start_job = start_job
         self._find_job = find_job
+        # W8: ``(owner_id, bot_id) -> rows removed`` — the managed-files store's
+        # purge, for a creation that ends without a bot after its pre-container
+        # phase wrote platform state. None means no store is bound.
+        self._purge_managed_files = purge_managed_files
         # Read from configuration once, at construction, and handed to the
         # enqueue below. The job freezes it into its payload, so a creation
         # keeps the window it was submitted under even if the setting moves.
@@ -295,13 +300,18 @@ class BotCreationManifestSeam:
         actor_id: str,
         engine_type: Optional[str],
         bot_type: Optional[str],
+        bot: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         """Apply the pre-container phase. Returns its ``apply_id``.
 
-        **Runs before the bot record exists**, which is what makes the ordering
-        guarantee structural rather than a hook in the right place: the
-        startup-script row is keyed by ``(entity_id, bot_id)`` and needs no
-        record, so the row is written before anything composes a start command.
+        **Runs before the bot record exists** under the ``PRE_CREATE_ON``
+        sequence, which is what makes the ordering guarantee structural rather
+        than a hook in the right place: the startup-script row is keyed by
+        ``(entity_id, bot_id)`` and needs no record, so the row is written
+        before anything composes a start command. Under
+        ``RECORD_PRE_PROVISION`` (W8) the record exists first and is handed in
+        as ``bot``, so the materialisers that read the record (the skills
+        area's flush) see the real row rather than the stand-in.
 
         **Never raises.** A manifest-layer failure must not abort creation
         (§2.7): the bot is still created, and the failure surfaces in the poll's
@@ -317,7 +327,7 @@ class BotCreationManifestSeam:
             accepted = self._applies.start_apply(
                 entity_id=entity_id,
                 bot_id=bot_id,
-                bot=None,
+                bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
@@ -380,8 +390,15 @@ class BotCreationManifestSeam:
             bot_id=bot_id,
         )
 
-    def discard(self, *, entity_id: str, bot_id: str) -> bool:
+    def discard(
+        self, *, entity_id: str, bot_id: str, owner_id: Optional[str] = None
+    ) -> bool:
         """Remove what submission and the pre-container phase wrote.
+
+        With ``owner_id`` (W8) the managed-files store is purged as well: under
+        the ``RECORD_PRE_PROVISION`` sequence the pre-container phase writes
+        platform files for a bot that, if creation then ends without one, has
+        no record for ordinary deletion to reach.
 
         Called when a creation ends **without a bot** — declined or expired. Both
         deletes are idempotent, and both are needed: the manifest row is keyed by
@@ -401,14 +418,20 @@ class BotCreationManifestSeam:
         still there, and this is the only thing that can ever reach them.
         """
         discarded = True
-        for what, delete in (
+        deletes: list[tuple[str, Callable[[], Any]]] = [
             ("manifest", lambda: self._manifests.delete(
                 entity_id=entity_id, bot_id=bot_id
             )),
             ("startup script", lambda: self._script_service_provider().delete(
                 entity_id=entity_id, bot_id=bot_id
             )),
-        ):
+        ]
+        if owner_id is not None and self._purge_managed_files is not None:
+            purge = self._purge_managed_files
+            deletes.append(
+                ("managed files", lambda: purge(owner_id, bot_id))
+            )
+        for what, delete in deletes:
             try:
                 delete()
             except Exception:  # noqa: BLE001 — see docstring

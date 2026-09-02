@@ -176,6 +176,20 @@ class ManagedFilesStore:
             )
         return True
 
+    def purge_owner_bot(self, owner_id: str, bot_id: str) -> int:
+        """``purge`` for the bot the materialisers address at ``("staff", owner)``
+        under the current env — the creation job's cleanup entry point."""
+        from agentclaw.community.utils.env_utils import get_current_env
+
+        return self.purge(
+            ManagedFileScope(
+                env=get_current_env(),
+                entity_type=OWNER_ENTITY_TYPE,
+                entity_id=owner_id,
+                bot_id=bot_id,
+            )
+        )
+
     def purge(self, scope: ManagedFileScope) -> int:
         """Remove every row and object for the bot. Returns rows removed."""
         records = self._repo.list_all(

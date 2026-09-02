@@ -28,6 +28,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
@@ -291,6 +294,7 @@ class BotCreateWithManifestHandler:
         complete_authorization: Callable[..., Any],
         bot_service_provider: Callable[[], Any],
         auth_relationship_provider: Callable[[], Any],
+        creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
         self._seam_provider = manifest_seam_provider
         self._applies_provider = apply_service_provider
@@ -299,6 +303,12 @@ class BotCreateWithManifestHandler:
         self._passport_provider = passport_plugin_provider
         self._bot_service_provider = bot_service_provider
         self._auth_relationship_provider = auth_relationship_provider
+        # W8: which order this engine's creation runs in — the delivery
+        # strategy's ``creation_sequence``. Absent (the pre-W8 wiring and the
+        # suites built on it) means ``PRE_CREATE_ON``, today's order.
+        self._creation_sequence = creation_sequence or (
+            lambda _engine: CreationSequence.PRE_CREATE_ON
+        )
 
     @property
     def task_type(self) -> str:
@@ -323,7 +333,12 @@ class BotCreateWithManifestHandler:
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
             return self._before_the_bot_exists(payload)
+        if self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION:
+            return self._after_the_record_exists(payload, bot)
         return self._after_the_bot_exists(payload, bot)
+
+    def _sequence(self, payload: dict) -> CreationSequence:
+        return self._creation_sequence(payload["spec"].get("engine_type"))
 
     # ── before there is a bot ───────────────────────────────────────────────
 
@@ -339,7 +354,7 @@ class BotCreateWithManifestHandler:
                 bot_id,
             )
             if not self._seam_provider().discard(
-                entity_id=entity_id, bot_id=bot_id
+                entity_id=entity_id, bot_id=bot_id, owner_id=user_id
             ):
                 return self._cleanup_did_not_land(bot_id)
             return Fail(AUTHORIZATION_WINDOW_ELAPSED)
@@ -361,10 +376,18 @@ class BotCreateWithManifestHandler:
                 bot_id,
             )
             if not self._seam_provider().discard(
-                entity_id=entity_id, bot_id=bot_id
+                entity_id=entity_id, bot_id=bot_id, owner_id=user_id
             ):
                 return self._cleanup_did_not_land(bot_id)
             return Fail(f"authorization did not complete: {status}")
+
+        if self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION:
+            # Authorized. Under this sequence the record comes first: the
+            # single pre-container phase writes platform state against it,
+            # and provisioning composes the first artifact from that state
+            # (W8, plan K-6). Nothing is applied before the record exists.
+            self._create_the_bot(payload, provision=False)
+            return Reschedule(POLL_DELAY_SECONDS)
 
         # Authorized. The pre-container phase must land before creation, because
         # `_build_create_bot_payload` reads the startup-script row while
@@ -389,6 +412,73 @@ class BotCreateWithManifestHandler:
         # creation (§2.7). The report says what did not land.
         self._create_the_bot(payload)
         return Reschedule(POLL_DELAY_SECONDS)
+
+    # ── after there is a record (RECORD_PRE_PROVISION, W8) ───────────────────
+
+    def _after_the_record_exists(self, payload: dict, bot: dict) -> TaskOutcome:
+        """The record exists; run the phase against it, then provision, then wait.
+
+        Three questions about durable state, asked in order: is there a binding
+        yet (no → the phase and provisioning are still ahead); is the phase's
+        record terminal (no → wait; none → start it); is the container up. A
+        failed phase still provisions (§2.7) — the report says what did not
+        land. The post-container phase is never started: there is nothing
+        left for it to deliver.
+        """
+        bot_id = str(payload["bot_id"])
+        entity_id = str(payload["entity_id"])
+        user_id = str(payload["user_id"])
+        spec = payload["spec"]
+
+        if not bot.get("binding_id"):
+            pre_container = self._pre_container_record(
+                entity_id=entity_id, bot_id=bot_id
+            )
+            if pre_container is None:
+                self._seam_provider().apply_pre_container(
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    owner_id=user_id,
+                    actor_id=user_id,
+                    engine_type=spec.get("engine_type"),
+                    bot_type=spec.get("bot_type"),
+                    bot=bot,
+                )
+                return Reschedule(POLL_DELAY_SECONDS)
+            if pre_container.status is ApplyStatus.RUNNING:
+                return Reschedule(POLL_DELAY_SECONDS)
+            # Terminal either way: provisioning composes the first artifact
+            # from whatever the phase wrote. Idempotent on a bound record, so
+            # a re-claimed task cannot provision twice.
+            try:
+                self._bot_service_provider().provision_bot(
+                    bot_id,
+                    user_id,
+                    user_id,
+                    template_type=spec.get("template_type"),
+                    template_config=spec.get("template_config"),
+                )
+            except Exception as could_not_provision:  # noqa: BLE001 — terminal
+                # The service soft-deletes the record on an allocation failure,
+                # so a retry would create a second bot under the same id.
+                logger.exception(
+                    "[manifest_create] bot_id=%s could not be provisioned", bot_id
+                )
+                return Fail(f"the bot could not be provisioned: {could_not_provision}")
+            return Reschedule(POLL_DELAY_SECONDS)
+
+        status = str(bot.get("status") or "")
+        if status in _CONTAINER_FAILED_STATUSES:
+            logger.warning(
+                "[manifest_create] bot_id=%s reached %s; no container is coming",
+                bot_id,
+                status,
+            )
+            return Fail(f"the bot could not be provisioned: {status}")
+        if status not in _CONTAINER_READY_STATUSES:
+            return Reschedule(POLL_DELAY_SECONDS)
+        self._repair_owner_relationship_if_missing(payload, bot)
+        return Complete()
 
     # ── after there is a bot ────────────────────────────────────────────────
 
@@ -631,13 +721,18 @@ class BotCreateWithManifestHandler:
         record = self._pre_container_record(entity_id=entity_id, bot_id=bot_id)
         return record.apply_id if record is not None else None
 
-    def _create_the_bot(self, payload: dict) -> None:
+    def _create_the_bot(self, payload: dict, *, provision: bool = True) -> None:
         """Complete the authorization, which is what writes the bot record.
 
-        Reuses ``complete_bot_authorization`` unmodified. It is idempotent on a
-        supplied ``bot_id``, so a re-claimed task cannot make a second bot.
+        Reuses ``complete_bot_authorization``. It is idempotent on a supplied
+        ``bot_id``, so a re-claimed task cannot make a second bot.
+        ``provision=False`` (W8) records the bot and leaves provisioning to
+        ``provision_bot``; the default call shape is unchanged.
         """
-        self._complete_authorization(payload)
+        if provision:
+            self._complete_authorization(payload)
+        else:
+            self._complete_authorization(payload, provision=False)
 
 
 class CreateJobLifecycle(LifecycleBase):

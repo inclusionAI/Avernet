@@ -230,19 +230,21 @@ Conventions every task assumes:
         made, in order; the whole existing creation suite passes unedited.
 - **Depends on:** —
 
-## [ ] Task 14: The job runs the strategy's sequence
-- **Files:** `core/bot_config_manifest/create_job.py`, `creation.py`,
+## [x] Task 14: The job runs the strategy's sequence
+- **Files:** `core/bot_config_manifest/create_job.py`, `creation.py`
+  (`apply_pre_container(bot=…)`, `discard(owner_id=…)` purging the store),
+  `managed_files/store.py` (`purge_owner_bot`), `di/modules/bot_management_module.py`,
   `tests/community/core/bot_config_manifest/creation/test_create_job.py`,
-  `…/test_creation_ordering.py`
+  `…/test_creation_ordering_teclaw.py` (new; the ARCA ordering suite is unedited)
 - **Done when:**
-  - [ ] The handler asks the strategy for the sequence. Under
+  - [x] The handler asks the strategy for the sequence. Under
         `RECORD_PRE_PROVISION`: authorized → `complete(provision=False)`;
         record without binding and no terminal pre-container record → start
         the phase; record terminal and no binding → `provision_bot`; binding
         present → wait `ACTIVE` → `Complete`. Never starts phase B.
-  - [ ] Under `PRE_CREATE_ON` the handler is today's, and its tests are
+  - [x] Under `PRE_CREATE_ON` the handler is today's, and its tests are
         unedited.
-  - [ ] Ordering tests: provision only after the phase is terminal; a second
+  - [x] Ordering tests: provision only after the phase is terminal; a second
         invocation at every step is a no-op; a failed phase still provisions
         (§2.7); a creation that ends without a bot purges the store as well as
         the manifest and script row.

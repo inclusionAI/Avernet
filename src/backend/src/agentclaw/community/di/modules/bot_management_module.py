@@ -211,6 +211,7 @@ from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     TeclawPlatformBindings,
 )
+from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
@@ -781,6 +782,7 @@ class BotManagementModule(Module):
     @inject
     def bot_creation_manifest_seam(
         self,
+        injector: Injector,
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: BotConfigManifestApplyService,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
@@ -790,14 +792,11 @@ class BotManagementModule(Module):
     ) -> BotCreationManifestSeam:
         """The operations bot creation asks of the manifest layer.
 
-        ``is_teclaw`` comes from the same factory the capability resolver takes,
-        so "runs in a teclaw container" has one definition rather than a
-        hand-rolled comparison here.
-
-        The job's two operations are bound here rather than imported by the
-        seam: ``create_job`` imports ``creation`` for the phase triggers, so the
-        dependency has to run one way. The queue itself stays behind the same
-        lazy provider the apply service uses.
+        ``is_teclaw`` is the capability resolver's own factory. The job's two
+        operations are bound here rather than imported by the seam:
+        ``create_job`` imports ``creation`` for the phase triggers, so the
+        dependency has to run one way. The queue stays behind the same lazy
+        provider the apply service uses.
         """
         return BotCreationManifestSeam(
             manifest_service=manifest_service,
@@ -813,6 +812,9 @@ class BotManagementModule(Module):
             authorization_window_seconds=(
                 create_with_manifest_config.authorization_window_seconds
             ),
+            purge_managed_files=lambda owner_id, bot_id: injector.get(
+                ManagedFilesStore
+            ).purge_owner_bot(owner_id, bot_id),
         )
 
     @singleton
@@ -832,12 +834,13 @@ class BotManagementModule(Module):
         creation graph it reaches into is large.
         """
 
-        def _complete(job_payload: dict) -> None:
+        def _complete(job_payload: dict, *, provision: bool = True) -> None:
             complete_manifest_creation(
                 job_payload,
                 bot_service=injector.get(BotService),
                 passport_plugin=passport_plugin,
                 auth_rel_plugin=auth_rel_plugin,
+                provision=provision,
             )
 
         return BotCreateWithManifestHandler(
@@ -853,6 +856,10 @@ class BotManagementModule(Module):
             # actually landed, because completion writes it *after* the bot
             # record and a failure there would otherwise never be retried.
             auth_relationship_provider=lambda: auth_rel_plugin,
+            # W8: the strategy decides the order a creation runs in.
+            creation_sequence=lambda engine: injector.get(
+                BotConfigManifestApplyService
+            ).delivery_for_engine(engine).creation_sequence,
         )
 
     @singleton
