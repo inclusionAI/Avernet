@@ -42,7 +42,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.deprecated import LEGACY_ROUTES
 
 from .conftest import mount_public_error_handlers
@@ -50,7 +50,7 @@ from .conftest import mount_public_error_handlers
 
 def _client() -> TestClient:
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     mount_public_error_handlers(app)
     return TestClient(app)
 

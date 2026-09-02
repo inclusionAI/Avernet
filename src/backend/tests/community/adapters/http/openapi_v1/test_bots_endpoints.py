@@ -1807,13 +1807,9 @@ def test_the_write_contract_does_not_promise_starts_that_never_recompose(
     """
     # Asserted on the *published* description, not the docstring: that string is
     # what a caller reads, and it is what promised more than the feature does.
-    from fastapi import FastAPI
+    from tests.community.adapters.http.openapi_v1.conftest import public_document
 
-    from agentclaw.community.adapters.http.openapi_v1 import build_public_router
-
-    app = FastAPI()
-    app.include_router(build_public_router())
-    ops = app.openapi()["paths"]["/openapi/v1/bots/{bot_id}/startup-script"]
+    ops = public_document()["paths"]["/openapi/v1/bots/{bot_id}/startup-script"]
 
     put_doc = ops["put"]["description"]
     assert "composes" in put_doc

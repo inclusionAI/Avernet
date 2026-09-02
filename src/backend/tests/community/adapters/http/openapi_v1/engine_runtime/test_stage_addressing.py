@@ -19,7 +19,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
@@ -344,9 +344,7 @@ def test_a_dead_stage_is_the_fixed_409(client, relay):
 def _schema() -> dict:
     # Cached: four document tests read the same generated description, and
     # assembling the whole public surface per test quadruples the cost.
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _operations(schema: dict):

@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi import HTTPException, Request, Response
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
 from agentclaw.community.adapters.http.openapi_v1.principal import require_user_id
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -707,7 +707,7 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
     """
     mounted = [
         route
-        for route in _api_routes(build_public_router())
+        for route in _api_routes(public_router())
         if route.path.startswith("/openapi/v1/bots/{bot_id}/resources")
     ]
     # 7 routes. The count is a tripwire — a resources route added without the

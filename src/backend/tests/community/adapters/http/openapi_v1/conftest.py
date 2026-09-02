@@ -1,11 +1,14 @@
 """Shared assembled-application fixtures for OpenAPI v1 adapter tests."""
 
+import copy
+import functools
 from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
+from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     BotEditLockError,
@@ -16,6 +19,52 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
 from agentclaw.community.adapters.http.openapi_v1.principal import USER_ID_QUERY
 from tests.community.framework.fixtures import app_with_testing_modules  # noqa: F401
 from tests.community.framework.fixtures import world  # noqa: F401
+
+
+# ── The assembled public surface, built once per process ───────────────────
+#
+# ``build_public_router()`` runs ``assert_every_route_authorized`` over the whole
+# surface, which resolves the dependant of every effective route (~300 routes,
+# ~2.5s), and ``app.openapi()`` on the result generates a ~230-path document
+# (~3.5s more). Tests that only *mount* the surface, or only *read* its document,
+# do not need a fresh copy of either: the router is assembled from module-level
+# handlers and is never mutated by those tests, and the document is a pure
+# function of the router. Building both per test made this package the single
+# most expensive one in the suite (~1400s of test time under xdist).
+#
+# A test that adds routes to the router under test, or mounts a different
+# surface, must keep calling ``build_public_router()`` itself.
+
+
+@functools.cache
+def _shared_public_router() -> APIRouter:
+    return build_public_router()
+
+
+def public_router() -> APIRouter:
+    """The assembled ``/openapi/v1/bots`` router, shared read-only across tests.
+
+    Mount it into a fresh ``FastAPI()`` per test as before; ``include_router``
+    keeps the router itself untouched, and overrides, middleware and exception
+    handlers live on the app.
+    """
+    return _shared_public_router()
+
+
+@functools.cache
+def _shared_public_document() -> dict:
+    app = FastAPI()
+    app.include_router(public_router())
+    return app.openapi()
+
+
+def public_document() -> dict:
+    """The generated OpenAPI document of :func:`public_router`, a deep copy per call.
+
+    Equivalent to ``FastAPI().include_router(build_public_router())`` followed by
+    ``.openapi()``; the copy lets a test edit what it reads without leaking.
+    """
+    return copy.deepcopy(_shared_public_document())
 
 
 def user_scoped_client(app: FastAPI, user_id: str, **kwargs) -> TestClient:

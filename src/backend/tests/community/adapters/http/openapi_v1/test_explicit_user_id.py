@@ -29,8 +29,8 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
@@ -443,9 +443,7 @@ _BOT_ID_PLACEMENT = {"path": 154, "query": 1, "none": 101}
 
 
 def _schema() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _current_operations(schema: dict):
