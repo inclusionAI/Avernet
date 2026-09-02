@@ -181,8 +181,20 @@ def test_factory_reads_the_switch_once_and_refuses_an_unbound_platform_path() ->
         ({"bot_config_manifest": {}}, False),
         ({"bot_config_manifest": {"teclaw_platform_managed": True}}, True),
         ({"bot_config_manifest": {"teclaw_platform_managed": "yes"}}, True),
+        ({"bot_config_manifest": {"teclaw_platform_managed": "false"}}, False),
+        ({"bot_config_manifest": {"teclaw_platform_managed": "off"}}, False),
+        ({"bot_config_manifest": {"teclaw_platform_managed": 0}}, False),
+        ({"bot_config_manifest": {"teclaw_platform_managed": 1}}, True),
         ({"bot_config_manifest": "not-a-mapping"}, False),
     ],
 )
 def test_the_switch_parses_from_the_config_tree(tree, expected) -> None:
     assert teclaw_platform_managed_from_config(tree) is expected
+
+
+@pytest.mark.parametrize("raw", ["nope", "2", 2, 0.5, [], {}])
+def test_a_malformed_switch_raises_rather_than_enabling(raw) -> None:
+    with pytest.raises(ValueError):
+        teclaw_platform_managed_from_config(
+            {"bot_config_manifest": {"teclaw_platform_managed": raw}}
+        )

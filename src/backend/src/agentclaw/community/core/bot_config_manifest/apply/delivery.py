@@ -246,12 +246,43 @@ class TeclawDelivery:
         return await self._redeliver(ctx)
 
 
+_TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
+_FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
+
+
 def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
-    """The switch, read from the ``user_config`` tree. Absent is off."""
+    """The switch, read from the ``user_config`` tree. Absent is off.
+
+    Strict, and the strictness is the point: YAML may hand back a string, and
+    ``bool("false")`` is ``True``. A switch that turns a delivery path on
+    because someone quoted ``"off"`` would fail every teclaw apply in a
+    deployment whose engine has not shipped the map. So only a boolean, the
+    usual boolean spellings, or 0/1 are accepted; anything else raises at
+    boot, where a config mistake belongs. A block that is not a mapping is
+    read as absent, the way the sibling readers treat a missing block.
+    """
     block = (tree or {}).get("bot_config_manifest") or {}
-    if not isinstance(block, Mapping):
+    if not isinstance(block, Mapping) or TECLAW_PLATFORM_MANAGED_KEY not in block:
         return False
-    return bool(block.get(TECLAW_PLATFORM_MANAGED_KEY, False))
+    raw = block[TECLAW_PLATFORM_MANAGED_KEY]
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _TRUE_SCALARS:
+            return True
+        if text in _FALSE_SCALARS:
+            return False
+        raise ValueError(
+            f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
+            f"not a boolean: {raw!r}"
+        )
+    if isinstance(raw, (int, float)) and raw in (0, 1):
+        return bool(raw)
+    raise ValueError(
+        f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
+        f"not a boolean: {raw!r}"
+    )
 
 
 class DeliveryStrategyFactory:
@@ -269,9 +300,10 @@ class DeliveryStrategyFactory:
         self._is_teclaw = is_teclaw
         self._platform_managed = teclaw_platform_managed
         self._arca_ports = arca_ports
-        # Until Task 12 binds them, the platform ports fall back to the device
-        # ports; the factory refuses to run the platform-managed path without
-        # them rather than silently writing into a container.
+        # The platform-managed path needs its own ports. With the switch on and
+        # none bound, ``for_engine`` refuses rather than silently writing into
+        # a container through the device ports — a misconfiguration should be
+        # loud, not a quiet fallback.
         self._teclaw_platform_ports = teclaw_platform_ports
         self._redeliver = redeliver
 
@@ -289,6 +321,8 @@ class DeliveryStrategyFactory:
             )
         return TeclawDelivery(
             platform_managed=platform_managed,
+            # With the switch off the platform ports are never consulted;
+            # ``_arca_ports`` stands in only so the constructor has a callable.
             platform_ports=self._teclaw_platform_ports or self._arca_ports,
             device_ports=self._arca_ports,
             redeliver=self._redeliver,

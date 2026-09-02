@@ -113,6 +113,7 @@ class ConfigManifestApply(BaseModel):
                         "note": None,
                     }
                 ],
+                "notes": [],
             }
         }
     )
@@ -149,4 +150,11 @@ class ConfigManifestApply(BaseModel):
         description="One row per declared entry, across every category. Removals "
         "are not here — they have no declared entry, so they are reported under "
         "the category's `removed`.",
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Apply-level notes that belong to no entry. Today only the "
+        "delivery strategy's closing step writes one: on teclaw, a whole-artifact "
+        "redeliver that failed after every category was written is recorded here "
+        "rather than failing the apply. Empty on ARCA.",
     )

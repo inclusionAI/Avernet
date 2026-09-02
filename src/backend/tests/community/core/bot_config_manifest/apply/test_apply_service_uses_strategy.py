@@ -275,12 +275,83 @@ def test_arca_never_sees_the_switch() -> None:
 
 
 @pytest.mark.asyncio
-async def test_dry_run_walks_the_strategys_phase_table() -> None:
+async def test_dry_run_runs_through_the_strategy_and_writes_nothing() -> None:
+    """A dry run walks both phases, so re-phasing is invisible to it; what it
+    proves is that the strategy's registry is the one consulted (the platform
+    activation is *read* for the plan) and that no port is written."""
+    calls: list[object] = []
+
+    async def redeliver(ctx):
+        calls.append(ctx)
+        return "never"
+
     service, device_activation, platform_activation = _world(
-        bot=_TECLAW_BOT, platform_managed=True
+        bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
     )
     report = await service.dry_run(
         entity_id=_ENTITY, bot_id=_BOT, bot=_TECLAW_BOT, owner_id=_ENTITY, actor_id=_ENTITY
     )
     assert [c.construct.value for c in report.categories] == ["mcp"]
-    assert platform_activation.activated == []  # a dry run writes nothing
+    assert platform_activation.activated == []
+    assert device_activation.activated == []
+    assert calls == []  # the closing step is a real-apply thing
+    assert report.notes == ()
+
+
+def test_a_raising_closing_step_is_a_note_not_a_failure() -> None:
+    async def redeliver(ctx):
+        raise ConnectionError("container unreachable")
+
+    service, _, platform_activation = _world(
+        bot=_TECLAW_BOT, platform_managed=True, redeliver=redeliver
+    )
+    report = _apply(service, _TECLAW_BOT, frozenset({ApplyPhase.PRE_CONTAINER}))
+    assert report.status is ApplyStatus.SUCCEEDED
+    assert platform_activation.activated == ["github"]
+    assert report.notes == ("delivery could not be closed: ConnectionError",)
+
+
+def test_notes_survive_the_carry_forward_merge() -> None:
+    from datetime import datetime
+
+    from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
+        carry_forward,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+
+    earlier = ApplyReport(
+        apply_id="a", bot_id=_BOT, trigger="create:pre_container",
+        status=ApplyStatus.SUCCEEDED, started_at=datetime.now(), notes=("phase A note",),
+    )
+    later = ApplyReport(
+        apply_id="b", bot_id=_BOT, trigger="create:on_container",
+        status=ApplyStatus.SUCCEEDED, started_at=datetime.now(), notes=("phase B note",),
+    )
+
+    class _Applies:
+        def get(self, **_kw):
+            return object()
+
+    merged = carry_forward(
+        later,
+        ctx=type("C", (), {"env": "dev", "entity_id": _ENTITY, "bot_id": _BOT})(),
+        carry_from_apply_id="a",
+        applies=_Applies(),
+        to_report=lambda record, **_kw: earlier,
+    )
+    assert merged.notes == ("phase A note", "phase B note")
+
+
+def test_the_api_payload_carries_the_notes() -> None:
+    from datetime import datetime
+
+    from agentclaw.community.adapters.http.openapi_v1.bots.config_manifest_support import (
+        apply_payload,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+
+    report = ApplyReport(
+        apply_id="a", bot_id=_BOT, trigger="put", status=ApplyStatus.SUCCEEDED,
+        started_at=datetime.now(), notes=("redeliver failed",),
+    )
+    assert apply_payload(report).notes == ["redeliver failed"]

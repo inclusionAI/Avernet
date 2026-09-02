@@ -59,7 +59,7 @@ class BotConfigManifestApplyRecord(BaseModel):
     env: str = Field(default="dev", description="Environment")
     entity_id: str = Field(..., description="Entity id (the bot's entity_id)")
     bot_id: str = Field(..., description="Bot ID")
-    trigger: str = Field(..., description="What started it: explicit/create/republish/restart")
+    trigger: str = Field(..., description="What started it: explicit/put/create:pre_container/create:on_container")
     status: str = Field(..., description="RUNNING, or one of the three terminal statuses")
     report: str = Field(..., description="The per-entry report (JSON)")
     actor: str = Field(..., description="Audit: who started it")

@@ -124,6 +124,7 @@ def apply_payload(report: ApplyReport) -> ConfigManifestApply:
             for category in payload["categories"]
         ],
         entries=[ConfigManifestApplyEntry(**entry) for entry in payload["entries"]],
+        notes=list(payload.get("notes") or ()),
     )
 
 
