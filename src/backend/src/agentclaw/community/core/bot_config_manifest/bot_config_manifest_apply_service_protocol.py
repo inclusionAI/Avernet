@@ -28,8 +28,12 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
-from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    ApplyPhase,
+)
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
+    ApplyConstruct,
     ApplyReport,
     ApplyStatus,
 )
@@ -67,6 +71,7 @@ class ApplyAccepted:
 
 
 __all__ = [
+    "ALL_PHASES",
     "ApplyAccepted",
     "ApplyPhase",
     "ApplyReport",
@@ -85,14 +90,26 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         *,
         entity_id: str,
         bot_id: str,
-        bot: dict,
+        bot: Optional[dict] = None,
         owner_id: str,
         actor_id: str,
         audit_actor: Optional[str] = None,
         trigger: str = "explicit",
-        phases: Optional[frozenset[ApplyPhase]] = None,
+        phases: frozenset[ApplyPhase],
+        engine_type: Optional[str] = None,
+        bot_type: Optional[str] = None,
+        carry_from_apply_id: Optional[str] = None,
     ) -> ApplyAccepted:
         """Take the lock, validate, record ``RUNNING``, start the work, return.
+
+        ``bot`` is optional for one caller: W13 applies the pre-container phase
+        **before** the bot record exists, and passes ``engine_type`` /
+        ``bot_type`` from the creation request instead. Every other caller has a
+        record and passes it.
+
+        ``carry_from_apply_id`` folds an earlier apply's categories into this
+        one's report, so a creation's two phases read as one story. A missing or
+        foreign id is ignored rather than fatal.
 
         **Does not wait for the apply.** Applying is device I/O today and
         network fetching from W5; a caller must never hold an HTTP connection
@@ -104,9 +121,14 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ``apply_id`` for an apply that did not start, and never has to poll to
         discover their document was bad.
 
-        ``phases`` defaults to both, which is what an apply on an existing bot
-        wants. W13 passes one at a time — ``PRE_CONTAINER`` before the start
-        command is composed, ``ON_CONTAINER`` once the container is up.
+        ``phases`` is **required, with no default**. An omitted-means-both
+        default read fine at the one call site that wanted both and badly
+        everywhere else: what an apply covers is the single most consequential
+        thing about it — W13's pre-container phase writing the startup-script
+        row before the container exists is the whole ordering guarantee — and a
+        caller that leaves it out is not stating a choice, it is inheriting one.
+        The explicit ``POST .../apply`` passes ``ALL_PHASES``, which says the
+        same thing the default said and says it where the reader is.
 
         Raises:
             ManifestApplyInProgressError: Another apply holds this bot's lock.
@@ -151,6 +173,24 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ``None`` when this bot has no such apply — including when the id belongs
         to a *different* bot, because the lookup is scoped to the bot key. The
         id is the caller's handle, never what authorizes the read.
+        """
+        ...
+
+    @abstractmethod
+    def materialised_constructs(self) -> frozenset["ApplyConstruct"]:
+        """Which constructs some shipped code can actually act on, right now.
+
+        **Derived from the registry, never a list written by hand.** The
+        implementation returns the keys of the same registry the orchestrator
+        builds, so the two cannot disagree — W5 widened this from two constructs
+        to four by registering materialisers and editing nothing else, and W6
+        widens it the same way.
+
+        The alternative was a hand-written constant. It would drift, and the
+        drift is invisible until the worst moment: a creation endpoint that
+        gates on it would accept a category nothing can apply, spend a Passport
+        application, take a user through authorization, create the bot, and only
+        then fail the apply.
         """
         ...
 

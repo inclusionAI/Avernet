@@ -439,7 +439,16 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: for polling, never what authorizes the read — the bot is still addressed in
 #: the path and still resolved as the named user's, which is what makes an id
 #: from another bot resolve to nothing.
-_BOT_ID_PLACEMENT = {"path": 154, "query": 1, "none": 101}
+#:
+#: CLI caller configuration then took ``path`` 153 → 154 — one more
+#: owner-addressed operation.
+#:
+#: W13 (#1696) adds the create-with-manifest pair, one to each column.
+#: ``GET …/bots/{bot_id}/with-manifest/status`` is bot-path-addressed like the
+#: rest (154 → 155); ``POST …/bots/with-manifest`` names no bot because it is
+#: the request that allocates one, so it joins ``none`` (101 → 102) beside
+#: ``POST /openapi/v1/bots`` itself.
+_BOT_ID_PLACEMENT = {"path": 155, "query": 1, "none": 102}
 
 
 def _schema() -> dict:
@@ -582,8 +591,12 @@ def test_the_pinned_number_of_operations_take_it():
     # actor composes off the principal alone — landing on 222 again.
     # Applying the manifest (W4, #1472) adds three more — apply, the
     # last-apply read, and the poll by ``apply_id``: 222 → 225. CLI caller
-    # configuration adds the final owner-addressed user-scoped operation.
-    assert len(taking) == 226
+    # configuration adds an owner-addressed user-scoped operation: 225 → 226.
+    # Creating a bot with its manifest (W13, #1696) adds two — the submission
+    # and its status poll: 226 → 228. Both name the end user for the same
+    # reason the ordinary create does: they spend that user's quota and read
+    # that user's rows, and neither is admissible to an application caller.
+    assert len(taking) == 228
 
 
 def test_the_exempt_operations_take_none():

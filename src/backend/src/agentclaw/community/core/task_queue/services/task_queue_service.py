@@ -24,7 +24,7 @@ from typing import Optional
 from agentclaw.community.core.repository.protocols.platform import TaskQueueRepositoryProtocol
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.wakeup import WorkerWakeup
-from agentclaw.community.core.task_queue.types import EnqueueResult
+from agentclaw.community.core.task_queue.types import EnqueueResult, TaskRecord
 from agentclaw.community.di.config import TaskQueueConfig
 from agentclaw.community.utils.env_utils import get_current_env
 
@@ -102,6 +102,34 @@ class TaskQueueService:
             # would race the worker against our own uncommitted insert.
             self._wakeup.notify()
         return result
+
+    def find_by_idempotency_key(
+        self, task_type: str, idempotency_key: str
+    ) -> Optional[TaskRecord]:
+        """What became of the work submitted under this key. A read, nothing else.
+
+        The one read on this facade, and it is here for the same reason
+        :meth:`enqueue` is: ``env`` and ``app`` scope the key, both come from
+        deployment config, and an adopter has no way to supply them. Reaching
+        the repository directly would mean guessing them.
+
+        Answers for a **live** task and for a terminal one alike — which is the
+        point, since the questions worth asking ("did it fail? did it run out of
+        time?") are about a task that is over, and a terminal transition
+        releases the key so ``enqueue`` can no longer see it.
+
+        ``None`` means no task was ever enqueued under this key in this
+        ``(env, app, task_type)``, not that one finished. See
+        ``TaskQueueRepositoryProtocol.find_by_idempotency_key`` for the cost
+        model — cheap while the task is live, a scan once it is over — and use
+        it accordingly.
+        """
+        return self._repo.find_by_idempotency_key(
+            task_type=task_type,
+            idempotency_key=idempotency_key,
+            env=get_current_env(),
+            app=self._config.app,
+        )
 
     def _should_wake(
         self, result: EnqueueResult, *, task_type: str, delay_seconds: int

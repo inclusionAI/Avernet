@@ -301,12 +301,27 @@ the whole of container provisioning, which is why W13 can call them one at a
 time. **This reverses design §3.4's order** — see work-items §2.12.
 
 **Apply is started, not awaited.** `POST …/apply` answers `202` with an
-`apply_id` and the work continues on a background thread wrapped with
-`bind_current_avernet_tenant`. The lock is taken and the stored document
-re-validated *before* an id is minted, so a caller never holds a handle to an
-apply that did not start. A report stranded at `RUNNING` by a killed process
-reads as `FAILED` once its lock is stale — derived at read time, so there is no
-sweeper to keep alive.
+`apply_id` and the work continues elsewhere. The lock is taken and the stored
+document re-validated *before* an id is minted, so a caller never holds a handle
+to an apply that did not start. A report stranded at `RUNNING` by a killed
+process reads as `FAILED` once its lock is stale — derived at read time, so there
+is no sweeper to keep alive.
+
+**"Elsewhere" is the task queue, not a thread (W13).** W4 ran the work on
+`threading.Thread(daemon=True)`; `core/task_queue`'s README names that pattern as
+the one it exists to replace, and W13 makes the loss load-bearing — creation
+depends on an apply completing, so a thread that dies with its pod does not lose
+a report, it boots a bot without its script. All three paths now run through one
+handler (`apply/apply_task.py`): the pre-container phase, the post-container
+phase, and an explicit apply on a running bot. The lock is acquired by whoever
+enqueues and released by whoever runs, so it spans the handoff; a task that never
+runs leaves a lock the TTL reaps, exactly as a dead thread did.
+
+**Re-running an apply is safe because apply converges — not because retry is
+off.** The queue is at-least-once *structurally*: a crashed worker's task is
+re-claimed once its lease expires, whether or not a handler ever returns `Retry`.
+Anyone adding a materialiser that is not convergent breaks this, and no queue
+configuration would save it.
 
 **Apply records delivery, not execution** (§2.7). The `script` materialiser
 writes one `ac_bot_startup_script` row and does nothing else: no restart, no
@@ -347,13 +362,50 @@ unpacked by the guarded unpacker and re-packed canonically) and activates
 through `DirectActivationService`, and convergence is observed through W11
 receipts — an active name plus a store-served pin writes nothing.
 
+## Creating a bot from a manifest (W13, #1696)
+
+`creation.py` is the seam bot creation calls — preflight, persist, the
+pre-container phase, discard, and the two operations that start and read the
+creation job. `create_job.py` is the job itself. Both live here rather than in
+`core/bot_management` because they are manifest concerns; creation decides *when*
+to call them.
+
+**The dependency runs one way.** `create_job` imports `creation` for the phase
+triggers, so the seam is handed its job operations at construction (the DI module
+wires them) rather than importing them back. `create_flow` must not import this
+package at all — that closes a cycle through the creation graph — which is why
+the seam's `persist` resolves the storage key itself and returns it.
+
+**Preflight is stricter than `PUT`, deliberately.** `PUT` may accept a construct
+no materialiser can act on: the document sits inert and nothing has been created.
+Here the same acceptance costs a Passport application, a user's authorization
+click and a live bot before the failure appears, so such a construct is refused
+at submission. The extra teclaw refusal is structural rather than a missing
+materialiser — teclaw composes a config artifact at provision time, a different
+mechanism from this pre/post-container delivery — and W8 (#1476) owns that arm,
+including lifting the refusal.
+
+### Operational precondition
+
+**Applying — and therefore creating a bot with a manifest — only progresses
+where `task_queue_worker.enabled=true` and `ac_task_queue` is provisioned.**
+Before W13 that flag gated an optimisation. It now gates the feature, and the
+failure mode is not slowness: with the worker off, `POST …/apply` still answers
+`202` and its report stays `RUNNING` until the apply lock's TTL expires, and a
+create-with-manifest still answers `202` and its poll sits at
+`AWAITING_AUTHORIZATION` until the creation deadline retires it as
+`AUTHORIZATION_EXPIRED`. Neither ever completes. It is the first thing to check
+when a creation or an apply appears stuck.
+
 ## Where the HTTP seam is
 
 Nothing here reads a framework, a request, or an HTTP status. The public surface
 is `adapters/http/openapi_v1/bots/config_manifest.py` (`GET` / `PUT` / `DELETE`
 on `/openapi/v1/bots/{bot_id}/config-manifest`, and `GET
-…/config-manifest/capabilities`), and the Service API contract the adapter
-depends on is `api/bot_config_manifest_service.py`. The fetch side has no HTTP
+…/config-manifest/capabilities`), plus
+`adapters/http/openapi_v1/bots/create_with_manifest.py` for the W13 pair
+(`POST /openapi/v1/bots/with-manifest` and its status poll). The Service API
+contract the adapter depends on is `api/bot_config_manifest_service.py`. The fetch side has no HTTP
 surface of its own — it is a core transport the apply orchestration (W4) calls.
 
 **There is no feature switch over the group.** An earlier revision hid it until
@@ -425,6 +477,20 @@ provides:
   - ApplyStatus
   - ApplyPhase
   - ApplyContext
+  - ApplyTaskHandler
+  - ApplyTaskLifecycle
+  - APPLY_TASK_TYPE
+  - build_apply_task_payload
+  - BotCreationManifestSeam
+  - CREATE_PRE_CONTAINER_TRIGGER
+  - CREATE_ON_CONTAINER_TRIGGER
+  - preflight_creation_manifest
+  - resolve_manifest_entity_id
+  - BotCreateWithManifestHandler
+  - CreateJobLifecycle
+  - CREATE_JOB_TASK_TYPE
+  - enqueue_create_job
+  - find_create_job
   - EntryOutcome
   - EntryResult
   - CategoryResult
@@ -518,8 +584,11 @@ consumes:
   - "SourceCredentialRepositoryProtocol (core.repository) — persistence for the credential table"
   - "ALLOWED_EXTENSIONS / MAX_FILE_SIZE (core.resources.services.file_service) — the workspace file surface's admission rule, re-asked in the `resources` materialiser's resolve by delegating to the one `admission_refusal` predicate so an undeliverable entry fails with the tree still standing (W6)"
   - "resolve_bot_engine (core.bot_management.engines.registry) — the pure runtime-engine routing policy (claude_code + a non-normalCC template ⇒ aicoding) the `resources` materialiser applies when addressing a bot's workspace, the same rule the resources router resolves through before it composes {bot_dir}/{engine}/workspace (W6)"
+  - "TaskQueueService (core.task_queue) — every apply runs as a task, and a creation is a task of its own; reached through a lazy provider because that module imports the DI container at module scope"
+  - "BotRepository (core.repository) — the apply task rebuilds its context by re-reading the bot rather than carrying it in a payload"
 consumed_by:
-  - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface"
+  - "adapters/http/openapi_v1/bots — the public read/replace/clear/capabilities surface, and the create-with-manifest pair (W13), which reaches the seam and never the task queue"
+  - "core.bot_management create_flow — submission calls the creation seam (preflight, persist, start the job); the dependency runs one way, so the seam is handed its job operations at construction rather than importing them"
   - "the apply orchestration (`apply/`, W4 #1472 + W5 #1473) — di/modules/manifest_fetch_module.py constructor-injects the transport_allowlist and the content store root (read via the W2/W11 pure parsers over config_module's seam) and holds the one EntryFetcher over the fetcher, the store, and W3's credentials"
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
@@ -527,6 +596,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.token_vault
+  - agentclaw.community.core.bot_management.utils  # resolve_agent_code — the creation job asks whether completion's *second* write (the owner relationship) actually landed, since the bot record alone cannot tell it
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
   - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
@@ -535,9 +605,12 @@ internal_dependencies:
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
+  - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider
   - agentclaw.community.core.workspace.constants
+  - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard
   - agentclaw.community.utils.env_utils

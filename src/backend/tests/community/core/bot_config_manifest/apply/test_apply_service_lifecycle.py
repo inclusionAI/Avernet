@@ -23,6 +23,11 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    ApplyPhase,
+)
+from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol import (
     ManifestApplyInProgressError,
 )
@@ -124,6 +129,41 @@ class _ManifestService:
         )
 
 
+class _FakeBotRepository:
+    """Just the one lookup ``run_apply_task`` makes to rebuild its context."""
+
+    def __init__(self, record: dict | None) -> None:
+        self._record = record
+
+    def get_by_id_and_entity(self, bot_id: str, entity_id: str):
+        return self._record
+
+
+class _FakeTaskQueue:
+    """A worker that claims immediately, which is what these tests need.
+
+    Applying moved off a daemon thread onto the task queue, so the service now
+    *enqueues* rather than runs. These tests are about what happens **around** the
+    engine — the lock, the two writes, what a poller sees — and all of that still
+    happens, just on a worker. Running the handler inline on enqueue keeps every
+    assertion below testing the same lifecycle rather than testing the queue.
+
+    It is also a faithful stand-in: the real type is registered with
+    ``wake_on_enqueue=True`` precisely so a due apply is claimed at once instead
+    of waiting out an idle poll.
+    """
+
+    def __init__(self) -> None:
+        self.service = None
+        self.enqueued: list[tuple[str, dict]] = []
+
+    def enqueue(self, task_type, payload, deadline_seconds, **kwargs):
+        self.enqueued.append((task_type, payload))
+        if self.service is not None:
+            self.service.run_apply_task(payload)
+        return (None, True)
+
+
 @pytest.fixture
 def world():
     # StaticPool, and it is load-bearing rather than incidental: apply does its
@@ -141,6 +181,7 @@ def world():
     Base.metadata.create_all(engine)
     db = InMemorySqliteDB(engine)
 
+    queue = _FakeTaskQueue()
     scripts = FakeStartupScriptService()
     applies = BotConfigManifestApplyRepository(db)
     locks = BotConfigManifestApplyLockRepository(db)
@@ -169,7 +210,11 @@ def world():
         # so the client is never *used* — it is constructed per apply and
         # must never be fetched through, which FakeGitClient enforces.
         git_client_provider=lambda: FakeGitClient(),
+        task_queue_provider=lambda: queue,
+        bot_repository=_FakeBotRepository(_BOT_RECORD),
     )
+    # Closes the loop: the fake worker needs the service it runs work for.
+    queue.service = service
     return service, applies, locks, scripts, BotConfigManifestRepository(db)
 
 
@@ -180,6 +225,7 @@ def _start(service):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
 
 
@@ -413,6 +459,7 @@ def test_the_audit_label_is_recorded_without_becoming_the_principal(world):
         owner_id=_ENTITY,
         actor_id=_ENTITY,
         audit_actor=label,
+        phases=ALL_PHASES,
     )
     report = _drain(service)
 
@@ -435,6 +482,7 @@ def test_the_audit_label_defaults_to_the_principal(world):
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
     _drain(service)
 
@@ -503,47 +551,35 @@ def test_partially_written_survives_the_storage_round_trip(world):
     )
 
 
-def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
+def test_an_enqueue_that_fails_terminates_the_report_and_frees_the_lock(
     world, monkeypatch
 ):
-    """The launch-failure window the audit found: the RUNNING row was already
-    written when ``Thread.start`` raises — thread exhaustion under load is
-    exactly its trigger — leaving the bot locked for the 30-minute TTL while
-    a poller waits on an apply that never existed. The window must close the
-    same way ``_run``'s finally closes everything else: FAILED row, lock
-    released, caller hears the original error."""
-    import threading
-
-    # Captured BEFORE the patch: reading ``threading.Thread`` after it would
-    # return the patched class (the module alias sees the same global), and
-    # "restoring" ExplodingThread to itself is exactly the trap.
-    original_thread_cls = threading.Thread
-
+    """The launch-failure window the audit found, on the queue: the RUNNING row
+    is already written when the handoff raises, leaving the bot locked for the
+    30-minute TTL while a poller waits on an apply that never existed. Thread
+    exhaustion used to be the trigger; a queue write that cannot land is the
+    same shape of failure and gets the same answer — FAILED row, lock released,
+    caller hears the original error."""
     service, applies, locks, scripts, _ = world
+    queue = service._task_queue_provider()
+    original_enqueue = queue.enqueue
 
-    class _NoThreadsLeftError(RuntimeError):
+    class _QueueUnavailableError(RuntimeError):
         pass
 
-    class ExplodingThread:
-        def __init__(self, *args, **kwargs):
-            pass
+    def _explode(*args, **kwargs):
+        raise _QueueUnavailableError("could not reach the queue")
 
-        def start(self):
-            raise _NoThreadsLeftError("can't start new thread")
+    monkeypatch.setattr(queue, "enqueue", _explode)
 
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        ExplodingThread,
-    )
-
-    with pytest.raises(_NoThreadsLeftError):
+    with pytest.raises(_QueueUnavailableError):
         service.start_apply(
             entity_id=_ENTITY,
             bot_id=_BOT,
             bot=_BOT_RECORD,
             owner_id=_ENTITY,
             actor_id=_ENTITY,
+            phases=ALL_PHASES,
         )
 
     # The report is terminal, not stranded RUNNING.
@@ -552,17 +588,14 @@ def test_a_thread_that_cannot_start_terminates_the_report_and_frees_the_lock(
     assert report.status is ApplyStatus.FAILED
 
     # And the bot is immediately re-applyable — no TTL wait.
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        original_thread_cls,
-    )
+    monkeypatch.setattr(queue, "enqueue", original_enqueue)
     accepted = service.start_apply(
         entity_id=_ENTITY,
         bot_id=_BOT,
         bot=_BOT_RECORD,
         owner_id=_ENTITY,
         actor_id=_ENTITY,
+        phases=ALL_PHASES,
     )
     assert accepted.status is ApplyStatus.RUNNING
 
@@ -640,36 +673,39 @@ def test_a_strict_baseline_is_read_back_from_the_last_report(world, monkeypatch)
     ) == {"charts": "f" * 40}
 
 
-def test_a_launch_failure_closes_the_session_it_built(world, monkeypatch):
-    """The terminal path that never runs ``_run`` still closes the session.
+def test_a_failed_handoff_has_no_session_to_leak(world, monkeypatch):
+    """The terminal path that never runs ``_run``, after the work moved.
 
-    ``Thread.start`` raising means ``_run``'s ``finally`` never exists for
-    this apply, so the launch-failure handler must close the session itself —
-    the same reason it terminates the report row: nothing else will.
+    W7 wrote this against ``Thread.start`` raising: the session was built in
+    the request, so a launch that never ran ``_run`` had to close it by hand
+    or leak an ``mkdtemp`` tree. W13 builds the session in the handler
+    instead — the checkouts belong to the process that applies them — so the
+    leak this guarded against cannot form: a handoff that fails has no
+    session yet. That is the invariant now, and it is worth pinning rather
+    than deleting, because moving the build back into ``start_apply`` would
+    silently restore the leak the launch-failure path no longer closes.
     """
+    service, _applies, _locks, _scripts, _manifests = world
+    queue = service._task_queue_provider()
+    closed = _counting_session_closes(monkeypatch)
+    before = FakeGitClient.constructed
 
-    class _NoThreadsLeftError(RuntimeError):
+    class _QueueUnavailableError(RuntimeError):
         pass
 
-    class ExplodingThread:
-        def __init__(self, *args, **kwargs):
-            pass
+    def _explode(*args, **kwargs):
+        raise _QueueUnavailableError("could not reach the queue")
 
-        def start(self):
-            raise _NoThreadsLeftError("can't start new thread")
+    monkeypatch.setattr(queue, "enqueue", _explode)
 
-    service, _applies, _locks, _scripts, _manifests = world
-    closed = _counting_session_closes(monkeypatch)
-    monkeypatch.setattr(
-        "agentclaw.community.core.bot_config_manifest.services."
-        "config_manifest_apply_service.threading.Thread",
-        ExplodingThread,
-    )
-
-    with pytest.raises(_NoThreadsLeftError):
+    with pytest.raises(_QueueUnavailableError):
         _start(service)
 
-    assert len(closed) == 1, "a launch failure must close the session it built"
+    assert FakeGitClient.constructed == before, (
+        "start_apply built a source session before the handoff; its checkout "
+        "trees would outlive the request that made them"
+    )
+    assert closed == [], "nothing was built, so nothing was there to close"
 
 
 def test_a_dry_run_closes_its_session(world, monkeypatch):
@@ -694,3 +730,248 @@ def test_a_dry_run_closes_its_session(world, monkeypatch):
     assert report.status is ApplyStatus.SUCCEEDED
     assert FakeGitClient.constructed - before == 1
     assert len(closed) == 1, "a dry run must close its session before returning"
+# ── Carrying one phase's report into the next (W13) ────────────────────────
+#
+# A creation runs two applies — the pre-container phase writes `script`, the
+# post-container phase writes everything else — separated by the whole of
+# container provisioning. Each has its own record, so the report a caller reads
+# at the end has to account for both or the manifest looks half-vanished.
+
+
+def test_the_second_phase_report_carries_the_first_phases_categories(world):
+    service, applies, _locks, _scripts, _manifests = world
+
+    first = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:pre_container",
+        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+    )
+    second = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        carry_from_apply_id=first.apply_id,
+    )
+
+    merged = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=second.apply_id
+    )
+    names = [c.construct.value for c in merged.categories]
+    assert "script" in names, (
+        "the post-container report dropped the pre-container phase's category; "
+        "a caller reading it would think the script never landed"
+    )
+    # APPLY_ORDER's own order: script is position 0.
+    assert names[0] == "script"
+
+    # The carried-from record is not rewritten by being carried.
+    earlier = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=first.apply_id
+    )
+    assert [c.construct.value for c in earlier.categories] == ["script"]
+
+
+def test_a_missing_carry_id_is_ignored_rather_than_failing_the_apply(world):
+    service, _applies, _locks, _scripts, _manifests = world
+
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        carry_from_apply_id="does-not-exist",
+        phases=ALL_PHASES,
+    )
+
+    report = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=accepted.apply_id
+    )
+    assert report is not None
+    assert report.status is ApplyStatus.SUCCEEDED, (
+        "losing a reporting nicety must never fail an apply that worked"
+    )
+
+
+def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(world):
+    """The summary is re-derived over the union, not copied from this phase.
+
+    This is the case the merge exists for. On its own the post-container phase
+    here delivers nothing and reports ``SUCCEEDED``; the pre-container phase
+    failed. A caller reading only the second report would be told the manifest
+    applied cleanly, which is exactly the lie the carry prevents.
+
+    The union's status is ``FAILED`` rather than ``PARTIAL`` because this
+    fixture's document declares only ``script``: nothing was delivered at all.
+    ``PARTIAL`` needs a document where something *did* land, which the
+    orchestrator's own suite covers — what matters here is that the summary
+    moved off what this phase alone would have said.
+    """
+    service, _applies, _locks, scripts, _manifests = world
+
+    def _refuse(**_kwargs):
+        raise RuntimeError("startup script write failed")
+
+    scripts.put = _refuse
+    first = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:pre_container",
+        phases=frozenset({ApplyPhase.PRE_CONTAINER}),
+    )
+    assert (
+        service.get_apply(
+            entity_id=_ENTITY, bot_id=_BOT, apply_id=first.apply_id
+        ).status
+        is ApplyStatus.FAILED
+    )
+
+    second = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        trigger="create:on_container",
+        phases=frozenset({ApplyPhase.ON_CONTAINER}),
+        carry_from_apply_id=first.apply_id,
+    )
+    merged = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id=second.apply_id
+    )
+    assert "script" in [c.construct.value for c in merged.categories], (
+        "the failed phase's category did not survive the merge"
+    )
+    assert merged.status is not ApplyStatus.SUCCEEDED, (
+        "the summary was copied from this phase instead of re-derived over the "
+        "union; a caller would be told the script landed when it did not"
+    )
+    assert merged.status is ApplyStatus.FAILED
+
+
+# ── What can actually be applied in this build (W13) ───────────────────────
+
+
+def test_materialised_constructs_reports_what_is_registered_today(world):
+    """W4 registered two; W5 brought the count to four, W6 to five.
+
+    Pinned as an equality rather than a subset so a materialiser that lands
+    without its documentation, its ordering entry or its capability gate is
+    caught here — the set is a published contract, not an accident of imports.
+    Widening it is the whole edit a new materialiser needs, which is the
+    property the next test pins.
+    """
+    service, *_ = world
+    assert {c.value for c in service.materialised_constructs()} == {
+        "script",
+        "mcp",
+        "identity",
+        "skills",
+        "resources",
+    }
+
+
+def test_registering_a_materialiser_widens_it_with_no_edit_to_any_caller(world):
+    """The property W5 and W6 depend on.
+
+    A hand-written set would need an edit here when they land, and forgetting it
+    is invisible until a creation accepts a category nothing can apply — after a
+    Passport application, a user's click, and a live bot. Deriving it from the
+    registry makes landing a materialiser the whole change.
+    """
+    service, *_ = world
+    from agentclaw.community.core.bot_config_manifest.capabilities import (
+        ManifestCategory,
+    )
+
+    real = service._build_materialisers
+
+    class _StubResourcesMaterialiser:
+        construct = ManifestCategory.RESOURCES
+
+    def _widened():
+        built = dict(real())
+        built[ManifestCategory.RESOURCES] = _StubResourcesMaterialiser()
+        return built
+
+    service._build_materialisers = _widened
+    try:
+        assert ManifestCategory.RESOURCES in service.materialised_constructs()
+    finally:
+        service._build_materialisers = real
+
+
+def test_an_apply_that_cannot_be_rebuilt_terminates_instead_of_looping(world):
+    """A rebuild failure is terminal, not a retry.
+
+    The document is re-read at execution rather than carried in the payload, so
+    it can fail to validate then — the bot's engine changed since the enqueue,
+    say. Letting that escape hands the worker an exception it treats as a retry,
+    and the apply would loop until its deadline with the lock still held and the
+    record still RUNNING. Both halves are asserted here because leaving either
+    out is the bug: no report means a poller waits, no release means the bot is
+    locked against every future apply.
+    """
+    service, _applies, locks, _scripts, _manifests = world
+
+    accepted = service.start_apply(
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        bot=_BOT_RECORD,
+        owner_id=_ENTITY,
+        actor_id=_ENTITY,
+        phases=ALL_PHASES,
+    )
+    # A second apply, whose rebuild will fail.
+    def _refuse(**_kwargs):
+        raise RuntimeError("the stored document no longer validates")
+
+    service._parsed_or_empty = _refuse
+    payload = {
+        "apply_id": "apply-that-cannot-start",
+        "entity_id": _ENTITY,
+        "bot_id": _BOT,
+        "owner_id": _ENTITY,
+        "actor_id": _ENTITY,
+        "env": get_current_env(),
+        "tenant": "",
+        "trigger": "explicit",
+        "lock_token": "no-such-token",
+        "started_at": None,
+        "phases": None,
+        "carry_from_apply_id": None,
+        "engine_type": None,
+        "bot_type": None,
+    }
+    service._applies.start(
+        env=get_current_env(),
+        entity_id=_ENTITY,
+        bot_id=_BOT,
+        apply_id="apply-that-cannot-start",
+        trigger="explicit",
+        actor=_ENTITY,
+        report="{}",
+    )
+
+    # Must not raise: raising is what the worker turns into a doomed retry.
+    service.run_apply_task(payload)
+
+    stranded = service.get_apply(
+        entity_id=_ENTITY, bot_id=_BOT, apply_id="apply-that-cannot-start"
+    )
+    assert stranded.status is ApplyStatus.FAILED, (
+        "an apply that cannot be rebuilt must terminate, not poll forever"
+    )
+    assert accepted.apply_id  # the first apply is untouched

@@ -14,12 +14,21 @@ from __future__ import annotations
 import io
 import json
 import tarfile
-import threading
 import time
 
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
+    APPLY_TASK_TYPE,
+)
+from agentclaw.community.core.repository.protocols.platform import (
+    TaskQueueRepositoryProtocol,
+)
+from agentclaw.community.core.task_queue.types import DEFAULT_APP, TaskStatus
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestApplyLockRepositoryProtocol,
     BotConfigManifestApplyRepositoryProtocol,
@@ -155,30 +164,45 @@ def _seed_no_bot(world) -> None:
 
 
 def _await_the_background_apply(_response, world) -> None:
-    """Join the worker before the case ends, then assert it finished.
+    """Run the enqueued apply, then assert it finished.
 
-    Two jobs, and the first is not optional. ``POST …/apply`` answers 202 and
-    keeps working on a daemon thread; the per-test fixture disposes the engine
-    the moment the case returns. Disposing a SQLite engine while another thread
-    is mid-statement on one of its connections does not raise — it segfaults the
-    interpreter, taking the whole pytest process with it. Joining the thread is
-    what makes the case deterministic rather than a coin flip that usually lands
-    the right way.
-
-    Nothing here works around a production defect: a real deployment does not
-    dispose its engine under a live apply, and an apply killed mid-flight is
-    already answered by design — its ``RUNNING`` row has no live lock behind it,
-    so the read derives ``FAILED``.
-
-    Having waited, assert what the wait makes observable: a 202 is only worth
+    **The assertion is the point and it has not changed:** a 202 is only worth
     anything if the work behind the handle actually reaches a terminal status.
+    What changed is where that work lives. ``POST …/apply`` used to answer 202
+    and keep going on a daemon thread, so this helper joined the thread by name;
+    applying is now a ``config_manifest.apply`` task, so it drains the queue
+    instead — claiming nothing, just running what was enqueued, which is what a
+    worker does.
+
+    Draining explicitly rather than starting a worker keeps the case
+    deterministic: no polling interval, no lease, and no second thread racing
+    the per-test fixture's engine disposal.
+
+    The hazard the thread version documented is simply gone. Disposing a SQLite
+    engine under a live apply thread segfaulted the interpreter; nothing runs
+    concurrently here any more.
     """
-    for thread in threading.enumerate():
-        # The name the service gives its workers. Coupling a test to it is the
-        # price of being able to wait for one deterministically.
-        if thread.name.startswith("manifest-apply-"):
-            thread.join(timeout=30)
-            assert not thread.is_alive(), "the apply thread never finished"
+    # Every status, not just PENDING, and the reason is a property of this
+    # fixture rather than of the feature: the endpoint test app never runs
+    # lifecycle ``bootstrap()``, so *no* task-queue handler is registered in it
+    # and its worker retires anything enqueued with "no handler registered".
+    # The task row's own verdict is therefore meaningless here; the payload it
+    # carries is not. Running that payload is exactly what a worker with the
+    # handler registered would do, and it is deterministic — no poll interval,
+    # no lease, nothing racing the fixture's engine disposal.
+    repo = world.get(TaskQueueRepositoryProtocol)
+    enqueued = [
+        task
+        for status in TaskStatus
+        for task in repo.list_by_status(
+            status=status, env=get_current_env(), app=DEFAULT_APP
+        )
+        if task.task_type == APPLY_TASK_TYPE
+    ]
+    assert enqueued, "the accepted apply enqueued no task"
+    apply_service = world.get(BotConfigManifestApplyServiceProtocol)
+    for task in enqueued:
+        apply_service.run_apply_task(task.payload)
 
     record = world.get(BotConfigManifestApplyRepositoryProtocol).latest(
         env=get_current_env(), entity_id=_OWNER, bot_id=_BOT_ID

@@ -566,6 +566,47 @@ class WorkspaceConfig:
     hermes_root: str = "/home/admin/.hermes"
 
 
+# ── Creating a bot with its configuration manifest (W13) ─────────────────
+
+
+@dataclass(frozen=True)
+class BotCreateWithManifestConfig:
+    """Policy for ``POST /openapi/v1/bots/with-manifest``.
+
+    Sourced from the ``bot_create_with_manifest`` block of ``user_config``.
+
+    ``authorization_window_seconds`` is how long a user has to follow the
+    authorization link before the creation is retired and the rows submission
+    wrote are deleted. It is frozen into the job's payload at enqueue rather
+    than re-read per step, so changing it here moves only *future* creations —
+    an in-flight one keeps the window it was submitted under, which is what
+    keeps the queue's own deadline the safe margin longer that it is meant
+    to be.
+
+    Must be positive: a zero or negative window would expire every creation the
+    instant it was submitted, so a non-positive value is refused in favour of
+    the default rather than honoured.
+    """
+
+    authorization_window_seconds: int = 10 * 60
+
+    @classmethod
+    def from_block(cls, block: dict) -> "BotCreateWithManifestConfig":
+        """Parse the ``bot_create_with_manifest`` block, defaulting defensively.
+
+        A missing key, an unreadable value and a non-positive one all take the
+        default. Non-positive is *refused* rather than honoured: zero would
+        expire every creation at the instant of submission, which from a
+        caller's side is indistinguishable from the feature being broken.
+        """
+        default = cls().authorization_window_seconds
+        try:
+            window = int(block.get("authorization_window_seconds", default))
+        except (TypeError, ValueError):
+            window = default
+        return cls(authorization_window_seconds=window if window > 0 else default)
+
+
 # ── Dormant bot recycle ──────────────────────────────────────────────────
 
 
