@@ -5,7 +5,16 @@ import { loadOrOnboardBotSession, persistBotSession } from './credentials.js';
 import { BcnWsClient } from './ws-client.js';
 
 export const name = 'deepseek-harness-channel-bcn';
-export const inject = ['agents', 'credentials', 'sessions', 'sessionPersistence', 'tools'];
+export const inject = [
+  'agentDefaultModel',
+  'agentPresets',
+  'agents',
+  'credentials',
+  'sessions',
+  'sessionPersistence',
+  'systemPrompt',
+  'tools',
+];
 export { Config };
 export type { Config as DeepSeekHarnessBcnConfig } from './config.js';
 

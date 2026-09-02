@@ -7,7 +7,16 @@ import { Config, apply, inject, name } from '../src/index.js';
 
 test('exports the Cordis bundle contract and a disabled safe default', async () => {
   assert.equal(name, 'deepseek-harness-channel-bcn');
-  assert.deepEqual(inject, ['agents', 'credentials', 'sessions', 'sessionPersistence', 'tools']);
+  assert.deepEqual(inject, [
+    'agentDefaultModel',
+    'agentPresets',
+    'agents',
+    'credentials',
+    'sessions',
+    'sessionPersistence',
+    'systemPrompt',
+    'tools',
+  ]);
   const resolved = Config({} as PluginConfig);
   assert.equal(resolved.enabled, false);
   assert.equal(resolved.onboardingTokenRef, 'BCN_ONBOARDING_TOKEN');
@@ -33,6 +42,9 @@ test('declares an installable DSH bundle manifest and mount row', async () => {
   const manifest = JSON.parse(await readFile(packageUrl, 'utf8')) as Record<string, unknown>;
   assert.deepEqual(manifest.dsh, { bundle: { patch: './cordis.patch.yml' } });
   assert.equal((manifest.dependencies as Record<string, string>).ws, '^8.18.3');
+  assert.equal((manifest.dependencies as Record<string, string>)['js-yaml'], '^4.2.0');
+  assert.deepEqual(manifest.bin, { 'dsh-bcn-configure': './dist/configure.js' });
+  assert.ok((manifest.files as string[]).includes('install-dsh.sh'));
   assert.equal(Object.keys(manifest.dependencies as Record<string, string>).some(key => key.startsWith('@deepseek-ai/')), false);
   const patch = await readFile(patchUrl, 'utf8');
   assert.match(patch, /id: deepseek-harness-channel-bcn/);

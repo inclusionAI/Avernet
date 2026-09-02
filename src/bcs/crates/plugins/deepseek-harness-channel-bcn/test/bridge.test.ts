@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent';
+import type { Agent, AgentHandle, AgentOptions, ModelSelection } from '@deepseek-ai/dsh-agent';
 import type { UserMessage } from '@deepseek-ai/dsh-llm';
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
-import type { ToolDefinition } from '@deepseek-ai/dsh-tools';
+import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
+import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools';
 import { BcnBridge } from '../src/bridge.js';
 import type { EventFrame, RequestFrame, ResponseFrame } from '../src/protocol.js';
 import type { BcnWsClient } from '../src/ws-client.js';
@@ -16,6 +16,7 @@ type RequestHandler = (frame: RequestFrame) => Promise<void>;
 type EventHandler = (frame: EventFrame) => Promise<void>;
 
 class FakeClient {
+  connected = true;
   requestHandlers = new Map<string, RequestHandler>();
   eventHandlers = new Map<string, EventHandler>();
   responses: ResponseFrame[] = [];
@@ -42,6 +43,20 @@ class FakeClient {
 
   async sendRequest(method: string, params: Record<string, unknown>): Promise<ResponseFrame> {
     this.requests.push({ method, params });
+    if (method === 'task.dispatch') {
+      return {
+        type: 'res',
+        id: 'task-dispatch-response',
+        ok: true,
+        payload: { task_id: 'task-1', status: 'dispatched' },
+      };
+    }
+    if (method === 'task.message') {
+      return { type: 'res', id: 'task-message-response', ok: true, payload: { status: 'sent' } };
+    }
+    if (method === 'task.complete') {
+      return { type: 'res', id: 'task-complete-response', ok: true, payload: {} };
+    }
     return {
       type: 'res',
       id: 'route-response',
@@ -69,20 +84,68 @@ interface FakeAgentState {
   injections: UserMessage[];
   cancels: string[];
   tools: ToolDefinition[];
+  scopedEvents: string[];
+  promptVariables: Map<string, () => string | undefined>;
+}
+
+interface FakePersistedSession {
+  id: string;
+  agentPreset?: string;
+  selectedPreset?: string;
 }
 
 class FakeHarness {
   readonly listeners = new Map<string, Set<Listener>>();
   readonly agents = new Map<string, FakeAgentState>();
   readonly context: Context;
+  readonly mountedPresets: string[] = [];
+  readonly defaultSelection: ModelSelection = {
+    provider: 'deepseek-official',
+    model: 'deepseek-chat',
+  };
 
-  constructor() {
+  constructor(persistedSessions: Array<string | FakePersistedSession> = []) {
+    const persisted = new Map(persistedSessions.map(value => {
+      const entry = typeof value === 'string' ? { id: value } : value;
+      const events = entry.selectedPreset
+        ? [{
+          type: 'agent-preset/selected',
+          seq: 0,
+          time: 1,
+          data: { agentPreset: entry.selectedPreset },
+        } as unknown as SessionEvent]
+        : [];
+      return [entry.id, {
+        meta: {
+          id: entry.id as SessionId,
+          ...(entry.agentPreset ? { agentPreset: entry.agentPreset } : {}),
+        } as SessionHeader,
+        events,
+      }];
+    }));
     const registry = {
       get: (id: SessionId) => this.agents.get(String(id))?.agent,
-      create: async (options: { sessionId: SessionId; setup?: (ctx: Context) => unknown }): Promise<AgentHandle> =>
-        this.createAgent(options.sessionId, options.setup),
-      resume: async (options: { resumeSessionId: SessionId; setup?: (ctx: Context) => unknown }): Promise<AgentHandle> =>
-        this.createAgent(options.resumeSessionId, options.setup),
+      create: async (options: {
+        sessionId: SessionId;
+        meta?: { cwd?: string; agentPreset?: string };
+        agentOptions?: AgentOptions;
+        setup?: (ctx: Context) => unknown;
+      }): Promise<AgentHandle> => this.createAgent(
+        options.sessionId,
+        options.meta,
+        options.agentOptions,
+        options.setup,
+      ),
+      resume: async (options: {
+        resumeSessionId: SessionId;
+        agentOptions?: AgentOptions;
+        setup?: (ctx: Context) => unknown;
+      }): Promise<AgentHandle> => this.createAgent(
+        options.resumeSessionId,
+        persisted.get(String(options.resumeSessionId))?.meta,
+        options.agentOptions,
+        options.setup,
+      ),
     };
     this.context = {
       on: (event: string, listener: Listener) => {
@@ -91,8 +154,24 @@ class FakeHarness {
         this.listeners.set(event, listeners);
         return () => listeners.delete(listener);
       },
+      agentDefaultModel: { currentSelection: () => this.defaultSelection },
+      agentPresets: {
+        resolve: async (id?: string) => ({ id: id ?? 'standard' }),
+        mount: async (_agentCtx: Context, id?: string) => {
+          const resolved = id ?? 'standard';
+          this.mountedPresets.push(resolved);
+          return { id: resolved };
+        },
+      },
       agents: registry,
-      sessionPersistence: { list: async () => [] },
+      sessionPersistence: {
+        list: async () => [...persisted.values()].map(item => item.meta),
+        inspect: async (id: SessionId) => {
+          const inspection = persisted.get(String(id));
+          if (!inspection) throw new Error(`missing persisted session ${String(id)}`);
+          return inspection;
+        },
+      },
     } as unknown as Context;
   }
 
@@ -100,21 +179,35 @@ class FakeHarness {
     for (const listener of this.listeners.get(event) ?? []) listener(...args);
   }
 
-  state(sessionKey: string): FakeAgentState {
-    const state = this.agents.get(String(dshSessionIdForV2(sessionKey)));
-    if (!state) throw new Error(`missing agent for ${sessionKey}`);
+  state(sessionIdentity: string): FakeAgentState {
+    const state = this.agents.get(String(dshSessionIdForV2(sessionIdentity)));
+    if (!state) throw new Error(`missing agent for ${sessionIdentity}`);
     return state;
   }
 
   private async createAgent(
     sessionId: SessionId,
+    meta: { cwd?: string; agentPreset?: string } | undefined,
+    agentOptions: AgentOptions | undefined,
     setup: ((ctx: Context) => unknown) | undefined,
   ): Promise<AgentHandle> {
     const followups: UserMessage[] = [];
     const injections: UserMessage[] = [];
     const cancels: string[] = [];
     const tools: ToolDefinition[] = [];
+    const scopedEvents: string[] = [];
+    const promptVariables = new Map<string, () => string | undefined>();
     const agentContext = {
+      on: (event: string) => {
+        scopedEvents.push(event);
+        return () => {};
+      },
+      systemPrompt: {
+        variable: (name: string, provider: () => string | undefined) => {
+          promptVariables.set(name, provider);
+          return () => promptVariables.delete(name);
+        },
+      },
       tools: {
         register: (definition: ToolDefinition) => {
           tools.push(definition);
@@ -127,10 +220,14 @@ class FakeHarness {
     } as unknown as Context;
     const agent = {
       id: sessionId,
-      session: { id: sessionId },
+      session: {
+        id: sessionId,
+        header: { cwd: meta?.cwd, agentPreset: meta?.agentPreset },
+        requestHeader: () => undefined,
+      },
       ctx: agentContext,
       status: 'idle',
-      options: {},
+      options: agentOptions ?? {},
       inbox: {},
       followup: (message: UserMessage) => followups.push(message),
       inject: (message: UserMessage) => injections.push(message),
@@ -140,8 +237,9 @@ class FakeHarness {
       send: () => {},
       steer: () => {},
     } as unknown as Agent;
+    Object.assign(agentContext, { agent });
     await setup?.(agentContext);
-    const state = { agent, followups, injections, cancels, tools };
+    const state = { agent, followups, injections, cancels, tools, scopedEvents, promptVariables };
     this.agents.set(String(sessionId), state);
     return {
       agent,
@@ -150,11 +248,115 @@ class FakeHarness {
   }
 }
 
+test('creates BCN agents with the DSH default model and scoped model selection', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+
+  await client.deliverRequest('chat.send', 'request-model', chatParams('model-session', 'model-run'));
+
+  const state = harness.state('model-session');
+  assert.deepEqual(state.agent.options, {
+    provider: harness.defaultSelection.provider,
+    model: harness.defaultSelection.model,
+  });
+  assert.deepEqual(state.scopedEvents, ['system-prompt/assemble', 'agent/request']);
+  assert.equal(state.agent.session.header.cwd, process.cwd());
+  assert.equal(state.agent.session.header.agentPreset, 'standard');
+  assert.equal(state.promptVariables.get('cwd')?.(), process.cwd());
+  assert.deepEqual(harness.mountedPresets, ['standard']);
+  assert.equal(state.followups.length, 1);
+  await bridge.dispose();
+});
+
+test('supplies cwd to legacy persisted BCN sessions created without session metadata', async () => {
+  const sessionKey = 'legacy-no-cwd-session';
+  const sessionId = dshSessionIdForV2(sessionKey);
+  const harness = new FakeHarness([String(sessionId)]);
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+
+  await client.deliverRequest('chat.send', 'request-legacy', chatParams(sessionKey, 'legacy-run'));
+
+  const state = harness.state(sessionKey);
+  assert.equal(state.agent.session.header.cwd, undefined);
+  assert.equal(state.promptVariables.get('cwd')?.(), process.cwd());
+  assert.deepEqual(harness.mountedPresets, ['standard']);
+  assert.equal(state.followups.length, 1);
+  await bridge.dispose();
+});
+
+test('restores the latest DSH agent preset recorded by a persisted BCN session', async () => {
+  const sessionKey = 'recorded-preset-session';
+  const sessionId = dshSessionIdForV2(sessionKey);
+  const harness = new FakeHarness([{
+    id: String(sessionId),
+    agentPreset: 'standard',
+    selectedPreset: 'custom-coding',
+  }]);
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+
+  await client.deliverRequest('chat.send', 'request-preset', chatParams(sessionKey, 'preset-run'));
+
+  assert.deepEqual(harness.mountedPresets, ['custom-coding']);
+  assert.equal(harness.state(sessionKey).followups.length, 1);
+  await bridge.dispose();
+});
+
+test('isolates V2 sessions that share a group-level session_key and reuses each session for inject', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  const sharedSessionKey = 'group:bcs_grp_59a251ab729a49cfbf8b7a183d80392d';
+  const firstSessionId = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d:9e1f90a1';
+  const secondSessionId = 'bcs_grp_59a251ab729a49cfbf8b7a183d80392d:28ab9c04';
+  const first = chatParams(sharedSessionKey, 'run-first');
+  first.bcs_group_id = firstSessionId;
+  first.session_context = {
+    ...(first.session_context as Record<string, unknown>),
+    session_id: firstSessionId,
+  };
+  const second = chatParams(sharedSessionKey, 'run-second');
+  second.bcs_group_id = secondSessionId;
+  second.session_context = {
+    ...(second.session_context as Record<string, unknown>),
+    session_id: secondSessionId,
+  };
+
+  await client.deliverRequest('chat.send', 'request-first', first);
+  await client.deliverRequest('chat.send', 'request-second', second);
+  const firstState = harness.state(firstSessionId);
+  const secondState = harness.state(secondSessionId);
+  assert.notEqual(firstState.agent.id, secondState.agent.id);
+  assert.equal(firstState.followups.length, 1);
+  assert.equal(secondState.followups.length, 1);
+
+  const firstInject = { ...first };
+  delete firstInject.idempotency_key;
+  await client.deliverRequest('chat.inject', 'inject-first', firstInject);
+  assert.equal(firstState.injections.length, 1);
+  assert.equal(secondState.injections.length, 0);
+
+  await client.deliverRequest('chat.abort', 'abort-ambiguous', { session_key: sharedSessionKey });
+  assert.equal(client.responses.at(-1)?.payload?.aborted, false);
+  assert.deepEqual(firstState.cancels, []);
+  assert.deepEqual(secondState.cancels, []);
+
+  await client.deliverRequest('chat.abort', 'abort-first', { session_key: firstSessionId });
+  assert.deepEqual(firstState.cancels, ['user']);
+  assert.deepEqual(secondState.cancels, []);
+  await bridge.dispose();
+});
+
 function chatParams(sessionKey = 'bcn-v2-session', idempotencyKey = 'run-1'): Record<string, unknown> {
   return {
     session_key: sessionKey,
     bcs_group_id: 'group-1',
-    bcs_session_id: 'session-layer-1',
     idempotency_key: idempotencyKey,
     message: { role: 'user', content: [{ type: 'text', text: 'Please investigate.' }], timestamp: 1 },
     channel: { source: 'api', actor_id: 'human-1' },
@@ -169,6 +371,29 @@ function chatParams(sessionKey = 'bcn-v2-session', idempotencyKey = 'run-1'): Re
       response_directive: { action: 'respond', request_source: 'default_policy' },
     },
   };
+}
+
+function taskGroupParams(
+  sessionKey: string,
+  idempotencyKey: string,
+  recipientRole: 'manager' | 'worker' | undefined,
+): Record<string, unknown> {
+  const params = chatParams(sessionKey, idempotencyKey);
+  params.bcs_group_id = 'bcs_grp_test:session-1';
+  params.session_context = {
+    ...(params.session_context as Record<string, unknown>),
+    group_type: 'manager_worker',
+    participants: ['bot-manager', 'human-1'],
+    ...(recipientRole ? { recipient_role: recipientRole } : {}),
+  };
+  return params;
+}
+
+function toolRunContext(agent: Agent): ToolRunContext {
+  return {
+    agent,
+    signal: new AbortController().signal,
+  } as ToolRunContext;
 }
 
 function event(value: unknown): SessionEvent {
@@ -320,8 +545,10 @@ test('captures bcs_route once, emits its normal tool telemetry, and attaches rou
   const client = new FakeClient();
   const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
   bridge.start();
-  await client.deliverRequest('chat.send', 'request-route', chatParams('route-session', 'run-route'));
-  const state = harness.state('route-session');
+  const params = chatParams('route-session', 'run-route');
+  params.bcs_session_id = 'session-layer-1';
+  await client.deliverRequest('chat.send', 'request-route', params);
+  const state = harness.state('session-layer-1');
   emitClaim(harness, state, state.followups[0] as UserMessage);
   const result = await bridge.captureRoute(
     state.agent,
@@ -376,6 +603,103 @@ test('captures bcs_route once, emits its normal tool telemetry, and attaches rou
     reason: 'Needs database expertise',
     include_self: false,
   });
+  await bridge.dispose();
+});
+
+test('registers manager task tools instead of bcs_route and forwards task requests to BCN', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest(
+    'chat.send',
+    'request-manager',
+    taskGroupParams('manager-session', 'manager-run', 'manager'),
+  );
+  const state = harness.state('bcs_grp_test:session-1');
+  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_assign_task', 'bcs_task_complete']);
+  emitClaim(harness, state, state.followups[0] as UserMessage);
+
+  const assign = state.tools.find(tool => tool.name === 'bcs_assign_task');
+  const complete = state.tools.find(tool => tool.name === 'bcs_task_complete');
+  assert.ok(assign);
+  assert.ok(complete);
+  assert.deepEqual(await assign.execute({
+    target_bot: ' Worker ',
+    message: ' Investigate the database ',
+    response_mode: 'after-last-tool-call',
+  }, toolRunContext(state.agent)), {
+    ok: true,
+    task_id: 'task-1',
+    status: 'dispatched',
+  });
+  assert.deepEqual(await complete.execute({ summary: ' All work is done. ' }, toolRunContext(state.agent)), {
+    ok: true,
+  });
+  assert.deepEqual(client.requests, [
+    {
+      method: 'task.dispatch',
+      params: {
+        group_id: 'bcs_grp_test:session-1',
+        target_bot: 'Worker',
+        message: 'Investigate the database',
+        response_mode: 'after-last-tool-call',
+      },
+    },
+    {
+      method: 'task.complete',
+      params: { group_id: 'bcs_grp_test:session-1', summary: 'All work is done.' },
+    },
+  ]);
+  await bridge.dispose();
+});
+
+test('registers only the worker task-message tool for a manager-worker worker', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest(
+    'chat.send',
+    'request-worker',
+    taskGroupParams('worker-session', 'worker-run', 'worker'),
+  );
+  const state = harness.state('bcs_grp_test:session-1');
+  assert.deepEqual(state.tools.map(tool => tool.name), ['bcs_send_task_message']);
+  emitClaim(harness, state, state.followups[0] as UserMessage);
+
+  const sendMessage = state.tools[0];
+  assert.ok(sendMessage);
+  assert.deepEqual(await sendMessage.execute({ message: ' Blocked on credentials. ' }, toolRunContext(state.agent)), {
+    ok: true,
+    status: 'sent',
+  });
+  assert.deepEqual(client.requests, [{
+    method: 'task.message',
+    params: { group_id: 'bcs_grp_test:session-1', message: 'Blocked on credentials.' },
+  }]);
+  await bridge.dispose();
+});
+
+test('fails closed when manager-worker recipient_role is absent and hides route in mention mode', async () => {
+  const harness = new FakeHarness();
+  const client = new FakeClient();
+  const bridge = new BcnBridge(harness.context, client as unknown as BcnWsClient, testConfig());
+  bridge.start();
+  await client.deliverRequest(
+    'chat.send',
+    'request-no-role',
+    taskGroupParams('missing-role-session', 'missing-role-run', undefined),
+  );
+  assert.deepEqual(harness.state('bcs_grp_test:session-1').tools, []);
+
+  const mentionParams = chatParams('mention-session', 'mention-run');
+  mentionParams.session_context = {
+    ...(mentionParams.session_context as Record<string, unknown>),
+    routing_mode: 'mention',
+  };
+  await client.deliverRequest('chat.send', 'request-mention', mentionParams);
+  assert.deepEqual(harness.state('mention-session').tools, []);
   await bridge.dispose();
 });
 

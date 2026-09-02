@@ -1,7 +1,12 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent';
+import {
+  installModelSelection,
+  type Agent,
+  type AgentHandle,
+  type ModelSelection,
+} from '@deepseek-ai/dsh-agent';
 import { createUserMessage, type ContentBlock, type TokenUsage } from '@deepseek-ai/dsh-llm';
-import type { JsonValue, Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session';
+import type { JsonValue, Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session';
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence';
 import type { Config } from './config.js';
 import {
@@ -17,18 +22,46 @@ import {
   type ChatSendParams,
   type PendingRouteIntent,
   type RequestFrame,
+  type ResponseFrame,
   type RouteSelector,
 } from './protocol.js';
 import { createBcsRouteTool } from './route-tool.js';
-import { dshSessionIdForV2 } from './session-identity.js';
+import { dshSessionIdForV2, resolveBcnSessionIdentity } from './session-identity.js';
+import {
+  createBcsAssignTaskTool,
+  createBcsSendTaskMessageTool,
+  createBcsTaskCompleteTool,
+} from './task-tools.js';
 import type { BcnWsClient } from './ws-client.js';
 
+type BcnToolProfile = 'route' | 'manager' | 'worker' | 'none';
+
 interface ManagedAgent {
-  sessionKey: string;
+  sessionIdentity: string;
   sessionId: SessionId;
   agent: Agent;
   handle: AgentHandle;
+  toolProfile: BcnToolProfile;
 }
+
+interface AgentDefaultModelService {
+  currentSelection(): ModelSelection;
+}
+
+interface SystemPromptService {
+  variable(name: string, provider: () => string | undefined): () => void;
+}
+
+interface AgentPresetsService {
+  resolve(id?: string): Promise<{ id: string }>;
+  mount(agentCtx: Context, id?: string): Promise<{ id: string }>;
+}
+
+type BcnAgentContext = Context & {
+  agentDefaultModel: AgentDefaultModelService;
+  agentPresets: AgentPresetsService;
+  systemPrompt: SystemPromptService;
+};
 
 interface ToolResultSnapshot {
   callId: string;
@@ -39,6 +72,7 @@ interface ToolResultSnapshot {
 interface RunContext {
   runId: string;
   sessionKey: string;
+  sessionIdentity: string;
   sessionId: SessionId;
   groupId: string;
   bcsSessionId?: string;
@@ -51,13 +85,14 @@ interface RunContext {
   toolStarts: Set<string>;
   toolResults: Set<string>;
   pendingToolResults: Map<string, ToolResultSnapshot>;
+  toolProfile: BcnToolProfile;
   route?: PendingRouteIntent;
 }
 
 export class BcnBridge {
   private managedAgents = new Map<string, Promise<ManagedAgent>>();
   private ownedAgents = new Set<AgentHandle>();
-  private sessionKeyBySessionId = new Map<string, string>();
+  private sessionIdentityBySessionId = new Map<string, string>();
   private runIdByMessageId = new Map<string, string>();
   private runIdByTurn = new Map<string, string>();
   private activeRunBySessionId = new Map<string, string>();
@@ -107,7 +142,7 @@ export class BcnBridge {
     await Promise.allSettled([...this.ownedAgents].map(handle => handle.dispose()));
     this.ownedAgents.clear();
     this.managedAgents.clear();
-    this.sessionKeyBySessionId.clear();
+    this.sessionIdentityBySessionId.clear();
     this.runIdByMessageId.clear();
     this.runIdByTurn.clear();
     this.activeRunBySessionId.clear();
@@ -125,6 +160,9 @@ export class BcnBridge {
     const run = runId ? this.runs.get(runId) : undefined;
     if (!run || run.terminal) {
       return { ok: false, error: 'NO_BCN_RUN', message: 'No active BCN run owns this call.' };
+    }
+    if (run.toolProfile !== 'route') {
+      return { ok: false, error: 'TOOL_NOT_ALLOWED', message: 'bcs_route is not available in this BCN session.' };
     }
     if (!Array.isArray(selectors) || selectors.length === 0 || selectors.length > 20) {
       return { ok: false, error: 'INVALID_PARAMS', message: 'to must contain 1-20 selectors.' };
@@ -171,6 +209,79 @@ export class BcnBridge {
     return { ok: true, captured: true, display_to_user: false, resolved };
   }
 
+  async assignTask(
+    agent: Agent | undefined,
+    targetBot: string,
+    message: string,
+    responseMode: string | undefined,
+    signal: AbortSignal,
+  ): Promise<JsonValue> {
+    const run = this.activeRunForTaskTool(agent, 'manager');
+    if (!run) return taskToolUnavailable();
+    const normalizedTarget = targetBot.trim();
+    const normalizedMessage = message.trim();
+    if (!normalizedTarget || !normalizedMessage) {
+      return taskToolInvalid("'target_bot' and 'message' must be non-empty strings.");
+    }
+    if (responseMode !== undefined && responseMode !== 'after-last-tool-call' && responseMode !== 'full') {
+      return taskToolInvalid("'response_mode' must be 'after-last-tool-call' or 'full'.");
+    }
+
+    const params: Record<string, unknown> = {
+      group_id: run.groupId,
+      target_bot: normalizedTarget,
+      message: normalizedMessage,
+      ...(responseMode ? { response_mode: responseMode } : {}),
+    };
+    const response = await this.sendTaskRequest('task.dispatch', params, signal);
+    if (!response.ok) return taskRequestFailure(response, 'TASK_DISPATCH_FAILED');
+    const payload = asRecord(response.payload);
+    const taskId = asNonEmptyString(payload?.task_id);
+    if (!taskId) return taskToolInvalidResponse('task.dispatch');
+    return {
+      ok: true,
+      task_id: taskId,
+      status: asNonEmptyString(payload?.status) ?? 'dispatched',
+    };
+  }
+
+  async sendTaskMessage(
+    agent: Agent | undefined,
+    message: string,
+    signal: AbortSignal,
+  ): Promise<JsonValue> {
+    const run = this.activeRunForTaskTool(agent, 'worker');
+    if (!run) return taskToolUnavailable();
+    const normalizedMessage = message.trim();
+    if (!normalizedMessage) return taskToolInvalid("'message' must be a non-empty string.");
+
+    const response = await this.sendTaskRequest('task.message', {
+      group_id: run.groupId,
+      message: normalizedMessage,
+    }, signal);
+    if (!response.ok) return taskRequestFailure(response, 'TASK_MESSAGE_FAILED');
+    const payload = asRecord(response.payload);
+    return { ok: true, status: asNonEmptyString(payload?.status) ?? 'sent' };
+  }
+
+  async completeTask(
+    agent: Agent | undefined,
+    summary: string,
+    signal: AbortSignal,
+  ): Promise<JsonValue> {
+    const run = this.activeRunForTaskTool(agent, 'manager');
+    if (!run) return taskToolUnavailable();
+    const normalizedSummary = summary.trim();
+    if (!normalizedSummary) return taskToolInvalid("'summary' must be a non-empty string.");
+
+    const response = await this.sendTaskRequest('task.complete', {
+      group_id: run.groupId,
+      summary: normalizedSummary,
+    }, signal);
+    if (!response.ok) return taskRequestFailure(response, 'TASK_COMPLETE_FAILED');
+    return { ok: true };
+  }
+
   private async handleChatSend(frame: RequestFrame): Promise<void> {
     let params: ChatSendParams;
     try {
@@ -186,10 +297,17 @@ export class BcnBridge {
       return;
     }
 
-    const sessionId = dshSessionIdForV2(params.session_key);
+    const sessionIdentity = resolveBcnSessionIdentity({
+      sessionKey: params.session_key,
+      groupId: params.bcs_group_id,
+      ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
+    });
+    const sessionId = dshSessionIdForV2(sessionIdentity);
+    const toolProfile = resolveToolProfile(params.session_context);
     const run: RunContext = {
       runId,
       sessionKey: params.session_key,
+      sessionIdentity,
       sessionId,
       groupId: params.bcs_group_id,
       ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
@@ -201,12 +319,13 @@ export class BcnBridge {
       toolStarts: new Set(),
       toolResults: new Set(),
       pendingToolResults: new Map(),
+      toolProfile,
     };
     this.runs.set(runId, run);
     this.client.sendResponse(frame.id, true, { run_id: runId });
 
     try {
-      const managed = await this.getOrCreateAgent(params.session_key);
+      const managed = await this.getOrCreateAgent(sessionIdentity, toolProfile);
       const message = createUserMessage({
         content: [{ type: 'text', text: formatInboundMessage(params) }],
         source: { kind: 'plugin', plugin: 'deepseek-harness-channel-bcn', form: 'relay' },
@@ -227,7 +346,15 @@ export class BcnBridge {
       return;
     }
     try {
-      const managed = await this.getOrCreateAgent(params.session_key);
+      const sessionIdentity = resolveBcnSessionIdentity({
+        sessionKey: params.session_key,
+        groupId: params.bcs_group_id,
+        ...(params.bcs_session_id ? { bcsSessionId: params.bcs_session_id } : {}),
+      });
+      const managed = await this.getOrCreateAgent(
+        sessionIdentity,
+        resolveToolProfile(params.session_context),
+      );
       managed.agent.inject(createUserMessage({
         content: [{ type: 'text', text: formatInboundMessage(params) }],
         source: { kind: 'plugin', plugin: 'deepseek-harness-channel-bcn', form: 'relay' },
@@ -263,10 +390,19 @@ export class BcnBridge {
   }
 
   private abortRun(params: ChatAbortParams): boolean {
-    const run = params.run_id
-      ? this.runs.get(params.run_id)
-      : [...this.runs.values()].find(item => item.sessionKey === params.session_key && !item.terminal);
-    if (!run || run.terminal || run.sessionKey !== params.session_key) return false;
+    let run: RunContext | undefined;
+    if (params.run_id) {
+      run = this.runs.get(params.run_id);
+    } else {
+      const candidates = [...this.runs.values()].filter(
+        item => runMatchesSession(item, params.session_key) && !item.terminal,
+      );
+      // COSEC: a V2 group-level session_key may match multiple isolated
+      // conversations. Never cancel an arbitrary run when the scope is ambiguous.
+      if (candidates.length !== 1) return false;
+      run = candidates[0];
+    }
+    if (!run || run.terminal || !runMatchesSession(run, params.session_key)) return false;
     const agent = this.ctx.agents.get(run.sessionId);
     if (!agent) {
       this.sendTerminal(run, 'aborted');
@@ -298,7 +434,7 @@ export class BcnBridge {
   }
 
   private handleSessionEvent(session: Session, event: SessionEvent): void {
-    if (this.disposed || !this.sessionKeyBySessionId.has(String(session.id))) return;
+    if (this.disposed || !this.sessionIdentityBySessionId.has(String(session.id))) return;
     const eventData = asRecord(event.data);
     const turn = typeof eventData?.turn === 'number' ? eventData.turn : undefined;
     if (turn === undefined) return;
@@ -462,34 +598,151 @@ export class BcnBridge {
     }
   }
 
-  private getOrCreateAgent(sessionKey: string): Promise<ManagedAgent> {
-    const existing = this.managedAgents.get(sessionKey);
-    if (existing) return existing;
-    const pending = this.createAgent(sessionKey).catch(error => {
-      this.managedAgents.delete(sessionKey);
+  private async getOrCreateAgent(sessionIdentity: string, toolProfile: BcnToolProfile): Promise<ManagedAgent> {
+    const existing = this.managedAgents.get(sessionIdentity);
+    if (existing) {
+      const managed = await existing;
+      if (managed.toolProfile !== toolProfile) {
+        throw new Error('BCN session coordination role changed after its DSH agent was created');
+      }
+      return managed;
+    }
+    const pending = this.createAgent(sessionIdentity, toolProfile).catch(error => {
+      this.managedAgents.delete(sessionIdentity);
       throw error;
     });
-    this.managedAgents.set(sessionKey, pending);
+    this.managedAgents.set(sessionIdentity, pending);
     return pending;
   }
 
-  private async createAgent(sessionKey: string): Promise<ManagedAgent> {
-    const sessionId = dshSessionIdForV2(sessionKey);
+  private async createAgent(sessionIdentity: string, toolProfile: BcnToolProfile): Promise<ManagedAgent> {
+    const sessionId = dshSessionIdForV2(sessionIdentity);
     if (this.ctx.agents.get(sessionId)) {
       throw new Error('A non-BCN DSH agent already owns the derived BCN session id');
     }
-    const persisted = (await this.ctx.sessionPersistence.list()).some(header => header.id === sessionId);
-    const setup = (agentCtx: Context) => {
-      agentCtx.tools.register(createBcsRouteTool(this));
+    const persistedHeader = (await this.ctx.sessionPersistence.list()).find(header => header.id === sessionId);
+    const cwd = process.cwd();
+    const bcnCtx = this.ctx as BcnAgentContext;
+    const defaultSelection = bcnCtx.agentDefaultModel.currentSelection();
+    const recordedPreset = persistedHeader
+      ? presetForInspection(await this.ctx.sessionPersistence.inspect(sessionId))
+      : undefined;
+    const presetId = (await bcnCtx.agentPresets.resolve(recordedPreset)).id;
+    const setup = async (agentCtx: Context) => {
+      installModelSelection(agentCtx, {
+        current: selectionForSession(agentCtx.agent, defaultSelection),
+        assembled: undefined,
+      });
+      (agentCtx as BcnAgentContext).systemPrompt.variable(
+        'cwd',
+        () => agentCtx.agent?.session.header.cwd ?? cwd,
+      );
+      await bcnCtx.agentPresets.mount(agentCtx, presetId);
+      if (toolProfile === 'route') {
+        agentCtx.tools.register(createBcsRouteTool(this));
+      } else if (toolProfile === 'manager') {
+        agentCtx.tools.register(createBcsAssignTaskTool(this));
+        agentCtx.tools.register(createBcsTaskCompleteTool(this));
+      } else if (toolProfile === 'worker') {
+        agentCtx.tools.register(createBcsSendTaskMessageTool(this));
+      }
     };
-    const handle = persisted
-      ? await this.ctx.agents.resume({ resumeSessionId: sessionId, setup })
-      : await this.ctx.agents.create({ sessionId, setup });
-    const managed = { sessionKey, sessionId, agent: handle.agent, handle };
+    const agentOptions = {
+      provider: defaultSelection.provider,
+      model: defaultSelection.model,
+    };
+    const handle = persistedHeader
+      ? await this.ctx.agents.resume({ resumeSessionId: sessionId, agentOptions, setup })
+      : await this.ctx.agents.create({
+        sessionId,
+        meta: { cwd, agentPreset: presetId },
+        agentOptions,
+        setup,
+      });
+    const managed = { sessionIdentity, sessionId, agent: handle.agent, handle, toolProfile };
     this.ownedAgents.add(handle);
-    this.sessionKeyBySessionId.set(String(sessionId), sessionKey);
+    this.sessionIdentityBySessionId.set(String(sessionId), sessionIdentity);
     return managed;
   }
+
+  private activeRunForTaskTool(
+    agent: Agent | undefined,
+    requiredProfile: 'manager' | 'worker',
+  ): RunContext | undefined {
+    if (!agent) return undefined;
+    const runId = this.activeRunBySessionId.get(String(agent.id));
+    const run = runId ? this.runs.get(runId) : undefined;
+    return run && !run.terminal && run.toolProfile === requiredProfile ? run : undefined;
+  }
+
+  private async sendTaskRequest(
+    method: 'task.dispatch' | 'task.message' | 'task.complete',
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<ResponseFrame> {
+    if (!this.client.connected) {
+      return {
+        type: 'res',
+        id: 'local-not-connected',
+        ok: false,
+        error: {
+          code: 'BCN_NOT_CONNECTED',
+          message: 'BCN WebSocket is not connected.',
+          retryable: true,
+        },
+      };
+    }
+    try {
+      return await this.client.sendRequest(method, params, 30_000, signal);
+    } catch {
+      return {
+        type: 'res',
+        id: 'local-request-failed',
+        ok: false,
+        error: {
+          code: 'BCN_REQUEST_FAILED',
+          message: 'BCN task request failed.',
+          retryable: true,
+        },
+      };
+    }
+  }
+}
+
+function presetForInspection(inspection: {
+  meta: SessionHeader;
+  events: readonly SessionEvent[];
+}): string | undefined {
+  for (let index = inspection.events.length - 1; index >= 0; index -= 1) {
+    const event = asRecord(inspection.events[index]);
+    if (event?.type !== 'agent-preset/selected') continue;
+    const selected = asNonEmptyString(asRecord(event.data)?.agentPreset);
+    if (selected) return selected;
+  }
+  return inspection.meta.agentPreset;
+}
+
+function selectionForSession(agent: Agent | undefined, fallback: ModelSelection): ModelSelection {
+  const recorded = agent?.session.requestHeader()?.config;
+  if (!recorded) return fallback;
+  return {
+    provider: recorded.provider,
+    model: recorded.model,
+    ...(recorded.reasoningEffort ? { reasoningEffort: recorded.reasoningEffort } : {}),
+  };
+}
+
+function resolveToolProfile(sessionContext: Record<string, unknown>): BcnToolProfile {
+  const groupType = asNonEmptyString(sessionContext.group_type);
+  if (groupType === 'manager_worker') {
+    // COSEC: task-tool authority comes only from the authenticated BCN
+    // downlink context. Missing or unknown roles fail closed.
+    const recipientRole = asNonEmptyString(sessionContext.recipient_role);
+    if (recipientRole === 'manager') return 'manager';
+    if (recipientRole === 'worker') return 'worker';
+    return 'none';
+  }
+  return asNonEmptyString(sessionContext.routing_mode) === 'mention' ? 'none' : 'route';
 }
 
 function formatInboundMessage(params: ChatSendParams | ChatInjectParams): string {
@@ -518,6 +771,10 @@ function turnKey(sessionId: SessionId, turn: number): string {
   return `${String(sessionId)}:${turn}`;
 }
 
+function runMatchesSession(run: RunContext, value: string): boolean {
+  return run.sessionKey === value || run.sessionIdentity === value;
+}
+
 function invalidRequest(error: unknown): { code: string; message: string; retryable: boolean } {
   return {
     code: 'INVALID_REQUEST',
@@ -529,6 +786,37 @@ function invalidRequest(error: unknown): { code: string; message: string; retrya
 function safeErrorCode(value: unknown): string {
   const code = asNonEmptyString(value);
   return code && /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : 'UNKNOWN';
+}
+
+function taskToolUnavailable(): JsonValue {
+  return {
+    ok: false,
+    error: 'TOOL_NOT_ALLOWED',
+    message: 'This BCN task tool is not available for the active session role.',
+  };
+}
+
+function taskToolInvalid(message: string): JsonValue {
+  return { ok: false, error: 'INVALID_PARAMS', message };
+}
+
+function taskToolInvalidResponse(method: string): JsonValue {
+  return {
+    ok: false,
+    error: 'INVALID_RESPONSE',
+    message: `BCN returned an invalid ${method} response.`,
+  };
+}
+
+function taskRequestFailure(
+  response: Awaited<ReturnType<BcnWsClient['sendRequest']>>,
+  fallbackCode: string,
+): JsonValue {
+  return {
+    ok: false,
+    error: response.error?.code ?? fallbackCode,
+    message: response.error?.message ?? 'BCN rejected the task request.',
+  };
 }
 
 function normalizeResolvedRouteTargets(value: unknown): Array<{ type: 'bot'; value: string }> {

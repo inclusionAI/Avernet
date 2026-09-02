@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "dsh-bcn-configure": "./dist/configure.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -16,6 +19,7 @@
   "files": [
     "dist",
     "cordis.patch.yml",
+    "install-dsh.sh",
     "README.md",
     "LEGAL.md",
     "LICENSE"
@@ -27,12 +31,14 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node -e \"require('node:fs').chmodSync('dist/configure.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "ci": "npm run typecheck && npm test && npm run build && npm pack --dry-run",
     "prepack": "npm run build"
   },
   "dependencies": {
+    "js-yaml": "^4.2.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
@@ -44,6 +50,7 @@
     "@deepseek-ai/dsh-session-persistence": "0.1.1-rc.2",
     "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
     "@deepseek-ai/schemastery": "3.18.1",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.15.0",
     "@types/ws": "^8.5.13",
     "tsx": "^4.20.6",
