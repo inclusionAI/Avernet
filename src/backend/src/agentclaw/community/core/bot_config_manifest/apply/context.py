@@ -17,6 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
+    ApplyFetchBudget,
+)
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
@@ -64,6 +67,13 @@ class ApplyContext:
     #: no report row; the entry identity half of the linkage is per fetch and
     #: rides the materialisers' call instead.
     apply_id: Optional[str] = None
+    #: One apply's fetch allowance — the ledger that makes the fetch-time
+    #: budget and byte cap of ``fetch/limits.py`` real (an audit caught them
+    #: defined but threaded by nothing, while W5's fetches could legitimately
+    #: outrun the 30-minute apply-lock TTL). Mutable by design inside the
+    #: frozen context: consult before each fetch, charge after. ``None`` for
+    #: callers that run no fetch pipeline (tests, hand-driven use).
+    budget: Optional["ApplyFetchBudget"] = None
 
 
 __all__ = ["ApplyContext"]

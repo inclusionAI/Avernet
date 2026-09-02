@@ -185,6 +185,15 @@ class EntryFetcher:
         a ``source_url`` approximation. ``ctx.apply_id`` supplies the apply
         half; both are optional for the same reason they are on ``store``.
         """
+        expired = ctx.budget.expired() if ctx.budget is not None else None
+        if expired is not None:
+            # Checked BEFORE the network: a budget-exhausted apply must end
+            # in bounded time, because its apply lock is held for its whole
+            # duration and the stale-lock reaper is TTL-based — the audit's
+            # finding was exactly a legitimate apply outrunning the TTL and
+            # the reaper handing a live apply's lock to a second one.
+            raise EntryFetchError(expired)
+
         target = _substitute(ctx, source_url)
         scope = scope_of(ctx)
         try:
@@ -312,6 +321,10 @@ class EntryFetcher:
                 "the fetched bytes could not be filed with the platform's "
                 f"store: {exc}"
             ) from exc
+        if ctx.budget is not None:
+            # Network bytes only: a store-hit answers a read, not a fetch,
+            # which is why the fast path is free.
+            ctx.budget.charge(fetched.size_bytes)
         return FetchedEntry(
             content=fetched.bytes,
             digest=fetched.sha256,

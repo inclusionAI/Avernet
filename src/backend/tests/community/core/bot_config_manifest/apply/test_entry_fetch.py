@@ -30,6 +30,12 @@ from ._fakes import (
 )
 
 BODY = b"soul-or-skill-bytes"
+
+
+def _with_budget(ctx, budget):
+    from dataclasses import replace
+
+    return replace(ctx, budget=budget)
 URL = "https://content.example/payload.bin"
 DIGEST = "sha256:" + hashlib.sha256(BODY).hexdigest()
 
@@ -446,3 +452,48 @@ def test_a_keep_last_read_failure_names_both_halves(rig):
         )
     assert "source transport failed" in excinfo.value.reason
     assert "keep_last fallback copy could not be read" in excinfo.value.reason
+
+
+def test_a_time_exhausted_budget_refuses_before_touching_the_network(rig):
+    """The deadline is checked before the fetch — the audit's scenario was
+    entries-long fetching that outran the apply-lock TTL and let the reaper
+    hand a live apply's lock to a second one, so an exhausted budget must
+    end the apply in bounded time with a named reason."""
+    content, fetcher, credentials, pipeline = rig
+    from agentclaw.community.core.bot_config_manifest.apply.budget import (
+        ApplyFetchBudget,
+    )
+
+    ctx = make_context()
+    ctx = _with_budget(ctx, ApplyFetchBudget(deadline=0.0, total_bytes=10**9))
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        EntryFetcher(fetcher, content, credentials).fetch(
+            ctx, source_url=URL, digest=None, category="identity"
+        )
+    assert "exhausted (time)" in excinfo.value.reason
+    assert fetcher.requests == []
+
+
+def test_a_byte_exhausted_budget_refuses_the_next_entry(rig):
+    """Bytes charge per network fetch; the cap stops the N+1st entry, not
+    the first — per-entry caps stay the fetcher's own business."""
+    content, fetcher, credentials, _ = rig
+    from agentclaw.community.core.bot_config_manifest.apply.budget import (
+        ApplyFetchBudget,
+    )
+
+    budget = ApplyFetchBudget(deadline=1e18, total_bytes=len(BODY), clock=lambda: 0.0)
+    ctx = _with_budget(make_context(), budget)
+    pipeline = EntryFetcher(fetcher, content, credentials)
+
+    first = pipeline.fetch(ctx, source_url=URL, digest=None, category="identity")
+    assert first.content == BODY  # the first fetch fits exactly
+
+    with pytest.raises(EntryFetchError) as excinfo:
+        pipeline.fetch(ctx, source_url=URL, digest=None, category="identity")
+    assert "exhausted (bytes)" in excinfo.value.reason
+    # Only the FIRST fetch reached the wire; the refused one never did —
+    # and note the first fetch's receipt does NOT serve the second (the
+    # receipt exists, but an unpinned entry's re-fetch is the point).
+    assert len(fetcher.requests) == 1

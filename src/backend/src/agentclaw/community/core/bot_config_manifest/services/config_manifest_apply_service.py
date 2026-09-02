@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import threading
 import uuid
 from datetime import datetime
@@ -21,12 +22,19 @@ from typing import Any, Callable, Optional
 
 from injector import inject
 
+from agentclaw.community.core.bot_config_manifest.apply.budget import (
+    ApplyFetchBudget,
+)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    APPLY_BUDGET_S,
+    APPLY_FETCH_TOTAL_LIMIT,
 )
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
@@ -174,6 +182,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         caller with nothing to distinguish keeps the obvious behaviour.
         """
         env = get_current_env()
+        # The two apply-scope promises of fetch/limits.py, made real: one
+        # ledger per apply, consulted before each entry's fetch and charged
+        # after — bounded apply duration is what keeps the TTL-based lock
+        # reaper from ever being right about a live apply.
+        budget = ApplyFetchBudget(
+            deadline=time.monotonic() + APPLY_BUDGET_S,
+            total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+        )
         lock = self._locks.acquire(
             env=env, entity_id=entity_id, bot_id=bot_id, holder_user_id=actor_id
         )
@@ -235,6 +251,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 # minted above, so the linkage column answers "what did THIS
                 # apply fetch" as an indexed read.
                 apply_id=apply_id,
+                budget=budget,
             )
 
             # ``bind_current_avernet_tenant`` captures the tenant AT WRAP TIME —
@@ -446,6 +463,13 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             actor_id=actor_id,
             entity_id=entity_id,
             env=env,
+            # A dry run may fetch, but bounded the same way: a preview that
+            # cannot cost an unbounded run of network time is part of what
+            # keeps it honest to answer synchronously.
+            budget=ApplyFetchBudget(
+                deadline=time.monotonic() + APPLY_BUDGET_S,
+                total_bytes=APPLY_FETCH_TOTAL_LIMIT,
+            ),
         )
         return await self._orchestrator().apply(
             ctx,
@@ -509,6 +533,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         entity_id: str,
         env: str,
         apply_id: Optional[str] = None,
+        budget: Optional[ApplyFetchBudget] = None,
     ) -> ApplyContext:
         return ApplyContext(
             bot_id=bot_id,
@@ -525,6 +550,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # report row; its fetches' receipts therefore carry NULL linkage
             # rather than an id nothing joins to.
             apply_id=apply_id,
+            budget=budget,
         )
 
     def _parsed_or_empty(
