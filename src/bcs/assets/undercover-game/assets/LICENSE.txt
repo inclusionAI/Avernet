@@ -1,0 +1,6 @@
+The room, table, podium, sprite, and marker visuals in this package are original
+CSS pixel-art primitives created for this asset. They are not downloaded at
+runtime and do not include third-party raster files. The primitives are
+available under the package's Apache-2.0 license; the design intentionally
+follows the integer-scale, nearest-neighbor conventions commonly used by CC0
+pixel-art asset packs.

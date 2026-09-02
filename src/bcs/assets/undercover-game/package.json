@@ -1,0 +1,44 @@
+{
+  "name": "@avernet-assets/undercover-game-panel",
+  "version": "1.0.0",
+  "description": "Pixel-art 谁是卧底 BCS side-panel component distributed as a UMD asset.",
+  "main": "./dist/index.umd.js",
+  "browser": "./dist/index.umd.js",
+  "unpkg": "./dist/index.umd.js",
+  "jsdelivr": "./dist/index.umd.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/inclusionAI/Avernet.git",
+    "directory": "src/bcs/assets/undercover-game"
+  },
+  "files": [
+    "dist/index.umd.js",
+    "README.md",
+    "LICENSE",
+    "assets/LICENSE.txt"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "test:focused": "node test/focused.mjs",
+    "test:umd": "node test/umd-contract.mjs",
+    "typecheck": "tsc --noEmit",
+    "scan:public": "node scripts/public-scan.mjs",
+    "verify": "npm run typecheck && npm run build && npm run test:focused && npm run test:integration && npm run test:umd && npm run scan:public",
+    "prepack": "npm run verify",
+    "test:integration": "node test/integration-smoke.mjs"
+  },
+  "dependencies": {
+    "styled-components": "^6.0.7"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^8.1.0"
+  }
+}
