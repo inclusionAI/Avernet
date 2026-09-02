@@ -406,7 +406,10 @@ class TaskService:
                 ),
                 run_info=RuntimeInfo(
                     run_mode="single_bot",
-                    assignee=request.owner_bot_id
+                    assignee=request.owner_bot_id,
+                    extend_props={
+                        "assignee_owner_id": request.owner_user_id
+                    }
                 ),
                 node_run_graph=None
             )
