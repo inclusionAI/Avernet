@@ -677,14 +677,27 @@ def test_factory_snapshot_rejects_blank_template_type() -> None:
         )
 
 
-def test_factory_snapshot_rejects_handcrafted_field_mix() -> None:
-    mixed = dict(_FACTORY_SNAPSHOT, devflow_workflow="app-flow")
-    with pytest.raises(BotTemplateInvalidError) as excinfo:
-        _strategy_prepare(
-            "claude_code",
-            {"template_type": "applicationCoding", "template_config": mixed},
-        )
-    assert "devflow_workflow" in str(excinfo.value)
+def test_factory_snapshot_carries_ac_form_field_keys_verbatim() -> None:
+    # available-tc-list 的 resolved 快照会把 custom_field 表单字段展开在
+    # template_config 顶层(含空值/None 也展开)。architect 模板的表单字段
+    # yuque_kb_repos / devflow_workflow 与手填 applicationCoding 的外层契约键
+    # 同名——它们是快照的正常组成,不是混传;工厂身份由 template_key+
+    # template_uid 双键判定,不存在歧义。
+    snapshot = dict(
+        _FACTORY_SNAPSHOT,
+        architect_name="大安全",
+        backend_repo=[],
+        frontend_repo=[],
+        lib_repo=[],
+        yuque_kb_repos=[],
+        devflow_workflow=None,
+    )
+    prepared = _strategy_prepare(
+        "claude_code",
+        {"template_type": "architect", "template_config": snapshot},
+    )
+    assert prepared.template_type == "architect"
+    assert prepared.template_config == snapshot
 
 
 def test_factory_snapshot_public_mode_rejects_server_managed_fields() -> None:
