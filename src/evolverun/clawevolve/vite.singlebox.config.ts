@@ -8,7 +8,7 @@ export default defineConfig({
     outDir: resolve(import.meta.dirname, "dist/singlebox"),
     emptyOutDir: false,
     rollupOptions: {
-      input: resolve(import.meta.dirname, "web/singlebox.html"),
+      input: resolve(import.meta.dirname, "web/index.html"),
     },
   },
 });

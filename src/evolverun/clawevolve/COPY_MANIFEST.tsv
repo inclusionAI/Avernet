@@ -7,7 +7,7 @@ source_sha	source_path	source_blob	target_path	target_sha256	status
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/db/dialect.ts	89a9bd8382720926f9fee9b417aabda9a8e27b4d	server/db/dialect.ts	125637c0764b0f45a405d058f2791e349512c45153053e8689633691101de5d5	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/db.ts	6491fe460f1bdd8d5e7ede456a37ff7adf50b0d5	server/db.ts	ea13a45360c978b1cfd4029376ba5b048279430a6a89c19ecc2c3093b09eafd5	adapted
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/env.ts	6c41e63df5a882fd798ecfd4e7bc64c4f1db7ab6	server/env.ts	4c9a4028789926159e37771f67b96fa20db72e9a12ac8626c3485936798d73f9	adapted
--	-	-	server/fixtures/insight/v1/governance-rules.json	9553a664fca5443830e95c1b040d4ea1204645a0dce7c6d2fef48b3314b283db	module-scaffold
+074db8c008d5f75ac26b03cf6c59b896d71572b1	server/fixtures/insight/v1/governance-rules.json	d702da4a7cf6a76c238aee0599781f077c1cee5c	server/fixtures/insight/v1/governance-rules.json	6f125e9e96b0c7452f22b000e1ddf58d2fdf384cd6f11f7aea994788b92b3d3a	copied
 -	-	-	server/index.ts	5a68f2b3c43f1dd38b7f6eb45a03c6cad9418e5d145e27617fd49a1c11588529	module-scaffold
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/lib/timeline-builder.ts	4f95c473be5f29c70c745c33359deb4722b79c49	server/lib/timeline-builder.ts	5ea3f43b51f20f909f51390d3372b9e68b25dc3a68416eca36541801fc8bbc64	copied
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/middleware/async-handler.ts	bf21bbd30456405f904fdfdf964aef169db55aec	server/middleware/async-handler.ts	342357c226dcf99dd55dc01af577b14dae54529e57bbf3fb97e6713410361ce9	copied
@@ -120,8 +120,8 @@ source_sha	source_path	source_blob	target_path	target_sha256	status
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/services/object-storage/clawweb-oss-runtime.ts	a78ba94bbd9d4ee4050d066e1dda9b0d66e0b69c	-	-	host-only-excluded
 074db8c008d5f75ac26b03cf6c59b896d71572b1	server/services/object-storage/mist-credential-provider.ts	19d426d5c74558954dbe2162045cbb24e4b5a525	-	-	host-only-excluded
 -	-	-	server/singlebox.ts	51ae2288f8f099ffe36e5caec65a200b9ed73f723610da6d873547846c5aad2a	module-scaffold
--	-	-	vite.singlebox.config.ts	5b33cbc9d860c3a4edc76185f7b630cfae117c67e1bb20ba471d49fd4b95a85f	module-scaffold
--	-	-	web/singlebox.html	068b2ab6dccbfae646e3d5e7811eebc08565a4a5b825dbdb49330a7bd68d512b	module-scaffold
+-	-	-	vite.singlebox.config.ts	9a1e81504d18f1046d9c8659b4c3b7e124ec77207046f09ac42b34d374e8b3ec	module-scaffold
+-	-	-	web/index.html	068b2ab6dccbfae646e3d5e7811eebc08565a4a5b825dbdb49330a7bd68d512b	module-scaffold
 -	-	-	web/src/singlebox.css	6b219bdc66d96e4cf85c8b9cfb9e85be28c615f05aaec27b7302aa89a7e56125	module-scaffold
 -	-	-	web/src/singlebox.tsx	b7cfa6b436ca3e0fabdd2ccd502d028127a2f0cfb2f2a72377493f27671d883b	module-scaffold
 -	-	-	server/services/object-storage/filesystem-object-store.ts	0aa2a5d5a221b8dd503184343b450c75008ff65ed1e1d0704cefc3d1c7d31948	module-scaffold
