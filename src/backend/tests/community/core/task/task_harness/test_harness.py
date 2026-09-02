@@ -88,6 +88,29 @@ class Recorder:
         self.patches.append(patch)
 
 
+class TestBbsActualRunMode:
+    def test_actual_bbs_override_uses_bbs_lease_expiry_path(self, svc, graph):
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch(
+            "t1", "c1", status=Status.RUNNING, run_mode="coop_group", assignee="bot1",
+            extend_props_patch={"actual_run_mode": "bbs"},
+        ))
+        svc.update_task_node_info(_patch(
+            "t1", "t1", extend_props_patch={"bbs_owner": "bot1"},
+        ))
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+        assert h._poll_once() == []
+        assert svc._get_node(graph, "c1").status == Status.DONE
+        assert svc._get_node(graph, "t1").run_info.extend_props.get("bbs_owner") is None
+        assert rec.patches == []
+
+
 class TestPollOnce:
     def test_first_sight_records_no_reset(self, svc, graph):
         clock = _Clock(0.0)

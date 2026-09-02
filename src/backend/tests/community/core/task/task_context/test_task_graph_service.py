@@ -30,6 +30,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
     TaskSpec,
     TaskGraphPatch,
+    effective_run_mode,
 )
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
@@ -60,6 +61,23 @@ def _node(node_id: str, task_id: str = "t1") -> TaskNode:
 
 def _patch(task_id: str, node_id: str, **kw) -> TaskNodePatch:
     return TaskNodePatch(task_id=task_id, node_id=node_id, **kw)
+
+
+
+
+def test_effective_run_mode_prefers_non_empty_actual_override():
+    node = _node("mode")
+    node.run_info.run_mode = "coop_group"
+    node.run_info.extend_props["actual_run_mode"] = "bbs"
+    assert effective_run_mode(node) == "bbs"
+
+
+def test_effective_run_mode_falls_back_when_actual_override_missing_or_blank():
+    node = _node("mode")
+    node.run_info.run_mode = "coop_group"
+    assert effective_run_mode(node) == "coop_group"
+    node.run_info.extend_props["actual_run_mode"] = "  "
+    assert effective_run_mode(node) == "coop_group"
 
 
 def test_status_includes_cancelled():
@@ -499,6 +517,16 @@ class TestMisc:
 
 
 # ===== 验收未通过的状态语义 =====
+class TestStartTimePatch:
+    def test_start_time_patch_records_dispatch_lifecycle_start(self, svc, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", start_time=123456789))
+
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.start_time == 123456789
+        assert node.run_info.end_time is None
+
+
 class TestAcceptanceFailStatus:
     """验收失败由动态编排核显式升级为 HUNG;无升级标记的通用图网关仍保留 DONE 留痕。"""
 

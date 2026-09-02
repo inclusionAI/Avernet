@@ -173,6 +173,20 @@ def graph(svc):
     return svc.initialize_graph(_task_info())
 
 
+# ===== task_dispatch lifecycle timestamps =====
+class TestPrepareDispatchStartTime:
+    def test_miss_node_records_start_time_before_dispatch_result(self, svc, graph):
+        dispatcher = StubDispatcher(miss=True)
+        eng = _engine(svc, dispatcher=dispatcher)
+        side: list[tuple] = []
+
+        _run(eng._prepare_into("t1", side))
+
+        root = svc._get_node(graph, "t1")
+        assert root.run_info.start_time is not None
+        assert side and side[0][0] == "miss"
+
+
 # ===== on_execute =====
 class TestOnExecute:
     def test_first_frame(self, svc, graph):

@@ -137,6 +137,7 @@ class _FakeGraph:
         self.claimed: str | None = None     # 历史 claim 的 winner(不重置,供断言)
         self.bbs_owner: str | None = None   # 当前根 bbs_owner 值(claim 设,收口/except 清)
         self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
+        self.added_nodes = []                # notify 创建的 scoped BBS 节点
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
@@ -150,6 +151,7 @@ class _FakeGraph:
 
     def add_task_nodes(self, nodes, task_id):
         # notify 新增 bbs scoped 节点:轻量记账即可(snapshot 取自 execution_graph 真实图)
+        self.added_nodes.extend(nodes)
         return MagicMock(success=True)
 
     def add_relations(self, task_id, edges):
@@ -210,6 +212,10 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert patch.acceptance_result is None
     assert patch.assignee == "B"
     assert graph.cleared          # 收口 finally 释放了 claim(bbs_owner=None)
+    assert len(graph.added_nodes) == 1
+    scoped = graph.added_nodes[0]
+    assert scoped.run_info.start_time is not None
+    assert scoped.run_info.extend_props["bbs_claim_at"] == scoped.run_info.start_time
     # bid prompt + dispatch msg 均内联任务态快照(goal objective 嵌入),而非只发 task_id
     assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
     assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
