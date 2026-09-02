@@ -1264,6 +1264,13 @@ def test_offline_impact_and_command_publish_stable_contracts(
                 display_name="基础能力集",
             ),
         ),
+        warnings=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+                resource_id="artifact-scan",
+                display_name="Service Artifact lineage is unreadable",
+            ),
+        ),
     )
     skill_offline_service.impact.return_value = impact
     skill_offline_service.offline.return_value = SpaceSkillOfflineResult(
@@ -1294,6 +1301,13 @@ def test_offline_impact_and_command_publish_stable_contracts(
                 "display_name": "基础能力集",
             }
         ],
+        "warnings": [
+            {
+                "kind": "UNKNOWN_ARTIFACT",
+                "resource_id": "artifact-scan",
+                "display_name": "Service Artifact lineage is unreadable",
+            }
+        ],
     }
     assert executed.status_code == 200
     assert executed.json()["data"]["changed"] is True
@@ -1310,18 +1324,18 @@ def test_offline_impact_and_command_publish_stable_contracts(
     )
 
 
-def test_offline_blocked_returns_latest_impact_in_409_data(
+def test_offline_blocked_returns_latest_explicit_impact_in_409_data(
     client, skill_offline_service
 ):
     impact = OfflineImpact(
         blocked=True,
         total=1,
-        counts={"UNKNOWN_ARTIFACT": 1},
+        counts={"SERVICE_ARTIFACT": 1},
         items=(
             OfflineImpactItem(
-                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
-                resource_id="artifact-scan",
-                display_name="scan incomplete",
+                kind=OfflineBlockerKind.SERVICE_ARTIFACT,
+                resource_id="123",
+                display_name="Service 123 V1 (Skill 1.0.0)",
             ),
         ),
     )
@@ -1331,7 +1345,7 @@ def test_offline_blocked_returns_latest_impact_in_409_data(
 
     assert response.status_code == 409
     assert response.json()["code"] == 409313
-    assert response.json()["data"]["counts"] == {"UNKNOWN_ARTIFACT": 1}
+    assert response.json()["data"]["counts"] == {"SERVICE_ARTIFACT": 1}
 
 
 def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
