@@ -873,23 +873,37 @@ def test_create_factory_snapshot_server_managed_field_is_422(client, svc):
     svc.create_bot.assert_not_called()
 
 
-def test_create_factory_snapshot_mix_is_422(client, svc):
-    response = client.post(
-        "/openapi/v1/bots",
-        json={
-            **_CREATE_BODY,
-            "engine": "claude_code",
-            "engine_properties": {
-                **_FACTORY_SNAPSHOT_BODY,
-                "template_config": {
-                    **_FACTORY_SNAPSHOT_BODY["template_config"],
-                    "devflow_workflow": "x",
+def test_create_factory_snapshot_with_form_fields_persists_verbatim(
+    client, svc, passport
+):
+    # tc-list 快照的 custom_field 表单值展开在顶层(与手填键同名):
+    # 工厂身份由 template_key+template_uid 判定,不按键名拒绝
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    snapshot = {
+        **_FACTORY_SNAPSHOT_BODY["template_config"],
+        "architect_name": "大安全",
+        "yuque_kb_repos": [],
+        "devflow_workflow": None,
+    }
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": {
+                    "template_type": "architect",
+                    "template_config": snapshot,
                 },
             },
-        },
-    )
-    assert response.status_code == 422, response.json()
-    svc.create_bot.assert_not_called()
+        )
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "architect"
+    assert kwargs["template_config"] == snapshot
 
 
 def test_create_handcrafted_with_foreign_template_type_is_422(client, svc):

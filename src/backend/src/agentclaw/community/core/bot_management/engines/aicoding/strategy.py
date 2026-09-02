@@ -54,11 +54,6 @@ TEMPLATE_CONFIG_CONSUMING_ENGINES = frozenset(
 #: implementation behind the hand-written application-coding shape and the
 #: template-factory snapshot passthrough shape.
 _ENGINE_PROPERTIES_KEYS = frozenset({"template_type", "template_config"})
-_HANDCRAFTED_MIX_REJECT_KEYS = (
-    "devflow_workflow",
-    "yuque_kb_repos",
-    "code_repos",
-)
 #: Template-factory identity keys allowed through the factory branch's PUBLIC
 #: server-managed-field check (design §5.5: the reserved list's concession for
 #: factory snapshots). A resolved snapshot legitimately carries its own
@@ -302,12 +297,13 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
                 "engine_properties.template_type is required for template "
                 "factory snapshots"
             )
-        mixed = [key for key in _HANDCRAFTED_MIX_REJECT_KEYS if key in template]
-        if mixed:
-            raise BotTemplateInvalidError(
-                "template factory snapshot must not mix application-coding "
-                f"fields: {sorted(mixed)}"
-            )
+        # NOTE: no mix-rejection between "factory keys" and "hand-written
+        # application-coding keys" on purpose. available-tc-list resolved
+        # snapshots spread their custom_field form values over the top level
+        # (``yuque_kb_repos``/``devflow_workflow``/``code_repos`` collide with
+        # the hand-written outer contract by name); the two shapes are
+        # disambiguated by the template_key+template_uid identity above, not
+        # by key names.
         if template_validation_mode is BotCreateTemplateValidationMode.PUBLIC:
             # Design §5.5: the factory branch reuses the shared
             # server-managed-field contract minus the factory identity keys.

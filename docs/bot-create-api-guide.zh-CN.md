@@ -136,7 +136,7 @@ POST /openapi/v1/bots
 
   前端引导用户完成 `iframe_url` 授权，然后轮询 §1.2。
 
-**错误码**：400 不支持的引擎/集群错配（`code: 400000`）、403 无权限、404 空间不存在、409 名称重复或组合不支持（见 §1.3 ⑤）、422 请求体校验失败（server-managed 字段 / 混传 / 形态冒充，见 §1.3）。
+**错误码**：400 不支持的引擎/集群错配（`code: 400000`）、403 无权限、404 空间不存在、409 名称重复或组合不支持（见 §1.3 ⑤）、422 请求体校验失败（server-managed 字段 / 形态冒充,见 §1.3）。
 
 ### 1.2 授权轮询 `POST /openapi/v1/bots/{bot_id}/auth-status`
 
@@ -205,9 +205,9 @@ POST /openapi/v1/bots/20260813_a7k2m9p1/auth-status
 
 **④ 未知键**：原样存活、随快照落库（引擎自有扩展），但**平台不解读**——见 §3 命名提醒。工厂快照同理：未知键透传落库、平台不解读。
 
-**⑤ 混传拒绝 + 组合约束：**
+**⑤ 表单字段同名键 + 组合约束：**
 
-- **混传**：完整工厂快照（双键身份）+ 手填专用键（`devflow_workflow` / `code_repos` / `yuque_kb_repos`）→ 422 `template factory snapshot must not mix application-coding fields: [...]`。工厂路径不解读手填键，两种形态**二选一**。只带零散工厂键（缺 `template_uid`）混有手填键 → 走手填路径，工厂键按未知键存活。
+- **同名键不拒绝**：tc-list 快照会把 custom_field 表单值展开在 `template_config` 顶层——`yuque_kb_repos` / `devflow_workflow` / `code_repos` 等键与手填形态的外层契约键**同名**,但它们是快照的正常组成(空值/`null` 也照传),**不需要剔除**。形态由 `template_key`+`template_uid` 双键判定,不按键名区分。只带零散工厂键（缺 `template_uid`）的 config → 走手填路径,工厂键按未知键存活。
 - **组合约束（工厂与手填同受约束）**：`engine` 必须 `claude_code` + `bot_type=personal` + 个人空间 + 云端。违反 → 409（`BotCombinationUnsupportedError`，既语文案如 `application coding is cloud-only` / `application coding does not support engine: ...`）。
 
 **密钥落库口径**：顶层 `token` 出现即按既有策略加密落密文；`bot_template_config.ext_config.thetaKey` 后端无加密入口，密文由调用方产生、原样落库。查询面按 #1785 verbatim 决策随存随显（见 §1.4）。
@@ -305,7 +305,7 @@ Body 必带 `bot_id`，其余与创建一致回传。响应 `data.status ∈ {PE
 | token | `token` | 出现就必须非空 |
 
 **手填必须剔除/不要携带这些键（openapi 面 422）：**
-`template_uid`、`workspace_id`、`bot_id`、`workspace_status`、`workspace_state`、`start_status`、`engine_form`。如果第三方配置里带 `template_uid`，**由前端丢弃**（模板 uid 由平台侧解析/分配；这条只约束手填形态——工厂快照来源整段回传放行）。**也不要把手填键拼进完整工厂快照**（422 混传拒绝，见 §1.3 ⑤）。
+`template_uid`、`workspace_id`、`bot_id`、`workspace_status`、`workspace_state`、`start_status`、`engine_form`。如果第三方配置里带 `template_uid`，**由前端丢弃**（模板 uid 由平台侧解析/分配；这条只约束手填形态——工厂快照来源整段回传放行）。快照里带 `yuque_kb_repos`/`devflow_workflow` 等与手填键同名的表单字段是正常形态,直接透传。
 
 **注意事项：**
 
@@ -323,7 +323,6 @@ Body 必带 `bot_id`，其余与创建一致回传。响应 `data.status ∈ {PE
 | openapi 创建 400 `unsupported engine` | `engine` 传了 `aicoding` 或未部署的引擎 | 改传 `claude_code` 等真实引擎 |
 | openapi 创建 422 `applicationCoding template_config must not be empty` | `template_config` 缺失或空 dict | 工厂=快照整段回传；手填=散字段拼装，非空必填 |
 | openapi 创建 422 提到 `server-managed fields` | 手填 `template_config` 带了 `template_uid`/`engine_form` 等；或工厂快照带了 `workspace_id`/`engine_form` 等 | 手填：剔除这些键（§3 第三步）；工厂快照：四个工厂身份键（`template_key`/`template_uid`/`template_version`/`template_version_id`）放行，其余 server-managed 键剔除 |
-| openapi 创建 422 `template factory snapshot must not mix application-coding fields` | 完整工厂快照（`template_key`+`template_uid`）里混了 `devflow_workflow`/`code_repos`/`yuque_kb_repos` 手填键 | 工厂与手填二选一：快照整段回传，别拼手填键（§1.3 ⑤） |
 | openapi 创建 422 `engine_properties.template_type is required for template factory snapshots` | 工厂快照未传 `engine_properties.template_type`（或空串） | 照抄 tc-list item 的 `template_type`（§1.1 示例 C 字段表） |
 | openapi 创建 422 `engine_properties.template_type must be applicationCoding for non factory snapshots` | 手填形态传了 `applicationCoding` 以外的 `template_type` | 手填省略该键或写死 `applicationCoding`；要其它值走工厂快照 |
 | openapi 创建 422 `extra inputs not permitted` | 请求体多了未知字段（如 `engine_options`），或 `engine_properties` 下不是 `template_type`/`template_config`（旧键 `template` 已废） | 对照 §1.1 字段表与 §1.3 键域 |
