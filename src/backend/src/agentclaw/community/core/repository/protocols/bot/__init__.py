@@ -26,6 +26,10 @@ from agentclaw.community.core.repository.protocols.bot.config_manifest_apply imp
 from agentclaw.community.core.repository.protocols.bot.friend import (
     BotFriendRepositoryProtocol,
 )
+from agentclaw.community.core.repository.protocols.bot.manifest_content import (
+    DEFAULT_RECORD_LIMIT,
+    ManifestContentRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.collaborator import (
     CollaboratorRepositoryProtocol,
     BotCollabLogRepositoryProtocol,
@@ -53,6 +57,8 @@ __all__ = [
     "BotRestartLockRepositoryProtocol",
     "BotStartupScriptRepositoryProtocol",
     "CollaboratorRepositoryProtocol",
+    "DEFAULT_RECORD_LIMIT",
+    "ManifestContentRepositoryProtocol",
     "RenderScreenRepository",
     "SourceCredentialRepositoryProtocol",
     "TemplateRepository",

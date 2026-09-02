@@ -346,6 +346,19 @@ def test_a_malformed_declared_digest_is_refused():
     assert transport.seen == []
 
 
+def test_a_digest_with_a_trailing_newline_is_refused_as_malformed():
+    # `$` also matches immediately before a trailing newline, so this value
+    # previously passed the vocabulary check and failed downstream as a
+    # FETCH failure ("digest mismatch") — the wrong taxonomy for malformed
+    # config, leaked a '\n' into a mismatch message, and on the store side
+    # masqueraded as a missing address. \Z closes all three.
+    transport = _Requests(_ok_handler())
+    pinned = "sha256:" + "a" * 64 + "\n"
+    with pytest.raises(FetchRefusedError):
+        _fetch(HTTPS_URL, transport=transport, digest=pinned)
+    assert transport.seen == []
+
+
 # --- credential injection (Protocol declared; W3 binds) ------------------------
 
 
