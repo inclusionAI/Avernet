@@ -41,6 +41,7 @@ CLASSIFIED: dict[str, dict[str, str]] = {
             "the other providers answer alike. Transport-shaped, not policy"
         ),
         "_read_file_or_404": "adapter: maps device errors onto this surface's 404/413",
+        "_preview_resource": "adapter: serializes shared preview bytes for two HTTP handlers",
     },
     f"{_PREFIX}.skills.router": {
         "_require_addressed_bot": "MOVED — binding to core.require_addressed_bot",
