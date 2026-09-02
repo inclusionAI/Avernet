@@ -2216,13 +2216,14 @@ async def test_projection_logs_agentpass_snapshot_failure_without_secret(caplog)
     )
 
     with caplog.at_level("INFO", logger="start"):
-        with pytest.raises(SkillSetRuntimeReconcileError):
-            await runtime.project(
-                bot_id="bot-1",
-                owner_id="true-owner",
-                scope=ProjectionScope.everything(),
-            )
+        result = await runtime.project(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope.everything(),
+        )
 
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "PASSPORT_RUNTIME_UNAVAILABLE"
     logged = caplog.text
     assert "agentpass_runtime_scope_update_requested" in logged
     assert "agentpass_runtime_scope_update_failed" in logged
@@ -2251,13 +2252,14 @@ async def test_projection_logs_agentpass_update_failure_without_secret(caplog):
     )
 
     with caplog.at_level("INFO", logger="start"):
-        with pytest.raises(SkillSetRuntimeReconcileError):
-            await runtime.project(
-                bot_id="bot-1",
-                owner_id="true-owner",
-                scope=ProjectionScope.everything(),
-            )
+        result = await runtime.project(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope.everything(),
+        )
 
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "PASSPORT_RUNTIME_UNAVAILABLE"
     assert "agentpass_runtime_scope_update_requested" in caplog.text
     assert "agentpass_runtime_scope_update_failed" in caplog.text
     assert "stage=update" in caplog.text
