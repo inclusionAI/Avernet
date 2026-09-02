@@ -449,7 +449,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: the request that allocates one, so it joins ``none`` (101 → 102) beside
 #: ``POST /openapi/v1/bots`` itself.
 #: Directory download adds one more bot-path-addressed resource operation.
-_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 102}
+#: Space Skill Version Copy adds one account-level operation; it is addressed by
+#: Space and Skill version rather than by Bot.
+_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 103}
 
 
 def _schema() -> dict:
@@ -596,7 +598,8 @@ def test_the_pinned_number_of_operations_take_it():
     # reason the ordinary create does: they spend that user's quota and read
     # that user's rows, and neither is admissible to an application caller.
     # Directory download adds one more user-scoped resource operation.
-    assert len(taking) == 229
+    # Space Skill Version Copy adds one more user-scoped operation.
+    assert len(taking) == 230
 
 
 def test_the_exempt_operations_take_none():

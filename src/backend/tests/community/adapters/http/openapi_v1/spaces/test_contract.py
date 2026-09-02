@@ -51,7 +51,6 @@ from agentclaw.community.api.space_skill_version_query_service import (
 )
 from agentclaw.community.api.space_skill_offline_service import (
     OfflineBlockerKind,
-    OfflineDraft,
     OfflineImpact,
     OfflineImpactItem,
     SpaceSkillOfflineResult,
@@ -366,9 +365,10 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "edit_draft": False,
                 "publish_draft": False,
                 "delete_draft": False,
-                "create_upgrade_draft": False,
-                "offline_skill": False,
-                "manage_grants": False,
+                            "create_upgrade_draft": False,
+                            "offline_skill": False,
+                            "copy_offline_skill": False,
+                            "manage_grants": False,
                 "transfer_owner": False,
                 "request_edit_access": True,
                 "takeover_lease": False,
@@ -625,6 +625,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "delete_draft": False,
                         "create_upgrade_draft": False,
                         "offline_skill": False,
+                        "copy_offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
@@ -676,6 +677,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "delete_draft": False,
                         "create_upgrade_draft": False,
                         "offline_skill": False,
+                        "copy_offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
@@ -1276,11 +1278,7 @@ def test_offline_impact_and_command_publish_stable_contracts(
     skill_offline_service.offline.return_value = SpaceSkillOfflineResult(
         changed=True,
         lifecycle_status="OFFLINE",
-        draft=OfflineDraft(
-            target_version=3,
-            status="EDITING",
-            revision_id="33333333-3333-4333-8333-333333333333",
-        ),
+        offline_at=datetime(2026, 9, 2),
     )
 
     preview = client.get(
@@ -1311,7 +1309,7 @@ def test_offline_impact_and_command_publish_stable_contracts(
     }
     assert executed.status_code == 200
     assert executed.json()["data"]["changed"] is True
-    assert executed.json()["data"]["draft"]["target_version"] == 3
+    assert executed.json()["data"]["offline_at"] == "2026-09-02T00:00:00"
     skill_offline_service.impact.assert_called_once_with(
         space_id=7,
         skill_id=51,

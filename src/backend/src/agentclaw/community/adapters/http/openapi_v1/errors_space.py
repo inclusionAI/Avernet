@@ -36,6 +36,7 @@ class SpaceErrorCode(IntEnum):
     PUBLICATION_TASK_UNAVAILABLE = 503203
     SKILL_OFFLINE = 409312
     SKILL_OFFLINE_BLOCKED = 409313
+    SKILL_NOT_OFFLINE = 409316
 
 
 class SpacePublicErrorMessage(StrEnum):
@@ -71,3 +72,4 @@ class SpacePublicErrorMessage(StrEnum):
     PUBLICATION_TASK_UNAVAILABLE = "Publication task is unavailable"
     SKILL_OFFLINE = "Skill is offline"
     SKILL_OFFLINE_BLOCKED = "Skill Offline is blocked"
+    SKILL_NOT_OFFLINE = "Skill must be offline before it can be copied"

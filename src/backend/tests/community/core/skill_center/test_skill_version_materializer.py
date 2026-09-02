@@ -456,7 +456,7 @@ class _RecoveryDrafts:
         raise AssertionError("successful Offline must retain the Draft revision")
 
 
-def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
+def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skill() -> None:
     db = _RecoveryDatabase()
     skill_uuid = "00000000-0000-4000-8000-000000000010"
     with db.orm_session() as session:
@@ -527,7 +527,7 @@ def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
         skill_id=skill_id,
         actor_id="owner",
     )
-    assert committed.draft.target_version == 3
+    assert committed.draft is None
     with db.orm_session() as session:
         persisted = session.query(Skill).filter_by(id=skill_id).one()
         assert persisted.offline_at is not None
@@ -569,6 +569,6 @@ def test_offline_vn_plus_one_recovers_through_unified_materializer() -> None:
     assert published.version_ordinal == 3
     with db.orm_session() as session:
         recovered = session.query(Skill).filter_by(id=skill_id).one()
-        assert recovered.offline_at is None
-        assert recovered.offline_by is None
+        assert recovered.offline_at is not None
+        assert recovered.offline_by == "owner"
         assert session.query(SkillVersion).filter_by(id=101).one().status == "PUBLISHED"

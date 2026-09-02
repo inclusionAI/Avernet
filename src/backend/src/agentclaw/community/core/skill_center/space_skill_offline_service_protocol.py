@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -35,6 +36,8 @@ class OfflineImpact:
 
 @dataclass(frozen=True, slots=True)
 class OfflineDraft:
+    """Deprecated in-process compatibility record; Offline no longer creates it."""
+
     target_version: int
     status: str
     revision_id: str
@@ -44,7 +47,8 @@ class OfflineDraft:
 class SpaceSkillOfflineResult:
     changed: bool
     lifecycle_status: str
-    draft: OfflineDraft
+    offline_at: datetime | None = None
+    draft: OfflineDraft | None = None
 
 
 @runtime_checkable

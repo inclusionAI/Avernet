@@ -538,6 +538,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership and exact Canonical Version visibility, adjudicated by the Version service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"):
         NoCheck("Space membership and exact Canonical file visibility, adjudicated by the Version service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy"):
+        NoCheck("Skill Owner or Manager, Offline state, exact Version and idempotency, adjudicated by the Skill service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
         NoCheck("Space membership and Draft visibility, adjudicated by the Skill service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):

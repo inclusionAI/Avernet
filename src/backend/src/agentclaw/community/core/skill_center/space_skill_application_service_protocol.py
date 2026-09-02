@@ -121,6 +121,17 @@ class SpaceSkillApplicationServiceProtocol(Protocol):
     ) -> DraftMutationResult: ...
 
     @abstractmethod
+    def copy_published_version(
+        self,
+        *,
+        space_id: int,
+        skill_id: int,
+        version_ordinal: int,
+        actor_id: str,
+        request_id: str,
+    ) -> SpaceSkillCreationOutcome: ...
+
+    @abstractmethod
     def create_from_git(
         self,
         *,
