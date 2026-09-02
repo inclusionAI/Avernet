@@ -1521,8 +1521,22 @@ class ExecutionEngine:
                 result = self._graph.update_task_node_info(patch)
                 self._reconcile_root_hung_if_blocked(patch.task_id)
                 return result
-            # 验收未通过仍是执行完成,由图服务将节点置为 DONE 并保留
-            # acceptance_result/gaps;不再折叠为 HUNG,也不触发 BBS/删除/重派。
+            # 先落验收结果，再处理状态。验收失败不作为普通 DONE 参与父节点成功
+            # 聚合:保留 acceptance_result/gaps 作为诊断上下文,随后升级当前节点 HUNG,
+            # 由 _maybe_propagate_hung 冒泡到根并进入 BBS。
+            acceptance_failed = (
+                patch.acceptance_result is not None
+                and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
+                and not self._is_external_managed_task(patch.task_id)
+            )
+            if acceptance_failed:
+                # 在同一次 SSOT 写入中选择 HUNG,避免先落 DONE 再二次翻态。
+                # acceptance_result/gaps 仍会保留在 run_info 中供 BBS 复核。
+                patch.status = Status.HUNG
+                patch.extend_props_patch = {
+                    **(patch.extend_props_patch or {}),
+                    "hung_reason": "acceptance_failed",
+                }
             result = self._graph.update_task_node_info(patch)
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
@@ -1600,10 +1614,13 @@ class ExecutionEngine:
             if verdict == AcceptanceVerdict.DONE:
                 logger.info("[task_callback][on_report] accept_pass,task=%s", patch.task_id)
                 await self._on_pass_collect(patch.task_id, patch.node_id, side)
-            else:  # 验收未通过:执行已完成,只保留 DONE + 验收结论,不再升级/删除/重派
+            else:  # 验收未通过:节点已升级 HUNG,冒泡到根并进入 BBS
                 logger.info(
-                    "[task_callback][on_report] acceptance_not_passed,task=%s",
+                    "[task_callback][on_report] acceptance_not_passed -> HUNG/BBS,task=%s",
                     patch.task_id,
+                )
+                self._escalate_hung(
+                    patch.task_id, patch.node_id, "acceptance_failed"
                 )
             await self._drain(patch.task_id, side)
             self._reconcile_root_hung_if_blocked(patch.task_id)

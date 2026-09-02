@@ -450,7 +450,7 @@ class TestOnReportFail:
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.DONE
+        assert svc._get_node(graph, "c1").status == Status.HUNG
         assert planner.plan_calls == 0  # 不 plan 补救(HUNG 冒泡/升 BBS 交既有逻辑)
 
     def test_acceptance_fail_folds_running_to_hung(self, svc, graph):
@@ -462,12 +462,12 @@ class TestOnReportFail:
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
         r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert r.new_status == Status.DONE
+        assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
-        assert n.status == Status.DONE
+        assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
         assert n.run_info.acceptance_result.gaps == ["缺x"]
-        assert graph.loop_round == 0
+        assert graph.loop_round == 1
         assert planner.plan_calls == 0
 
     def test_pull_fail_status_folded_to_hung(self, svc, graph):
@@ -484,12 +484,12 @@ class TestOnReportFail:
             status=Status.FAILED,
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
         )))
-        assert r.new_status == Status.DONE
+        assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
-        assert n.status == Status.DONE
+        assert n.status == Status.HUNG
         assert n.run_info.acceptance_result is not None
         assert n.run_info.acceptance_result.gaps == ["缺x"]
-        assert graph.loop_round == 0
+        assert graph.loop_round == 1
         assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
 
     def test_non_root_hung_does_not_consume_loop_round(self, svc, graph):
@@ -657,7 +657,7 @@ class TestLoopRound:
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
-        assert graph.loop_round == before
+        assert graph.loop_round == before + 1
 
 
 

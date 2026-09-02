@@ -46,9 +46,9 @@ from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 _LOG = logging.getLogger(__name__)
 
 # 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
-# acceptance 驱动(skill 验收回投):RUNNING->SUCCESS(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
+# acceptance 驱动(skill 验收回投):RUNNING->SUCCESS(PASS)/HUNG(FAIL,动态)/DONE(FAIL,外部托管)
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.RUNNING: {Status.SUCCESS, Status.FAILED},
+    Status.RUNNING: {Status.SUCCESS, Status.DONE, Status.HUNG, Status.FAILED},
 }
 # status 直驱(框架内部:派发/复位/传播/HUNG)。DONE 只表示执行完成,
 # SUCCESS 只表示验收通过。框架在 gap 闭合时使用 SUCCESS,执行实体/BBS 仅能写 DONE。
@@ -430,8 +430,8 @@ class TaskGraphService:
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
-        ① acceptance_result 驱动(skill 回投):PASS→SUCCESS / FAIL→DONE(记录未通过验收);
-           FAILED 仅表示执行失败(exec_error);gaps 可空,verdict=FAILED 仅作为验收留痕;
+        ① acceptance_result 驱动(skill 回投):PASS→SUCCESS / FAIL→HUNG(动态,记录未通过验收)或 DONE(外部托管);
+           FAILED 仅表示执行失败(exec_error);
         ② status 直驱(框架内部):PENDING→RUNNING(派发) / RUNNING→PENDING(Harness 复位) /
            DONE(执行完成但未验收) / SUCCESS(框架确认验收通过) / PLANNING→SUCCESS(传播)。
            两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
@@ -450,9 +450,11 @@ class TaskGraphService:
                 if verdict == AcceptanceVerdict.DONE:
                     new_status = Status.SUCCESS
                 else:
-                    # 验收未通过仍代表执行已经结束,状态保持 DONE;验收结论和 gaps
-                    # 记录在 acceptance_result 中。FAILED 仅用于执行失败(exec_error)。
-                    new_status = Status.DONE
+                    # 动态编排核通过 patch.status=HUNG 表示验收失败需要升级 BBS;
+                    # 外部托管调用方保留 DONE,仅记录验收结论和 gaps。
+                    new_status = (
+                        Status.HUNG if patch.status == Status.HUNG else Status.DONE
+                    )
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
                 if patch.extend_props_patch is not None:

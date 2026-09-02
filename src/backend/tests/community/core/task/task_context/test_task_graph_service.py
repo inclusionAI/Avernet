@@ -230,8 +230,8 @@ class TestUpdateTaskNodeInfo:
                 status=Status.HUNG,
             )
         )
-        assert r.new_status == Status.DONE
-        assert svc._get_node(graph, "c1").status == Status.DONE
+        assert r.new_status == Status.HUNG
+        assert svc._get_node(graph, "c1").status == Status.HUNG
 
     def test_acceptance_fail_with_gaps(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
@@ -499,10 +499,10 @@ class TestMisc:
 
 
 # ===== 验收未通过的状态语义 =====
-class TestAcceptanceFailToDone:
-    """验收未通过表示执行已完成,状态为 DONE,结论和 gaps 仅作为验收留痕。"""
+class TestAcceptanceFailStatus:
+    """验收失败由动态编排核显式升级为 HUNG;无升级标记的通用图网关仍保留 DONE 留痕。"""
 
-    def test_fail_with_explicit_hung_status_still_done(self, svc: TaskGraphService, graph):
+    def test_fail_with_explicit_hung_status_is_hung(self, svc: TaskGraphService, graph):
         svc.add_task_nodes([_node("c1")], parent_node_id="t1")
         svc.update_task_node_info(_patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
         r = svc.update_task_node_info(
@@ -512,9 +512,9 @@ class TestAcceptanceFailToDone:
                 status=Status.HUNG,
             )
         )
-        assert r.new_status == Status.DONE
+        assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
-        assert n.status == Status.DONE
+        assert n.status == Status.HUNG
         assert n.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
         assert n.run_info.acceptance_result.gaps == ["缺x"]
 

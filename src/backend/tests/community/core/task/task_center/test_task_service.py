@@ -307,6 +307,23 @@ class TestHarnessWiring:
         assert "t1" in harness._registered
         assert harness._on_harness_fn == facade._engine.on_harness
 
+    def test_dashboard_registers_task_for_harness_on_this_worker(self):
+        from agentclaw.community.core.task.task_harness.harness import TaskHarness
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        svc = TaskGraphService()
+        harness = TaskHarness(svc)
+        facade = _CaseTaskService(
+            svc, planner_factory=lambda g: [_child("c1")], harness=harness,
+            task_id_provider=lambda: "t1",
+        )
+        _exec(facade, _task_info_request())
+        harness._registered.clear()  # simulate a dashboard request on another worker
+
+        facade.get_task_dashboard("t1")
+
+        assert "t1" in harness._registered
+
 
 # ===== V1/V2 回归:验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market)=====
 class TestAcceptanceViaReport:

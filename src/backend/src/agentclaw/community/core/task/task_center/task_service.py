@@ -758,6 +758,13 @@ class TaskService:
         按 root(node_id==task_id)的 ``run_info.extend_props['session_id']`` 反查 ``task_callback`` 最新回调,
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
+        # Dashboard requests can land on a different worker than the one that
+        # accepted ``execute``.  Re-register the task on every full-graph read so
+        # that this worker's Harness also watches persisted PENDING nodes.
+        # Registration is idempotent and intentionally skipped for subtree reads,
+        # which are read-only projections rather than task lifecycle heartbeats.
+        if node_id is None and self._harness is not None:
+            self._harness.register(task_id)
         graph = self._graph.query_task_dashboard(task_id, node_id)
         if node_id is None:
             self._hydrate_root_dashboard_runtime(graph, task_id)
