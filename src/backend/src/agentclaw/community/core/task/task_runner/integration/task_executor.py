@@ -280,9 +280,12 @@ class TaskExecutor:
         owner_user_id: str,
         loop_task_id: str,
     ) -> bool:
-        """P2 旁路:single_bot → "二人 chat 群"(driver=assignee bot + 人类观察者,不发言),任务指令进群
-        context,按 coop_group 收敛(BcsGroupHandle);并落库 run_mode single_bot→coop_group +
-        extend_props.actual_run_mode=single_bot。复用 form_coop_group(自动加人类观察者 + routing_policy)。"""
+        """P2 旁路:single_bot → "manager_worker 群"(single bot 作 manager,自管自执行,无 worker;
+        人类 owner 以观察者 participant 入群),任务指令进群 context,按 coop_group 收敛
+        (BcsGroupHandle);并落库 run_mode single_bot→coop_group + extend_props.actual_run_mode=
+        single_bot。复用 form_coop_group(manager_bot_id 必填;自动加人类观察者 + routing_policy)。
+        manager_worker 带 event_subscriptions → BCS require_human,需预发绑真实 BcsBotTokenProvider
+        (driver-bot session_token Bearer)才放行建群,否则建群被拒。"""
         logger.info(
             "[task][task-executor] singlebot_2_group 旁路入口 task=%s node=%s driver_bot=%s owner=%s loop_task_id=%s",
             node.task_id, node.node_id, openapi_bot_id, owner_user_id, loop_task_id,
@@ -295,17 +298,19 @@ class TaskExecutor:
             "backend": self._api_base_url,
         })
         message = self._formatter.format_execute(ctx, node)
-        # BCS driver_bot/participant 用纯 bot_id(去 :owner 透传,见 e2e docstring 契约);
-        # originator 不设人类(BCS 拒人类建群 → 403 not authorized)—— 人类走观察者 participant,
-        # 让 BCS 从纯 driver_bot 解析建群 caller(需 driver_bot 为可解析的真 bot,见上一行)。
+        # manager_worker 群:single bot 作 manager(自管自执行,无 worker);人类 owner 以观察者
+        # participant 入群(_HUMAN_OBSERVER_MODES 含 manager_worker)。driver/originator 用纯 bot_id
+        # 且不设人类(BCS 拒人类建群)。manager_worker 带 event_subscriptions → BCS require_human,
+        # 需预发绑真实 BcsBotTokenProvider(driver-bot session_token Bearer)才放行建群。
         driver_bot = openapi_bot_id.partition(":")[0]
         gf = GroupFormation(
             bot_ids=[driver_bot],
-            collab_mode="chat",
+            collab_mode="manager_worker",
             group_name=node.run_info.extend_props.get("group_name") or f"{node.task_id}-{node.node_id}",
-            members_info=[{"bot_id": driver_bot, "role": "driver"}],
+            members_info=[{"bot_id": driver_bot, "role": "manager"}],
             extend_props={
                 "owner_user_id": owner_user_id,
+                "manager_bot_id": driver_bot,
                 "loop_task_id": loop_task_id,
                 "task_instruction": message,
             },
@@ -342,7 +347,7 @@ class TaskExecutor:
             BcsGroupHandle(
                 loop_task_id=loop_task_id,
                 group_id=gid,
-                collab_mode="chat",
+                collab_mode="manager_worker",
                 registered_at=time.monotonic(),
                 session_id=session_id,
                 run_id=None,
