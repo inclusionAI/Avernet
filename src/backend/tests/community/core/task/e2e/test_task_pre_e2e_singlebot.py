@@ -65,18 +65,18 @@ else:
     _COOKIE = ""
     _COOKIE_SRC = "none"
 
-_CLAW_MIND_BOT_ID = os.environ.get("AVERNET_E2E_CLAW_MIND_BOT_ID", "").strip()
+_SINGLE_BOT_ID = os.environ.get("AVERNET_E2E_SINGLE_BOT_ID", "").strip()
 
 _TIMEOUT = float(os.environ.get("AVERNET_PRE_TASK_E2E_TIMEOUT", "2000"))
 
-_READY = bool(_LIVE and _BACKEND and _USER_ID and _CLAW_MIND_BOT_ID)
+_READY = bool(_LIVE and _BACKEND and _USER_ID and _SINGLE_BOT_ID)
 
 _HDRS: dict[str, str] = {"x-user-id": _USER_ID, "accept": "application/json"}
 if _COOKIE:
     _HDRS["Cookie"] = _COOKIE
 
 
-def _execute_body(claw_mind_bot_id: str) -> dict:
+def _execute_body(SINGLE_BOT_ID: str) -> dict:
     """``POST /api/v1/collaboration/tasks/execute`` 请求体(预发版:纯 bot_id,无 :user_id 透传)。
 
     与 singlebox 参考测同构,但 ``owner_bot_id`` / ``participant_bindings`` 用纯 bot_id
@@ -102,7 +102,7 @@ def _execute_body(claw_mind_bot_id: str) -> dict:
         "source_type": "bot",
         "owner_user_id": _USER_ID,
         # 纯 bot_id(预发真 BCS 解析身份,无 singlebox :user_id 透传)。
-        "owner_bot_id": claw_mind_bot_id,
+        "owner_bot_id": SINGLE_BOT_ID,
         "execution_config": {
             "task_type": "workflow",
             # workflow 路径只从 execution_config 读 workflow_id/args 拼 message
@@ -132,14 +132,14 @@ class TestWritingQcStateMachinePreE2E(unittest.TestCase):
     async def _run(self) -> None:
         print(
             f"[pre-e2e] backend={_BACKEND} user={_USER_ID} "
-            f"claw_mind_bot={_CLAW_MIND_BOT_ID} cookie={_COOKIE_SRC}"
+            f"claw_mind_bot={_SINGLE_BOT_ID} cookie={_COOKIE_SRC}"
         )
         g: dict = {}
         async with httpx.AsyncClient(timeout=300.0, headers=_HDRS) as cli:
             # 1) POST /execute → TaskService.execute → _run_yaml成立 BCS 协作群(预发自动跑状态机)
             r = await cli.post(
                 f"{_BACKEND}/api/v1/collaboration/tasks/execute",
-                json=_execute_body(_CLAW_MIND_BOT_ID)
+                json=_execute_body(_SINGLE_BOT_ID)
             )
             r.raise_for_status()
             body = r.json()

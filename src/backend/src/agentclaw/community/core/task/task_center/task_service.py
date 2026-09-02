@@ -39,6 +39,7 @@ from agentclaw.community.core.task.domain.models import (
     Metadata,
     Context,
     Goal,
+    RuntimeInfo,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -403,7 +404,10 @@ class TaskService:
                         acceptances=list()
                     )
                 ),
-                run_info=None,
+                run_info=RuntimeInfo(
+                    run_mode="single_bot",
+                    assignee=request.owner_bot_id
+                ),
                 node_run_graph=None
             )
 
