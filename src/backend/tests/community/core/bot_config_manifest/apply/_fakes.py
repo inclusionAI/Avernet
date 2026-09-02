@@ -672,10 +672,19 @@ class FakeResourceFileService:
 
     ``delete`` removes from the presence set as well — the real service's
     contract — because the plan stage classifies by ``exists`` and would
-    otherwise call a deleted path "unchanged".
+    otherwise call a deleted path "unchanged". Deleting a directory removes
+    the whole subtree from presence (the real chain's ``delete_tree``
+    branch); a path named in ``fail_deletes`` answers a silent ``False``
+    with presence untouched — the real transports' contract, which catch
+    their own errors and return ``False`` rather than raise, so a refused
+    ``rmtree`` is only distinguishable by re-probing presence.
     """
 
-    def __init__(self, exists_paths: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        exists_paths: set[str] | None = None,
+        fail_deletes: set[str] | None = None,
+    ) -> None:
         self.writes: dict[tuple[str, str], bytes] = {}
         self.deleted: list[str] = []
         # Full addressing of every call, so a test can pin *how* the write
@@ -684,6 +693,7 @@ class FakeResourceFileService:
         self.delete_calls: list[dict[str, Any]] = []
         self.exists_probes: list[dict[str, Any]] = []
         self._exists = set(exists_paths or ())
+        self._fail_deletes = set(fail_deletes or ())
 
     def record_present(self, *paths: str) -> None:
         self._exists.update(paths)
@@ -732,8 +742,16 @@ class FakeResourceFileService:
                 "path": path,
             }
         )
+        if path in self._fail_deletes:
+            # Silent refusal: the transport answered, nothing was removed,
+            # presence still reports the tree — an exists re-probe sees it.
+            return False
         self.deleted.append(path)
-        self._exists.discard(path)
+        self._exists = {
+            p
+            for p in self._exists
+            if p != path and not p.startswith(f"{path}/")
+        }
         return True
 
     async def exists(

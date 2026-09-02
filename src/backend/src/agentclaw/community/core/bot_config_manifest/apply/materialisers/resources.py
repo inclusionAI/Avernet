@@ -23,7 +23,11 @@ Three invariants, all from the W6 work item:
   drifted tree would survive that. v1 takes the recommended option (1):
   every apply rewrites every member. ``plan`` therefore classifies for the
   report only (created / updated), never "unchanged", and the category is
-  never ``is_noop``.
+  never ``is_noop``. The declared-tree replacement rides the plan's
+  ``removals`` channel — the engine's "an overwrite removes something with
+  no declared entry to attach to" — so the dry-run projection and the real
+  write report one shape, and a dirs-only archive's destructive replace
+  still audits through ``removed``.
 
 Two v1 narrows, stated here rather than discovered:
 
@@ -84,6 +88,24 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 
 _FETCH_CATEGORY_FILE = FetchCategory.RESOURCES_FILE.value
 _FETCH_CATEGORY_ARCHIVE = FetchCategory.RESOURCES_ARCHIVE.value
+
+
+class _DeclaredTree:
+    """The declared-tree marker intent's value — an explicit object, never
+    ``None``.
+
+    ``None`` is ``Intent.value``'s dataclass *default*, so keying the tree
+    marker on it would let any future intent constructed without an
+    explicit value silently promise a whole-tree deletion at write time.
+    An instance of a module-private class cannot be produced by accident.
+    """
+
+    __slots__ = ()
+
+
+#: The single marker instance: ``Intent.value`` for a declared directory,
+#: identity the declared path with its trailing slash.
+_DECLARED_TREE = _DeclaredTree()
 
 
 class ResourcesMaterialiser(Materialiser):
@@ -160,13 +182,12 @@ class ResourcesMaterialiser(Materialiser):
                 if isinstance(members, str):
                     failures.append(ResolveFailure(path, members))
                     continue
-                # The directory sentinel: identity=path, value=None. It rides
-                # first in the intent list so plan marks the tree for
-                # replacement and write deletes it before members upload.
-                # The gate on every member, before the sentinel that
-                # promises the tree: one undeliverable member must abort
-                # the category with the tree still standing, not delete it
-                # for a partial delivery that every re-apply would repeat.
+                # The declared-tree marker intent rides first so plan routes
+                # the tree into ``removals`` and write replaces it before
+                # members upload. The gate on every member comes before the
+                # marker that promises the tree: one undeliverable member
+                # must abort the category with the tree still standing, not
+                # delete it for a partial delivery every re-apply repeats.
                 bad = next(
                     (
                         (path + rel, refused)
@@ -179,9 +200,7 @@ class ResourcesMaterialiser(Materialiser):
                 if bad is not None:
                     failures.append(ResolveFailure(bad[0], bad[1]))
                     continue
-                intents.append(
-                    Intent(identity=path, value=None, note=fetched.fallback_reason)
-                )
+                intents.append(Intent(identity=path, value=_DECLARED_TREE))
                 for rel, data in members:
                     intents.append(
                         Intent(
@@ -345,14 +364,21 @@ class ResourcesMaterialiser(Materialiser):
         """Classify for the report. Never ``unchanged`` — v1 replaces on
         every apply (the work item's recommended option (1)), so classifying
         anything as unchanged would be a claim the write stage does not
-        honour. ``exists`` is consulted only for the created/updated label,
-        and the directory sentinels classify within the same vocabulary:
-        the orchestrator's dry-run projection feeds every planned outcome
-        through :class:`EntryOutcome`, which a bespoke label would crash.
+        honour. ``exists`` is consulted only for the members' created/updated
+        labels.
+
+        The declared trees do not classify at all — they go to the plan's
+        ``removals`` channel, the engine's own answer for "an overwrite
+        removes something with no declared entry to attach to". That is
+        what keeps the dry-run projection and the real write in one shape
+        (both take ``plan.removals`` verbatim), and what gives a
+        dirs-only archive's destructive replace its audit row.
         """
         entity_type, entity_id = _coords(ctx)
         planned: list[PlannedEntry] = []
         for intent in intents:
+            if intent.value is _DECLARED_TREE:
+                continue
             present = await self._resources.exists(
                 entity_type=entity_type,
                 entity_id=entity_id,
@@ -366,7 +392,10 @@ class ResourcesMaterialiser(Materialiser):
                     outcome="updated" if present else "created",
                 )
             )
-        return CategoryPlan(entries=tuple(planned), removals=())
+        removals = tuple(
+            intent.identity for intent in intents if intent.value is _DECLARED_TREE
+        )
+        return CategoryPlan(entries=tuple(planned), removals=removals)
 
     async def write(
         self, ctx: ApplyContext, plan: CategoryPlan
@@ -381,33 +410,57 @@ class ResourcesMaterialiser(Materialiser):
         """
         entity_type, entity_id = _coords(ctx)
         results: list[EntryResult] = []
-        # 1) Directory sentinels first — one delete per declared tree. A
-        # tree's replace removes everything under ``path``, including files
-        # the new archive no longer ships and hand-added ones (the
-        # ownership rule). Sentinels produce no EntryResult: an ownership
+        # 1) Declared trees first — one delete per tree, from the plan's
+        # removals. A tree's replace removes everything under ``path``,
+        # including files the new archive no longer ships and hand-added
+        # ones (the ownership rule). Tree deletes are addressed at the path
+        # *minus* the declaring slash: the write chain branches file-vs-tree
+        # on the path's shape, and "wrap/" reads as a file named "" to that
+        # branch. Tree deletes produce no EntryResult: an ownership
         # action, not an entry — but a *failed* one fails its members, in
         # the stage's composed words (never the exception's: a transport
         # error can quote a header, a header can carry a token).
         failed_trees: list[str] = []
-        for planned in plan.entries:
-            if planned.intent.value is not None:
-                continue
+        for tree in plan.removals:
+            target = tree.rstrip("/")
             try:
-                await self._resources.delete(
+                ok = await self._resources.delete(
                     entity_type=entity_type,
                     entity_id=entity_id,
                     bot_id=ctx.bot_id,
                     engine_type=ctx.engine_type,
-                    path=planned.intent.identity,
+                    path=target,
                 )
             except Exception:  # noqa: BLE001 — surfaced per member, not as text
-                failed_trees.append(planned.intent.identity)
-        # 2) then each member file, in declaration order
+                failed_trees.append(tree)
+                continue
+            if ok:
+                continue
+            # ``False`` is ambiguous in the write chain's own contract: it
+            # is both "nothing was deleted" (a first apply onto an absent
+            # tree — fine) and the transports' *only* failure signal (every
+            # device filesystem catches its own errors and returns False
+            # rather than raising). Presence re-probes tell them apart: a
+            # tree that is still there was not deleted and never will be,
+            # and delivery over an unreplaced tree would report success.
+            try:
+                still_present = await self._resources.exists(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    bot_id=ctx.bot_id,
+                    engine_type=ctx.engine_type,
+                    path=target,
+                )
+            except Exception:  # noqa: BLE001 — pessimistic default below
+                still_present = True
+            if still_present:
+                failed_trees.append(tree)
+        # 2) then each member file, in declaration order. Containment is
+        # matched against the *declared* form (with the slash) so a tree
+        # "wrap/" cannot claim "wrap-old/x.txt" as its member.
         for planned in plan.entries:
             identity = planned.intent.identity
             data = planned.intent.value
-            if data is None:
-                continue
             if any(identity.startswith(tree) for tree in failed_trees):
                 results.append(
                     EntryResult(

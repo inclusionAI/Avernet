@@ -573,8 +573,10 @@ def _resources_reached_the_write_chain(_response, world) -> None:
         ("tools/sub", "b.py"): b"y = 2\n",
     }
     # The declared directory tree is replaced in full, delete first — the
-    # ownership rule, including files the new archive no longer ships.
-    assert _seed_bot_with_resource_manifest.deletes == ["tools/"]
+    # ownership rule, including files the new archive no longer ships. The
+    # tree is addressed without the declaring slash: the write chain's
+    # file-vs-tree branching keys on the path's shape.
+    assert _seed_bot_with_resource_manifest.deletes == ["tools"]
 
 
 @endpoint_test(
