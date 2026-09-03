@@ -7,7 +7,10 @@ import asyncio
 import pytest
 
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import (
+    DeviceActivatedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +37,10 @@ def test_skill_symlink_listener_is_registered_by_startup_hook():
     bus = get_event_bus()
     handlers = bus._handlers.get(DeviceActivatedEvent, [])  # type: ignore[attr-defined]
     assert listener.handle in handlers
+    reprojection_handlers = bus._handlers.get(  # type: ignore[attr-defined]
+        RuntimeProjectionRequestedEvent, []
+    )
+    assert listener.handle in reprojection_handlers
 
 
 def test_register_is_idempotent():
@@ -44,3 +51,7 @@ def test_register_is_idempotent():
     bus = get_event_bus()
     handlers = bus._handlers.get(DeviceActivatedEvent, [])  # type: ignore[attr-defined]
     assert handlers.count(listener.handle) == 1
+    reprojection_handlers = bus._handlers.get(  # type: ignore[attr-defined]
+        RuntimeProjectionRequestedEvent, []
+    )
+    assert reprojection_handlers.count(listener.handle) == 1
