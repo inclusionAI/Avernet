@@ -15145,6 +15145,12 @@
             "title": "Notification Id",
             "type": "integer"
           },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
+          },
           "title": {
             "description": "Display title of the notification.",
             "title": "Title",
@@ -22533,9 +22539,27 @@
             "description": "Identifier of the reviewer after processing, otherwise null.",
             "title": "Reviewer User Id"
           },
+          "reviewer_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name of the reviewer after processing, otherwise null.",
+            "title": "Reviewer User Name"
+          },
           "status": {
             "$ref": "#/components/schemas/WorkOrderStatus",
             "description": "Current work-order status."
+          },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
           },
           "title": {
             "description": "Display title of the work order.",
@@ -22561,6 +22585,7 @@
           "title",
           "status",
           "reviewer_user_id",
+          "reviewer_user_name",
           "review_remark",
           "reviewed_at",
           "can_approve"
@@ -22937,6 +22962,12 @@
               }
             ],
             "description": "Related work-order status, when one exists."
+          },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
           },
           "title": {
             "anyOf": [

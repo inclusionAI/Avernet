@@ -733,6 +733,43 @@ def test_list_items_forwards_filters_and_normalizes_pagination() -> None:
     )
 
 
+def test_get_detail_resolves_reviewer_name_from_staff_directory() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="001234", nick_name=" Reviewer "
+    )
+    service, repository, *_ = _service(staff_dept=staff_dept)
+    repository.get_detail.return_value = _detail().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                update={"reviewer_user_id": "1234"}
+            )
+        }
+    )
+
+    detail = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert detail.reviewer_user_name == "Reviewer"
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="001234")
+
+
+def test_get_detail_keeps_success_when_reviewer_lookup_fails() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError("down")
+    service, repository, *_ = _service(staff_dept=staff_dept)
+    repository.get_detail.return_value = _detail().model_copy(
+        update={
+            "work_order": _work_order().model_copy(
+                update={"reviewer_user_id": "1234"}
+            )
+        }
+    )
+
+    detail = service.get_detail(work_order_id=11, actor_id="owner-1")
+
+    assert detail.reviewer_user_name is None
+
+
 def test_get_detail_returns_record_and_missing_raises() -> None:
     service, repository, _, _, _ = _service()
     repository.get_detail.side_effect = [_detail(), None]

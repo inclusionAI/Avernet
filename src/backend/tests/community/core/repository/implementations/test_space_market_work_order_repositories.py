@@ -50,7 +50,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
-    WorkOrderTitleKey,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -1071,6 +1070,8 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     owner_detail = repository.get_detail(
         work_order_id=record.id, actor_id="owner-1", env="dev"
     )
+    assert owner_detail.event_type is not None
+    assert owner_detail.title is not None
     assert owner_detail.can_approve is True
     assert (
         repository.get_detail(work_order_id=record.id, actor_id="intruder", env="dev")
@@ -1081,7 +1082,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
 
     notification = pending[0].notification
-    assert notification.title == WorkOrderTitleKey.SPACE_JOIN_PENDING.value
+    assert notification.title == "空间加入申请待审批"
     assert repository.count_unread(recipient_user_id="owner-1", env="dev") == 1
     owner_badge = repository.get_notification_badge_summary(
         recipient_user_id="owner-1", env="dev"
@@ -1203,7 +1204,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
     assert applicant_total == 1
     applicant_notification = applicant_items[0].notification
-    assert applicant_notification.title == WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
+    assert applicant_notification.title == "空间加入申请已处理"
     assert applicant_notification.content == approved_notification.content
     assert (
         repository.list_items(
@@ -1329,7 +1330,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     )
     assert (
         applicant_items[0].notification.title
-        == WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
+        == "空间加入申请已处理"
     )
     assert applicant_items[0].notification.content == "custom rejected content"
 

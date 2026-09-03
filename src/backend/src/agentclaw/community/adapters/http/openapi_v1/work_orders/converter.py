@@ -10,6 +10,8 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderMessageTitle,
     WorkOrderStatus,
     WorkOrderTitleKey,
+    notification_summary_for,
+    notification_title_for,
 )
 
 JsonObject = dict[str, Any]
@@ -39,10 +41,14 @@ _TITLE_KEY_BY_STATUS = {
 def display_title(
     stored_title: str | None,
     *,
+    event_type: str | None = None,
     biz_type: str | None = None,
     status: WorkOrderStatus | None = None,
-) -> str | None:
-    """Translate known persisted title formats and preserve unknown titles."""
+) -> str:
+    """Resolve titles from the event contract with legacy compatibility."""
+
+    if event_type is not None:
+        return notification_title_for(event_type, stored_title)
 
     key = _TITLE_KEY_BY_STORED_VALUE.get(stored_title or "")
     if key is not None:
@@ -52,6 +58,11 @@ def display_title(
     if biz_type == WorkOrderBizType.SPACE_JOIN.value and status is not None:
         return _TITLE_BY_KEY[_TITLE_KEY_BY_STATUS[status]]
     return stored_title
+
+
+def display_summary(event_type: str | None) -> str:
+    """Return the stable list/detail summary for an event."""
+    return notification_summary_for(event_type)
 
 
 def json_object(raw: str | None) -> JsonObject | None:
