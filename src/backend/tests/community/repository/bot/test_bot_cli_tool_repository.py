@@ -61,7 +61,7 @@ def repo(db_engine):
     return BotCliToolRepository(InMemorySqliteDB(db_engine))
 
 
-def _install(repo, *, name="mycli", digest="sha256:aa", subpath=None, **over):
+def _fields(*, name="mycli", digest="sha256:aa", subpath=None, **over):
     bot_id = over.pop("bot_id", "bot")
     fields = dict(
         env="dev",
@@ -82,7 +82,11 @@ def _install(repo, *, name="mycli", digest="sha256:aa", subpath=None, **over):
         modifier="u1",
     )
     fields.update(over)
-    return repo.upsert(**fields)
+    return fields
+
+
+def _install(repo, **over):
+    return repo.upsert(**_fields(**over))
 
 
 # --- table creation ---------------------------------------------------------
@@ -362,3 +366,44 @@ def test_one_tenant_cannot_delete_anothers_tool(repo):
         assert repo.delete_all(env="dev", entity_id="ent", bot_id="bot") == []
     with avernet_tenant_scope("tenant-a"):
         assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+
+
+def test_insert_writes_a_new_row(repo):
+    """The atomic half of the management API's 409."""
+    record = repo.insert(**_fields(name="mycli"))
+    assert record is not None and record.name == "mycli"
+    assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli") is not None
+
+
+def test_insert_answers_none_when_the_name_is_taken(repo):
+    """``None`` rather than an exception: "the name is taken" is an ordinary
+    answer on this path, which the caller turns into a 409."""
+    assert repo.insert(**_fields(digest="sha256:aa")) is not None
+    assert repo.insert(**_fields(digest="sha256:bb")) is None
+    # And the first write is what survives — the loser replaced nothing, which
+    # is the whole difference from ``upsert``.
+    assert (
+        repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli").digest
+        == "sha256:aa"
+    )
+
+
+def test_upsert_still_replaces_where_insert_refuses(repo):
+    """The two are deliberately different: a manifest apply's full override is
+    entitled to replace, and would conflict forever if it used ``insert``."""
+    repo.insert(**_fields(digest="sha256:aa"))
+    repo.upsert(**_fields(digest="sha256:bb"))
+    assert (
+        repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli").digest
+        == "sha256:bb"
+    )
+
+
+def test_insert_scopes_by_env_and_entity_like_every_other_write(repo):
+    """The unique key is the whole tuple, so the same name elsewhere is not a
+    conflict — otherwise one tenant's install would 409 another's."""
+    assert repo.insert(**_fields(name="mycli")) is not None
+    assert repo.insert(**_fields(name="mycli", bot_id="other-bot")) is not None
+    assert repo.insert(**_fields(name="mycli", env="prod")) is not None
+    assert repo.insert(**_fields(name="mycli", entity_id="other-ent")) is not None
+    assert repo.insert(**_fields(name="mycli")) is None

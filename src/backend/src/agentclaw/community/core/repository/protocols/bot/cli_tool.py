@@ -83,6 +83,41 @@ class BotCliToolRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
+    def insert(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        name: str,
+        source: str,
+        digest: str,
+        subpath: Optional[str],
+        md5: str,
+        size_bytes: int,
+        version: Optional[str],
+        oss_key: str,
+        installed_by: str,
+        modifier: str,
+    ) -> Optional[BotCliToolRecord]:
+        """Insert only; ``None`` when the bot already has a tool by that name.
+
+        The atomic half of the management API's 409. A read-then-:meth:`upsert`
+        cannot answer that contract: the window between the two spans a fetch,
+        an unpack and a verification — seconds to minutes for a large binary —
+        and ``upsert`` deliberately turns the losing insert into an update, so
+        both callers would succeed and one would silently replace the other.
+
+        Returning ``None`` rather than raising because "the name is taken" is an
+        ordinary answer on this path, not a fault: the caller turns it into a
+        409. A conflict on anything *other* than the unique key propagates.
+
+        A manifest apply never calls this — a full override is entitled to
+        replace, which is what :meth:`upsert` is for.
+        """
+        ...
+
+    @abstractmethod
     def delete(self, *, env: str, entity_id: str, bot_id: str, name: str) -> bool:
         """Hard-delete one row. Idempotent — returns ``False`` when absent.
 
@@ -108,12 +143,13 @@ class BotCliToolRepositoryProtocol(Protocol):
 
         **The keys are safe to delete only while no object is referenced by
         more than one row.** Nothing in this table enforces that — ``oss_key``
-        carries no uniqueness constraint — and a per-bot prefix alone is not
-        enough: a content-addressed layout like ``tools/{bot}/{sha256}`` keeps
-        bots apart yet gives *one* bot's two commands the same key whenever the
-        same archive is installed under two names, which the model explicitly
-        allows (two rows may share a ``digest``). The store's one-object-per-row
-        layout is what makes this contract true; a change to it is a change to
-        this contract.
+        carries no uniqueness constraint — so it rests on the store's layout,
+        ``{bot}_cli/{name}.{digest fingerprint}``. Both halves are load-bearing:
+        the **name** keeps one bot's two commands apart when the same archive is
+        installed under two names (the model allows two rows to share a
+        ``digest``), and the **fingerprint** keeps two versions of one command
+        apart, so a replacement writes a new object instead of overwriting the
+        one the current row still describes. A change to that layout is a change
+        to this contract.
         """
         ...

@@ -64,6 +64,10 @@ _OUTCOMES = {
     CliToolOp.INSTALLED: EntryOutcome.UPDATED,
     CliToolOp.UNCHANGED: EntryOutcome.UNCHANGED,
     CliToolOp.FAILED: EntryOutcome.FAILED,
+    # Unreachable from here — a full override never asks for insert-only, so
+    # the service never answers CONFLICT on this path. Mapped anyway so a
+    # future caller that does ask cannot produce a KeyError mid-apply.
+    CliToolOp.CONFLICT: EntryOutcome.FAILED,
 }
 
 
@@ -247,7 +251,7 @@ class CliToolsMaterialiser(Materialiser):
             # ``reason`` on a failure, ``note`` on a success: they answer
             # opposite questions, and a client rendering failures must not show
             # a note as an error.
-            failed = outcome.op is CliToolOp.FAILED
+            failed = outcome.failed
             results.append(
                 EntryResult(
                     self.construct,

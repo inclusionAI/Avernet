@@ -22,6 +22,9 @@ _SCOPE = CliToolScope(entity_type="staff", entity_id="u1", bot_id="bot7")
 _BASE = "teclaw/dev/bolt_data"
 _LIVE = f"{_BASE}/staff_u1/bot7_cli"
 _BYTES = b"\x7fELF-ish payload"
+_DIGEST = "sha256:" + "3e7a1f9c2b8d4e6a" + "0" * 48
+#: What the key carries: the digest's first sixteen hex characters.
+_FP = "3e7a1f9c2b8d4e6a"
 
 
 def _store(oss=None):
@@ -34,9 +37,9 @@ def _store(oss=None):
 
 def test_put_writes_the_live_key_and_returns_what_the_row_records() -> None:
     store, oss = _store()
-    stored = store.put(_SCOPE, name="mycli", data=_BYTES)
-    assert stored.store_key == f"{_LIVE}/mycli"
-    assert stored.ref_path == "staff_u1/bot7_cli/mycli"
+    stored = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
+    assert stored.store_key == f"{_LIVE}/mycli.{_FP}"
+    assert stored.ref_path == "staff_u1/bot7_cli/mycli." + _FP
     assert stored.store == BOT_DATA_STORE
     assert oss.objects[stored.store_key] == _BYTES
 
@@ -45,7 +48,7 @@ def test_the_live_prefix_is_not_a_publish_stage_prefix() -> None:
     """``_cli`` versus ``_{publish_id}_{stage}``: they can never collide, so a
     live tool is never mistaken for a snapshot of one."""
     store, _ = _store()
-    live = store.store_key(_SCOPE, "mycli")
+    live = store.store_key(_SCOPE, "mycli", _DIGEST)
     staged = store.stage_store_key(
         _SCOPE, name="mycli", publish_id=9, stage="verify"
     )
@@ -63,7 +66,7 @@ def test_the_ref_path_is_the_key_minus_the_store_base() -> None:
     """What a ``cliToolRef`` carries: the engine resolves it against the
     ``bot-data`` store's base, so the base must not be inside it."""
     store, _ = _store()
-    stored = store.put(_SCOPE, name="mycli", data=_BYTES)
+    stored = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     assert stored.store_key == f"{_BASE}/{stored.ref_path}"
     assert _BASE not in stored.ref_path
 
@@ -72,16 +75,16 @@ def test_the_base_is_read_per_call_not_bound_once() -> None:
     """The thunk is the point: the base depends on the deployment env."""
     base = ["teclaw/dev/bolt_data"]
     store = CliToolStore(object_storage=FakeObjectStorage(), store_base=lambda: base[0])
-    first = store.store_key(_SCOPE, "mycli")
+    first = store.store_key(_SCOPE, "mycli", _DIGEST)
     base[0] = "teclaw/prod/bolt_data"
-    assert store.store_key(_SCOPE, "mycli") != first
+    assert store.store_key(_SCOPE, "mycli", _DIGEST) != first
 
 
 def test_a_trailing_slash_on_the_base_does_not_double_up() -> None:
     store = CliToolStore(
         object_storage=FakeObjectStorage(), store_base=lambda: f"{_BASE}/"
     )
-    assert store.store_key(_SCOPE, "mycli") == f"{_LIVE}/mycli"
+    assert store.store_key(_SCOPE, "mycli", _DIGEST) == f"{_LIVE}/mycli.{_FP}"
 
 
 # ── the name is one key segment ───────────────────────────────────────────
@@ -96,7 +99,7 @@ def test_a_name_that_is_not_one_key_segment_is_refused(name: str) -> None:
     field that promises not to be a path."""
     store, oss = _store()
     with pytest.raises(ValueError):
-        store.put(_SCOPE, name=name, data=_BYTES)
+        store.put(_SCOPE, digest=_DIGEST, name=name, data=_BYTES)
     assert oss.puts == []
 
 
@@ -110,7 +113,7 @@ def test_a_name_longer_than_the_column_is_refused() -> None:
     so it is also what keeps a key inside the object store's key cap."""
     store, oss = _store()
     with pytest.raises(ValueError) as excinfo:
-        store.put(_SCOPE, name="a" * (MAX_NAME_LENGTH + 1), data=_BYTES)
+        store.put(_SCOPE, digest=_DIGEST, name="a" * (MAX_NAME_LENGTH + 1), data=_BYTES)
     assert str(MAX_NAME_LENGTH) in str(excinfo.value)
     assert oss.puts == []
     assert checked_name("a" * MAX_NAME_LENGTH)
@@ -130,13 +133,13 @@ def test_a_put_that_did_not_land_raises_rather_than_returning_a_key() -> None:
     prevents: the artifact would reference an object nothing wrote."""
     store, _ = _store(FakeObjectStorage(fail_puts=True))
     with pytest.raises(CliToolStoreError) as excinfo:
-        store.put(_SCOPE, name="mycli", data=_BYTES)
+        store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     assert "mycli" in str(excinfo.value)
 
 
 def test_a_delete_that_did_not_land_raises_with_the_object_still_there() -> None:
     store, oss = _store(FakeObjectStorage(fail_deletes=True))
-    stored = store.put(_SCOPE, name="mycli", data=_BYTES)
+    stored = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     with pytest.raises(CliToolStoreError):
         store.delete(key=stored.store_key)
     assert stored.store_key in oss.objects
@@ -145,17 +148,17 @@ def test_a_delete_that_did_not_land_raises_with_the_object_still_there() -> None
 def test_delete_addresses_the_recorded_key_not_a_recomputed_one() -> None:
     """A tool written under an earlier store base is still removable."""
     store, oss = _store()
-    oss.objects["teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli"] = _BYTES
-    store.delete(key="teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli")
-    assert oss.deletes == ["teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli"]
+    oss.objects["teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli." + _FP] = _BYTES
+    store.delete(key="teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli." + _FP)
+    assert oss.deletes == ["teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli." + _FP]
     assert oss.objects == {}
 
 
 def test_delete_issues_the_call_without_a_prior_existence_check() -> None:
     """A pre-check would fold a transient listing failure into "not there"."""
     store, oss = _store()
-    store.delete(key=f"{_LIVE}/never-written")
-    assert oss.deletes == [f"{_LIVE}/never-written"]
+    store.delete(key=f"{_LIVE}/never-written.{_FP}")
+    assert oss.deletes == [f"{_LIVE}/never-written.{_FP}"]
     assert oss.reads == []
 
 
@@ -167,7 +170,7 @@ def test_copy_to_stage_uses_the_server_side_copy_when_the_store_has_one() -> Non
     and a promotion copies every one of a bot's."""
     oss = FakeCopyingObjectStorage()
     store, _ = _store(oss)
-    source = store.put(_SCOPE, name="mycli", data=_BYTES)
+    source = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     staged = store.copy_to_stage(
         _SCOPE, name="mycli", source_key=source.store_key, publish_id=9, stage="verify"
     )
@@ -180,7 +183,7 @@ def test_copy_to_stage_falls_back_to_read_and_write_without_the_capability() -> 
     """An overlay that has not shipped ``copy_object`` must still promote."""
     oss = FakeObjectStorage()
     store, _ = _store(oss)
-    source = store.put(_SCOPE, name="mycli", data=_BYTES)
+    source = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     staged = store.copy_to_stage(
         _SCOPE, name="mycli", source_key=source.store_key, publish_id=9, stage="verify"
     )
@@ -193,7 +196,7 @@ def test_copy_to_stage_copies_from_the_recorded_key() -> None:
     earlier store base still promotes rather than staging nothing."""
     oss = FakeCopyingObjectStorage()
     store, _ = _store(oss)
-    old_key = "teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli"
+    old_key = "teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli." + _FP
     oss.objects[old_key] = _BYTES
     staged = store.copy_to_stage(
         _SCOPE, name="mycli", source_key=old_key, publish_id=9, stage="verify"
@@ -205,7 +208,7 @@ def test_copy_to_stage_copies_from_the_recorded_key() -> None:
 def test_a_failed_server_side_copy_raises() -> None:
     oss = FakeCopyingObjectStorage(fail_copies=True)
     store, _ = _store(oss)
-    source = store.put(_SCOPE, name="mycli", data=_BYTES)
+    source = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     with pytest.raises(CliToolStoreError):
         store.copy_to_stage(
             _SCOPE, name="mycli", source_key=source.store_key,
@@ -219,7 +222,7 @@ def test_an_unreadable_source_raises_rather_than_staging_an_empty_tool() -> None
     store, oss = _store()
     with pytest.raises(CliToolStoreError) as excinfo:
         store.copy_to_stage(
-            _SCOPE, name="mycli", source_key=f"{_LIVE}/mycli",
+            _SCOPE, name="mycli", source_key=f"{_LIVE}/mycli.{_FP}",
             publish_id=9, stage="verify",
         )
     assert "nothing staged" in str(excinfo.value)
@@ -229,7 +232,7 @@ def test_an_unreadable_source_raises_rather_than_staging_an_empty_tool() -> None
 def test_a_failed_staged_put_raises_on_the_fallback_path() -> None:
     oss = FakeObjectStorage()
     store, _ = _store(oss)
-    source = store.put(_SCOPE, name="mycli", data=_BYTES)
+    source = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     oss.fail_puts = True
     with pytest.raises(CliToolStoreError):
         store.copy_to_stage(
@@ -242,7 +245,7 @@ def test_draft_and_verify_snapshots_do_not_share_an_object() -> None:
     """Republishing a draft must not change what a published bot runs."""
     oss = FakeCopyingObjectStorage()
     store, _ = _store(oss)
-    source = store.put(_SCOPE, name="mycli", data=_BYTES)
+    source = store.put(_SCOPE, digest=_DIGEST, name="mycli", data=_BYTES)
     draft = store.copy_to_stage(
         _SCOPE, name="mycli", source_key=source.store_key, publish_id=9, stage="draft"
     )
@@ -256,7 +259,7 @@ def test_draft_and_verify_snapshots_do_not_share_an_object() -> None:
 def test_two_bots_never_share_a_key() -> None:
     store, _ = _store()
     other = CliToolScope(entity_type="staff", entity_id="u1", bot_id="bot8")
-    assert store.store_key(_SCOPE, "mycli") != store.store_key(other, "mycli")
+    assert store.store_key(_SCOPE, "mycli", _DIGEST) != store.store_key(other, "mycli", _DIGEST)
 
 
 def test_the_context_addresses_the_store_by_its_own_coordinates() -> None:
@@ -270,10 +273,10 @@ def test_the_context_addresses_the_store_by_its_own_coordinates() -> None:
     )
     store, _ = _store()
     assert ctx.scope == _SCOPE
-    assert store.store_key(ctx.scope, "mycli") == f"{_LIVE}/mycli"
+    assert store.store_key(ctx.scope, "mycli", _DIGEST) == f"{_LIVE}/mycli.{_FP}"
 
 
 def test_two_entities_never_share_a_key() -> None:
     store, _ = _store()
     other = CliToolScope(entity_type="team", entity_id="u1", bot_id="bot7")
-    assert store.store_key(_SCOPE, "mycli") != store.store_key(other, "mycli")
+    assert store.store_key(_SCOPE, "mycli", _DIGEST) != store.store_key(other, "mycli", _DIGEST)

@@ -28,6 +28,7 @@ from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.gateway_principal_config import (
     init_principal_verifier_config,
 )
+from tests.community.core.bot_config_manifest.cli_tools._fakes import elf as _elf_header
 from tests.community.factories.access import make_staff_user
 from tests.community.factories.bot_collaborator import make_collaborator
 from tests.community.framework import (
@@ -46,9 +47,9 @@ _TECLAW_BOT_ID = "cli-tools-teclaw-bot"
 _MEMBER = "cli-tools-member"
 _KEY = "cli-tools-framework-signing-key-at-least-32-bytes"
 
-#: A minimal little-endian x86-64 ELF header, which is what the platform
-#: verifies before it will distribute an executable.
-_ELF = bytes(bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 11 + b"\x3e\x00")) + b"\x00" * 64
+#: A well-formed 64-bit x86-64 executable header, which is what the platform
+#: verifies before it will distribute anything.
+_ELF = _elf_header()
 _DIGEST = "sha256:" + hashlib.sha256(_ELF).hexdigest()
 
 

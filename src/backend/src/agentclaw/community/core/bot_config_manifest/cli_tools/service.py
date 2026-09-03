@@ -145,7 +145,12 @@ class CliToolService:
     # ── writes ───────────────────────────────────────────────────────────
 
     async def install(
-        self, ctx: CliToolContext, decl: CliToolDecl, *, installed_by: str
+        self,
+        ctx: CliToolContext,
+        decl: CliToolDecl,
+        *,
+        installed_by: str,
+        expect_absent: bool = False,
     ) -> CliToolOutcome:
         """Fetch, verify, store, deliver and record one tool.
 
@@ -153,6 +158,12 @@ class CliToolService:
         rather than as an exception: a full override installing four tools must
         report the one that failed alongside the three that did not, and a
         caller that wanted an exception can read ``outcome.failed``.
+
+        ``expect_absent`` is the management API's contract, and the *only* thing
+        that makes its 409 true: the row is then written with an insert whose
+        UNIQUE constraint decides, rather than an upsert that would quietly turn
+        a losing concurrent install into a replacement. A manifest apply leaves
+        it off — a full override is entitled to replace.
         """
         try:
             checked_name(decl.name)
@@ -168,9 +179,17 @@ class CliToolService:
             return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
 
         md5 = hashlib.md5(data).hexdigest()
+        # Read before the write: a replacement must know which object the
+        # surviving row points at, so a failed delivery can discard only what
+        # nothing references.
+        superseded = self.get(ctx, decl.name)
         try:
             stored = await asyncio.to_thread(
-                self._store.put, ctx.scope, name=decl.name, data=data
+                self._store.put,
+                ctx.scope,
+                name=decl.name,
+                digest=decl.digest,
+                data=data,
             )
         except CliToolStoreError as error:
             return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
@@ -182,12 +201,19 @@ class CliToolService:
             # has the tool, so it is not written — and the object just stored
             # is removed, because nothing will reference it and nothing else
             # would ever collect it (its key is derived, not recorded).
-            await self._discard(stored.store_key)
+            #
+            # Safe on a replacement too, and only because the live key carries a
+            # content fingerprint: the bytes just written are at a key of their
+            # own, so discarding them cannot touch the object the surviving row
+            # still describes. The one case it must not fire is a re-install of
+            # the *same* digest, where both rows name the same key.
+            if superseded is None or superseded.oss_key != stored.store_key:
+                await self._discard(stored.store_key)
             return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
 
-        superseded = self.get(ctx, decl.name)
+        write = self._repo.insert if expect_absent else self._repo.upsert
         record = await asyncio.to_thread(
-            self._repo.upsert,
+            write,
             env=ctx.env,
             entity_id=ctx.entity_id,
             bot_id=ctx.bot_id,
@@ -202,11 +228,26 @@ class CliToolService:
             installed_by=installed_by,
             modifier=ctx.actor_id,
         )
+        if record is None:
+            # ``insert`` alone can answer this, and only at the moment of the
+            # write: the name was free when this install started and is taken
+            # now. The object just stored is unreferenced and nothing else would
+            # ever collect it, so it is discarded — but only after checking it
+            # is not the *winner's*, which it is when both racers installed the
+            # same bytes and the content-addressed key came out identical.
+            winner = self.get(ctx, decl.name)
+            if winner is None or winner.oss_key != stored.store_key:
+                await self._discard(stored.store_key)
+            return CliToolOutcome(
+                decl.name,
+                CliToolOp.CONFLICT,
+                f"the bot already has a CLI tool named {decl.name!r}",
+            )
         if superseded is not None and superseded.oss_key != stored.store_key:
-            # A reinstall normally overwrites the same key. It does not when the
-            # row was written under an earlier store base — and then the old
-            # object is unreferenced the moment the row is replaced, with its
-            # key held nowhere else. Collected here or never.
+            # The replaced version's object is unreferenced the moment the row
+            # is replaced, and its key is held nowhere else. Collected here or
+            # never. Reached whenever the digest changed — the ordinary
+            # replacement — and also when the row predates a store-base change.
             await self._discard(superseded.oss_key)
         logger.info(
             "[cli_tools] installed bot=%s name=%s size=%d by=%s",

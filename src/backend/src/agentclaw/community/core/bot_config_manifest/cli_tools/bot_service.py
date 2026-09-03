@@ -16,10 +16,18 @@ passed. Check and address cannot disagree, because there is one lookup.
 **The capability answer is re-asked here, not trusted from the manifest's
 ``PUT``.** A bot's engine can change, and this surface has no stored document
 to have been validated against in the first place.
+
+**A teclaw mutation is followed by a redeliver, and it has to be.** On that
+family the composed artifact *is* the delivery, so writing the row and the
+bytes changes nothing a running container can see. The manifest path closes
+with the strategy's redeliver; this path is the other caller and needs its own,
+or a `POST` would answer 200 while the bot kept its previous tool set until
+some unrelated operation happened to compose another artifact. On ARCA there is
+nothing to do — the engine's `install` already put the tool in the container.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Protocol, Sequence
+from typing import Any, Awaitable, Callable, Optional, Protocol, Sequence
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
@@ -77,10 +85,18 @@ class BotCliToolService(BotCliToolServiceProtocol):
         bot_service: BotLookupPort,
         cli_tool_service_factory: Callable[[str], CliToolService],
         is_teclaw: Callable[[Optional[str]], bool],
+        redeliver: Optional[Callable[[Any], Awaitable[Optional[str]]]] = None,
     ) -> None:
         self._bots = bot_service
         self._factory = cli_tool_service_factory
         self._is_teclaw = is_teclaw
+        # The same whole-artifact redeliver the manifest apply closes with,
+        # reached on this path for the teclaw family alone. ``None`` (the bare
+        # wiring) means a teclaw mutation lands in platform state and waits for
+        # the next compose, which is the pre-W9 behaviour rather than a silent
+        # half-delivery — but it is not what the API promises, so production
+        # binds it.
+        self._redeliver = redeliver
 
     # ── the surface ──────────────────────────────────────────────────────
 
@@ -88,19 +104,30 @@ class BotCliToolService(BotCliToolServiceProtocol):
         self, *, bot_id: str, owner_id: str, actor_id: str, decl: CliToolDecl
     ) -> BotCliToolRecord:
         service, ctx = self._resolve(bot_id, owner_id, actor_id)
+        conflict = CliToolConflictError(
+            f"bot {bot_id} already has a CLI tool named {decl.name!r}; "
+            "remove it first, or declare it in the bot's manifest, which "
+            "replaces the whole set"
+        )
+        # Asked twice, and both are needed. This read is the *cheap* answer —
+        # it refuses before a fetch that could take minutes and hundreds of
+        # megabytes. It is not the authoritative one: the name can be taken
+        # during that fetch, so the write itself is an insert whose UNIQUE
+        # constraint decides. 409 rather than a silent replacement either way —
+        # a manifest apply *does* replace, because a full override is its
+        # declared semantics, but a single POST is not, and overwriting a tool
+        # the caller did not mention would be the surprising reading of
+        # "install".
         if service.get(ctx, decl.name) is not None:
-            # 409 rather than a silent replacement. A manifest apply *does*
-            # replace, because a full override is its declared semantics; a
-            # single POST is not, and overwriting a tool the caller did not
-            # mention would be the surprising reading of "install".
-            raise CliToolConflictError(
-                f"bot {bot_id} already has a CLI tool named {decl.name!r}; "
-                "remove it first, or declare it in the bot's manifest, which "
-                "replaces the whole set"
-            )
-        outcome = await service.install(ctx, decl, installed_by=actor_id)
+            raise conflict
+        outcome = await service.install(
+            ctx, decl, installed_by=actor_id, expect_absent=True
+        )
+        if outcome.op is CliToolOp.CONFLICT:
+            raise conflict
         if outcome.failed or outcome.record is None:
             raise CliToolRefusedError(outcome.detail or "the tool could not be installed")
+        await self._redeliver_if_teclaw(ctx)
         return outcome.record
 
     def list(
@@ -118,7 +145,27 @@ class BotCliToolService(BotCliToolServiceProtocol):
         outcome = await service.remove(ctx, name)
         if outcome.op is not CliToolOp.REMOVED:
             raise CliToolRefusedError(outcome.detail or "the tool could not be removed")
+        await self._redeliver_if_teclaw(ctx)
         return outcome
+
+    async def _redeliver_if_teclaw(self, ctx: CliToolContext) -> None:
+        """Hand the running container a fresh artifact, on teclaw only.
+
+        A failure is logged, not raised: the tool *is* installed — the row, the
+        bytes and, on the engine's next compose, the artifact all say so — and
+        answering 500 to a caller whose install succeeded would be a worse
+        report than a delayed delivery. A bot with no live binding is not a
+        failure at all; provisioning composes from the state just written.
+        """
+        if self._redeliver is None or not self._is_teclaw(ctx.engine_type):
+            return
+        note = await self._redeliver(ctx)
+        if note:
+            logger.warning(
+                "[cli_tools] bot=%s: the tool is recorded but the running "
+                "container was not updated: %s",
+                ctx.bot_id, note,
+            )
 
     # ── resolution ───────────────────────────────────────────────────────
 

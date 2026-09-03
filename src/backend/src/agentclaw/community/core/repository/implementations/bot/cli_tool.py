@@ -174,6 +174,66 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
             )
             return self._upsert_once(**fields)
 
+    def insert(
+        self,
+        *,
+        env: str,
+        entity_id: str,
+        bot_id: str,
+        name: str,
+        source: str,
+        digest: str,
+        subpath: Optional[str],
+        md5: str,
+        size_bytes: int,
+        version: Optional[str],
+        oss_key: str,
+        installed_by: str,
+        modifier: str,
+    ) -> Optional[BotCliToolRecord]:
+        """插入工具行；同名已存在时返回 ``None``。
+
+        The UNIQUE constraint is what decides, not a preceding read — that is
+        the whole point, and why this exists beside ``upsert`` rather than
+        being expressed as one.
+        """
+        key = _tool_key(env=env, entity_id=entity_id, bot_id=bot_id, name=name)
+        try:
+            with self._db.orm_session() as db:
+                row = self._Tool(
+                    env=env,
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    name=name,
+                    tool_key=key,
+                    source=source,
+                    digest=digest,
+                    subpath=subpath,
+                    md5=md5,
+                    size_bytes=size_bytes,
+                    version=version,
+                    oss_key=oss_key,
+                    installed_by=installed_by,
+                    modifier=modifier,
+                )
+                db.add(row)
+                db.flush()
+                return row.to_record()
+        except IntegrityError as exc:
+            # The name is taken. Logged at info because it is an ordinary
+            # outcome of this method, not a fault — and the driver's own error
+            # is named so a *different* integrity failure (a NOT NULL, say)
+            # reads as itself rather than as a phantom conflict.
+            logger.info(
+                "[cli_tool.insert] name already taken (or another integrity "
+                "conflict): env=%s, bot_id=%s, name=%s, error=%s",
+                env,
+                bot_id,
+                name,
+                exc.orig,
+            )
+            return None
+
     def _upsert_once(
         self,
         *,

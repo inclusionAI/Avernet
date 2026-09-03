@@ -472,6 +472,10 @@ class ServiceBotModule(Module):
             # W8: the platform's copy of a teclaw bot's manifest-delivered
             # files, and which categories it asserts (manifest_fetch_module).
             managed_files_reader=injector.get(ManagedFilesComposeReader),
+            # W9: ``ac_bot_cli_tool``. Without it every production compose
+            # yields no tool refs at all — the row and the bytes exist and the
+            # artifact never mentions them.
+            cli_tool_repository=injector.get(BotCliToolRepositoryProtocol),
         )
 
     @singleton

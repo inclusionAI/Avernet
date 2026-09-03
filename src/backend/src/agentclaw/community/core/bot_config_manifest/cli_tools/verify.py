@@ -32,8 +32,27 @@ E_MACHINE_OFFSET = 18
 EM_X86_64 = 0x3E
 #: ``EI_DATA``: 1 = little-endian, 2 = big-endian.
 EI_DATA_OFFSET = 5
-#: Enough bytes to reach ``e_machine`` and its two-byte width.
-_ELF_HEADER_MINIMUM = E_MACHINE_OFFSET + 2
+#: ``EI_CLASS``: 1 = 32-bit, 2 = 64-bit. An x86-64 ``e_machine`` on a 32-bit
+#: class is a malformed header, not a runnable binary.
+EI_CLASS_OFFSET = 4
+ELFCLASS64 = 2
+#: ``e_type`` at offset 16, two bytes. Only these two can be executed: a
+#: position-dependent executable and a PIE (which is what most toolchains
+#: emit today, and which reads as a shared object).
+E_TYPE_OFFSET = 16
+ET_EXEC = 2
+ET_DYN = 3
+#: The 64-bit ELF header is 64 bytes. A file shorter than that cannot carry
+#: one, whatever its first twenty bytes say — the check this constant replaced
+#: stopped at ``e_machine``, so a twenty-byte fragment passed.
+_ELF_HEADER_MINIMUM = 64
+
+#: What ``e_type`` values mean, for a refusal that says what was found.
+_TYPE_NAMES = {
+    0: "an unknown-type ELF",
+    1: "a relocatable object (.o)",
+    4: "a core dump",
+}
 
 #: The few ``e_machine`` values worth naming in a refusal, so the message says
 #: what the caller actually shipped instead of a bare number. Not exhaustive
@@ -57,30 +76,50 @@ class CliToolSubpathError(ValueError):
 
 
 def verify_amd64_elf(data: bytes, *, name: str) -> None:
-    """Refuse a non-ELF file, or one built for another architecture.
+    """Refuse anything that is not a runnable x86-64 ELF executable.
+
+    Four questions, and all four are needed for the gate to mean what it says.
+    Checking magic and ``e_machine`` alone accepts a twenty-byte fragment, an
+    x86-64 *relocatable object*, and a core dump — each of which is stored,
+    installed and then fails at exec time, which is exactly the outcome this
+    check exists to move forward to install time.
 
     Raises:
         CliToolVerificationError: naming what was found, because "this is not
             an x86-64 executable" without saying what it *is* leaves the caller
             guessing between a wrong build, a wrapper script and a bad subpath.
     """
-    if len(data) < _ELF_HEADER_MINIMUM:
-        raise CliToolVerificationError(
-            f"{name!r} is {len(data)} bytes — too short to be an executable"
-        )
     if not data.startswith(ELF_MAGIC):
         raise CliToolVerificationError(
             f"{name!r} is not an ELF executable (it begins {data[:4]!r}); a CLI "
             "tool must be one self-contained x86-64 binary, not a script or an "
             "archive member picked by mistake"
         )
+    if len(data) < _ELF_HEADER_MINIMUM:
+        raise CliToolVerificationError(
+            f"{name!r} is {len(data)} bytes — an ELF header alone is "
+            f"{_ELF_HEADER_MINIMUM}, so this is a truncated file rather than a "
+            "program"
+        )
+    if data[EI_CLASS_OFFSET] != ELFCLASS64:
+        raise CliToolVerificationError(
+            f"{name!r} is a 32-bit ELF; the containers that run it are x86-64"
+        )
     little_endian = data[EI_DATA_OFFSET] != 2
-    (machine,) = struct.unpack_from("<H" if little_endian else ">H", data, E_MACHINE_OFFSET)
+    order = "<H" if little_endian else ">H"
+    (machine,) = struct.unpack_from(order, data, E_MACHINE_OFFSET)
     if machine != EM_X86_64:
         found = _MACHINE_NAMES.get(machine, f"e_machine 0x{machine:02X}")
         raise CliToolVerificationError(
             f"{name!r} is an ELF built for {found}; the containers that run it "
             "are x86-64"
+        )
+    (file_type,) = struct.unpack_from(order, data, E_TYPE_OFFSET)
+    if file_type not in (ET_EXEC, ET_DYN):
+        found = _TYPE_NAMES.get(file_type, f"e_type 0x{file_type:02X}")
+        raise CliToolVerificationError(
+            f"{name!r} is {found}, not a program; a CLI tool must be an "
+            "executable — link it rather than shipping the object file"
         )
 
 
@@ -119,7 +158,12 @@ def select_subpath(tree: UnpackedTree, subpath: str, *, location: str) -> Path:
 
 
 __all__ = [
+    "EI_CLASS_OFFSET",
     "EI_DATA_OFFSET",
+    "ELFCLASS64",
+    "ET_DYN",
+    "ET_EXEC",
+    "E_TYPE_OFFSET",
     "ELF_MAGIC",
     "EM_X86_64",
     "E_MACHINE_OFFSET",

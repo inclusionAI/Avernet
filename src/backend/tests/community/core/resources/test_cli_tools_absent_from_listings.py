@@ -61,7 +61,7 @@ def test_a_tools_object_key_is_not_under_a_workspace_namespace() -> None:
         object_storage=object(), store_base=lambda: "teclaw/dev/bolt_data"
     )
     scope = CliToolScope(entity_type="staff", entity_id="u1", bot_id="bot7")
-    live = store.store_key(scope, "mycli")
+    live = store.store_key(scope, "mycli", "sha256:" + "ab" * 32)
     staged = store.stage_store_key(
         scope, name="mycli", publish_id=9, stage="verify"
     )

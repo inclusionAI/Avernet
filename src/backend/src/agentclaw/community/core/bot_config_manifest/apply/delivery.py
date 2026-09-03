@@ -29,7 +29,7 @@ here, by the factory, and nowhere else.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
@@ -259,10 +259,20 @@ class TeclawDelivery(DeliveryStrategy):
         platform_ports: Callable[[], MaterialiserPorts],
         device_ports: Callable[[], MaterialiserPorts],
         redeliver: Optional[Redeliver] = None,
+        cli_tool_service: Optional[CliToolService] = None,
     ) -> None:
         self._platform_managed = platform_managed
         self._platform_ports = platform_ports
         self._device_ports = device_ports
+        # W9. ``cli_tools`` is always platform-managed on this family, so its
+        # port cannot be whichever the switch selects: with the switch off the
+        # device bundle carries the *ARCA* port, which would call ARCA-only
+        # engine endpoints on a teclaw bot — and, since ``phase_of`` puts this
+        # category before the container, would run with no container to call at
+        # all. Substituted into whichever bundle ``ports`` returns, so the
+        # invariant holds in one place instead of depending on two wiring sites
+        # agreeing.
+        self._cli_tool_service = cli_tool_service
         self._redeliver = redeliver
 
     @property
@@ -305,9 +315,12 @@ class TeclawDelivery(DeliveryStrategy):
         return not self._platform_managed
 
     def ports(self) -> MaterialiserPorts:
-        if self._platform_managed:
-            return self._platform_ports()
-        return self._device_ports()
+        bundle = (
+            self._platform_ports() if self._platform_managed else self._device_ports()
+        )
+        if self._cli_tool_service is None:
+            return bundle
+        return replace(bundle, cli_tool_service=self._cli_tool_service)
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
         if not self._platform_managed or self._redeliver is None:
@@ -369,6 +382,7 @@ class DeliveryStrategyFactory:
         arca_ports: Callable[[], MaterialiserPorts],
         teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
         redeliver: Optional[Redeliver] = None,
+        teclaw_cli_tool_service: Optional[Callable[[], CliToolService]] = None,
     ) -> None:
         self._is_teclaw = is_teclaw
         self._platform_managed = teclaw_platform_managed
@@ -379,6 +393,10 @@ class DeliveryStrategyFactory:
         # loud, not a quiet fallback.
         self._teclaw_platform_ports = teclaw_platform_ports
         self._redeliver = redeliver
+        # W9: the teclaw-bound CLI service, handed to every teclaw strategy
+        # whatever the switch says. A lazy callable for the reason every other
+        # port here is lazy — it reaches the device graph.
+        self._teclaw_cli_tool_service = teclaw_cli_tool_service
 
     @property
     def teclaw_platform_managed(self) -> bool:
@@ -399,6 +417,11 @@ class DeliveryStrategyFactory:
             platform_ports=self._teclaw_platform_ports or self._arca_ports,
             device_ports=self._arca_ports,
             redeliver=self._redeliver,
+            cli_tool_service=(
+                self._teclaw_cli_tool_service()
+                if self._teclaw_cli_tool_service is not None
+                else None
+            ),
         )
 
     def for_bot(self, bot: Mapping[str, Any]) -> DeliveryStrategy:

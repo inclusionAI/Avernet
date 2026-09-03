@@ -32,6 +32,11 @@ class CliToolOp(StrEnum):
     UNCHANGED = "unchanged"
     REMOVED = "removed"
     FAILED = "failed"
+    #: The bot already had a tool by that name, and the caller asked for an
+    #: install rather than a replacement. Distinct from ``FAILED`` because it is
+    #: the API's 409 rather than its 422: nothing was wrong with the
+    #: declaration, the name was simply taken.
+    CONFLICT = "conflict"
 
 
 @dataclass(frozen=True)
@@ -107,7 +112,7 @@ class CliToolOutcome:
 
     @property
     def failed(self) -> bool:
-        return self.op is CliToolOp.FAILED
+        return self.op in (CliToolOp.FAILED, CliToolOp.CONFLICT)
 
 
 @dataclass(frozen=True)

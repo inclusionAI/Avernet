@@ -275,6 +275,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             arca_ports=self._arca_ports,
             teclaw_platform_ports=teclaw_platform_ports_provider,
             redeliver=redeliver,
+            # W9: the teclaw-bound CLI service, so a teclaw bot never gets the
+            # ARCA delivery port for this category whatever the switch says.
+            teclaw_cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
         )
 
     # ── starting ────────────────────────────────────────────────────────────

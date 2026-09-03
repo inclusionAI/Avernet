@@ -485,6 +485,7 @@ class ManifestFetchModule(Module):
         injector: Injector,
         cli_tool_service_factory: CliToolServiceFactory,
         teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        teclaw_bindings: TeclawPlatformBindings,
     ) -> BotCliToolServiceProtocol:
         """W9: the ``bot_id``-addressed surface the HTTP routes bind to.
 
@@ -511,6 +512,10 @@ class ManifestFetchModule(Module):
             bot_service=_Bots(),
             cli_tool_service_factory=cli_tool_service_factory,
             is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+            # The same closing redeliver a manifest apply uses. Without it a
+            # teclaw install would answer 200 while the running container kept
+            # its previous tool set.
+            redeliver=teclaw_bindings.redeliver,
         )
 
     @singleton

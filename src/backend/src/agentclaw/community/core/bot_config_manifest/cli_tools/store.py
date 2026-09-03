@@ -12,12 +12,23 @@ after the source URL rotated — reads the platform's copy (spec D-4).
 **Key layout.** Two prefixes under the ``bot-data`` store's base, both keyed
 by the bot, for a tool named ``mycli`` on bot ``bot7`` owned by ``staff u1``::
 
-    live     teclaw/dev/bolt_data/staff_u1/bot7_cli/mycli
+    live     teclaw/dev/bolt_data/staff_u1/bot7_cli/mycli.3e7a1f9c2b8d4e6a
     staged   teclaw/dev/bolt_data/staff_u1/bot7_9_verify/teclaw/cli/mycli
-             └────────── store base ─────┘└──────── ref path ─────────┘
+             └────────── store base ─────┘└──────────── ref path ────────────┘
 
 The live prefix holds what the bot has installed *now*; it is not a snapshot
-of anything and so carries no engine-layout segment. The staged prefix is the
+of anything and so carries no engine-layout segment.
+
+**The live key carries a content fingerprint, and that is load-bearing.** An
+install that *replaces* a tool must not write over the bytes the current row
+points at before the engine has accepted the replacement: if delivery then
+fails, the surviving row would describe the old tool while the object held the
+new one — a promotion would copy the wrong bytes under the right metadata,
+which is worse than a missing object. With the digest in the key a replacement
+writes somewhere new, the old object stays valid until its row is replaced, and
+the discard paths only ever remove a key nothing references. The staged key
+needs no fingerprint: a publish stage is written once and its prefix is already
+unique per publish. The staged prefix is the
 one ``TeclawFilePromotion`` already builds — ``{bot}_{publish_id}_{stage}``,
 then the engine segment, then a namespace — with ``cli`` in the namespace slot
 beside ``workspace`` and ``identity``. Stage-scoping is what keeps a draft and
@@ -152,11 +163,23 @@ class CliToolStore:
     def _base(self) -> str:
         return self._store_base().rstrip("/")
 
-    def ref_path(self, scope: CliToolScope, name: str) -> str:
-        return f"{scope.rel_root}/{checked_name(name)}"
+    @staticmethod
+    def fingerprint(digest: str) -> str:
+        """The key's content half: the digest's hex, shortened.
 
-    def store_key(self, scope: CliToolScope, name: str) -> str:
-        return f"{self._base()}/{self.ref_path(scope, name)}"
+        Sixteen hex characters of a sha256 — the collision probability across
+        one bot's tools is not a risk anyone needs to reason about, and a full
+        64 characters would push a long name towards the object store's key cap
+        for no gain. Derived from the *declared* digest rather than re-hashing:
+        the fetch pipeline already proved the bytes match it.
+        """
+        return digest.rsplit(":", 1)[-1][:16] or "0"
+
+    def ref_path(self, scope: CliToolScope, name: str, digest: str) -> str:
+        return f"{scope.rel_root}/{checked_name(name)}.{self.fingerprint(digest)}"
+
+    def store_key(self, scope: CliToolScope, name: str, digest: str) -> str:
+        return f"{self._base()}/{self.ref_path(scope, name, digest)}"
 
     def stage_ref_path(
         self, scope: CliToolScope, *, name: str, publish_id: int, stage: str
@@ -174,9 +197,15 @@ class CliToolStore:
 
     # ── writes ───────────────────────────────────────────────────────────
 
-    def put(self, scope: CliToolScope, *, name: str, data: bytes) -> StoredCliTool:
-        """Write a tool's bytes to the live prefix; return what to record."""
-        ref_path = self.ref_path(scope, name)
+    def put(
+        self, scope: CliToolScope, *, name: str, digest: str, data: bytes
+    ) -> StoredCliTool:
+        """Write a tool's bytes to the live prefix; return what to record.
+
+        The key includes the content fingerprint, so this never overwrites the
+        object a *different* version's row still points at.
+        """
+        ref_path = self.ref_path(scope, name, digest)
         key = f"{self._base()}/{ref_path}"
         if not self._oss.put_object(key, data):
             raise CliToolStoreError(f"object store put failed for {key!r}")

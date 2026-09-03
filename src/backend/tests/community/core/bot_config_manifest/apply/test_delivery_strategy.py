@@ -148,6 +148,47 @@ def test_a_teclaw_creation_installs_tools_before_it_composes(switch) -> None:
     assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
 
 
+@pytest.mark.parametrize("switch", [True, False])
+def test_teclaw_always_gets_the_teclaw_cli_port_whatever_the_switch(switch) -> None:
+    """The category is always platform-managed, so its *port* cannot follow the
+    switch either.
+
+    With the switch off the device bundle carries the **ARCA** CLI port, which
+    would call ARCA-only engine endpoints on a teclaw bot — and, since
+    ``phase_of`` puts this category before the container, would run with no
+    container to call at all. The strategy substitutes the teclaw port into
+    whichever bundle it hands out.
+    """
+    teclaw_cli = object()
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+        cli_tool_service=teclaw_cli,
+    )
+    ports = teclaw.ports()
+    assert ports.cli_tool_service is teclaw_cli
+    # Every other port still comes from the bundle the switch selects.
+    assert ports.resource_service == ("store" if switch else "device")
+
+
+def test_arca_keeps_its_own_cli_port() -> None:
+    """The substitution is the teclaw strategy's alone — an ARCA bot's tools do
+    go into its live container."""
+    arca = ArcaDelivery(lambda: _ports("arca"))
+    assert arca.ports().cli_tool_service == "arca"
+
+
+def test_a_teclaw_strategy_with_no_cli_service_bound_leaves_the_bundle_alone() -> None:
+    """The bare wiring (no W9 service bound) behaves as it did before."""
+    teclaw = TeclawDelivery(
+        platform_managed=False,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+    )
+    assert teclaw.ports() == _ports("device")
+
+
 def test_the_order_table_itself_is_untouched_by_w9() -> None:
     """``order.py`` carries the ARCA reading; the per-family rule lives in the
     strategy. A change here would silently re-phase ARCA too."""

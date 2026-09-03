@@ -32,6 +32,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools import (
 )
 
 from ..cli_tools._fakes import (
+    elf,
     FakeCliToolRepo,
     FakeDelivery,
     FakeEntryFetcher,
@@ -42,9 +43,7 @@ _BASE = "teclaw/dev/bolt_data"
 
 
 def _elf() -> bytes:
-    header = bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 13)
-    header[18:20] = (0x3E).to_bytes(2, "little")
-    return bytes(header) + b"\x00" * 64
+    return elf()
 
 
 _TOOL = _elf()
@@ -247,9 +246,7 @@ async def test_the_api_and_apply_refuse_the_same_hostile_declaration() -> None:
     """The equivalence that makes "one implementation" a fact rather than a
     claim: both arms reach the same service, so a wrong-architecture binary
     fails identically whichever door it came through."""
-    arm64 = bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 13)
-    arm64[18:20] = (0xB7).to_bytes(2, "little")
-    payload = bytes(arm64) + b"\x00" * 64
+    payload = elf(machine=0xB7)
     digest = "sha256:" + hashlib.sha256(payload).hexdigest()
 
     service, repo, _, _ = _service(content=payload, digest=digest)

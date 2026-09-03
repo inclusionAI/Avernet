@@ -18,11 +18,11 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.verify import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.unpack import UnpackedTree
 
+from ._fakes import elf
 
-def _elf(machine: int, *, data_byte: int = 1, tail: bytes = b"\x00" * 32) -> bytes:
-    header = bytearray(b"\x7fELF\x02" + bytes([data_byte]) + b"\x01" + b"\x00" * 13)
-    header[18:20] = machine.to_bytes(2, "little" if data_byte != 2 else "big")
-    return bytes(header) + tail
+
+def _elf(machine: int, *, data_byte: int = 1) -> bytes:
+    return elf(machine=machine, little_endian=data_byte != 2)
 
 
 # ── the architecture check ────────────────────────────────────────────────
@@ -33,9 +33,36 @@ def test_an_x86_64_elf_passes() -> None:
 
 
 def test_a_file_too_short_to_hold_a_header_is_refused() -> None:
+    """A twenty-byte fragment carrying the magic and an x86-64 ``e_machine``
+    used to pass: the check stopped at ``e_machine`` and never asked whether
+    the rest of the header was there."""
     with pytest.raises(CliToolVerificationError) as excinfo:
-        verify_amd64_elf(b"\x7fELF", name="mycli")
-    assert "too short" in str(excinfo.value)
+        verify_amd64_elf(elf()[:20], name="mycli")
+    assert "truncated" in str(excinfo.value)
+
+
+def test_a_32_bit_elf_is_refused() -> None:
+    with pytest.raises(CliToolVerificationError) as excinfo:
+        verify_amd64_elf(elf(elf_class=1), name="mycli")
+    assert "32-bit" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "file_type,expected",
+    [(1, "relocatable object"), (4, "core dump"), (0, "unknown-type")],
+)
+def test_a_file_that_is_not_a_program_is_refused(file_type, expected) -> None:
+    """An x86-64 relocatable object is a perfectly valid ELF that cannot be
+    executed. Installing it would move the failure to the first invocation
+    inside a container, which is what this gate exists to prevent."""
+    with pytest.raises(CliToolVerificationError) as excinfo:
+        verify_amd64_elf(elf(file_type=file_type), name="mycli")
+    assert expected in str(excinfo.value)
+
+
+def test_a_position_independent_executable_passes() -> None:
+    """What most toolchains emit today: a PIE reads as ``ET_DYN``."""
+    verify_amd64_elf(elf(file_type=3), name="mycli")
 
 
 def test_a_non_elf_file_says_what_it_begins_with() -> None:

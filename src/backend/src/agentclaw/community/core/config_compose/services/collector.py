@@ -40,6 +40,7 @@ from agentclaw.community.core.config_compose.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
     BOT_DATA_STORE as CLI_TOOL_STORE,
     CliToolScope,
+    CliToolStore,
 )
 from agentclaw.community.core.config_compose.protocols import (
     ComposeInputCollector,
@@ -730,6 +731,10 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         written under an earlier base is therefore not found under the current
         one, and the next install writes it again — the same rule W8's
         managed-files store states for a file.
+
+        It carries the digest's fingerprint for the reason the store's key does:
+        a replacement writes a new object rather than overwriting the one the
+        current row describes.
         """
         if self._cli_tool_repository is None:
             return []
@@ -740,7 +745,10 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             CollectedCliTool(
                 name=record.name,
                 store=CLI_TOOL_STORE,
-                path=f"{scope.rel_root}/{record.name}",
+                path=(
+                    f"{scope.rel_root}/{record.name}"
+                    f".{CliToolStore.fingerprint(record.digest)}"
+                ),
                 md5=record.md5,
                 version=record.version,
             )

@@ -94,6 +94,15 @@ class FakeCliToolRepo:
         ] = record
         return record
 
+    def insert(self, **kwargs):
+        """Insert only — ``None`` when the name is taken, like the real one."""
+        key = self._key(
+            kwargs["env"], kwargs["entity_id"], kwargs["bot_id"], kwargs["name"]
+        )
+        if key in self.rows:
+            return None
+        return self.upsert(**kwargs)
+
     def delete(self, *, env, entity_id, bot_id, name) -> bool:
         self.deletes.append(name)
         return self.rows.pop(self._key(env, entity_id, bot_id, name), None) is not None
@@ -180,3 +189,28 @@ def code_of(module) -> str:
             continue
         kept.append(token.string)
     return " ".join(kept)
+
+
+def elf(
+    *,
+    machine: int = 0x3E,
+    file_type: int = 2,
+    elf_class: int = 2,
+    little_endian: bool = True,
+    payload: bytes = b"\x00" * 64,
+) -> bytes:
+    """A well-formed 64-bit ELF header, with the fields the gate reads settable.
+
+    One builder rather than one per test file, because the gate checks four
+    fields and a helper that sets only the two a given test cares about is how
+    a test ends up passing for the wrong reason.
+    """
+    order = "little" if little_endian else "big"
+    header = bytearray(64)
+    header[0:4] = b"\x7fELF"
+    header[4] = elf_class
+    header[5] = 1 if little_endian else 2
+    header[6] = 1  # EI_VERSION
+    header[16:18] = file_type.to_bytes(2, order)
+    header[18:20] = machine.to_bytes(2, order)
+    return bytes(header) + payload

@@ -36,6 +36,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
 )
 
 from ._fakes import (
+    elf,
     FakeCliToolRepo,
     FakeDelivery,
     FakeEntryFetcher,
@@ -45,6 +46,13 @@ from ._fakes import (
 
 _BASE = "teclaw/dev/bolt_data"
 _LIVE = f"{_BASE}/staff_u1/bot7_cli"
+
+
+def _key(name: str = "mycli", digest: str = None) -> str:
+    """The live key a tool of this digest lands at — fingerprint and all."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools import CliToolStore
+
+    return f"{_LIVE}/{name}.{CliToolStore.fingerprint(digest or _DIGEST)}"
 _CTX = CliToolContext(
     bot_id="bot7", owner_id="u1", actor_id="u2", entity_id="u1",
     env="dev", engine_type="openclaw", tenant="teamclaw",
@@ -52,10 +60,7 @@ _CTX = CliToolContext(
 
 
 def _elf(machine: int = 0x3E, *, payload: bytes = b"\x00" * 64) -> bytes:
-    """A minimal little-endian ELF header with ``e_machine`` set."""
-    header = bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 13)
-    header[18:20] = machine.to_bytes(2, "little")
-    return bytes(header) + payload
+    return elf(machine=machine, payload=payload)
 
 
 _TOOL = _elf()
@@ -108,12 +113,12 @@ async def test_install_fetches_stores_delivers_and_records() -> None:
 
     assert outcome.op is CliToolOp.INSTALLED
     assert delivery.installed == [("mycli", _TOOL)]
-    assert oss.objects[f"{_LIVE}/mycli"] == _TOOL
+    assert oss.objects[_key()] == _TOOL
     record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
     assert record.md5 == hashlib.md5(_TOOL).hexdigest()
     assert record.size_bytes == len(_TOOL)
     assert (record.digest, record.version, record.oss_key) == (
-        _DIGEST, "1.4.2", f"{_LIVE}/mycli",
+        _DIGEST, "1.4.2", _key(),
     )
     assert (record.installed_by, record.modifier) == ("u2", "u2")
 
@@ -188,7 +193,10 @@ async def test_archive_selects_only_the_declared_subpath(kind, pack) -> None:
     )
     assert outcome.op is CliToolOp.INSTALLED
     assert delivery.installed == [("mycli", _TOOL)]
-    assert oss.objects[f"{_LIVE}/mycli"] == _TOOL
+    # The key fingerprints the *archive's* digest — what the entry pinned —
+    # rather than the selected member's, because the declaration is what a
+    # re-declaration compares against.
+    assert oss.objects[_key(digest=digest)] == _TOOL
 
 
 @pytest.mark.asyncio
@@ -294,8 +302,8 @@ async def test_a_failed_placement_discards_the_object_it_just_stored() -> None:
     delivery = FakeDelivery(install_error=CliToolPlacementError("nope"))
     service, _, _, _, oss = _service(delivery=delivery)
     await service.install(_CTX, _decl(), installed_by="u2")
-    assert oss.deletes == [f"{_LIVE}/mycli"]
-    assert f"{_LIVE}/mycli" not in oss.objects
+    assert oss.deletes == [_key()]
+    assert _key() not in oss.objects
 
 
 @pytest.mark.asyncio
@@ -317,7 +325,7 @@ async def test_remove_deletes_the_oss_object_with_the_row() -> None:
     assert outcome.op is CliToolOp.REMOVED
     assert delivery.deleted == ["mycli"]
     assert repo.rows == {}
-    assert f"{_LIVE}/mycli" not in oss.objects
+    assert _key() not in oss.objects
 
 
 @pytest.mark.asyncio
@@ -539,7 +547,7 @@ async def test_a_reinstall_collects_an_object_left_under_an_earlier_base() -> No
     else."""
     service, repo, _, _, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
-    stale = "teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli"
+    stale = "teclaw/OLD/bolt_data/staff_u1/bot7_cli/mycli.oldfingerprint"
     oss.objects[stale] = _TOOL
     repo.rows[("dev", "u1", "bot7", "mycli")] = repo.rows[
         ("dev", "u1", "bot7", "mycli")
@@ -547,7 +555,7 @@ async def test_a_reinstall_collects_an_object_left_under_an_earlier_base() -> No
 
     await service.install(_CTX, _decl(), installed_by="u2")
     assert stale in oss.deletes and stale not in oss.objects
-    assert oss.objects[f"{_LIVE}/mycli"] == _TOOL
+    assert oss.objects[_key()] == _TOOL
 
 
 @pytest.mark.asyncio
@@ -625,3 +633,263 @@ async def test_a_manifest_apply_removes_a_tool_a_person_installed() -> None:
     assert [(o.name, o.op) for o in outcomes] == [("by-hand", CliToolOp.REMOVED)]
     assert outcomes[0].record.installed_by == "u2"
     assert delivery.deleted == ["by-hand"] and repo.rows == {}
+
+
+# ── replacement, and the object the surviving row still describes ─────────
+
+
+@pytest.mark.asyncio
+async def test_a_failed_replacement_leaves_the_installed_tools_bytes_intact() -> None:
+    """The finding this key layout exists for.
+
+    A replacement whose delivery fails must not damage the tool the bot still
+    has. If the new bytes went to the same key, the surviving row would
+    describe the old tool while the object held the new one — and a promotion
+    would copy the wrong bytes under the right metadata, which is worse than a
+    missing object.
+    """
+    service, repo, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    original_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._delivery.install_error = CliToolPlacementError("nope")
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+
+    outcome = await service.install(
+        _CTX, _decl(digest=other_digest), installed_by="u2"
+    )
+
+    assert outcome.op is CliToolOp.FAILED
+    # The row still points at its own object, and that object still holds the
+    # bytes the bot is running.
+    row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    assert row.oss_key == original_key and row.digest == _DIGEST
+    assert oss.objects[original_key] == _TOOL
+    assert original_key not in oss.deletes
+
+
+@pytest.mark.asyncio
+async def test_a_failed_reinstall_of_the_same_digest_keeps_the_shared_object() -> None:
+    """The one case where the new key *is* the old one: same bytes, same
+    fingerprint. Discarding it would delete what the surviving row describes."""
+    service, repo, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    service._delivery.install_error = CliToolPlacementError("nope")
+    outcome = await service.install(_CTX, _decl(), installed_by="u2")
+
+    assert outcome.op is CliToolOp.FAILED
+    assert oss.objects[key] == _TOOL and key not in oss.deletes
+
+
+@pytest.mark.asyncio
+async def test_a_successful_replacement_collects_the_version_it_replaced() -> None:
+    service, repo, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    outcome = await service.install(
+        _CTX, _decl(digest=other_digest), installed_by="u2"
+    )
+
+    assert outcome.op is CliToolOp.INSTALLED
+    new_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+    assert new_key != old_key
+    assert old_key in oss.deletes and old_key not in oss.objects
+    assert oss.objects[new_key] == other
+
+
+class _Bots:
+    """The one bot-lookup method ``BotCliToolService`` calls."""
+
+    def __init__(self, *, engine: str) -> None:
+        self._engine = engine
+
+    def get_bot(self, bot_id: str, owner_id: str) -> dict:
+        return {
+            "bot_id": bot_id,
+            "entity_id": "u1",
+            "entity_type": "staff",
+            "active_engine": self._engine,
+            "bot_type": "personal",
+        }
+
+
+# ── the API arm's teclaw redeliver ────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_teclaw_install_redelivers_the_artifact() -> None:
+    """On teclaw the artifact *is* the delivery, so a row and some bytes change
+    nothing a running container can see. Without this the API would answer 200
+    while the bot kept its previous tool set."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+        BotCliToolService,
+    )
+
+    delivered: list[str] = []
+
+    async def _redeliver(ctx):
+        delivered.append(ctx.bot_id)
+        return None
+
+    service, *_ = _service()
+    bots = _Bots(engine="teclaw")
+    api = BotCliToolService(
+        bot_service=bots,
+        cli_tool_service_factory=lambda family: service,
+        is_teclaw=lambda engine: engine == "teclaw",
+        redeliver=_redeliver,
+    )
+    await api.install(bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl())
+    assert delivered == ["bot7"]
+
+    await api.remove(bot_id="bot7", owner_id="u1", actor_id="u2", name="mycli")
+    assert delivered == ["bot7", "bot7"]
+
+
+@pytest.mark.asyncio
+async def test_an_arca_install_does_not_redeliver() -> None:
+    """The engine's ``install`` already put the tool in the container; a
+    whole-artifact redeliver would be a second delivery of nothing."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+        BotCliToolService,
+    )
+
+    delivered: list[str] = []
+
+    async def _redeliver(ctx):
+        delivered.append(ctx.bot_id)
+        return None
+
+    service, *_ = _service()
+    api = BotCliToolService(
+        bot_service=_Bots(engine="openclaw"),
+        cli_tool_service_factory=lambda family: service,
+        is_teclaw=lambda engine: engine == "teclaw",
+        redeliver=_redeliver,
+    )
+    await api.install(bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl())
+    assert delivered == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_redeliver_does_not_fail_an_install_that_worked() -> None:
+    """The tool is installed — the row, the bytes and the next compose all say
+    so. Answering 500 to a caller whose install succeeded would be the worse
+    report."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+        BotCliToolService,
+    )
+
+    async def _redeliver(ctx):
+        return "the container was unreachable"
+
+    service, repo, *_ = _service()
+    api = BotCliToolService(
+        bot_service=_Bots(engine="teclaw"),
+        cli_tool_service_factory=lambda family: service,
+        is_teclaw=lambda engine: engine == "teclaw",
+        redeliver=_redeliver,
+    )
+    record = await api.install(
+        bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl()
+    )
+    assert record.name == "mycli"
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is not None
+
+
+# ── the API's 409, made true at the write ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_insert_only_refuses_a_name_taken_during_the_fetch() -> None:
+    """The finding this mode exists for.
+
+    The API's pre-check happens before a fetch that can take minutes; the name
+    can be claimed inside that window. With ``upsert`` both callers would
+    succeed and one would silently replace the other, which is not what a 409
+    contract means.
+    """
+    service, repo, delivery, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="someone-else")
+    winner_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+
+    outcome = await service.install(
+        _CTX, _decl(digest=other_digest), installed_by="u2", expect_absent=True
+    )
+
+    assert outcome.op is CliToolOp.CONFLICT and outcome.failed
+    # The winner's row and object are untouched.
+    row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    assert (row.installed_by, row.oss_key) == ("someone-else", winner_key)
+    assert oss.objects[winner_key] == _TOOL
+
+
+@pytest.mark.asyncio
+async def test_a_conflicting_install_leaves_no_object_behind() -> None:
+    """The loser's bytes are at a key of their own — this version's
+    fingerprint — so nothing references them once the write is refused."""
+    service, _, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="someone-else")
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    await service.install(
+        _CTX, _decl(digest=other_digest), installed_by="u2", expect_absent=True
+    )
+
+    loser_key = _key(digest=other_digest)
+    assert loser_key in oss.deletes and loser_key not in oss.objects
+
+
+@pytest.mark.asyncio
+async def test_a_manifest_apply_still_replaces_rather_than_conflicting() -> None:
+    """A full override is entitled to replace, so it never asks for
+    insert-only — otherwise every re-apply of a changed tool would 409."""
+    service, repo, _, _, _ = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    outcomes = await service.replace_all(
+        _CTX, [_decl(digest=other_digest)], installed_by="manifest"
+    )
+
+    assert [o.op for o in outcomes] == [CliToolOp.INSTALLED]
+    assert repo.get(
+        env="dev", entity_id="u1", bot_id="bot7", name="mycli"
+    ).digest == other_digest
+
+
+@pytest.mark.asyncio
+async def test_a_conflict_over_identical_bytes_keeps_the_winners_object() -> None:
+    """The one case where the loser's cleanup would be the winner's loss.
+
+    The live key is content-addressed, so two racers installing the *same*
+    bytes under the same name land on one key. Discarding it because this
+    caller's write was refused would leave the winner's row pointing at an
+    object that no longer exists.
+    """
+    service, repo, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="someone-else")
+
+    outcome = await service.install(
+        _CTX, _decl(), installed_by="u2", expect_absent=True
+    )
+
+    assert outcome.op is CliToolOp.CONFLICT
+    key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+    assert key not in oss.deletes and oss.objects[key] == _TOOL
