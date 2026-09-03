@@ -53,7 +53,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventCreatedResult,
     WorkOrderEventType,
     reviewed_event_type_for,
-    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -643,14 +642,11 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 .first()
                 is not None
             )
-            event_type = (
-                notification.event_type
-                if notification is not None
-                else work_order.biz_type
-            )
-            title = (
-                notification.title if notification is not None else work_order.biz_type
-            )
+            # A work order without a notification has no originating event.
+            # Keep these fields empty so the delivery adapter can derive a
+            # compatible title from the business type and current status.
+            event_type = notification.event_type if notification is not None else None
+            title = notification.title if notification is not None else None
             return WorkOrderDetail(
                 work_order=work_order.to_record(),
                 event_type=event_type,
@@ -824,9 +820,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         notification.biz_type, "value", notification.biz_type
                     ),
                     biz_id=notification.biz_id,
-                    title=notification_title_for(
-                        WorkOrderEventType.SPACE_JOIN_REVIEWED.value,
-                        notification.title,
+                    title=(
+                        WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
+                        if target_status is WorkOrderStatus.APPROVED
+                        else WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
                     ),
                     content=notification.content,
                     env=env,

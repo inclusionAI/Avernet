@@ -355,8 +355,8 @@ class WorkOrderListItem(BaseModel):
 
 class WorkOrderDetail(BaseModel):
     work_order: WorkOrderRecord
-    event_type: str
-    title: str
+    event_type: str | None
+    title: str | None
     content: str | None = None
     space_id: int
     space_name: str

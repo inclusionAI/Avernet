@@ -526,6 +526,29 @@ def test_get_work_order_maps_nested_content(client, work_order_service):
     )
 
 
+def test_get_work_order_without_notification_uses_business_status_title(
+    client, work_order_service
+):
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(WorkOrderStatus.PENDING),
+        event_type=None,
+        title=None,
+        content=None,
+        space_id=7,
+        space_name="Team",
+        applicant_name="Applicant",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["event_type"] is None
+    assert data["title"] == "空间加入申请待审批"
+    assert data["summary"] == "你有一条新的通知，请查看详情。"
+
+
 def test_get_bot_editor_work_order_maps_business_content(client, work_order_service):
     record = _work_order(
         biz_data=json.dumps(

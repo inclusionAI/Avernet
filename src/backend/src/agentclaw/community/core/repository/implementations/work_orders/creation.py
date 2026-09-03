@@ -105,6 +105,11 @@ class _WorkOrderCreationRepository:
                     )
 
             notifications = []
+            persisted_title = (
+                title
+                if event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value
+                else notification_title_for(event_type, title)
+            )
             for user_id in recipients:
                 notification = self._Notification(
                     work_order_id=work_order_id,
@@ -113,7 +118,7 @@ class _WorkOrderCreationRepository:
                     event_type=event_type,
                     biz_type=biz_type,
                     biz_id=biz_id,
-                    title=notification_title_for(event_type, title),
+                    title=persisted_title,
                     content=content,
                     env=env,
                 )
@@ -276,9 +281,7 @@ class _WorkOrderCreationRepository:
                         event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
                         biz_type=WorkOrderBizType.SPACE_JOIN.value,
                         biz_id=str(space_id),
-                        title=notification_title_for(
-                            WorkOrderEventType.SPACE_JOIN_APPLIED.value, title
-                        ),
+                        title=title,
                         content=content,
                         env=env,
                     )
