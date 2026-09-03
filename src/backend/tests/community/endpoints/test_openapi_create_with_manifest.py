@@ -962,7 +962,7 @@ def test_a_teclaw_creation_walks_record_phase_container_ready(client, world):
     states: list[str] = []
     seen_at_provision: dict[str, list[str]] = {}
     store = world.get(ManagedFilesStore)
-    scope = ManagedFileScope(env=get_current_env(), entity_type="staff", entity_id=_OWNER, bot_id=bot_id)
+    scope = ManagedFileScope(entity_type="staff", entity_id=_OWNER, bot_id=bot_id)
 
     outcome = None
     for _ in range(8):
