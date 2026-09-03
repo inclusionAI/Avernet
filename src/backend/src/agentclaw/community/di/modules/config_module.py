@@ -355,21 +355,6 @@ class ConfigModule(Module):
 
     @singleton
     @provider
-    def bcs_binding(self) -> cfg.BcsBindingConfig:
-        """BCS bindings endpoint for bcn_gateway channels (neutral empty; corp
-        env overlays set the host and service token)."""
-        block = _block("bcs_binding")
-        defaults = cfg.BcsBindingConfig()
-        return cfg.BcsBindingConfig(
-            base_url=str(block.get("base_url", defaults.base_url)),
-            service_token=str(block.get("service_token", defaults.service_token)),
-            timeout_seconds=float(
-                block.get("timeout_seconds", defaults.timeout_seconds)
-            ),
-        )
-
-    @singleton
-    @provider
     def llm_harness(self) -> cfg.LLMHarnessConfig:
         """Harness LLM config (neutral empty defaults; corp env overlays set the
         endpoint/secret name via the ``llm`` yaml block)."""
