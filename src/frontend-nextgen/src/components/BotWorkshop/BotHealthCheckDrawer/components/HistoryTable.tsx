@@ -32,7 +32,7 @@ export function HistoryTable({ history, onViewDetail }: HistoryTableProps) {
                   <th className="px-4 py-3 text-left">发起方</th>
                   <th className="px-4 py-3 text-left">体检项目</th>
                   <th className="px-4 py-3 text-left">警告项</th>
-                  <th className="px-4 py-3 text-left">错误项</th>
+                  <th className="px-4 py-3 text-left">未通过项</th>
                   <th className="px-4 py-3 text-left">操作</th>
                 </tr>
               </thead>

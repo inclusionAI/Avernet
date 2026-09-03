@@ -170,6 +170,15 @@ describe('BotHealthCheckDrawer', () => {
     dimension.status = 'error';
     dimension.scanStatus = 'completed';
     dimension.failedReason = null;
+    dimension.errorCount = 1;
+    dimension.checkItems = [
+      {
+        name: 'AGENTS.md',
+        status: 'error',
+        result: 'fail',
+        score: 32,
+      },
+    ];
     dimension.patches = [
       {
         patch_id: 7,
@@ -200,6 +209,8 @@ describe('BotHealthCheckDrawer', () => {
     );
 
     expect(screen.getByText('异常')).toBeInTheDocument();
+    expect(screen.getAllByText('未通过')).toHaveLength(2);
+    expect(screen.queryByText('错误')).not.toBeInTheDocument();
     expect(screen.getByText(/补充安全边界/)).toBeInTheDocument();
     expect(screen.queryByText('检测失败：未知原因')).not.toBeInTheDocument();
   });

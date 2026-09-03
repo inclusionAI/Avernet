@@ -88,7 +88,7 @@ export const RESULT_STYLES: Record<
 > = {
   pass: { icon: '✓', tone: 'success', label: '通过' },
   warning: { icon: '⚠', tone: 'warning', label: '警告' },
-  fail: { icon: '✕', tone: 'error', label: '错误' },
+  fail: { icon: '✕', tone: 'error', label: '未通过' },
   error: { icon: '!', tone: 'neutral', label: '检测失败' },
   pending: { icon: '○', tone: 'neutral', label: '待检测' },
   running: { icon: '⟳', tone: 'primary', label: '检测中' },
