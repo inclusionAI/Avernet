@@ -5,7 +5,7 @@
 Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 
 ## Task 1: Add the `cli_tools` category and tool index to the managed-files store
-- **Goal:** Give the store a `tools/` namespace, a `cli_tools` category, and the per-bot index object the other categories do not need.
+- **Goal:** Give the store a `tools/` namespace, a `cli_tools` category, and the per-bot index object the other categories do not need. teclaw side only — ARCA holds no copy.
 - **Files:** `src/agentclaw/community/core/bot_config_manifest/managed_files/store.py`, `.../managed_files/__init__.py`
 - **Done when:**
   - [ ] `TOOLS_NS`, `TOOLS_INDEX`, `CATEGORY_CLI_TOOLS` and the `ToolRecord` dataclass exist and are exported.
@@ -26,21 +26,21 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
   - [ ] `select_subpath` refuses a `subpath` that is absent, is not a regular file, or escapes the tree after symlink resolution.
   - [ ] `verify_amd64_elf` refuses a non-ELF file and one whose `e_machine` is not x86-64, failing that entry with the architecture found and the one expected.
   - [ ] `md5` is computed over the finally selected file, never read from a store ETag.
-  - [ ] `plan` is read-only and classifies `unchanged` on `(digest, subpath)` equality — so the same archive with a changed `subpath` is a change, not a no-op.
-  - [ ] `plan` computes removals for names in the index that the declaration no longer carries; an empty declared list removes every tool.
-  - [ ] `write` puts changed tools, deletes removals, and rewrites the index **last**; an `is_noop` plan performs no write.
+  - [ ] `plan` is read-only. Where the port answers with a record (teclaw), `(digest, subpath)` equality plans `unchanged` — so the same archive with a changed `subpath` is a change, not a no-op. Where it does not (ARCA), every declared tool plans a write and the category is never `is_noop` — replace, don't diff, as `resources` does.
+  - [ ] `plan` computes removals from `list_tools`; an empty declared list removes every tool.
+  - [ ] `write` calls `put_tool` per write and `remove_tool` per removal, and never branches on engine.
   - [ ] `version` reaches the report and the index and never affects convergence.
 - **Depends on:** Task 1
 
-## Task 3: Register the materialiser and add its two ports
-- **Goal:** Wire the materialiser into both delivery strategies, with a store port and a projection port.
-- **Files:** `.../apply/registry.py`, `.../apply/delivery.py`, `.../apply/cli_tools_port.py` (new), `.../apply/materialisers/__init__.py`, the DI module that builds the strategies
+## Task 3: Add the tool port and register the materialiser
+- **Goal:** One narrow write port, bound per delivery strategy — the `resources` shape.
+- **Files:** `.../apply/cli_tool_port.py` (new), `.../apply/registry.py`, `.../apply/delivery.py`, `.../apply/materialisers/__init__.py`, the DI module that builds the strategies
 - **Done when:**
-  - [ ] `CliToolProjectionPort` exists, named the way `ActivationPort` names activation's methods.
-  - [ ] `MaterialiserPorts` gains `cli_tool_store` and `cli_tool_projection`; `as_kwargs` carries both.
-  - [ ] Both strategies bind the same store; ARCA binds the real projector and the platform-managed teclaw path binds the record-only stand-in, because the artifact is teclaw's projection.
+  - [ ] `ManifestCliToolPort` declares `put_tool` / `list_tools` / `remove_tool`, named the way `resource_port.py` names the resource chain's methods.
+  - [ ] `MaterialiserPorts` gains `cli_tool_service`; `as_kwargs` carries it.
+  - [ ] The ARCA strategy binds the device-backed port, the teclaw platform-managed strategy the store-backed one.
   - [ ] `build_materialisers` constructs `CliToolsMaterialiser`; the registry test pinning every key to an `APPLY_ORDER` row still passes.
-  - [ ] **`order.py` is not modified** — `cli_tools` is already `ON_CONTAINER` at position 6, which is where a live projection belongs.
+  - [ ] **`order.py` is not modified** — `cli_tools` is already `ON_CONTAINER`, and `TeclawDelivery.phase_of` already re-phases non-script constructs to `PRE_CONTAINER` under the switch, so the per-family phase needs no category-specific code.
   - [ ] The stale "`cli_tools` arrives with W9" comments in `registry.py:218` and `materialisers/__init__.py:10` are removed.
   - [ ] The existing "orchestrator stays generic" and "no materialiser names an engine" tests pass unedited.
 - **Depends on:** Task 2
@@ -59,7 +59,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 - **Files:** `tests/community/core/bot_config_manifest/apply/test_cli_tools_materialiser.py` (new), `tests/.../test_iteration1_ordering.py`
 - **Done when:**
   - [ ] The nine cases named in `plan.md`'s test strategy for the materialiser pass — notably `same digest + different subpath is a change` and `index is written after the bytes`.
-  - [ ] A test pins `cli_tools` as `ON_CONTAINER` on both families, added as a new row rather than by editing an existing assertion.
+  - [ ] A test pins `cli_tools` as `ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw under the switch, added as a new row rather than by editing an existing assertion.
   - [ ] Non-ELF and wrong-architecture inputs each fail their entry with a message naming what was found.
 - **Depends on:** Task 4
 
@@ -84,45 +84,44 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
   - [ ] `ownership.cli_tools` follows the operation, as W8 established.
 - **Depends on:** Task 6
 
-## Task 8: Add the `cli_tools` domain to the runtime projection
-- **Goal:** Make tools a third projection domain beside skills and MCP, on the seam that already spans the ARCA family.
-- **Files:** `core/skill_center/runtime_projection_contract.py`, `core/skill_center/services/runtime_projections/per_domain.py`
+## Task 8: Build the device-backed tool port (ARCA)
+- **Goal:** Write the tool into the live container through the existing file chain, then make it executable.
+- **Files:** `core/bot_config_manifest/apply/cli_tool_device_port.py` (new)
 - **Done when:**
-  - [ ] `ProjectionScope` gains its tools half, declared by the mutation rather than inferred.
-  - [ ] `PerDomainRuntimeProjection` calls the engine's tools endpoint with the declared set, sending the **`cliToolRef` shape verbatim** — the same refs teclaw gets from the artifact.
-  - [ ] `validate_plan` refuses a `cli_tools` plan an engine has no contract for **before any runtime request is emitted**.
-  - [ ] A tools-only scope does not force a skills or MCP rewrite.
-  - [ ] An empty declared list projects removal of every platform-delivered tool.
-  - [ ] `WholeArtifactRuntimeProjection` needs no `cli_tools` branch; a test says so.
+  - [ ] `put_tool` writes through `ResourceFileService`'s chain — the same chain `resources` uses — into the platform tools directory.
+  - [ ] It then sets the executable bit via `execute_baas_shell_command`, the helper `baas_container_init` and `baas_codefuse_writer` already use. **No new channel, no engine change, no deploy-path change.**
+  - [ ] A non-zero exit raises with the command's stderr, so the entry fails in the apply report rather than leaving a non-executable file.
+  - [ ] The tool name is `shlex.quote`d before it reaches the shell, on top of W1's no-separator constraint.
+  - [ ] `list_tools` returns names only (no md5/digest — the platform holds no copy on ARCA), which is what makes the materialiser plan every tool as a write.
+  - [ ] `remove_tool` deletes a tool the declaration no longer names.
 - **Depends on:** Task 3
 
-## Task 9: Report honestly for an engine without the endpoint
-- **Goal:** Make "this engine cannot do tools yet" a first-class, visible outcome rather than silence.
-- **Files:** `core/skill_center/services/runtime_projections/per_domain.py`, `.../apply/materialisers/cli_tools.py`
+## Task 9: Build the store-backed tool port (teclaw)
+- **Goal:** Put bytes and record the index, so the composer can emit refs.
+- **Files:** `core/bot_config_manifest/managed_files/ports.py`
 - **Done when:**
-  - [ ] An engine with no tools endpoint yields `SKIPPED` — or `DEGRADED` when other domains converged — with a `RuntimeProjectionIssue` naming the engine and the missing endpoint, and `retryable` set honestly.
-  - [ ] The materialiser surfaces that outcome in the apply report per entry, using the existing status vocabulary; no new report shape.
-  - [ ] A `cli_tools` apply on such an engine **never reports success**.
-  - [ ] The store is still converged in that case, so the tools are delivered the moment the engine gains the endpoint.
-- **Depends on:** Task 8
+  - [ ] `put_tool` writes the bytes under the `cli_tools` category and records `md5`, `version`, `digest` and `subpath` in the tool index, bytes before index.
+  - [ ] `list_tools` answers from the index, so `(digest, subpath)` equality can plan `unchanged`.
+  - [ ] `remove_tool` deletes the object and its index entry.
+  - [ ] It sets no executable bit: on teclaw the engine does that on placement, per its contract.
+- **Depends on:** Task 3
 
-## Task 10: Projection tests
-- **Goal:** Pin the protocol's behaviour without needing a real engine.
-- **Files:** `tests/community/core/skill_center/test_cli_tools_projection.py` (new)
+## Task 10: Port tests
+- **Goal:** Pin both ports, including the failure that would silently ship an unusable tool.
+- **Files:** `tests/community/core/bot_config_manifest/apply/test_cli_tool_ports.py` (new)
 - **Done when:**
-  - [ ] The five cases named in `plan.md`'s test strategy for the projection pass.
-  - [ ] A test pins that **no deploy-path file changed**: the composed start command is byte-identical for every bot and #935's assertion is unedited.
-  - [ ] The `SKIPPED` path is asserted end to end, from the projection through to the apply report entry.
-- **Depends on:** Task 9
+  - [ ] The six cases named in `plan.md`'s test strategy for the ports pass — notably `failed chmod fails the entry with stderr` and `tool name with shell metacharacters is quoted`.
+  - [ ] A test pins that no deploy-path file and no `skill_center` file changed.
+- **Depends on:** Tasks 8, 9
 
-## Task 11: Write the ARCA-facing CLI protocol document
-- **Goal:** Give the ARCA engine owners the spec they implement against, as `teclaw-cli-contract.zh-CN.md` does for teclaw.
-- **Files:** `docs/bot-config-manifest/arca-cli-contract.zh-CN.md` (new), `docs/bot-config-manifest/engine-requirements.zh-CN.md`
+## Task 11: Confirm the tools directory is on the agent's `PATH` (closes A2)
+- **Goal:** Answer the spec's one open question, per deploy runtime.
+- **Files:** `docs/bot-config-manifest/engine-requirements.zh-CN.md`, and the tools-directory constant
 - **Done when:**
-  - [ ] The document states the ref shape, the four behaviours (placement, `md5` change test, executable bit, `PATH`), full-replacement semantics, and the projection result an engine returns.
-  - [ ] It states what the platform guarantees: one self-contained executable per entry, `sha256` already enforced, architecture already verified.
-  - [ ] It includes the removal and empty-list cases, and the idempotent redelivery case.
-  - [ ] `engine-requirements.zh-CN.md` is updated: the "zero changes" line now carries the `cli_tools` exception, and **A2 is closed** — the PATH injection point is the engine's internal decision under this protocol, not a platform-side answer.
+  - [ ] The directory is confirmed against the ACK and managed runtimes: either it is already on the agent process's `PATH`, or container-init adds it.
+  - [ ] The constant reflects what was confirmed, not what was assumed.
+  - [ ] `engine-requirements.zh-CN.md` records that the ARCA family needs **no change** for `cli_tools`, and A2 is closed by naming the directory.
+  - [ ] Any runtime that does not fit is recorded with what it would need, rather than silently assumed to work.
 - **Depends on:** Task 8
 
 ## Task 12: Documentation and work-item reconciliation
@@ -151,13 +150,13 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 
 ## Groups
 
-- **Group A — Store and materialiser:** Tasks 1, 2, 3
-  - Theme: One desired state, one convergence rule. The `cli_tools` category exists in the store, the materialiser converges it, and it is registered with its two ports. Nothing is user-reachable yet.
+- **Group A — Materialiser and port shape:** Tasks 1, 2, 3
+  - Theme: The pipeline and the seam. The store gains the `cli_tools` category, the materialiser converges through a port it cannot see the engine behind, and it is registered. Nothing user-reachable yet.
 - **Group B — Admission:** Tasks 4, 5
-  - Theme: The category becomes acceptable at `PUT`, with the pipeline's behaviour pinned — including the two silent-wrong-file failure modes.
+  - Theme: The category becomes acceptable at `PUT`, with the pipeline pinned — including the two silent-wrong-file failure modes.
 - **Group C — teclaw arm:** Tasks 6, 7
   - Theme: The artifact carries `cli_tools` refs, and a bot without tools still composes byte-identical output.
-- **Group D — The engine protocol:** Tasks 8, 9, 10, 11
-  - Theme: Tools become a third projection domain on the seam that already spans the engines, an engine without the endpoint reports `SKIPPED` rather than silence, and the ARCA engine owners get the contract they implement against.
+- **Group D — ARCA arm:** Tasks 8, 9, 10, 11
+  - Theme: Both ports built — device write plus `chmod` on ARCA, store plus index on teclaw — and the tools directory confirmed to be on `PATH`, which closes A2.
 - **Group E — Docs and verification:** Tasks 12, 13
   - Theme: The limits are written down where they are read, the stale docs are reconciled, and the spec's criteria are checked off.
