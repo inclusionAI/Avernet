@@ -36,6 +36,15 @@ class UpdateDeviceStatusResult:
     new_status: str
 
 
+@dataclass
+class UpdateBotStatusResult:
+    """Result of a bot status update operation."""
+
+    bot_uuid: str
+    previous_status: str
+    new_status: str
+
+
 from secbaas.community.api.device_manage import (  # noqa: E402 — cyclic import guard
     DeployConfig,
 )
