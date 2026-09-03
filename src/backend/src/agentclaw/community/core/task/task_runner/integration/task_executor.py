@@ -278,7 +278,7 @@ class TaskExecutor:
         self,
         node: TaskNode,
         openapi_bot_id: str,
-        owner_user_id: str,
+        assignee_owner_id: str,
         loop_task_id: str,
     ) -> bool:
         """P2 旁路:single_bot → "manager_worker 群"(single bot 作 manager,自管自执行,无 worker;
@@ -288,8 +288,8 @@ class TaskExecutor:
         manager_worker 带 event_subscriptions → BCS require_human,需预发绑真实 BcsBotTokenProvider
         (driver-bot session_token Bearer)才放行建群,否则建群被拒。"""
         logger.info(
-            "[task][task-executor] singlebot_2_group 旁路入口 task=%s node=%s driver_bot=%s owner=%s loop_task_id=%s",
-            node.task_id, node.node_id, openapi_bot_id, owner_user_id, loop_task_id,
+            "[task][task-executor] singlebot_2_group 旁路入口 task=%s node=%s driver_bot=%s assignee_owner_id=%s loop_task_id=%s",
+            node.task_id, node.node_id, openapi_bot_id, assignee_owner_id, loop_task_id,
         )
         ctx = dict(self._context.build(node.task_id, node.node_id) or {})
         ctx.update({
@@ -311,16 +311,19 @@ class TaskExecutor:
             group_name=node.run_info.extend_props.get("group_name") or f"{node.task_id}-{node.node_id}",
             members_info=[{"bot_id": driver_bot, "role": "manager"}],
             extend_props={
-                "owner_user_id": owner_user_id,
                 "manager_bot_id": driver_bot,
                 "loop_task_id": loop_task_id,
                 "task_instruction": message,
             },
         )
+        task_owner_id = self._resolve_owner_user_id(gf)
+        gf.extend_props["owner_user_id"] = task_owner_id
+
         logger.info(
-            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat owner=%s",
-            node.task_id, node.node_id, openapi_bot_id, owner_user_id,
+            "[task][task-executor] singlebot_2_group 建群前 task=%s node=%s driver=%s collab=chat task_owner=%s",
+            node.task_id, node.node_id, openapi_bot_id, task_owner_id,
         )
+
         gid = await self.form_coop_group(gf)
         logger.info(
             "[task][task-executor] singlebot_2_group 建群成功 task=%s node=%s group_id=%s",
