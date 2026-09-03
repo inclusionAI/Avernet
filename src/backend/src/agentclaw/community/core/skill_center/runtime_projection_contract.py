@@ -88,7 +88,13 @@ class RuntimeProjectionResult:
         return cls(status=RuntimeProjectionStatus.SKIPPED, reason=reason)
 
     @classmethod
-    def pending(cls, *, code: str, reason: str) -> "RuntimeProjectionResult":
+    def pending(
+        cls,
+        *,
+        code: str,
+        reason: str,
+        suggested_action: str | None = None,
+    ) -> "RuntimeProjectionResult":
         return cls(
             status=RuntimeProjectionStatus.PENDING,
             issues=(
@@ -98,6 +104,7 @@ class RuntimeProjectionResult:
                     reason=reason,
                     status=RuntimeProjectionStatus.PENDING,
                     retryable=True,
+                    suggested_action=suggested_action,
                 ),
             ),
         )

@@ -400,6 +400,10 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                     reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
                     status=status,
                     retryable=status is RuntimeProjectionStatus.PENDING,
+                    suggested_action=(
+                        "Bot 当前未完成运行时同步。请稍后再次保存能力集；若持续失败，"
+                        "请联系管理员并提供错误详情。"
+                    ),
                 )
             )
         return RuntimeProjectionResult(
@@ -442,21 +446,23 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             "MANAGED_SOURCE_MISSING": (
                 "MANAGED_SOURCE_MISSING",
                 "Skill 的源文件已被删除或移动，平台已保留目标软链",
-                "请重新上传或恢复该 Skill；后续能力同步会再次尝试",
+                "该技能的内容暂时不可用。请重新同步或重新添加该技能后，再保存能力集。",
                 "DANGLING_SYMLINK",
                 "SYMLINK",
             ),
             "UNMANAGED_ACTIVE_ENTRY_RETAINED": (
                 "UNMANAGED_ACTIVE_ENTRY_RETAINED",
                 "Bot 生效目录中存在同名实体目录，平台没有覆盖或删除该目录",
-                "请备份并移走同名实体目录，然后重新执行能力变更",
+                "该技能已在 Bot 内被手动维护。为避免覆盖现有内容，平台没有替换它。"
+                "请联系 Bot 管理员确认处理后，再保存能力集。",
                 "DIRECTORY",
                 "SYMLINK",
             ),
             "EXTERNAL_ACTIVE_ENTRY_RETAINED": (
                 "EXTERNAL_ACTIVE_ENTRY_RETAINED",
                 "同名软链指向平台管理目录之外，平台没有修改该软链",
-                "请确认该软链用途；如需平台管理，请先移走该软链",
+                "该技能当前由其他配置管理，平台没有修改它。请联系 Bot 管理员确认"
+                "是否交由平台管理后，再保存能力集。",
                 "EXTERNAL_SYMLINK",
                 "SYMLINK",
             ),
@@ -466,7 +472,8 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             (
                 code or "SKILL_MAPPING_DEGRADED",
                 "Skill 运行时投影尚未完成",
-                "请在 Bot 运行环境恢复后再次执行能力变更",
+                "部分技能未完成运行时同步。请稍后再次保存能力集；若持续失败，"
+                "请联系管理员并提供错误详情。",
                 None,
                 None,
             ),

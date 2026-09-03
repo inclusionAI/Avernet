@@ -31,6 +31,10 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+_RUNTIME_SNAPSHOT_UNAVAILABLE_ACTION = (
+    "Bot 当前不可连接或仍在启动。能力集已保存；待 Bot 恢复后，请再次保存能力集完成同步。"
+)
+
 
 def skill_claim_scope(result: DesiredStateMutation) -> ProjectionScope:
     """A Skill mutation that adds the Skill, and with it its MCP dependencies.
@@ -230,6 +234,7 @@ class MutationProjectionFlow:
             return RuntimeProjectionResult.pending(
                 code="RUNTIME_SNAPSHOT_UNAVAILABLE",
                 reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+                suggested_action=_RUNTIME_SNAPSHOT_UNAVAILABLE_ACTION,
             )
         try:
             snapshot_started_at = time.perf_counter()
@@ -241,6 +246,7 @@ class MutationProjectionFlow:
             return RuntimeProjectionResult.pending(
                 code="RUNTIME_SNAPSHOT_UNAVAILABLE",
                 reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+                suggested_action=_RUNTIME_SNAPSHOT_UNAVAILABLE_ACTION,
             )
         self._log_timing(
             stage="snapshot_after",
