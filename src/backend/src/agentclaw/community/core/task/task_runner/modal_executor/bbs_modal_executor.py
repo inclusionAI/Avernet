@@ -412,9 +412,10 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, t
     按其中标的子任务范围执行,而非仅据全量快照自行裁剪。
     """
 
+    callback_url = f"{backend_url.rstrip('/')}/api/v1/collaboration/tasks/callback/report"
     report_instruction = """
   curl -X POST \
-    'https://agentclawengine-pre.alipay.com/api/v1/collaboration/tasks/callback/report' \
+    '__TASK_CALLBACK_URL__' \
     -H 'Content-Type: application/json' \
     -d '{
       "task_id": "71502914-0caf-4866-952c-49d60d159607",
@@ -430,7 +431,7 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, t
       },
       "extend_props": {}
     }'
-    """
+    """.replace("__TASK_CALLBACK_URL__", callback_url)
 
     snapshot = _build_task_snapshot(execution_graph)
     parts = [f"我自主判断要接力执行的任务信息如下：task_id={task_id}, node_id={node_id} \n"]

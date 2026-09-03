@@ -119,6 +119,13 @@ def _search_result(nid: str | None) -> dict:
 
 
 # ===== discover double:语义预查候选集(返回固定候选)=====
+class _PollerModeSettings:
+    """Exercise the pull-poller branch; production defaults to skill HTTP push."""
+
+    def is_enabled(self, setting_type: str) -> bool:
+        return setting_type != "skill_report_enabled"
+
+
 class _DiscoverStub:
     def search_by_keyword(self, **kw):
         return {"total": 2, "items": [
@@ -150,7 +157,8 @@ class TestSingleBotPollReportE2E:
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         nodes = {n.node_id: n for n in g.tasks}
@@ -179,7 +187,8 @@ class TestCoopGroupManagerWorkerE2E:
                                    "success": True, "data": "group_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_group = next(n for n in g.tasks if n.node_id == "N_group")
@@ -251,7 +260,8 @@ class TestCoopGroupStateMachineE2E:
                                    "success": True, "data": "sm_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_sm = next(n for n in g.tasks if n.node_id == "N_sm")
