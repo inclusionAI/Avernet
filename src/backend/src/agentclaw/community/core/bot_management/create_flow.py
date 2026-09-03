@@ -316,8 +316,18 @@ def _prepare_create(
     elif spec.template_type == "applicationCoding":
         # Keeping the "template_config" key preserves legacy intent when the
         # caller omits the config, so both input shapes share the Strategy gate.
+        # ``template_type`` rides along: a template-factory snapshot (full
+        # identity: template_key + template_uid) is rejected by the strategy
+        # unless ``engine_properties.template_type`` declares its type, and the
+        # internal surface only expresses that declaration through this fold.
         prepared = _prepare_with_engine_strategy(
-            replace(spec, engine_properties={"template_config": spec.template_config}),
+            replace(
+                spec,
+                engine_properties={
+                    "template_type": spec.template_type,
+                    "template_config": spec.template_config,
+                },
+            ),
             context,
         )
     else:
