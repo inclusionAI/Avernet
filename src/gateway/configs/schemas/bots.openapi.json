@@ -23,26 +23,22 @@
         "type": "object"
       },
       "AcceptanceResultDTO": {
-        "description": "验收结论(PASS/FAIL + 通过项与缺口)。",
+        "description": "验收结论(DONE/FAILED + 通过项与缺口)。",
         "properties": {
           "acceptances_metric": {
-            "description": "通过的验收项标识列表",
-            "items": {
-              "type": "string"
-            },
+            "description": "通过的验收项明细列表(新协议为对象数组,[{项:结论}])",
+            "items": {},
             "title": "Acceptances Metric",
             "type": "array"
           },
           "gaps": {
-            "description": "未通过的验收项标识列表(gap)",
-            "items": {
-              "type": "string"
-            },
+            "description": "未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)",
+            "items": {},
             "title": "Gaps",
             "type": "array"
           },
           "verdict": {
-            "description": "PASS / FAIL",
+            "description": "DONE / FAILED",
             "title": "Verdict",
             "type": "string"
           }
@@ -1345,6 +1341,28 @@
             "description": "Whether the MCP has a desired-state installation.",
             "title": "Active",
             "type": "boolean"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on an activate/deactivate response; the durable Desired State result."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on an activate/deactivate response; observed Runtime convergence."
           },
           "server_code": {
             "description": "The server's unique identifier in the marketplace catalogue — an opaque, case-sensitive string, e.g. 'mcp.example.weather'. Obtain it from the server listing; do not parse it.",
@@ -3057,6 +3075,31 @@
           "dept_path"
         ],
         "title": "DeptSearchItem",
+        "type": "object"
+      },
+      "DesiredStateResult": {
+        "description": "The durable result of one idempotent Bot capability command.",
+        "properties": {
+          "changed": {
+            "description": "Whether this command changed Desired State.",
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "COMMITTED after a durable Desired State write; UNCHANGED for an idempotent no-op.",
+            "enum": [
+              "COMMITTED",
+              "UNCHANGED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changed",
+          "status"
+        ],
+        "title": "DesiredStateResult",
         "type": "object"
       },
       "DiagnoseStartResponse": {
@@ -11659,14 +11702,28 @@
       },
       "ExecutionConfigDTO": {
         "additionalProperties": true,
-        "description": "执行配置(task_type 必填;静态单工作流/静态组工作流/workflow_id 可选;其余键允许透传)。",
+        "description": "执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。",
         "properties": {
+          "panel_component_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "state_machine 协作群 opening_message 使用的业务面板组件名",
+            "title": "Panel Component Name"
+          },
           "task_type": {
             "description": "任务类型",
             "enum": [
               "yaml",
               "workflow",
-              "dynamic"
+              "dynamic",
+              "static_plan",
+              "bbs"
             ],
             "title": "Task Type",
             "type": "string"
@@ -17511,10 +17568,8 @@
             "type": "object"
           },
           "output": {
-            "additionalProperties": true,
-            "description": "节点输出(checkpoint fold)",
-            "title": "Output",
-            "type": "object"
+            "description": "节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
+            "title": "Output"
           },
           "run_mode": {
             "anyOf": [
@@ -17542,6 +17597,217 @@
           }
         },
         "title": "RuntimeInfoDTO",
+        "type": "object"
+      },
+      "RuntimeProjectionIssue": {
+        "description": "One safe, actionable runtime observation without infrastructure paths.",
+        "properties": {
+          "code": {
+            "description": "Stable, machine-readable Runtime observation code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Skill corpus such as LOCAL, REPO, or CENTER.",
+            "title": "Corpus"
+          },
+          "expected_entry_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected active entry classification.",
+            "title": "Expected Entry Type"
+          },
+          "logical_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical Runtime location without an absolute filesystem path.",
+            "title": "Logical Location"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe display name of the affected capability.",
+            "title": "Name"
+          },
+          "observed_entry_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe classification of the existing active entry.",
+            "title": "Observed Entry Type"
+          },
+          "reason": {
+            "description": "Safe human-readable explanation without infrastructure details.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested Runtime action when the engine reported one.",
+            "title": "Requested Action"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable capability identifier when available.",
+            "title": "Resource Id"
+          },
+          "resource_type": {
+            "description": "The affected capability domain.",
+            "enum": [
+              "SKILL",
+              "MCP",
+              "RUNTIME"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "retryable": {
+            "description": "Whether a later projection attempt may resolve the issue.",
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "Whether the observation is transient or requires user intervention.",
+            "enum": [
+              "PENDING",
+              "DEGRADED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggested_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe next action suggested to the caller.",
+            "title": "Suggested Action"
+          }
+        },
+        "required": [
+          "resource_type",
+          "code",
+          "reason",
+          "status",
+          "retryable"
+        ],
+        "title": "RuntimeProjectionIssue",
+        "type": "object"
+      },
+      "RuntimeProjectionResult": {
+        "description": "Observed Runtime outcome; never a replacement for Installation.",
+        "properties": {
+          "components": {
+            "additionalProperties": {
+              "enum": [
+                "CONVERGED",
+                "PENDING",
+                "DEGRADED",
+                "SKIPPED"
+              ],
+              "type": "string"
+            },
+            "description": "Per-domain Runtime outcomes when the engine can report them.",
+            "title": "Components",
+            "type": "object"
+          },
+          "degraded_count": {
+            "default": 0,
+            "description": "Number of non-destructive degraded observations.",
+            "title": "Degraded Count",
+            "type": "integer"
+          },
+          "issues": {
+            "description": "Per-capability safe diagnostic details.",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProjectionIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "pending_count": {
+            "default": 0,
+            "description": "Number of retryable pending observations.",
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason for a skipped or aggregate Runtime observation.",
+            "title": "Reason"
+          },
+          "status": {
+            "description": "Aggregate Runtime observation for this command.",
+            "enum": [
+              "CONVERGED",
+              "PENDING",
+              "DEGRADED",
+              "SKIPPED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RuntimeProjectionResult",
         "type": "object"
       },
       "RuntimeStage": {
@@ -20146,6 +20412,17 @@
             "description": "Optional SkillSet description.",
             "title": "Description"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
+          },
           "id": {
             "description": "Decimal SkillSet identifier.",
             "title": "Id",
@@ -20165,6 +20442,17 @@
             "description": "Unique SkillSet name within this Bot.",
             "title": "Name",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [
@@ -20300,6 +20588,28 @@
             "description": "False when the requested membership state already existed.",
             "title": "Changed",
             "type": "boolean"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result for this membership command."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence for this membership command."
           }
         },
         "required": [
@@ -20362,6 +20672,28 @@
             "title": "Changed",
             "type": "boolean"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result for this mutation."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence for this mutation."
+          },
           "skill": {
             "$ref": "#/components/schemas/Skill",
             "description": "The skill in its resulting state."
@@ -20390,6 +20722,17 @@
           }
         },
         "properties": {
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for an active package replacement; the committed Desired State result."
+          },
           "operation": {
             "description": "'created' — no skill of that name existed for the bot; a new one was created, inactive, and answers 201. 'updated' — a same-name skill existed and its package was replaced in place, keeping its id and active state; answers 200.",
             "enum": [
@@ -20398,6 +20741,17 @@
             ],
             "title": "Operation",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for an active package replacement; observed Runtime convergence."
           },
           "skill": {
             "$ref": "#/components/schemas/Skill",
@@ -21383,6 +21737,12 @@
       "TaskExecutionGraphDTO": {
         "description": "任务执行图(图级运行态 + 节点表 + 分解树边 + 审计 DAG)。",
         "properties": {
+          "execution_config": {
+            "additionalProperties": true,
+            "description": "执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平,扩展上下文兼容归一)",
+            "title": "Execution Config",
+            "type": "object"
+          },
           "execution_graph": {
             "anyOf": [
               {
@@ -21824,6 +22184,47 @@
           "metadata"
         ],
         "title": "TaskSpecDTO",
+        "type": "object"
+      },
+      "TemplateRunRequestDTO": {
+        "description": "运行仓内置静态模板;触发者身份从调用方上下文解析。\n\n触发者身份对称 dynamic execute:caller_bot_id 必填(触发执行的 bot id),\nowner_user_id/owner_account_id 由登录态 principal 解析后注入。",
+        "properties": {
+          "auto_advance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "演示自驱开关:true=跳过真实派发用 mock 结果推进静态 DAG,false=强制真实派发,null=由服务端默认开关决定。",
+            "title": "Auto Advance"
+          },
+          "caller_bot_id": {
+            "description": "触发执行这条静态模板的 caller bot id(必填,对称 dynamic execute.owner_bot_id)",
+            "minLength": 1,
+            "title": "Caller Bot Id",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "模板输入键值,按模板 input_schema 规定填入",
+            "title": "Input",
+            "type": "object"
+          },
+          "template_id": {
+            "description": "仓内置静态模板标识,如 okr-implementation",
+            "minLength": 1,
+            "title": "Template Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id",
+          "caller_bot_id"
+        ],
+        "title": "TemplateRunRequestDTO",
         "type": "object"
       },
       "TransferSkillOwnerRequest": {
@@ -22796,6 +23197,17 @@
             "description": "Optional SkillSet description.",
             "title": "Description"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
+          },
           "id": {
             "description": "Decimal SkillSet identifier.",
             "title": "Id",
@@ -22824,6 +23236,17 @@
             "description": "Unique SkillSet name within this Bot.",
             "title": "Name",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [
@@ -83364,7 +83787,7 @@
             }
           },
           {
-            "description": "可选 status 过滤记录状态;非法值 → 400",
+            "description": "可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400",
             "in": "query",
             "name": "status",
             "required": false,
@@ -83377,7 +83800,7 @@
                   "type": "null"
                 }
               ],
-              "description": "可选 status 过滤记录状态;非法值 → 400",
+              "description": "可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400",
               "title": "Status"
             }
           },
@@ -83706,6 +84129,187 @@
           }
         },
         "summary": "Revoke Task Claim",
+        "tags": [
+          "task"
+        ]
+      }
+    },
+    "/openapi/v1/collaboration/tasks/run-template": {
+      "post": {
+        "description": "运行预置静态模板;owner 由公开面鉴权 + user_id 自确认决定。\n\nuser_id 经 require_user_id 自确认(与签名 principal 不符→403);owner_user_id=user_id。\n触发执行 bot 由请求体提供并交由任务服务处理。",
+        "operationId": "run_template_openapi_v1_collaboration_tasks_run_template_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateRunRequestDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TaskOpResultDTO_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Run Template",
         "tags": [
           "task"
         ]

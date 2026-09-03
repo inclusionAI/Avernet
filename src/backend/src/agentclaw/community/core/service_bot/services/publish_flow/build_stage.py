@@ -98,11 +98,21 @@ class BuildStageRunner:
             # The projector owns Reader flush/version resolution and every
             # engine-specific application contract. Restart/scale/rollback of
             # a frozen release never enters this build path.
-            await self._runtime_projector.project(
-                bot_id=str(bot["bot_id"]),
-                owner_id=str(bot["owner_id"]),
-                scope=ProjectionScope.everything(),
-            )
+            try:
+                await self._runtime_projector.project(
+                    bot_id=str(bot["bot_id"]),
+                    owner_id=str(bot["owner_id"]),
+                    scope=ProjectionScope.everything(),
+                )
+            except Exception:
+                # Draft verification is the product gate for Service Bot
+                # publication. Runtime convergence remains best-effort here;
+                # Artifact construction below decides Build success.
+                logger.exception(
+                    "[BuildStageRunner] Runtime projection did not complete "
+                    "before Service Bot build: bot_id=%s",
+                    bot_id,
+                )
 
             # Select the artifact producer by device_provider: ARCA/baas → the
             # existing build(); teclaw → compose + freeze. produce_artifact is

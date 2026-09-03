@@ -837,8 +837,8 @@ class TestCronAdapter:
         assert call["job"]["payload"]["timeoutSeconds"] == 30
         # schedule every → everyMs
         assert call["job"]["schedule"]["everyMs"] == 60000
-        assert call["job"]["owner_id"] == "owner-2"
-        assert call["job"]["bot_id"] == "bot-2"
+        assert "owner_id" not in call["job"]
+        assert "bot_id" not in call["job"]
 
     async def test_get_job_preserves_owner_and_bot_ids(self):
         adapter = ClaudeCodeCronAdapter(_FakeCronPort())

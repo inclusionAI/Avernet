@@ -42,6 +42,10 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
+from agentclaw.community.adapters.http.openapi_v1.schemas_runtime_projection import (
+    desired_state_from,
+    runtime_projection_from,
+)
 from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
@@ -239,8 +243,21 @@ def _uploaded_skill_response(
     operation = str(result["operation"])
     if operation == "updated":
         response.status_code = 200
+    runtime_result = result.get("runtime_projection")
+    mutation = {"changed": operation == "updated", "runtime_projection": runtime_result}
     return envelope(
-        SkillUpload(operation=operation, skill=_to_skill(result["skill"])),
+        SkillUpload(
+            operation=operation,
+            skill=_to_skill(result["skill"]),
+            desired_state=(
+                desired_state_from(mutation) if runtime_result is not None else None
+            ),
+            runtime_projection=(
+                runtime_projection_from(mutation)
+                if runtime_result is not None
+                else None
+            ),
+        ),
         request,
         code=201000 if operation == "created" else 200000,
         message="Created" if operation == "created" else "OK",
@@ -453,6 +470,7 @@ async def replace_skill_parameters(
     status_code=201,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
     response_model=Envelope[SkillUpload],
+    response_model_exclude_none=True,
     responses={
         200: {
             "model": Envelope[SkillUpload],
@@ -514,6 +532,7 @@ async def upload_skill(
     status_code=201,
     dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
     response_model=Envelope[SkillUpload],
+    response_model_exclude_none=True,
     responses={
         200: {
             "model": Envelope[SkillUpload],
@@ -597,7 +616,12 @@ async def activate_skill(
         actor_id=user_id,
     )
     return envelope(
-        SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
+        SkillState(
+            skill=_to_skill(result),
+            changed=bool(result["changed"]),
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
         request,
     )
 
@@ -642,7 +666,12 @@ async def deactivate_skill(
         actor_id=user_id,
     )
     return envelope(
-        SkillState(skill=_to_skill(result), changed=bool(result["changed"])),
+        SkillState(
+            skill=_to_skill(result),
+            changed=bool(result["changed"]),
+            desired_state=desired_state_from(result),
+            runtime_projection=runtime_projection_from(result),
+        ),
         request,
     )
 

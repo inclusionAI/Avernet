@@ -50,9 +50,24 @@ async def test_mutation_flow_logs_control_plane_timing_stages(caplog) -> None:
         ),
     )
 
-    assert result == {"id": "set-1", "changed": True}
+    assert result == {
+        "id": "set-1",
+        "changed": True,
+        "runtime_projection": {
+            "status": "CONVERGED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+        },
+    }
     messages = [record.getMessage() for record in caplog.records]
-    for stage in ("snapshot_before", "mutation_tx", "snapshot_after"):
+    for stage in (
+        "snapshot_before",
+        "desired_state_mutation",
+        "snapshot_after",
+        "runtime_projection",
+    ):
         assert any(
             "[MutationProjectionFlow] timing" in message
             and f"stage={stage}" in message

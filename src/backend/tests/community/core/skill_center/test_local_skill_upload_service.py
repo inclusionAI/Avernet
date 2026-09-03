@@ -1160,23 +1160,29 @@ async def test_teclaw_replacement_resolves_provider_before_staging():
 
 
 @pytest.mark.asyncio
-async def test_active_replacement_runtime_failure_restores_old_metadata_and_runtime_mapping():
+async def test_active_replacement_keeps_new_content_when_runtime_is_pending():
     filesystem = _Filesystem()
     filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = b"old"
     old = _existing_skill(active=True)
     repo = _ReplacementRepo([old])
     runtime = _ReplacementRuntime([False, True])
-    with pytest.raises(LocalSkillRuntimeSyncError):
-        await _replacement_service(filesystem, repo, runtime).upload_local_skill(
-            bot_id="bot",
-            owner_id="owner",
-            actor_id="owner",
-            package=_zip({"SKILL.md": _skill_md(description="new description")}),
-        )
+    result = await _replacement_service(filesystem, repo, runtime).upload_local_skill(
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+    )
+
+    # The package/database write is the Local Skill Desired State. A runtime
+    # outage is reported to the caller but must not silently restore the old
+    # content after that durable state has committed.
+    assert result["runtime_projection"]["status"] == "PENDING"
     assert old["git_path"] == "local:///private/skills-local/upload-skill"
-    assert old["description"] == "old description"
-    assert runtime.calls == 2
-    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == b"old"
+    assert old["description"] == "new description"
+    assert runtime.calls == 1
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        _skill_md(description="new description")
+    )
 
 
 @pytest.mark.asyncio

@@ -86,7 +86,11 @@ def test_friend_handler_accepts_and_forwards_only_supplied_credential() -> None:
     http.post.return_value = _response({"success": True, "data": {}})
     handler = FriendDecisionCallbackHandler(http, timeout=3.0)
     credential = WorkOrderCallbackCredential(
-        headers={"Authorization": "Bearer token", "X-Trace-Id": "trace"}
+        headers={
+            "Authorization": "Bearer token",
+            "X-Avernet-Principal": "principal-token",
+            "X-Trace-Id": "trace",
+        }
     )
 
     handler.handle(
@@ -97,9 +101,13 @@ def test_friend_handler_accepts_and_forwards_only_supplied_credential() -> None:
     )
 
     http.post.assert_called_once_with(
-        "/collaboration/friend-connections/requests/request%2F77/accept",
+        "/openapi/v1/collaboration/friend-connections/requests/request%2F77/accept",
         json=None,
-        headers={"Authorization": "Bearer token", "X-Trace-Id": "trace"},
+        headers={
+            "Authorization": "Bearer token",
+            "X-Avernet-Principal": "principal-token",
+            "X-Trace-Id": "trace",
+        },
         timeout=3.0,
     )
 
@@ -144,16 +152,51 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
     assert request_log.request_body is None
     assert request_log.has_authorization is True
     assert request_log.has_x_avernet_principal is True
+    auth_log = next(
+        record
+        for record in caplog.records
+        if record.message == "BCN callback auth headers"
+    )
+    assert auth_log.has_principal is True
+    assert auth_log.principal_header_count == 1
+    assert auth_log.principal_length == len("secret-principal")
+    assert auth_log.has_authorization is True
+    assert request_log.principal_header_count == 1
+    assert request_log.principal_length == len("secret-principal")
+    assert len(request_log.principal_fingerprint) == 16
+    assert "secret-principal" not in request_log.message
     assert response_log.http_status == 403
     assert response_log.response_code == 403201
     assert response_log.response_message == "Forbidden"
     assert response_log.response_request_id == "bcn-request-1"
     assert response_log.response_body_raw == (
-        '{"code":403201,"message":"Forbidden","data":null,'
-        '"request_id":"bcn-request-1"}'
+        '{"code":403201,"message":"Forbidden","data":null,"request_id":"bcn-request-1"}'
     )
+    assert response_log.duration_ms >= 0
     assert "secret-auth" not in caplog.text
     assert "secret-principal" not in caplog.text
+
+
+def test_friend_handler_accepts_openapi_success_envelope() -> None:
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response(
+        {
+            "code": 20_000,
+            "message": "OK",
+            "data": {"request_id": "request/77"},
+            "request_id": "bcn-request-1",
+        }
+    )
+    handler = FriendDecisionCallbackHandler(http)
+
+    handler.handle(
+        context=_context(),
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        credential=WorkOrderCallbackCredential(
+            headers={"x-avernet-principal": "principal-token"}
+        ),
+    )
 
 
 def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
@@ -182,6 +225,44 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     assert response_log.http_status == 502
     assert response_log.response_code is None
     assert response_log.response_body_raw == "Bad Gateway"
+    failure_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order decision callback failed"
+    )
+    assert failure_log.exception_type == "HTTPStatusError"
+    assert failure_log.response_body_raw == "Bad Gateway"
+    assert failure_log.principal_header_count == 0
+    assert failure_log.principal_fingerprint is None
+    assert failure_log.principal_length is None
+
+
+def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    large_body = "x" * 16_385
+    http.post.return_value = httpx.Response(
+        502,
+        text=large_body,
+        request=httpx.Request("POST", "https://bcn.test/callback"),
+    )
+    handler = FriendDecisionCallbackHandler(http)
+
+    with pytest.raises(WorkOrderCallbackError):
+        handler.handle(
+            context=_context(),
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    response_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order BCN callback response"
+    )
+    assert response_log.response_body_raw.endswith("...<truncated>")
+    assert len(response_log.response_body_raw) == 16 * 1024 + len("...<truncated>")
 
 
 def test_friend_handler_rejects_with_review_reason() -> None:

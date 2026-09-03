@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+import time
 
 from agentclaw.community.core.repository.protocols.skill_center_reference import (
     SkillCenterReferenceRepositoryProtocol,
@@ -68,6 +69,10 @@ _PUBLIC_REFERENCE_ERRORS = {
 }
 
 
+def _duration_ms(started_at: float) -> int:
+    return round((time.perf_counter() - started_at) * 1000)
+
+
 class SkillCenterReferenceProcessor:
     """Materialize independently, then commit successful members in one batch."""
 
@@ -93,6 +98,7 @@ class SkillCenterReferenceProcessor:
         self._max_concurrency = max_concurrency
 
     async def process(self, request_id: str) -> TaskOutcome:
+        batch_started_at = time.perf_counter()
         batch = self._references.get_work_batch(
             env=self._env_provider(), request_id=request_id
         )
@@ -109,14 +115,40 @@ class SkillCenterReferenceProcessor:
                 SkillCenterReferenceStatus.PROJECTING_RUNTIME,
             }
         ]
+        logger.info(
+            "[SkillCenterReference] batch materialization started: request_id=%s "
+            "env=%s item_count=%s pending_count=%s max_concurrency=%s",
+            batch.request_id,
+            batch.env,
+            len(batch.items),
+            len(pending),
+            self._max_concurrency,
+        )
         semaphore = asyncio.Semaphore(self._max_concurrency)
 
         async def run(item: SkillCenterReferenceWorkItem) -> bool:
             async with semaphore:
                 return await asyncio.to_thread(self._materialize_one, batch, item)
 
+        materialization_started_at = time.perf_counter()
         retry_required = any(await asyncio.gather(*(run(item) for item in pending)))
+        logger.info(
+            "[SkillCenterReference] batch materialization barrier completed: "
+            "request_id=%s env=%s pending_count=%s retry_required=%s duration_ms=%s",
+            batch.request_id,
+            batch.env,
+            len(pending),
+            retry_required,
+            _duration_ms(materialization_started_at),
+        )
         if retry_required:
+            logger.info(
+                "[SkillCenterReference] batch processing deferred for retry: "
+                "request_id=%s env=%s duration_ms=%s",
+                batch.request_id,
+                batch.env,
+                _duration_ms(batch_started_at),
+            )
             return Retry("one or more Reference items need another attempt")
 
         latest = self._references.get_work_batch(
@@ -133,8 +165,23 @@ class SkillCenterReferenceProcessor:
             }
         ]
         if not ready:
+            logger.info(
+                "[SkillCenterReference] batch processing completed without final add: "
+                "request_id=%s env=%s duration_ms=%s",
+                batch.request_id,
+                batch.env,
+                _duration_ms(batch_started_at),
+            )
             return Complete()
         await self._add_ready(latest, ready)
+        logger.info(
+            "[SkillCenterReference] batch processing completed: request_id=%s env=%s "
+            "ready_count=%s duration_ms=%s",
+            batch.request_id,
+            batch.env,
+            len(ready),
+            _duration_ms(batch_started_at),
+        )
         return Complete()
 
     def _materialize_one(
@@ -142,6 +189,7 @@ class SkillCenterReferenceProcessor:
         batch: SkillCenterReferenceWorkBatch,
         item: SkillCenterReferenceWorkItem,
     ) -> bool:
+        started_at = time.perf_counter()
         current = self._references.update_item(
             env=batch.env,
             reference_id=item.reference_id,
@@ -203,6 +251,8 @@ class SkillCenterReferenceProcessor:
                 error_code=None,
                 error_message=None,
             )
+            resolution_ms = _duration_ms(started_at)
+            materialization_started_at = time.perf_counter()
             published = self._materializer.materialize(
                 SkillVersionMaterializationRequest(
                     env=batch.env,
@@ -211,10 +261,13 @@ class SkillCenterReferenceProcessor:
                     scope=SkillCenterReadScope.PUBLIC,
                 )
             )
+            materialization_ms = _duration_ms(materialization_started_at)
             # Re-ensure the level-triggered task even when another Reference
             # already published this exact Version.  This closes the accepted
             # post-commit enqueue window without creating a second event model.
+            track_latest_started_at = time.perf_counter()
             self._track_latest.version_published(published)
+            track_latest_ms = _duration_ms(track_latest_started_at)
             self._references.update_item(
                 env=batch.env,
                 reference_id=item.reference_id,
@@ -224,6 +277,21 @@ class SkillCenterReferenceProcessor:
                 resolved_skill_id=target.skill_id,
                 error_code=None,
                 error_message=None,
+            )
+            logger.info(
+                "[SkillCenterReference] item materialized: request_id=%s env=%s "
+                "reference_id=%s skill_code=%s skill_id=%s skill_version_id=%s "
+                "resolution_ms=%s materialization_ms=%s track_latest_ms=%s duration_ms=%s",
+                batch.request_id,
+                batch.env,
+                item.reference_id,
+                item.skill_code,
+                target.skill_id,
+                target.skill_version_id,
+                resolution_ms,
+                materialization_ms,
+                track_latest_ms,
+                _duration_ms(started_at),
             )
             return False
         except _PermanentReferenceError as exc:
@@ -235,10 +303,17 @@ class SkillCenterReferenceProcessor:
             self._fail(batch.env, item.reference_id, exc.code)
             return False
         except SkillCenterGatewayError as exc:
-            logger.exception(
-                "[SkillCenterReference] gateway failure: reference_id=%s code=%s",
+            logger.warning(
+                "[SkillCenterReference] gateway failure: operation=reference_resolution "
+                "env=%s scope=public reference_id=%s skill_code=%s skill_version_id=%s "
+                "gateway_error_code=%s upstream_code=%s upstream_trace_id=%s",
+                batch.env,
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
                 exc.code,
+                exc.upstream_code,
+                exc.trace_id,
             )
             if exc.code is SkillCenterGatewayErrorCode.BUSINESS:
                 self._fail(batch.env, item.reference_id, "SC_SKILL_NOT_FOUND")
@@ -246,18 +321,38 @@ class SkillCenterReferenceProcessor:
             return self._retry_or_fail(
                 batch.env, current, "SC_MARKET_UNAVAILABLE"
             )
-        except SkillVersionMaterializationError:
-            logger.exception(
-                "[SkillCenterReference] materialization failure: reference_id=%s",
+        except SkillVersionMaterializationError as exc:
+            # Do not log the exception text or traceback here: download errors
+            # can embed an exact-package presigned URL.  The materializer's
+            # finite stage plus the exception type remain sufficient to locate
+            # the failed Ready Gate without exposing credentials.
+            cause = exc.__cause__
+            logger.warning(
+                "[SkillCenterReference] materialization failure: operation=reference_materialization "
+                "env=%s scope=public reference_id=%s skill_code=%s skill_version_id=%s "
+                "failure_stage=%s cause_type=%s duration_ms=%s",
+                batch.env,
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
+                exc.stage or "unknown",
+                type(cause).__name__ if cause is not None else type(exc).__name__,
+                _duration_ms(started_at),
             )
             return self._retry_or_fail(
                 batch.env, current, "MATERIALIZATION_FAILED"
             )
-        except (TypeError, ValueError, RuntimeError):
-            logger.exception(
-                "[SkillCenterReference] invalid materialization facts: reference_id=%s",
+        except (TypeError, ValueError, RuntimeError) as exc:
+            logger.warning(
+                "[SkillCenterReference] invalid materialization facts: "
+                "operation=reference_materialization env=%s scope=public "
+                "reference_id=%s skill_code=%s skill_version_id=%s failure_type=%s duration_ms=%s",
+                batch.env,
                 item.reference_id,
+                item.skill_code,
+                current.skill_version_id,
+                type(exc).__name__,
+                _duration_ms(started_at),
             )
             self._fail(batch.env, item.reference_id, "MATERIALIZATION_FAILED")
             return False
@@ -267,6 +362,10 @@ class SkillCenterReferenceProcessor:
         batch: SkillCenterReferenceWorkBatch,
         ready: list[SkillCenterReferenceWorkItem],
     ) -> None:
+        started_at = time.perf_counter()
+        skill_ids = tuple(
+            sorted((str(item.resolved_skill_id) for item in ready), key=int)
+        )
         try:
             target = self._skill_sets.get_set(
                 bot_id=batch.bot_id,
@@ -281,6 +380,15 @@ class SkillCenterReferenceProcessor:
                         reference_id=item.reference_id,
                         status=SkillCenterReferenceStatus.PROJECTING_RUNTIME,
                     )
+            logger.info(
+                "[SkillCenterReference] final SkillSet add started: request_id=%s env=%s "
+                "skill_set_id=%s ready_count=%s runtime_projection_required=%s",
+                batch.request_id,
+                batch.env,
+                batch.skill_set_id,
+                len(ready),
+                bool(target.get("is_active") or target.get("is_default")),
+            )
             outcomes = await self._skill_sets.add_skills(
                 bot_id=batch.bot_id,
                 owner_id=batch.owner_id,
@@ -290,11 +398,7 @@ class SkillCenterReferenceProcessor:
                 # ready in a different order on each replay. The batch has set
                 # semantics, but sorting its numeric IDs keeps the wire and
                 # idempotent observability stable.
-                skill_ids=tuple(
-                    sorted(
-                        (str(item.resolved_skill_id) for item in ready), key=int
-                    )
-                ),
+                skill_ids=skill_ids,
             )
         except (
             SkillOfflineError,
@@ -304,8 +408,9 @@ class SkillCenterReferenceProcessor:
             SkillSetRuntimeReconcileError,
         ) as exc:
             logger.exception(
-                "[SkillCenterReference] final SkillSet add failed: request_id=%s",
+                "[SkillCenterReference] final SkillSet add failed: request_id=%s duration_ms=%s",
                 batch.request_id,
+                _duration_ms(started_at),
             )
             code = _final_add_error_code(exc)
             for item in ready:
@@ -313,6 +418,7 @@ class SkillCenterReferenceProcessor:
             return
 
         by_skill_id = {outcome.skill_id: outcome for outcome in outcomes}
+        succeeded_count = 0
         for item in ready:
             skill_id = str(item.resolved_skill_id)
             outcome = by_skill_id.get(skill_id)
@@ -336,6 +442,18 @@ class SkillCenterReferenceProcessor:
                 error_code=None,
                 error_message=None,
             )
+            succeeded_count += 1
+        logger.info(
+            "[SkillCenterReference] final SkillSet add completed: request_id=%s env=%s "
+            "skill_set_id=%s ready_count=%s succeeded_count=%s skill_ids=%s duration_ms=%s",
+            batch.request_id,
+            batch.env,
+            batch.skill_set_id,
+            len(ready),
+            succeeded_count,
+            skill_ids,
+            _duration_ms(started_at),
+        )
 
     def _retry_or_fail(
         self,

@@ -29,8 +29,8 @@ from fastapi.testclient import TestClient
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
     ERROR_RESPONSES,
     USER_SCOPED_ERROR_RESPONSES,
@@ -449,15 +449,14 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: the request that allocates one, so it joins ``none`` (101 → 102) beside
 #: ``POST /openapi/v1/bots`` itself.
 #:
-#: The account-level user→app authorizations (grant, list, withdraw under
+#: Directory download adds one more bot-path-addressed resource operation;
+#: the account-level user→app authorizations (grant, list, withdraw under
 #: ``/org/user/authorized-apps``) address no bot: ``none`` 102 → 105.
-_BOT_ID_PLACEMENT = {"path": 155, "query": 1, "none": 105}
+_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 105}
 
 
 def _schema() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _current_operations(schema: dict):
@@ -599,9 +598,10 @@ def test_the_pinned_number_of_operations_take_it():
     # and its status poll: 226 → 228. Both name the end user for the same
     # reason the ordinary create does: they spend that user's quota and read
     # that user's rows, and neither is admissible to an application caller.
-    # The account-level user→app authorizations (grant, list, withdraw under
-    # /org/user/authorized-apps) add three user-scoped operations: 228 → 231.
-    assert len(taking) == 231
+    # Directory download adds one more user-scoped resource operation, and the
+    # account-level user→app authorizations (grant, list, withdraw under
+    # /org/user/authorized-apps) add three more: 228 → 232.
+    assert len(taking) == 232
 
 
 def test_the_exempt_operations_take_none():

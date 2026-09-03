@@ -254,8 +254,6 @@ def _build_add_params(request: CreateJobRequest) -> dict[str, Any]:
         "name": request.name,
         "schedule": openclaw_schedule,
         "payload": openclaw_payload,
-        "owner_id": request.owner_id,
-        "bot_id": request.bot_id,
         "sessionTarget": request.session_target,
         "enabled": request.enabled,
     }

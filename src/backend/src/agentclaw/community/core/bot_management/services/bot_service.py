@@ -2330,13 +2330,21 @@ class BotService(BotServiceProtocol):
         items = (page or {}).get("items") or []
         return items[0] if items else None
 
-    def get_bot_classification(self, bot_id: str) -> Optional[Dict[str, str]]:
+    def get_bot_classification(
+        self, bot_id: str, entity_id: Optional[str] = None
+    ) -> Optional[Dict[str, str]]:
         """Return the minimal authenticated-public classification for a Bot.
 
-        The repository's unique lookup fails closed when a tenant contains
-        multiple live records for the same external ``bot_id``.
+        ``entity_id`` addresses legacy Bot IDs such as ``default`` precisely.
+        When it is omitted, the repository's unique lookup keeps failing closed
+        if a tenant contains multiple live records for the same external
+        ``bot_id``.
         """
-        bot = self._repository.get_unique_by_id(bot_id)
+        bot = (
+            self._repository.get_by_id_and_entity(bot_id, entity_id)
+            if entity_id is not None
+            else self._repository.get_unique_by_id(bot_id)
+        )
         if bot is None:
             return None
 

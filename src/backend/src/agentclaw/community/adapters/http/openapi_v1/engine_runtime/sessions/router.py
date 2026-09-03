@@ -48,6 +48,7 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _require_within_depth,
     _window,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.converter_creation import reconcile_created_session
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.dependencies_session_files import OpenApiSessionFileAdapter
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
@@ -115,7 +116,6 @@ _LOOKAHEAD = 1
 #: Generous for a conversation; bounded enough that a page number cannot be
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
-
 
 def _friend_auth_headers(request: Request) -> dict[str, str]:
     """Forward only identity/trace headers needed by BCN's trusted boundary."""
@@ -242,7 +242,7 @@ async def list_sessions(
         path="/api/sessions",
         params=params,
     )
-    mapped = [_map_session(d) for d in _as_list(result.data)]
+    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
     # The session list reports no total; derive it from the window.
     total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
@@ -310,7 +310,8 @@ async def create_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError("engine returned no session")
-    return created(_map_session(result.data), request)
+    item = await reconcile_created_session(relay=relay, facts=facts, bot_id=bot_id, owner_id=owner_id, user_id=user_id, stage=stage, created_item=result.data, requested_title=body.title)
+    return created(_map_session(item, engine_type=facts.active_engine), request)
 
 
 @router.get("/favorites", response_model=Envelope[SessionPage])
@@ -359,7 +360,7 @@ async def list_session_favorites(
         path="/api/session-favorites",
         params=params,
     )
-    mapped = [_map_session(d) for d in _as_list(result.data)]
+    mapped = [_map_session(d, engine_type=facts.active_engine) for d in _as_list(result.data)]
     total, items = _page(mapped, page, reported=result.total)
     return page_envelope(total, items, request)
 
@@ -407,7 +408,7 @@ async def get_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
-    return envelope(_map_session(result.data), request)
+    return envelope(_map_session(result.data, engine_type=facts.active_engine), request)
 
 
 async def _set_session_favorite(
@@ -554,7 +555,7 @@ async def update_session(
     )
     if not isinstance(result.data, dict):
         raise EngineResourceNotFoundError(f"no session {session_id}")
-    return envelope(_map_session(result.data), request)
+    return envelope(_map_session(result.data, engine_type=facts.active_engine), request)
 
 
 @router.delete("/{session_id}", response_model=Envelope[Deleted])

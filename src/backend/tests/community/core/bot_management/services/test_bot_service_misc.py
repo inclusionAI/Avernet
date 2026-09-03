@@ -211,6 +211,39 @@ class TestGetBotClassification:
         }
         svc._repository.get_unique_by_id.assert_called_once_with("service-bot")
 
+    def test_entity_id_selects_the_exact_legacy_bot(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_entity.return_value = {
+            **_make_bot(
+                bot_id="default",
+                entity_id="service-owner",
+                bot_type="service",
+            ),
+            "owner_name": "Sensitive Owner",
+            "template_config": {"token": "must-not-leak"},
+        }
+
+        assert svc.get_bot_classification(
+            "default", entity_id="service-owner"
+        ) == {
+            "bot_id": "default",
+            "bot_type": "service",
+        }
+        svc._repository.get_by_id_and_entity.assert_called_once_with(
+            "default", "service-owner"
+        )
+        svc._repository.get_unique_by_id.assert_not_called()
+
+    def test_entity_scoped_lookup_returns_none_when_bot_does_not_exist(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_entity.return_value = None
+
+        assert (
+            svc.get_bot_classification("default", entity_id="missing-owner")
+            is None
+        )
+        svc._repository.get_unique_by_id.assert_not_called()
+
     def test_returns_none_when_bot_does_not_exist(self):
         svc = _make_service()
         svc._repository.get_unique_by_id.return_value = None

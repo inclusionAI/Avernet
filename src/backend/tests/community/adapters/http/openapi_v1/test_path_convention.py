@@ -20,12 +20,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import FastAPI
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 _BASE = f"{PUBLIC_API_PREFIX}/bots"
 
@@ -44,9 +43,7 @@ _UNROUTED_ANCHOR = "<!-- reserved-component-names-unrouted -->"
 
 
 def _document() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _paths() -> list[str]:

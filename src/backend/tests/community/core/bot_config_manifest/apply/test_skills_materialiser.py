@@ -646,8 +646,8 @@ class _StaticGit:
             sha=self.sha,
             url=spec.url,
             ref=spec.ref,
-            files=lambda subpath=None: list(self._files),
-            read_file=lambda subpath=None: b"",
+            files=lambda subpath=None, file_limit=None: list(self._files),
+            read_file=lambda subpath=None, file_limit=None: b"",
         )
 
 

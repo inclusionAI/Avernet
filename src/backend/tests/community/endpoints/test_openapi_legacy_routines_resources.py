@@ -256,8 +256,17 @@ for (_method, _path, _input, _status), _modern in zip(
     )(lambda: None)
 
 
+# download-dir is a new operation with no retiring address (the legacy shim
+# skips it on purpose), so it is filtered out of this one-to-one pairing; its
+# modern address is covered in test_openapi_resources.py itself.
+_MODERN_LEGACY_PAIRED = tuple(
+    case
+    for case in _MODERN_RESOURCE_CASES
+    if not case[1].endswith("/download-dir")
+)
+
 for (_method, _path, _input, _status), _modern in zip(
-    _RESOURCE_CASES, _MODERN_RESOURCE_CASES, strict=True
+    _RESOURCE_CASES, _MODERN_LEGACY_PAIRED, strict=True
 ):
     assert (_method, _status) == (_modern[0], _modern[3]), (
         f"legacy/modern resource case lists drifted at {_method} {_path}"

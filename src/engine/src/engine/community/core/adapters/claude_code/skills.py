@@ -48,7 +48,10 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
+    PoolMappingApplyMode,
+    PoolMappingItemResult,
     PoolMappingPublishResult,
+    PoolMappingProjectionStatus,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupRequest,
@@ -467,6 +470,7 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         payload: dict[str, object] = {
@@ -479,10 +483,23 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
+        if apply_mode is not PoolMappingApplyMode.STRICT:
+            payload["apply_mode"] = apply_mode.value
         raw = await self._port.publish_pool_mappings(payload)
+        raw_status = str(raw.get("status", PoolMappingProjectionStatus.CONVERGED))
+        try:
+            status = PoolMappingProjectionStatus(raw_status)
+        except ValueError:
+            status = PoolMappingProjectionStatus.DEGRADED
         return PoolMappingPublishResult(
             published=raw.get("published") is True,
             evidence=dict(raw.get("evidence") or {}),
+            status=status,
+            items=tuple(
+                PoolMappingItemResult.from_data(item)
+                for item in raw.get("items", [])
+                if isinstance(item, dict)
+            ),
         )
 
     async def verify_pool_mappings(
@@ -492,6 +509,7 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         payload: dict[str, object] = {
@@ -504,10 +522,23 @@ class ClaudeCodeSkillsAdapter(SkillsService):
             ]
         if mapping_contract_version is not None:
             payload["mapping_contract_version"] = mapping_contract_version
+        if apply_mode is not PoolMappingApplyMode.STRICT:
+            payload["apply_mode"] = apply_mode.value
         raw = await self._port.verify_pool_mappings(payload)
+        raw_status = str(raw.get("status", PoolMappingProjectionStatus.CONVERGED))
+        try:
+            status = PoolMappingProjectionStatus(raw_status)
+        except ValueError:
+            status = PoolMappingProjectionStatus.DEGRADED
         return PoolMappingVerificationResult(
             valid=raw.get("valid") is True,
             evidence=dict(raw.get("evidence") or {}),
+            status=status,
+            items=tuple(
+                PoolMappingItemResult.from_data(item)
+                for item in raw.get("items", [])
+                if isinstance(item, dict)
+            ),
         )
 
 

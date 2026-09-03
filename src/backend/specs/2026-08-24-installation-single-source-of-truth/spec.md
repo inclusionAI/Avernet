@@ -68,11 +68,15 @@ configuration and never touches a device. The *runtime projection* is
 DB→engine: pushing Installation-backed desired state to the Bot's running
 engine (symlinks / Pool mappings, MCP details, Passport scope) through the
 runtime projector (`BotRuntimeProjector`, renamed from
-`BotRuntimeProjectionReconciler` — criterion F.15a). Every command ends with a synchronous
-runtime projection, compensated on failure — that responsibility stays with
-the two command services. The reader's flush never triggers one; read paths
-that need the runtime updated go through the projector, which reads via the
-reader.
+`BotRuntimeProjectionReconciler` — criterion F.15a). Every command ends with a
+synchronous, **best-effort** runtime projection. A committed Installation row
+is not compensated merely because a device is offline, a managed source is
+missing, or an unmanaged active entry cannot safely be replaced: those outcomes
+are returned as `PENDING` / `DEGRADED` Runtime observations. Database,
+authorization, ownership, offline/retirement, path-safety and duplicate-name
+validation remain fail-closed before the write. The reader's flush never
+triggers a projection; read paths that need the runtime updated go through the
+projector, which reads via the reader.
 
 ## Motivation — the inconsistencies as they exist today
 
@@ -310,8 +314,8 @@ reader.
 - **Bot data-init** (`data_init_service`): dead feature per the domain owner;
   its activation step and activator wiring are deleted mechanically so the
   codebase imports — nothing about it is migrated, tested, or guaranteed.
-- Concurrency and durable serialization (compensating restore and the
-  `skill_activation_sync_task` skeleton stay as they are).
+- Concurrency and durable serialization (`skill_activation_sync_task` skeleton
+  stays as it is).
 - Backfilling the Installation tables.
 - `center://` membership resolution (pre-existing, per the 2026-08-23 spec).
 - Migrating the legacy metadata/bootstrap writers (`ensure_default_skill_set`,

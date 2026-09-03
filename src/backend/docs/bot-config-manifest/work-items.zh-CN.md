@@ -1657,6 +1657,18 @@ manifest 概念。
 > apply 报告、strict 基线读上次 apply 报告。v1 收窄：git 源不支持
 > `digest`（以 SHA 形式的 ref 钉住）；`resources` 条目仍只认 URL 源——
 > W6 的物化器接上 git 路是后续工作（W6 先于 W7 合入，未携带 git 消费）。
+>
+> **🔧 评审修复（2026-09-02，`fix/w7-review-fixes`）。**#1829 的全量评审发现
+> 上述交付被闸门挡住，另有五个潜在缺陷，本 PR 全部修掉：admission 的
+> `SourceForm.GIT`/`NAMED` 从未翻转，整个运行时经 PUT 不可达（现翻转，
+> resources 收窄改由逐条目 schema 拒绝承载）；strict 解析只在过 strict 门后采纳、
+> 基线改为按报告历史有界回走——拒绝不再"一次后放行"、fetch 失败不再解除
+> strict/keep_last；git 失败文本报告安全（只留步骤+退出码，带 URL 回显的
+> stderr 全丢，对齐 W2 契约）；树字节护栏与类目限额按 `ls-tree -l` 声明尺寸在
+> checkout/读取**之前**裁决，树字节按 `(url, ref)` 一次性计入 apply 账本；
+> quotepath 转义名反转义（非 ASCII 文件名可读、非 UTF-8 名按引号形式拒绝）；
+> git 收据回归 `credential_name` 归因；子进程环境在组合根读取、剥离环境
+> `GIT_*`，凭证走 `GIT_CONFIG_*` env（仅 owner 可读）而非 ps 可见的 argv。
 
 
 **目标。**一次 `ref` 变更把整份配置解析到同一个 commit，且公司 git 服务上托管的内容是

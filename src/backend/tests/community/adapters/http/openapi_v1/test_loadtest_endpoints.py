@@ -29,8 +29,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import (
     PRINCIPAL_HEADER,
     require_principal,
@@ -64,7 +64,7 @@ def client() -> TestClient:
     ``@envelope_errors`` never sees it.
     """
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     return TestClient(mount_public_error_handlers(app))
 
 
@@ -213,7 +213,7 @@ def _routes():
             else:
                 walk(route)
 
-    walk(build_public_router())
+    walk(public_router())
     return found
 
 

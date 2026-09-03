@@ -545,9 +545,10 @@ class _ScriptedGit:
             raise self._error
         return SimpleNamespace(
             root=None, sha=self._sha, url=spec.url, ref=spec.ref,
-            members=(("100644", spec.subpath or "pkg/skill.md"),),
-            files=lambda subpath=None: [("skill.md", b"file-bytes")],
-            read_file=lambda: b"file-bytes",
+            members=(("100644", spec.subpath or "pkg/skill.md", 11),),
+            tree_bytes=11,
+            files=lambda subpath=None, file_limit=None: [("skill.md", b"file-bytes")],
+            read_file=lambda subpath=None, file_limit=None: b"file-bytes",
         )
 
 
@@ -623,6 +624,11 @@ def test_strict_refuses_when_the_ref_moved(rig):
             entry={"source": {"git": GIT_URL, "ref": "main", "mode": "strict"}},
             category="skills",
         )
+    # The refused move was NOT adopted: this apply's report records no
+    # resolution for the source, so the next apply's baseline is still the
+    # one this refusal was checked against — strict mode refuses every
+    # apply until the document re-pins, not just the first.
+    assert ctx.source_session.resolution_records() == ()
 
 
 def test_non_strict_records_the_move_in_the_note(rig):
@@ -718,3 +724,107 @@ def test_file_bytes_files_canonical_entry_bytes_with_the_store(rig):
     assert call["source_url"] == f"git+{GIT_URL}@{_FAKE_SHA}:pkg"
     assert call["apply_id"] == "apply-1"
     assert call["entry_identity"] == "s1"
+
+
+class _Ledger:
+    """A duck-typed ApplyFetchBudget that records what was charged."""
+
+    def __init__(self) -> None:
+        self.charged: list[int] = []
+
+    def expired(self):
+        return None
+
+    def charge(self, size_bytes: int) -> None:
+        self.charged.append(size_bytes)
+
+
+def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = _with_budget(
+        make_context(source_session=_session(git, sources={
+            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+        })),
+        _Ledger(),
+    )
+    # Two entries name the same source: one fetch, one charge — a cached
+    # checkout answers a read, not a fetch, the URL road's fast-path ruling.
+    for name in ("first", "second"):
+        pipeline.fetch_declared(
+            ctx, entry={"from": "app", "name": name}, category="skills",
+            entry_identity=name,
+        )
+    assert ctx.budget.charged == [11]
+
+
+def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    from agentclaw.community.core.bot_config_manifest.apply.budget import (
+        ApplyFetchBudget,
+    )
+
+    ctx = _with_budget(
+        make_context(source_session=_session(git, sources={
+            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+        })),
+        ApplyFetchBudget(deadline=9e99, total_bytes=5),
+    )
+    with pytest.raises(EntryFetchError, match="exhausted \\(bytes\\)"):
+        pipeline.fetch_declared(
+            ctx, entry={"from": "app"}, category="skills"
+        )
+
+
+def test_entry_level_subpath_on_a_git_source_is_refused(rig):
+    _, _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+        "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+    }))
+    # Entry-level 'subpath' is real vocabulary on the URL roads, so a caller
+    # who writes it beside a git source believes they scoped something they
+    # did not — the refusal says where scoping belongs for this form.
+    with pytest.raises(EntryFetchError, match="'subpath' is not supported on a git"):
+        pipeline.fetch_declared(
+            ctx, entry={"from": "app", "subpath": "pkg/narrow"}, category="skills"
+        )
+
+
+def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
+    _, _, _, pipeline = rig
+    ctx = make_context(source_session=_session(_ScriptedGit()))
+    with pytest.raises(EntryFetchError, match="'auth' is not supported on a git"):
+        pipeline.fetch_declared(
+            ctx,
+            entry={"source": {"git": GIT_URL, "ref": "main"}, "auth": "ci-token"},
+            category="skills",
+        )
+
+
+def test_file_bytes_files_the_credential_name_on_git_receipts(rig):
+    content, _, _, pipeline = rig
+    ctx = make_context(apply_id="apply-1")
+    pipeline.file_bytes(
+        ctx, content=b"canonical-zip",
+        source_url=git_receipt_url(GIT_URL, _FAKE_SHA, "pkg"),
+        category="skills", entry_identity="s1", credential_name="ci-token",
+    )
+    # The lineage answers "which named credential distributed this content"
+    # identically on the URL and git roads.
+    assert content.store_calls[-1]["credential_name"] == "ci-token"
+
+
+def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git, sources={
+        "app": {"git": GIT_URL, "ref": "main", "auth": "ci-token"},
+    }))
+    decl = pipeline.fetch_declared(ctx, entry={"from": "app"}, category="identity")
+    assert isinstance(decl, GitEntrySource)
+    # The identity category's per-entry cap rides the source: its reader
+    # refuses a member by DECLARED size against the category number, the
+    # same vocabulary the URL road's transport enforces.
+    assert decl.file_limit == 1 * 1024 * 1024
+    assert decl.auth == "ci-token"

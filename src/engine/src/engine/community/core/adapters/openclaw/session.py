@@ -70,6 +70,57 @@ def _session_label_suffix(value: object) -> str:
         return uuid.uuid4().hex
 
 
+def _parse_datetime(value: object) -> datetime | None:
+    """Parse OpenClaw's millisecond/second/ISO timestamp variants."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, datetime):
+        return (
+            value.replace(tzinfo=UTC)
+            if value.tzinfo is None
+            else value.astimezone(UTC)
+        )
+
+    numeric: float | None = None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            numeric = float(text)
+        except ValueError:
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            return (
+                parsed.replace(tzinfo=UTC)
+                if parsed.tzinfo is None
+                else parsed.astimezone(UTC)
+            )
+
+    if numeric is None:
+        return None
+    if abs(numeric) >= 10_000_000_000:
+        numeric /= 1000
+    try:
+        return datetime.fromtimestamp(numeric, tz=UTC)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _raw_message_time(message: object) -> datetime | None:
+    if not isinstance(message, dict):
+        return None
+    for field in ("timestamp", "createdAt", "created_at"):
+        parsed = _parse_datetime(message.get(field))
+        if parsed is not None:
+            return parsed
+    return None
+
+
 # ── raw-dict → core-DTO builders (relocated from engines/openclaw/session.py) ──
 
 
@@ -83,6 +134,36 @@ def _to_session(data: dict[str, Any], index: int = 0) -> Session:
     log.info("[_to_session] raw data: %s", data)
     key = data.get("key", "")
     now = datetime.now(UTC)
+    messages_raw = data.get("_messages")
+    if not isinstance(messages_raw, list):
+        messages_raw = []
+    message_times = [
+        parsed
+        for message in messages_raw
+        if (parsed := _raw_message_time(message)) is not None
+    ]
+    created_at = next(
+        (
+            parsed
+            for field in ("createdAt", "created_at", "createdAtMs", "created_at_ms")
+            if (parsed := _parse_datetime(data.get(field))) is not None
+        ),
+        None,
+    )
+    updated_at = next(
+        (
+            parsed
+            for field in ("updatedAt", "updated_at", "updatedAtMs", "updated_at_ms")
+            if (parsed := _parse_datetime(data.get(field))) is not None
+        ),
+        None,
+    )
+    first_message_at = min(message_times) if message_times else None
+    last_message_at = max(message_times) if message_times else None
+    # History is authoritative when an OpenClaw row lacks timestamps. For an
+    # empty session, updatedAt is also its best available creation instant.
+    created_at = created_at or first_message_at or updated_at or now
+    updated_at = updated_at or last_message_at or created_at
     # The impl already normalised the model string and stored it as _normalized_model.
     normalized_model = data.get("_normalized_model") or data.get("model")
     return Session(
@@ -92,9 +173,10 @@ def _to_session(data: dict[str, Any], index: int = 0) -> Session:
         user_id="default",
         title=data.get("label") or data.get("displayName") or key,
         status="active",
-        created_at=now,
-        updated_at=now,
-        last_message_at=now if data.get("preview") else None,
+        created_at=created_at,
+        updated_at=updated_at,
+        last_message_at=last_message_at
+        or (updated_at if data.get("preview") else None),
         model=normalized_model,
         message_count=data.get("_message_count", 0),
         total_input_tokens=data.get("inputTokens", 0),

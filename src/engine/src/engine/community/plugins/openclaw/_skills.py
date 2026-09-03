@@ -20,6 +20,7 @@ from engine.community.plugin_api.openclaw.skills import (
 from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.plugins.openclaw._file import _convert_path
 from engine.community.plugins.openclaw.layout_activation import (
+    MappingApplyMode,
     MappingSourceLayout,
     activate_openclaw_pool,
     publish_pool_mappings,
@@ -143,6 +144,8 @@ class _SkillsPortMixin:
         }
         if retired.mappings:
             publish_kwargs["retired_mappings"] = list(retired.mappings)
+        if params.get("apply_mode") is not None:
+            publish_kwargs["apply_mode"] = MappingApplyMode(params["apply_mode"])
         result = await asyncio.to_thread(
             publish_pool_mappings,
             **publish_kwargs,
@@ -177,6 +180,8 @@ class _SkillsPortMixin:
         }
         if retired.mappings:
             verify_kwargs["retired_mappings"] = list(retired.mappings)
+        if params.get("apply_mode") is not None:
+            verify_kwargs["apply_mode"] = MappingApplyMode(params["apply_mode"])
         result = await asyncio.to_thread(
             verify_skill_mappings,
             **verify_kwargs,

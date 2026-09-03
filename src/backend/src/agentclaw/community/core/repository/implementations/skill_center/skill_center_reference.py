@@ -280,6 +280,12 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
             elif skill.skill_uuid != skill_uuid:
                 raise RuntimeError("SC Public locator has a conflicting identity")
 
+            # The first exact package may converge the provisional market
+            # display name to ``SKILL.md.name`` before PUBLISHED.  Every later
+            # Version inherits that frozen runtime identity; SC presentation
+            # metadata must never overwrite it.
+            version_name = str(skill.name)
+
             existing = (
                 session.query(SkillVersion)
                 .filter(
@@ -309,7 +315,7 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
                     sc_version_number=sc_version_number,
                     sc_skill_id=sc_skill_id,
                     sc_version_id=sc_version_id,
-                    name=skill_name,
+                    name=version_name,
                     description=description,
                     metadata_json=None,
                     published_at=None,
@@ -482,8 +488,7 @@ class SkillCenterReferenceRepository(SkillCenterReferenceRepositoryProtocol):
         items = (
             session.query(SkillCenterReferenceItemModel)
             .filter(
-                SkillCenterReferenceItemModel.avernet_tenant
-                == row.avernet_tenant,
+                SkillCenterReferenceItemModel.avernet_tenant == row.avernet_tenant,
                 SkillCenterReferenceItemModel.env == row.env,
                 SkillCenterReferenceItemModel.request_id == row.request_id,
             )

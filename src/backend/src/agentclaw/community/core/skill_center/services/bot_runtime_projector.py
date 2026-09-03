@@ -36,6 +36,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
     ResolvedSkillPlan,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
@@ -128,7 +129,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         plan = self._resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
@@ -143,7 +144,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # and whether the scope's halves mean anything to it at all — is the
         # engine's fact, so the engine's own implementation answers it. Nothing
         # below this line tests which engine this is.
-        await self._registry.for_engine(plan.engine).apply(
+        result = await self._registry.for_engine(plan.engine).apply(
             plan=plan,
             scope=scope,
             retired_mappings=retired_mappings,
@@ -153,7 +154,22 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # trigger is unchanged.
         if scope.mcp:
             assert isinstance(plan, ResolvedCapabilityPlan)
-            self._apply_passport_projection(plan=plan)
+            try:
+                self._apply_passport_projection(plan=plan)
+            except Exception:
+                logger.exception(
+                    "[BotRuntimeProjector] Passport projection unavailable "
+                    "bot_id=%s engine=%s",
+                    plan.bot_id,
+                    plan.engine,
+                )
+                return RuntimeProjectionResult.combine(
+                    result,
+                    RuntimeProjectionResult.pending(
+                        code="PASSPORT_RUNTIME_UNAVAILABLE",
+                        reason="MCP 授权配置尚未完成同步",
+                    ),
+                )
         else:
             logger.info(
                 "[BotRuntimeProjector] Passport update skipped, scope declares "
@@ -161,6 +177,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 plan.bot_id,
                 plan.engine,
             )
+        return result
 
     async def project_mcp_and_cli(
         self,
@@ -168,7 +185,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         bot_id: str,
         owner_id: str,
         scope: ProjectionScope,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Rebuild MCP/CLI when a cutover task exclusively owns Skill mappings.
 
         The same four steps as ``project``, with no retirements: declaring the
@@ -184,11 +201,27 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             scope=scope,
         )
         assert isinstance(plan, ResolvedCapabilityPlan)
-        await self._registry.for_engine(plan.engine).apply(
+        result = await self._registry.for_engine(plan.engine).apply(
             plan=plan,
             scope=scope,
         )
-        self._apply_passport_projection(plan=plan)
+        try:
+            self._apply_passport_projection(plan=plan)
+        except Exception:
+            logger.exception(
+                "[BotRuntimeProjector] Passport projection unavailable "
+                "bot_id=%s engine=%s",
+                plan.bot_id,
+                plan.engine,
+            )
+            return RuntimeProjectionResult.combine(
+                result,
+                RuntimeProjectionResult.pending(
+                    code="PASSPORT_RUNTIME_UNAVAILABLE",
+                    reason="MCP 授权配置尚未完成同步",
+                ),
+            )
+        return result
 
     def _resolve_plan(
         self,

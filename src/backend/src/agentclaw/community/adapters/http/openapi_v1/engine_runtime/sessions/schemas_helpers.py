@@ -13,16 +13,45 @@ logger = get_logger()
 _LOOKAHEAD = 1
 _MAX_HISTORY_DEPTH = 5000
 
-def _map_session(data: dict[str, Any]) -> Session:
+def _openclaw_public_title(session_id: str, title: str) -> str:
+    """Remove only the internal suffix OpenClaw adds to a public title."""
+    if not session_id or not title:
+        return title
+
+    candidates = {session_id}
+    parts = session_id.split(":")
+    try:
+        session_index = parts.index("session")
+    except ValueError:
+        session_index = -1
+    if session_index >= 0 and session_index + 1 < len(parts):
+        candidates.add(parts[session_index + 1])
+        candidates.add(":".join(parts[session_index:]))
+
+    for suffix in sorted(candidates, key=len, reverse=True):
+        marker = f"_{suffix}"
+        if suffix and title.endswith(marker):
+            return title[: -len(marker)]
+    return title
+
+
+def _map_session(
+    data: dict[str, Any], *, engine_type: str | None = None
+) -> Session:
     """Engine session dict → public :class:`Session`.
 
     Source: ``_session_to_dict`` in ``src/engine/.../api/session/router.py``.
     ``user_id`` is dropped (it is the caller) and ``ext_info`` is dropped
     (engine-specific opaque payload with no public contract).
     """
+    session_id = str(data.get("id", ""))
+    title = str(data.get("title") or "")
+    if (engine_type or "").lower() == "openclaw":
+        title = _openclaw_public_title(session_id, title)
+
     return Session(
-        session_id=str(data.get("id", "")),
-        title=str(data.get("title") or ""),
+        session_id=session_id,
+        title=title,
         agent_id=str(data.get("agent_id") or ""),
         model=str(data.get("model") or ""),
         permission_mode=str(data.get("permission_mode") or ""),
