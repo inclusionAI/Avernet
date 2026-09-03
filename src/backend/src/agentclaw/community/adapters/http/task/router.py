@@ -14,6 +14,7 @@
   POST /api/v1/collaboration/tasks/bbs/claim        — BBS 接力步②:CAS 占根(恰一赢,输者 409)
   POST /api/v1/collaboration/tasks/bbs/attach        — BBS 接力步④:挂 run_mode=bbs scoped 子节点 + start
   POST /api/v1/collaboration/tasks/bbs/result        — BBS 接力步⑤:回投终态 + 释放 claim
+  GET  /api/v1/collaboration/tasks/bbs/list          — 列 BBS 接力任务(分页;可选 status / search_word 过滤)
   POST /api/v1/collaboration/tasks/discovery/discover — 任务发现阶段:读取任务 → per-bot engine 建 session → 投递通知
   GET  /api/v1/collaboration/tasks/discovery/status   — 任务发现状态(读 SQLite db)
 
@@ -46,6 +47,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     BbsAttachDTO,
     BbsClaimDTO,
     BbsResultDTO,
+    BbsTaskItemDTO,
     TaskCallbackDataDTO,
     TaskCallbackRequest,
     TaskExecutionGraphDTO,
@@ -55,6 +57,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskNodeCallbackRequest,
     TaskOpResultDTO,
     acceptance_result_from_dto,
+    bbs_task_overview_to_dto,
     callback_from_dto,
     graph_to_dto,
     op_result_to_dto,
@@ -80,7 +83,7 @@ from agentclaw.community.adapters.http.task.translator import (
     translate_claw_mind,
     translate_common_task_callback
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
@@ -89,7 +92,7 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     CLAIM_JOIN_FILTER,
     HARNESS_POLLER,
     SEARCH_SKILL,
-    SINGLE_BOT_SKILL_REPORT,
+    SKILL_REPORT,
     TaskClaimJoinGateProtocol,
     TaskSettingsServiceProtocol,
 )
@@ -130,6 +133,18 @@ def _validate_status_filter(status: str | None) -> None:
     for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
         if tok not in valid:
             raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
+def _validate_single_status(status: str | None) -> str | None:
+    """校验单值 status:空白(None/空串) → None(不过滤);非空则 strip+upper 后必须 ∈ Status 枚举值,
+    否则 400(含逗号多值,如 ``RUNNING,DONE`` 不在枚举内 → 400,强制单值契约)。返回归一化大写字符串,
+    供 ``task_node.status == v`` 直接比对;与多值版 ``_validate_status_filter`` 区分(后者用于 /list)。"""
+    if status is None or not status.strip():
+        return None
+    v = status.strip().upper()
+    if v not in {s.value for s in Status}:
+        raise HTTPException(status_code=400, detail=f"invalid status: {status}")
+    return v
 
 
 router = APIRouter(prefix="/api/v1/collaboration/tasks", tags=["task"])
@@ -181,7 +196,10 @@ async def get_task_dashboard_internal(
 @envelope_errors
 async def list_tasks_internal(
     request: Request,
-    status: str | None = None,
+    status: str | None = Query(
+        None,
+        description="可选 status 过滤:支持单个或逗号分隔多值(如 DONE,FAILED);非法值 → 400",
+    ),
     user_id: str | None = Query(
         None,
         description="可选:按 owner_user_id 过滤;为空返回全量。与公开面 "
@@ -195,7 +213,7 @@ async def list_tasks_internal(
     ),
     service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
 ) -> Envelope[list[TaskInfoRecordDTO] | Page[TaskInfoRecordDTO]]:
-    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选状态/owner 过滤)。
+    """列持久化 ``task_info`` 记录(内部副本,按更新时间降序;可选单状态/多状态/owner 过滤)。
 
     非法 ``status`` 过滤值 → 400(经 ``HTTPException`` → 中央 handler → ``ErrorEnvelope``)。
     ``user_id`` 为空时不按 owner 过滤(返回全量,供内部可信调用方);传入则按 ``owner_user_id``
@@ -295,7 +313,7 @@ async def get_task_settings(
 ) -> Envelope[list[TaskSettingStateDTO]]:
     """读取全部已支持的任务开关状态。"""
     env = get_current_env()
-    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SINGLE_BOT_SKILL_REPORT)
+    setting_types = (CLAIM_JOIN_FILTER, HARNESS_POLLER, SEARCH_SKILL, SKILL_REPORT)
     states = [
         TaskSettingStateDTO(
             setting_type=setting_type,
@@ -480,6 +498,50 @@ async def bbs_result(
         exec_error=body.exec_error,
     )
     return envelope({"ok": True}, request)
+
+
+@router.get("/bbs/list", response_model=Envelope[Page[BbsTaskItemDTO]])
+@envelope_errors
+async def list_bbs_tasks(
+    request: Request,
+    page: int = Query(default=1, ge=1, description="页码,1-based,默认 1"),
+    page_size: int = Query(
+        default=20, ge=1, le=100, description="每页数量,默认 20,最大 100"
+    ),
+    search_word: str | None = Query(
+        default=None,
+        description="可选模糊匹配:对 task_spec/extend_props 两列文本大小写不敏感 LIKE;空则不过滤",
+    ),
+    status: str | None = Query(
+        default=None,
+        description="可选单值状态过滤(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED);逗号多值/非法 → 400",
+    ),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[Page[BbsTaskItemDTO]]:
+    """列 BBS 接力任务(run_mode='bbs')的一页:`task_node_run_info` r ⋈ `task_node` n (task_id+node_id),
+    再按 task_id 补 `task_info.owner_bot_id`(publisher)。无 retry 过滤(当前 retry 恒 0)。
+
+    分页(1-based,缺省用默认值):``page``(默认 1)/ ``page_size``(默认 20,最大 100)。返回
+    ``Page{total, items}``——``items`` 为 ``BbsTaskItemDTO``(SQL 直投字段 task_id/node_id/run_mode/
+    retry/assignee_id/status/acceptance_result/extend_props/relay_* time/task_spec + adapter 二次解析字段
+    title=task_spec.metadata.title / goal=task_spec.goal.objective / acceptances=task_spec.goal.acceptances
+    / assignee_name=extend_props.assignee_name / publisher);``total`` 为**过滤后**行数。
+
+    可选过滤(为空时退化为纯分页,行为不变):``status``(单值,对 ``task_node.status`` 等值;逗号多值/非法值
+    → 400)、``search_word``(大小写不敏感模糊匹配 ``task_spec`` 或 ``extend_props`` 文本;``%``/``_`` 视作
+    通配符)。结果按 run info 记录 id 降序(最新优先);页越界 → items=[] 但 total 真实;非法 page/page_size →
+    422(Query 校验)。translator 投影遵循 Rule 22(adapter 只转协议);
+    领域查询委托 TaskServiceProtocol.list_bbs_tasks(page, page_size, search_word=?, status=?)。
+    """
+    normalized_status = _validate_single_status(status)
+    normalized_word = (search_word or "").strip() or None
+    records, total = service.list_bbs_tasks(
+        page=page,
+        page_size=page_size,
+        search_word=normalized_word,
+        status=normalized_status,
+    )
+    return page_envelope(total, [bbs_task_overview_to_dto(r) for r in records], request)
 
 
 @router.post("/nodes/update", response_model=Envelope[dict[str, Any]])
@@ -844,7 +906,7 @@ task_callback_router = APIRouter(
     prefix="/api/v1/collaboration/tasks/callback", tags=["task-callback"]
 )
 
-_TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
+_TERMINAL = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}
 
 
 def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | None:
@@ -941,7 +1003,7 @@ async def _dispatch_impl(
             await svc.callback.ingest_parse_error(_raw_obj, str(exc))
         return envelope({"ok": True}, request)
     if is_bcn_event_payload(_raw_obj):
-        logger.info("[task_callback] bcn event received session_id=%s", _sid)
+        logger.info("[task_callback] bcn_event_callback session_id=%s", _sid)
         auth.verify(
             source="bcn",
             headers=request.headers,
@@ -1029,6 +1091,7 @@ async def _dispatch_impl(
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
 
     if is_common_task_payload(_raw_obj):
+        logger.info("[task_callback] common_task_loop_callback session_id=%s, raw_obj=%s", _sid, _raw_obj)
         tc = translate_common_task_callback(_raw_obj)
         try:
             await svc.callback.report_result(tc.data)

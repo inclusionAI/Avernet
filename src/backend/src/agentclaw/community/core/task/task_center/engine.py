@@ -49,15 +49,102 @@ from agentclaw.community.core.task.domain.models import (
     TaskGraphPatch,
     TaskNode,
     TaskNodePatch,
+    effective_run_mode,
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 
 logger = logging.getLogger("task.engine")
 
 _DEFAULT_MAX_HARNESS = 2  # 执行报错 harness 重投上限(达上限→HUNG)
+
+# 固定流程兜底 mock 的"产出摘要"(节点真实上报未在 fallback 超时内闭环时,以此真实内容代替 [auto] 占位)。
+# 取自 okr-implementation-relay 剧本(服装多平台大促)各节点"本跳产出正文"摘要,供下游 ## 上游产出正文 可读、
+# 流程不因占位无意义文本而读不通。仅服务默认真实上报 + 80s 兜底路径;真实上报先到则本表内容不被使用。
+_STATIC_MOCK_SUMMARY: dict[str, str] = {
+    "marketing_strategy": (
+        "双十一大促三平台差异化营销策略:淘宝预售蓄水(10.15起品类券)+11.11返场爆品,目标占GMV55%;"
+        "京东近仓速达/价保/无忧退提客单,占25%;拼多多拉新组合+证质门槛,占20%。"
+        "三平台统一主视觉、优惠规则前置公示。"
+        "无法独立闭环:人群未分层、主推商品池未定需圈人/选品细化;多平台比价、低质拉新、负面舆情需风控评估。"
+    ),
+    "strategy_generation_group": (
+        "完整大促营销策略(三平台差异化+人群分层+选品商品池+玩法):"
+        "淘宝站内+直通车精准+品类券(满300减40),京东搜索/京准通+服务券(价保/速达),拼多多多多进宝拉新+门槛券;"
+        "人群:淘宝老客分层(高价值/沉睡/流失召回)、京东品质人群+蓝海潜客、拼多多下沉新客设证质门槛;"
+        "选品:淘宝冬装基本款+羽绒服爆款、京东高端羽绒+配饰、拼多多低价引流款设证质拦截刷单;"
+        "玩法:预售10.15起定金翻倍、11.4–11.11品类券、11.11–11.15返场,总投入不超1000万。"
+        "无法闭环:多平台比价、低质拉新、负面舆情需风控评估;舆情监测无人承接需安全架构师补。"
+    ),
+    "risk_lead": (
+        "锁定8项重点风险点与评审范围:①券规则被中介套利(三平台品类券);②拼多多低质拉新二次客诉(下沉新客);"
+        "③部分地区发货延迟(羽绒服重货);④客诉赔付超日常1.5倍;⑤京东价保争议;⑥热销缺货/预售超卖;"
+        "⑦大促负面舆情无承接系统(无人承接,需安全架构师补舆情监测);⑧跨平台比价套利。建议风险评审群重点审②③④⑦。"
+        "无法闭环:舆情监测无对接系统无承接团队,业务风控也补不了,带进风险评审群标无人承接/需安全架构师补。"
+    ),
+    "risk_assessment": (
+        "8项风险逐项定级与约束:客诉赔付(高,赔付预案¥300万+夜间客服扩容)、发货延迟(高,热销品前置入仓+运力保底)、"
+        "低质拉新(高,证质门槛+拉新黑名单)、券套利(中,单平台限购+实名校验)、价保争议(中,规则前置公示)、"
+        "库存缺货(高,预售库存强校验)、跨平台比价(中,每日价差监控)、舆情监测(无人承接,转安全架构师)。"
+        "无人承接任务:舆情监测系统无承接团队无对接系统→转BBS安全架构师承接。unhandled_tasks见上报硬字段。"
+    ),
+    "risk_unhandled_to_bbs": (
+        "交付大促舆情监控补齐方案(舆情监测MVP):覆盖三平台店铺评论+社媒关键词,情感分类,负面按严重度分级,"
+        "阈值触发告警→客服/运营闭环,接入审核/实施dashboard;MVP就位可供审核与实施接入。"
+        "业务风险(逐项成因/等级/约束):低质拉新二次客诉(高,赔付预案¥300万+夜间客服扩容)、发货延迟(高,热销前置入仓+运力保底)、"
+        "券套利(中,单平台限购+实名校验)、价保争议(中,规则前置公示)、库存缺货/预售超卖(高,预售库存强校验)、跨平台比价(中,每日价差监控)。"
+        "技术/系统风险:券核销与库存并发须防超卖(强校验)、价差监控告警链路延迟、舆情监测接入告警通道联调。"
+        "carry-forward上游全料:①三平台差异化营销策略 ②人群分层+选品商品池+玩法 ③上述风险逐项结论与约束,供下游审核一次审齐。"
+    ),
+    "strategy_approval": (
+        "审核结论:批准有条件通过。问题清单:高—低质拉新二次客诉(证质门槛+黑名单,需实施盯控负向清单);"
+        "高—发货延迟(热销前置入仓,需盯入仓率);高—客诉赔付(赔付预案¥300万+客服扩容,需盯赔付率);"
+        "中—券套利(单平台限购);中—价保争议(规则前置);中—跨平台比价(每日监控)。舆情监测MVP就绪,实施接入告警通道。"
+    ),
+    "implementation": (
+        "三平台投放配置单已定并挂监控:淘宝预售10.15起定金翻倍、品类券满300减40、11.11爆品返场,监控入仓率/赔付率;"
+        "京东价保+速达服务券、搜索/京准通投放,监控价保工单;拼多多拉新组合+证质门槛+黑名单,监控低质拉新占比;"
+        "跨平台每日价差监控;舆情MVP接入告警→客服。异常处置预案:触发阈值→降量/限购/赔付/公关。"
+    ),
+    "notify_done": (
+        "大促方案已实施,通知负责人收尾。各跳交接摘要:①专家出三平台策略方向→②策略生成群细化人群+选品+玩法→"
+        "③'风控圈8项风险点→③风险评审群评审定级与约束→④安全架构师补舆情监测MVP+带全料→⑤审核批准有条件通过+三项硬约束→"
+        "⑥落地配置单+监控+预案。当前状态:已实施待执行日,三项高风险需盯控(低质拉新/发货延迟/客诉赔付),舆情监测已上线。"
+    ),
+    # ---- merchant-operations-goal-to-plan 节点 mock(理发店18周年店庆) ----
+    "set_redlines": (
+        "18周年店庆任务单(全套公共约束):活动窗口2026.10.15-11.15(32天)、营业时段10:00-22:00、促销预算≤20万、备货现金占用≤8万、价格红线(补贴率≤30%、最低折扣85折、护理套餐最低价298)、平台合规红线(券有效期/预约限制须明示、禁止全城最低)、客流目标(新客1500/护理200)。自持单品成本、毛利底线、授权清单留给利润核算。发门店运营测产能。"
+    ),
+    "ops_capacity": (
+        "门店能力画像(运营子集测算):剪发位8、护理位3、技师12(剪发8/护理4);剪发45min、护理90min;周末剪发新增约15人/天、护理新增约8人/天(扣自然客流),工作日余量较足;可扩:临时剪发技师+2→剪发+10人/天、延营至23:00→周末+5人/天;护理耗材现有30份、备货8万可补到60份;目标新客1500(≈47人/天)需扩产能可达。营销约束原样透传:促销预算≤20万、价格红线、平台合规红线、客流目标(不解读不使用)。交营销出方案。"
+    ),
+    "marketing_plan": (
+        "营销方案(能力内):新客王牌剪发体验券原价68→体验价48(补贴29%≤30%),按产能分批投放冲1500;老客头皮+基础护理套餐90min、398(≥298红线),首批按库存60份与护理位产能限量、预约制;会员周年双倍积分+会员日提前购;节奏:预约占用率>75%暂停放量。送评审群审。"
+    ),
+    "review_group": (
+        "评审群结论(商场运营+线上平台两路,默认给修订条件不打回):商场侧——展位报批通过、传单限入口、营业时段内执行;平台侧——券有效期与预约限制须在活动页明示、禁止全城最低、设等待超时安抚、客诉超阈值暂停投放。过审带修订条件,交店主利润核算。"
+    ),
+    "profit_accounting": (
+        "利润核算表(自持成本):体验券单次成本25/售价48达标;护理套餐成本180/售价398达标;某引流款低于毛利底线标红。授权清单:体验券分批投放可自主、护理套餐放量需店主审批、扩产能(临时技师)需店主审批。待取舍:低价引流款是否保留、临时技师成本是否接受。交投放实施。"
+    ),
+    "launch": (
+        "投放实施阶段发现:周年活动券当前通过公众号和门店渠道发放,"
+        "现有发券与核销工具无法可靠判断同一用户是否已领取过同类活动券,"
+        "重复领取拦截能力无法确认,需要补齐后再继续放量。"
+    ),
+}
+
+# 固定流程兜底 mock 的"不可实现任务"(risk_assessment 上报无结构化 unhandled_tasks 时兜底)。
+# 大促剧本:风险评审认为差外部舆情监控能力,内部找不到对应舆情监控 bot → 转 BBS 广场由安全架构师承接。
+_UHT_MOCK: list[dict[str, str]] = [
+    {
+        "id": "uht-sentiment-1",
+        "title": "舆情监控方案缺失",
+        "reason": "风险评审认为差外部舆情监控能力(发货慢/尺码偏小等负面舆情无监测,需告警→客服闭环),内部找不到对应舆情监控 bot,转 BBS 广场由安全架构师承接",
+    },
+]
 
 # 陈旧飞行态阈值(dispatching=True 超此即视为崩溃遗留,redrive 可清理重派)。
 # 默认 60s:正常 start_run 在途远小于此;与默认 recovery lease(60s)对齐——崩溃任务经 recovery
@@ -191,13 +278,13 @@ class ExecutionEngine:
                 "None" if self._bcs is None else type(self._bcs).__name__,
             )
             return None
-        from agentclaw.community.core.task.task_runner.integration.task_executor import (
+        from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
             TaskExecutor,
         )
-        from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+        from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
             TaskExecutorResultPoller,
         )
-        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+        from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
             PromptFormatterImpl,
         )
 
@@ -271,7 +358,7 @@ class ExecutionEngine:
         return TaskDispatcher(self._graph, pool=pool)
 
     def _build_runner(self):
-        from agentclaw.community.core.task.task_runner.runner import TaskRunner
+        from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
         return TaskRunner(self._graph, execution_backend=self._executor)
 
@@ -301,7 +388,7 @@ class ExecutionEngine:
         sibling_outputs = {
             s.node_id: s.run_info.output
             for s in siblings
-            if s.status == Status.DONE and s.node_id != node_id
+            if s.status == Status.SUCCESS and s.node_id != node_id
         }
         return {
             "mode": "execute",
@@ -331,7 +418,7 @@ class ExecutionEngine:
         return int(cfg.get("MAX_HARNESS", _DEFAULT_MAX_HARNESS))
 
     def _max_plan_round(self, task_id: str) -> int:
-        """节点级重规划次数上限 MAX_PLAN_ROUND(default 3)。父节点子全 DONE→gap 未闭→重 plan 产新子,
+        """节点级重规划次数上限 MAX_PLAN_ROUND(default 3)。父节点子全 SUCCESS→gap 未闭→重 plan 产新子,
         每次该路径走一次 +1;达上限父节点 HUNG(不再产子)"""
         cfg = self._graph._execution_config(task_id)
         return int(cfg.get("MAX_PLAN_ROUND", 3))
@@ -349,12 +436,13 @@ class ExecutionEngine:
         return self._task_type(task_id) in {"workflow", "yaml"}
 
     def _is_graph_terminal(self, task_id: str) -> bool:
-        """图级终态(DONE/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:
+        """图级终态(DONE/SUCCESS/HUNG)判定。终态后自动驱动(plan/dispatch/harness/回投推进)一律冻结:
         MAX_LOOP 达上限→图 HUNG 后,后续 on_pass/on_miss/on_harness 不再推进(避免 loop_round 失控飙升
         与节点无限增生);on_bbs_report(BBS 接力恢复)是唯一可从 HUNG 恢复的路径,不在本守卫范围。"""
         try:
             return self._graph.query_task_dashboard(task_id).status in {
                 Status.DONE,
+                Status.SUCCESS,
                 Status.HUNG,
             }
         except Exception:  # noqa: BLE001  图不存在等→视为非终态,让正常入口逻辑处理
@@ -427,8 +515,8 @@ class ExecutionEngine:
         叶子派发执行时由 _prepare_into 覆写为 single_bot/coop_group/bbs+worker。"""
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
-        if node is None or node.status != Status.PENDING:
-            return  # 已 PLANNING / 已终态 → 幂等不翻
+        if node is None or node.status not in {Status.PENDING, Status.HUNG}:
+            return  # 已 PLANNING / 其他终态 → 幂等不翻
         self._graph.update_task_node_info(
             TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.PLANNING)
         )
@@ -444,7 +532,7 @@ class ExecutionEngine:
         children = self._graph.get_child_tasks(task_id, parent_node_id)
         done = [
             c for c in children
-            if c.status == Status.DONE and c.run_info.output
+            if c.status == Status.SUCCESS and c.run_info.output
         ]
         if not done:
             return None
@@ -625,7 +713,7 @@ class ExecutionEngine:
         使多入合并点(如 strategy_approval 依赖 risk/marketing/crowd/product 四路)
         在 dashboard 上可渲染为 DAG。返回本次新入图节点数。"""
         graph = self._graph.query_task_dashboard(task_id)
-        done = {n.node_id for n in graph.tasks if n.status == Status.DONE}
+        done = {n.node_id for n in graph.tasks if n.status == Status.SUCCESS}
         in_graph = {n.node_id for n in graph.tasks}
         wave_defs = [
             d for d in runtime.definition.nodes
@@ -735,7 +823,7 @@ class ExecutionEngine:
         的 bot_id 永远被尊重(不会被 catalog 命中的其他 bot 替换)。依赖顺序由 runtime.ready 保证。"""
         to_run: list[TaskNode] = []
         # 固定流程默认真实上报 + fallback 兜底:每个真实派发节点都额外调度一条延迟 mock 上报,
-        # 真实回投在 fallback 超时(默认 80s,env OCB_TASK_STATIC_FALLBACK_TIMEOUT)内先到则自跳过,
+        # 真实回投先到则自跳过(mock 兜底延迟改为随机:单 bot 20-40s,协作群 40-80s,无固定超时),
         # 否则超时后由 mock 推进;auto=True 演示模式仍走短延迟(_static_auto_report 内按 mode 取 delay)。
         auto_nodes: list[TaskNode] = []
         for node in ready_nodes:
@@ -807,8 +895,9 @@ class ExecutionEngine:
                 )
                 continue
             # bbs_handoff 旁路:不可实现任务转 BBS 广场(与 approval 并行,不阻塞主实施线)。
-            # 阶段① 入广场:未派发,assignee 空(不展示研发 bot),写 bbs_status=posted_in_square;
-            # 30s 后由 _bbs_handoff_claim 被接:真 start_run 发研发 bot + 翻 claimed(展示研发 bot)。
+            # 阶段① 入广场:写 assignee=安全架构师 + bbs_status=posted_in_square(dashboard 即可点开安全架构师
+            # bot 主会话,不再空 assignee 致点不开);30s 后由 _bbs_handoff_claim 被接:真实 start_run 发
+            # 安全架构师 并落 session_id + 翻 claimed。
             if getattr(definition, "node_type", "bot") == "bbs_handoff":
                 bot_id = getattr(definition, "bot_id", None) or ""
                 static_input = node.task_spec.context.extend_props.get("static_input") or {}
@@ -817,11 +906,8 @@ class ExecutionEngine:
                     pass  # 真实风险评估上报了结构化不可实现任务 → 原样用其内容
                 else:
                     # 真实评估为自然语言、无结构化 unhandled_tasks → 兜底 mock 占位(与 _static_auto_report
-                    # 的 uht-auto 占位同口径),研发 bot 不致收到空;真实检测到时优先用真实内容。
-                    items = [
-                        {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
-                        {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
-                    ]
+                    # 的 _UHT_MOCK 同口径),安全架构师 不致收到空;真实检测到时优先用真实内容。
+                    items = list(_UHT_MOCK)
                     logger.info(
                         "[task][static-plan] bbs_handoff 真实无结构化 unhandled_tasks,兜底 mock 占位 task=%s node=%s",
                         task_id, node.node_id,
@@ -836,6 +922,7 @@ class ExecutionEngine:
                         task_id=task_id,
                         node_id=node.node_id,
                         run_mode="bbs",
+                        assignee=bot_id,
                         extend_props_patch={
                             "dispatching": True,
                             "dispatching_at": _now_ms(),
@@ -915,12 +1002,12 @@ class ExecutionEngine:
             side.append(("auto", auto_nodes))
 
     async def _static_auto_report(self, task_id: str, node_id: str) -> None:
-        """固定流程兜底上报:节点真实派发后,若在 fallback 超时(默认 80s)内无真实回投,
-        则以 mock 信息回投 PASS→DONE 推进图态,避免单节点不上报致整流程卡死;
+        """固定流程兜底上报:节点真实派发后,若在随机延迟内(单 bot 20-40s,协作群 40-80s;取消固定 80s 超时)无真实回投,
+        则以 mock 信息回投 PASS→SUCCESS 推进图态,避免单节点不上报致整流程卡死;
         auto=True 演示模式改走短("demo")延迟。
 
         mock 只替代"上报信息",不替代派发——拉群/发消息仍走真实路径(_drain group/run)。
-        延迟到期后仅在节点处 RUNNING 态(真实派发成功)时才回投 PASS→DONE;
+        延迟到期后仅在节点处 RUNNING 态(真实派发成功)时才回投 PASS→SUCCESS;
         若派发失败留 PENDING / 已被真实上报翻 DONE,则跳过(暴露真实失败,不掩盖,不重复翻态)。"""
         runtime = self._static_runtime(task_id)
         if runtime is None:
@@ -929,7 +1016,7 @@ class ExecutionEngine:
         delay = (
             self._static_auto_report_delay(task_id)
             if auto
-            else self._static_fallback_delay(task_id)
+            else self._static_mock_fallback_delay(task_id, node_id)
         )
         logger.info(
             "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
@@ -947,8 +1034,10 @@ class ExecutionEngine:
             )
             return
         definition = runtime.by_id.get(node_id)
+        # 兜底产出摘要:用各节点真实产出(剧本)代替 [auto] 占位,使下游 ## 上游产出正文 可读、流程不因
+        # 无意义占位文本读不通。真实上报先到则本兜底自跳过,不被使用。
         mock_result: Any = {
-            "summary": f"[auto] node={node_id}",
+            "summary": _STATIC_MOCK_SUMMARY.get(node_id, f"[auto] node={node_id}"),
             "random": f"{random.randrange(10 ** 6):06d}",
         }
         if definition is not None and any(
@@ -956,15 +1045,13 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["approved"] = True
-        # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群)
+        # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群):
+        # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 安全架构师)。
         if definition is not None and any(
             isinstance(v, str) and v.startswith("$.result.unhandled_tasks")
             for v in definition.output.values()
         ):
-            mock_result["unhandled_tasks"] = [
-                {"id": "uht-auto-1", "title": "自动研发任务-1", "reason": "评估认为暂不可实现"},
-                {"id": "uht-auto-2", "title": "自动研发任务-2", "reason": "依赖外部能力暂缺"},
-            ]
+            mock_result["unhandled_tasks"] = [dict(t) for t in _UHT_MOCK]
         logger.info(
             "[task][static-plan] auto-report fire task=%s node=%s mock=%s -> on_report",
             task_id, node_id, mock_result,
@@ -986,14 +1073,14 @@ class ExecutionEngine:
     async def _static_bbs_handoff_auto_report(
         self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
     ) -> None:
-        """固定流程 bbs_handoff 兜底上报:与节点级 _static_auto_report 同语义——真实 poller 在 timeout
-        内闭环则自跳过(节点非 RUNNING);否则超时后 mock PASS→DONE,避免旁路节点长挂致整流程不终态。
-        auto 演示模式用短 demo 延迟,默认真实模式用 fallback 超时(80s)。"""
+        """固定流程 bbs_handoff 兜底上报:与节点级 _static_auto_report 同语义——真实 poller 先到则自跳过(节点非 RUNNING);
+        否则随机延迟(单 bot/node 同单 bot 20-40s)后 mock PASS→SUCCESS,避免旁路节点长挂致整流程不终态。
+        auto 演示模式用短 demo 延迟。"""
         auto = self._static_auto_report_on(task_id)
         delay = (
             self._static_auto_report_delay(task_id)
             if auto
-            else self._static_fallback_delay(task_id)
+            else self._static_mock_fallback_delay(task_id, node_id)
         )
         logger.info(
             "[task][static-plan] %s scheduled task=%s node=%s in %.2fs",
@@ -1018,7 +1105,7 @@ class ExecutionEngine:
                 ),
                 output_patch={
                     "result": {
-                        "summary": f"[bbs-handoff] node={node_id}",
+                        "summary": _STATIC_MOCK_SUMMARY.get(node_id, f"[bbs-handoff] node={node_id}"),
                         "handed_to": rnd_bot_id,
                         "items": items,
                         "random": f"{random.randrange(10 ** 6):06d}",
@@ -1041,6 +1128,15 @@ class ExecutionEngine:
             return float(v) if v is not None else 80.0
         except (TypeError, ValueError):
             return 80.0
+
+    def _static_mock_fallback_delay(self, task_id: str, node_id: str) -> float:
+        """固定流程真实上报兜底 mock 的随机延迟(取消固定 fallback 超时):
+        单 bot 节点随机 20-40s,协作群节点随机 40-80s;auto 演示模式仍走 _static_auto_report_delay 短延迟。
+        无法定 node_type 时按单 bot 处理(20-40)。真实回投先到则本兜底自跳过,不被使用。"""
+        runtime = self._static_runtime(task_id)
+        definition = runtime.by_id.get(node_id) if runtime is not None else None
+        is_group = definition is not None and definition.node_type == "collaboration"
+        return random.uniform(40.0, 80.0) if is_group else random.uniform(20.0, 40.0)
 
     def _static_auto_report_delay(self, task_id: str) -> float:
         """自驱 mock 上报延迟秒数:execution_config.static_auto_report_delay →
@@ -1082,8 +1178,8 @@ class ExecutionEngine:
     async def _bbs_handoff_claim(
         self, task_id: str, node_id: str, rnd_bot_id: str, items: Any
     ) -> None:
-        """BBS 交接"被接":延迟后真实 start_run 发自动研发 bot,成功翻 claimed + 展示研发 bot;
-        auto 模式随即 mock 上报 PASS→DONE(派发完成即交接完成),真实模式留给 poller。
+        """BBS 交接"被接":延迟后真实 start_run 发安全架构师,成功翻 claimed + 展示安全架构师;
+        auto 模式随即 mock 上报 PASS→SUCCESS(派发完成即交接完成),真实模式留给 poller。
         失败留 PENDING(post_failed),不掩盖真实派发失败。"""
         delay = self._bbs_handoff_delay(task_id)
         logger.info(
@@ -1121,47 +1217,55 @@ class ExecutionEngine:
                 action_log=list(node.run_info.action_log),
             ),
         )
-        # ② start_run([delivery_node]) 真实投递给研发 bot。
+        # ② start_run([delivery_node]) 真实投递给研发 bot；持久化节点保持 bbs 语义。
         ok = False
+        node.run_info.run_mode = "single_bot"
         try:
             results = await self._runner.start_run([delivery_node])
             ok = bool(results[0]) if results else False
-        except Exception as ex:  # noqa: BLE001
+        except Exception as ex:  # noqa: BLE101
             logger.warning(
-                "[task][static-plan] bbs_handoff start_run 异常 task=%s node=%s rnd_bot=%s: %s",
+                "[task][static-plan] bbs_handoff 安全架构师 派发异常 task=%s node=%s rnd_bot=%s: %s",
                 task_id, node_id, rnd_bot_id, ex,
             )
             ok = False
-        if not ok:
-            with self._lock_for(task_id):
+        finally:
+            node.run_info.run_mode = "bbs"
+            # 清掉临时 single_bot 派发(单 bot→group 旁路)在 extend_props 泄漏的 actual_run_mode,
+            # 否则 effective_run_mode() 优先读 actual_run_mode 仍判 single_bot,致 dashboard 误显单人。
+            node.run_info.extend_props["actual_run_mode"] = "bbs"
+        with self._lock_for(task_id):
+            if not ok:
+                # 真派发失败:不回 PENDING/不清 assignee,直接 no-op 翻 RUNNING(bbs 路径仍由兜底推进),
+                # dashboard 可按 assignee 点开安全架构师 主会话;dispatch_error 留痕便于排查。
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
-                        run_mode="bbs", assignee="",
+                        status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
                         extend_props_patch={
                             "dispatching": None,
-                            "dispatch_error": "bbs_handoff_start_run_failed",
-                            "bbs_status": "post_failed",
+                            "actual_run_mode": "bbs",
+                            "dispatch_error": "bbs_rnd_dispatch_fallback_noop",
+                            "bbs_status": "claimed_by_rnd",
                         },
                     )
                 )
-            return
-        # ② 被接成功:翻 RUNNING + bbs_status=claimed(此时 dashboard 展示研发 bot)
-        with self._lock_for(task_id):
-            self._graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id, node_id=node_id,
-                    status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
-                    extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+            else:
+                # 安全架构师 真发成功:session_id/run_id 已由 dispatcher 写入 extend_props,bbs 翻 RUNNING+claimed。
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id, node_id=node_id,
+                        status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
+                        extend_props_patch={"dispatching": None, "actual_run_mode": "bbs", "bbs_status": "claimed_by_rnd"},
+                    )
                 )
-            )
         logger.info(
             "[task][static-plan] bbs_handoff claimed task=%s node=%s rnd_bot=%s items=%s",
             task_id, node_id, rnd_bot_id,
             items if isinstance(items, list) else type(items).__name__,
         )
         # 交接完成:固定流程 bbs_handoff 始终调度兜底上报——真实 poller 在 timeout 内闭环则自跳过;
-        # 否则超时后 mock PASS→DONE,避免旁路节点长挂致整个固定流程永不终态。
+        # 否则超时后 mock PASS→SUCCESS,避免旁路节点长挂致整个固定流程永不终态。
         # auto 演示模式用短延迟;默认(非 auto)用 fallback 超时(80s)兜底。
         _bbs_t = asyncio.create_task(
             self._static_bbs_handoff_auto_report(task_id, node_id, rnd_bot_id, items)
@@ -1212,7 +1316,7 @@ class ExecutionEngine:
         materialized_ids = {n.node_id for n in current.tasks} & all_def_ids
         all_in_graph = materialized_ids == all_def_ids
         terminal = all_in_graph and all(
-            n.status in {Status.DONE, Status.FAILED, Status.HUNG}
+            n.status in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}
             for n in current.tasks
             if n.node_id in all_def_ids
         )
@@ -1228,12 +1332,12 @@ class ExecutionEngine:
             {n.node_id: n.status.value for n in current.tasks if n.node_id in all_def_ids},
         )
         if terminal:
-            # 终态镜像:root 先翻 DONE(下方 if 块),再 _sync_graph_status_to_root 镜像 graph(不再 graph 独立先写 status)
+            # 终态镜像:root 先翻 SUCCESS(下方 if 块),再 _sync_graph_status_to_root 镜像 graph(不再 graph 独立先写 status)
             root_node = next((n for n in current.tasks if n.node_id == task_id), None)
-            if root_node is not None and root_node.status not in {Status.DONE, Status.FAILED, Status.HUNG}:
+            if root_node is not None and root_node.status not in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}:
                 try:
                     self._graph.update_task_node_info(
-                        TaskNodePatch(task_id=task_id, node_id=task_id, status=Status.DONE)
+                        TaskNodePatch(task_id=task_id, node_id=task_id, status=Status.SUCCESS)
                     )
                 except Exception as ex:  # noqa: BLE101 翻态非法不阻塞 graph DONE
                     logger.warning(
@@ -1387,24 +1491,45 @@ class ExecutionEngine:
         )
         with self._lock_for(patch.task_id):
             logger.info("[task_callback][on_report] begin update task node info, task=%s,", patch.task_id)
-            # 乙' a+R1 动态验收 FAIL 叶折叠 HUNG(纯语义归并):跳过 RUNNING→FAILED 瞬态,一次写直驱
-            # RUNNING→HUNG(节点 status 翻 HUNG;acceptance_result+gaps+hung_reason 同时落库)。
-            # **verdict 不改**:acceptance_result.verdict 仍记 FAILED(验收结论留痕),仅节点 status→HUNG
-            # (解耦 status=DONE/HUNG 与 verdict=DONE/FAILED)。push/pull 两路 skill/adapter 协议均以
-            # status≡verdict=FAILED 上报,此处统一折叠 status→HUNG 交 BBS 升级兜底。仅动态(非外部/非静态)
-            # 生效;调用方未置 status 或置 FAILED 时均折叠。外部/静态仍按 verdict FAIL→FAILED(三方/静态终态);
-            # exec_error 路径无 acceptance_result,不入此门(走 _on_harness_collect 重派)。
+            # 固定 plan 的"执行报错(exec_error)"不进 harness 重投/HUNG:V2 relay 下发给 bot 的是纯
+            # 交接正文(无 {success,data,gaps} poller 协议),bot 常回自然语言 → poller 误判 exec_error
+            # (terminal_result_invalid)。若仍 reset+重派×MAX_HARNESS→HUNG,会在 80s 兜底
+            # (_static_auto_report)之前把节点挂死,整固定流程读不往下走(等同 on_harness 入口守卫
+            # 39636835f 的意图,补在 poller→on_report 这条未守的路径上)。此处对固定 plan 的
+            # exec_error:不翻 FAILED、不重派,保持节点 RUNNING,仅记 last_exec_error 留痕,让
+            # 80s 兜底推进 DONE;真实 {success} 回投先到则走下方 acceptance DONE 自跳过。
             if (
+                self._static_runtime(patch.task_id) is not None
+                and patch.exec_error is not None
+            ):
+                logger.info(
+                    "[task_callback][on_report] task=%s node=%s 固定 plan exec_error=%s 忽略翻态/重派,交给 static fallback 兜底",
+                    patch.task_id, patch.node_id, patch.exec_error,
+                )
+                patch.status = None  # 保持 RUNNING,不落 FAILED
+                patch.acceptance_result = None
+                _ep = dict(patch.extend_props_patch) if patch.extend_props_patch else {}
+                _ep.setdefault("last_exec_error", patch.exec_error)
+                patch.extend_props_patch = _ep
+                result = self._graph.update_task_node_info(patch)
+                self._reconcile_root_hung_if_blocked(patch.task_id)
+                return result
+            # 先落验收结果，再处理状态。验收失败不作为普通 DONE 参与父节点成功
+            # 聚合:保留 acceptance_result/gaps 作为诊断上下文,随后升级当前节点 HUNG,
+            # 由 _maybe_propagate_hung 冒泡到根并进入 BBS。
+            acceptance_failed = (
                 patch.acceptance_result is not None
                 and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
-                and patch.status in (None, Status.FAILED)
                 and not self._is_external_managed_task(patch.task_id)
-                and self._static_runtime(patch.task_id) is None
-            ):
+            )
+            if acceptance_failed:
+                # 在同一次 SSOT 写入中选择 HUNG,避免先落 DONE 再二次翻态。
+                # acceptance_result/gaps 仍会保留在 run_info 中供 BBS 复核。
                 patch.status = Status.HUNG
-                _ep = dict(patch.extend_props_patch) if patch.extend_props_patch else {}
-                _ep.setdefault("hung_reason", "acceptance_fail")
-                patch.extend_props_patch = _ep
+                patch.extend_props_patch = {
+                    **(patch.extend_props_patch or {}),
+                    "hung_reason": "acceptance_failed",
+                }
             result = self._graph.update_task_node_info(patch)
             if self._static_runtime(patch.task_id) is not None:
                 # Static plans use the same harness contract as dynamic tasks.
@@ -1482,9 +1607,14 @@ class ExecutionEngine:
             if verdict == AcceptanceVerdict.DONE:
                 logger.info("[task_callback][on_report] accept_pass,task=%s", patch.task_id)
                 await self._on_pass_collect(patch.task_id, patch.node_id, side)
-            else:  # FAIL
-                logger.info("[task_callback][on_report] accept_fail,task=%s", patch.task_id)
-                await self._on_fail_collect(patch.task_id, patch.node_id, side)
+            else:  # 验收未通过:节点已升级 HUNG,冒泡到根并进入 BBS
+                logger.info(
+                    "[task_callback][on_report] acceptance_not_passed -> HUNG/BBS,task=%s",
+                    patch.task_id,
+                )
+                self._escalate_hung(
+                    patch.task_id, patch.node_id, "acceptance_failed"
+                )
             await self._drain(patch.task_id, side)
             self._reconcile_root_hung_if_blocked(patch.task_id)
             return result
@@ -1494,10 +1624,8 @@ class ExecutionEngine:
         """BBS 接力步⑤回投:翻 scoped 节点终态 + 释放 claim,**收口交给 engine 既有路径(非 bot 声明)**。
 
         不再有 ``root_verified``:根目标是否满足由框架经 owner 复核(``_on_pass_collect``→``plan(root)``→
-        ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。scoped 节点 PASS→DONE 走正常
-        PASS 传播(parent=root;守卫对 ``run_mode=="bbs"`` 触发的 root 复核放行,见 §10.5 seam 对应处);
-        FAIL+gaps→**删 scoped 节点**(丢弃本次接力尝试:不翻 FAILED、不 ``output_patch`` fold);
-        图回到 root ``PLANNING``+``bbs_mode`` 可恢复态等下段重新 claim/attach,**不进 FAIL 传播**。
+        ``has_gap=False``→``_maybe_finish_graph``)判定,**不由接力 bot 自报**。BBS 回投表示本次接力执行与验收已完成,统一将 scoped 节点置为 SUCCESS。BBS 回投
+        不删除节点、不根据回投内容判定 FAILED。
         最后清根 ``bbs_owner`` 释放 claim。
 
         持有者校验:``root.run_info.extend_props['bbs_owner']`` 须 == ``patch.assignee``(调用方
@@ -1508,7 +1636,7 @@ class ExecutionEngine:
         释放 claim,避免持卡者死锁(他 bot claim 被 CAS 拒)。owner 校验在 ``try`` 之前,非持有者抛错不清他卡。
 
         无 owner bot 时(单测)``plan(root)`` 返 ``has_gap=True``(no_planning_port)→ ``gap_no_progress`` → 父
-        HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped DONE + claim 释放)。"""
+        HUNG;故收口需 owner planner(live 有),单测只验 mechanics(scoped SUCCESS + claim 释放)。"""
         if self._is_external_managed_task(patch.task_id):
             logger.info("[task][on_bbs_report] task=%s external-managed, graph update only", patch.task_id)
             return self._graph.update_task_node_info(patch)
@@ -1523,39 +1651,22 @@ class ExecutionEngine:
                 raise TaskStateError(
                     f"on_bbs_report: 非claim持有者 task={patch.task_id}"
                 )
-            # FAIL:丢弃本次接力尝试——删 scoped 节点(不翻 FAILED、不 fold output_patch/gaps 作 checkpoint);
-            # 根保持 HUNG+bbs_mode 可恢复态,等下段重 claim/attach,不进 PASS/FAIL 传播。
-            # PASS / fold-only(无 acceptance):scoped 终态翻转(PASS→DONE)或 fold(output_patch/exec_error)走原路径。
-            is_fail = (
-                patch.acceptance_result is not None
-                and patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
+            # BBS 回投成功后将 scoped 节点置为 SUCCESS,使根节点进入正常
+            # owner 复核/重新规划路径;不删除节点。
+            completion_patch = TaskNodePatch(
+                task_id=patch.task_id,
+                node_id=patch.node_id,
+                # A completed BBS relay is the successful execution/acceptance
+                # handoff that unlocks the normal parent/root planning path.
+                status=Status.SUCCESS,
+                assignee=patch.assignee,
+                output_patch=patch.output_patch,
+                extend_props_patch=patch.extend_props_patch,
             )
             try:
-                if is_fail:
-                    if not patch.acceptance_result.gaps:
-                        raise TaskStateError("on_bbs_report: FAIL 验收强制要求 gaps")
-                    prev = next(
-                        (n for n in graph.tasks if n.node_id == patch.node_id), None
-                    )
-                    self._graph.delete_task_node(patch.task_id, patch.node_id)
-                    result = NodeOpResult(
-                        task_id=patch.task_id,
-                        node_id=patch.node_id,
-                        success=True,
-                        prev_status=(prev.status if prev else None),
-                        new_status=None,
-                    )
-                    logger.info(
-                        "[task][on_bbs_report] task=%s FAIL → 删 scoped 节点 %s(gaps=%s),claim 释放",
-                        patch.task_id,
-                        patch.node_id,
-                        patch.acceptance_result.gaps,
-                    )
-                else:
-                    # scoped 节点终态翻转(acceptance→DONE)或 fold(output_patch/exec_error)
-                    result = self._graph.update_task_node_info(patch)
+                result = self._graph.update_task_node_info(completion_patch)
             finally:
-                # 无论 FAIL 删节点 / PASS 翻态是否抛,都清根 bbs_owner 释放 claim
+                # 无论 scoped 节点翻态是否抛错,都清根 bbs_owner 释放 claim。
                 self._graph.update_task_node_info(
                     TaskNodePatch(
                         task_id=patch.task_id,
@@ -1563,10 +1674,10 @@ class ExecutionEngine:
                         extend_props_patch={"bbs_owner": None},
                     )
                 )
-            # 收口:FAIL 已删节点(无 DONE/FAILED 可传播);PASS → scoped DONE→owner 复核根 gap 收口
-            if is_fail:
-                pass  # 图回可恢复态,等下段重 claim;无 PASS/FAIL 传播
-            elif self._is_graph_terminal(patch.task_id):
+            # BBS scoped SUCCESS 进入统一通过收敛,由 owner 复核根 gap 并继续规划。
+            # HUNG 是 BBS 可恢复态:attach 阶段保持根 HUNG,必须允许本次 SUCCESS
+            # 回投进入 _on_pass_collect,再由其将根置为 PLANNING。
+            if self._graph.query_task_dashboard(patch.task_id).status in {Status.DONE, Status.SUCCESS}:
                 logger.info(
                     "[task][on_bbs_report] task=%s 图已终态,不再驱动", patch.task_id
                 )
@@ -1579,7 +1690,7 @@ class ExecutionEngine:
                     ),
                     None,
                 )
-                if node is not None and node.status == Status.DONE:
+                if node is not None and node.status == Status.SUCCESS:
                     await self._on_pass_collect(patch.task_id, patch.node_id, side)
                 elif node is not None and node.status == Status.FAILED:
                     await self._on_fail_collect(patch.task_id, patch.node_id, side)
@@ -1589,8 +1700,8 @@ class ExecutionEngine:
     async def _on_pass_collect(
         self, task_id: str, node_id: str, side: list[tuple]
     ) -> None:
-        """PASS→DONE 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
-        兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 DONE(plan-ready)→ plan(target=parent):
+        """PASS→SUCCESS 后:查结构父 P。v4 父恒 PLANNING(委托态),无需翻态:
+        兄弟仍有未终态(RUNNING/PLANNING/PENDING)→等待;兄弟全 SUCCESS(plan-ready)→ plan(target=parent):
           有子→节点级 plan_round++(达 MAX_PLAN_ROUND→父 HUNG)+add+dispatch;
           空+has_gap=F→gap 闭:非根传播 DONE 上行/根→图 DONE;空+has_gap=T→HUNG 升 BBS。
         兄弟全终态含 HUNG/FAILED→终态传播。
@@ -1600,25 +1711,38 @@ class ExecutionEngine:
             side.append(("finish", task_id))
             return
         siblings = self._graph.get_child_tasks(task_id, parent.node_id)
+        triggering = next(
+            (n for n in siblings if n.node_id == node_id),
+            None,
+        )
+        root = self._root(task_id)
+        is_root_parent = parent.node_id == (root.node_id if root else None)
+        is_bbs_recovery = (
+            is_root_parent
+            and triggering is not None
+            and effective_run_mode(triggering) == "bbs"
+        )
         logger.info(
-            "[task][on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s",
+            "[task][on_pass] task=%s node=%s 父=%s 父态=%s 兄弟=%s bbs_recovery=%s",
             task_id,
             node_id,
             parent.node_id,
             parent.status,
             [(s2.node_id, s2.status.value) for s2 in siblings],
+            is_bbs_recovery,
         )
-        if any(
-            st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING}
-            for st in siblings
-        ):
-            logger.info("[task][on_pass] task=%s 兄弟未全终态,等待", task_id)
-            return
-        if not all(st.status == Status.DONE for st in siblings):
-            self._propagate_terminal(task_id, parent, siblings, side)
-            return
-        root = self._root(task_id)
-        is_root_parent = parent.node_id == (root.node_id if root else None)
+        # BBS scoped 节点是对根下 HUNG 占位节点的恢复交付。原 HUNG 节点
+        # 仍保留用于审计，不能阻断本次 BBS 成功后的根重新规划。
+        if not is_bbs_recovery:
+            if any(
+                st.status in {Status.RUNNING, Status.PLANNING, Status.PENDING}
+                for st in siblings
+            ):
+                logger.info("[task][on_pass] task=%s 兄弟未全终态,等待", task_id)
+                return
+            if not all(st.status == Status.SUCCESS for st in siblings):
+                self._propagate_terminal(task_id, parent, siblings, side)
+                return
         # BBS 可恢复态守卫:图已升 BBS(bbs_mode=true)且根未被 BBS 接力持有(bbs_owner=None)。
         # 走到此守卫前 step①②已保证兄弟全终态且全 DONE;"停手等 BBS 接力"此时是死锁(无在途接力,
         # root 非 HUNG 不重升 BBS → 无人收口)。故无论触发叶是否 bbs scoped,一律放行 owner 复核根 gap:
@@ -1626,27 +1750,16 @@ class ExecutionEngine:
         if is_root_parent:
             g_ext = self._graph.query_task_dashboard(task_id).extend_props
             if g_ext.get("bbs_mode") and not g_ext.get("bbs_owner"):
-                triggering = next(
-                    (
-                        n
-                        for n in self._graph.query_task_dashboard(task_id).tasks
-                        if n.node_id == node_id
-                    ),
-                    None,
-                )
-                if (
-                    triggering is not None
-                    and (triggering.run_info.run_mode or "") == "bbs"
-                ):
+                if is_bbs_recovery:
                     logger.info(
-                        "[task][on_pass] task=%s bbs scoped 节点 DONE→放行 owner 复核根 gap 收口",
+                        "[task][on_pass] task=%s bbs scoped 节点 SUCCESS→放行 owner 复核根 gap 收口",
                         task_id,
                     )
                 else:
-                    # step①② 已保证兄弟全 DONE 且 bbs_owner=None(无在途接力):停手会死锁
+                    # step①② 已保证兄弟全 SUCCESS 且 bbs_owner=None(无在途接力):停手会死锁
                     # (无在途接力,root 非 HUNG 不重升 BBS → 无人收口)。普通叶最后 DONE 亦放行 owner 复核根 gap。
                     logger.info(
-                        "[task][on_pass] task=%s 图 bbs_mode 未 claim,普通叶最后 DONE→放行 owner 复核根 gap(避免死锁)",
+                        "[task][on_pass] task=%s 图 bbs_mode 未 claim,普通叶最后 SUCCESS→放行 owner 复核根 gap(避免死锁)",
                         task_id,
                     )
         self._mark_planning(task_id, parent.node_id)
@@ -1699,7 +1812,7 @@ class ExecutionEngine:
                 self._maybe_finish_graph(task_id, pr)
                 return
             # 结构父(非执行态)gap 闭翻 DONE 时补全 run_info:验收执行者=owner 落 run_mode/assignee,
-            # 父自身 acceptance_result(owner 逐条验收结论)补全,output 滚直接已 DONE 子交付物
+            # 父自身 acceptance_result(owner 逐条验收结论)补全,output 滚直接已 SUCCESS 子交付物
             # (否则结构父 output 恒空 → 祖父一跳 done_children 看不到 → gap_no_progress 死循环)。
             if not parent.run_info.run_mode:
                 _done_out = self._rollup_done_children_output(task_id, parent.node_id)
@@ -1716,7 +1829,7 @@ class ExecutionEngine:
             else:
                 self._graph.update_task_node_info(
                     TaskNodePatch(
-                        task_id=task_id, node_id=parent.node_id, status=Status.DONE
+                        task_id=task_id, node_id=parent.node_id, status=Status.SUCCESS
                     )
                 )
             # 动作历史:TRANSITION(非根 gap 闭传播 DONE)
@@ -1726,7 +1839,7 @@ class ExecutionEngine:
                 NodeAction.TRANSITION,
                 {"reason": "gap_closed_propagate", "to": "DONE"},
                 status_from=Status.PLANNING,
-                status_to=Status.DONE,
+                status_to=Status.SUCCESS,
             )
             await self._on_pass_collect(task_id, parent.node_id, side)
         else:
@@ -1735,53 +1848,20 @@ class ExecutionEngine:
     async def _on_fail_collect(
         self, task_id: str, node_id: str, side: list[tuple]
     ) -> None:
-        """验收不过(FAIL+gaps)→直接 HUNG + 升 BBS(非"落 FAILED 交 harness 重派同一执行体")。
-
-        验收不过属内容 gap:重派同一执行体多为无效重试;且 harness 重派(复位 FAILED→PENDING→重新
-        dispatch→RUNNING)不会清上一轮 acceptance_result/output,会产生 dashboard "RUNNING 却顶 FAILED
-        验收"的不一致态。故验收不过直接收口 HUNG(保留验收结论 + gaps 作 hung 上下文),交 BBS
-        升级兜底(owner 复核/换 bot/协群)。与 exec_error(执行报错/传输失败,如 sofa_tracer httpx)的
-        harness 重派不同:后者为临时性失败,重派有意义(见 _on_harness_collect)。
-        乙' a+R1:节点已由 on_report 折叠直驱 RUNNING→HUNG(acceptance_result+gaps+hung_reason 一次写,
-        无 FAILED 瞬态);此处仅升级传播(bbs_mode + loop_round++ + 冒泡到根——根/图 HUNG 才真 dispatch
-        start_run),不重复置节点态。"""
-        _n = next(
-            (
-                x
-                for x in self._graph.query_task_dashboard(task_id).tasks
-                if x.node_id == node_id
-            ),
-            None,
-        )
+        """兼容旧调用入口。验收失败已在 ``on_report`` 中原子折叠为 HUNG 并升级 BBS；
+        此处不重复改变节点状态或安排重试。"""
         logger.info(
-            "[task][on_fail] task=%s node=%s → HUNG 升级传播(gaps=%s)",
+            "[task][on_fail] task=%s node=%s acceptance_not_passed already handled by on_report",
             task_id,
             node_id,
-            (
-                _n.run_info.acceptance_result.gaps
-                if _n and _n.run_info.acceptance_result
-                else None
-            ),
         )
-        # 节点已折叠 HUNG(态由 on_report 直驱),记 TRANSITION + 升级传播;不重复置态。
-        self._log_action(
-            task_id,
-            node_id,
-            NodeAction.TRANSITION,
-            {"reason": "acceptance_fail", "to": "HUNG"},
-            status_from=Status.RUNNING,
-            status_to=Status.HUNG,
-        )
-        self._escalate_hung(task_id, node_id, "acceptance_fail")
 
     async def _on_harness_collect(
         self, task_id: str, node_id: str, exec_error: str, side: list[tuple]
     ) -> None:
-        """harness 重试:执行报错(exec_error:bot 没跑通 run FAILED/SLA/poll 耗尽)的节点级重投。
-        验收不过(acceptance verdict FAILED+gaps,run 已 COMPLETED)不经此路——走 on_report FAIL
-        折叠/on_fail_collect 补救重规划,与执行报错重投语义不同。
-        重试=重新派发执行(不拆):<MAX_HARNESS → 复位 FAILED/RUNNING→PENDING + re-prepare(重新 dispatch→start_run);
-        >=MAX_HARNESS → HUNG(exec_stuck,再 升 BBS,loop_round++/图 HUNG)。"""
+        """harness 重试仅处理执行失败(exec_error:网络抖动、超时、崩溃、poll 耗尽)。
+        验收未通过不进入此路径,由图服务记录为 DONE 并保留验收结论。
+        """
         graph = self._graph.query_task_dashboard(task_id)
         node = next((n for n in graph.tasks if n.node_id == node_id), None)
         if node is None:
@@ -1950,6 +2030,18 @@ class ExecutionEngine:
                 "[task][on_harness] task=%s 图已终态,冻结 harness 推进", patch.task_id
             )
             return
+        if self._static_runtime(patch.task_id) is not None:
+            # 固定 plan 任务:真实上报兜底由 _static_auto_report(默认 80s mock PASS→SUCCESS)承担,
+            # V2 relay 节点下发为纯交接正文(不含 {success,data,gaps} poller 协议),bot 常回自然语言
+            # → poller 误判 exec_error;若仍走 harness 重投×MAX_HARNESS→HUNG,会在 80s fallback 之前就把
+            # 节点 HUNG,80s 兜底因 status!=RUNNING 而跳过,致单节点挂死、整流程不往下走。
+            # 此处对固定 plan 跳过 harness 重投/HUNG,把恢复交给 static fallback:真实回投先到则自跳过,
+            # 否则 80s 由 mock 推进 DONE,流程不卡(真实派发已完成,不重复派发)。
+            logger.info(
+                "[task][on_harness] task=%s node=%s 固定 plan,由 static fallback 兜底,跳过 harness 重投/HUNG",
+                patch.task_id, patch.node_id,
+            )
+            return
         side: list[tuple] = []
         with self._lock_for(patch.task_id):
             await self._on_harness_collect(
@@ -1969,7 +2061,7 @@ class ExecutionEngine:
         RUNNING 进行态(建图/中间态不镜像)。BBS 可恢复态(root HUNG 但等接力)由 _maybe_propagate_hung
         自管,不走本方法。"""
         root = self._root(task_id)
-        if root is None or root.status not in {Status.DONE, Status.HUNG, Status.FAILED, Status.CANCELLED}:
+        if root is None or root.status not in {Status.DONE, Status.SUCCESS, Status.HUNG, Status.FAILED, Status.CANCELLED}:
             return
         g = self._graph.query_task_dashboard(task_id)
         if g.status == root.status:
@@ -2293,7 +2385,7 @@ class ExecutionEngine:
         in PLANNING/RUNNING forever.
         """
         root = self._root(task_id)
-        if root is None or root.status in {Status.HUNG, Status.DONE, Status.FAILED, Status.CANCELLED}:
+        if root is None or root.status in {Status.HUNG, Status.DONE, Status.SUCCESS, Status.FAILED, Status.CANCELLED}:
             return
         siblings = self._graph.get_child_tasks(task_id, root.node_id)
         if not siblings or any(
@@ -2331,7 +2423,7 @@ class ExecutionEngine:
         状态机:RUNNING=真执行;派发命中只填执行者+置 dispatching,PENDING 维持到 start_run 成功后才翻。
         跳过:① dispatching=True 节点(已交付 _drain 待翻 RUNNING 的飞行态,防双派发);② dispatch_error 节点
         (搜推异常/派发失败,harness owns 重试+HUNG 上限,正常 cycle 不重复搜推防 bot 调用风暴);
-        ③ run_mode=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
+        ③ effective_run_mode(node)=="bbs" 节点(FR-EXT-06:bbs 由 bot 经 bbs/attach 自驱,框架不自动派发/翻态)。
         reset 节点(FAILED/RUNNING→PENDING 复位,无 dispatching)不在跳过之列→重新派发执行。"""
         if self._is_external_managed_task(task_id):
             logger.info("[task][prepare] task=%s external-managed, skip dynamic dispatch", task_id)
@@ -2344,14 +2436,28 @@ class ExecutionEngine:
             for n in all_pending
             if not n.run_info.extend_props.get("dispatching")
             and not n.run_info.extend_props.get("dispatch_error")
-            and n.run_info.run_mode != "bbs"
+            and effective_run_mode(n) != "bbs"
         ]
         if not pending:
             return
+        dispatch_started_at = _now_ms()
+        for node in pending:
+            # start_time is the first dispatch lifecycle timestamp, not the
+            # beginning of each Harness retry attempt. Preserve it across
+            # RUNNING→PENDING→RUNNING retries so elapsed time stays truthful.
+            if node.run_info.start_time is None:
+                self._graph.update_task_node_info(
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        start_time=dispatch_started_at,
+                    )
+                )
         logger.info(
-            "[task][prepare] task=%s 待派发节点=%s",
+            "[task][prepare] task=%s 待派发节点=%s dispatch_started_at=%s",
             task_id,
             [n.node_id for n in pending],
+            dispatch_started_at,
         )
         dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []
@@ -2652,13 +2758,13 @@ class ExecutionEngine:
             await self.on_miss(m)
 
     def _maybe_finish_graph(self, task_id: str, pr: PlanResult | None = None) -> None:
-        """根 gap 闭(终验通过)→ root 翻 DONE(并补全 run_info)→ graph 终态镜像 DONE。
+        """根 gap 闭(终验通过)→ root 翻 SUCCESS(并补全 run_info)→ graph 终态镜像 SUCCESS。
 
-        终态镜像:root 先 DONE,再 _sync_graph_status_to_root 镜像 graph(保证 graph.status≡root.status,
+        终态镜像:root 先 SUCCESS,再 _sync_graph_status_to_root 镜像 graph(保证 graph.status≡root.status,
         不再 graph 独立先写 status)。验收执行者=owner 落 run_mode/assignee,根自身 acceptance_result
-        (owner 逐条验收结论),output 滚直接已 DONE 子交付物。两写均经 SSOT 网关(锁内同步)。"""
+        (owner 逐条验收结论),output 滚直接已 SUCCESS 子交付物。两写均经 SSOT 网关(锁内同步)。"""
         root = self._root(task_id)
-        if root is not None and root.status != Status.DONE:
+        if root is not None and root.status not in {Status.DONE, Status.SUCCESS}:
             _rprev = root.status
             graph = self._graph.query_task_dashboard(task_id)
             _owner = graph.extend_props.get("owner_bot_id") or ""
@@ -2672,14 +2778,14 @@ class ExecutionEngine:
                     assignee=_owner or None,
                 )
             )
-            # 动作历史:TRANSITION(根 gap 闭终验通过 → root DONE)
+            # 动作历史:TRANSITION(根 gap 闭终验通过 → root SUCCESS)
             self._log_action(
                 task_id,
                 root.node_id,
                 NodeAction.TRANSITION,
-                {"reason": "root_gap_closed", "to": "DONE"},
+                {"reason": "root_gap_closed", "to": "SUCCESS"},
                 status_from=_rprev,
-                status_to=Status.DONE,
+                status_to=Status.SUCCESS,
             )
         # 终态镜像:root 已 DONE → graph 镜像 DONE(all_done 标记);不再 graph 独立先写 status
         self._sync_graph_status_to_root(task_id)

@@ -17,7 +17,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 2. **select + claim + dispatch**:选 completion_rate 最高者 → 引擎服务端 ``claim_bbs_owner(winner)``
    (recover 清 HUNG 死分支)→ 给 winner 派发 ``bbs-relay-single-task`` 任务消息。
 3. **接力执行**:winner 读 dashboard 剩余事项 → ``bbs/attach`` 挂 ``run_mode=bbs`` scoped 节点 →
-   用自身能力(arch-analysis)执行 → ``bbs/result`` 回投 PASS + architects → ``on_bbs_report`` 收口 → 根 DONE → 图 DONE。
+   用自身能力(arch-analysis)执行 → ``bbs/result`` 回投 PASS + architects → ``on_bbs_report`` 收口 → 根 SUCCESS → 图 SUCCESS。
 
 # 前置:怎么让两个 dream bot 进 roster
 
@@ -33,7 +33,7 @@ staff_no,经 BCS ``authorize_bot_management`` 的 owner 匹配放行)PATCH
 - MISS→升 BBS 确定可复现:owner 装 ``planning-arch``(单一交付物「架构师名册」→ ``[N_architects]``)
   + ``search``(``N_architects``→MISS),``MAX_DEPTH=1`` → ``miss_depth_exhausted``。(同 bbs/ 目录 natual e2e 手法。)
 - bid 自评 + 接力执行依赖真 LLM(winner 不固定,亦可能两 bot 自评相近);本用例**断言可观结果**:图经
-  ``run_mode=bbs`` scoped 节点(其 assignee ∈ 两个 dream bot 之一)收口到 DONE,即证明 bid→select→claim→
+  ``run_mode=bbs`` scoped 节点(其 assignee ∈ 两个 dream bot 之一)收口到 SUCCESS,即证明 bid→select→claim→
   dispatch→执行 链路打通。不校验具体 winner / completion_rate 数值。
 
 # 已修的接缝
@@ -52,7 +52,7 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxBotProvisioner,
 )
 
@@ -182,7 +182,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
             # 2) POST /api/v1/collaboration/tasks/execute → 真实 engine 推进:
             #    planning-arch → [N_architects] → search MISS → @MAX_DEPTH=1 miss_depth_exhausted → 升 BBS
             #    → _schedule_bbs_notify → bbs_runner.notify → 两 dream bot bid → 选 winner → claim → dispatch
-            #    → winner(bbs-relay-single-task) attach→execute→result → 收口 DONE。
+            #    → winner(bbs-relay-single-task) attach→execute→result → 收口 SUCCESS。
             r = await cli.post(f"{_BACKEND}/api/v1/collaboration/tasks/execute",
                                json=_execute_body(owner_id))
             r.raise_for_status()
@@ -228,7 +228,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
                   f"assignee={str(ri.get('assignee') or '-')[:24]} "
                   f"verdict={(ri.get('acceptance_result') or {}).get('verdict')}")
 
-        self.assertEqual(g.get("status"), "DONE",
+        self.assertEqual(g.get("status"), "SUCCESS",
                          f"全图未闭环 DONE:status={g.get('status')}"
                          f"(未升 BBS / dream roster 空 / bid 全失败 / winner 未执行? 看 [snapshot] 定位)")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "未升 BBS(bbs_mode 未置 true)")
@@ -236,7 +236,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
         nodes = {t.get("node_id"): t for t in g.get("tasks") or []}
         root = nodes.get(task_id)
         self.assertIsNotNone(root, "根节点(task_id)未出现")
-        self.assertEqual(root.get("status"), "DONE", f"根未 DONE:{root.get('status')}")
+        self.assertEqual(root.get("status"), "SUCCESS", f"根未 SUCCESS:{root.get('status')}")
 
         # bbs scoped 中继节点:winner 经 bbs-relay-single-task 挂的 run_mode=bbs 节点,assignee ∈ 两 dream bot
         scoped = [n for n in g.get("tasks") or []
@@ -245,7 +245,7 @@ class TestBbsBidTwoDreamBotsE2E(unittest.TestCase):
         self.assertEqual(len(scoped), 1, f"应恰 1 个 bbs scoped 中继节点(1 个 winner 执行段):{[(n.get('node_id')) for n in scoped]}")
         sc = scoped[0]
         ri = sc.get("run_info") or {}
-        self.assertEqual(sc.get("status"), "DONE", f"scoped 中继节点未 DONE:{sc.get('status')}")
+        self.assertEqual(sc.get("status"), "SUCCESS", f"scoped 中继节点未 SUCCESS:{sc.get('status')}")
         self.assertIn(ri.get("assignee"), dream_ids,
                       f"scoped assignee 非两 dream bot 之一(bid 未选到 dream bot?):{ri.get('assignee')}")
         ar = ri.get("acceptance_result") or {}

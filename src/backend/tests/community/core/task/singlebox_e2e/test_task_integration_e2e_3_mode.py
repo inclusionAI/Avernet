@@ -22,7 +22,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。**协作群需 BCS double**,本地起后端 
   → ``miss_depth_exhausted`` → 节点 HUNG → 自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲)。
 - 升 BBS 后唤醒一次金庸(``bbs-relay-pickup``):claim(recover 清 HUNG 死分支)→ 自判"架构师名册"段 full
   → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
-  ``output_patch.architects`` → scoped DONE。owner 复核根 gap 三份交付物齐 → 根 DONE → 图 DONE。
+  ``output_patch.architects`` → scoped SUCCESS。owner 复核根 gap 三份交付物齐 → 根 DONE → 图 SUCCESS。
 
 # 为什么用 storage `search`(同 integration e2e)
 
@@ -55,7 +55,7 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxBotProvisioner,
     SingleboxEngineAdapter,
 )
@@ -269,7 +269,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
             task_id = execute_data["task_id"]
             print(f"[execute] {r.json().get('message')} data={execute_data}")
 
-            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 DONE / 超时
+            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 SUCCESS / 超时
             g: dict = {}
             last_sig: tuple | None = None
             deadline = time.monotonic() + _TIMEOUT
@@ -306,7 +306,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                               f"mode={_ri.get('run_mode') or '-':11} "
                               f"assignee={str(_ri.get('assignee') or '')[:24]}")
                     break
-                if g.get("status") == "DONE":
+                if g.get("status") == "SUCCESS":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
                 await asyncio.sleep(5.0)
 
@@ -365,16 +365,16 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                 g = detail_g
             _print_task_details(g, task_id)
 
-        # 6) 断言:3-mode natural 三种执行模态共存 + 图收口 DONE。
+        # 6) 断言:3-mode natural 三种执行模态共存 + 图收口 SUCCESS。
         #    断言取宽容(≥1 每模态):LLM 自分解/自判非确定,只要三模态共存即达到 3-mode 意图。
         try:
             await adapter._aclose()
         except Exception:
             pass
 
-        self.assertEqual(g.get("status"), "DONE", f"全图未闭环 DONE:status={g.get('status')}")
+        self.assertEqual(g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}")
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
-        self.assertEqual(nodes[task_id]["status"], "DONE", "根未 DONE")
+        self.assertEqual(nodes[task_id]["status"], "SUCCESS", "根未 SUCCESS")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode(架构师名册未升 BBS)")
 
         # 6a) single_bot:技术栈概览子任务真匹配到现成 bot(DONE,assignee=技术栈概览Bot)
@@ -389,7 +389,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         )
         for n in single_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"single_bot 子任务未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"single_bot 子任务未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
                 ri.get("assignee"), single_id,
                 f"single_bot 非技术栈概览Bot 执行:{n.get('node_id')} assignee={ri.get('assignee')}",
@@ -406,7 +406,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
             f"nodes={[t.get('node_id') for t in g.get('tasks') or []]}",
         )
         for n in coop_nodes:
-            self.assertEqual(n.get("status"), "DONE", f"coop_group 子任务未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"coop_group 子任务未 SUCCESS:{n.get('node_id')}")
             self.assertTrue(
                 # 群 id 前缀容忍两种后端:本地 stub/double 产 ``grp_<8hex>``;真 BCS(:21000)产 ``bcs_grp_<uuid>``。
                 str((n.get("run_info") or {}).get("assignee") or "").startswith(("grp_", "bcs_grp_")),
@@ -425,7 +425,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
         )
         for n in bbs_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"scoped 未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
                 ri.get("assignee"), jy_id,
                 f"scoped 非 金庸 接力:{n.get('node_id')} assignee={ri.get('assignee')}",
@@ -435,7 +435,7 @@ class TestTaskIntegrationE2E3Mode(unittest.TestCase):
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
         print(f"[final] graph={g.get('status')} single_bot={len(single_nodes)} "
-              f"coop_group={len(coop_nodes)} bbs={len(bbs_nodes)} 唤醒={wakes} 根=DONE")
+              f"coop_group={len(coop_nodes)} bbs={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS")
 
 
 def nodes_first_ext(g: dict, key: str) -> str:

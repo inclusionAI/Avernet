@@ -13,10 +13,18 @@ export interface OwnedBotDto {
   bot_name: string;
   bot_desc?: string;
   engine?: string;
+  engine_type?: string;
+  template_type?: string;
+  template_name?: string;
+  template_config?: Record<string, unknown>;
+  bot_template_config?: Record<string, unknown>;
+  engine_properties?: Record<string, unknown>;
   cluster_name?: string;
   bot_type?: string;
   status?: string;
   owner_entity_id?: string;
+  space_id?: string | number;
+  space_name?: string;
 }
 
 /** /openapi/v1/bots/metadata/queries 的 body 里单个 bot 查询项。 */

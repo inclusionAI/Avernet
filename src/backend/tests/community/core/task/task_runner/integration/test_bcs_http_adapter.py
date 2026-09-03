@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
 )
 
@@ -62,6 +62,42 @@ def test_create_group_state_machine_forces_strategy_and_start_false():
     assert res.group_id == "g2"
     assert '"start_initial_run":false' in seen["body"].replace(" ", "")
     assert '"group_strategy":"state_machine"' in seen["body"].replace(" ", "")
+
+
+def test_create_group_forwards_routing_policy_and_label_when_set():
+    import json
+
+    seen = {}
+
+    def h(req):
+        seen["body"] = json.loads(req.read())
+        return httpx.Response(200, json={"group_id": "g9", "session_id": None})
+
+    req = BcsCreateGroupRequest(
+        driver_bot="drv",
+        participants=[{"bot_uuid": "drv"}],
+        routing_policy={"default_bot_final_delivery": "inject_observers"},
+        label="task-t1-c1",
+    )
+    res = _run(_adapter(h).create_group(req))
+    assert res.group_id == "g9"
+    assert seen["body"]["routing_policy"] == {"default_bot_final_delivery": "inject_observers"}
+    assert seen["body"]["label"] == "task-t1-c1"
+
+
+def test_create_group_omits_routing_policy_and_label_when_none():
+    import json
+
+    seen = {}
+
+    def h(req):
+        seen["body"] = json.loads(req.read())
+        return httpx.Response(200, json={"group_id": "g9", "session_id": None})
+
+    req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
+    _run(_adapter(h).create_group(req))
+    assert "routing_policy" not in seen["body"]
+    assert "label" not in seen["body"]
 
 
 def test_create_session_returns_session_id():
@@ -139,7 +175,7 @@ def test_create_group_omits_bearer_when_no_caller_bot_token():
 
 
 def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
-    import agentclaw.community.core.task.task_runner.integration.bcs_http_adapter as module
+    import agentclaw.community.core.task.task_runner.client.bcs_http_adapter as module
 
     class _FakeClient:
         instances = []

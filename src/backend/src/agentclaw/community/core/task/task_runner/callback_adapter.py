@@ -9,7 +9,6 @@ import contextvars
 import hashlib
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
@@ -156,9 +155,9 @@ class CallbackAdapter:
         A) poller 形态(single_bot/BCN 翻译器产出的 ``result`` 是 dict 且含 ``success``):
            result.success/data/gaps/_ext_info/exec_error 组装;三段互斥(对齐 on_report 分流):
            ① exec_error 非空 → 执行报错(bot 没跑通)→ patch.exec_error(无 acceptance,→ on_harness 重投);
-           ② success=True → 验收 DONE → content=_unwrap_poller_content(data)(展平 {"result":<str>})
+           ② success=True → 验收 SUCCESS → content=_unwrap_poller_content(data)(展平 {"result":<str>})
            + output_patch={"output": content};
-           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED(→ harness 重派);
+           ③ success=False + 非空 gaps → 验收不过 → acceptance_result=FAILED,状态为 DONE(不重派);
            ④ success 非布尔/失败无 gaps → exec_error=terminal_result_invalid。
 
         B) common_task 形态(skill HTTP 上报 ``/callback/report`` 翻译后 ``result`` 非上述 dict,
@@ -200,7 +199,7 @@ class CallbackAdapter:
                 exec_error="terminal_result_invalid: success must be bool",
                 extend_props_patch=ext_patch,
             )
-        # ② success=True → 验收 DONE。
+        # ② success=True → 验收 SUCCESS。
         if success:
             return TaskNodePatch(
                 task_id=task_id,
@@ -357,10 +356,23 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
 
         logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
+        event_id = _derive_event_id(payload, "result") if payload is not None else None
+
+        # The same inbound result may be retried after the HTTP response is lost.
+        # Use the stable event id before creating an audit record or replaying the
+        # graph mutation, just like start_run does.
+        if self._is_already_processed(event_id):
+            logger.info(
+                "[task][task_callback] idempotent result event_id=%s session_id=%s",
+                event_id,
+                payload.get("workflow_instance_id") if payload is not None else "",
+            )
+            return
+
         record = (
             _to_callback_record(
                 payload,
-                event_id=str(uuid.uuid4()),
+                event_id=event_id,
                 process_status="PROCESSED",
             )
             if payload is not None

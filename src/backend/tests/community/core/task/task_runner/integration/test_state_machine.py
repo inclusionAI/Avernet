@@ -6,12 +6,12 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupResult, BcsHttpAdapter,
 )
-from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 
@@ -25,6 +25,12 @@ class _Tok:
 def _adapter(handler):
     return BcsHttpAdapter(_Tok(), http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler),
                                                                 base_url="http://bcs"))
+
+
+
+class _TaskSettingsOff:
+    def is_enabled(self, setting_type):
+        return False
 
 
 def _run(coro):
@@ -96,7 +102,8 @@ def test_dispatch_state_machine_registers_run_handle():
     bcs = _Bcs()
     poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None,
-                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver())
+                       poller=poller, identity_resolver=_DoubleBcsBotIdentityResolver(),
+                       task_settings=_TaskSettingsOff())
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
                                             members_info=[{"bot_id": "drv", "role": "manager"}],
                                             extend_props={"collaboration_definition_yaml": "kind: collab"})))

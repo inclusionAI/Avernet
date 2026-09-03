@@ -263,6 +263,9 @@ pub struct ProviderBotTaskModesFilter {
     pub task_claim_mode: Option<bool>,
     pub task_dream_mode: Option<bool>,
     pub match_mode: TaskModeMatch,
+    pub visibility: Option<String>,
+    pub status: Option<ActorStatus>,
+    pub user_visibility: Option<UserVisibility>,
 }
 
 #[async_trait]

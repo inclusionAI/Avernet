@@ -1,11 +1,14 @@
 /** @jest-environment jsdom */
-import { expect, it, jest } from '@jest/globals';
+import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 let mockPathname = '/workspace';
 const mockInitSpaceContext = jest.fn(async () => undefined);
+const mockEnsurePersonalSpaceOnAppEntry = jest.fn(async () => undefined);
 
 jest.mock('@umijs/max', () => ({
   history: { push: jest.fn() },
@@ -13,6 +16,7 @@ jest.mock('@umijs/max', () => ({
 }));
 jest.mock('@/hooks/useSpaceContext', () => ({
   initSpaceContext: mockInitSpaceContext,
+  ensurePersonalSpaceOnAppEntry: mockEnsurePersonalSpaceOnAppEntry,
 }));
 jest.mock('@/services/workspace/identityService', () => ({
   identityService: {
@@ -38,6 +42,11 @@ jest.mock('@/shell/AppSidebar', () => ({ AppSidebar: () => <div data-testid="app
 
 const { AppShell } = require('@/shell/AppShell') as typeof import('@/shell/AppShell');
 
+beforeEach(() => {
+  useWorkspaceStore.getState().reset();
+  useExternalAuthStore.getState().reset();
+});
+
 it('仅进入管理区域时初始化空间上下文', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
   await waitFor(() => expect(mockInitSpaceContext).not.toHaveBeenCalled());
@@ -47,8 +56,33 @@ it('仅进入管理区域时初始化空间上下文', async () => {
   await waitFor(() => expect(mockInitSpaceContext).toHaveBeenCalledTimes(1));
 });
 
+it('挂载即初始化一次个人空间（不等进入管理区域）', async () => {
+  mockEnsurePersonalSpaceOnAppEntry.mockClear(); // mock 为文件级共享：清掉前一用例的累计调用
+  render(<AppShell>工作内容</AppShell>); // 初始 pathname=/workspace（工作区域）也需触发
+  await waitFor(() => expect(mockEnsurePersonalSpaceOnAppEntry).toHaveBeenCalledTimes(1));
+});
+
 it('将 mine 返回的 Human 身份传给顶栏账号区', async () => {
   const view = render(<AppShell>工作内容</AppShell>);
 
   await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('验收用户'));
+});
+
+it('登录回归：/auth/user（checkAuth）晚于 mine 落位时，顶栏账号区随 externalAuthStore 刷新', async () => {
+  // Open Core（oauth-provider）：/auth/user 与 mine 并跑且常更晚返回；capability 契约规定
+  // externalAuthStore.user 优先。AppShell 一次性快照 currentUser 会把 mine 兜底身份冻结进顶栏
+  // （登录后头像/花名不一致，需切 tab 触发 re-render 才纠正）。
+  const view = render(<AppShell>工作内容</AppShell>);
+  await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('验收用户'));
+
+  act(() => {
+    useExternalAuthStore.getState().setAuthenticated({
+      userId: 'Asbku1dJX8Pe',
+      displayName: '福惠',
+      provider: 'alipay',
+      avatarUrl: 'https://tfs.example/avatar.png',
+    });
+  });
+
+  await waitFor(() => expect(view.getByTestId('app-header')).toHaveTextContent('福惠'));
 });

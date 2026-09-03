@@ -15,6 +15,7 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchBasedDispatchStrategy,
     SearchOutcome,
     SearchResult,
+    _rule_based_search_result,
 )
 
 
@@ -207,3 +208,68 @@ def test_empty_roster_fail_open():
     r = _run(_strat(b, _Gate(True))._apply_claim_join(_single("X"), CANDS))
     # 空名册(BCS 返回 [])按 fail-open 透传,等价于 JOIN 关 → 原 HIT_SINGLE 不降级
     assert r.outcome == SearchOutcome.HIT_SINGLE and r.bot_id == "X"
+
+
+def test_rule_dispatch_single_candidate_random_miss_allows_bbs_escalation(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.39,
+    )
+
+    result = _rule_based_search_result([{"bot_id": "candidate-a"}])
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.bot_id is None
+    assert result.group_formation is None
+    assert result.miss_reason == "rule_single_candidate_random_miss"
+
+
+def test_rule_dispatch_multi_candidate_caps_fixed_pool_group_at_three(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.99,
+    )
+    observed = {}
+
+    def sample(values, count):
+        observed["count"] = count
+        return list(values)[:count]
+
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        sample,
+    )
+
+    result = _rule_based_search_result(
+        [{"bot_id": f"candidate-{index}"} for index in range(8)]
+    )
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert observed["count"] == 3
+    assert len(result.group_formation.bot_ids) == 3
+    assert len(result.group_formation.members_info) == 3
+
+
+def test_rule_dispatch_single_candidate_keeps_hit_after_40_percent_threshold(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.4,
+    )
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
+        lambda values, count: list(values)[:count],
+    )
+
+    result = _rule_based_search_result([{"bot_id": "candidate-a"}])
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id in {
+        "20260825_bohtfhe6:35983",
+        "default:35983",
+        "default:146836",
+        "20260825_p8e63hms:35983",
+        "20260823_1c4am0ei:146836",
+        "20260826_q3tbj2da:146836",
+        "20260826_fmszf5aq:146836",
+        "20260826_20rphqo0:146836",
+    }

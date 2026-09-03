@@ -4,7 +4,7 @@ import logging
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _node(node_id="c1", task_id="t1", run_mode="bbs", assignee="b1"):
@@ -41,7 +41,7 @@ def test_dispatch_returns_one_bool_per_node():
 
 def test_runner_falls_back_to_stub_without_backend():
     from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-    from agentclaw.community.core.task.task_runner.runner import TaskRunner
+    from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
     g = TaskGraphService()
     r = TaskRunner(g)  # 无 execution_backend
     res = _run(r.start_run([_node()]))

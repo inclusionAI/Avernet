@@ -18,7 +18,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
   自然升 BBS(``bbs_mode=True``、根 ``PLANNING``、图空闲,spec §10.5 可恢复态)。
 - 升 BBS 后唤醒一次金庸(``bbs-relay-pickup``):claim(recover 清掉 HUNG 死分支)→ 自判"架构师名册"段
   full → 挂 ``run_mode="bbs"`` scoped 节点 → ``arch-analysis`` mock 执行 → ``bbs/result`` 写回
-  ``output_patch.architects`` → scoped DONE。owner 复核根 gap 两份交付物齐 → 根 DONE → 图 DONE。
+  ``output_patch.architects`` → scoped SUCCESS。owner 复核根 gap 两份交付物齐 → 根 DONE → 图 SUCCESS。
 
 # 为什么用 storage `search`(同 integration e2e)
 
@@ -50,7 +50,7 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxBotProvisioner,
     SingleboxEngineAdapter,
 )
@@ -199,7 +199,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 
-            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 DONE / 超时
+            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(架构师名册 MISS→HUNG→升 BBS)或全图 SUCCESS / 超时
             g: dict = {}
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
@@ -232,7 +232,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                               f"mode={_ri.get('run_mode') or '-':5} "
                               f"assignee={str(_ri.get('assignee') or '')[:24]}")
                     break
-                if g.get("status") == "DONE":
+                if g.get("status") == "SUCCESS":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
                 await asyncio.sleep(5.0)
 
@@ -283,15 +283,15 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                     await asyncio.sleep(5.0)
 
         # 6) 断言:2-mode natural 混合结局——一子任务真匹配 bot(single_bot HIT)+ 一子任务 MISS→BBS 中继(bbs)
-        #    + 图收口 DONE。断言取宽容(≥1):LLM 自分解/自判非确定,只要 HIT 与中继共存即达到 2-mode 意图。
+        #    + 图收口 SUCCESS。断言取宽容(≥1):LLM 自分解/自判非确定,只要 HIT 与中继共存即达到 2-mode 意图。
         try:
             await adapter._aclose()
         except Exception:
             pass
 
-        self.assertEqual(g.get("status"), "DONE", f"全图未闭环 DONE:status={g.get('status')}")
+        self.assertEqual(g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}")
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
-        self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
+        self.assertEqual(nodes[TASK_ID]["status"], "SUCCESS", "根未 SUCCESS")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode(架构师名册未升 BBS)")
 
         # 6a) HIT 侧:一子任务真匹配到现成 bot(single_bot,DONE,assignee=技术栈bot)
@@ -306,7 +306,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
         )
         for n in hit_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"HIT 子任务未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"HIT 子任务未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
                 ri.get("assignee"), hit_id,
                 f"HIT 子任务非技术栈bot 执行:{n.get('node_id')} assignee={ri.get('assignee')}",
@@ -324,7 +324,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
         )
         for n in bbs_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"scoped 未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
                 ri.get("assignee"), jy_id,
                 f"scoped 非 金庸 接力:{n.get('node_id')} assignee={ri.get('assignee')}",
@@ -334,7 +334,7 @@ class TestBbsRelayE2ENatual2Mode(unittest.TestCase):
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
         print(f"[final] graph={g.get('status')} HIT(single_bot)={len(hit_nodes)} "
-              f"中继(bbs)={len(bbs_nodes)} 唤醒={wakes} 根=DONE")
+              f"中继(bbs)={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS")
 
 
 def nodes_first_ext(g: dict, key: str) -> str:

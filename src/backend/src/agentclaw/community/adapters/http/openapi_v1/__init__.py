@@ -210,6 +210,7 @@ from .engine_runtime.models import router as engine_models_router
 from .engine_runtime.nodes import router as engine_nodes_router
 from .engine_runtime.sessions import router as engine_sessions_router
 from .harness import harness_router
+from .human_chat import router as human_chat_router
 from .identity import router as identity_router
 from .local import router as local_router
 from .loadtest import router as loadtest_router
@@ -422,6 +423,11 @@ _ENGINE_RUNTIME_GROUPS = [
     engine_connection_router,
 ]
 
+# Human chat is caller-owned and BCN-authorized, not an operator view of a
+# device. Keep it outside the engine-runtime mount so the collaborator grant
+# dependency cannot supersede its friendship policy for dual-role callers.
+_HUMAN_CHAT_GROUPS = [human_chat_router]
+
 # Authentication for the whole surface, declared once. Every handler already
 # takes ``principal: PrincipalDep``, so this changes nothing today — its value is
 # that a route added later cannot *omit* it. Verification is what refuses a
@@ -567,6 +573,12 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router,
             responses=ENGINE_RUNTIME_ERROR_RESPONSES,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
+        )
+    for router in _HUMAN_CHAT_GROUPS:
+        public.include_router(
+            router,
+            responses=USER_SCOPED_ERROR_RESPONSES,
             dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The addresses this surface used to have. Each legacy group is mounted the

@@ -238,8 +238,8 @@ class TestExecute:
         result = _exec(facade, _task_info_request())
         assert result.success is True
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.DONE
-        assert graph.status == Status.DONE
+        assert svc._get_node(graph, "t1").status == Status.SUCCESS
+        assert graph.status == Status.SUCCESS
 
 
 # ===== get_task_dashboard =====
@@ -255,6 +255,26 @@ class TestGetDashboard:
         _exec(facade, _task_info_request())
         sub = facade.get_task_dashboard("t1", "c1")
         assert {n.node_id for n in sub.tasks} == {"c1"}
+
+    def test_root_dashboard_runtime_backfills_missing_identity(self):
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        graph_service = TaskGraphService()
+        facade, _, *_ = _build_facade(svc=graph_service)
+        info = _task_info("t-dashboard")
+        info.owner_bot_id = "owner-bot"
+        info.owner_user_id = "owner-user"
+        info.execution_config["main_session_id"] = "main-session"
+        graph_service.initialize_graph(info)
+
+        dashboard = facade.get_task_dashboard("t-dashboard")
+        root = dashboard.tasks[0]
+
+        assert root.run_info.run_mode == "single_bot"
+        assert root.run_info.assignee == "owner-bot"
+        assert root.run_info.extend_props["session_id"] == "main-session"
+        assert root.run_info.extend_props["assignee_owner_id"] == "owner-user"
+        assert root.run_info.end_time is None
 
 
 # ===== callback =====
@@ -272,7 +292,7 @@ class TestCallback:
             "result": {"success": True, "data": "done"},
         })))
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "c1").status == Status.DONE
+        assert svc._get_node(graph, "c1").status == Status.SUCCESS
 
 
 # ===== harness wiring =====
@@ -287,6 +307,23 @@ class TestHarnessWiring:
         _exec(facade, _task_info_request())
         assert "t1" in harness._registered
         assert harness._on_harness_fn == facade._engine.on_harness
+
+    def test_dashboard_registers_task_for_harness_on_this_worker(self):
+        from agentclaw.community.core.task.task_harness.harness import TaskHarness
+        from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+
+        svc = TaskGraphService()
+        harness = TaskHarness(svc)
+        facade = _CaseTaskService(
+            svc, planner_factory=lambda g: [_child("c1")], harness=harness,
+            task_id_provider=lambda: "t1",
+        )
+        _exec(facade, _task_info_request())
+        harness._registered.clear()  # simulate a dashboard request on another worker
+
+        facade.get_task_dashboard("t1")
+
+        assert "t1" in harness._registered
 
 
 # ===== V1/V2 回归:验收 100% 回投(无 verify port);BBS 投递归 runner(无 bbs market)=====
@@ -305,8 +342,8 @@ class TestAcceptanceViaReport:
         })))
         # c1 DONE → 根 plan[](无新子,去重空)→ gap 闭=终验通过 → 翻根 DONE + graph DONE
         graph = svc.query_task_dashboard("t1")
-        assert svc._get_node(graph, "t1").status == Status.DONE
-        assert graph.status == Status.DONE
+        assert svc._get_node(graph, "t1").status == Status.SUCCESS
+        assert graph.status == Status.SUCCESS
 
 
 class TestBbsEscalationNoMarket:
@@ -322,9 +359,9 @@ class TestBbsEscalationNoMarket:
             "result": {"success": False, "fail_detail": "缺x"},
         })))
         graph = svc.query_task_dashboard("t3")
-        # 验收 FAIL→节点 status 折叠 HUNG(on_report 解耦:status=HUNG,verdict 仍 FAILED);升 BBS 标 bbs_mode
+        # 动态任务验收 FAIL→节点 HUNG，并进入 BBS 恢复态。
         _c1 = svc._get_node(graph, "c1")
-        assert _c1.status == Status.HUNG  # status 折叠 HUNG(不再 v4 的 FAILED 瞬态)
+        assert _c1.status == Status.HUNG
         assert _c1.run_info.acceptance_result is not None
         assert _c1.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED  # verdict 不改
 

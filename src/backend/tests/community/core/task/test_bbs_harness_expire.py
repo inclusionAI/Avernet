@@ -93,7 +93,7 @@ def _make_bbs_running_graph(svc: TaskGraphService, task_id: str = "t1",
 
 class TestBbsLeaseExpire:
     def test_bbs_lease_expire_clears_owner_and_marks_terminal_not_redispatch(self):
-        """bbs RUNNING 节点超 SLA → 根 bbs_owner 清空 + scoped 节点 FAILED;不重派(非 PENDING)。"""
+        """bbs RUNNING 节点超 SLA → 根 bbs_owner 清空 + scoped 节点 DONE;不重派(非 PENDING)。"""
         svc = TaskGraphService()
         graph = _make_bbs_running_graph(svc, "t1", "c1", owner="botA")
 
@@ -111,9 +111,9 @@ class TestBbsLeaseExpire:
         root = svc._get_node(graph, "t1")
         assert root.run_info.extend_props.get("bbs_owner") is None
 
-        # (b) scoped 节点标终态 FAILED(acceptance FAIL gaps=bbs_lease_expired),非 PENDING 重派
+        # (b) scoped 节点标终态 DONE(acceptance FAIL gaps=bbs_lease_expired),非 PENDING 重派
         scoped = svc._get_node(graph, "c1")
-        assert scoped.status == Status.FAILED
+        assert scoped.status == Status.DONE
         assert scoped.run_info.acceptance_result is not None
         assert scoped.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED
         assert scoped.run_info.acceptance_result.gaps == ["bbs_lease_expired"]
@@ -125,17 +125,17 @@ class TestBbsLeaseExpire:
             f"bbs 节点不应经 on_harness_fn 扇出任何 patch(不重派): {rec.patches}")
 
     def test_bbs_bot_reported_fail_not_redispatched(self):
-        """bbs 节点 bot 自报 FAIL(acceptance FAIL)→ FAILED-scan guard 跳过 bbs,仍 FAILED 且 on_harness 不重派。
+        """bbs 节点 bot 自报 FAIL(acceptance FAIL)→ DONE,FAILED-scan guard 跳过 bbs 且 on_harness 不重派。
 
         覆盖 FAILED-scan 的 bbs 跳过对 bot-FAIL 同样生效(非仅 lease-expire 直写图路径)。
         """
         svc = TaskGraphService()
         graph = _make_bbs_running_graph(svc, "t3", "c3", owner="botA")
-        # 模拟 bot 回投验收 FAIL:RUNNING→FAILED(via acceptance_result,走 _ACCEPTANCE_TRANSITIONS)
+        # 模拟 bot 回投验收 FAIL:RUNNING→DONE(via acceptance_result,走 _ACCEPTANCE_TRANSITIONS)
         svc.update_task_node_info(_patch(
             "t3", "c3",
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["bot_reported_gap"])))
-        assert svc._get_node(graph, "c3").status == Status.FAILED
+        assert svc._get_node(graph, "c3").status == Status.DONE
 
         clock = _Clock(0.0)
         rec = _Recorder()
@@ -143,8 +143,8 @@ class TestBbsLeaseExpire:
         h.register("t3")
         h._poll_once()  # FAILED-scan:已 FAILED 的 bbs 节点应被 guard 跳过,不扇出到 on_harness_fn
 
-        # (a) bbs 节点仍 FAILED(终态,未被 FAILED-scan 重派为 PENDING)
-        assert svc._get_node(graph, "c3").status == Status.FAILED
+        # (a) bbs 节点仍 DONE(终态,未被 FAILED-scan 重派为 PENDING)
+        assert svc._get_node(graph, "c3").status == Status.DONE
         # (b) on_harness_fn 对 bbs 节点零扇出
         assert not any(p.node_id == "c3" for p in rec.patches), (
             f"bbs bot-FAIL 节点不应经 on_harness_fn 扇出(不重派): {rec.patches}")

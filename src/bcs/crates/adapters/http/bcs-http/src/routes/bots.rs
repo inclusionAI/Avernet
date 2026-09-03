@@ -511,7 +511,16 @@ pub async fn search_bots(
                     "viewer_actor_id must not be empty".to_string(),
                 ));
             }
-            Some(actor_id.to_string())
+            // Normalize an explicit human viewer id to the canonical `human_<id>` form
+            // used by edge_grants.from_id / bcs_friendships keys, so the friend lookup
+            // matches. Idempotent: a value already prefixed with `human_` passes through
+            // unchanged. Bot viewer ids (full bot uuids) are never prefixed.
+            let actor_id = if actor_type == "human" && !actor_id.starts_with("human_") {
+                format!("human_{actor_id}")
+            } else {
+                actor_id.to_string()
+            };
+            Some(actor_id)
         }
         _ => {
             return Err(HttpAdapterError::BadRequest(

@@ -1,0 +1,139 @@
+template_id: okr-implementation-relay
+entry_bot_id: 20260828_8azkbtgs
+entry_name: 入口 OKR实现Bot
+task_type: static_plan
+# 串行接力 V2。链:
+# 入口(20260828_8azkbtgs,图前:分析OKR→决定找营销策略专家)
+# -> ① 营销策略专家(20260828_whd6nx7x,单独:产出策略方向+判定信息不够,决定拉圈人选品)
+# -> ② 策略生成群(driver 专家 20260828_whd6nx7x + 圈人 20260828_6snfeiq0 + 选品 20260828_roqtqqkx:
+#      专家驱动,圈人/选品细化,专家汇成完整营销策略)
+# -> ③'业务风控专家(20260828_7q4cbeze,单独:拿到②策略→定风险点与范围→启动风险评审,框架据此拉下一节点的风险评审群)
+# -> ③ 风险评审群(业务风控 20260828_7q4cbeze driver+合规 20260828_jbadndne)
+# -> ④ 不可实现任务转BBS广场+安全架构师(20260828_f7wfi27d,串行腿非旁路;须把上游策略/风险全料一并带到正文供⑤审核)
+# -> ⑤ 营销策略审核(20260828_9rgd70li)
+# -> ⑥ 投放实施(20260828_k9c2slro)
+# -> ⑦ 通知(notify,负责人)
+#
+# 接力承载: 每个节点 input 只透传上游"产出正文"(handoff=$.result / 入口=okr 原文);
+# 框架在 _decorate 注入 V2 输入三段(# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务),不做摘要/合成。
+# 各节点 task 仅给中性角色任务;上游内容由框架 _decorate 透传(## 上游产出正文),不在 task 里复述;rule(输出格式/接力交接)仍由各 bot 的 skill/rule 配置。
+input_schema:
+  okr:
+    type: string
+    required: true
+nodes:
+  - id: marketing_strategy
+    name: 营销策略专家
+    title: 大促营销策略生成
+    type: bot
+    bot_id: 20260828_whd6nx7x
+    depends_on: []
+    input:
+      okr: $.input.okr
+    output:
+      handoff: $.result
+    task: |
+      你是大促营销策略专家。依据上游的 OKR 目标与活动背景产出双十一大促营销策略;若上游仅给到原始需求而无前置分析,请自行先抓"为何营销策略是关键卡点"的根因再据此产出。
+      遇到你无法独立闭环的部分,按你的判断决定如何推进。
+  - id: strategy_generation_group
+    name: 策略生成群
+    title: 圈人和选品策略讨论
+    type: collaboration
+    depends_on: [marketing_strategy]
+    collaboration:
+      bot_ids: [20260828_whd6nx7x, 20260828_6snfeiq0, 20260828_roqtqqkx]
+      bot_names: [营销策略专家, 圈人 specialist, 选品 specialist]
+      mode: chat
+      completion: report
+    input:
+      handoff: $.marketing_strategy.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你是策略生成群(driver 营销策略专家):向圈人/选品 specialist 派活,每人按其专长各自细化;最终你须把【三平台差异化策略 + 圈人人群方案 + 选品商品方案 + 营销玩法】汇总成一份完整营销策略产出正文上报,让下游一次拿到全部方案(不要只给策略结论、漏掉人群/选品细节)。
+      处理不了的问题,按你的判断标明。
+  - id: risk_lead
+    name: 业务风控专家
+    title: 风控策略生成
+    type: bot
+    bot_id: 20260828_7q4cbeze
+    depends_on: [strategy_generation_group]
+    input:
+      handoff: $.strategy_generation_group.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你是业务风控专家(全局风险 owner):围绕营销目标,对策略落地可能带来的业务/经营/合规、以及会影响业务结果的技术/系统风险做统一判断,识别需重点评估的风险点与范围,启动风险评审(下一步会拉合规专家进群一起评审)。
+      处理不了的问题,按你的判断标明。
+  - id: risk_assessment
+    name: 风险评审群
+    title: 业务/技术风险评审
+    type: collaboration
+    depends_on: [risk_lead]
+    collaboration:
+      bot_ids: [20260828_7q4cbeze, 20260828_jbadndne]
+      bot_names: [业务风控, 合规]
+      mode: chat
+      completion: report
+    input:
+      handoff: $.risk_lead.output.handoff
+    output:
+      risk_result: $.report.result
+      unhandled_tasks: $.result.unhandled_tasks
+      handoff: $.result
+    task: |
+      你是风险评审群(driver 业务风控 + 合规):基于上游给的风险点与范围,做双十一大促业务/合规风险评审,逐项给成因/等级/约束。
+      处理不了的问题,按你的判断标明。
+      (硬字段:driver output JSON 须带 unhandled_tasks 数组,供框架路由后续;叙述用职能词)
+  - id: risk_unhandled_to_bbs
+    name: 不可实现任务转BBS广场
+    title: 舆情监控方案缺失
+    type: bbs_handoff
+    bot_id: 20260828_f7wfi27d
+    depends_on: [risk_assessment]
+    input:
+      unhandled_tasks: $.risk_assessment.output.unhandled_tasks
+      handoff: $.risk_assessment.output.handoff
+    output:
+      bbs_handed: $.result
+      handoff: $.result
+    task: |
+      你是安全架构师:把上家识别出无人承接的任务组织成研发需求并交付;你必在本跳产出正文里 carry-forward 上游①策略/②圈人选品/③完整风险清单全料,供下游审核一次审齐。
+      框架兜底:上家真实上报未带 unhandled_tasks,按占位 mock。
+  - id: strategy_approval
+    name: 营销策略审核
+    title: 大促策略审核
+    type: bot
+    bot_id: 20260828_9rgd70li
+    depends_on: [risk_unhandled_to_bbs]
+    input:
+      risks: $.risk_assessment.output.risk_result
+      handoff: $.risk_unhandled_to_bbs.output.handoff
+    output:
+      approval_result: $.result
+      handoff: $.result
+    task: |
+      你是结构化审核:对双十一大促营销策略做结构化审核。审核须覆盖全部维度——营销策略(三平台差异化+人群+选品+玩法)、业务风险清单与约束、技术/系统风险清单与约束、舆情监控补齐方案是否就位、不可实现任务交接是否闭环;需要退回或流转的,按你的判断给建议。
+      上游已带 risks(风险评审结论与约束)与 handoff(安全架构师产出+舆情监控补齐方案+全料 carry-forward);若仍看不到③完整风险清单,是上家 rule 没 carry-forward,不找框架做 fan-in。
+  - id: implementation
+    name: 投放实施
+    title: 大促投放实施
+    type: bot
+    bot_id: 20260828_k9c2slro
+    depends_on: [strategy_approval]
+    input:
+      handoff: $.strategy_approval.output.handoff
+    output:
+      implementation_result: $.result
+      handoff: $.result
+    task: |
+      你是投放实施:把已批准方案落为各平台/时段/资源位执行动作并跟踪;异常按你的判断决定处置方式。
+  - id: notify_done
+    name: 通知完成
+    title: 执行结果通知
+    type: notify
+    depends_on: [implementation]
+    input:
+      handoff: $.implementation.output.handoff
+    task: |
+      把"大促已实施 + 进展/风险 + 各跳交接摘要"通知负责人。

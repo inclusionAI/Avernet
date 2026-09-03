@@ -41,31 +41,34 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
     TaskSummary,
 )
+from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 
 _LOG = logging.getLogger(__name__)
 
 # 合法状态转换(PLANNING/RUNNING 解耦:PLANNING=规划中(显式委托态),RUNNING=执行中(子执行/自身执行))
-# acceptance 驱动(skill 验收回投):仅 RUNNING->DONE(PASS)/FAILED(FAIL+gaps);FAILED 不再经 acceptance 翻
+# acceptance 驱动(skill 验收回投):RUNNING->SUCCESS(PASS)/HUNG(FAIL,动态)/DONE(FAIL,外部托管)
 _ACCEPTANCE_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.RUNNING: {Status.DONE, Status.FAILED},
+    Status.RUNNING: {Status.SUCCESS, Status.DONE, Status.HUNG, Status.FAILED},
 }
-# status 直驱(框架内部:派发/复位/传播/HUNG)。v4:父节点规划出子由 add_task_nodes 直置 PLANNING(不走此表),
-#   故 PLANNING->RUNNING 已废弃;RUNNING 已不再表示委托态(委托态=PLANNING),RUNNING->PLANNING 已废弃。
+# status 直驱(框架内部:派发/复位/传播/HUNG)。DONE 只表示执行完成,
+# SUCCESS 表示验收通过；BBS 经 engine.on_bbs_report 收口时由框架将 scoped
+# 节点记为 SUCCESS,无 on_bbs_report 的轻量回退路径仍只写 DONE。
 #   PENDING->PLANNING(初始根/MISS 叶进入规划) / PENDING->RUNNING(叶子派发执行) /
-#   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(gap 闭) / RUNNING->HUNG
-#   PLANNING->DONE(gap 闭传播) / PLANNING->HUNG(depth>=MAX 拆不动)
+#   RUNNING->PENDING(harness 复位重投) / RUNNING->DONE(执行完成但未验收) / RUNNING->SUCCESS(框架确认验收通过) / RUNNING->HUNG
+#   PLANNING->DONE(仅执行完成直驱) / PLANNING->SUCCESS(gap 闭合验收通过) / PLANNING->HUNG(depth>=MAX 拆不动)
 #   FAILED->PENDING(harness 重新派发执行重试) / FAILED->HUNG(重试达上限)
 _DIRECT_TRANSITIONS: dict[Status, set[Status]] = {
-    Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE},
-    Status.PLANNING: {Status.DONE, Status.HUNG},
-    Status.RUNNING: {Status.PENDING, Status.DONE, Status.HUNG},
+    Status.PENDING: {Status.PLANNING, Status.RUNNING, Status.HUNG, Status.DONE, Status.SUCCESS},
+    Status.PLANNING: {Status.DONE, Status.SUCCESS, Status.HUNG},
+    Status.RUNNING: {Status.PENDING, Status.DONE, Status.SUCCESS, Status.HUNG},
     Status.FAILED: {Status.PENDING, Status.HUNG},
+    Status.HUNG: {Status.PLANNING},
 }
 # 可委托(add_task_nodes 时 parent 允许的态):PENDING(初始/根)/FAILED(补救)/PLANNING(前向重规划)
 _DELEGATABLE_PARENT: set[Status] = {Status.PENDING, Status.FAILED, Status.PLANNING, Status.HUNG}
 
-# 终态集(无出边):acceptance 回投到终态节点 → 幂等拒绝(DONE/FAILED/HUNG/CANCELLED)。
-_TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+# 终态集(无出边):已完成/失败/挂起/取消节点不再接受重复验收回投。
+_TERMINAL_STATUSES: set[Status] = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
 _DEFAULT_MAX_DEPTH = 2
 _DEFAULT_MAX_LOOP = 3  # 图级总轮次(根 gap 不闭 + 反复升 BBS)
@@ -278,12 +281,15 @@ class TaskGraphService:
             if task_id in self._graphs:
                 raise GraphAlreadyInitializedError(f"task_id={task_id} 图已存在")
             run_id = self._next_run_id()
+            # 任务从建图开始计时。根节点仍保持 PENDING,但其 start_time 代表
+            # 任务创建/执行图初始化时间,不能等到后续进入 RUNNING 才补写。
+            started_at = int(time.time() * 1000)
             root = TaskNode(
                 node_id=task_id,
                 task_id=task_id,
                 status=Status.PENDING,
                 task_spec=task_info.task_spec,
-                run_info=RuntimeInfo(),
+                run_info=RuntimeInfo(start_time=started_at),
                 node_run_graph=None,  # type: ignore[arg-type]  回填见下
             )
             graph = TaskExecutionGraph(
@@ -307,14 +313,16 @@ class TaskGraphService:
             return graph
 
     def add_task_nodes(
-        self, tasks: list[TaskNode], parent_node_id: str, *, attach_dependency: bool = True
+        self, tasks: list[TaskNode], parent_node_id: str, *,
+        attach_dependency: bool = True, mark_parent_planning: bool = True,
     ) -> TaskExecutionGraph:
         """并子图(单写 relations 分解树)。触发条件 a/b/c 由编排核判后调,本方法双检:
         a. 只有一个根节点且 status=PENDING(初始规划);
         b. 存在 FAILED 节点且 acceptance_result.gaps 非空的叶子(补救);
         c. 存在 PLANNING 节点 且 无 RUNNING(下一层规划)。
         登记分解树:每新子挂 ``parent_node_id`` 下写入 DEPENDENCY 边(src=parent,dst=新子,单入);
-        parent 进/维持 PLANNING(委托态)。单层同构护栏:本批 node_id 不重复、不与已存重复、本批内不互父子。
+        默认将 parent 置为 PLANNING(委托态)。BBS attach 可关闭该行为,待 scoped 节点
+        SUCCESS 回投后再由编排核将根节点置为 PLANNING。单层同构护栏:本批 node_id 不重复、不与已存重复、本批内不互父子。
         """
         if not tasks:
             raise GraphIntegrityError("add_task_nodes: tasks 不能为空")
@@ -343,7 +351,7 @@ class TaskGraphService:
                     graph.relations.append(
                         Relation(src_id=parent_node_id, dst_id=t.node_id, type=RelationType.DEPENDENCY)
                     )
-            if parent.status != Status.PLANNING:
+            if mark_parent_planning and parent.status != Status.PLANNING:
                 parent.status = Status.PLANNING
             return graph, None, True
 
@@ -426,10 +434,11 @@ class TaskGraphService:
 
     def update_task_node_info(self, patch: TaskNodePatch) -> NodeOpResult:
         """节点级原子状态流转网关。双模式:
-        ① acceptance_result 驱动(skill 回投):PASS→DONE / FAIL→(折叠)HUNG(动态)或 FAILED(外部;
-           gaps 可空,verdict=FAILED 即统一收口,不强制要求 gaps 非空);
+        ① acceptance_result 驱动(skill 回投):PASS→SUCCESS / FAIL→HUNG(动态,记录未通过验收)或 DONE(外部托管);
+           FAILED 仅表示执行失败(exec_error);
         ② status 直驱(框架内部):PENDING→RUNNING(派发) / RUNNING→PENDING(Harness 复位) /
-           PLANNING→DONE(传播)。两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
+           DONE(执行完成但未验收) / SUCCESS(框架确认验收通过) / PLANNING→SUCCESS(传播)。
+           两者都校验状态机。无 acceptance_result 且无 status 只 fold 不翻态。
         派发写:patch.run_mode(str)/assignee 落库 + 置 RUNNING。
         """
         def mutation(graph):
@@ -443,12 +452,12 @@ class TaskGraphService:
                     )
                 verdict = patch.acceptance_result.verdict
                 if verdict == AcceptanceVerdict.DONE:
-                    new_status = Status.DONE
+                    new_status = Status.SUCCESS
                 else:
+                    # 动态编排核通过 patch.status=HUNG 表示验收失败需要升级 BBS;
+                    # 外部托管调用方保留 DONE,仅记录验收结论和 gaps。
                     new_status = (
-                        Status.HUNG
-                        if patch.status == Status.HUNG
-                        else Status.FAILED
+                        Status.HUNG if patch.status == Status.HUNG else Status.DONE
                     )
                 node.run_info.acceptance_result = patch.acceptance_result
             elif patch.exec_error is not None:
@@ -463,6 +472,9 @@ class TaskGraphService:
                 allowed = _DIRECT_TRANSITIONS.get(node.status, set())
                 if new_status not in allowed:
                     _LOG.warning(f"status 直驱非法: {node.status} → {new_status}")
+            if patch.start_time is not None:
+                node.run_info.start_time = patch.start_time
+                node.run_info.end_time = None
             if patch.output_patch is not None:
                 node.run_info.output.update(patch.output_patch)
             if patch.run_mode is not None:
@@ -471,13 +483,19 @@ class TaskGraphService:
                 node.run_info.assignee = patch.assignee or None
             if patch.extend_props_patch is not None:
                 node.run_info.extend_props.update(patch.extend_props_patch)
-            if new_status == Status.RUNNING and prev_status != Status.RUNNING:
+            if (
+                new_status == Status.RUNNING
+                and prev_status != Status.RUNNING
+                and node.run_info.start_time is None
+            ):
                 node.run_info.start_time = int(time.time() * 1000)
                 node.run_info.end_time = None
-            elif new_status in {Status.DONE, Status.FAILED, Status.HUNG}:
+            elif new_status in {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}:
                 node.run_info.end_time = int(time.time() * 1000)
             elif new_status == Status.PENDING:
-                node.run_info.start_time = None
+                # Harness retries must not erase the node's first dispatch
+                # timestamp. Keep start_time for truthful total elapsed time;
+                # end_time is cleared until the next terminal transition.
                 node.run_info.end_time = None
             if new_status is not None:
                 node.status = new_status
@@ -555,9 +573,8 @@ class TaskGraphService:
         先 hydrate 最新图(他实例可能已 claim),再做 DB CAS;赢者更新本地缓存,输者抛 ``TaskStateError``。
         无仓储(lightweight/单测)走原 in-mem CAS(仅 ``_lock_for`` 进程内串行)。
 
-        **recover 清理**:CAS 占根成功后,先把图中所有 ``HUNG`` 子树(每个 HUNG 节点及其 DEPENDENCY 后代)
-        删除——这些是 planner 规划不合理 / 派发全 MISS 造的死分支,BBS 接力视为推倒重做,清掉让根回到
-        干净委托点(根 ``task_id`` 永不清)。不区分 ``hung_reason``/checkpoint(按 recover 语义)。
+        **recover 语义**:CAS 只负责占有根节点,不修改或删除现有任务节点。
+        HUNG 节点及其运行记录保留,由后续 BBS 接力结果和正常图状态流转决定任务如何继续。
         """
         with self._lock_for(task_id):
             graph = self._graphs.get(task_id)
@@ -588,17 +605,10 @@ class TaskGraphService:
                 root.run_info.extend_props["bbs_owner"] = bot_id
                 root.run_info.extend_props["bbs_claim_at"] = now
                 self._graph_versions[task_id] = self._graph_repo.get_version(task_id) or 0
-                pruned = self._prune_hung_subtrees(graph, task_id)
-                if pruned:
-                    _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
-                    self._persist_locked(graph)
                 return NodeOpResult(
                     task_id=task_id, node_id=task_id, success=True,
                     prev_status=root.status, new_status=root.status,
                 )
-            pruned = self._prune_hung_subtrees(graph, task_id)
-            if pruned:
-                _LOG.info("[bbs-claim] task=%s recover 清理 HUNG 死子树 %d 个", task_id, pruned)
             return self.update_task_node_info(
                 TaskNodePatch(
                     task_id=task_id,
@@ -607,42 +617,13 @@ class TaskGraphService:
                 )
             )
 
-    def _prune_hung_subtrees(self, graph: TaskExecutionGraph, task_id: str) -> int:
-        """删除图中所有 ``HUNG`` 子树(每个 HUNG 节点 + 其 DEPENDENCY 后代),返回删除节点数。
-
-        根(``task_id``)永不清。调用方须持 ``_lock_for(task_id)``。recover 语义:清掉 planner 造的
-        HUNG 死分支(规划不合理 / 派发全 MISS),不区分 ``hung_reason``/checkpoint。
-        """
-        children: dict[str, list[str]] = {}
-        for rel in graph.relations:
-            if rel.type == RelationType.DEPENDENCY:
-                children.setdefault(rel.src_id, []).append(rel.dst_id)
-        prune: set[str] = set()
-        stack = [n.node_id for n in graph.tasks
-                 if n.status == Status.HUNG and n.node_id != task_id]
-        while stack:
-            nid = stack.pop()
-            if nid in prune:
-                continue
-            prune.add(nid)
-            for child in children.get(nid, []):
-                if child not in prune:
-                    stack.append(child)
-        if not prune:
-            return 0
-        graph.tasks = [n for n in graph.tasks if n.node_id not in prune]
-        graph.relations = [
-            r for r in graph.relations
-            if r.src_id not in prune and r.dst_id not in prune
-        ]
-        return len(prune)
-
     def delete_task_node(self, task_id: str, node_id: str) -> None:
         """删除单个节点(及其 DEPENDENCY 后代子树 + 相关边)。根(``task_id``)永不可删。
 
-        用于 ``on_bbs_report`` 收到 verdict=FAILED:丢弃本次接力尝试(不翻 FAILED、不 fold output_patch),
-        图回到 root PLANNING + bbs_mode 可恢复态等下段重新 claim/attach。bbs scoped 节点是叶子,但实现按
-        子树删(节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
+        用于 ``on_bbs_report`` 收到 verdict=FAILED:逻辑删除本次接力尝试的 scoped 节点
+        (不物理删除 task_node；不翻 FAILED、不 fold output_patch)，图回到 root PLANNING + bbs_mode 可恢复态等下段
+        重新 claim/attach。逻辑删除会保留节点行、运行记录和审计历史；bbs scoped 节点是叶子,但实现按子树标记
+        (节点 + DEPENDENCY 后代)以通用。锁:再取同 task 的 RLock(re-entrant 安全,调用方通常已持)。
         """
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
@@ -699,15 +680,23 @@ class TaskGraphService:
                 )
                 raise TaskStateError(f"attach_bbs_node: BBS relay 深度达上限 task={task_id}")
             node_id = f"bbs-{uuid.uuid4().hex[:8]}"
+            claim_at = root.run_info.extend_props.get("bbs_claim_at") or int(time.time() * 1000)
             node = TaskNode(
                 node_id=node_id,
                 task_id=task_id,
                 status=Status.PENDING,
                 task_spec=task_spec,
-                run_info=RuntimeInfo(run_mode="bbs", assignee=bot_id, start_time=int(time.time() * 1000)),
+                run_info=RuntimeInfo(
+                    run_mode="bbs",
+                    assignee=bot_id,
+                    start_time=int(claim_at),
+                    extend_props={"bbs_claim_at": int(claim_at)},
+                ),
                 node_run_graph=graph,
             )
-            self.add_task_nodes([node], parent_node_id=parent_node_id)  # a/b/c/d 校验 + 父→PLANNING
+            self.add_task_nodes(
+                [node], parent_node_id=parent_node_id, mark_parent_planning=False
+            )  # BBS 挂载只建 scoped 节点,根在 SUCCESS 回投后再→PLANNING
             self.update_task_node_info(
                 TaskNodePatch(task_id=task_id, node_id=node_id, status=Status.RUNNING)
             )  # create+start:PENDING→RUNNING 是 _DIRECT_TRANSITIONS 合法翻
@@ -837,6 +826,24 @@ class TaskGraphService:
                     bbs_mode=bool(graph.extend_props.get("bbs_mode", False))))
             summaries.sort(key=lambda s: s.run_id, reverse=True)
             return summaries
+
+    def list_bbs_tasks_overview(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务概览的一页(run_mode='bbs' 的 run_info ⋈ node,补 publisher);只读。
+
+        委托 ``graph_repo.list_bbs_tasks_overview``(透传 status/search_word 可选过滤,为空不过滤,退化为
+        纯分页);无 repo 绑定(纯内核/测试)→ ([], 0),不阻断。"""
+        if self._graph_repo is None:
+            return [], 0
+        return self._graph_repo.list_bbs_tasks_overview(
+            page, page_size, search_word=search_word, status=status
+        )
 
     def _node_depth(self, task_id: str, node_id: str) -> int:
         """从 relations 分解树递归自算深度(派生不持久)。根=0。"""

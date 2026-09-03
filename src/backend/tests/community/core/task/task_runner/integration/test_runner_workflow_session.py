@@ -1,11 +1,11 @@
 import asyncio
 
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
-from agentclaw.community.core.task.task_runner.runner import TaskRunner
+from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 
 class _FakeBot:

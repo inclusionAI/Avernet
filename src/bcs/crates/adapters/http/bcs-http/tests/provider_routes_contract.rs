@@ -3223,3 +3223,89 @@ async fn register_provider_bot_dispatches_visibility_sync_for_plugin_mode_allowl
     assert_eq!(requests[0].bot_uuid, bot_ref);
     assert_eq!(requests[0].actor_kind, ActorKind::Bot);
 }
+
+#[tokio::test]
+async fn list_provider_bots_by_task_modes_parses_visibility_status_user_visibility_filters() {
+    // Exercises the parser arms added for the visibility / status /
+    // user_visibility roster filters. Every accepted spelling returns 200;
+    // unrecognized status / user_visibility values surface as 400 bad_request
+    // from the handler before the service is consulted. No bots are seeded —
+    // the parser branches are covered regardless of roster cardinality (the
+    // None/empty arms are already covered by the toggle tests that omit them).
+    let provider_id = "prv_task_modes_filters".to_string();
+    let admin_token = "admin-token";
+    let TestApp {
+        app,
+        provider_repo,
+        provider_credentials,
+        ..
+    } = test_app_with_allowed_switch_provider_ids(vec![provider_id.clone()]);
+    seed_provider_admin(
+        &provider_repo,
+        &provider_credentials,
+        &provider_id,
+        admin_token,
+        "11111111",
+    )
+    .await;
+
+    // Accepted status spellings => 200 (online + hidden arms of parse_actor_status).
+    let (status, _body) =
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?status=online").await;
+    assert_eq!(status, StatusCode::OK, "status=online rejected");
+    let (status, _body) =
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?status=hidden").await;
+    assert_eq!(status, StatusCode::OK, "status=hidden rejected");
+
+    // Accepted user_visibility spellings => 200 (public/protected/private arms).
+    for value in ["public", "protected", "private"] {
+        let (status, _body) = task_mode_roster(
+            &app,
+            &provider_id,
+            Some(admin_token),
+            &format!("?user_visibility={value}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "user_visibility={value} rejected");
+    }
+
+    // Non-empty visibility => 200 (Some arm of parse_non_empty_query).
+    let (status, _body) =
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?visibility=public").await;
+    assert_eq!(status, StatusCode::OK, "visibility=public rejected");
+
+    // Empty spellings are treated as "no filter" => 200 (empty -> None arms).
+    let (status, _body) = task_mode_roster(
+        &app,
+        &provider_id,
+        Some(admin_token),
+        "?status=&user_visibility=&visibility=",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "empty filter values rejected");
+
+    // Unrecognized status => 400 (error arm of parse_actor_status).
+    let (status, body) =
+        task_mode_roster(&app, &provider_id, Some(admin_token), "?status=maybe").await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "invalid status not rejected: {body}"
+    );
+    assert_eq!(body["status"], 400);
+
+    // Unrecognized user_visibility => 400 (error arm of parse_user_visibility).
+    let (status, body) = task_mode_roster(
+        &app,
+        &provider_id,
+        Some(admin_token),
+        "?user_visibility=secret",
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "invalid user_visibility not rejected: {body}"
+    );
+    assert_eq!(body["status"], 400);
+}

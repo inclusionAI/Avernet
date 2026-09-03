@@ -317,6 +317,29 @@ class TestSessionsList:
         sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
         assert sessions_list_calls == [("sessions.list", {"search": "target"}, None)]
 
+    async def test_session_key_filter_accepts_cloud_create_relative_key(self):
+        canonical = "agent:main:session:abc-123:user:clouduser"
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload([
+                {"key": canonical, "label": "Cloud session", "model": None},
+            ]),
+            "chat.history": self._history_payload([]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            session_key="session:ABC-123:user:CloudUser",
+        )
+
+        assert [session["key"] for session in result] == [canonical]
+        sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert sessions_list_calls == [(
+            "sessions.list",
+            {"search": "session:abc-123:user:clouduser"},
+            None,
+        )]
+
     async def test_session_key_filter_returns_empty_list_for_no_match(self):
         impl, client = _make_impl({
             "sessions.list": self._sessions_payload([

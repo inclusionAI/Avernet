@@ -46,7 +46,7 @@ from pathlib import Path
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxBotProvisioner,
     SingleboxEngineAdapter,
 )
@@ -113,7 +113,7 @@ def _execute_body(owner_id: str) -> dict:
       再拆分",避免 planner 把"基础架构"再切成中间件/存储/云原生/可观测/安全… 等一堆子方向(MAx_DEPTH=1
       时即使切也只展一层、且 depth-1 miss 直接走 ``miss_depth_exhausted`` 可恢复,不 re-plan 嵌套)。
     - 预期:owner 规划出 1~3 个扁平子任务 → 普通派发全 MISS(无此类 bot)→ 自然升 BBS(根 PLANNING 可恢复)
-      → 金庸 claim 时 recover 清掉 HUNG 死分支 → 挂 1 个 bbs scoped 节点自驱 → 收口 DONE。
+      → 金庸 claim 时 recover 清掉 HUNG 死分支 → 挂 1 个 bbs scoped 节点自驱 → 收口 SUCCESS。
     """
     sub = SUB_DOMAINS[0]
     return {
@@ -191,7 +191,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
             r.raise_for_status()
             print(f"[execute] {r.json().get('message')} data={r.json().get('data')}")
 
-            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(或全图 DONE / 超时)
+            # 等自然升 BBS:Poll 直到 bbs_mode 置 true(或全图 SUCCESS / 超时)
             g: dict = {}
             deadline = time.monotonic() + _TIMEOUT
             while time.monotonic() < deadline:
@@ -226,7 +226,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                               f"mode={_ri.get('run_mode') or '-':5} "
                               f"reason={(_ri.get('extend_props') or {}).get('hung_reason') or '-'}")
                     break  # 已自然升 BBS
-                if g.get("status") == "DONE":
+                if g.get("status") == "SUCCESS":
                     break  # 未升 BBS 已闭环(异常路径,留待断言揭出)
                 await asyncio.sleep(5.0)
 
@@ -279,15 +279,15 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                         break
                     await asyncio.sleep(5.0)
 
-        # 6) 断言:自然升 BBS + 金庸自主接力收口图 DONE
+        # 6) 断言:自然升 BBS + 金庸自主接力收口图 SUCCESS
         try:
             await adapter._aclose()
         except Exception:
             pass
 
-        self.assertEqual(g.get("status"), "DONE", f"全图未闭环 DONE:status={g.get('status')}")
+        self.assertEqual(g.get("status"), "SUCCESS", f"全图未闭环 DONE:status={g.get('status')}")
         nodes = {t["node_id"]: t for t in g.get("tasks") or []}
-        self.assertEqual(nodes[TASK_ID]["status"], "DONE", "根未 DONE")
+        self.assertEqual(nodes[TASK_ID]["status"], "SUCCESS", "根未 SUCCESS")
         self.assertTrue((g.get("extend_props") or {}).get("bbs_mode"), "图未置 bbs_mode")
 
         bbs_nodes = [
@@ -301,7 +301,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
         )
         for n in bbs_nodes:
             ri = n.get("run_info") or {}
-            self.assertEqual(n.get("status"), "DONE", f"scoped 未 DONE:{n.get('node_id')}")
+            self.assertEqual(n.get("status"), "SUCCESS", f"scoped 未 SUCCESS:{n.get('node_id')}")
             self.assertEqual(
                 ri.get("assignee"), jy_id,
                 f"scoped 非 金庸 接力:{n.get('node_id')} assignee={ri.get('assignee')}",
@@ -310,7 +310,7 @@ class TestBbsRelayE2ENatual(unittest.TestCase):
                 (ri.get("output") or {}).get("architects"),
                 f"scoped 缺架构师 checkpoint:{n.get('node_id')}",
             )
-        print(f"[final] graph={g.get('status')} 金庸接力段={len(bbs_nodes)} 唤醒={wakes} 根=DONE")
+        print(f"[final] graph={g.get('status')} 金庸接力段={len(bbs_nodes)} 唤醒={wakes} 根=SUCCESS")
 
 
 def nodes_first_ext(g: dict, key: str) -> str:

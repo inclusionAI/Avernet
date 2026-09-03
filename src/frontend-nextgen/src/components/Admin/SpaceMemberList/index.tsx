@@ -6,6 +6,7 @@
 import type { SearchedUser } from '@/capabilities';
 import {
   Button,
+  CaptionText,
   ConfirmDialog,
   Empty,
   Modal,
@@ -19,7 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
+  TableHeaderText,
+  ValueText,
 } from '@/components/ui';
+import { Card } from '@/components/ui/Card';
 import type { Space, SpaceMember } from '@/domain/admin/models';
 import { adminService } from '@/services/admin';
 import { readUserId } from '@/services/admin/userIdentity';
@@ -93,21 +97,19 @@ export function SpaceMemberList({
       添加成员
     </Button>
   ) : joinableTeam ? (
-    <span className="text-sm text-muted-foreground">可申请</span>
+    <CaptionText as="span">可申请</CaptionText>
   ) : null;
 
   // 底部行：未加入团队→左提示 + 右申请加入按钮；个人空间→左提示
   const bottomBar = joinableTeam ? (
     <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
-      <p className="m-0 text-xs text-muted-foreground">您尚未加入此团队，可申请加入，待管理员审批通过后即可访问。</p>
+      <CaptionText className="m-0">您尚未加入此团队，可申请加入，待管理员审批通过后即可访问。</CaptionText>
       <Button size="sm" variant="primary" onClick={() => setJoinOpen(true)} className="shrink-0">
         申请加入
       </Button>
     </div>
   ) : isPersonal ? (
-    <p className="mt-auto border-t border-border pt-3 text-xs text-muted-foreground">
-      个人空间仅含您本人，不可添加或移除成员。
-    </p>
+    <CaptionText className="mt-auto border-t border-border pt-3">个人空间仅含您本人，不可添加或移除成员。</CaptionText>
   ) : manageable && DELETE_SPACE_SUPPORTED ? (
     <div className="mt-auto flex items-center justify-end border-t border-border pt-3">
       <ConfirmDialog
@@ -135,7 +137,7 @@ export function SpaceMemberList({
           ) : (
             <Users size={20} className="text-primary" aria-hidden />
           )}
-          <span className="text-lg font-semibold text-foreground">{space.spaceName}</span>
+          <span className="text-[14px] font-semibold leading-5 text-foreground">{space.spaceName}</span>
           {isPersonal && <Tag>个人</Tag>}
         </div>
         {topRight}
@@ -143,52 +145,58 @@ export function SpaceMemberList({
 
       {/* 成员表 */}
       {/* 骨架对齐真实成员表(容器+表头+行,列宽一致,loading↔loaded 列位不跳) */}
-      {loading ? (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] bg-muted/60 px-4 py-2.5">
-            <Skeleton.Block className="h-3 w-10" />
-            <Skeleton.Block className="h-3 w-8" />
-            <Skeleton.Block className="ml-auto h-3 w-8" />
+      <Card className="overflow-hidden shadow-sm">
+        {loading ? (
+          <>
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-border bg-muted/50 px-4 py-2.5">
+              <Skeleton.Block className="h-3 w-10" />
+              <Skeleton.Block className="h-3 w-8" />
+              <Skeleton.Block className="ml-auto h-3 w-8" />
+            </div>
+            <ul className="m-0 list-none divide-y divide-border p-0">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <li key={i} className="grid grid-cols-[minmax(0,1fr)_160px_80px] items-center px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Skeleton.Block className="h-7 w-7 shrink-0 rounded-full" />
+                    <Skeleton.Line className="w-24" />
+                  </div>
+                  <Skeleton.Block className="h-7 w-16 rounded" />
+                  <div className="flex justify-end">
+                    <Skeleton.Block className="h-7 w-7 rounded" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : members.length === 0 ? (
+          <div className="px-4 py-5">
+            <Empty title="暂无成员" description={manageable ? '可添加成员来协同管理空间' : '该空间暂无成员'} compact />
           </div>
-          <ul className="m-0 list-none divide-y divide-border p-0">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <li key={i} className="grid grid-cols-[minmax(0,1fr)_160px_80px] items-center px-4 py-2.5">
-                <div className="flex items-center gap-2">
-                  <Skeleton.Block className="h-7 w-7 shrink-0 rounded-full" />
-                  <Skeleton.Line className="w-24" />
-                </div>
-                <Skeleton.Block className="h-7 w-16 rounded" />
-                <div className="flex justify-end">
-                  <Skeleton.Block className="h-7 w-7 rounded" />
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : members.length === 0 ? (
-        <Empty title="暂无成员" description={manageable ? '可添加成员来协同管理空间' : '该空间暂无成员'} compact />
-      ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] bg-muted/60 px-4 py-2.5 text-xs font-medium text-muted-foreground">
-            <span>成员</span>
-            <span>角色</span>
-            <span className="text-right">操作</span>
-          </div>
-          <ul className="m-0 list-none divide-y divide-border p-0">
-            {members.map((m) => (
-              <SpaceMemberRow
-                key={m.userId}
-                space={space}
-                member={m}
-                manageable={manageable}
-                lastOwner={lastOwner}
-                onUpdateRole={onUpdateRole}
-                onRemoveMember={onRemoveMember}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
+        ) : (
+          <>
+            <div className="grid grid-cols-[minmax(0,1fr)_160px_80px] border-b border-border bg-muted/50 px-4 py-2.5">
+              <TableHeaderText as="span">成员</TableHeaderText>
+              <TableHeaderText as="span">角色</TableHeaderText>
+              <TableHeaderText as="span" className="text-right">
+                操作
+              </TableHeaderText>
+            </div>
+            <ul className="m-0 list-none divide-y divide-border p-0">
+              {members.map((m) => (
+                <SpaceMemberRow
+                  key={m.userId}
+                  space={space}
+                  member={m}
+                  manageable={manageable}
+                  lastOwner={lastOwner}
+                  onUpdateRole={onUpdateRole}
+                  onRemoveMember={onRemoveMember}
+                />
+              ))}
+            </ul>
+          </>
+        )}
+      </Card>
 
       {/* 底部：状态化提示 + 申请加入按钮 */}
       {bottomBar}
@@ -202,22 +210,22 @@ export function SpaceMemberList({
             </ModalHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">搜索员工</label>
+                <CaptionText as="label">搜索员工</CaptionText>
                 <UserSearchDropdown
                   disabledUserIds={disabledUserIds}
                   onSelect={setSelectedUser}
                   disabled={!!selectedUser}
                 />
                 {selectedUser && (
-                  <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                  <Card className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 shadow-sm">
                     <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
                       {(selectedUser.nickName || selectedUser.realName || selectedUser.userId || '?')
                         .charAt(0)
                         .toUpperCase()}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                    <ValueText as="span" className="min-w-0 flex-1 truncate">
                       {selectedUser.nickName ? `${selectedUser.nickName}(${selectedUser.userId})` : selectedUser.userId}
-                    </span>
+                    </ValueText>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -227,11 +235,11 @@ export function SpaceMemberList({
                     >
                       <X size={14} />
                     </Button>
-                  </div>
+                  </Card>
                 )}
               </div>
               <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">分配角色</label>
+                <CaptionText as="label">分配角色</CaptionText>
                 <Select value={newRole} onValueChange={(v) => setNewRole(v as 'ADMIN' | 'MEMBER')}>
                   <SelectTrigger className="h-9 w-full">
                     <SelectValue />
@@ -244,10 +252,10 @@ export function SpaceMemberList({
               </div>
             </div>
             <ModalFooter>
-              <Button variant="ghost" onClick={() => setAddOpen(false)}>
+              <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
                 取消
               </Button>
-              <Button variant="primary" onClick={() => void submitAdd()} disabled={!selectedUser}>
+              <Button variant="primary" size="sm" onClick={() => void submitAdd()} disabled={!selectedUser}>
                 添加
               </Button>
             </ModalFooter>

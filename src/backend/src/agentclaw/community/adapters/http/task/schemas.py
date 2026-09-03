@@ -175,7 +175,7 @@ class TaskNodeUpdateDTO(BaseModel):
 
     task_id: str = Field(..., description="任务ID")
     node_id: str = Field(..., description="节点ID")
-    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/PENDING/RUNNING 等)")
+    status: str | None = Field(None, description="框架直驱状态(HUNG/DONE/SUCCESS/PENDING/RUNNING 等)")
     run_mode: str | None = Field(None, description="执行模态(single_bot / bbs 等)")
     assignee: str | None = Field(None, description="承接者(bot_id 或 group_id)")
     output_patch: dict[str, Any] | None = Field(None, description="增量输出(fold 进 run_info.output)")
@@ -276,7 +276,7 @@ class TaskNodeDTO(BaseModel):
     task_id: str = Field(..., description="所属任务ID")
     status: str = Field(
         ...,
-        description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/FAILED/CANCELLED)",
+        description="节点状态(product 态:DEFINED/EXECUTING/REVIEWING/DONE/SUCCESS/FAILED/CANCELLED)",
     )
     task_spec: TaskSpecDTO = Field(..., description="节点任务规格")
     run_info: RuntimeInfoDTO = Field(
@@ -301,6 +301,36 @@ class TaskInfoRecordDTO(BaseModel):
     status: str = Field(..., description="任务状态(product 态)")
     gmt_create: datetime | None = Field(None, description="记录创建时间")
     gmt_modified: datetime | None = Field(None, description="记录最后修改时间")
+
+
+class BbsTaskItemDTO(BaseModel):
+    """GET /api/v1/collaboration/tasks/bbs/list 返回的单条 BBS 接力任务概览。
+
+    忠实映射给定 SQL 的列别名(task_node_run_info r ⋈ task_node n,再补 task_info.owner_bot_id)。
+    title/goal/acceptances 由 adapter 二次解析自 task_spec;assignee_name 解析自 extend_props;
+    publisher=task_info.owner_bot_id(按 task_id 补,缺失 → None)。status 取 task_node 原始运行态。
+    """
+
+    task_id: str = Field(..., description="任务ID(r.task_id)")
+    node_id: str = Field(..., description="节点ID(r.node_id)")
+    run_mode: str | None = Field(None, description="执行模态(r.run_mode;bbs)")
+    retry: int = Field(0, description="重试序号(r.retry;当前恒 0)")
+    assignee_id: str | None = Field(None, description="承接者ID(r.assignee → assignee_id)")
+    status: str | None = Field(None, description="节点运行态(n.status 原值,如 RUNNING/DONE/SUCCESS/…)")
+    acceptance_result: dict[str, Any] | None = Field(None, description="验收结论(r.acceptance_result)")
+    extend_props: dict[str, Any] | None = Field(None, description="运行扩展属性(r.extend_props)")
+    relay_create_time: datetime | None = Field(None, description="节点建表时间(n.gmt_create)")
+    relay_begin_time: datetime | None = Field(None, description="run 建表时间(r.gmt_create)")
+    relay_end_time: datetime | None = Field(None, description="run 改表时间(r.gmt_modified)")
+    task_spec: dict[str, Any] = Field(..., description="节点任务规格(n.task_spec 原始 dict)")
+    title: str | None = Field(None, description="解析自 task_spec.metadata.title")
+    goal: str | None = Field(None, description="解析自 task_spec.goal.objective")
+    acceptances: list[Any] | None = Field(None, description="解析自 task_spec.goal.acceptances")
+    assignee_name: str | None = Field(None, description="解析自 extend_props.assignee_name")
+    publisher: str | None = Field(None, description="发布方 botId(task_info.owner_bot_id)")
+    publisher_name: str | None = Field(
+        None, description="发布方 bot 名称(由 publisher bot_id 批量查 BotService;缺失/降级 → None)"
+    )
 
 
 class TaskRelationDTO(BaseModel):
@@ -351,6 +381,7 @@ def runtime_status_to_product_status(status: Any) -> str:
         "PENDING": "DEFINED",
         "HUNG": "REVIEWING",
         "DONE": "DONE",
+        "SUCCESS": "SUCCESS",
         "FAILED": "FAILED",
         "CANCELLED": "CANCELLED",
     }.get(value, "EXECUTING")
@@ -537,8 +568,10 @@ def _unwrap_node_output(d: Any) -> Any:
     return dict(d) if isinstance(d, dict) else d
 
 
+# 内部字段不直接透出到 dashboard DTO。编排核仍从 graph.extend_props 读取
+# execution_config 做运行时策略配置,但对外有唯一的顶层 execution_config 投影,避免重复返回。
+_INTERNAL_GRAPH_EXT_PROPS = frozenset({"execution_config"})
 # 内部飞行态标志(纯在途去重/陈旧判定),无 dashboard 价值且恒为 null 噪音 → 不透出到外部 DTO。
-# 持久化与编排核内部仍读 extend_props["dispatching"] 做跨实例/跨协程去重;仅外部序列化剥离。
 _INTERNAL_NODE_EXT_PROPS = frozenset({"dispatching", "dispatching_at"})
 
 
@@ -628,7 +661,11 @@ def graph_to_dto(graph, *, include_action_log: bool = False) -> TaskExecutionGra
         output=dict(graph.output),
         tasks=nodes,
         relations=relations,
-        extend_props=dict(graph.extend_props),
+        extend_props={
+            key: value
+            for key, value in graph.extend_props.items()
+            if key not in _INTERNAL_GRAPH_EXT_PROPS
+        },
         execution_graph=execution_graph_to_product_status(graph.execution_graph),
         execution_config=_normalize_execution_config(graph),
     )
@@ -653,6 +690,34 @@ def task_info_record_to_dto(record) -> TaskInfoRecordDTO:
         status=runtime_status_to_product_status(record.status),
         gmt_create=record.gmt_create,
         gmt_modified=record.gmt_modified,
+    )
+
+
+def bbs_task_overview_to_dto(record) -> BbsTaskItemDTO:
+    """BbsTaskOverviewRecord -> BbsTaskItemDTO(Rule 22):二次解析 task_spec/extend_props。"""
+    task_spec = record.task_spec or {}
+    metadata = task_spec.get("metadata") or {}
+    goal = task_spec.get("goal") or {}
+    extend_props = record.extend_props or {}
+    return BbsTaskItemDTO(
+        task_id=record.task_id,
+        node_id=record.node_id,
+        run_mode=record.run_mode,
+        retry=record.retry,
+        assignee_id=record.assignee_id,
+        status=record.status.value if record.status is not None else None,
+        acceptance_result=record.acceptance_result,
+        extend_props=record.extend_props,
+        relay_create_time=record.relay_create_time,
+        relay_begin_time=record.relay_begin_time,
+        relay_end_time=record.relay_end_time,
+        task_spec=dict(task_spec),
+        title=metadata.get("title"),
+        goal=goal.get("objective"),
+        acceptances=goal.get("acceptances"),
+        assignee_name=extend_props.get("assignee_name"),
+        publisher=record.publisher,
+        publisher_name=record.publisher_name,
     )
 
 
@@ -746,7 +811,7 @@ class TaskSettingRequestDTO(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report", "harness_poller"] = Field(
+    setting_type: Literal["claim_join_filter", "search_skill", "skill_report_enabled", "harness_poller"] = Field(
         ..., description="任务开关类型"
     )
     enabled: bool = Field(..., description="是否启用")
@@ -755,7 +820,7 @@ class TaskSettingRequestDTO(BaseModel):
 class TaskSettingStateDTO(BaseModel):
     """任务开关当前状态。"""
 
-    setting_type: Literal["claim_join_filter", "search_skill", "single_bot_skill_report", "harness_poller"] = Field(
+    setting_type: Literal["claim_join_filter", "search_skill", "skill_report_enabled", "harness_poller"] = Field(
         ..., description="任务开关类型"
     )
     enabled: bool = Field(..., description="当前开关状态")

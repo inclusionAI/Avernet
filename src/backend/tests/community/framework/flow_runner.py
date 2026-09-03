@@ -1,7 +1,7 @@
 # src/backend/tests/community/framework/flow_runner.py
 """FlowRunner — drives a FlowCase end-to-end over TestClient.
 
-Reuses runner.py's _build_url/_is_subset. Each step: interpolate path/body
+Reuses task_runner.py's _build_url/_is_subset. Each step: interpolate path/body
 from FlowContext, send request, assert status + (optional) subset expect,
 then extract declared fields into the context for later steps.
 """

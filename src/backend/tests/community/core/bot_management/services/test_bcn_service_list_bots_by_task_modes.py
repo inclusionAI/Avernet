@@ -143,6 +143,34 @@ class TestListBotsByTaskModesRequestParams:
         }
 
 
+
+    @patch(
+        "agentclaw.community.core.bot_management.services.bcn_service.get_current_env",
+        return_value="pre",
+    )
+    def test_metadata_filters_are_forwarded_as_combined_query(self, _mock_env, service, http):
+        http.set_response("get", _ok_response(200, {"items": [{"bot_id": "filtered"}]}))
+
+        items = service.list_bots_by_task_modes(
+            claim=True,
+            dream=False,
+            match="all",
+            visibility=" public ",
+            status="hidden",
+            user_visibility="private",
+        )
+
+        assert items == [{"bot_id": "filtered"}]
+        call = http.calls_to("get")[0]
+        assert call.kwargs["params"] == {
+            "match": "all",
+            "task_claim_mode": "true",
+            "task_dream_mode": "false",
+            "visibility": "public",
+            "status": "hidden",
+            "user_visibility": "private",
+        }
+
 class TestListBotsByTaskModesResponseParsing:
     """解析 BCN 响应 ``items`` 列表,容错空 / 缺失 / 非列表。"""
 

@@ -21,13 +21,13 @@ import asyncio
 import os
 import unittest
 
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupRequest,
 )
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.singlebox_bcs_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_bcs_adapter import (
     SingleboxBcsAdapter,
 )
 

@@ -340,6 +340,9 @@ impl ProviderManagementService for ProviderManagement {
                 task_claim_mode: filter.task_claim_mode,
                 task_dream_mode: filter.task_dream_mode,
                 match_mode: filter.match_mode,
+                visibility: filter.visibility,
+                status: filter.status,
+                user_visibility: filter.user_visibility,
             })
             .await?;
         let items = views

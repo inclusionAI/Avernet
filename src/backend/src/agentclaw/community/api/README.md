@@ -147,6 +147,7 @@ internal_dependencies:
   - agentclaw.community.core.repository.protocols.skill_center_types # Space Skill query projection
   - agentclaw.community.core.market_favorites.models # Favorite records and target enum — typed in market_favorite_service.py
   - agentclaw.community.core.work_orders.models       # Work-order, notification, query, status, and event contracts
+  - agentclaw.community.core.task.task_runner.client.ports # OpenApiBotPort — typed in task_grant_service.py
   - agentclaw.community.core.work_orders.callbacks    # Work-order callback credential typed in work_order_service.py
   - agentclaw.community.core.service_bot.services.baas_service  # BotWsConnectionInfoResponse / HttpConnectionInfo — typed in baas_service.py (BaasService is a plain core service)
   - agentclaw.community.core.service_bot.types       # PublishStage enum — typed in baas_service.py

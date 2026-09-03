@@ -70,3 +70,21 @@ def test_graph_to_dto_no_flight_flags_passes_through():
     dto = graph_to_dto(svc.query_task_dashboard("tdto"))
     node = next(n for n in dto.tasks if n.node_id == "c1")
     assert node.run_info.extend_props == {"k": "v"}
+
+
+def test_graph_to_dto_projects_execution_config_once_at_top_level():
+    svc = TaskGraphService()
+    svc.initialize_graph(_task_info("tdto-config"))
+    graph = svc.query_task_dashboard("tdto-config")
+    graph.extend_props["execution_config"] = {"task_type": "dynamic", "MAX_LOOP": 3}
+    graph.extend_props["custom"] = "kept"
+
+    dto = graph_to_dto(graph)
+
+    assert dto.execution_config == {"task_type": "dynamic", "MAX_LOOP": 3}
+    assert dto.extend_props == {
+        "source_type": "bot",
+        "owner_bot_id": "b1",
+        "owner_user_id": "",
+        "custom": "kept",
+    }

@@ -151,7 +151,7 @@ class CaseDecomposer:
         if four_done and not self._bbs_attempted and "N_practice_bbs" not in child_ids:
             self._bbs_attempted = True
             return [self._node("N_practice_bbs")]
-        # 批4 N_report:practice 已 fulfilled(N_practice_bbs 或 BBS 认领子 N_practice_* DONE)且无 N_report
+        # 批4 N_report:practice 已 fulfilled(N_practice_bbs 或 BBS 认领子 N_practice_* SUCCESS)且无 N_report
         practice_fulfilled = any(
             self._is_done(graph, cid) and cid.startswith("N_practice") for cid in child_ids
         )
@@ -179,7 +179,7 @@ class CaseDecomposer:
         return [n for n in graph.tasks if n.node_id in ids]
 
     def _is_done(self, graph, node_id):
-        return any(n.node_id == node_id and n.status == Status.DONE for n in graph.tasks)
+        return any(n.node_id == node_id and n.status == Status.SUCCESS for n in graph.tasks)
 
 
 class CaseBotDiscover:
@@ -344,7 +344,7 @@ class TestThreeModesHappyToDone:
         # 回投 N_overview PASS → 批2 four专题
         _run(facade.callback.report_result(_cb(True, f"{root_id}::N_overview", data="行业全貌")))
         g = svc.query_task_dashboard(root_id)
-        assert svc._get_node(g, "N_overview").status == Status.DONE
+        assert svc._get_node(g, "N_overview").status == Status.SUCCESS
         for nid, expect_mode in (("N_market", "coop_group"), ("N_tech", "coop_group"),
                                  ("N_compete", "single_bot"), ("N_customer", "coop_group")):
             n = svc._get_node(g, nid)
@@ -363,7 +363,7 @@ class TestThreeModesHappyToDone:
         assert pb.run_info.run_mode == "single_bot"
         assert pb.status == Status.RUNNING
         for nid in ("N_market", "N_tech", "N_compete", "N_customer", "N_overview"):
-            assert svc._get_node(g, nid).status == Status.DONE
+            assert svc._get_node(g, nid).status == Status.SUCCESS
 
         _run(facade.callback.report_result(_cb(True, f"{root_id}::N_practice_bbs", data="一手实践")))
         g = svc.query_task_dashboard(root_id)
@@ -373,9 +373,9 @@ class TestThreeModesHappyToDone:
         # 语义A:回投 N_report PASS → 根 plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(无需回投根 PASS)
         _run(facade.callback.report_result(_cb(True, f"{root_id}::N_report", data="尽调报告")))
         g = svc.query_task_dashboard(root_id)
-        assert svc._get_node(g, root_id).status == Status.DONE  # gap 闭=终验通过→翻根 DONE(语义A)
-        assert g.status == Status.DONE
-        assert all(n.status == Status.DONE for n in g.tasks)
+        assert svc._get_node(g, root_id).status == Status.SUCCESS  # gap 闭=终验通过→翻根 DONE(语义A)
+        assert g.status == Status.SUCCESS
+        assert all(n.status == Status.SUCCESS for n in g.tasks)
 
     def test_relations_decomposition_tree_single_in(self):
         facade, svc, *_ = _wire_facade()
@@ -405,7 +405,7 @@ class TestFailRemedyCure:
         # 重新派发后回投 PASS → DONE
         _run(facade.callback.report_result(_cb(True, "t_case::N_market", data="市场深化")))
         g = svc.query_task_dashboard("t_case")
-        assert svc._get_node(g, "N_market").status == Status.DONE
+        assert svc._get_node(g, "N_market").status == Status.SUCCESS
         _run(facade.callback.report_result(_cb(True, "t_case::N_tech", data="tech")))
         _run(facade.callback.report_result(_cb(True, "t_case::N_customer", data="cust")))
         g = svc.query_task_dashboard("t_case")
@@ -432,8 +432,8 @@ class TestMissEscalateBbs:
         """v5 真实 BBS 接力经 facade API(claim→attach→report PASS 收口;根收口由框架经 owner 复核自判),
         不需直写复位:MISS at max→HUNG→升 BBS(miss_depth_exhausted 可恢复态)→ 根先置 HUNG 待接力 →
         BBS bot 经 facade.claim_bbs_task 占根 → facade.attach_bbs_node 挂 run_mode=bbs scoped 节点
-        (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped DONE + claim 释放;框架 _on_pass_collect 复核
-        根 gap(case planner 返 has_gap=False)→ 根 DONE + 图 DONE。"""
+        (已 RUNNING)→ facade.report_bbs_result(PASS)→ scoped SUCCESS + claim 释放;框架 _on_pass_collect 复核
+        根 gap(case planner 返 has_gap=False)→ 根 SUCCESS + 图 SUCCESS。"""
         facade, svc, runner = _wire_facade(max_depth=1, miss_nodes={"N_practice_bbs"})
         _exec(facade, _task_info_request("t_case", max_depth=1))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="overview")))
@@ -464,10 +464,10 @@ class TestMissEscalateBbs:
             output_patch={"result": "bbs 一手实践"},
         ))
         g = svc.query_task_dashboard("t_case")
-        # 收口:scoped DONE + 根 DONE + 图 DONE(框架 _on_pass_collect 复核根 gap 闭→_maybe_finish_graph)
-        assert svc._get_node(g, scoped.node_id).status == Status.DONE
-        assert svc._get_node(g, "t_case").status == Status.DONE
-        assert g.status == Status.DONE
+        # 收口:scoped SUCCESS + 根 SUCCESS + 图 SUCCESS(框架 _on_pass_collect 复核根 gap 闭→_maybe_finish_graph)
+        assert svc._get_node(g, scoped.node_id).status == Status.SUCCESS
+        assert svc._get_node(g, "t_case").status == Status.SUCCESS
+        assert g.status == Status.SUCCESS
 
 
 # ===== Test 5: dashboard 事件可重放(view 终态断言) =====
@@ -476,7 +476,7 @@ class TestDashboardTerminal:
         facade, svc, *_ = _wire_facade()
         _exec(facade, _task_info_request("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
-        from agentclaw.community.core.task.task_runner.runner import TaskRunner
+        from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
         r = TaskRunner(svc)
         detail = r.query_detail(_node("N_overview", "t_case"))
         assert detail.run_info.output.get("output") == "行业全貌"

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode
+from agentclaw.community.core.task.domain.models import TaskExecutionGraph, TaskNode, effective_run_mode
 from agentclaw.community.core.task.task_dispatch.strategies import (
     DirectDispatchStrategy,
     DispatchStrategy,
@@ -22,7 +22,7 @@ logger = logging.getLogger("task.dispatcher")
 class TaskDispatcher:
     """派发编排壳:对每节点 first-match-wins 选策略(graph 级 config 匹配)→ apply 填 run_info 后返回。
 
-    不写图、不起 run(编排核落库+起 run)。BBS 节点(run_mode 已 "bbs")退化为直接维持(不走策略)。
+    不写图、不起 run(编排核落库+起 run)。BBS 节点的有效执行模态为 "bbs" 时退化为直接维持(不走策略)。
     HIT_MULTI_BOTS 时填 run_mode="coop_group"+extend_props["pending_group_formation"],assignee 留空
     (拉群归编排核调 runner.form_coop_group 后填 assignee)。
     """
@@ -45,7 +45,7 @@ class TaskDispatcher:
         不写图、不起 run;per node first-match 策略 await apply SearchResult → 填 node.run_info:
         HIT_SINGLE→single_bot/bot_id;HIT_GROUP→coop_group/group_id;
         HIT_MULTI_BOTS→coop_group/pending_group_formation(assignee 留空,编排核拉群填);MISS→不填+标 miss_events。
-        BBS 节点(run_mode 已 "bbs")→ 退化直接维持。协程化:catalog 搜推是耗时 IO,await 不阻塞编排核。"""
+        有效执行模态为 "bbs" 的节点→ 退化直接维持。协程化:catalog 搜推是耗时 IO,await 不阻塞编排核。"""
         graph = self._graph.query_task_dashboard(
             toDoTaskList[0].task_id if toDoTaskList else ""
         ) if toDoTaskList else None
@@ -55,7 +55,7 @@ class TaskDispatcher:
         async def _one(node: "TaskNode"):
             # 容错:搜推异常(无响应/推理失败/端口错)不崩整批,留 PENDING 标 dispatch_error 交 harness 重试搜推
             try:
-                if node.run_info.run_mode == "bbs":
+                if effective_run_mode(node) == "bbs":
                     logger.info("[task][dispatch] node=%s run_mode=bbs 退化维持", node.node_id)
                     return node  # BBS 节点退化维持
                 result = await self._select_and_apply(node, graph)

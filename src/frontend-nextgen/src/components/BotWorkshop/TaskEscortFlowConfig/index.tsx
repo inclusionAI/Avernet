@@ -90,9 +90,9 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
 
       {/* Error */}
       {error && (
-        <div className="rounded-lg border border-[var(--color-error-soft)] bg-[var(--color-error-soft)] px-3 py-2 text-xs text-[var(--color-error)]">
+        <Card className="border-[var(--color-error-soft)] bg-[var(--color-error-soft)] px-3 py-2 text-xs text-[var(--color-error)] shadow-none">
           {error}
-        </div>
+        </Card>
       )}
 
       {/* Loading */}
@@ -107,14 +107,14 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
       {selectedWorkflowId && spec && (
         <div className="space-y-3">
           {/* View mode toggle */}
-          <div className="flex gap-1 rounded-lg bg-[var(--color-panel-muted)] p-1">
+          <Card className="flex gap-1 rounded-lg bg-[var(--color-panel-muted)] p-1 shadow-none">
             <Button variant={viewMode === 'dag' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('dag')}>
               DAG
             </Button>
             <Button variant={viewMode === 'yaml' ? 'secondary' : 'ghost'} size="sm" onClick={() => setViewMode('yaml')}>
               YAML
             </Button>
-          </div>
+          </Card>
 
           {/* Spec header */}
           <Card>
@@ -130,16 +130,16 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
           {/* DAG view */}
           {viewMode === 'dag' && <WorkflowDagView spec={spec} />}
 
-{/* YAML view */}
+          {/* YAML view */}
           {viewMode === 'yaml' && (
-            <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
+            <Card className="overflow-hidden shadow-none">
               <div className="border-b border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-1.5 text-xs font-medium">
                 WorkflowSpec YAML
               </div>
               <pre className="max-h-[400px] overflow-auto bg-[var(--color-panel-muted)] p-3 text-[11px] leading-relaxed">
                 <code className="font-mono">{yamlText || '# 无内容'}</code>
               </pre>
-            </div>
+            </Card>
           )}
         </div>
       )}

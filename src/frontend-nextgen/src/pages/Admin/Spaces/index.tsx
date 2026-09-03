@@ -3,7 +3,8 @@
 import { SpaceCard } from '@/components/Admin/SpaceCard';
 import { SpaceCreateForm } from '@/components/Admin/SpaceCreateForm';
 import { SpaceMemberList } from '@/components/Admin/SpaceMemberList';
-import { Button, Drawer, DrawerContent, Empty, Input, Skeleton } from '@/components/ui';
+import { Button, Drawer, DrawerContent, Empty, Input, PageTitle, Pagination, Skeleton } from '@/components/ui';
+import { Card } from '@/components/ui/Card';
 import { useAdmin } from '@/hooks/useAdmin';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
 import { extractFriendlyErrorMessage } from '@/utils/requestErrorHandler';
@@ -24,6 +25,7 @@ export function AdminSpacesView() {
     membersLoading,
     onKeywordChange,
     changePage,
+    changePageSize,
     createTeamSpace,
     openSpaceDetail,
     closeSpaceDetail,
@@ -37,15 +39,13 @@ export function AdminSpacesView() {
   const currentSpaceId = useSpaceContext((s) => s.currentSpaceId);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const pageCount = Math.max(1, Math.ceil(total / pageSize));
-
   return (
     <div className="mx-auto max-w-[1200px]">
       {/* §4.1 精简版 PageHeader：左 h1＋副文案，右操作区（搜索 + 唯一主按钮「创建空间」） */}
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">空间管理</h1>
-          <p className="mt-1 text-xs text-muted-foreground">管理你已加入及可申请的团队空间</p>
+          <PageTitle>空间管理</PageTitle>
+          <p className="mt-2 text-[14px] text-muted-foreground">管理你已加入及可申请的团队空间</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -55,7 +55,7 @@ export function AdminSpacesView() {
               className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
             />
             <Input
-              className="h-9 w-64 pl-8 pr-7"
+              className="h-9 w-64 pl-8 pr-7 text-xs"
               placeholder="搜索空间名称..."
               value={keyword}
               onChange={(e) => onKeywordChange(e.target.value)}
@@ -73,7 +73,12 @@ export function AdminSpacesView() {
               </Button>
             )}
           </div>
-          <Button variant="primary" leftIcon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
+          <Button
+            variant="primary"
+            className="text-xs"
+            leftIcon={<Plus size={14} />}
+            onClick={() => setCreateOpen(true)}
+          >
             创建空间
           </Button>
         </div>
@@ -81,18 +86,18 @@ export function AdminSpacesView() {
 
       {/* 列表 */}
       {loading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton.Card key={i} />
           ))}
         </div>
       ) : error ? (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+        <Card className="flex items-center justify-between gap-3 border-destructive/30 bg-destructive/5 p-4 shadow-none">
           <div className="min-w-0 text-sm text-destructive">{extractFriendlyErrorMessage(error)}</div>
           <Button size="sm" variant="primary" onClick={() => void fetchList()}>
             重试
           </Button>
-        </div>
+        </Card>
       ) : items.length === 0 ? (
         <Empty
           title="暂无空间"
@@ -106,7 +111,7 @@ export function AdminSpacesView() {
           }
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
           {items.map((space) => (
             <SpaceCard
               key={space.spaceId || space.spaceCode}
@@ -119,21 +124,17 @@ export function AdminSpacesView() {
         </div>
       )}
 
-      {/* 分页：按钮居左，「共 N 条」右对齐 */}
-      {total > pageSize && (
-        <div className="mt-6 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="ghost" disabled={pageNo <= 1} onClick={() => changePage(pageNo - 1)}>
-              上一页
-            </Button>
-            <Button size="sm" variant="ghost" disabled={pageNo >= pageCount} onClick={() => changePage(pageNo + 1)}>
-              下一页
-            </Button>
-          </div>
-          <span className="text-xs tabular-nums text-muted-foreground">
-            {pageNo} / {pageCount} · 共 {total} 条
-          </span>
-        </div>
+      {/* 分页：统一 Pagination 组件，含每页条数选择与跳页输入 */}
+      {total > 0 && (
+        <Pagination
+          className="mt-6"
+          current={pageNo}
+          pageSize={pageSize}
+          total={total}
+          onChange={changePage}
+          onPageSizeChange={changePageSize}
+          showQuickJumper
+        />
       )}
 
       {/* 创建团队空间 Modal */}

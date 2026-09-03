@@ -1,5 +1,6 @@
 import { ContentCard, PageHeader } from '@/components/Common';
 import { Button, Empty } from '@/components/ui';
+import { Card } from '@/components/ui/Card';
 import { getNavigationItem } from '@/shell/navigation';
 import { getRouteMeta } from '@/shell/routeMeta';
 import { history, useLocation } from '@umijs/max';
@@ -21,7 +22,7 @@ const ModuleOverviewPage: React.FC = () => {
           description={item?.description ?? '模块页面正在接入'}
           actions={<Button leftIcon={<Plus className="h-4 w-4" />}>创建{title.replace('工坊', '')}</Button>}
         />
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-border)] bg-white p-3">
+        <Card className="flex flex-wrap items-center gap-2 p-3 shadow-none">
           <Button variant="secondary">全部</Button>
           <Button variant="ghost">我创建的</Button>
           <Button variant="ghost">最近更新</Button>
@@ -30,7 +31,7 @@ const ModuleOverviewPage: React.FC = () => {
               返回上一页
             </Button>
           </div>
-        </div>
+        </Card>
         <ContentCard>
           <Empty
             title={`${title}页面骨架已就绪`}

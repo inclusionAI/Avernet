@@ -25,6 +25,13 @@ class StaticPlanNodeDefinition:
     input: dict[str, Any]
     output: dict[str, Any]
     enabled_when: str | None = None
+    # V2 接力输入: 框架下发给 bot 的"# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务"里,
+    # "本角色任务"文本由这里给出(rule 不归框架,在各 bot 的 skill/rule 配置)。
+    task: str = ""
+    # 节点在 dashboard 显示的短标题(goal/objective 标签);缺省回退 task/name。
+    title: str = ""
+    # collaboration 节点的群组成角色名,与 bot_ids 平行;bot_names[0] = driver/总结者。
+    bot_names: tuple[str, ...] = ()
 
     @property
     def all_bot_ids(self) -> tuple[str | None, ...]:
@@ -37,6 +44,8 @@ class StaticPlanDefinition:
     entry_bot_id: str | None
     input_schema: dict[str, Any]
     nodes: tuple[StaticPlanNodeDefinition, ...]
+    # V2 接力: 入口接自身份展示名,与 entry_bot_id 一起渲染 "# 接自: <entry_name>(<entry_bot_id>)"。
+    entry_name: str | None = None
 
     @classmethod
     def from_yaml(cls, text: str) -> "StaticPlanDefinition":
@@ -62,6 +71,10 @@ class StaticPlanDefinition:
                 input=dict(item.get("input") or {}), output=dict(item.get("output") or {}),
                 enabled_when=(item.get("enabled_when") or {}).get("expression")
                     if isinstance(item.get("enabled_when"), dict) else None,
+                # V2 接力输入(本角色任务 + 群组成角色名);缺省为空(老模板走旧行为,不变)。
+                task=str(item.get("task") or "").strip(),
+                title=str(item.get("title") or "").strip(),
+                bot_names=tuple(str(x) for x in collab.get("bot_names", [])),
             ))
         known = {n.node_id for n in nodes}
         for node in nodes:
@@ -84,7 +97,7 @@ class StaticPlanDefinition:
                 remaining.pop(key)
                 for deps in remaining.values():
                     deps.discard(key)
-        return cls(str(raw["template_id"]), raw.get("entry_bot_id"), dict(raw.get("input_schema") or {}), tuple(nodes))
+        return cls(str(raw["template_id"]), raw.get("entry_bot_id"), dict(raw.get("input_schema") or {}), tuple(nodes), entry_name=raw.get("entry_name"))
 
     @classmethod
     def from_file(cls, template_id: str, directory: Path) -> "StaticPlanDefinition":

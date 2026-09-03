@@ -21,7 +21,7 @@ import httpx
 import os
 import unittest
 
-from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiBotAdapter,
 )
 

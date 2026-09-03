@@ -1,5 +1,6 @@
 // 全局空间上下文 Hook：统一读写入口。
 // - useSpaceContext(selector): 选读 store（各模块用：const spaceId = useSpaceContext(s=>s.currentSpaceId)）
+// - ensurePersonalSpaceOnAppEntry(): App 挂载（进入项目）时由 AppShell 调用，单飞初始化一次个人空间（幂等，失败静默）
 // - initSpaceContext(): 进入管理区域时调用，拉已加入空间（scope=accessible）→首次无个人空间则 ensure+重拉→还原/默认
 //   （localStorage tc_personal_space_ensured 幂等标记，避免每次进管理页重复「查+建」往返）
 // - refreshSpaceContext(): 切换器气泡每次打开时调用，重拉最新列表（保留当前选中；失效则回落个人空间）
@@ -145,4 +146,23 @@ export interface UseSpaceContextActions {
 /** 组件用：返回稳定 actions 引用（模块级常量，引用永恒定）。 */
 export function useSpaceContextActions(): UseSpaceContextActions {
   return { init: initSpaceContext, refresh: refreshSpaceContext, switchSpace: switchSpaceContext };
+}
+
+// App 挂载即确保个人空间的单飞标记：同一页面加载只发一次 initialize。
+let appEntryEnsurePromise: Promise<void> | null = null;
+
+/**
+ * 进入项目（App 挂载）即初始化一次个人空间：不再等进入管理区域才由 initSpaceContext 兜底。
+ * - 幂等：initialize 后端已存在则返回已有，每次进入重复调用安全；
+ * - 单飞：同一页面加载内多次触发（含 AppShell 重挂载）只发一次请求；失败同样保留标记，本页不重试；
+ * - 失败静默降级：不重抛、不阻断启动，后续进入管理区域时 initSpaceContext 的 ensure 分支按列表兜底；
+ *   身份解析复用 ensureUserId → identityService 单飞，与 AppShell 挂载的身份拉取共用 inflight，零重复请求。
+ */
+export function ensurePersonalSpaceOnAppEntry(): Promise<void> {
+  if (appEntryEnsurePromise) return appEntryEnsurePromise;
+  appEntryEnsurePromise = adminService.ensurePersonalSpace().then(
+    () => undefined,
+    () => undefined, // 兜底吞运行时异常，避免外泄到启动链路；错误提示默认走 errorNotify 观察者
+  );
+  return appEntryEnsurePromise;
 }

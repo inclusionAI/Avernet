@@ -119,8 +119,8 @@ export function ArchitectNameField({
     });
   }, []);
 
-  const renderOptionTree = (treeOptions: ArchitectDomainOption[], depth = 0, parentKey = ''): React.ReactNode =>
-    treeOptions.map((option) => {
+  function renderOptionTree(treeOptions: ArchitectDomainOption[], depth = 0, parentKey = ''): React.ReactNode {
+    return treeOptions.map((option) => {
       const optionKey = getArchitectOptionKey(option, depth, parentKey);
       const hasChildren = !!option.children?.length;
       const expanded = isSearching || expandedKeys.has(optionKey);
@@ -178,6 +178,7 @@ export function ArchitectNameField({
         </React.Fragment>
       );
     });
+  }
 
   return (
     <div className="relative space-y-1.5">

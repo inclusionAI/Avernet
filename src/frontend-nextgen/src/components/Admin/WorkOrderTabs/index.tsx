@@ -1,6 +1,6 @@
 // 工单中心：card 视图 tab + 分类 Segmented + 全部已读 + 列表（骨架/空态/错误）+ 分页 + 工单/通知详情 Drawer。
 // 视觉对齐 admin 视觉交互指南 §7.2/§7.4/§8。切视图/分类回第 1 页；详情用 typeLabel/statusLabel 本地化。
-import { Button, Empty, Skeleton } from '@/components/ui';
+import { Button, Card, Empty, Pagination, Skeleton } from '@/components/ui';
 import type { WorkOrder, WorkOrderCategory, WorkOrderView } from '@/domain/admin/models';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useWorkOrders } from '@/hooks/useWorkOrders';
@@ -44,6 +44,7 @@ export function WorkOrderTabs() {
     setView,
     setCategory,
     setPageNo,
+    setPageSize,
     fetchList,
     approve,
     reject,
@@ -103,8 +104,6 @@ export function WorkOrderTabs() {
   };
 
   const totalCount = total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(totalCount / pageSize));
-  const paged = totalCount > pageSize;
 
   const viewOptions = VIEWS.map((vw) => ({
     value: vw.value,
@@ -135,7 +134,7 @@ export function WorkOrderTabs() {
       />
 
       {/* 内容面板：独立卡片，与上方 card tab 留 12px 间距，左右边缘与 tab 行对齐 */}
-      <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
+      <Card className="overflow-hidden bg-card shadow-sm">
         {/* 分类筛选 + 全部已读 */}
         <div className="flex items-center justify-between gap-3 px-5 py-4">
           <MiniSegmented<WorkOrderCategory>
@@ -181,12 +180,12 @@ export function WorkOrderTabs() {
             ))}
           </div>
         ) : error ? (
-          <div className="m-5 mt-0 flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <Card className="m-5 mt-0 flex items-center justify-between gap-3 border-destructive/30 bg-destructive/5 p-4 shadow-none">
             <div className="min-w-0 text-sm text-destructive">{extractFriendlyErrorMessage(error)}</div>
             <Button size="sm" variant="primary" onClick={() => void fetchList()}>
               重试
             </Button>
-          </div>
+          </Card>
         ) : items.length === 0 ? (
           <div className="p-5 pt-0">
             <Empty
@@ -221,32 +220,19 @@ export function WorkOrderTabs() {
                 />
               ))}
             </div>
-            {/* 分页 + 计数：按钮居左，「共 N 条」右对齐 */}
-            <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-4">
-              <div className="flex items-center gap-2">
-                {paged && (
-                  <Button size="sm" variant="ghost" disabled={pageNo <= 1} onClick={() => setPageNo(pageNo - 1)}>
-                    上一页
-                  </Button>
-                )}
-                {paged && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={pageNo >= pageCount}
-                    onClick={() => setPageNo(pageNo + 1)}
-                  >
-                    下一页
-                  </Button>
-                )}
-              </div>
-              <span className="text-xs tabular-nums text-muted-foreground">
-                {paged ? `${pageNo} / ${pageCount} · 共 ${totalCount} 条` : `共 ${totalCount} 条`}
-              </span>
+            {/* 分页：接入统一 Pagination 组件（计数 + 上/下一页图标按钮，右对齐） */}
+            <div className="flex items-center justify-end border-t border-border px-5 py-4">
+              <Pagination
+                current={pageNo}
+                pageSize={pageSize}
+                total={totalCount}
+                onChange={setPageNo}
+                onPageSizeChange={setPageSize}
+              />
             </div>
           </>
         )}
-      </div>
+      </Card>
 
       <WorkOrderDetailDrawer
         detail={detail}

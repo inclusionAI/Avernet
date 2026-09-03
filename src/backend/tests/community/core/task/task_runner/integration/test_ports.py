@@ -1,6 +1,6 @@
 from typing import Any, Protocol, runtime_checkable  # noqa: F401
 
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     ApiKeyProvider, BcsBotIdentityResolver, BcsClientPort, OpenApiBotPort, PromptFormatter,
     ResultSink, TaskContextBuilder,
 )

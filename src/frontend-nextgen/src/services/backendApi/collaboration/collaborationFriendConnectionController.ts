@@ -28,6 +28,11 @@ export interface FriendConnectionDto {
   created_at?: number | string;
 }
 
+export interface FriendConnectionSummaryDto {
+  actor: FriendConnectionActor;
+  name?: string;
+}
+
 export interface CreateFriendConnectionRequestBody {
   to_actor: FriendConnectionActor;
   from_actor?: FriendConnectionActor;
@@ -104,11 +109,16 @@ export function cancelFriendConnectionRequest(requestId: string, signal?: AbortS
   );
 }
 
-export function listFriendConnections(params: ListFriendConnectionsParams, signal?: AbortSignal) {
-  return backendRequest<BackendApiEnvelope<BackendApiPage<FriendConnectionDto>>>(
-    COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections,
-    { method: 'GET', params: { ...params }, injectUserId: false, signal },
-  );
+export function listFriendConnections<T = FriendConnectionDto>(
+  params: ListFriendConnectionsParams,
+  signal?: AbortSignal,
+) {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<T>>>(COLLABORATION_FRIEND_CONNECTION_ENDPOINTS.connections, {
+    method: 'GET',
+    params: { ...params },
+    injectUserId: false,
+    signal,
+  });
 }
 
 export function deleteFriendConnection(body: DeleteFriendConnectionBody, signal?: AbortSignal) {

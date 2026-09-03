@@ -15,13 +15,17 @@ from agentclaw.community.api.task.task_grant_service import (
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     TaskClaimJoinGateProtocol,
 )
+from agentclaw.community.core.task.domain.errors import TaskError
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
     Status,
     TaskExecutionGraph,
     TaskOpResult,
 )
-from agentclaw.community.core.task.repository.types import TaskInfoRecord
+from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
+    TaskInfoRecord,
+)
 from agentclaw.community.core.task.task_discovery.discovery_service import DiscoveryService
 from agentclaw.community.core.task.task_discovery.scheduler import TaskDiscoveryScheduler
 from tests.community.framework import (
@@ -370,6 +374,78 @@ def bbs_result_happy():
     expect=ExpectError(status=422),
 )
 def bbs_result_error():
+    pass
+
+
+# BBS task listing (GET /bbs/list):all run_mode='bbs' runs joined to their node + publisher.
+def _seed_bbs_list_service(world) -> None:
+    def list_bbs_tasks(_self, page=1, page_size=20, *, search_word=None, status=None):
+        return [
+            BbsTaskOverviewRecord(
+                task_id="bbs-endpoint-1",
+                node_id="n1",
+                run_mode="bbs",
+                retry=0,
+                assignee_id="asg-1",
+                status=Status.RUNNING,
+                acceptance_result=None,
+                extend_props={"assignee_name": "Alice"},
+                relay_create_time=None,
+                relay_begin_time=None,
+                relay_end_time=None,
+                task_spec=_TASK_SPEC,
+                publisher="pub-1",
+                publisher_name="EndpointPublisherBot",
+            )
+        ], 1
+
+    bind_overrides(world, TaskServiceProtocol, {"list_bbs_tasks": list_bbs_tasks})
+
+
+def _seed_bbs_list_error(world) -> None:
+    def list_bbs_tasks(_self, **_):
+        raise TaskError("list bbs tasks unavailable")
+
+    bind_overrides(world, TaskServiceProtocol, {"list_bbs_tasks": list_bbs_tasks})
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="happy_ok",
+    seed=_seed_bbs_list_service,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "total": 1,
+                "items": [
+                    {
+                        "task_id": "bbs-endpoint-1",
+                        "title": "Endpoint case",
+                        "goal": "exercise the route",
+                        "assignee_name": "Alice",
+                        "publisher": "pub-1",
+                        "publisher_name": "EndpointPublisherBot",
+                    }
+                ],
+            },
+        },
+    ),
+)
+def bbs_list_happy():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="err_service_failure",
+    seed=_seed_bbs_list_error,
+    expect=ExpectError(status=500, json_contains={"message": "Internal error"}),
+)
+def bbs_list_error():
     pass
 
 

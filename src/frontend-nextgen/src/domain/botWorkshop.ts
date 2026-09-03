@@ -4,7 +4,7 @@ import type { BotHarnessContext } from './botHealthCheck';
 export type BotOwnership = 'personal' | 'team';
 export type BotDeployment = 'local' | 'cloud';
 export type BotServiceMode = 'non-service' | 'service';
-export type BotLifecycle = 'draft' | 'deploying' | 'prestable' | 'running' | 'offline' | 'unknown';
+export type BotLifecycle = 'draft' | 'deploying' | 'prestable' | 'running' | 'offline' | 'failed' | 'unknown';
 export type BotRuntimeStage = 'draft' | 'verify' | 'online';
 export type BotCompleteness = 'complete' | 'partial';
 
@@ -28,16 +28,22 @@ export interface BotRuntimeDomain extends BotRuntime {
 
 export interface BotDomain {
   id: string;
+  cardId?: string;
+  publicationVersion?: number;
+  liveVersion?: number;
   ownerId?: string;
   entityKey: string;
   name: string;
   description?: string;
   spaceId?: string;
+  spaceName?: string;
   /** 授权能力只跟随接口返回的 Bot 所属空间类型，不从 Bot 类型或部署形态推断。 */
   spaceKind: BotOwnership;
   ownership: BotOwnership;
   deployment: BotDeployment;
   serviceMode: BotServiceMode;
+  /** 列表卡片是否允许将非服务 Bot 升级为服务 Bot。 */
+  canUpgradeToService: boolean;
   lifecycle: BotLifecycle;
   rawStatus?: string;
   rawPublishStatus?: string;

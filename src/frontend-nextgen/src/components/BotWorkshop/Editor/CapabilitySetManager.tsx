@@ -15,6 +15,7 @@ export interface CapabilitySetManagerProps {
   sets: BotCapabilitySet[];
   mySkills: BotEditorSkill[];
   marketSkills: BotEditorSkill[];
+  skillCenterSkills: BotEditorSkill[];
   workshopSkills: BotEditorSkill[];
   marketMcps: BotEditorMcp[];
   editable: boolean;
@@ -22,6 +23,7 @@ export interface CapabilitySetManagerProps {
   onDelete: (id: string) => Promise<void>;
   onActive: (set: BotCapabilitySet, active: boolean) => Promise<void>;
   onSkill: (setId: string, skillId: string, active: boolean) => Promise<void>;
+  onSkillCenterReferences: (setId: string, skillCodes: string[]) => Promise<void>;
   onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
   onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
   onLoadCandidates: () => Promise<void>;
@@ -34,6 +36,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     sets,
     mySkills,
     marketSkills,
+    skillCenterSkills,
     workshopSkills,
     marketMcps,
     editable,
@@ -41,6 +44,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     onDelete,
     onActive,
     onSkill,
+    onSkillCenterReferences,
     onMcp,
     onUploadSkillFolder,
     onLoadCandidates,
@@ -191,6 +195,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           kind={picker.kind}
           open
           marketItems={picker.kind === 'skill' ? marketSkills : marketMcps}
+          skillCenterItems={picker.kind === 'skill' ? skillCenterSkills : []}
           workshopItems={picker.kind === 'skill' ? workshopSkills : []}
           myItems={picker.kind === 'skill' ? mySkills : []}
           existingIds={
@@ -201,7 +206,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
           onOpenChange={(open) => {
             if (!open) setPicker(undefined);
           }}
-          onConfirm={async (ids) => {
+          onConfirm={async (ids, source) => {
+            if (picker.kind === 'skill' && source === 'skillcenter-market') {
+              await onSkillCenterReferences(picker.set.id, ids);
+              return;
+            }
             await Promise.all(
               ids.map((id) =>
                 picker.kind === 'skill' ? onSkill(picker.set.id, id, true) : onMcp(picker.set.id, id, true),

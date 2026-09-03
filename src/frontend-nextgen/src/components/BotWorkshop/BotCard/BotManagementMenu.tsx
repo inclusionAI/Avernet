@@ -34,7 +34,7 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
           />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-52 space-y-1 p-2">
-          {!isAgentCodingBot && bot.serviceMode === 'service' && onManagePublication ? (
+          {bot.serviceMode === 'service' && onManagePublication ? (
             <Button
               variant="ghost"
               size="sm"
@@ -49,13 +49,13 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               发布与阶段推进
             </Button>
           ) : null}
-          {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' ? (
+          {bot.serviceMode === 'non-service' && bot.deployment === 'cloud' && bot.canUpgradeToService ? (
             <Button
               variant="ghost"
               size="sm"
               className="w-full justify-start"
               leftIcon={actionIcon.upgrade}
-              disabled={!isAgentCodingBot && !['openclaw', 'teclaw'].includes(bot.runtime.engine)}
+              disabled={lockedByOther}
               onClick={() => {
                 setOpen(false);
                 setConfirmAction('upgrade');

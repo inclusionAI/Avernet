@@ -4,7 +4,6 @@ one store — hydrate, callback (same-tx audit), event idempotency, BBS claim CA
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 from agentclaw.community.core.repository.implementations.task.task_callback_repository import (
     TaskCallbackRepository,
@@ -38,7 +37,6 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 from agentclaw.community.core.task.task_runner.callback_adapter import (
     CallbackAdapter,
     TaskLoopCallback,
-    _derive_event_id,
 )
 
 
@@ -134,7 +132,7 @@ def test_cross_instance_callback_advances_graph_and_audits_same_tx(db):
 
     # a (instance A, empty cache) hydrates and sees the terminal state
     hyd = a.query_task_dashboard(task_id)
-    assert hyd.tasks[0].status is Status.DONE
+    assert hyd.tasks[0].status is Status.SUCCESS
     # the callback audit row exists with the event id and PROCESSED status
     all_cb = callback_repo.list_by_session("inst-1")
     assert all_cb and all_cb[0].process_status == "PROCESSED"
@@ -143,7 +141,7 @@ def test_cross_instance_callback_advances_graph_and_audits_same_tx(db):
     assert a.has_repository
 
 
-def test_callback_result_replay_uses_fresh_event_id_without_graph_mutation(db):
+def test_callback_result_replay_uses_stable_event_id_without_graph_mutation(db):
     task_id = "T-IDEM"
     _seed(db, task_id)
     a = _make_graph_service(db)
@@ -155,20 +153,16 @@ def test_callback_result_replay_uses_fresh_event_id_without_graph_mutation(db):
     data = _result_data(task_id, task_id, success=True)
     _run(cb.report_result(data))
     first_id = callback_repo.get(task_id, task_id).event_id
-    assert first_id and str(uuid.UUID(first_id)) == first_id
+    assert first_id
     assert callback_repo.find_by_event_id(first_id).process_status == "PROCESSED"
 
     version_after = a._graph_versions[task_id]
-    # report_result deliberately uses a fresh UUID v4 for every inbound result;
-    # terminal graph state rejects the replay without changing its version.
-    try:
-        _run(cb.report_result(data))
-    except TaskStateError:
-        pass
+    # Replaying the same result must be acknowledged by the callback layer
+    # before it reaches the graph, using the same derived event id.
+    _run(cb.report_result(data))
     assert a._graph_versions[task_id] == version_after
     rec = callback_repo.get(task_id, task_id)
-    assert rec is not None and rec.event_id and rec.event_id != first_id
-    assert str(uuid.UUID(rec.event_id)) == rec.event_id
+    assert rec is not None and rec.event_id == first_id
 
 
 def test_concurrent_bbs_claim_one_winner(db):

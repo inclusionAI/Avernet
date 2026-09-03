@@ -9,7 +9,10 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     listBotMcps: jest.fn(),
     listMcpServers: jest.fn(),
     listRepositorySkills: jest.fn(),
-    listSpaceSkills: jest.fn(),
+    listSkillCenterSkills: jest.fn(),
+    listConsumableSpaceSkills: jest.fn(),
+    createSkillCenterReferences: jest.fn(),
+    listSkillCenterReferences: jest.fn(),
     listResources: jest.fn(),
     listRenderScreens: jest.fn(),
     listRoutines: jest.fn(),
@@ -35,7 +38,8 @@ beforeEach(() => {
   controller.listBotMcps.mockResolvedValue({ data: [] });
   controller.listMcpServers.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRepositorySkills.mockResolvedValue({ data: { total: 0, items: [] } });
-  controller.listSpaceSkills.mockResolvedValue({ data: { total: 0, items: [] } });
+  controller.listSkillCenterSkills.mockResolvedValue({ data: { total: 0, items: [] } });
+  controller.listConsumableSpaceSkills.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listResources.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRenderScreens.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRoutines.mockResolvedValue({ data: { total: 0, items: [] } });
@@ -90,14 +94,62 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
 
   expect(controller.listMcpServers).not.toHaveBeenCalled();
   expect(controller.listRepositorySkills).not.toHaveBeenCalled();
-  expect(controller.listSpaceSkills).not.toHaveBeenCalled();
+  expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
 
   await botEditorService.loadCapabilityCandidates('bot-1', '12');
 
   expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
   expect(controller.listMcpServers).toHaveBeenCalledTimes(1);
   expect(controller.listRepositorySkills).toHaveBeenCalledTimes(1);
-  expect(controller.listSpaceSkills).toHaveBeenCalledWith('12');
+  expect(controller.listSkillCenterSkills).toHaveBeenCalledTimes(1);
+  expect(controller.listConsumableSpaceSkills).toHaveBeenCalledWith('12', 1, 100);
+});
+
+it('工坊可消费 Skill 超过单页时加载全部分页', async () => {
+  const firstPage = Array.from({ length: 100 }, (_, index) => ({
+    skill_id: `space-${index + 1}`,
+    name: `Skill ${index + 1}`,
+    latest_published_version: { version: 1 },
+  }));
+  controller.listConsumableSpaceSkills
+    .mockResolvedValueOnce({ data: { total: 101, items: firstPage } })
+    .mockResolvedValueOnce({
+      data: {
+        total: 101,
+        items: [{ skill_id: 'space-101', name: 'Skill 101', latest_published_version: { version: 1 } }],
+      },
+    });
+
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12');
+
+  expect(controller.listConsumableSpaceSkills).toHaveBeenNthCalledWith(1, '12', 1, 100);
+  expect(controller.listConsumableSpaceSkills).toHaveBeenNthCalledWith(2, '12', 2, 100);
+  expect(result.workshopSkills).toHaveLength(101);
+});
+
+it('按 SkillCenter、TeamClaw 和工坊可消费接口分类候选 Skill', async () => {
+  controller.listRepositorySkills.mockResolvedValue({
+    data: { total: 1, items: [{ skill_id: 'repo-1', name: 'TeamClaw Skill' }] },
+  });
+  controller.listSkillCenterSkills.mockResolvedValue({
+    data: { total: 1, items: [{ skillCode: 'sc-1', skillName: 'SkillCenter Skill', latestVersionNumber: 3 }] },
+  });
+  controller.listConsumableSpaceSkills.mockResolvedValue({
+    data: {
+      total: 1,
+      items: [{ skill_id: 'space-1', name: '工坊 Skill', latest_published_version: { version: 2 } }],
+    },
+  });
+
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12');
+
+  expect(result.marketSkills).toEqual([expect.objectContaining({ id: 'repo-1', source: 'teamclaw-market' })]);
+  expect(result.skillCenterSkills).toEqual([
+    expect.objectContaining({ id: 'sc-1', source: 'skillcenter-market', version: '3' }),
+  ]);
+  expect(result.workshopSkills).toEqual([
+    expect.objectContaining({ id: 'space-1', source: 'workshop', version: 'V2' }),
+  ]);
 });
 
 it('通过 Bot OpenAPI 加载并注册副屏 CDN', async () => {

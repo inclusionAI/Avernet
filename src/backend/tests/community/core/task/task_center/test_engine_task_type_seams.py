@@ -2,7 +2,7 @@ import asyncio
 
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_center.engine import CoopGroupStart, ExecutionEngine
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 
 class _FakeRunner:

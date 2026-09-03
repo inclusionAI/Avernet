@@ -178,13 +178,143 @@ describe('BotCard management actions', () => {
   });
 });
 
+describe('BotCard runtime labels', () => {
+  test('服务 Bot 展示发布版本', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-version-card',
+      card_id: 'service-version-card:3',
+      bot_name: '版本 Bot',
+      kind: 'service',
+      publication_version: 3,
+      display_state: 'service_online',
+    }).item;
+
+    render(<BotCard bot={bot} onView={noop} />);
+
+    expect(screen.getByText('V3')).toBeInTheDocument();
+  });
+
+  test('创建失败展示准确状态', () => {
+    const bot = mapBotDto({
+      bot_id: 'failed-card',
+      bot_name: '失败 Bot',
+      display_state: 'failed',
+      status: 'FAILED',
+      disabled_actions: { restart: 'bot provisioning failed' },
+    }).item;
+
+    render(<BotCard bot={bot} onView={noop} />);
+
+    expect(screen.getByText('创建失败')).toBeInTheDocument();
+  });
+
+  test('Coding Bot 展示模板名称而不是 claude_code', () => {
+    const bot = mapBotDto({
+      bot_id: 'architect-card',
+      bot_name: '架构 Bot 实例',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: { template_config: { template_name: '架构 Bot' } },
+      status: 'ACTIVE',
+    }).item;
+
+    render(<BotCard bot={bot} onView={noop} />);
+
+    expect(screen.getByText('架构 Bot')).toBeInTheDocument();
+    expect(screen.queryByText('claude_code')).not.toBeInTheDocument();
+  });
+
+  test('历史个人 Coding Bot 缺少模板名称时展示个人 Coding Bot', () => {
+    const bot = mapBotDto({
+      bot_id: 'personal-coding-card',
+      bot_name: '个人 Coding Bot 实例',
+      engine: 'claude_code',
+      template_type: 'personalCoding',
+      status: 'ACTIVE',
+    }).item;
+
+    render(<BotCard bot={bot} onView={noop} />);
+
+    expect(screen.getByText('个人 Coding Bot')).toBeInTheDocument();
+    expect(screen.queryByText('claude_code')).not.toBeInTheDocument();
+  });
+
+  test('普通 Claude Code 仍展示引擎标签', () => {
+    const bot = mapBotDto({
+      bot_id: 'normal-card',
+      bot_name: '普通 CC',
+      engine: 'claude_code',
+      template_type: 'normalCC',
+      status: 'ACTIVE',
+    }).item;
+
+    render(<BotCard bot={bot} onView={noop} />);
+
+    expect(screen.getByText('claude_code')).toBeInTheDocument();
+  });
+});
+
 describe('Agent Coding Bot card actions', () => {
+  test('Coding Bot 即使没有 chat action 也固定展示去使用', () => {
+    const bot = mapBotDto({
+      bot_id: 'general-service-draft-without-chat',
+      bot_name: 'GeneralCC 草稿 Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_draft',
+      actions: ['restart', 'delete'],
+    }).item;
+    const onConversation = jest.fn();
+
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onConversation={onConversation}
+        onAction={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '去使用' }));
+    expect(onConversation).toHaveBeenCalledWith(bot);
+  });
+
+  test('generalCC 服务 Bot 草稿态展示发布与阶段推进', () => {
+    const bot = mapBotDto({
+      bot_id: 'general-service-draft',
+      bot_name: 'GeneralCC 服务 Bot',
+      engine: 'claude_code',
+      template_type: 'generalCC',
+      bot_type: 'service',
+      kind: 'service',
+      display_state: 'service_draft',
+      actions: ['chat', 'restart', 'delete'],
+    }).item;
+
+    render(
+      <BotCard
+        bot={bot}
+        onView={noop}
+        onConversation={noop}
+        onAction={jest.fn().mockResolvedValue(undefined)}
+        onManagePublication={noop}
+        inventoryActions={{ chat: { action: 'chat', visible: true, enabled: true } }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
+    expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
+  });
+
   test('只展示去使用，管理菜单仅保留指定操作', () => {
     const bot = mapBotDto({
       bot_id: 'agent-template',
       bot_name: 'Agent Coding 模版 Bot',
       active_engine: 'claude_code',
       template_type: 'myTemplate',
+      engine_properties: { template_config: { capabilities: { upgrade_service_bot: true } } },
       bot_type: 'personal',
       display_state: 'running',
       actions: ['chat', 'view', 'edit', 'restart', 'engine_restart', 'delete'],

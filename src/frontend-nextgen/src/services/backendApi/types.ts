@@ -77,6 +77,33 @@ export function isEnvelopeFailure(data: unknown): boolean {
   return !isEnvelopeSuccess(data);
 }
 
+/**
+ * 业务 code 是否落在「未登录」段(双方言并集):python 6 位 `floor(code/1000) === 401`(401000–401999),
+ * BCS 5 位 `floor(code/100) === 401`(40100–40199)。两段无交集,任一 code 至多命中一段(同 envelope.test.ts 矩阵)。
+ */
+function isUnauthenticatedBusinessCode(code: string | number | undefined): boolean {
+  if (code === undefined || code === null) return false;
+  const numeric = typeof code === 'number' ? code : Number(code);
+  if (!Number.isFinite(numeric)) return false;
+  return Math.floor(numeric / 1000) === 401 || Math.floor(numeric / 100) === 401;
+}
+
+/**
+ * 信封体「未登录」判定(不依赖 HTTP status,双方言并集):
+ * - BCS 显式形态:`data.error_code === 'unauthenticated'`(401 反应口既有契约,见 add-external-oauth-login 8.9);
+ * - 网关误包形态:HTTP 2xx 但 `code` 落未登录段(实测 40100/401000,见 authApiController 勘探注释)。
+ *
+ * 与 `isEnvelopeFailure` 的对象语义一致:非对象不算,成功信封(2xx 段)不算。供两条请求通道
+ * (通道 B `backendRequest`、通道 A `requestConfig`)统一收口为「登录处置 + 静默上抛」,不投递逐条错误 toast。
+ */
+export function isEnvelopeUnauthenticated(data: unknown): boolean {
+  if (typeof data !== 'object' || data === null) return false;
+  if (isEnvelopeSuccess(data)) return false;
+  const env = data as BackendApiEnvelope<unknown> & { data?: { error_code?: unknown } };
+  if (env.data?.error_code === 'unauthenticated') return true;
+  return isUnauthenticatedBusinessCode(env.code);
+}
+
 export interface BackendApiPage<T> {
   items?: T[];
   total?: number;

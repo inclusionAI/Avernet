@@ -14,19 +14,20 @@ from typing import Any
 
 # ===== 枚举 =====
 class Status(StrEnum):
-    """任务/节点执行状态(7 态,含 PLANNING/CANCELLED)。"""
+    """任务/节点生命周期状态(8 态, DONE 表示执行完成未通过验收, SUCCESS 表示执行完成且验收通过)。"""
 
     PENDING = "PENDING"      # 待处理
     PLANNING = "PLANNING"    # 规划中(被分解委托子执行,显式委托态)
     RUNNING = "RUNNING"      # 运行中
-    DONE = "DONE"            # 已成功完成
-    FAILED = "FAILED"        # 执行失败(验收未通过,带 gaps)
+    DONE = "DONE"            # 执行完成,但尚未通过验收
+    SUCCESS = "SUCCESS"      # 执行完成且已通过验收
+    FAILED = "FAILED"        # 执行或验收失败(带 gaps)
     HUNG = "HUNG"            # 已挂起/暂停(仅 stuck:迭代达上限执行不下去,需人介入)
     CANCELLED = "CANCELLED"  # 已取消
 
 
 class AcceptanceVerdict(StrEnum):
-    """验收结论。``status`` 与 ``verdict`` 统一用 ``DONE``/``FAILED``。"""
+    """验收结论。``verdict`` 使用 ``DONE``(通过) / ``FAILED``(未通过);节点 ``status`` 则分别为 ``SUCCESS`` / ``DONE``。"""
 
     DONE = "DONE"
     FAILED = "FAILED"
@@ -184,7 +185,7 @@ class RuntimeInfo:
 
     run_mode: str | None = None              # "single_bot"/"coop_group"/"bbs";无 collab_mode
     assignee: str | None = None              # 执行者(bot_id / group_id)
-    start_time: int | None = None         # 进 RUNNING 时写(毫秒,int(time.time()*1000))
+    start_time: int | None = None         # 任务/节点开始时间(根在 init_graph;叶子 task_dispatch/BBS claim 时写)
     end_time: int | None = None           # 进终态时写(毫秒,int(time.time()*1000))
     output: dict[str, Any] = field(default_factory=dict)
     acceptance_result: AcceptanceResult | None = None
@@ -200,6 +201,22 @@ class Relation:
     dst_id: str                   # 结构子(分解产物/依赖方)
     type: RelationType = RelationType.DEPENDENCY
     extend_props: dict[str, Any] = field(default_factory=dict)
+
+
+def effective_run_mode(node: TaskNode) -> str | None:
+    """Return the authoritative execution mode for a task node.
+
+    ``actual_run_mode`` is an execution/session-permission override introduced
+    by the task runtime. Empty or missing values preserve legacy ``run_mode``.
+    """
+    runtime = getattr(node, "run_info", None)
+    if runtime is None:
+        return None
+    actual = runtime.extend_props.get("actual_run_mode")
+    if actual is not None and str(actual).strip():
+        return str(actual).strip()
+    mode = runtime.run_mode
+    return str(mode).strip() if mode is not None and str(mode).strip() else None
 
 
 @dataclass
@@ -264,8 +281,7 @@ class TaskNodePatch:
     """节点级原子写(``update_task_node_info`` 入参)。
 
     终态翻转三选一(互斥):　
-    ① ``acceptance_result`` 非空 → 验收驱动(RUNNING→DONE/[折叠]HUNG):PASS→DONE / FAIL→HUNG(动态折叠,
-       gaps 可空,verdict=FAILED 即统一收口);　
+    ① ``acceptance_result`` 非空 → 验收驱动:PASS→SUCCESS / FAIL→DONE(验收未通过仅记录结论,gaps 可空);　
     ② ``exec_error`` 非空 → 执行报错(bot 压根没跑通:run FAILED / SLA 超时 / poll 耗尽),
        不翻终态,由编排核 on_harness 复位重投(计数,达上限→HUNG);　
     ③ ``status`` 非空(无前两者)→ 框架直驱(PENDING→RUNNING 派发 / RUNNING→PENDING harness 复位 等)。　
@@ -277,8 +293,9 @@ class TaskNodePatch:
     status: Status | None = None
     run_mode: str | None = None
     assignee: str | None = None
+    start_time: int | None = None                    # 节点进入 task_dispatch/BBS claim 的时间
     output_patch: dict[str, Any] | None = None               # fold 到 run_info.output
-    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→FAILED)
+    acceptance_result: AcceptanceResult | None = None        # 验收驱动终态翻转(PASS→DONE/FAIL+gaps→DONE)
     exec_error: str | None = None                            # 执行报错信号(非验收;→ on_harness 重投,)
     extend_props_patch: dict[str, Any] | None = None         # miss_events / hung_reason(stuck) / harness_retries / 崩溃栈
 

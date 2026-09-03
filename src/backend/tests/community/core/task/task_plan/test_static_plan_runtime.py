@@ -66,7 +66,7 @@ def test_runtime_join_is_not_ready_until_both_predecessors_done():
 
     first = runtime.ready(graph)
     for node in first.ready:
-        node.status = Status.DONE
+        node.status = Status.SUCCESS
         if node.node_id == "risk":
             node.run_info.output["risk_result"] = "risk"
         else:

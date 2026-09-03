@@ -331,7 +331,7 @@ class TestTaskExecute:
         assert "运行静态模板" not in spec["metadata"]["instruction"]
         assert spec["metadata"]["title"] != "okr-implementation"
         assert spec["goal"]["objective"] != "okr-implementation"
-        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation-relay"
         assert record.execution_config["static_plan_yaml"]
         assert record.execution_config["task_type"] == "dynamic"
 
@@ -348,6 +348,34 @@ class TestTaskExecute:
         assert isinstance(body["data"]["task_id"], str) and body["data"]["task_id"]
         assert body["data"]["success"] is True
 
+    def test_execute_routes_merchant_operations_template_by_business_content(self, client):
+        # 商家经营语义通过 execute 内容路由命中新模板，并在持久化 execution_config 中 materialize。
+        c, inj = client
+        r = c.post(
+            "/openapi/v1/collaboration/tasks/execute",
+            json={
+                "task_spec": {
+                    "metadata": {
+                        "title": "门店经营目标",
+                        "instruction": "制定店庆经营方案和执行计划",
+                    },
+                    "context": {"background": "护理门店周年庆", "extend_props": {}},
+                    "goal": {"objective": "提升到店复购", "acceptances": []},
+                },
+                "source_type": "api",
+                "owner_user_id": "owner_user",
+                "owner_bot_id": "owner_bot",
+                "execution_config": {"task_type": "dynamic"},
+            },
+        )
+        assert r.status_code == 200, r.text
+        task_id = r.json()["data"]["task_id"]
+        record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
+        assert record is not None
+        assert record.execution_config["static_plan_id"] == "merchant-operations-goal-to-plan"
+        assert record.execution_config["static_plan_yaml"]
+        assert record.execution_config["template_input"]["okr"] == "提升到店复购"
+
     def test_execute_static_plan_fills_template_input_from_task_spec_when_absent(self, client):
         # 内容路由命中预置模板但调用方未传 template_input(模拟 bot 动态调用):materialize 应按模板必填 input
         # 用 task_spec objective 兜底补齐,返 200 而非 409(missing static plan input)。
@@ -361,7 +389,7 @@ class TestTaskExecute:
         record = inj.get(TaskInfoRepositoryProtocol).get(task_id)
         assert record is not None
         # 模板必填 input okr 被用调用方目标镜像兜底补进,并落到预置模板 plan
-        assert record.execution_config["static_plan_id"] == "okr-implementation"
+        assert record.execution_config["static_plan_id"] == "okr-implementation-relay"
         assert record.execution_config["template_input"]["okr"] == (
             "制定2026年度大促OKR完成策略,实现平稳过多平台年度大促并取得用户和收益双增长"
         )
@@ -575,7 +603,7 @@ class TestTaskCallbackReport:
         # 断言翻态
         g = graph_svc.query_task_dashboard("t_http")
         n = next(n for n in g.tasks if n.node_id == "N_http")
-        assert n.status == Status.DONE, f"回投未翻 DONE: {n.status}"
+        assert n.status == Status.SUCCESS, f"回投未翻 SUCCESS: {n.status}"
         # dashboard DTO 透传 relations 分解树:http 边界 graph_to_dto 不再丢 relations(回归 guard)
         d = c.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": "t_http"})
         assert d.status_code == 200, d.text

@@ -10,16 +10,16 @@ import asyncio
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupRequest, BcsHttpAdapter,
 )
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider, LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.singlebox_bcs_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_bcs_adapter import (
     SingleboxBcsAdapter,
 )
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxEngineAdapter,
 )
 from agentclaw.community.di.modules.task_module import TaskModule

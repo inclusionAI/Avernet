@@ -26,7 +26,7 @@ from agentclaw.community.api.system_config_service import SystemConfigServicePro
 from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
     SEARCH_SKILL,
-    SINGLE_BOT_SKILL_REPORT,
+    SKILL_REPORT,
     TaskClaimJoinGate,
     TaskClaimJoinGateProtocol,
     TaskSettingsService,
@@ -51,11 +51,11 @@ from agentclaw.community.core.task.task_center.recovery_lifecycle import (
 )
 from agentclaw.community.core.task.task_harness.harness import TaskHarness
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
     LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 from agentclaw.community.core.task.task_runner.callback_correlation import (
@@ -63,7 +63,7 @@ from agentclaw.community.core.task.task_runner.callback_correlation import (
     InMemoryCallbackCorrelationRegistry,
 )
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     BcsClientPort,
     OpenApiBotPort,
 )
@@ -220,7 +220,7 @@ class TaskModule(Module):
             bcn = None
         bcs_identity = None
         if bcs is not None:
-            from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
+            from agentclaw.community.core.task.task_runner.client.bcs_bot_identity_resolver import (
                 BotServiceBcsBotIdentityResolver,
             )
 
@@ -302,7 +302,7 @@ class TaskModule(Module):
             _callback_fn = getattr(bcs, "task_callback_url", None)
             if callable(_callback_fn):
                 bcs_callback_url = str(_callback_fn() or "").strip()
-        from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+        from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
             BcsBotTokenProvider, NullBcsBotTokenProvider,
         )
         try:
@@ -390,7 +390,7 @@ class TaskModule(Module):
             config=config,
             defaults={
                 SEARCH_SKILL: task_dispatch.task_search_skill_enabled,
-                SINGLE_BOT_SKILL_REPORT: task_dispatch.single_bot_skill_report_enabled,
+                SKILL_REPORT: task_dispatch.skill_report_enabled,
             },
         )
 
@@ -477,13 +477,13 @@ class TaskModule(Module):
             != DeployProfile.SINGLEBOX.value
         ):
             return None, None
-        from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+        from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
             LocalBcsTokenProvider,
         )
-        from agentclaw.community.core.task.task_runner.integration.singlebox_bcs_adapter import (
+        from agentclaw.community.core.task.task_runner.client.singlebox_bcs_adapter import (
             SingleboxBcsAdapter,
         )
-        from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+        from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
             SingleboxEngineAdapter,
         )
 
@@ -496,7 +496,7 @@ class TaskModule(Module):
         # 供 e2e 跑协作群真链路而不依赖真 BCS 群聊时序(singlebox 无真群协作收敛保障):
         # 真实 form_group/session/poll 路径 + 确定终态回投 PASS(经 BcsSessionTranslator 解析 output 为 success json)。
         if os.environ.get("SINGLEBOX_BCS_DOUBLE", "").strip().lower() in {"1", "true"}:
-            from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import (
+            from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import (
                 _DoubleBcsClient,
             )
 
@@ -525,7 +525,7 @@ class TaskModule(Module):
         port once per token. BCSFuse remains available to the separate public
         Bot-discovery API, but is not a task dispatch dependency.
         """
-        from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+        from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
             SingleboxKeywordBotDiscover,
         )
 

@@ -97,8 +97,7 @@ export function AgentCodingSection({
     const localError = agentCodingTemplateService.validate(selected as AgentCodingTemplate, value.values);
     if (localError) return localError;
     if (value.kind === 'applicationCoding') {
-      const yuqueValid = await applicationFormRef.current?.validateYuqueKbRepos?.();
-      return yuqueValid === false ? '语雀知识库校验失败，请检查标红的条目' : undefined;
+      return (await applicationFormRef.current?.validate?.()) ?? undefined;
     }
     const result = await validateDynamicTemplateFieldBindingsDetailed(
       selected.fields as BotTemplateField[],

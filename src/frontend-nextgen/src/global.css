@@ -28,7 +28,7 @@
   --popover: 0 0% 100%;
   --popover-foreground: 240 10% 3.9%;
 
-  --primary: 221.7 100% 54.3%; /* D1: 反向锚定 BU 品牌蓝 #165dff */
+  --primary: 221.7 100% 54.3%; /* BU 品牌蓝 #165dff = rgb(22, 93, 255) */
   --primary-foreground: 0 0% 98%;
 
   --secondary: 240 4.8% 95.9%;
@@ -46,11 +46,11 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --info: 199 89% 48%;
-  --brand: 221.7 100% 54.3%; /* D1/B1: brand 与 primary 同锚 #165dff，单品牌蓝 */
+  --brand: 221.7 100% 54.3%; /* BU 品牌蓝 #165dff，与 --primary 保持一致 */
 
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
-  --ring: 221.7 100% 54.3%; /* D1: follow --primary 品牌蓝 */
+  --ring: 240 5.9% 10%; /* design-system-preview-v2: follow --primary */
 
   /* 圆角系统 §2.4 */
   --radius: 0.5rem;
@@ -61,30 +61,32 @@
   --radius-2xl: 1rem;
 
   /* 项目业务色变量（兼容 sprint 分支已有代码） */
-  --color-primary: #165dff;
-  --color-primary-hover: #0e4ee8;
-  --color-primary-active: #0a3fcc;
-  --color-primary-weak: #9dbdff;
-  --color-primary-soft: #edf4ff;
-  --color-success: #00a884;
-  --color-success-soft: #e9f8f4;
-  --color-warning: #c9960a;
-  --color-warning-soft: #fff7db;
-  --color-error: #d44030;
-  --color-error-soft: #fff0ed;
-  --color-info: #0974d0;
-  --color-bg: #f5f6fa;
-  --color-card: #fff;
-  --color-border: #e4e6ec;
-  --color-fg: #1a1c24;
-  --color-muted: #6b7085;
-  --color-panel-muted: #f7f8fb;
-  --color-panel-strong: #eef0f5;
+  --color-primary: hsl(var(--brand));
+  --color-primary-hover: color-mix(in srgb, hsl(var(--brand)) 90%, black);
+  --color-primary-active: color-mix(in srgb, hsl(var(--brand)) 80%, black);
+  --color-primary-weak: hsl(var(--brand) / 0.48);
+  --color-primary-soft: hsl(var(--brand) / 0.1);
+  --color-success: hsl(var(--success));
+  --color-success-soft: hsl(var(--success) / 0.1);
+  --color-warning: hsl(var(--warning));
+  --color-warning-soft: hsl(var(--warning) / 0.12);
+  --color-error: hsl(var(--destructive));
+  --color-error-soft: hsl(var(--destructive) / 0.1);
+  --color-info: hsl(var(--info));
+  --color-bg: hsl(var(--background));
+  --color-card: hsl(var(--card));
+  --color-border: hsl(var(--border));
+  --color-fg: hsl(var(--foreground));
+  --color-muted: hsl(var(--muted-foreground));
+  --color-panel-muted: hsl(var(--muted));
+  --color-panel-strong: hsl(var(--secondary));
+  --color-danger: hsl(var(--destructive));
+  --color-panel: hsl(var(--card));
 
   /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
-  --color-chat-bubble-bot: rgb(246, 249, 255);
+  --color-chat-bubble-bot: hsl(var(--brand) / 0.04);
   --shell-header-height: 56px;
-  --shell-sidebar-width: 220px;
+  --shell-sidebar-width: 240px;
 
   /* 浮层层级统一由组件 Token 管理，避免业务页面散落 z-index 魔法数。
      注意：Select/Popover 等锚定浮层会 Portal 到 body，若层级低于 Drawer/Dialog，
@@ -137,11 +139,11 @@
   /* 业务蓝（admin 品牌蓝 / Button primary）暗色覆盖：亮色态值无自动暗色适配，
      这里补暗色值，使 var(--color-primary) 系在暗色下对比度不掉。
      见 admin-polish-audit.md §1 决策 A1。 */
-  --color-primary: #4d7bff;
-  --color-primary-hover: #6f97ff;
-  --color-primary-active: #3a64d9;
-  --color-primary-weak: #8fb0ff;
-  --color-primary-soft: #161e3a;
+  --color-primary: hsl(var(--brand));
+  --color-primary-hover: color-mix(in srgb, hsl(var(--brand)) 90%, black);
+  --color-primary-active: color-mix(in srgb, hsl(var(--brand)) 80%, black);
+  --color-primary-weak: hsl(var(--brand) / 0.48);
+  --color-primary-soft: hsl(var(--brand) / 0.1);
 }
 
 /* ==========================================================================

@@ -203,13 +203,15 @@ describe('TaskProgressTab', () => {
       runMode: 'coop_group',
       groupId: 'group-1',
       sessionId: 'session-1',
+      assignee: 'group-1',
+      assigneeName: '虾摸鱼',
       executor: '虾摸鱼',
       groupName: '业务架构分析群',
     });
     const task = makeTask([node]);
 
     render(<TaskProgressTab task={task} onOpenGroupSession={onOpenGroupSession} />);
-    fireEvent.click(screen.getByRole('button', { name: '查看执行会话 业务架构分析群' }));
+    fireEvent.click(screen.getByRole('button', { name: '查看执行会话 虾摸鱼' }));
 
     expect(onOpenGroupSession).toHaveBeenCalledWith(node);
   });

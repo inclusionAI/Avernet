@@ -1,4 +1,4 @@
-import { Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import { Badge, Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
 import type { CollaborationBotView } from '@/services/workspace/collaborationCandidateService';
 import { cn } from '@/utils/cn';
 import { Check, Plus, Search, X } from 'lucide-react';
@@ -170,7 +170,8 @@ export function GroupParticipantPicker({
           >
             {visibleBots.map((bot) => {
               const selected = selectedIds.includes(bot.id);
-              const unavailable = bot.reachability === 'unreachable' || !bot.online;
+              const unknown = bot.detailsResolved === false;
+              const unavailable = unknown || bot.reachability === 'unreachable' || !bot.online;
               const isOriginator = prependBot && bot.id === prependBot.id;
               return (
                 <Button
@@ -182,13 +183,16 @@ export function GroupParticipantPicker({
                   aria-pressed={selected}
                   className={cn(
                     'h-auto min-w-0 w-full max-w-full justify-start gap-2 rounded-none border-0 px-3 py-2 text-left',
-                    cardMode
+                    unknown
+                      ? 'cursor-not-allowed bg-muted/50 text-muted-foreground'
+                      : cardMode
                       ? selected
                         ? 'rounded-lg border border-primary bg-primary/10 hover:bg-primary/10'
                         : 'rounded-lg border border-border bg-card hover:border-primary/30 hover:bg-primary/10'
                       : selected
                       ? 'bg-primary/10 hover:bg-primary/10'
                       : 'hover:bg-muted/50',
+                    unknown && cardMode && 'rounded-lg border border-border',
                   )}
                   onClick={() => onToggle(bot.id)}
                 >
@@ -203,17 +207,10 @@ export function GroupParticipantPicker({
                           发起方
                         </span>
                       )}
-                      <span
-                        className={cn(
-                          'flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px]',
-                          bot.reachability === 'unreachable' || !bot.online
-                            ? 'bg-muted text-muted-foreground'
-                            : 'bg-primary/10 text-primary',
-                        )}
-                      >
+                      <Badge tone={unavailable ? 'neutral' : 'primary'} className="flex shrink-0 items-center gap-1">
                         <i className={cn('h-1.5 w-1.5 rounded-full', bot.online ? 'bg-success' : 'bg-muted')} />
-                        {bot.online ? '在线' : '隐身'}
-                      </span>
+                        {unknown ? '未知' : bot.online ? '在线' : '隐身'}
+                      </Badge>
                     </span>
                     {bot.summary && (
                       <span className="mt-1 block truncate text-xs text-muted-foreground">{bot.summary}</span>
