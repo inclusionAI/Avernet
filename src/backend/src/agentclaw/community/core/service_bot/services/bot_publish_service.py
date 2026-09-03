@@ -1,7 +1,7 @@
 """Bot Publish Service - Bot发布服务业务逻辑层。"""
 import copy
 import threading
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, Mapping, Optional, TYPE_CHECKING
 
 from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
@@ -35,6 +35,7 @@ from agentclaw.community.core.service_bot.services.arca_image_pin import (
 )
 from agentclaw.community.core.task_queue.services.task_queue_service import TaskQueueService
 from agentclaw.community.core.service_bot.types import PublishStage
+from agentclaw.community.core.workspace.runtime_identity import uses_aicoding_runtime
 from agentclaw.community.utils.avernet_tenant import bind_current_avernet_tenant
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
@@ -1334,9 +1335,18 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"Bot is already a service bot: bot_id={bot_id}"
             )
 
-        # 4. 检查是否为 aicoding 类型（不支持升级）
+        # 4. 检查是否为 aicoding 类型（不支持升级）。aicoding 是 claude_code 的
+        #    内部 runtime form（engine/form 词汇分裂），两半拼写都要拦：
+        #    legacy 字面 ``active_engine='aicoding'`` 与 ``claude_code`` +
+        #    coding 模板（uses_aicoding_runtime 三臂判定），否则 post-split 的
+        #    coding bot 会被放走升级、按 coding 容器做 service 化重启。
         active_engine = bot.get("active_engine", "")
-        if active_engine == "aicoding":
+        template_config = bot.get("template_config")
+        if uses_aicoding_runtime(
+            active_engine=active_engine,
+            template_type=bot.get("template_type"),
+            template_config=template_config if isinstance(template_config, Mapping) else None,
+        ):
             raise BotTypeNotSupportedError(
                 f"aicoding type bot cannot be upgraded to service: bot_id={bot_id}"
             )
