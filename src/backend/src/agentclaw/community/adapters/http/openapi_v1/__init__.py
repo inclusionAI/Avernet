@@ -575,7 +575,7 @@ def build_public_router() -> APIRouter:
         public.include_router(
             router,
             responses=USER_SCOPED_ERROR_RESPONSES,
-            dependencies=_PUBLIC_AUTH,
+            dependencies=_PUBLIC_AUTH + _GRANT_CHECKED_ADDRESSED_BOT,
         )
     # The addresses this surface used to have. Each legacy group is mounted the
     # way its replacement is, because the mount decides half of what a caller

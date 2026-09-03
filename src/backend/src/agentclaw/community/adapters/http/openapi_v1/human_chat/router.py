@@ -13,7 +13,7 @@ import asyncio
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Path, Request
 
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -40,13 +40,11 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schema
     _require_within_depth,
     _window,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import OwnerIdDep
 from agentclaw.community.adapters.http.openapi_v1.human_chat.schemas import (
     HumanChatConnection,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import (
-    UserIdDep,
-    refuse_app_only_caller,
-)
+from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
     deleted,
@@ -75,30 +73,12 @@ router = APIRouter(
     prefix="/openapi/v1/bots/{bot_id}/human-chat",
     tags=["human-chat"],
     route_class=PublicAPIRoute,
-    dependencies=[Depends(refuse_app_only_caller)],
 )
 
 SessionIdPath = Annotated[
     str,
     Path(description="Opaque session_id returned by this human-chat API."),
 ]
-
-
-async def _resolve_owner_id(
-    user_id: UserIdDep,
-    owner_id: Annotated[
-        str | None,
-        Query(
-            min_length=1,
-            description="Owner of the friend Bot. Defaults to the authenticated user.",
-        ),
-    ] = None,
-) -> str:
-    """Resolve an owner without applying the collaborator grant dependency."""
-    return owner_id if owner_id is not None else user_id
-
-
-HumanChatOwnerIdDep = Annotated[str, Depends(_resolve_owner_id)]
 
 
 def _identity_headers(request: Request) -> dict[str, str]:
@@ -175,7 +155,7 @@ async def list_sessions(
     bot_id: BotIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -207,7 +187,7 @@ async def create_session(
     bot_id: BotIdPath,
     body: SessionCreate,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -248,7 +228,7 @@ async def list_favorites(
     bot_id: BotIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -281,7 +261,7 @@ async def get_session(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -306,7 +286,7 @@ async def update_session(
     session_id: SessionIdPath,
     body: SessionUpdate,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -333,7 +313,7 @@ async def delete_session(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -357,7 +337,7 @@ async def get_connection(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -413,7 +393,7 @@ async def add_favorite(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -442,7 +422,7 @@ async def remove_favorite(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -470,7 +450,7 @@ async def list_messages(
     session_id: SessionIdPath,
     page: PageParamsDep,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
@@ -504,7 +484,7 @@ async def clear_messages(
     bot_id: BotIdPath,
     session_id: SessionIdPath,
     user_id: UserIdDep,
-    owner_id: HumanChatOwnerIdDep,
+    owner_id: OwnerIdDep,
     request: Request,
     friendships: HumanBotFriendshipServiceProtocol = Injected(
         HumanBotFriendshipServiceProtocol
