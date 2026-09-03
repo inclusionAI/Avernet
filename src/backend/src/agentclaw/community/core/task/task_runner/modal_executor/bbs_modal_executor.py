@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 _BBS_SKILL_NAME = "bbs-relay-single-task"
 _BID_TIMEOUT = 170.0
-_OVERALL_TIMEOUT = 300.0
+_OVERALL_TIMEOUT = 600.0
 _ROSTER_TIMEOUT = 60.0
 _ROSTER_MAX_RETRIES = 3
 _ROSTER_RETRY_DELAY = 1.0

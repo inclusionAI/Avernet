@@ -37,7 +37,7 @@
 import asyncio
 import json
 from unittest.mock import MagicMock, AsyncMock, patch
-from community.core.task.task_runner.modal_executor.bbs_runner import notify
+from community.core.task.task_runner.modal_executor.bbs_modal_executor import notify
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BotTaskModeRoster
 
 
@@ -127,7 +127,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agentclaw...bbs_runne
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_runner.py
+# src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_modal_executor.py
 """BBS 主动触发:bid→select→claim→dispatch。
 升 BBS 可恢复态后,向 dream-mode roster 广播评估消息;从回复中选 completion_rate 最高的 bot;
 引擎服务端 claim_bbs_owner;发任务消息给胜出 bot(best-effort,不抛)。"""
@@ -331,7 +331,7 @@ Expected: PASS (5 passed)
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_runner.py \
+git add src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_modal_executor.py \
   src/backend/tests/community/core/task/task_runner/integration/test_bbs_runner.py
 git commit -m "feat(bbs-runner): bid→select→claim→dispatch module for BBS active trigger"
 ```
@@ -390,7 +390,7 @@ In `task_executor.py`:
 ```python
 async def run_bbs(self, execution_graph) -> None:
     """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。"""
-    from community.core.task.task_runner.modal_executor import bbs_runner
+    from community.core.task.task_runner.modal_executor import bbs_modal_executor
     await bbs_runner.notify(
         execution_graph,
         bcs=self._bcs, bot=self._bot,
