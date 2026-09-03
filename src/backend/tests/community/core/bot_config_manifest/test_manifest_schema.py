@@ -165,22 +165,22 @@ manifest:
     assert ("manifest.identity[0].from", "undeclared_source") in _reject(document)
 
 
-def test_a_named_source_reference_is_refused_while_nothing_resolves_one():
-    document = """schema_version: 1
+def test_named_and_git_sources_are_accepted_for_the_w7_categories():
+    """The flip this fix delivers: a ``from`` reference and an inline git
+    source validate for the categories whose entries consume them (skills
+    and identity) — the admission gate was the one thing the W7 delivery
+    left closed, leaving the whole delivered runtime unreachable."""
+    _accept("""schema_version: 1
 sources:
   content:
-    url: https://cdn.example.com/content/
+    git: https://code.example.com/team/content.git
+    ref: v1.2.0
 manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: soul.md
-"""
-    assert ("manifest.identity[0].from", "unsupported_source") in _reject(document)
-
-
-def test_a_git_source_is_refused_while_nothing_resolves_one():
-    document = """schema_version: 1
+""")
+    _accept("""schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
@@ -188,8 +188,35 @@ manifest:
         git: https://code.example.com/team/content.git
         ref: v1.2.0
         subpath: soul.md
+""")
+
+
+def test_named_and_git_sources_are_refused_for_resources_entries():
+    """The v1 (category, form) narrowing, at PUT: the resources materialiser
+    is still on the URL road W6 shipped, so a resources entry naming a named
+    or git source is refused with a reason that names the category — never
+    a runtime accident the follow-up would have met as a misleading error."""
+    document = """schema_version: 1
+sources:
+  content:
+    git: https://code.example.com/team/content.git
+    ref: v1.2.0
+manifest:
+  resources:
+    - path: assets/logo.png
+      from: content
 """
-    assert ("manifest.identity[0].source", "unsupported_source") in _reject(document)
+    assert ("manifest.resources[0]", "unsupported_source") in _reject(document)
+
+    inline = """schema_version: 1
+manifest:
+  resources:
+    - path: assets/logo.png
+      source:
+        git: https://code.example.com/team/content.git
+        ref: v1.2.0
+"""
+    assert ("manifest.resources[0]", "unsupported_source") in _reject(inline)
 
 
 def test_a_declared_but_unreferenced_source_is_a_warning_not_a_refusal():
@@ -838,3 +865,37 @@ manifest:
       source: "{boundary}"
 """
     )
+
+
+def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
+    """The PUT-time predicate, pure, exposed for the apply-time belt.
+
+    The resources materialiser re-asks this rule at apply time (a stored
+    document can predate the validator); sharing one function is what
+    keeps the belt from being a weaker copy of the schema's rule.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema._support import (
+        relative_path_refusal,
+    )
+
+    refused = [
+        ("/etc/passwd", "absolute_path"),
+        ("~/.ssh/id", "absolute_path"),
+        ("C:evil.md", "absolute_path"),
+        ("../../etc/passwd", "path_traversal"),
+        ("data/../../etc", "path_traversal"),
+        ("a\\b.md", "invalid_path"),
+        ("a b.md", "invalid_path"),
+        ("", "invalid_path"),
+    ]
+    for value, code in refused:
+        refusal = relative_path_refusal(value)
+        assert refusal is not None, value
+        assert refusal[0] == code, (value, refusal)
+        assert refusal[1]
+    # A non-string is the belt's own business (declared by the index) — the
+    # predicate refuses it as invalid rather than assuming str.
+    assert relative_path_refusal(123)[0] == "invalid_path"
+    # The legitimate shapes, including the per-segment '..' reading.
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+        assert relative_path_refusal(value) is None, value

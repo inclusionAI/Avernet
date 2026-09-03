@@ -80,6 +80,20 @@ FETCH_TIMEOUT_S = 60.0
 #: cap is both a robustness and a safety bound.
 MAX_REDIRECTS = 5
 
+#: W7 — a git checkout's budget. The wire cap above counts bytes in flight;
+#: a small pack can bloom into a giant tree on disk, so git content gets its
+#: own post-unpack caps, aligned with the archive vocabulary rather than a
+#: second dialect of numbers that drifts. Enforced by ``fetch/git_source.py``
+#: while the checkout is read, refused before any byte reaches the entry.
+GIT_CHECKOUT_UNPACKED_LIMIT = FETCH_ENTRY_LIMITS["resources_unpacked"]
+GIT_CHECKOUT_MEMBER_LIMIT = ARCHIVE_MEMBER_LIMIT
+GIT_SINGLE_FILE_LIMIT = FETCH_ENTRY_LIMITS["skills"]
+
+#: A git fetch is one network operation with disk work after it, so it gets
+#: more than a single HTTP hop's ``FETCH_TIMEOUT_S`` but stays inside the
+#: apply-level ``APPLY_BUDGET_S`` ledger that is charged around it.
+GIT_FETCH_TIMEOUT_S = 120.0
+
 #: Schemes accepted without a deployment exception (W2 验收: 仅 https)。
 SAFE_SCHEMES = frozenset({"https"})
 

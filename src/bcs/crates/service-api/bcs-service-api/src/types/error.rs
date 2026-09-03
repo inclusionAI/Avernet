@@ -16,6 +16,10 @@ pub enum ServiceError {
     #[error("Bot '{0}' is not connected")]
     BotNotConnected(String),
 
+    /// The connected Bot runtime does not implement a requested Plugin API method.
+    #[error("Bot '{bot_id}' does not support method '{method}'")]
+    BotMethodUnsupported { bot_id: String, method: String },
+
     /// Bot is hidden and not accepting communication.
     #[error("Bot '{0}' is not collaborative")]
     BotHidden(String),
@@ -163,6 +167,9 @@ impl ServiceError {
             | Self::BotNotConnected(id)
             | Self::BotHidden(id) => {
                 serde_json::json!({ "bot_id": id })
+            }
+            Self::BotMethodUnsupported { bot_id, method } => {
+                serde_json::json!({ "bot_id": bot_id, "method": method })
             }
             Self::GroupNotFound(id) => serde_json::json!({ "group_id": id }),
             Self::ProposalNotFound(id) => serde_json::json!({ "proposal_id": id }),

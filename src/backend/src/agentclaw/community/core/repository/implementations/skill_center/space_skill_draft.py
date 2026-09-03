@@ -16,6 +16,7 @@ from agentclaw.community.core.models.space_skill import (
     SkillGrant,
     SkillSpaceBinding,
     SkillPublicationAttempt,
+    SkillPublicationAttemptStatus,
     SkillVersion,
 )
 from agentclaw.community.core.repository.protocols.skill_center import (
@@ -38,6 +39,7 @@ from agentclaw.community.core.skill_center.errors import (
     DraftRevisionConflictError,
     SpaceSkillIdempotencyConflictError,
     SpaceSkillGrantForbiddenError,
+    SkillOfflineError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.core.work_orders.repository.models import WorkOrderModel
@@ -170,6 +172,7 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 "name": row[0].name,
                 "space_type": row[1].space_type,
                 "sc_team_id": row[1].sc_team_id,
+                "offline_at": row[0].offline_at,
             }
 
     def get_upgrade_by_request_id(
@@ -279,6 +282,8 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
         )
         if grant is None:
             raise SpaceSkillGrantForbiddenError("owner or manager required")
+        if skill.offline_at is not None:
+            raise SkillOfflineError("offline Skill cannot create an upgrade Draft")
         request = (
             session.query(SkillDraftUpgradeRequest)
             .filter(
@@ -520,6 +525,7 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
             )
             if grant is None:
                 raise SpaceSkillGrantForbiddenError("owner or manager required")
+            lease: SkillDraftEditLease | None = None
             if space_type == "TEAM":
                 lease = (
                     session.query(SkillDraftEditLease)
@@ -540,21 +546,25 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                     )
                 if lease.fencing_token != fencing_token:
                     raise DraftEditLeaseTokenRejectedError("stale fencing token")
+            publication_attempts = (
+                session.query(SkillPublicationAttempt)
+                .filter(
+                    SkillPublicationAttempt.skill_id == skill_id,
+                    SkillPublicationAttempt.env == env,
+                )
+                .all()
+            )
             external = (
                 any(
+                    attempt.status != SkillPublicationAttemptStatus.FAILED
+                    for attempt in publication_attempts
+                )
+                or any(
                     session.query(model)
-                    .filter(
-                        getattr(model, "skill_id", None) == skill_id,
-                        model.env == env,
-                    )
+                    .filter(model.skill_id == skill_id, model.env == env)
                     .first()
                     is not None
-                    for model in (
-                        SkillVersion,
-                        SkillPublicationAttempt,
-                        SkillSetSkill,
-                        BotSkillInstallation,
-                    )
+                    for model in (SkillVersion, SkillSetSkill, BotSkillInstallation)
                 )
                 or session.query(WorkOrderModel.id)
                 .filter(
@@ -579,8 +589,14 @@ class SpaceSkillDraftRepository(SpaceSkillDraftRepositoryProtocol):
                 skill.draft_status = None
                 skill.draft_description = None
                 skill.draft_source_kind = None
+                if space_type == "TEAM":
+                    assert lease is not None
+                    lease.holder_user_id = None
+                    lease.fencing_token += 1
                 scope = "DRAFT"
             else:
+                for attempt in publication_attempts:
+                    session.delete(attempt)
                 session.query(SkillDraftEditLease).filter_by(
                     skill_id=skill_id, env=env
                 ).delete(synchronize_session=False)

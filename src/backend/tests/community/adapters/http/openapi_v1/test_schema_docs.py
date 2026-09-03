@@ -16,17 +16,14 @@ published.
 
 from __future__ import annotations
 
-from fastapi import FastAPI
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 _METHODS = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
 
 
 def _document() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _operations(document: dict):

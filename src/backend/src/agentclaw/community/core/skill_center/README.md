@@ -99,6 +99,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
+  - "StaffDeptPlugin"
   - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
@@ -113,7 +114,6 @@ consumes:
   - "SkillVersionRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
   - "SpaceSkillPublicationRepositoryProtocol"
-  - "SkillVersionScannerProtocol"
   - "HttpClient"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
@@ -176,6 +176,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.plugin_api.space_skill_source
+  - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
@@ -200,8 +201,12 @@ write intent and integrity manifest live under the derived sibling
 Those objects protect immutable writes and validate completeness; they are not
 a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by
 `SkillVersionMaterializer` after exact download/hash, strict package validation,
-Scanner metadata, MCP dependency and Store verification all succeed, expresses
-domain readiness. Publication and SC Reference producers consume the public
+scope-owned metadata, MCP dependency and Store verification all succeed, expresses
+domain readiness. SC Public and Team/Space exact downloads trust the MCP facts
+already established by SkillCenter publication: both consume upstream
+`mcpServices` and skip a second remote Scanner pass. Local/Repo scan flows remain
+owned by their existing services and are not changed by this trust boundary.
+Publication and SC Reference producers consume the public
 Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
 
@@ -284,8 +289,10 @@ that way:
   transaction; nothing else re-derives those decisions.
 
 Writes go through two command services, one per scope, with identical shape —
-authorize, mutate desired state in one UoW transaction, project the runtime
-halves declared by `ProjectionScope`, compensate on failure:
+authorize, mutate desired state in one UoW transaction, then best-effort
+project the runtime halves declared by `ProjectionScope`. A committed Desired
+State is never reverted merely because Runtime observation is unavailable or
+degraded; the command returns a structured `runtime_projection` result instead:
 `SkillSetManagementService` for Set-scoped
 mutations (Default-Set edits become per-Bot exclusion rows) and
 `DirectActivationService` for Set-free single-capability activation, Skills
@@ -319,7 +326,7 @@ flush it runs, so a Bot converged this way still needs a runtime projection
 before its engine sees the change.
 
 MCP Direct activation and ordinary SkillSet MCP membership share the same
-active-only desired-state and compensation boundary as Skills.  The MCP
+active-only desired-state and best-effort projection boundary as Skills. The MCP
 catalogue, user configuration, and permission grant remain separate facts;
 the control plane consults the MCP authorization Service API before any MCP
 membership or Direct-installation write.
@@ -327,9 +334,8 @@ membership or Direct-installation write.
 Engine/template Default MCPs never become Installation provenance: Direct
 commands reject them, while exclusion removes any legacy Direct row left by an
 older process so the installed union cannot bypass policy. Runtime projection
-resolves template Default MCP context strictly; a provider failure aborts the
-projection and enters command compensation rather than becoming an empty
-Default policy.
+resolves template Default MCP context strictly; a provider failure produces a
+pending Runtime observation rather than becoming an empty Default policy.
 
 `RuntimeProjectionResolver` is the only source of Projector snapshots.
 `resolve_skills` produces the complete Local/Repo/Center Skill half for a
@@ -341,13 +347,15 @@ existing ConfigComposer still rebuilds its persisted MCP artifact at delivery;
 CLI authorization remains an overwrite-style Passport projection.
 
 Direct activation and canonical SkillSet mutations commit desired state in the
-repository transaction and then reconcile the declared runtime projection.
+repository transaction and then project the declared runtime projection
+best-effort. A device outage, a missing managed source, or an unmanaged active
+entry that cannot safely be replaced is reported as `PENDING` / `DEGRADED`; it
+does not restore a committed Installation row.
 They do not acquire `SkillsPoolEditGuard`: Pool editing is a file-corpus and
 layout-migration concern, retained only by Local package upload/replacement/
 deletion and Pool cutover/rollback paths. Phase 1 intentionally has no
-cache-backed cross-command Bot mutation fence: the current compensating restore
-remains a best-effort compatibility path for non-concurrent mutations, while
-durable serialization is deferred to the task-queue design.
+cache-backed cross-command Bot mutation fence; durable serialization is
+deferred to the task-queue design.
 
 `skill_activation_sync_task.py` is the enqueue half of that durable design:
 `skill_center.activation_sync`, one task type shared by every
@@ -373,9 +381,10 @@ the new package, backs up the old package, and publishes the replacement back to
 that same locator; the Skill ID, `git_path`, desired active state, membership,
 and Installation identity do not change. Staging and rollback directories are
 temporary implementation details and are removed before success is returned.
-If publication, metadata persistence, runtime reconcile, audit persistence, or
-temporary-package cleanup fails, the old canonical package and metadata are
-restored before the request fails. A non-canonical locator or a metadata row
+If publication, metadata persistence, audit persistence, or temporary-package
+cleanup fails, the old canonical package and metadata are restored before the
+request fails. A Runtime projection failure is instead returned as `PENDING` /
+`DEGRADED` with the new package and metadata retained. A non-canonical locator or a metadata row
 whose authoritative package is missing fails closed and is repaired outside the
 upload path.
 

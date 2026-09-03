@@ -36,7 +36,10 @@ from engine.community.core.skills.models import (
     PoolLayoutActivationStatus,
     PoolLayoutProbeResult,
     PoolLayoutProbeStatus,
+    PoolMappingApplyMode,
+    PoolMappingItemResult,
     PoolMappingPublishResult,
+    PoolMappingProjectionStatus,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupResult,
@@ -224,7 +227,10 @@ def test_ensure_center_skills_route_success(rich_manager, client):
                 ok=[CenterEnsureItem(skill_uuid="u1", version="1.0.0")],
                 failed=[
                     CenterEnsureFailure(
-                        skill_uuid="u2", version="2.0.0", reason="missing"
+                        skill_uuid="u2",
+                        version="2.0.0",
+                        reason="missing",
+                        code="CENTER_VERSION_NOT_FOUND",
                     )
                 ],
             )
@@ -246,7 +252,12 @@ def test_ensure_center_skills_route_success(rich_manager, client):
     assert body["success"] is True
     assert body["data"]["ok"] == [{"skill_uuid": "u1", "version": "1.0.0"}]
     assert body["data"]["failed"] == [
-        {"skill_uuid": "u2", "version": "2.0.0", "reason": "missing"}
+        {
+            "skill_uuid": "u2",
+            "version": "2.0.0",
+            "reason": "missing",
+            "code": "CENTER_VERSION_NOT_FOUND",
+        }
     ]
     assert len(captured["items"]) == 2
 
@@ -581,6 +592,45 @@ def test_pool_mapping_routes_propagate_logical_v2_contract(client, rich_manager)
         [intent],
         mapping_contract_version=version,
         retired_mappings=[retired_intent],
+    )
+
+
+def test_pool_mapping_routes_explicitly_propagate_best_effort_mode(
+    client,
+    rich_manager,
+) -> None:
+    plugin = MagicMock()
+    plugin.publish_pool_mappings = AsyncMock(
+        return_value=PoolMappingPublishResult(
+            published=False,
+            status=PoolMappingProjectionStatus.DEGRADED,
+            items=(
+                PoolMappingItemResult(
+                    target="/skills/user-owned",
+                    source="/pool/user-owned",
+                    status=PoolMappingProjectionStatus.DEGRADED,
+                    code="UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                ),
+            ),
+        )
+    )
+    rich_manager._active_engine._skills = plugin
+
+    response = client.post(
+        "/api/skills/layout/mappings/publish",
+        json={
+            "apply_mode": "BEST_EFFORT",
+            "mappings": [{"source": "/pool/user-owned", "target": "/skills/user-owned"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is False
+    assert response.json()["data"]["status"] == "DEGRADED"
+    assert response.json()["data"]["items"][0]["code"] == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+    plugin.publish_pool_mappings.assert_awaited_once_with(
+        [SymlinkItem(source="/pool/user-owned", target="/skills/user-owned")],
+        apply_mode=PoolMappingApplyMode.BEST_EFFORT,
     )
 
 

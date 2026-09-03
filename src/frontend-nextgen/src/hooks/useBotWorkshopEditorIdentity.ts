@@ -13,6 +13,7 @@ export function useBotWorkshopRequestIdentity(): {
   ready: boolean;
   loading: boolean;
   error?: string;
+  userId?: string;
 } {
   const { identity, status, error } = useHumanIdentity();
   const userId = identity?.userId.trim();
@@ -26,7 +27,7 @@ export function useBotWorkshopRequestIdentity(): {
   if (status === 'loading') return { ready: false, loading: true, error: undefined };
   if (status === 'error') return { ready: false, loading: false, error: error ?? '当前用户身份加载失败' };
   if (!userId) return { ready: false, loading: false, error: '未获取到当前用户身份' };
-  return { ready: true, loading: false, error: undefined };
+  return { ready: true, loading: false, error: undefined, userId };
 }
 
 /** 编辑二级页兼容命名；身份门禁由 Bot 工坊一级页和编辑页共同复用。 */

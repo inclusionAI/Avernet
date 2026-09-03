@@ -17,7 +17,7 @@ export interface UseGroupManagementResult {
   addMember: (actorId: string) => Promise<boolean>;
   removeMember: (actorId: string) => Promise<boolean>;
   leaveGroup: (actorId: string) => Promise<boolean>;
-  createShare: () => Promise<DomainResult<{ invitationUrl: string }>>;
+  createShare: (targetGroupId?: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 当前群的钉钉绑定状态：null 未绑定 / view 已绑定 / 'conflict' 多绑定冲突。 */
   dingTalkBinding: DingTalkBindingState;
   dingTalkLoading: boolean;
@@ -37,7 +37,11 @@ function notifyError(res: { ok: false; error: { friendlyMessage: string } }): vo
  * 群管理写操作的编排 Hook：更新、成员增删/退出、分享链接、钉钉机器人绑定。
  * 组件只调用此 Hook，不直接依赖 groupService/invitationService/channelBindingService。
  */
-export function useGroupManagement(groupId: string | null, onMutated: () => Promise<void>): UseGroupManagementResult {
+export function useGroupManagement(
+  groupId: string | null,
+  onMutated: () => Promise<void>,
+  enabled: boolean = true,
+): UseGroupManagementResult {
   const [dingTalkBinding, setDingTalkBinding] = useState<DingTalkBindingState>(null);
   const [dingTalkLoading, setDingTalkLoading] = useState(false);
 
@@ -54,8 +58,9 @@ export function useGroupManagement(groupId: string | null, onMutated: () => Prom
   }, [groupId]);
 
   useEffect(() => {
+    if (!enabled) return;
     void reloadDingTalk();
-  }, [reloadDingTalk]);
+  }, [enabled, reloadDingTalk]);
 
   const updateGroup = useCallback(
     async (patch: Parameters<UseGroupManagementResult['updateGroup']>[0]) => {
@@ -115,17 +120,21 @@ export function useGroupManagement(groupId: string | null, onMutated: () => Prom
     [groupId],
   );
 
-  const createShare = useCallback(async () => {
-    if (!groupId) {
-      return {
-        ok: false as const,
-        error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
-      };
-    }
-    const res = await invitationService.createGroupShare(groupId);
-    if (!res.ok) notifyError(res);
-    return res;
-  }, [groupId]);
+  const createShare = useCallback(
+    async (targetGroupId?: string) => {
+      const shareGroupId = targetGroupId ?? groupId;
+      if (!shareGroupId) {
+        return {
+          ok: false as const,
+          error: { code: 'GROUP_MISSING', friendlyMessage: '未选择协作群', canRetry: false },
+        };
+      }
+      const res = await invitationService.createGroupShare(shareGroupId);
+      if (!res.ok) notifyError(res);
+      return res;
+    },
+    [groupId],
+  );
 
   const saveDingTalk = useCallback(
     async (config: GroupDingTalkConfig) => {

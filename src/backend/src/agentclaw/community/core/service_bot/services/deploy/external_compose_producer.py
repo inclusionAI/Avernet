@@ -16,12 +16,16 @@ bytes are persisted separately), so there's nothing to materialize —
 already inside the artifact). Per Model 1 that pinned artifact is later **handed to
 baas and forwarded** to the external container (non-mount) — no ARCA mount chain.
 """
+
 from __future__ import annotations
 
 import dataclasses
 from typing import Any, Protocol
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     enrich_engine_ext,
 )
@@ -48,12 +52,12 @@ class ConfigComposerLike(Protocol):
 class ExternalComposeProducer(DeployArtifactProducer):
     """Compose-from-DB+NAS build producer (base for engine-specific subclasses)."""
 
+    requires_runtime_layout_observation = False
+
     def __init__(self, composer: ConfigComposerLike) -> None:
         self._composer = composer
 
-    def produce_artifact(
-        self, bot: dict[str, Any], version: int | None
-    ) -> DeployArtifact:
+    def produce_artifact(self, request: ArtifactBuildRequest) -> DeployArtifact:
         """Produce the deployable artifact: compose (+ inject ``engine_ext``) and pin
         the composed dict onto ``ext.config_artifact``.
 
@@ -63,10 +67,8 @@ class ExternalComposeProducer(DeployArtifactProducer):
         The verify/online publish stages — and eager teclaw provisioning — read
         ``ext.config_artifact`` and hand it to ``create_teclaw_bot`` (non-mount).
         """
-        artifact = self._compose_with_engine_ext(bot, version)
-        return DeployArtifact(
-            success=True, ext={"config_artifact": artifact.to_dict()}
-        )
+        artifact = self._compose_with_engine_ext(dict(request.bot), request.version)
+        return DeployArtifact(success=True, ext={"config_artifact": artifact.to_dict()})
 
     def _compose_with_engine_ext(
         self, bot: dict[str, Any], version: int | None

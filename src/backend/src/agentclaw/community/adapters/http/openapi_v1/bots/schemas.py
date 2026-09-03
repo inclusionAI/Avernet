@@ -117,10 +117,11 @@ class Bot(BaseModel):
     )
     template_config: dict | None = Field(
         default=None,
-        description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template. Includes the "
-        "server-managed 'engine_form' marker for bots whose runtime form "
-        "differs from the engine (e.g. engine_form='aicoding').",
+        description="Stored template snapshot, copied verbatim from the bot's "
+        "creation input (no field filtering). Null without a template. May "
+        "carry sensitive values the creator supplied (e.g. 'token', "
+        "'bot_template_config.ext_config.thetaKey') and the server-managed "
+        "'engine_form' marker — treat as sensitive.",
     )
     space: BusinessSpace | None = Field(
         default=None,
@@ -178,11 +179,22 @@ class BotCreateEngineProperties(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    template: dict[str, Any] = Field(
+    template_type: str | None = Field(
         description=(
-            "Application-coding template properties. Passed through unchanged to "
-            "the template validator; platform-managed identity and lifecycle "
-            "fields are not accepted."
+            "Template type declared with the config. Required for template-"
+            "factory snapshots (any value, echoed from available-tc-list); "
+            "for hand-written application-coding configs omit it or pass "
+            "'applicationCoding'."
+        ),
+        default=None,
+    )
+    template_config: dict[str, Any] = Field(
+        description=(
+            "Template configuration. Either hand-written application-coding "
+            "properties, or a template-factory snapshot (identified by "
+            "template_key + template_uid) echoed verbatim from "
+            "bot-templates/available-tc-list; platform-managed identity and "
+            "lifecycle fields are not accepted."
         ),
     )
 
@@ -220,7 +232,8 @@ class BotCreate(BaseModel):
         default=None,
         description=(
             "Optional engine-specific properties. Omit for a plain bot; provide "
-            "template for an application-coding bot."
+            "template_config (hand-written application-coding or a "
+            "template-factory snapshot) for a template-backed bot."
         ),
     )
     # ``engine_options`` is deliberately absent. The engine-owned bag the
@@ -844,10 +857,11 @@ class BotInventoryItem(BaseModel):
     )
     template_config: dict | None = Field(
         default=None,
-        description="Server-projected template snapshot (display-safe subset; "
-        "secrets never returned). Null without a template. Includes the "
-        "server-managed 'engine_form' marker for bots whose runtime form "
-        "differs from the engine (e.g. engine_form='aicoding').",
+        description="Stored template snapshot, copied verbatim from the bot's "
+        "creation input (no field filtering). Null without a template. May "
+        "carry sensitive values the creator supplied (e.g. 'token', "
+        "'bot_template_config.ext_config.thetaKey') and the server-managed "
+        "'engine_form' marker — treat as sensitive.",
     )
     avatar_url: str | None = Field(
         default=None, description="Avatar URL for the bot, when configured."

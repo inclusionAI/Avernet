@@ -22,12 +22,13 @@ const bot = {
   capabilities: ['需求分析'],
   relationshipStatus: 'none' as const,
 };
+const botWithUuid = { ...bot, id: '20260825_mbu0ey8f:447147' };
 const group = {
   id: 'g1',
   name: '产品共创群',
   ownerBotName: '群主助手',
   ownerUserName: '示例用户',
-  typeLabel: '自由协作群',
+  typeLabel: '自由聊天',
   memberCount: 2,
   goal: '推进产品共创',
   memberListVisibility: 'visible' as const,
@@ -62,15 +63,47 @@ describe('collaboration square accessible UI', () => {
     expect(html).not.toContain('查看画像');
     expect(html).toContain('<dl');
     expect(html).toContain('Owner 用户');
-    expect(html).toContain('Bot ID');
+    expect(html).toContain('Bot UUID');
     expect(html).not.toContain('Owner用户 ·');
-    expect(html).not.toContain('Bot ID ·');
+    expect(html).not.toContain('Bot UUID ·');
     expect(html).toContain('aria-label="分享 产品协作助手"');
     expect(html).toContain('分享');
     expect(html).not.toContain('需求分析');
     expect(html).not.toContain('bg-gray-');
-    expect(friendHtml).toContain('好友 Bot');
-    expect(friendHtml).not.toContain('已是好友');
+    expect(friendHtml).toContain('已经是好友');
+    expect(friendHtml).toContain('立即开始对话');
+    expect(friendHtml).not.toContain('申请好友权限');
+
+    const uuidHtml = renderToStaticMarkup(
+      <SquareBotCard bot={botWithUuid} busy={false} onShare={jest.fn()} onPrimaryAction={jest.fn()} />,
+    );
+    expect(uuidHtml).toContain('Bot UUID');
+    expect(uuidHtml).not.toContain('Bot ID');
+
+    const profileHtml = renderToStaticMarkup(
+      <SquareBotCard
+        bot={{ ...bot, shortProfile: '用于测试的专用 Bot' }}
+        busy={false}
+        onShare={jest.fn()}
+        onPrimaryAction={jest.fn()}
+      />,
+    );
+    expect(profileHtml).toContain('Profile');
+    expect(profileHtml).toContain('用于测试的专用 Bot');
+  });
+
+  test('自有公开 Bot 显示直接会话操作且不显示好友申请', () => {
+    const html = renderToStaticMarkup(
+      <SquareBotCard
+        bot={{ ...bot, isOwnedByViewer: true, relationshipStatus: 'none' }}
+        busy={false}
+        onShare={jest.fn()}
+        onPrimaryAction={jest.fn()}
+      />,
+    );
+    expect(html).toContain('我的 Bot');
+    expect(html).toContain('立即开始对话');
+    expect(html).not.toContain('申请好友权限');
   });
 
   test('群卡片展示公开字段且不展示敏感管理字段', () => {
@@ -84,7 +117,7 @@ describe('collaboration square accessible UI', () => {
       />,
     );
     expect(html).toContain('群主 Bot');
-    expect(html).toContain('Owner用户');
+    expect(html).not.toContain('Owner用户');
     expect(html).toContain('创建新会话');
     expect(html).not.toContain('在线状态');
     expect(html).not.toContain('实例环境');
@@ -102,10 +135,22 @@ describe('collaboration square accessible UI', () => {
       />,
     );
     expect(botHtml).toContain('展示该 Bot 已公开的画像与能力。');
-    expect(botHtml).toContain('Bot ID');
+    expect(botHtml).toContain('Bot UUID');
+    expect(botHtml).not.toContain('Bot ID');
     expect(botHtml).not.toContain('完整 Bot ID');
     expect(botHtml).not.toContain('已公开能力');
     expect(botHtml).not.toContain('需求分析');
+
+    const uuidProfileHtml = renderWithPortals(
+      <BotProfileModal
+        open
+        profile={{ ...botWithUuid, engine: 'OpenClaw', capabilities: [] }}
+        loading={false}
+        onClose={jest.fn()}
+        onCopyId={jest.fn()}
+      />,
+    );
+    expect(uuidProfileHtml).toContain('Bot UUID');
     const memberHtml = renderWithPortals(
       <GroupMembersModal
         open
@@ -133,9 +178,14 @@ describe('collaboration square accessible UI', () => {
     const files = [
       'src/pages/CollaborationSquare/Bots/index.tsx',
       'src/pages/CollaborationSquare/Groups/index.tsx',
+      'src/pages/CollaborationSquare/Tasks/index.tsx',
+      'config/routes.ts',
       'src/components/CollaborationSquare/SquarePageShell/index.tsx',
+      'src/components/CollaborationSquare/PublicBotCatalogPanel/index.tsx',
+      'src/components/CollaborationSquare/PublicGroupSquareSection/index.tsx',
       'src/hooks/useCollaborationSquare.ts',
       'src/hooks/useCollaborationSquareList.ts',
+      'src/hooks/useCreateGroupSessionFlow.ts',
     ];
     const source = files.map((file) => readFileSync(path.join(process.cwd(), file), 'utf8')).join('\n');
     expect(source).not.toContain('antd');
@@ -148,8 +198,14 @@ describe('collaboration square accessible UI', () => {
     expect(source).toContain(
       '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能发现，并以当前用户身份发起好友申请。',
     );
-    expect(source).toContain('onModeChange={isBot ? square.setBotSearchMode : undefined}');
+    expect(source).toContain('onModeChange={vm.setMode}');
+    expect(source).toContain('COLLABORATION_SQUARE_PAGE_SIZE = 24');
+    expect(source).toContain('new IntersectionObserver');
+    expect(source).toContain('onScroll={handleScroll}');
+    expect(source).toContain('rootMargin: `0px 0px ${LOAD_MORE_PRELOAD_DISTANCE}px 0px`');
     expect(source).toContain('发现协作群，支持基于公开协作群快速创建新会话。');
-    expect(source).toContain('defaultRole=');
+    expect(source).toContain('发现公开 BBS 求助任务');
+    expect(source).toContain('resource="task"');
+    expect(source).toContain('/collaboration-square/tasks');
   });
 });

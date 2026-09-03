@@ -100,9 +100,10 @@ export class GroupChatHistoryPaginator {
    * 当前身份 identityId（bot/human 的 bot_id），供后端按身份视角返回消息。
    */
   private async fetchPage(before?: number): Promise<{ mapped: ChatMessage[]; rawCount: number }> {
-    const params: { limit: number; view_bot_id: string; before?: string } = {
+    const params: { limit: number; view_bot_id: string; include_pending: boolean; before?: string } = {
       limit: GROUP_MESSAGE_PAGE_SIZE,
       view_bot_id: this.identityId,
+      include_pending: true,
     };
     if (before !== undefined) params.before = String(before);
     const resp = await listSessionMessages(this.sessionId, params);

@@ -1,4 +1,4 @@
-import type { BotChatFilters, BotChatRelationScope } from '@/domain/botChats';
+import type { BotChatDetailSelection, BotChatFilters, BotChatRelationScope } from '@/domain/botChats';
 import { resolveBotChatRelationScope } from '@/services/botWorkshop/botChatRelations';
 import { botChatService } from '@/services/botWorkshop/botChatService';
 import { identityService, isTestUserIdentity, resolveUserId } from '@/services/workspace';
@@ -39,7 +39,8 @@ export function useBotChats() {
     void (async () => {
       let userId: string;
       try {
-        userId = params.get('user_id')?.trim() || (await resolveActingUser());
+        // user_id 恒取当前登录用户，禁止通过 URL 参数指定他人身份（否则可越权查看全局日志）。
+        userId = await resolveActingUser();
       } catch (error) {
         if (disposed) return;
         const message = error instanceof Error ? error.message : '日志加载失败';
@@ -89,14 +90,36 @@ export function useBotChats() {
     await botChatService.list(current.context, current.appliedFilters, 1, limit).catch(() => undefined);
   }, []);
 
-  const openDetail = useCallback(async (traceId: string) => {
+  const openDetail = useCallback(async (selection: BotChatDetailSelection | string) => {
     const current = useBotChatStore.getState();
     const context = current.context;
     if (!context) return;
+    const isListSelection = typeof selection !== 'string';
+    const traceId = isListSelection ? selection.traceId : selection;
+    const selectedSessionId = isListSelection ? selection.sessionId : undefined;
+    const selectedBotId = isListSelection ? selection.botId : undefined;
+    const relatedItem =
+      current.related?.items.find((item) => item.id === traceId) ??
+      current.page?.items.find((item) => item.id === traceId);
     const groupId = current.relationScope === 'group' ? current.detail?.groupId : undefined;
-    const detail = await botChatService.detail(context, traceId, groupId).catch(() => undefined);
+    const sourceBotId = selectedBotId ?? relatedItem?.botId;
+    // The related list already came from the session query. Clicking a related
+    // trace should only load that trace's detail, not query the same session again.
+    const sessionId = selectedSessionId;
+    const preserveRelated = !isListSelection && !groupId;
+    const detailRequest = sessionId
+      ? botChatService.detail(context, traceId, groupId, sourceBotId, sessionId, preserveRelated)
+      : sourceBotId
+      ? preserveRelated
+        ? botChatService.detail(context, traceId, groupId, sourceBotId, undefined, true)
+        : botChatService.detail(context, traceId, groupId, sourceBotId)
+      : preserveRelated
+      ? botChatService.detail(context, traceId, groupId, undefined, undefined, true)
+      : botChatService.detail(context, traceId, groupId);
+    const detail = await detailRequest.catch(() => undefined);
     if (detail) {
       if (groupId) return;
+      if (!isListSelection) return;
       const scope = resolveBotChatRelationScope(detail, useBotChatStore.getState().relationScope);
       await botChatService.related(context, detail, scope).catch(() => undefined);
     }

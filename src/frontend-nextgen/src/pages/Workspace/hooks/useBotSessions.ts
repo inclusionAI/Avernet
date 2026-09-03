@@ -5,16 +5,17 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useBotSessionMap } from './useBotSessionMap';
-
 function notifyError(err: DomainError): void {
   toast.error(err.friendlyMessage);
 }
 function errOf(res: { ok: false; error: DomainError }): DomainError {
   return res.error;
 }
-
 export interface UseBotSessionsResult {
   sessionsByBotId: Record<string, BotChatSessionView[]>;
+  favoriteSessionsByBotId: Record<string, BotChatSessionView[]>;
+  sessionPageMetaByBotId: ReturnType<typeof useBotSessionMap>['pageMetaByBotId'];
+  favoriteSessionPageMetaByBotId: ReturnType<typeof useBotSessionMap>['favoritePageMetaByBotId'];
   isSessionsLoading: boolean;
   selectedBotSessionId: string | null;
   selectedSession: BotChatSessionView | null;
@@ -26,11 +27,11 @@ export interface UseBotSessionsResult {
   clearContext: (bot: ChatBotView, sessionId: string) => Promise<boolean>;
   toggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
   loadFavoriteSessions: (botId: string) => Promise<void>;
+  loadMoreSessions: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
   updateSessionModel: (botId: string, sessionId: string, model: string) => void;
   reloadBot: (botId: string) => Promise<void>;
   toggleBotExpanded: (botId: string, sectionKey?: string) => void;
 }
-
 /** useBotSessions 编排 bot 单聊会话列表:展开懒加载、选中、新建/删除(镜像 useGroupSessions)。 */
 export function useBotSessions(
   chatBots: ChatBotView[],
@@ -41,12 +42,17 @@ export function useBotSessions(
   const selectBotSession = useWorkspaceStore((s) => s.selectBotSession);
   const {
     rawByBotId,
+    favoriteByBotId,
+    pageMetaByBotId,
+    favoritePageMetaByBotId,
     isLoading,
     updateBotSessions,
+    updateBotFavoriteSessions,
     reloadBot,
+    loadFavoriteSessions: loadFavoriteSessionsFromMap,
+    loadMoreSessions: loadMoreSessionsFromMap,
     toggleBotExpanded: toggleBotExpandedFromMap,
   } = useBotSessionMap(chatBots, expandedBotIds, activeIdentityId);
-
   const selectedSession = useMemo(() => {
     for (const list of Object.values(rawByBotId)) {
       const found = list.find((s) => s.sessionId === selectedBotSessionId);
@@ -54,20 +60,16 @@ export function useBotSessions(
     }
     return null;
   }, [rawByBotId, selectedBotSessionId]);
-
   const selectSession = useCallback((id: string | null) => selectBotSession(id), [selectBotSession]);
-
   const openSession = useCallback(
     (botId: string, sessionId: string) => {
       // 确保 bot 已展开
       if (!useWorkspaceStore.getState().expandedBotIds[botId]) toggleBotExpandedFromMap(botId);
       selectBotSession(sessionId);
-      // 重复点击同一会话也递增 nonce,驱动 useBotChat 重新拉取历史消息。
       useWorkspaceStore.getState().bumpHistoryRefresh();
     },
     [toggleBotExpandedFromMap, selectBotSession],
   );
-
   const createSession = useCallback(
     async (bot: ChatBotView, title?: string): Promise<BotChatSessionView | null> => {
       if (!activeIdentityId) return null;
@@ -95,7 +97,6 @@ export function useBotSessions(
     },
     [activeIdentityId, selectBotSession, updateBotSessions],
   );
-
   const deleteSession = useCallback(
     async (bot: ChatBotView, sessionId: string): Promise<boolean> => {
       if (!activeIdentityId) return false;
@@ -111,12 +112,12 @@ export function useBotSessions(
         }
         return next;
       });
+      updateBotFavoriteSessions(bot.botId, (list) => list.filter((s) => s.sessionId !== sessionId));
       toast.success('会话已删除');
       return true;
     },
-    [activeIdentityId, updateBotSessions, selectBotSession],
+    [activeIdentityId, updateBotFavoriteSessions, updateBotSessions, selectBotSession],
   );
-
   const renameSession = useCallback(
     async (bot: ChatBotView, sessionId: string, title: string): Promise<boolean> => {
       if (!activeIdentityId) return false;
@@ -128,10 +129,13 @@ export function useBotSessions(
       updateBotSessions(bot.botId, (list) =>
         list.map((session) => (session.sessionId === sessionId ? { ...session, title: res.data.title } : session)),
       );
+      updateBotFavoriteSessions(bot.botId, (list) =>
+        list.map((session) => (session.sessionId === sessionId ? { ...session, title: res.data.title } : session)),
+      );
       toast.success('会话已重命名');
       return true;
     },
-    [activeIdentityId, updateBotSessions],
+    [activeIdentityId, updateBotFavoriteSessions, updateBotSessions],
   );
 
   const clearContext = useCallback(
@@ -145,13 +149,16 @@ export function useBotSessions(
       updateBotSessions(bot.botId, (list) =>
         list.map((session) => (session.sessionId === sessionId ? { ...session, messageCount: 0 } : session)),
       );
+      updateBotFavoriteSessions(bot.botId, (list) =>
+        list.map((session) => (session.sessionId === sessionId ? { ...session, messageCount: 0 } : session)),
+      );
       if (useWorkspaceStore.getState().selectedBotSessionId === sessionId) {
         useWorkspaceStore.getState().bumpHistoryRefresh();
       }
       toast.success('会话上下文已清除');
       return true;
     },
-    [activeIdentityId, updateBotSessions],
+    [activeIdentityId, updateBotFavoriteSessions, updateBotSessions],
   );
 
   const toggleFavorite = useCallback(
@@ -160,11 +167,8 @@ export function useBotSessions(
       const bot = chatBots.find((b) => b.botId === botId);
       if (!bot) return false;
       const current =
-        useWorkspaceStore.getState().selectedBotSessionId === sessionId
-          ? Object.values(rawByBotId)
-              .flat()
-              .find((s) => s.sessionId === sessionId)
-          : null;
+        favoriteByBotId[botId]?.find((session) => session.sessionId === sessionId) ??
+        rawByBotId[botId]?.find((session) => session.sessionId === sessionId);
       const fav = current ? !current.favorite : true;
       const res = await botSessionService.toggleFavorite(bot, activeIdentityId, sessionId, fav);
       if (!res.ok) {
@@ -174,28 +178,36 @@ export function useBotSessions(
       updateBotSessions(botId, (list) =>
         list.map((s) => (s.sessionId === sessionId ? { ...s, favorite: res.data } : s)),
       );
+      if (favoriteByBotId[botId] !== undefined) {
+        updateBotFavoriteSessions(botId, (list) => {
+          if (!res.data) return list.filter((session) => session.sessionId !== sessionId);
+          if (list.some((session) => session.sessionId === sessionId)) {
+            return list.map((session) => (session.sessionId === sessionId ? { ...session, favorite: true } : session));
+          }
+          return current ? [{ ...current, favorite: true }, ...list] : list;
+        });
+      }
       return true;
     },
-    [activeIdentityId, chatBots, rawByBotId, updateBotSessions],
+    [activeIdentityId, chatBots, favoriteByBotId, rawByBotId, updateBotFavoriteSessions, updateBotSessions],
   );
   const loadFavoriteSessions = useCallback(
     async (botId: string): Promise<void> => {
       if (!activeIdentityId) return;
       const bot = chatBots.find((b) => b.botId === botId);
       if (!bot) return;
-      const res = await botSessionService.listFavoriteSessions(bot, activeIdentityId);
-      if (res.ok) {
-        // 合并：已有会话更新 favorite 标记，新增的收藏会话追加到列表。
-        updateBotSessions(botId, (list) => {
-          const favIds = new Set(res.data.map((s) => s.sessionId));
-          const updated = list.map((s) => ({ ...s, favorite: favIds.has(s.sessionId) }));
-          const existingIds = new Set(list.map((s) => s.sessionId));
-          const newOnes = res.data.filter((s) => !existingIds.has(s.sessionId));
-          return [...newOnes, ...updated];
-        });
-      }
+      await loadFavoriteSessionsFromMap(bot, activeIdentityId);
     },
-    [activeIdentityId, chatBots, updateBotSessions],
+    [activeIdentityId, chatBots, loadFavoriteSessionsFromMap],
+  );
+
+  const loadMoreSessions = useCallback(
+    (botId: string, mode: 'all' | 'favorite'): Promise<void> => {
+      if (!activeIdentityId) return Promise.resolve();
+      const bot = chatBots.find((b) => b.botId === botId);
+      return bot ? loadMoreSessionsFromMap(bot, activeIdentityId, mode) : Promise.resolve();
+    },
+    [activeIdentityId, chatBots, loadMoreSessionsFromMap],
   );
 
   const updateSessionModel = useCallback(
@@ -209,6 +221,9 @@ export function useBotSessions(
 
   return {
     sessionsByBotId: rawByBotId,
+    favoriteSessionsByBotId: favoriteByBotId,
+    sessionPageMetaByBotId: pageMetaByBotId,
+    favoriteSessionPageMetaByBotId: favoritePageMetaByBotId,
     isSessionsLoading: isLoading,
     selectedBotSessionId,
     selectedSession,
@@ -220,6 +235,7 @@ export function useBotSessions(
     clearContext,
     toggleFavorite,
     loadFavoriteSessions,
+    loadMoreSessions,
     updateSessionModel,
     reloadBot: (botId: string): Promise<void> => {
       const bot = chatBots.find((b) => b.botId === botId);

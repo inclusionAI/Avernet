@@ -1,5 +1,6 @@
 import {
   getBotRoutine,
+  listAllRoutines,
   listBotRoutineRuns,
   listBotRoutines,
   runBotRoutine,
@@ -16,9 +17,12 @@ export interface ScheduledRoutineRecord {
   model: string;
   frequency: string;
   timezone?: string;
+  /** owner 聚合接口特有：同一 definition 跨 draft/verify/online 阶段会出多行。 */
+  runtimeStage?: string;
   nextRunAt?: string;
   lastRunAt?: string;
   prompt?: string;
+  enabled?: boolean;
   raw: BotRoutineDto;
 }
 
@@ -37,6 +41,13 @@ export interface ScheduledRoutineRunRecord {
   outputSummary?: string;
   errorMessage?: string;
   raw: BotRoutineRunDto;
+}
+
+export interface ScheduledRoutinePageResult {
+  items: ScheduledRoutineRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -65,11 +76,24 @@ function pickNestedString(source: Record<string, unknown> | undefined, path: str
   return asString(cursor);
 }
 
-function unwrapPage<T>(payload: { data?: BackendApiPage<T> | T[] | null } | null | undefined): T[] {
+function unwrapPage<T>(payload: { data?: BackendApiPage<T> | T[] | null } | null | undefined) {
   const data = payload?.data;
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  return Array.isArray(data.items) ? data.items : [];
+  if (!data) {
+    return { items: [] as T[], total: 0, page: 1, pageSize: 0 };
+  }
+  if (Array.isArray(data)) {
+    return { items: data as T[], total: data.length, page: 1, pageSize: data.length };
+  }
+  const items = Array.isArray(data.items) ? (data.items as T[]) : [];
+  const total = typeof data.total === 'number' ? data.total : items.length;
+  const page = typeof data.page === 'number' && data.page > 0 ? data.page : 1;
+  const pageSize =
+    typeof data.pageSize === 'number' && data.pageSize > 0
+      ? data.pageSize
+      : typeof data.page_size === 'number' && data.page_size > 0
+      ? data.page_size
+      : items.length;
+  return { items, total, page, pageSize };
 }
 
 function formatDuration(start?: string, end?: string): string | undefined {
@@ -90,6 +114,7 @@ export function mapScheduledRoutineRecord(item: BotRoutineDto): ScheduledRoutine
   const cronText = pickNestedString(trigger, ['cron']) ?? pickString(source, ['cron']);
   const botId = pickString(source, ['bot_id', 'botId', 'owner_bot_id', 'ownerBotId']) ?? 'unknown-bot';
   const frequency = scheduleText ?? (cronText ? `cron: ${cronText}` : '—');
+  const enabled = typeof source.enabled === 'boolean' ? source.enabled : undefined;
   return {
     id: pickString(source, ['routine_id', 'routineId', 'id']) ?? 'unknown-routine',
     botId,
@@ -99,11 +124,13 @@ export function mapScheduledRoutineRecord(item: BotRoutineDto): ScheduledRoutine
     model,
     frequency,
     timezone: pickString(source, ['timezone', 'tz']),
+    runtimeStage: pickString(source, ['runtime_stage', 'runtimeStage', 'stage']),
     nextRunAt: pickString(source, ['next_run_at', 'next_run_time', 'next_fire_at', 'nextTriggerAt']),
     lastRunAt: pickString(source, ['last_run_at', 'last_run_time', 'last_finished_at', 'gmt_modified']),
     prompt:
       pickString(source, ['prompt', 'command', 'description', 'summary']) ??
       pickNestedString(source, ['task_spec', 'metadata', 'instruction']),
+    enabled,
     raw: item,
   };
 }
@@ -165,10 +192,30 @@ export function mapScheduledRoutineRunRecord(
 export async function fetchScheduledRoutines(
   botId: string,
   params: BackendUnknownRecord = {},
-): Promise<ScheduledRoutineRecord[]> {
-  if (!botId) return [];
+): Promise<ScheduledRoutinePageResult> {
+  if (!botId) return { items: [], total: 0, page: 1, pageSize: 0 };
   const result = await listBotRoutines(botId, { page: 1, page_size: 100, ...params });
-  return unwrapPage(result).map(mapScheduledRoutineRecord);
+  const page = unwrapPage<BotRoutineDto>(result);
+  return {
+    ...page,
+    items: page.items.map(mapScheduledRoutineRecord),
+  };
+}
+
+/**
+ * owner 聚合查询（GET /openapi/v1/bots/routines/all）：一次请求返回该用户名下 +
+ * 协作 Bot 的全部定时任务（跨 runtime stage），page/page_size/total 由服务端统一切片，
+ * 不再依赖前端按 Bot fan-out 合并。注意接口不含 next_run_at/model，缺失时显示 '—'。
+ */
+export async function fetchOwnerScheduledRoutines(
+  params: BackendUnknownRecord = {},
+): Promise<ScheduledRoutinePageResult> {
+  const result = await listAllRoutines({ page: 1, page_size: 20, ...params });
+  const page = unwrapPage<BotRoutineDto>(result);
+  return {
+    ...page,
+    items: page.items.map(mapScheduledRoutineRecord),
+  };
 }
 
 export async function fetchScheduledRoutineDetail(
@@ -190,7 +237,9 @@ export async function fetchScheduledRoutineRuns(
   if (!botId || !routineId) return [];
   const result = await listBotRoutineRuns(botId, routineId, { page: 1, page_size: 100, ...params });
   const currentRoutine = routine ?? (await fetchScheduledRoutineDetail(botId, routineId).catch(() => null));
-  return unwrapPage(result).map((item) => mapScheduledRoutineRunRecord(item, currentRoutine ?? undefined));
+  return unwrapPage<BotRoutineRunDto>(result).items.map((item) =>
+    mapScheduledRoutineRunRecord(item, currentRoutine ?? undefined),
+  );
 }
 
 export async function triggerScheduledRoutine(botId: string, routineId: string) {
@@ -208,6 +257,7 @@ export const scheduledTasksService = {
     };
   },
   fetchScheduledRoutines,
+  fetchOwnerScheduledRoutines,
   fetchScheduledRoutineDetail,
   fetchScheduledRoutineRuns,
   triggerScheduledRoutine,

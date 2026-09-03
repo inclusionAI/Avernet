@@ -12,6 +12,7 @@ import asyncio
 import json
 import threading
 import time
+from unittest.mock import AsyncMock, patch
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
@@ -263,10 +264,9 @@ class TestCoopGroupStateMachineE2E:
         _stop_poller(eng)
 
 
-# ===== Test 4: bbs no-op(投递不翻态,不改节点状态)=====
-class TestBbsNoOpE2E:
-    def test_bbs_dispatch_noop(self):
-        # 单独构造一个 bbs 节点(RENNING + run_mode=bbs),投递应 no-op,status 不变
+# ===== Test 4: BBS 统一 dispatch(执行器接单,最终状态由 BBS 回投收敛)=====
+class TestBbsDispatchE2E:
+    def test_bbs_dispatch_invokes_bbs_adapter(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info("t_bbs"))
         bcs = _DoubleBcsClient()
@@ -276,9 +276,15 @@ class TestBbsNoOpE2E:
                      task_spec=_task_info("t_bbs").task_spec,
                      run_info=RuntimeInfo(run_mode="bbs", assignee="bbs_bot"),
                      node_run_graph=None)  # type: ignore[arg-type]
-        ok = _run(exe._executor.dispatch([n]))  # type: ignore[attr-defined]
+        svc.add_task_nodes([n], parent_node_id="t_bbs")
+        with patch(
+            "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+            new_callable=AsyncMock,
+        ) as notify:
+            ok = _run(exe._executor.dispatch([n]))  # type: ignore[attr-defined]
         assert ok == [True]
-        assert n.status == Status.RUNNING  # bbs no-op 不翻态
+        notify.assert_awaited_once()
+        assert n.status == Status.RUNNING  # 最终状态仍由 BBS report 回投收敛
         _stop_poller(eng)
 
 

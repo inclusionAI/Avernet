@@ -1,8 +1,8 @@
 // @asset-migrated: teamclaw 自研资产
 /** 节点详情抽屉：任务规格、执行上下文、步骤追踪和验收结果。 */
-import MarkdownIt from 'markdown-it';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { Close, NodeStatusIcon } from './icons';
+import { MarkdownCell } from './MarkdownCell';
 import { Empty, LabelValue, SectionCard } from './theme';
 import { C, NODE_STATUS_TONES } from './tokens';
 import { TruncatedText } from './TruncatedText';
@@ -13,8 +13,19 @@ const NODE_STATUS_LABELS: Record<NodeStatus, string> = {
   running: '执行中',
   failed: '失败',
   pending: '待执行',
-  skipped: '已跳过',
+  hung: '任务挂起',
+  cancelled: '已取消',
 };
+
+const RUN_MODE_LABELS: Record<string, string> = {
+  single_bot: '单Bot',
+  coop_group: '协作群',
+  bbs: 'BBS接力',
+};
+
+function getRunModeLabel(runMode?: string | null): string {
+  return runMode ? RUN_MODE_LABELS[runMode] ?? runMode : '未标记执行模态';
+}
 
 const StepItem: React.FC<{ step: TaskNodeView['stepTraces'][number]; index: number; isLast: boolean }> = ({
   step,
@@ -90,81 +101,6 @@ const StepItem: React.FC<{ step: TaskNodeView['stepTraces'][number]; index: numb
     </div>
   </div>
 );
-
-const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
-
-/** 轻量 markdown 渲染单元格：输出摘要等长文本按 markdown 格式渲染。
- * 内容较多时默认折叠（max-height 截断 + 渐变遮罩），点击「展开全部」查看全文，避免淹没其它字段。 */
-const COLLAPSED_HEIGHT = 120;
-const EXPANDED_MAX_HEIGHT = 320;
-const MarkdownCell: React.FC<{ content: string | null | undefined }> = ({ content }) => {
-  const [expanded, setExpanded] = useState(false);
-  if (!content || !content.trim()) {
-    return <span style={{ color: C.textMuted }}>—</span>;
-  }
-  const html = md.render(content);
-  // 折叠态：固定高度 + 底部渐变遮罩；展开态：全高显示
-  const collapsed = !expanded;
-  return (
-    <div style={{ marginTop: 5, position: 'relative' }}>
-      <div
-        style={{
-          color: C.textPrimary,
-          fontSize: 12,
-          lineHeight: 1.6,
-          wordBreak: 'break-word',
-          maxHeight: collapsed ? COLLAPSED_HEIGHT : EXPANDED_MAX_HEIGHT,
-          overflow: 'auto',
-          position: 'relative',
-        }}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-      {collapsed && (
-        <button
-          type="button"
-          onClick={() => setExpanded(true)}
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 40,
-            border: 0,
-            background: `linear-gradient(to bottom, transparent, ${C.surfaceRaised})`,
-            color: C.primary,
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'center',
-            paddingBottom: 2,
-          }}
-        >
-          展开全部 ▾
-        </button>
-      )}
-      {!collapsed && (
-        <button
-          type="button"
-          onClick={() => setExpanded(false)}
-          style={{
-            marginTop: 6,
-            border: 0,
-            background: 'transparent',
-            color: C.primary,
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            padding: 0,
-          }}
-        >
-          收起 ▴
-        </button>
-      )}
-    </div>
-  );
-};
 
 const DetailField: React.FC<{ label: string; value?: React.ReactNode; wide?: boolean }> = ({
   label,
@@ -346,7 +282,7 @@ export const NodeDetailDrawer: React.FC<{
             <NodeStatusIcon status={node.status} size={11} />
             {statusLabel}
           </span>
-          <span style={{ color: C.textSecondary, fontSize: 11 }}>{node.runMode ?? '未标记执行模态'}</span>
+          <span style={{ color: C.textSecondary, fontSize: 11 }}>{getRunModeLabel(node.runMode)}</span>
         </div>
       </header>
 
@@ -354,7 +290,7 @@ export const NodeDetailDrawer: React.FC<{
         <SectionCard title="基本信息">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
             <DetailField label="执行器" value={node.executor} />
-            <DetailField label="执行模态" value={node.runMode} />
+            <DetailField label="执行模态" value={getRunModeLabel(node.runMode)} />
             <DetailField label="开始时间" value={node.startedAt} />
             <DetailField label="结束时间" value={node.endAt} />
             <DetailField label="耗时" value={node.timeConsuming} />
@@ -362,14 +298,17 @@ export const NodeDetailDrawer: React.FC<{
               label="Tokens"
               value={node.tokens !== null && node.tokens !== undefined ? node.tokens.toLocaleString() : undefined}
             />
-            <DetailField label="输出摘要" value={<MarkdownCell content={node.outputSummary ?? node.output} />} wide />
+            <DetailField
+              label="输出摘要"
+              value={<MarkdownCell content={node.outputRender ?? node.outputSummary} />}
+              wide
+            />
           </div>
         </SectionCard>
 
         <SectionCard title="任务信息" marginTop={12}>
           <div style={{ display: 'grid', gap: 8 }}>
             <DetailField label="标题" value={<TruncatedText value={taskSpec.title ?? node.name} maxLength={20} />} />
-            <DetailField label="执行指令" value={taskSpec.instruction} wide />
             <DetailField label="目标" value={taskSpec.target} wide />
             <DetailField label="验收标准" value={acceptanceValue} wide />
           </div>
@@ -406,7 +345,7 @@ export const NodeDetailDrawer: React.FC<{
           )}
         </SectionCard>
 
-        {node.acceptanceResult && (
+        {node.acceptanceResult?.verdict && (
           <SectionCard title="验收结果" marginTop={12}>
             <div
               style={{
@@ -416,13 +355,21 @@ export const NodeDetailDrawer: React.FC<{
                 marginBottom: 10,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background: node.acceptanceResult.verdict === 'PASS' ? `${C.success}12` : `${C.danger}12`,
-                color: node.acceptanceResult.verdict === 'PASS' ? C.success : C.danger,
+                background:
+                  node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
+                    ? `${C.success}12`
+                    : `${C.danger}12`,
+                color:
+                  node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
+                    ? C.success
+                    : C.danger,
                 fontSize: 12,
                 fontWeight: 650,
               }}
             >
-              {node.acceptanceResult.verdict === 'PASS' ? '✓ 验收通过' : '！验收未通过'}
+              {node.acceptanceResult.verdict === 'PASS' || node.acceptanceResult.verdict === 'DONE'
+                ? '✓ 验收通过'
+                : '！验收未通过'}
             </div>
             {node.acceptanceResult.gaps.length > 0 && (
               <LabelValue

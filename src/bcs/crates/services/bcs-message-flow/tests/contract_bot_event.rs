@@ -2351,6 +2351,7 @@ async fn native_mcp_tool_result_coordination_echo_dispatches_from_exact_provider
             "bot-driver",
             CoordinationSurface {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: BTreeMap::from([(
@@ -2412,6 +2413,7 @@ async fn native_mcp_assign_task_echo_forwards_provider_participant_tags() {
             "bot-manager",
             CoordinationSurface {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: BTreeMap::from([(
@@ -2463,6 +2465,7 @@ async fn native_mcp_coordination_rejects_unmapped_or_mismatched_results_and_reso
             "bot-driver",
             CoordinationSurface {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: BTreeMap::from([(

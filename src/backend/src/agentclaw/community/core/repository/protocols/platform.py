@@ -216,6 +216,42 @@ class TaskQueueRepositoryProtocol(Protocol):
         tests)."""
         ...
 
+    @abstractmethod
+    def find_by_idempotency_key(
+        self, *, task_type: str, idempotency_key: str, env: str, app: str
+    ) -> Optional[TaskRecord]:
+        """The newest task enqueued under ``idempotency_key``, live or terminal.
+
+        The read that answers "what became of the work I submitted?" for a
+        caller that holds the key but not the task id. ``enqueue`` already
+        answers it for a *live* task — it hands the holder back with
+        ``created=False`` — but a poll must not enqueue to find out, and the
+        interesting answers (declined, timed out) are precisely the terminal
+        ones ``enqueue`` no longer sees, because a terminal transition releases
+        the key.
+
+        **Two lookups, and the order is the whole performance story.** The live
+        one runs first and is served by the existing
+        ``UNIQUE (env, app, task_type, active_idempotency_key)`` index. Only
+        when it finds nothing does the fallback query the *audit* column
+        ``idempotency_key``, which no index covers — terminal rows keep their
+        key precisely so this question stays answerable, and giving that column
+        an index of its own would be a schema change for a read this rare.
+
+        So: cheap while the work is in flight (which is when something is
+        actually polling), and a scan of this ``(env, app)``'s rows once the
+        work is over. Callers must keep it that way — reach for this only when
+        the durable state your own domain owns cannot answer, and never in a
+        loop. ``get_by_id`` is the right read whenever the id is at hand.
+
+        Scoped to ``(env, app, task_type)``, the same scope the key is unique
+        within, so it can never hand back another deployment's row. Terminal
+        rows accumulate under a key that is re-enqueued later, so the newest is
+        returned — that is the generation a caller asking "what became of it?"
+        means.
+        """
+        ...
+
 
 @runtime_checkable
 class QualityTaskRepository(Protocol):

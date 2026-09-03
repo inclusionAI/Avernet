@@ -3,7 +3,9 @@
 // 5 种禁用场景：个人空间 / 未加入团队 / 非管理员 / 创建者 / 最后一位管理员（§7.6）。
 // 角色变更直接执行（PRD 交互），无降级二次确认；降级由「最后一位管理员不可改」前置 disabled 防护。
 // 管理员色 warning 橙 / 成员色 muted-foreground 灰（对齐 PRD：color r==='admin'?'--warning':'--muted-foreground'）。
+import { getCapabilities } from '@/capabilities';
 import {
+  Avatar,
   Button,
   ConfirmDialog,
   Select,
@@ -48,15 +50,6 @@ export function getRoleState(
   return { disabled: false, reason: '' };
 }
 
-function NameAvatar({ name }: { name: string }) {
-  const ch = (name || '?').trim().charAt(0).toUpperCase();
-  return (
-    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-medium text-white">
-      {ch}
-    </span>
-  );
-}
-
 export interface SpaceMemberRowProps {
   space: Space;
   member: SpaceMember;
@@ -81,14 +74,16 @@ export function SpaceMemberRow({
   const name = member.userName || member.displayName || member.userId;
   const { disabled: roleDisabled, reason } = getRoleState(space, member, manageable, lastOwner);
   const isAdmin = member.role === 'ADMIN';
-  // PRD：角色色 admin=warning 橙 / member=muted-foreground 灰；内联 var 覆盖 trigger base 的 text-foreground。
-  const roleColor = isAdmin ? 'hsl(var(--warning))' : 'hsl(var(--muted-foreground))';
+  // PRD：角色色 admin=warning 橙 / member=muted-foreground 灰；用语义 text-* 类覆盖 trigger base 的 text-foreground。
+  // 成员头像经 capability 解析：internal overlay 按 user_id(工号) 拼 antwork 照片 URL；
+  // Open Core/null/加载失败时 <Avatar> 回退首字母占位（不硬编码内网 URL，保持 Open Core 纯净）。
+  const avatarUrl = getCapabilities().getMemberAvatarUrl(member.userId).value ?? undefined;
 
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_160px_80px] items-center px-4 py-2.5 transition-colors hover:bg-muted/40">
       {/* 成员 */}
       <div className="flex min-w-0 items-center gap-2">
-        <NameAvatar name={name} />
+        <Avatar name={name} src={avatarUrl} size={28} />
         <span className="truncate text-sm font-medium text-foreground">{name}</span>
       </div>
 
@@ -108,8 +103,8 @@ export function SpaceMemberRow({
                   className={cn(
                     'h-8 w-[90px] border-0 bg-transparent px-2 font-medium shadow-none',
                     roleDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent/60',
+                    isAdmin ? 'text-warning' : 'text-muted-foreground',
                   )}
-                  style={{ color: roleColor }}
                 >
                   <SelectValue />
                 </SelectTrigger>

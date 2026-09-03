@@ -39,23 +39,24 @@ export function useSelectedGroupDetail(
       setSelectedGroupFallback(null);
       return;
     }
+    // 群已在当前筛选列表中：列表项已含展示所需字段，无需补拉详情，避免选中即触发
+    // GET /groups/{id} 详情请求。群详情仅在打开管理面板（查看/编辑）时按需拉取。
+    if (sessionGroups.some((group) => group.groupId === selectedGroupId)) {
+      setSelectedGroupFallback(null);
+      return;
+    }
+    // 列表尚未加载完成时等待，避免 sessionGroups 暂空时误判为"不在列表"而提前补拉。
+    if (isGroupsLoading) return;
+    // 仅当选中群不在当前筛选列表（URL 深链/邀请直达/被过滤）时，才补拉详情兜底展示。
     let cancelled = false;
     groupService.loadGroupDetailOrBcs(selectedGroupId, activeIdentityId ?? undefined).then((res) => {
       if (cancelled || !res?.ok) return;
       setSelectedGroupFallback(res.data);
-      // 不从群详情覆盖 membership：用户可能手动切换了「群成员/会话成员」视角，
-      // 身份切换后也已从记忆中恢复。群详情的 membership 字段反映后端对该身份的
-      // 归属判定，但不应覆盖用户的前端视角选择（下方 auto-correct effect 兜底）。
-      setSessionGroups((current) =>
-        current.some((group) => group.groupId === selectedGroupId)
-          ? current.map((group) => (group.groupId === selectedGroupId ? res.data : group))
-          : current,
-      );
     });
     return () => {
       cancelled = true;
     };
-  }, [selectedGroupId, activeIdentityId, setMembership, setSelectedGroupFallback, setSessionGroups]);
+  }, [selectedGroupId, activeIdentityId, sessionGroups, isGroupsLoading, setSelectedGroupFallback, setSessionGroups]);
 
   // 自动纠正：用户首次选了 direct 群但后端判定为 session_only 时自动切视角。
   // 恢复期间（restoringRef）跳过，避免覆盖记忆恢复的 membership。

@@ -103,6 +103,14 @@ export function useTaskExecution({
             apiBaseUrl: TASK_API_BASE,
             bcsBaseUrl: '',
             userId: context.ownerUserId,
+            // dashboard 图 DTO 可能不带任务列表元信息，透传创建时可用字段作为副屏 fallback。
+            taskInfoFallback: {
+              taskTypeLabel: form.taskType === 'workflow' ? '工作流任务' : '动态任务',
+              sourceLabel: context.sourceType === 'coop_group' ? '协作群' : 'Bot 会话',
+              ownerBotName: context.ownerBotId,
+              createdAt: record.create_time,
+              finishedAt: record.finish_time,
+            },
           }),
         );
         return { ok: true, taskId: record.task_id } as const;

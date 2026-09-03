@@ -9,6 +9,7 @@ import type {
   PublicScope,
 } from '@/domain/collaborationPrivacy/types';
 import { useEffect, useState } from 'react';
+import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 
 const scopeOptions: Array<{ value: PublicScope; label: string }> = [
@@ -51,22 +52,29 @@ export function PublicationEditor({
 }: PublicationEditorProps) {
   const [scope, setScope] = useState(initialConfig.scope);
   const [selected, setSelected] = useState<OrganizationPath[]>(initialConfig.organizationPaths);
-  const [deptNoByKey, setDeptNoByKey] = useState<Record<string, { deptNo: string; deptName: string }>>({});
+  const [selectedEntries, setSelectedEntries] = useState<OrganizationSearchEntry[]>(
+    () => initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path })),
+  );
   useEffect(() => {
     if (open) {
       setScope(initialConfig.scope);
       setSelected(initialConfig.organizationPaths);
-      setDeptNoByKey({});
+      setSelectedEntries(
+        initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path })),
+      );
     }
   }, [open, initialConfig]);
 
   const wrappedSearch = async (keyword: string, signal?: AbortSignal): Promise<OrganizationSearchEntry[]> => {
     const entries = await onSearch(keyword, signal);
-    const map: Record<string, { deptNo: string; deptName: string }> = { ...deptNoByKey };
-    for (const e of entries) {
-      map[e.path.join('/')] = { deptNo: e.deptNo, deptName: e.path.join('-') };
-    }
-    setDeptNoByKey(map);
+    const selectedKeys = new Set(selected.map((path) => path.join('\u0000')));
+    setSelectedEntries((current) => {
+      const byPath = new Map(current.map((entry) => [entry.path.join('\u0000'), entry]));
+      entries.forEach((entry) => {
+        if (selectedKeys.has(entry.path.join('\u0000'))) byPath.set(entry.path.join('\u0000'), entry);
+      });
+      return selected.map((path) => byPath.get(path.join('\u0000')) ?? { deptNo: '', path });
+    });
     return entries;
   };
 
@@ -74,12 +82,12 @@ export function PublicationEditor({
     const viewDepts =
       scope === 'restricted' && selected.length
         ? selected.map((p) => {
-            const key = p.join('/');
-            const info = deptNoByKey[key];
-            return { deptNo: info?.deptNo ?? '', deptName: info?.deptName ?? p.join('-') };
+            const key = p.join('\u0000');
+            const entry = selectedEntries.find((item) => item.path.join('\u0000') === key);
+            return { deptNo: entry?.deptNo ?? '', deptName: entry?.path.join(' / ') ?? p.join(' / ') };
           })
         : undefined;
-    onSubmit({ scope, organizationPaths: selected }, viewDepts);
+    onSubmit({ scope, organizationPaths: selected, organizationEntries: selectedEntries }, viewDepts);
   };
 
   const invalid = scope === 'restricted' && selected.length === 0;
@@ -94,34 +102,32 @@ export function PublicationEditor({
           </ModalDescription>
         </ModalHeader>
         <div className="space-y-5">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {scopeOptions.map((option) => (
-              <Button
-                key={option.value}
-                variant={scope === option.value ? 'primary' : 'secondary'}
-                className="h-auto min-h-20 flex-col items-start px-3 py-3 text-left"
-                aria-pressed={scope === option.value}
-                onClick={() => setScope(option.value)}
-              >
-                <span>{option.label}</span>
-                <span
-                  className={scope === option.value ? 'text-xs text-white/80' : 'text-xs text-[var(--color-muted)]'}
-                >
-                  {scopeDescriptions[audience][option.value]}
-                </span>
-              </Button>
-            ))}
-          </div>
+          <ChoiceGroup
+            value={scope}
+            options={scopeOptions.map((option) => ({
+              ...option,
+              description: scopeDescriptions[audience][option.value],
+            }))}
+            ariaLabel="公开范围"
+            onChange={setScope}
+            className="sm:grid-cols-3"
+          />
           {scope === 'restricted' && (
             <section aria-labelledby="publication-organizations">
-              <h3 id="publication-organizations" className="mb-2 text-sm font-medium text-[var(--color-fg)]">
+              <h3 id="publication-organizations" className="mb-2 text-sm font-medium text-foreground">
                 选择组织范围
               </h3>
-              <OrganizationScopeSearch value={selected} onChange={setSelected} onSearch={wrappedSearch} />
-              {invalid && <p className="mt-2 text-xs text-[var(--color-error)]">限制开放时，请至少选择一个团队范围</p>}
+              <OrganizationScopeSearch
+                value={selected}
+                onChange={setSelected}
+                onSearch={wrappedSearch}
+                selectedEntries={selectedEntries}
+                onEntriesChange={setSelectedEntries}
+              />
+              {invalid && <p className="mt-2 text-xs text-destructive">限制开放时，请至少选择一个团队范围</p>}
             </section>
           )}
-          {unchanged && !invalid && <p className="text-xs text-[var(--color-muted)]">配置未发生变化，无需提交审批</p>}
+          {unchanged && !invalid && <p className="text-xs text-muted-foreground">配置未发生变化，无需提交审批</p>}
         </div>
         <ModalFooter>
           <Button variant="secondary" disabled={loading} onClick={onClose}>

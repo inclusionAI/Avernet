@@ -2,6 +2,7 @@ import {
   changeBotSpace,
   deleteBot,
   listBotInventory,
+  listBots,
   restartBot,
   restartBotEngine,
   upgradeBotToService,
@@ -21,6 +22,17 @@ describe('botController OpenAPI contracts', () => {
     jest.restoreAllMocks();
     useWorkspaceStore.setState({ activeIdentityId: null });
   });
+  test('lists owned Bot engines with the explicit user id and pagination contract', async () => {
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 1, items: [] }));
+
+    await listBots({ user_id: '447147', page: 1, page_size: 100 });
+
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots?user_id=447147&page=1&page_size=100',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
   test('adds the current OpenAPI user id to inventory requests', async () => {
     useWorkspaceStore.setState({ activeIdentityId: 'human_327325' });
     const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
@@ -29,6 +41,17 @@ describe('botController OpenAPI contracts', () => {
 
     expect(spy).toHaveBeenCalledWith(
       '/openapi/v1/bots/all?page=1&page_size=20&user_id=327325',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+  test('does not send placeholder identity me as user_id', async () => {
+    useWorkspaceStore.setState({ activeIdentityId: 'me' });
+    const spy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => response({ total: 0, items: [] }));
+
+    await listBotInventory({ page: 1, page_size: 20 });
+
+    expect(spy).toHaveBeenCalledWith(
+      '/openapi/v1/bots/all?page=1&page_size=20',
       expect.objectContaining({ method: 'GET' }),
     );
   });

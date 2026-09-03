@@ -4,6 +4,7 @@ import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
 import { TASK_API_BASE } from '@/services/tasks/taskConfig';
+import { getBotDisplayName, getUserTaskSourceLabel, getUserTaskTypeLabel } from '../userTaskUtils';
 import { MyTaskRoutineDrawer } from './MyTaskRoutineDrawer';
 import { MyTaskRoutineHistoryDrawer } from './MyTaskRoutineHistoryDrawer';
 
@@ -24,6 +25,7 @@ export interface MyTaskDrawersProps {
   historyLoading: boolean;
   historyError: string | null;
   onOpenRoutineFromHistory: (botId: string, routineId: string) => void;
+  botNameMap: Record<string, string>;
 }
 
 export function MyTaskDrawers({
@@ -43,20 +45,47 @@ export function MyTaskDrawers({
   historyLoading,
   historyError,
   onOpenRoutineFromHistory,
+  botNameMap,
 }: MyTaskDrawersProps) {
-  const selectedTask = taskRecords.find((item) => item.task_id === selectedTaskId) ?? null;
+  const selectedTask = selectedTaskId ? taskRecords.find((record) => record.task_id === selectedTaskId) : null;
+  const taskInfoFallback = selectedTask
+    ? (() => {
+        const record = selectedTask as TaskListItem & {
+          task_info?: {
+            execution_config?: { task_type?: string };
+            create_time?: string;
+            finish_time?: string | null;
+            source_type?: string | null;
+            owner_bot_id?: string | null;
+          };
+          create_time?: string;
+          finish_time?: string | null;
+        };
+        const taskInfo = record.task_info;
+        return {
+          taskTypeLabel: getUserTaskTypeLabel(
+            record.execution_config?.task_type ?? taskInfo?.execution_config?.task_type,
+          ),
+          sourceLabel: getUserTaskSourceLabel(record.source_type ?? taskInfo?.source_type),
+          ownerBotName: getBotDisplayName(botNameMap, record.owner_bot_id ?? taskInfo?.owner_bot_id),
+          createdAt: record.gmt_create ?? taskInfo?.create_time ?? record.create_time ?? '',
+          finishedAt: record.gmt_modified ?? taskInfo?.finish_time ?? record.finish_time ?? null,
+        };
+      })()
+    : undefined;
 
   return (
     <>
       <Drawer open={Boolean(selectedTaskId)} onOpenChange={(open) => !open && onCloseTask()}>
-        <DrawerContent side="right" size="full" className="p-0">
-          <div className="-m-6 h-[calc(100%+3rem)]">
-            {selectedTask ? (
+        <DrawerContent side="right" size="full" className="overflow-hidden bg-background p-0" bodyClassName="p-0">
+          <div className="h-full min-h-0">
+            {selectedTaskId ? (
               <TaskPanel
                 apiBaseUrl={TASK_API_BASE}
                 bcsBaseUrl=""
                 userId={ownerUserId}
-                taskId={selectedTask.task_id}
+                taskId={selectedTaskId}
+                taskInfoFallback={taskInfoFallback}
                 style={{ height: '100%', minHeight: 0 }}
               />
             ) : (
@@ -75,6 +104,7 @@ export function MyTaskDrawers({
         selectedRoutineRuns={selectedRoutineRuns}
         selectedRoutineRunsLoading={selectedRoutineRunsLoading}
         selectedRoutineRunsError={selectedRoutineRunsError}
+        botNameMap={botNameMap}
       />
 
       <MyTaskRoutineHistoryDrawer

@@ -106,6 +106,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          # Cache ~/.npm keyed on the committed lockfiles. `npm ci` for the
+          # frontend (2153 packages, ~44s) and the BCS panel asset then
+          # resolve tarballs from the cache; the openclaw global install and
+          # the lockfile-less BCN plugin build share the same tarball cache.
+          cache: npm
+          cache-dependency-path: |
+            src/frontend/package-lock.json
+            src/bcs/assets/panel/package-lock.json
 
       - name: Install Rust toolchain
         if: steps.changes.outputs.skip != 'true'
@@ -114,38 +122,76 @@ jobs:
           rustup default stable
           rustup component add llvm-tools
           echo "${HOME}/.cargo/bin" >> "${GITHUB_PATH}"
-          cargo install cargo-llvm-cov --locked
           rustc --version
           cargo --version
-          cargo llvm-cov --version
+
+      - name: Install cargo-llvm-cov
+        if: steps.changes.outputs.skip != 'true'
+        # Prebuilt release binary into ~/.cargo/bin. `cargo install
+        # cargo-llvm-cov --locked` compiled it from source on every run
+        # (~55s of the 61s toolchain step); the download takes seconds.
+        # No version pin, so this tracks the latest release exactly like
+        # `cargo install` did.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Show cargo-llvm-cov version
+        if: steps.changes.outputs.skip != 'true'
+        run: cargo llvm-cov --version
 
       - name: Install system dependencies
         if: steps.changes.outputs.skip != 'true'
+        # ubuntu-latest already ships gcc/make, curl, git, jq, libsqlite3-dev,
+        # libssl-dev, lsof, pkg-config, and procps; listing them here only
+        # pulled in package upgrades. protobuf-compiler (protoc, needed by
+        # the BCS build) is the one package the image lacks.
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            curl \
-            git \
-            jq \
-            libsqlite3-dev \
-            libssl-dev \
-            lsof \
-            pkg-config \
-            procps \
-            protobuf-compiler
+          sudo apt-get install -y --no-install-recommends protobuf-compiler
 
-      - name: Install Python tooling
+      - name: Install uv
         if: steps.changes.outputs.skip != 'true'
-        run: |
-          python -m pip install --upgrade pip uv
-          uv --version
+        # Same setup as unit-tests.yml. The cache holds uv's wheel/sdist-build
+        # cache (~/.cache/uv), keyed on the lockfiles of every project the
+        # coverage stack syncs, so `uv sync` links from cache instead of
+        # re-downloading (and rebuilding jieba from sdist) on every run.
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            src/backend/uv.lock
+            src/baas/uv.lock
+            src/bcsfuse/uv.lock
+            src/engine/uv.lock
+
+      - name: Show uv version
+        if: steps.changes.outputs.skip != 'true'
+        run: uv --version
 
       - name: Install OpenClaw CLI
         if: steps.changes.outputs.skip != 'true'
         run: |
           npm install -g openclaw@2026.6.1
           openclaw --version || true
+
+      - name: Cache Cargo registry and git
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          # Registry/git fetch only. NOT src/bcs/target: the instrumented
+          # build under target/cov-e2e/llvm-cov-target is force-rebuilt every
+          # run (BCS_COVERAGE_FORCE_REBUILD=1) so coverage always reflects
+          # the pushed source; caching those artifacts would risk stale
+          # coverage across commits (same reasoning as e2e-tests.yml).
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-singlebox-${{ hashFiles('src/bcs/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-singlebox-
+            ${{ runner.os }}-cargo-e2e-
+            ${{ runner.os }}-cargo-
 
       - name: Validate shell scripts
         if: steps.changes.outputs.skip != 'true'

@@ -261,6 +261,10 @@ jwt_secret = "replace-with-oauth-jwt-secret"
 idle_timeout_minutes = 30
 base_url = "https://bcs.example.com"
 cookie_secure = true
+# Path the browser is redirected to after a successful OAuth login.
+# Must be a relative path starting with a single "/". Defaults to "/".
+# A query string is allowed, e.g. "/?login=success".
+success_redirect_path = "/"
 
 [auth.oauth.providers.github]
 kind = "github"

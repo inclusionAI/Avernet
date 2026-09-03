@@ -10,6 +10,7 @@ import {
   abortAllStreams,
   cleanupAgentEventsSubscription,
   combineDeliveredReplyParts,
+  handleChatAbort,
   handleChatInject,
   handleChatSend,
   handleBcsRouteTool,
@@ -704,17 +705,97 @@ describe('openclaw-channel-bcn', () => {
     assert.equal(registeredEvents.includes('before_tool_call'), false);
   });
 
-  it('does not expose unused chat.abort request handling in public source files', () => {
-    const matches: string[] = [];
+  it('aborts an exact run, fences late terminals, and keeps idempotent tombstones', async () => {
+    const responses: Array<{
+      id: string;
+      ok: boolean;
+      payload?: Record<string, unknown>;
+      error?: Record<string, unknown>;
+    }> = [];
+    const events: Array<{ event: string; payload: Record<string, unknown> }> = [];
+    let rejectLoad: ((error: Error) => void) | undefined;
+    const client = {
+      sendResponse(
+        id: string,
+        ok: boolean,
+        payload?: Record<string, unknown>,
+        error?: Record<string, unknown>,
+      ) {
+        responses.push({ id, ok, payload, error });
+      },
+      sendEvent(event: string, payload: Record<string, unknown>) {
+        events.push({ event, payload });
+      },
+    };
+    setBcsRuntime({
+      config: {
+        loadConfig() {
+          return new Promise((_resolve, reject) => {
+            rejectLoad = reject;
+          });
+        },
+      },
+    } as any);
+    const account = {
+      accountId: 'default',
+      enabled: true,
+      bcsUrl: 'ws://bcs.test/ws/bot',
+      botId: 'bot-1',
+      botName: 'Bot 1',
+      capabilities: { summary: '', domains: [], skills: [], scopes: [] },
+      heartbeatIntervalMs: 60000,
+      reconnectIntervalMs: 5000,
+      connectionTimeoutMs: 10000,
+    } as ResolvedBcsAccount;
+    const send = handleChatSend({
+      type: 'req',
+      id: 'send-command',
+      method: 'chat.send',
+      params: {
+        idempotency_key: 'run-exact',
+        session_key: 'session-1',
+        bcs_session_id: 'session-1',
+        bcs_group_id: 'group-1',
+        channel: { source: 'api' },
+        session_context: {},
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: 'work' }],
+          timestamp: Date.now(),
+        },
+      },
+    }, client as any, account);
 
-    for (const file of listSourceFiles(join(__dirname, '..', 'src'))) {
-      const content = readFileSync(file, 'utf-8');
-      if (content.includes('chat.abort') || content.includes('ChatAbortParams')) {
-        matches.push(file.slice(join(__dirname, '..').length + 1));
-      }
-    }
+    assert.equal(responses[0]?.ok, true, 'chat.send ACK follows controller registration');
+    await handleChatAbort({
+      type: 'req', id: 'wrong-scope', method: 'chat.abort',
+      params: { session_key: 'session-other', run_id: 'run-exact' },
+    }, client as any);
+    assert.equal(responses.at(-1)?.error?.code, 'SCOPE_MISMATCH');
 
-    assert.deepEqual(matches, []);
+    await handleChatAbort({
+      type: 'req', id: 'abort-1', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-exact' },
+    }, client as any);
+    assert.deepEqual(responses.at(-1)?.payload?.aborted_run_ids, [ 'run-exact' ]);
+    assert.equal(events.filter(event => event.payload.state === 'aborted').length, 1);
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-repeat', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-exact' },
+    }, client as any);
+    assert.deepEqual(responses.at(-1)?.payload?.aborted_run_ids, []);
+
+    await handleChatAbort({
+      type: 'req', id: 'abort-unknown', method: 'chat.abort',
+      params: { session_key: 'session-1', run_id: 'run-unknown' },
+    }, client as any);
+    assert.equal(responses.at(-1)?.error?.code, 'RUN_NOT_FOUND');
+
+    rejectLoad?.(new Error('stop after abort'));
+    await send;
+    assert.equal(events.filter(event => event.payload.state === 'aborted').length, 1);
+    abortAllStreams();
   });
 
   it('does not activate manager task tools for legacy task groups without a local bot uuid', () => {

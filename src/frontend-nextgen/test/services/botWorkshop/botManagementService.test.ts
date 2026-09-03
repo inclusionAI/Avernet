@@ -1,53 +1,52 @@
-import { botEditorController } from '@/services/backendApi/bots/botEditorController';
+import { createSpace, listSpaces } from '@/services/backendApi/admin/spaceController';
+import { botCollaborationController } from '@/services/backendApi/bots/botCollaborationController';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
-import { mapBotDto } from '@/services/botWorkshop/botMapper';
 
 jest.mock('@/services/backendApi/bots/botEditorController', () => ({
-  botEditorController: { getEditLock: jest.fn(), stealEditLock: jest.fn() },
+  botEditorController: { stealEditLock: jest.fn() },
 }));
-jest.mock('@/services/backendApi/admin/spaceController', () => ({ listSpaces: jest.fn() }));
-jest.mock('@/services/backendApi/bots/botCollaborationController', () => ({ botCollaborationController: {} }));
+jest.mock('@/services/backendApi/admin/spaceController', () => ({ listSpaces: jest.fn(), createSpace: jest.fn() }));
+jest.mock('@/services/backendApi/bots/botCollaborationController', () => ({
+  botCollaborationController: { add: jest.fn(), update: jest.fn() },
+}));
 jest.mock('@/services/backendApi/bots/botController', () => ({ changeBotSpace: jest.fn() }));
 
-const getEditLock = botEditorController.getEditLock as jest.MockedFunction<typeof botEditorController.getEditLock>;
+const mockedListSpaces = listSpaces as jest.MockedFunction<typeof listSpaces>;
+const mockedCreateSpace = createSpace as jest.MockedFunction<typeof createSpace>;
 
-test('只为草稿服务 Bot 加载锁，并映射持锁人和创建时间', async () => {
-  getEditLock.mockResolvedValue({
-    data: {
-      locked: true,
-      holder_user_id: 'u2',
-      holder_name: '李四',
-      created_at: '2026-08-26T10:00:00Z',
-      has_collaborators: true,
-      is_owner_holder: false,
-      need_lock: true,
-    },
+test('变更归属空间只查询当前用户可用空间', async () => {
+  mockedListSpaces.mockResolvedValue({ data: { total: 0, items: [] } });
+
+  await botManagementService.listSpaces('149608');
+
+  expect(mockedListSpaces).toHaveBeenCalledWith({
+    user_id: '149608',
+    page_no: 1,
+    page_size: 100,
+    scope: 'accessible',
   });
-  const serviceBot = mapBotDto({
-    bot_id: 'service-1',
-    owner_entity_id: 'owner-1',
-    bot_type: 'service',
-    kind: 'service',
-    engine: 'openclaw',
-    display_state: 'service_draft',
-  }).item;
-  const personalBot = mapBotDto({
-    bot_id: 'personal-1',
-    owner_entity_id: 'owner-1',
-    bot_type: 'personal',
-    engine: 'openclaw',
-    status: 'ACTIVE',
-  }).item;
+});
 
-  const result = await botManagementService.loadServiceLocks([serviceBot, personalBot], 'u1');
+test('创建团队后返回可用于迁移的空间', async () => {
+  mockedCreateSpace.mockResolvedValue({ data: { space_id: 12, space_name: '研发团队', space_type: 'TEAM' } });
 
-  expect(getEditLock).toHaveBeenCalledTimes(1);
-  expect(getEditLock).toHaveBeenCalledWith('service-1', 'owner-1');
-  expect(result[0].lock).toEqual({
-    status: 'other',
-    holderUserId: 'u2',
-    holderName: '李四',
-    lockedAt: '2026-08-26T10:00:00Z',
+  await expect(botManagementService.createTeamSpace('研发团队', '149608')).resolves.toEqual({
+    id: 12,
+    name: '研发团队',
+    type: 'TEAM',
   });
-  expect(result[1].lock).toBeUndefined();
+  expect(mockedCreateSpace).toHaveBeenCalledWith({ space_name: '研发团队' }, { user_id: '149608' });
+});
+
+test('添加协作者时同时提交姓名并使用写接口响应', async () => {
+  const add = botCollaborationController.add as jest.Mock;
+  add.mockResolvedValue({ data: { id: 7, user_id: '149608', user_name: '小明', role: 'member' } });
+
+  await expect(botManagementService.addCollaborator('bot-1', '149608', '小明', 'member')).resolves.toEqual({
+    id: 7,
+    userId: '149608',
+    name: '小明',
+    role: 'member',
+  });
+  expect(add).toHaveBeenCalledWith('bot-1', '149608', '小明', 'member');
 });

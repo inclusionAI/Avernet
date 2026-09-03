@@ -25,12 +25,12 @@ export function FuseFloatButton({ onClick, sessionId }: FuseFloatButtonProps) {
         size="sm"
         onClick={onClick}
         className={cn(
-          'flex h-10 items-center overflow-hidden rounded-full border border-[var(--color-border)] bg-white text-[var(--color-fg)] shadow-md hover:shadow-lg !px-0 !justify-start',
+          'flex h-10 items-center overflow-hidden rounded-full border border-border bg-background text-foreground shadow-md hover:shadow-lg !px-0 !justify-start',
           hovered ? 'w-[120px]' : 'w-10',
         )}
       >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-soft)] ml-1.5">
-          <Brain className="h-4 w-4 text-[var(--color-primary)]" />
+        <span className="ml-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10">
+          <Brain className="h-4 w-4 text-primary" />
         </span>
         <span
           className={cn(
@@ -41,7 +41,7 @@ export function FuseFloatButton({ onClick, sessionId }: FuseFloatButtonProps) {
           融合模式
         </span>
         {hasUnread && (
-          <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--color-error)] ring-2 ring-white" />
+          <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-destructive ring-2 ring-background" />
         )}
       </Button>
     </div>

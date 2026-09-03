@@ -92,7 +92,7 @@ class SpaceSkillSummaryRecord(TypedDict):
 
 
 class SpaceSkillDetailRecord(SpaceSkillSummaryRecord):
-    source: Literal["FOLDER", "GIT"]
+    source: Literal["FOLDER", "GIT", "COPY"]
     offline_at: datetime | None
     offline_by: str | None
 

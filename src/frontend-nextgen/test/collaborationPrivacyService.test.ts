@@ -61,6 +61,7 @@ function createOverview(): CollaborationPrivacyOverview {
 class FakeGateway implements CollaborationPrivacyGateway {
   overview = createOverview();
   directCommands: DirectSettingCommand[] = [];
+  refreshBotIds: string[] = [];
   publicationCommands: PublicationCommand[] = [];
   friendCommands: FriendApprovalCommand[] = [];
   signals: Array<AbortSignal | undefined> = [];
@@ -69,11 +70,35 @@ class FakeGateway implements CollaborationPrivacyGateway {
   holdDirectSettings = false;
   directResolvers: Array<(value: DirectSettingCommand['value']) => void> = [];
 
-  async loadOverview(signal?: AbortSignal) {
+  async loadOverview(_userId: string, signal?: AbortSignal) {
     this.signals.push(signal);
     return this.overview;
   }
-  async syncDepartment(signal?: AbortSignal) {
+  taskClaimRequests: Array<{ botId: string; action: 'enable' | 'disable' }> = [];
+  async enableTaskClaim(botId: string) {
+    this.taskClaimRequests.push({ botId, action: 'enable' });
+    const bot = this.overview.bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    const updated = { ...bot, taskClaimingEnabled: true, taskClaimStatus: 'authorized' as const };
+    this.overview.bots = this.overview.bots.map((item) => (item.id === botId ? updated : item));
+    return structuredClone(updated);
+  }
+  async disableTaskClaim(botId: string) {
+    this.taskClaimRequests.push({ botId, action: 'disable' });
+    const bot = this.overview.bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    const updated = { ...bot, taskClaimingEnabled: false, taskClaimStatus: 'unauthorized' as const };
+    this.overview.bots = this.overview.bots.map((item) => (item.id === botId ? updated : item));
+    return structuredClone(updated);
+  }
+  async refreshManagedBot(botId: string, signal?: AbortSignal) {
+    this.signals.push(signal);
+    this.refreshBotIds.push(botId);
+    const bot = this.overview.bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    return { ...structuredClone(bot), collaborationStatus: 'hidden' as const };
+  }
+  async syncDepartment(_userId: string, signal?: AbortSignal) {
     this.signals.push(signal);
     return this.overview.currentUser;
   }
@@ -114,10 +139,28 @@ class FakeGateway implements CollaborationPrivacyGateway {
 }
 
 describe('CollaborationPrivacyService', () => {
+  test('按需刷新只替换目标 Bot，不重新加载整个列表', async () => {
+    const gateway = new FakeGateway();
+    const service = new CollaborationPrivacyService(gateway);
+    await service.loadOverview('447147');
+
+    const refreshed = await service.refreshBot('joined');
+
+    expect(gateway.refreshBotIds).toEqual(['joined']);
+    expect(refreshed.collaborationStatus).toBe('hidden');
+    await expect(
+      service.updateDirectSetting({
+        botId: 'joined',
+        setting: 'collaborationStatus',
+        value: 'online',
+      }),
+    ).resolves.toMatchObject({ collaborationStatus: 'online' });
+  });
+
   test('BCN 未加入时拒绝任何写操作', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     await expect(
       service.updateDirectSetting({ botId: 'disabled', setting: 'profilePublic', value: true }),
@@ -128,7 +171,7 @@ describe('CollaborationPrivacyService', () => {
   test('提交公开变更只创建对应 audience pending，不提前改变生效值', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     const next = await service.submitPublication({
       botId: 'joined',
@@ -145,7 +188,7 @@ describe('CollaborationPrivacyService', () => {
   test('restricted 和 partial_exempt 缺少范围时不调用 Gateway', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     await expect(
       service.submitPublication({
@@ -167,7 +210,7 @@ describe('CollaborationPrivacyService', () => {
   test('双公开均 none 时拒绝修改好友审批策略', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     await expect(
       service.updateFriendApproval({
@@ -180,7 +223,7 @@ describe('CollaborationPrivacyService', () => {
   test('同一 audience 存在 pending 时拒绝重复提交', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
     await service.submitPublication({
       botId: 'joined',
       audience: 'user',
@@ -200,7 +243,7 @@ describe('CollaborationPrivacyService', () => {
   test('归一化后配置无变化时不创建工单', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     await expect(
       service.submitPublication({
@@ -225,11 +268,39 @@ describe('CollaborationPrivacyService', () => {
     expect(gateway.friendCommands).toHaveLength(0);
   });
 
+  test('限制公开部门发生变化时仍提交变更并进入 pending', async () => {
+    const gateway = new FakeGateway();
+    const service = new CollaborationPrivacyService(gateway);
+    await service.loadOverview('447147');
+
+    const next = await service.submitPublication({
+      botId: 'joined',
+      audience: 'bot',
+      config: { scope: 'restricted', organizationPaths: [['示例集团', '安全团队']] },
+    });
+
+    expect(gateway.publicationCommands).toEqual([
+      {
+        botId: 'joined',
+        audience: 'bot',
+        config: { scope: 'restricted', organizationPaths: [['示例集团', '安全团队']] },
+      },
+    ]);
+    expect(next.publication.bot).toEqual({
+      scope: 'restricted',
+      organizationPaths: [['示例集团', '平台团队']],
+    });
+    expect(next.pendingPublications.bot?.target).toEqual({
+      scope: 'restricted',
+      organizationPaths: [['示例集团', '安全团队']],
+    });
+  });
+
   test('同一 audience 的并发提交只允许一个进入 Gateway，不同 audience 可独立提交', async () => {
     const gateway = new FakeGateway();
     gateway.holdPublications = true;
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     const userRequest = service.submitPublication({
       botId: 'joined',
@@ -268,7 +339,7 @@ describe('CollaborationPrivacyService', () => {
     const gateway = new FakeGateway();
     gateway.holdDirectSettings = true;
     const service = new CollaborationPrivacyService(gateway);
-    await service.loadOverview();
+    await service.loadOverview('447147');
 
     const request = service.updateDirectSetting({ botId: 'joined', setting: 'profilePublic', value: false });
     await expect(
@@ -284,8 +355,8 @@ describe('CollaborationPrivacyService', () => {
     const service = new CollaborationPrivacyService(gateway);
     const signal = new AbortController().signal;
 
-    await service.loadOverview(signal);
-    await service.syncDepartment(signal);
+    await service.loadOverview('447147', signal);
+    await service.syncDepartment('447147', signal);
     await service.updateDirectSetting({ botId: 'joined', setting: 'profilePublic', value: false }, signal);
     await service.submitPublication(
       {
@@ -303,7 +374,9 @@ describe('CollaborationPrivacyService', () => {
       signal,
     );
 
-    expect(gateway.signals).toHaveLength(5);
+    await service.refreshBot('joined', signal);
+
+    expect(gateway.signals).toHaveLength(6);
     gateway.signals.forEach((received) => expect(received).toBe(signal));
   });
 });

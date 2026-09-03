@@ -36,6 +36,9 @@ from agentclaw.community.core.bot_management.engines.aicoding.strategy import (
     AICODING_ENGINE_TYPE,
     CLAUDE_CODE_ENGINE_TYPE,
 )
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
+)
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotTemplateInvalidError,
@@ -55,10 +58,6 @@ from agentclaw.community.core.workspace.runtime_identity import (
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.auth_relationship import AuthRelationshipError
 from agentclaw.community.plugin_api.passport import PassportError
-from agentclaw.community.utils.avernet_tenant import (
-    DEFAULT_AVERNET_TENANT,
-    get_current_avernet_tenant,
-)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -315,11 +314,10 @@ def _prepare_create(
     if spec.engine_properties:
         prepared = _prepare_with_engine_strategy(spec, context)
     elif spec.template_type == "applicationCoding":
-        # Core-only compatibility representation: the "template" key's presence
-        # preserves the legacy intent even when the caller intentionally
-        # omitted the config, so both input shapes share the Strategy's gate.
+        # Keeping the "template_config" key preserves legacy intent when the
+        # caller omits the config, so both input shapes share the Strategy gate.
         prepared = _prepare_with_engine_strategy(
-            replace(spec, engine_properties={"template": spec.template_config}),
+            replace(spec, engine_properties={"template_config": spec.template_config}),
             context,
         )
     else:
@@ -394,14 +392,21 @@ def _apply_passport(
     any other apply failure becomes a ``BotServiceError`` so it keeps the
     "Passport apply failed" mapping rather than falling into a generic bucket.
     """
-    # 默认租户:首个个人 Bot → applyFirst(跳过审批),否则 → applyAgent(走审批)。
-    # 服务 Bot 不占用“首个个人 Bot”资格；软删除过滤由仓储查询保证。
-    # 其他租户(openapi / 外部):一律 applyFirst —— 审批流不适用于外部租户,
-    # 且 applyFirst 对重复调用幂等,故不依赖首个个人 Bot 判断。见 #556。
-    if (
-        get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT
-        and not use_first_passport
-    ):
+    # ``use_first_passport`` decides, and nothing else: the first personal Bot
+    # takes applyFirst (skipping approval), everything else applyAgent. Service
+    # Bots do not consume that eligibility; soft-delete filtering is the
+    # repository query's job.
+    #
+    # **Every tenant is treated the same.** This was once gated on
+    # ``get_current_avernet_tenant() == DEFAULT_AVERNET_TENANT`` too, so a
+    # non-default tenant took applyFirst *unconditionally* — #556's reading that
+    # approval does not apply to external tenants. That made
+    # ``use_first_passport=False`` a request this function could silently
+    # decline, and W13 is the caller that cannot survive it: submission passes
+    # ``False`` precisely to get an authorization URL, and on a non-default
+    # tenant got a bare token instead — a ``202`` carrying two empty strings and
+    # no way to authorize the creation it had just started.
+    if not use_first_passport:
         apply = passport_plugin.apply_agent_passport
     else:
         apply = passport_plugin.apply_first_agent_passport
@@ -633,6 +638,296 @@ def create_bot_with_authorization(
         bot=result,
         is_first_bot=is_first_bot,
         passport_token=passport_token,
+    )
+
+
+@dataclass(frozen=True)
+class ManifestCreationSubmitted:
+    """What submitting a create-from-manifest request answers with.
+
+    No state field, deliberately: the state vocabulary belongs to the poll and
+    appears nowhere else, so no terminal value can ever be returned by
+    submission. A caller that has just submitted is, by construction, awaiting
+    authorization.
+    """
+
+    bot_id: str
+    iframe_url: str | None
+    redirect_url: str | None
+    #: The **prepared** spec and context, as the creation will actually be
+    #: completed. Returned rather than left for the caller to rebuild, because
+    #: ``_prepare_create`` can rewrite the engine and what the job freezes must
+    #: be the engine the manifest was validated against — not the one the
+    #: request happened to name. See :func:`creation_spec_to_payload`.
+    spec: BotCreateSpec
+    context: BotCreateContext
+
+
+
+def submit_bot_creation_with_manifest(
+    *,
+    user_id: str,
+    bot_id: str,
+    document: str,
+    modifier: str,
+    spec: BotCreateSpec,
+    context: BotCreateContext,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    skill_set_factory: SkillSetServiceFactory,
+    manifest_seam: ManifestCreationSeam,
+) -> ManifestCreationSubmitted:
+    """Validate, store the manifest, apply for a Passport — and stop.
+
+    **This never creates the bot**, which is the difference from
+    :func:`create_bot_with_authorization`. That function creates inline when
+    Passport hands back a token immediately; here the creation job owns creation
+    on every path, so there is one sequence rather than two and the
+    pre-container phase cannot be skipped by a lucky Passport response. If a
+    token does come back at once, the job's first run simply sees ``ISSUED`` and
+    proceeds — no special case.
+
+    **The manifest is validated before Passport is applied for**, in the same
+    breath as quota, name and engine. A caller must never complete an
+    authorization only to be told their document was invalid: that wastes their
+    time and burns a Passport application. It is stored immediately afterwards,
+    which is what makes "the manifest that was validated is the manifest that is
+    applied" structural — the caller submits it once and the poll never accepts
+    another.
+
+    Ordering, and every line of it matters:
+
+    1. ``_prepare_create`` — the shared creation policy, which may rewrite the
+       engine (legacy aliases), so everything after it sees the engine the bot
+       will actually run.
+    2. the name check, then the platform preflight (quota, reserved engines).
+    3. the manifest preflight, against **the prepared spec's** engine.
+    4. persist, keyed by the same ``entity_id`` ``create_bot`` will resolve.
+    5. the Passport application.
+    """
+    spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
+    bot_name = validate_bot_name(spec.bot_name) if spec.bot_name is not None else None
+    bot_service.check_create_bot_preflight(
+        user_id=user_id,
+        bot_id=bot_id,
+        engine_type=spec.engine_type,
+        bot_name=bot_name,
+    )
+
+    # Raises ManifestValidationError with every reason at once. Before Passport.
+    manifest_seam.preflight(
+        document=document,
+        engine_type=spec.engine_type,
+        bot_type=spec.bot_type,
+    )
+    # The seam resolves the storage key and returns it: this module must not
+    # import the manifest package (that closes a cycle through the creation
+    # graph), and the key's rule belongs with the storage that depends on it.
+    entity_id = manifest_seam.persist(
+        spec_entity_id=spec.entity_id,
+        bot_id=bot_id,
+        document=document,
+        modifier=modifier,
+        engine_type=spec.engine_type,
+        bot_type=spec.bot_type,
+    )
+
+    # Everything after the manifest is stored is one unit, and it has to be.
+    #
+    # The document is now on disk under a ``bot_id`` the caller has not been told
+    # about yet. If the Passport application raises, or returns nowhere to send
+    # the user, or the durable handoff fails, the request ends in an error and
+    # that row is unreachable: no bot record for ordinary deletion to find, and
+    # no job to expire and clean it up. Compensating here is what keeps "the
+    # rows this endpoint creates are bounded by their own jobs" true — before a
+    # job exists there is no job to bound them, so this is the only place that
+    # can.
+    try:
+        return _apply_and_hand_off(
+            manifest_seam=manifest_seam,
+            passport_plugin=passport_plugin,
+            skill_set_factory=skill_set_factory,
+            user_id=user_id,
+            bot_id=bot_id,
+            entity_id=entity_id,
+            bot_name=bot_name,
+            spec=spec,
+            context=context,
+        )
+    except Exception:
+        # Best-effort by construction: ``discard`` never raises, so a cleanup
+        # that cannot run does not replace the caller's real error with its own.
+        manifest_seam.discard(entity_id=entity_id, bot_id=bot_id)
+        raise
+
+
+def _apply_and_hand_off(
+    *,
+    manifest_seam: ManifestCreationSeam,
+    passport_plugin: PassportPlugin,
+    skill_set_factory: SkillSetServiceFactory,
+    user_id: str,
+    bot_id: str,
+    entity_id: str,
+    bot_name: str | None,
+    spec: BotCreateSpec,
+    context: BotCreateContext,
+) -> ManifestCreationSubmitted:
+    """Apply for the Passport, then hand the creation to its durable job.
+
+    Split out so the compensating cleanup above wraps exactly the steps that can
+    strand the stored manifest, and nothing else.
+
+    The job is started **here** rather than by the caller: it is the last step of
+    submission, and a route that started it would be the one place a failure
+    could leave a stored manifest with nothing to clean it up.
+    """
+    passport_result = _apply_passport(
+        passport_plugin,
+        bot_id=bot_id,
+        user_id=user_id,
+        bot_name=bot_name,
+        spec=spec,
+        mcp_codes=_get_bot_mcp_codes(
+            skill_set_factory, user_id, bot_id, spec.entity_id, spec.entity_type,
+            engine_type=spec.engine_type,
+        ),
+        cli_items=get_default_cli_items(
+            spec.engine_type,
+            spec.template_type,
+            ext_info={"template_config": spec.template_config}
+            if spec.template_config is not None
+            else None,
+        ),
+        # **No first-bot skip on this surface.** ``create_bot_with_authorization``
+        # asks Passport to skip approval for a user's very first bot; this
+        # endpoint deliberately does not, so an OpenAPI client integrates
+        # against one flow rather than two.
+        #
+        # It governs every tenant, which it did not always: while
+        # ``_apply_passport`` consulted the tenant, this ``False`` was honoured
+        # on the default one and ignored elsewhere, so a non-default tenant got
+        # ``applyFirst`` — a bare token, no URL, and a ``202`` the caller could
+        # not act on. That branch is gone; see ``_apply_passport``.
+        use_first_passport=False,
+    )
+
+    iframe_url = passport_result.get("iframe_url") if passport_result else None
+    redirect_url = passport_result.get("redirect_url") if passport_result else None
+    token = passport_result.get("token") if passport_result else None
+    if not token and not iframe_url and not redirect_url:
+        # Neither a token nor anywhere to send the user. No bot was created, but
+        # the stored manifest is real — the caller above discards it — and the
+        # caller would otherwise be left polling a creation nobody can authorize.
+        raise PassportError(
+            f"Passport returned no token and no authorization URL for bot {bot_id}"
+        )
+
+    # The durable job, last: its first step reads the authorization that the
+    # application above has only just made, so starting it earlier would only
+    # buy a first run that finds nothing.
+    manifest_seam.start_job(
+        bot_id=bot_id,
+        entity_id=entity_id,
+        user_id=user_id,
+        document_owner=user_id,
+        spec=creation_spec_to_payload(spec, context),
+        iframe_url=iframe_url,
+        redirect_url=redirect_url,
+    )
+    return ManifestCreationSubmitted(
+        bot_id=bot_id,
+        iframe_url=iframe_url,
+        redirect_url=redirect_url,
+        spec=spec,
+        context=context,
+    )
+
+
+def creation_spec_to_payload(
+    spec: BotCreateSpec, context: BotCreateContext
+) -> dict[str, Any]:
+    """Freeze a creation's attributes so nothing has to be supplied again.
+
+    This is what lets the poll take a ``bot_id`` and nothing else: the server
+    already holds what the creation was for. Enums are stored by value because
+    the payload is JSON in a database column, and the *prepared* spec is what
+    callers should freeze — ``_prepare_create`` can rewrite the engine, and the
+    completion must use the engine the manifest was validated against.
+    """
+    return {
+        "entity_id": spec.entity_id,
+        "entity_type": spec.entity_type,
+        "engine_type": spec.engine_type,
+        "bot_type": spec.bot_type,
+        "bot_name": spec.bot_name,
+        "bot_desc": spec.bot_desc,
+        "avatar_url": spec.avatar_url,
+        "share_policy": spec.share_policy,
+        "template_type": spec.template_type,
+        "template_config": spec.template_config,
+        "template_validation_mode": spec.template_validation_mode.value,
+        "space_id": spec.space_id,
+        "engine_properties": spec.engine_properties,
+        "deployment_mode": context.deployment_mode.value,
+        "space_kind": context.space_kind,
+    }
+
+
+def creation_spec_from_payload(
+    payload: dict[str, Any],
+) -> tuple[BotCreateSpec, BotCreateContext]:
+    """The inverse. Raises ``KeyError``/``ValueError`` on a payload it cannot read."""
+    return (
+        BotCreateSpec(
+            entity_id=payload["entity_id"],
+            entity_type=payload.get("entity_type", "staff"),
+            engine_type=payload["engine_type"],
+            bot_type=payload["bot_type"],
+            bot_name=payload.get("bot_name"),
+            bot_desc=payload.get("bot_desc"),
+            avatar_url=payload.get("avatar_url"),
+            share_policy=payload.get("share_policy"),
+            template_type=payload.get("template_type"),
+            template_config=payload.get("template_config"),
+            template_validation_mode=BotCreateTemplateValidationMode(
+                payload["template_validation_mode"]
+            ),
+            space_id=payload.get("space_id"),
+            engine_properties=payload.get("engine_properties") or {},
+        ),
+        BotCreateContext(
+            deployment_mode=BotCreateDeploymentMode(payload["deployment_mode"]),
+            space_kind=payload["space_kind"],
+        ),
+    )
+
+
+def complete_manifest_creation(
+    job_payload: dict[str, Any],
+    *,
+    bot_service: BotService,
+    passport_plugin: PassportPlugin,
+    auth_rel_plugin: AuthRelationshipPlugin,
+) -> AuthStatusResult:
+    """Finish a create-from-manifest by the ordinary completion path.
+
+    Reuses :func:`complete_bot_authorization` **unmodified**, which is what keeps
+    creation itself a single implementation. It is idempotent on a supplied
+    ``bot_id`` — ``create_bot`` returns the existing bot — so a re-claimed task
+    cannot produce a second one.
+    """
+    spec, context = creation_spec_from_payload(job_payload["spec"])
+    user_id = str(job_payload["user_id"])
+    return complete_bot_authorization(
+        user_id=user_id,
+        nick_name=user_id,
+        bot_id=str(job_payload["bot_id"]),
+        spec=spec,
+        context=context,
+        bot_service=bot_service,
+        passport_plugin=passport_plugin,
+        auth_rel_plugin=auth_rel_plugin,
     )
 
 

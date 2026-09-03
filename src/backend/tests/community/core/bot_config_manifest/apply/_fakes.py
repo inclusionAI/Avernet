@@ -599,6 +599,30 @@ class FakeActivationService:
         )
 
 
+class FakeGitClient:
+    """The git transport for suites whose documents fetch nothing — every
+    call is a wiring bug, so it counts and refuses.
+
+    ``constructed`` is the class-level construction count the lifecycle
+    suite reads: one session per apply means one client per apply, and the
+    provider (not the test) is what builds it, so the only observable of
+    "a session was built" is how many times the provider ran.
+    """
+
+    constructed: int = 0
+
+    def __init__(self) -> None:
+        self.calls = 0
+        type(self).constructed += 1
+
+    def fetch(self, spec, *, headers=None):
+        self.calls += 1
+        raise AssertionError(
+            "this suite's document declares no git sources; "
+            f"git fetch({spec.url!r}) must not run"
+        )
+
+
 class FakeMcpAuth:
     """Permission answers, per server code.
 
@@ -633,8 +657,27 @@ def make_context(
     engine_type: str = "claude_code",
     bot_type: str = "personal",
     apply_id: str | None = None,
+    source_session=None,
+    bot: dict[str, Any] | None = None,
 ) -> ApplyContext:
-    """An ``ApplyContext`` with real capabilities resolved for a baas bot."""
+    """An ``ApplyContext`` with real capabilities resolved for a baas bot.
+
+    ``source_session`` carries the W7 per-apply named-source state when a
+    test drives the ``from``/git pipeline. ``bot`` overlays the default
+    record — e.g. ``bot={"template_type": "applicationCoding"}`` for the
+    runtime-routing cases: the bot record is what the engine-provisioning
+    routing policy reads, and ``bot_type`` / ``engine_type`` stay the
+    *capability* vocabulary while the materialiser derives the workspace
+    address from the record.
+    """
+    record = {
+        "bot_id": bot_id,
+        "owner_id": owner_id,
+        "entity_id": entity_id,
+        "active_engine": engine_type,
+        "bot_type": bot_type,
+    }
+    record.update(bot or {})
     return ApplyContext(
         bot_id=bot_id,
         owner_id=owner_id,
@@ -645,16 +688,132 @@ def make_context(
         engine_type=engine_type,
         bot_type=bot_type,
         apply_id=apply_id,
-        bot={
-            "bot_id": bot_id,
-            "owner_id": owner_id,
-            "entity_id": entity_id,
-            "active_engine": engine_type,
-            "bot_type": bot_type,
-        },
+        source_session=source_session,
+        bot=record,
         capabilities=resolve_capabilities(
             active_engine=engine_type,
             bot_type=bot_type,
             is_teclaw=lambda engine: engine == "teclaw",
         ),
     )
+
+
+class FakeResourceFileService:
+    """Stands in for ``ResourceFileService``: uploads and deletes, recorded.
+
+    ``ResourceFileService`` is v1's single write chain for manifest resources
+    (its dispatcher covers the arca / baas / teclaw transports uniformly), so
+    the fake needs only the three entry points the materialiser calls:
+    ``upload_file``, ``delete`` — plus ``exists`` for the plan stage's
+    classification. Signatures mirror the port's apply-side surface (every
+    parameter the materialiser passes; the router-only extras such as
+    ``preserve_structure`` are deliberately absent), so a drift shows up as a
+    TypeError in these tests before it shows up mid-apply in production.
+
+    ``delete`` removes from the presence set as well — the real service's
+    contract — because the plan stage classifies by ``exists`` and would
+    otherwise call a deleted path "unchanged". Deleting a directory removes
+    the whole subtree from presence (the real chain's ``delete_tree``
+    branch); a path named in ``fail_deletes`` answers a silent ``False``
+    with presence untouched — the real transports' contract, which catch
+    their own errors and return ``False`` rather than raise, so a refused
+    ``rmtree`` is only distinguishable by re-probing presence.
+    """
+
+    def __init__(
+        self,
+        exists_paths: set[str] | None = None,
+        fail_deletes: set[str] | None = None,
+    ) -> None:
+        self.writes: dict[tuple[str, str], bytes] = {}
+        self.deleted: list[str] = []
+        # Full addressing of every call, so a test can pin *how* the write
+        # stage addressed the workspace — same rationale as exists_probes.
+        self.upload_calls: list[dict[str, Any]] = []
+        self.delete_calls: list[dict[str, Any]] = []
+        self.exists_probes: list[dict[str, Any]] = []
+        self._exists = set(exists_paths or ())
+        self._fail_deletes = set(fail_deletes or ())
+
+    def record_present(self, *paths: str) -> None:
+        self._exists.update(paths)
+
+    async def upload_file(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        target_dir: str,
+        filename: str,
+        data: bytes,
+    ) -> dict[str, Any]:
+        self.upload_calls.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "target_dir": target_dir,
+                "filename": filename,
+            }
+        )
+        self.writes[(target_dir, filename)] = data
+        self._exists.add(f"{target_dir}/{filename}".replace("//", "/"))
+        return {"path": f"{target_dir}/{filename}"}
+
+    async def delete(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+    ) -> bool:
+        self.delete_calls.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "path": path,
+            }
+        )
+        if path in self._fail_deletes:
+            # Silent refusal: the transport answered, nothing was removed,
+            # presence still reports the tree — an exists re-probe sees it.
+            return False
+        self.deleted.append(path)
+        self._exists = {
+            p
+            for p in self._exists
+            if p != path and not p.startswith(f"{path}/")
+        }
+        return True
+
+    async def exists(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+        publish_id: str | None = None,
+        device_uuid: str | None = None,
+    ) -> bool:
+        # Recorded so a test can pin *how* the plan stage addressed the
+        # workspace — the entity half must be the owner, the router's own
+        # address, not the manifest's storage key.
+        self.exists_probes.append(
+            {
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "bot_id": bot_id,
+                "engine_type": engine_type,
+                "path": path,
+            }
+        )
+        return path in self._exists

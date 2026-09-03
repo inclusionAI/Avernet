@@ -54,9 +54,7 @@ class OfflineInspection:
 @dataclass(frozen=True, slots=True)
 class OfflineCommit:
     changed: bool
-    target_version: int
-    status: str
-    locator: str
+    offline_at: datetime
 
 
 __all__ = [

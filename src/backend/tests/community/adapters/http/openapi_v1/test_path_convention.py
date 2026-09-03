@@ -20,12 +20,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import FastAPI
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 _BASE = f"{PUBLIC_API_PREFIX}/bots"
 
@@ -44,9 +43,7 @@ _UNROUTED_ANCHOR = "<!-- reserved-component-names-unrouted -->"
 
 
 def _document() -> dict:
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _paths() -> list[str]:
@@ -120,6 +117,11 @@ _BOT_FREE = frozenset(
         # shares the bots namespace the bots domain routes, but never
         # names one bot, exactly like the other literal groups above.
         "source-credentials",
+        # Creating a bot with its manifest (W13, #1696): a creation, so there is
+        # no bot to address yet — the same shape as `POST /openapi/v1/bots`,
+        # which needs no entry here only because it adds no segment at all. Its
+        # status poll *is* `{bot_id}`-first and needs nothing here.
+        "with-manifest",
         "work-order-notifications",
         "work-orders",
     }

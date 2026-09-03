@@ -349,16 +349,38 @@ BCN 通过 `chat.send` 请求向 bot 发送需要回复的消息：
 ### 5.3 接收 `chat.abort`（取消处理）
 ```json
 {
-  "type": "event",
-  "event": "chat.abort",
-  "payload": {
+  "type": "req",
+  "id": "abort-001",
+  "method": "chat.abort",
+  "params": {
     "session_key": "sess-123",
     "run_id": "run-unique-001"
   }
 }
 ```
 
-引擎应取消对应 `run_id` 的处理。
+引擎必须只取消精确匹配的 `run_id`，在本地确认取消后响应，并屏蔽该 run
+迟到的 delta/final/error：
+
+```json
+{
+  "type": "res",
+  "id": "abort-001",
+  "ok": true,
+  "payload": {
+    "aborted": true,
+    "aborted_run_ids": ["run-unique-001"]
+  }
+}
+```
+
+已终态 run 幂等成功并返回空 `aborted_run_ids`；未知 run 或不属于该
+`session_key` 的 run 返回协议错误。单次响应最多返回一个 aborted run ID。
+
+`chat.abort.session_key` 必须与该 run 原始 `chat.send.session_key` 完全一致：
+协议 v2 使用 Group 派生的兼容 key，协议 v3 使用 canonical BCS Session ID。
+无论协议版本如何，BCS 都使用 canonical `group_id + session_id + bot_id`
+进行调用者授权和活动 run 选择。
 
 ### 5.4 响应 `chat.history`（历史消息查询）
 BCN 本身不存储聊天消息，当需要获取会话历史时，BCN 会向 bot 发送 `chat.history` 请求，由引擎返回本地存储的消息记录。

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Annotated
 from urllib.parse import quote
-
-from injector import inject
 
 from agentclaw.community.core.work_orders.errors import (
     WorkOrderCallbackError,
@@ -22,14 +21,55 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
 )
 from agentclaw.community.log import get_logger
-from agentclaw.community.plugin_api.http_client import (
-    QUALIFIER_BCN,
-    HttpClient,
-)
+from agentclaw.community.plugin_api.http_client import HttpClient
 
 
 logger = get_logger()
 _RESPONSE_BODY_LOG_LIMIT = 16 * 1024
+
+# The forwarded identity header, lowercased for the case-insensitive comparisons
+# below — HTTP header names are case-insensitive and the inbound spelling is
+# whatever the gateway and the ASGI server happened to use.
+_PRINCIPAL_HEADER = "x-avernet-principal"
+
+
+def _principal_fingerprint(headers: Mapping[str, str]) -> str | None:
+    """Return a safe correlation fingerprint for the forwarded Principal.
+
+    The JWT itself is never logged; the short digest lets operators compare the
+    approval request credential with the BCN callback credential.
+
+    Since the callback credential is **re-addressed** before it is sent (see
+    :meth:`FriendDecisionCallbackHandler.handle`), the two no longer share a
+    digest — a re-signed token is a different token. Both are logged, under
+    ``principal_fingerprint`` for what went to BCN and
+    ``source_principal_fingerprint`` for what arrived here, so the hop is still
+    correlatable from one log line to the next.
+    """
+    values = [
+        value for key, value in headers.items() if key.lower() == _PRINCIPAL_HEADER
+    ]
+    if not values:
+        return None
+    return hashlib.sha256(values[0].encode("utf-8")).hexdigest()[:16]
+
+
+def _principal_header_count(headers: Mapping[str, str]) -> int:
+    return sum(key.lower() == _PRINCIPAL_HEADER for key in headers)
+
+
+def _is_successful_bcn_response(payload: dict[str, object] | None) -> bool:
+    """Accept the legacy and OpenAPI BCN success envelopes.
+
+    The legacy friend-connections route returns ``{"success": true, ...}``,
+    while the OpenAPI route returns the common envelope with ``code=20000``.
+    Both are valid responses for this callback during the route migration.
+    """
+    if payload is None:
+        return False
+    if payload.get("success") is True:
+        return True
+    return payload.get("code") == 20_000
 
 
 @dataclass(frozen=True)
@@ -79,11 +119,85 @@ def validate_friend_approval_event(
 
 
 class FriendDecisionCallbackHandler:
-    """Apply a friend-request decision to BCN before local persistence."""
+    """Apply a friend-request decision to BCN before local persistence.
 
-    def __init__(self, http_client: HttpClient, timeout: float = 10.0) -> None:
+    The decision arrives on ``/openapi/v1`` carrying the gateway-signed
+    ``X-Avernet-Principal`` the backend just verified, and applying it means
+    calling BCN as that same caller. The header cannot simply be relayed: the
+    gateway addresses each token to one upstream, so the one we hold says
+    ``aud=backend`` and BCN's verifier refuses it — the callback failed its
+    audience check on every friend approval, and no retry could have fixed it.
+
+    So the credential is **re-addressed** before it is forwarded:
+    ``resign_principal`` re-signs the verified claims with the shared key under
+    the ``iss``/``aud``/``kid`` BCN requires, leaving the identities and the
+    token's lifetime untouched (``core/gateway_principal/signer.py``). BCN then
+    authorizes the same caller the backend did, which is the whole point — the
+    approval is applied *as the approver*, not as the backend.
+    """
+
+    def __init__(
+        self,
+        http_client: HttpClient,
+        resign_principal: Callable[[str], str],
+        timeout: float = 10.0,
+    ) -> None:
         self._http = http_client
+        self._resign_principal = resign_principal
         self._timeout = timeout
+
+    def _readdressed_headers(
+        self, headers: Mapping[str, str], *, work_order_id: int
+    ) -> dict[str, str]:
+        """Return ``headers`` with the forwarded Principal re-addressed to BCN.
+
+        Every other header is passed through untouched — this seam forwards a
+        credential, it does not compose a request.
+
+        A **missing or blank** Principal is left alone rather than raised on:
+        there is nothing to re-address, and the call then fails at BCN exactly
+        as it did before, with ``has_principal=False`` already on the log line
+        below naming why. A Principal that is present but cannot be
+        re-addressed is a different matter — the token did not verify, or this
+        deployment has no signing key — and there is no point sending a
+        credential we know BCN will refuse, so the callback fails closed and
+        the decision is not stored.
+        """
+        readdressed = dict(headers)
+        for key in [k for k in readdressed if k.lower() == _PRINCIPAL_HEADER]:
+            token = readdressed[key].strip()
+            if not token:
+                continue
+            try:
+                readdressed[key] = self._resign_principal(token)
+            except Exception as exc:
+                # The reason, never the token. A verification failure names the
+                # contract and the key fingerprint this side judged the token
+                # against, which is what an operator needs; the digest
+                # correlates this line with the request that carried the
+                # credential, since no re-addressed one exists to log.
+                logger.warning(
+                    "friend work-order BCN callback credential could not be "
+                    "re-addressed: work_order_id=%s "
+                    "source_principal_fingerprint=%s "
+                    "exception_type=%s reason=%s",
+                    work_order_id,
+                    _principal_fingerprint(headers),
+                    type(exc).__name__,
+                    exc,
+                    extra={
+                        "work_order_id": work_order_id,
+                        "source_principal_fingerprint": _principal_fingerprint(
+                            headers
+                        ),
+                        "exception_type": type(exc).__name__,
+                    },
+                    exc_info=True,
+                )
+                raise WorkOrderCallbackError(
+                    "BCN callback credential could not be re-addressed"
+                ) from exc
+        return readdressed
 
     def handle(
         self,
@@ -110,7 +224,7 @@ class FriendDecisionCallbackHandler:
         request_id = friend_request_id(biz_data)
         action = "accept" if decision is WorkOrderDecision.APPROVED else "reject"
         path = (
-            "/collaboration/friend-connections/requests/"
+            "/openapi/v1/collaboration/friend-connections/requests/"
             f"{quote(request_id, safe='')}/{action}"
         )
         body = (
@@ -118,8 +232,31 @@ class FriendDecisionCallbackHandler:
             if decision is WorkOrderDecision.APPROVED
             else {"reason": review_remark}
         )
-        callback_headers = dict(credential.headers)
-        lowered_headers = {key.lower(): value for key, value in callback_headers.items()}
+        source_principal_fingerprint = _principal_fingerprint(credential.headers)
+        callback_headers = self._readdressed_headers(
+            credential.headers, work_order_id=context.work_order.id
+        )
+        lowered_headers = {
+            key.lower(): value for key, value in callback_headers.items()
+        }
+        has_principal = "x-avernet-principal" in lowered_headers
+        has_authorization = "authorization" in lowered_headers
+        principal_header_count = _principal_header_count(callback_headers)
+        principal_fingerprint = _principal_fingerprint(callback_headers)
+        principal_length = (
+            len(lowered_headers["x-avernet-principal"]) if has_principal else None
+        )
+        logger.info(
+            "BCN callback auth headers",
+            extra={
+                "has_principal": has_principal,
+                "principal_header_count": principal_header_count,
+                "principal_fingerprint": principal_fingerprint,
+                "source_principal_fingerprint": source_principal_fingerprint,
+                "principal_length": principal_length,
+                "has_authorization": has_authorization,
+            },
+        )
         logger.info(
             "friend work-order BCN callback request",
             extra={
@@ -129,8 +266,12 @@ class FriendDecisionCallbackHandler:
                 "action": action,
                 "callback_path": path,
                 "request_body": body,
-                "has_authorization": "authorization" in lowered_headers,
-                "has_x_avernet_principal": "x-avernet-principal" in lowered_headers,
+                "has_authorization": has_authorization,
+                "has_x_avernet_principal": has_principal,
+                "principal_header_count": principal_header_count,
+                "principal_fingerprint": principal_fingerprint,
+                "source_principal_fingerprint": source_principal_fingerprint,
+                "principal_length": principal_length,
                 "x_request_id": lowered_headers.get("x-request-id"),
                 "x_trace_id": lowered_headers.get("x-trace-id"),
             },
@@ -138,6 +279,7 @@ class FriendDecisionCallbackHandler:
         response = None
         response_body_raw = ""
         response_payload: dict[str, object] | None = None
+        callback_started = time.perf_counter()
         try:
             response = self._http.post(
                 path,
@@ -157,6 +299,14 @@ class FriendDecisionCallbackHandler:
                 parsed = None
             if isinstance(parsed, dict):
                 response_payload = parsed
+            duration_ms = (time.perf_counter() - callback_started) * 1000
+            response_code = response_payload.get("code") if response_payload else None
+            response_message = (
+                response_payload.get("message") if response_payload else None
+            )
+            response_request_id = (
+                response_payload.get("request_id") if response_payload else None
+            )
             logger.info(
                 "friend work-order BCN callback response",
                 extra={
@@ -165,22 +315,31 @@ class FriendDecisionCallbackHandler:
                     "request_id": request_id,
                     "action": action,
                     "http_status": response.status_code,
-                    "response_code": response_payload.get("code")
-                    if response_payload
-                    else None,
-                    "response_message": response_payload.get("message")
-                    if response_payload
-                    else None,
-                    "response_request_id": response_payload.get("request_id")
-                    if response_payload
-                    else None,
+                    "response_code": response_code,
+                    "response_message": response_message,
+                    "response_request_id": response_request_id,
+                    "duration_ms": duration_ms,
                     "response_body_raw": logged_response_body,
                 },
             )
             response.raise_for_status()
-            if response_payload is None or response_payload.get("success") is not True:
+            if not _is_successful_bcn_response(response_payload):
                 raise ValueError("BCN callback did not report success")
         except Exception as exc:
+            failure_duration_ms = (time.perf_counter() - callback_started) * 1000
+            http_status = response.status_code if response is not None else None
+            response_code = response_payload.get("code") if response_payload else None
+            response_message = (
+                response_payload.get("message") if response_payload else None
+            )
+            response_request_id = (
+                response_payload.get("request_id") if response_payload else None
+            )
+            logged_failure_body = (
+                response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
+                if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
+                else response_body_raw
+            )
             logger.warning(
                 "friend work-order decision callback failed",
                 extra={
@@ -188,21 +347,17 @@ class FriendDecisionCallbackHandler:
                     "event_type": context.source_event_type,
                     "request_id": request_id,
                     "action": action,
-                    "http_status": response.status_code if response is not None else None,
-                    "response_code": response_payload.get("code")
-                    if response_payload
-                    else None,
-                    "response_message": response_payload.get("message")
-                    if response_payload
-                    else None,
-                    "response_request_id": response_payload.get("request_id")
-                    if response_payload
-                    else None,
-                    "response_body_raw": (
-                        response_body_raw[:_RESPONSE_BODY_LOG_LIMIT] + "...<truncated>"
-                        if len(response_body_raw) > _RESPONSE_BODY_LOG_LIMIT
-                        else response_body_raw
-                    ),
+                    "http_status": http_status,
+                    "response_code": response_code,
+                    "response_message": response_message,
+                    "response_request_id": response_request_id,
+                    "principal_header_count": principal_header_count,
+                    "principal_fingerprint": principal_fingerprint,
+                    "source_principal_fingerprint": source_principal_fingerprint,
+                    "principal_length": principal_length,
+                    "duration_ms": failure_duration_ms,
+                    "exception_type": type(exc).__name__,
+                    "response_body_raw": logged_failure_body,
                 },
                 exc_info=True,
             )
@@ -210,14 +365,23 @@ class FriendDecisionCallbackHandler:
 
 
 class WorkOrderDecisionCallbackDispatcher:
-    """Dispatch only explicitly registered approval events; all others are no-op."""
+    """Dispatch only explicitly registered approval events; all others are no-op.
 
-    @inject
+    ``resign_principal`` is handed in by the composition root
+    (``di/modules/work_orders_module.py``) rather than resolved here: it closes
+    over the process-wide signing key, which is deployment configuration this
+    layer must stay transport- and config-agnostic about (Rule 7). See
+    :class:`FriendDecisionCallbackHandler` for what it is for.
+    """
+
     def __init__(
         self,
-        http_client: Annotated[HttpClient, QUALIFIER_BCN],
+        http_client: HttpClient,
+        resign_principal: Callable[[str], str],
     ) -> None:
-        friend_handler = FriendDecisionCallbackHandler(http_client)
+        friend_handler = FriendDecisionCallbackHandler(
+            http_client, resign_principal=resign_principal
+        )
         self._handlers = {
             WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value: friend_handler,
             WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value: friend_handler,

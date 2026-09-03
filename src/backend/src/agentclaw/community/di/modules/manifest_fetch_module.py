@@ -2,7 +2,7 @@
 
 The apply wiring W11's repository binding comment reserved: the guarded
 fetcher (W2), the content store (W11), and the one entry-fetcher funnel over
-W2/W3/W11, plus the five lazy service factories the registry's two W5
+W2/W3/W11, plus the lazy service factories the registry's fetch-consuming
 materialisers take their collaborators through. One module because one
 feature wave owns them — the same reason the apply service and its
 repositories bind in ``bot_management_module``, where they landed with W4.
@@ -26,11 +26,18 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
 )
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
+)
 from agentclaw.community.core.bot_config_manifest.content.service import (
     ManifestContentService,
 )
 from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
     ManifestContentServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
+    GitSourceClient,
+    SubprocessGitClient,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     GuardedFetcher,
@@ -134,6 +141,33 @@ class ManifestFetchModule(Module):
         """
         return EntryFetcher(fetcher, content, credentials)
 
+    @singleton
+    @provider
+    def manifest_git_source_client(self) -> GitSourceClient:
+        """W7's git transport: the CLI subprocess client.
+
+        Like ``GuardedFetcher``, everything about it except construction is
+        the shipped default — https-only scheme, hermetic env, header-only
+        credential injection — and not configurable from here.
+
+        The base subprocess environment is read **here**, the composition
+        root, per the repo rule that raw environment access belongs to
+        configuration loading and composition roots, never to core. The
+        client drops every ``GIT_*`` key this snapshot still carries and adds
+        its own hermetic overrides, so this env is a plain inheritance
+        surface: proxy settings ride along exactly as they do for the W2
+        httpx transport (``trust_env`` is that client's default), while an
+        operator's ``insteadOf`` rewrite or upload-pack default cannot.
+        """
+        import os
+
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        }
+        return SubprocessGitClient(env=env)
+
     # ── the lazy factories the registry wiring asks for ────────────────────
 
     @singleton
@@ -218,3 +252,43 @@ class ManifestFetchModule(Module):
     ) -> Callable[[], EntryFetcher]:
         """The lazy lookup the apply service's registry wiring asks for."""
         return lambda: injector.get(EntryFetcher)
+
+    @singleton
+    @provider
+    @inject
+    def manifest_resource_service_factory(
+        self, injector: Injector
+    ) -> Callable[[], ManifestResourcePort]:
+        """The write chain the ``resources`` materialiser delivers through.
+
+        Lazy with a function-level import for the reason the identity
+        factory above records: the resource file service module reaches the
+        device dispatcher graph at import time, and this module's import
+        must not trigger that chain. Structural check at wiring time for
+        the same reason as there — the port has no implementation
+        relationship to the service, so nothing else would notice a rename
+        until mid-apply.
+        """
+        from agentclaw.community.core.services.resource_file_service import (
+            ResourceFileService,
+        )
+
+        def _resources() -> ManifestResourcePort:
+            service = injector.get(ResourceFileService)
+            if not isinstance(service, ManifestResourcePort):
+                raise TypeError(
+                    "ResourceFileService no longer satisfies ManifestResourcePort"
+                )
+            return service
+
+        return _resources
+
+    @singleton
+    @provider
+    @inject
+    def manifest_git_client_factory(
+        self, injector: Injector
+    ) -> Callable[[], GitSourceClient]:
+        """The lazy lookup the apply service builds each apply's source
+        session through — a fresh map and fresh checkouts every apply."""
+        return lambda: injector.get(GitSourceClient)

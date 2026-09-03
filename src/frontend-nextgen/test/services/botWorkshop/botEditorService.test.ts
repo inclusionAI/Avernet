@@ -5,7 +5,7 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 jest.mock('@/services/backendApi/bots/botEditorController', () => ({
   botEditorController: {
     listSkills: jest.fn(),
-    listSkillSets: jest.fn(),
+    listSkillSetResources: jest.fn(),
     listBotMcps: jest.fn(),
     listMcpServers: jest.fn(),
     listRepositorySkills: jest.fn(),
@@ -17,7 +17,6 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     getEngineStatus: jest.fn(),
     getApprovalConfig: jest.fn(),
     listSkillSetSkills: jest.fn(),
-    listSkillSetMcps: jest.fn(),
     getMcpPermission: jest.fn(),
     setSkillSetMcp: jest.fn(),
     uploadSkillFolder: jest.fn(),
@@ -30,26 +29,75 @@ beforeEach(() => {
   jest.clearAllMocks();
   clearCdnConfig();
   controller.listSkills.mockResolvedValue({ data: { total: 0, items: [] } });
-  controller.listSkillSets.mockResolvedValue({
-    data: [{ id: '600005', name: '默认能力集', is_default: true, is_active: true }],
+  controller.listSkillSetResources.mockResolvedValue({
+    data: [{ id: '600005', name: '默认能力集', is_default: true, is_active: true, mcps: [], clis: [] }],
   });
   controller.listBotMcps.mockResolvedValue({ data: [] });
   controller.listMcpServers.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRepositorySkills.mockResolvedValue({ data: { total: 0, items: [] } });
+  controller.listSpaceSkills.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listResources.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRenderScreens.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRoutines.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.getEngineConfig.mockResolvedValue({ data: {} });
   controller.getEngineStatus.mockResolvedValue({ data: { engine: 'openclaw', active_connections: 0, running: false } });
   controller.listSkillSetSkills.mockRejectedValue(new Error('404 Not found'));
-  controller.listSkillSetMcps.mockRejectedValue(new Error('404 Not found'));
 });
 
-it('能力集子资源失败时保留能力集并返回降级结果', async () => {
+it('聚合加载能力集 MCP 和 CLI，仅对缺失的 Skill 关系补充查询', async () => {
+  controller.listSkillSetResources.mockResolvedValue({
+    data: [
+      {
+        id: '600005',
+        name: '默认能力集',
+        is_default: true,
+        is_active: true,
+        mcps: [{ server_code: 'mcp.weather', name: '天气 MCP' }],
+        clis: [{ cli_code: 'claude', name: 'Claude CLI' }],
+      },
+    ],
+  });
+  controller.listSkillSetSkills.mockResolvedValue({
+    data: [{ skill_id: 'skill-1', name: '代码 Skill' }],
+  });
+
   const result = await botEditorService.load('20260806_wg6wkrk4');
 
-  expect(result.skillSets).toEqual([expect.objectContaining({ id: '600005', skills: [], mcps: [] })]);
-  expect(result.errors).toBe(2);
+  expect(result.skillSets).toEqual([
+    expect.objectContaining({
+      id: '600005',
+      skills: [expect.objectContaining({ id: 'skill-1' })],
+      mcps: [expect.objectContaining({ serverCode: 'mcp.weather' })],
+      clis: [expect.objectContaining({ code: 'claude' })],
+    }),
+  ]);
+  expect(controller.listSkillSetResources).toHaveBeenCalledTimes(1);
+  expect(controller.listSkillSetSkills).toHaveBeenCalledTimes(1);
+  expect(result.errors).toBe(0);
+});
+
+it('Skill 子资源失败时仍保留聚合接口返回的能力集、MCP 和 CLI', async () => {
+  const result = await botEditorService.load('20260806_wg6wkrk4');
+
+  expect(result.skillSets).toEqual([expect.objectContaining({ id: '600005', skills: [], mcps: [], clis: [] })]);
+  expect(result.errors).toBe(1);
+});
+
+it('首屏不加载市场候选，用户打开添加能力时再一次性加载', async () => {
+  controller.listSkillSetSkills.mockResolvedValue({ data: [] });
+
+  await botEditorService.load('bot-1');
+
+  expect(controller.listMcpServers).not.toHaveBeenCalled();
+  expect(controller.listRepositorySkills).not.toHaveBeenCalled();
+  expect(controller.listSpaceSkills).not.toHaveBeenCalled();
+
+  await botEditorService.loadCapabilityCandidates('bot-1', '12');
+
+  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
+  expect(controller.listMcpServers).toHaveBeenCalledTimes(1);
+  expect(controller.listRepositorySkills).toHaveBeenCalledTimes(1);
+  expect(controller.listSpaceSkills).toHaveBeenCalledWith('12');
 });
 
 it('通过 Bot OpenAPI 加载并注册副屏 CDN', async () => {

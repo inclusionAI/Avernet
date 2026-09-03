@@ -20,6 +20,9 @@ from typing import Any, Optional
 from agentclaw.community.core.bot_config_manifest.apply.budget import (  # noqa: F401
     ApplyFetchBudget,
 )
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
+)
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
@@ -74,6 +77,14 @@ class ApplyContext:
     #: frozen context: consult before each fetch, charge after. ``None`` for
     #: callers that run no fetch pipeline (tests, hand-driven use).
     budget: Optional["ApplyFetchBudget"] = None
+    #: One apply's named-source state (W7): the document's ``sources``, the
+    #: strict-mode baselines read back from the last apply's report, and the
+    #: git checkout cache. Mutable by design inside the frozen context — the
+    #: same ruling as ``budget``, and for the same reason: the alternative is
+    #: state on a DI-singleton fetcher, which would leak across applies.
+    #: ``None`` for callers that run no ``from``/git pipeline (tests,
+    #: hand-driven use); ``fetch_declared`` refuses such entries loudly.
+    source_session: Optional[SourceSession] = None
 
 
 __all__ = ["ApplyContext"]

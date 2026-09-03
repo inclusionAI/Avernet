@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { NavigationArea, NavigationItem } from './navigation';
@@ -15,6 +16,9 @@ interface SidebarNavListProps {
 /** 一级导航的内容本体（不含 `<aside>` 外壳）。由 AppSidebar 的内流外壳与 <lg 抽屉复用，保证两处一致。 */
 export function SidebarNavList({ area, activePath, items, onNavigate, collapsed = false }: SidebarNavListProps) {
   const areaItems = items.filter((item) => item.area === area);
+  // 空间切换器为形态级入口（getShellVisibility.spaceSwitcher）：Open Core（阿里云部署）默认隐藏。
+  // 隐藏 UI 不影响空间数据链路：initSpaceContext 由 AppShell 进入管理区域触发，与开关无关。
+  const showSpaceSwitcher = area === 'manage' && getCapabilities().getShellVisibility().value.spaceSwitcher;
 
   if (collapsed) {
     return (
@@ -67,7 +71,7 @@ export function SidebarNavList({ area, activePath, items, onNavigate, collapsed 
           })}
         </div>
       </nav>
-      {area === 'manage' && (
+      {showSpaceSwitcher && (
         <div className="mt-auto border-t border-[var(--color-border)] px-3 pb-3 pt-2">
           <SpaceSwitcher />
         </div>

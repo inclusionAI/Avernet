@@ -47,6 +47,11 @@ def _service(
                     "preparation_id": "2a958f59-8cf4-4413-a267-7d56d3382f23",
                     "evidence": {
                         "mapping_contract_version": "skills-pool-mapping-v2",
+                        "center_mount": {
+                            "status": "NOT_READY",
+                            "reason": "center_mount_missing",
+                            "restart_required": True,
+                        },
                         "checks": {
                             "pool_repo_mounted": True,
                             "legacy_repo_bridge_valid": True,
@@ -74,6 +79,7 @@ async def test_ready_is_taken_from_current_runtime_inspection():
 
     assert result.status is RuntimeLayoutProbeStatus.READY
     assert result.preparation_id == "2a958f59-8cf4-4413-a267-7d56d3382f23"
+    assert result.evidence["center_mount"]["restart_required"] is True
     resolver.resolve_for_bot.assert_called_once_with("bot-1", "user-1")
     transport.invoke.assert_awaited_once_with(
         context.conn_info,

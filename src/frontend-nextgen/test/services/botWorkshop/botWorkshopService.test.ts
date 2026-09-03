@@ -105,28 +105,63 @@ describe('botWorkshopService', () => {
     });
   });
 
-  test.each([
-    ['claude_code', 'service'],
-    ['aicoding', 'non-service'],
-  ] as const)('supports creating %s bots with valid service mode', (engine, serviceMode) => {
-    expect(
+  test('rejects creating an ordinary personal Claude Code bot', () => {
+    expect(() =>
       botWorkshopService.toCreateRequest({
         scenario: 'cloud',
-        name: `${engine} Bot`,
+        name: 'claude_code Bot',
         description: 'AI Coding',
-        engine,
+        engine: 'claude_code',
         spaceId: '10001',
         ownership: 'personal',
-        serviceMode,
+        serviceMode: 'service',
         initialize: true,
       }),
-    ).toEqual(
+    ).toThrow('普通 Claude Code');
+  });
+
+  test('maps an AgentCoding template while retaining its declared engine', () => {
+    const request = botWorkshopService.toCreateRequest({
+      scenario: 'cloud',
+      name: 'AgentCoding Bot',
+      description: 'AI Coding',
+      engine: 'aicoding',
+      spaceId: '10001',
+      ownership: 'personal',
+      serviceMode: 'non-service',
+      initialize: true,
+      agentCoding: {
+        kind: 'template',
+        template: {
+          key: 'architect',
+          versionId: 'v1',
+          name: '架构 Bot',
+          engine: 'claude_code',
+          source: 'official',
+          templateType: 'architect',
+          fields: [],
+          config: {},
+        },
+        values: { architect_name: '平台架构' },
+      },
+    });
+    expect(request).toEqual(
       expect.objectContaining({
-        engine,
-        cluster_name: 'ACRA',
-        bot_type: serviceMode === 'service' ? 'service' : 'personal',
+        engine: 'claude_code',
+        engine_properties: {
+          template_type: 'architect',
+          template_config: expect.objectContaining({
+            template_key: 'architect',
+            template_version_id: 'v1',
+          }),
+        },
       }),
     );
+    expect(
+      ((request.engine_properties as Record<string, unknown>).template_config as Record<string, unknown>).envs,
+    ).toEqual({
+      AGENT_CONFIG: JSON.stringify({ architect_name: '平台架构', bot_name: 'AgentCoding Bot' }),
+    });
   });
 
   test('rejects service creation for the aicoding engine', () => {

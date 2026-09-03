@@ -83,11 +83,13 @@ def test_application_coding_engine_matrix() -> None:
 
 
 @pytest.mark.unit
-def test_application_coding_supported_combination() -> None:
+@pytest.mark.parametrize("space_kind", ["personal", "team"])
+def test_application_coding_supported_combination(space_kind: str) -> None:
+    # No space-kind gate: coding bots may be created in any business space.
     ok = assert_application_coding_create(
         engine="claude_code",
         bot_type="personal",
-        space_kind="personal",
+        space_kind=space_kind,
         deployment_mode=DeployMode.CLOUD,
     )
     assert ok.ok
@@ -108,17 +110,11 @@ def test_application_coding_rejects_aicoding_engine() -> None:
 
 
 @pytest.mark.unit
-def test_application_coding_rejects_service_team_and_local() -> None:
+def test_application_coding_rejects_service_and_local() -> None:
     assert not assert_application_coding_create(
         engine="claude_code",
         bot_type="service",
         space_kind="personal",
-        deployment_mode=DeployMode.CLOUD,
-    ).ok
-    assert not assert_application_coding_create(
-        engine="claude_code",
-        bot_type="personal",
-        space_kind="team",
         deployment_mode=DeployMode.CLOUD,
     ).ok
     assert not assert_application_coding_create(

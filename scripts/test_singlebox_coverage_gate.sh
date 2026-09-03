@@ -97,6 +97,10 @@ case "${STANDALONE_RUNTIME_DIR:-}" in
   *) echo "singlebox coverage should use an isolated standalone runtime dir" >&2; exit 14 ;;
 esac
 printf '%s\n' "$*" >> "${SINGLEBOX_STUB_LOG:?}"
+if [ "$*" = "--standalone setup all" ] && [ "${BCS_SKIP_DEBUG_BUILD:-}" != "1" ]; then
+  echo "singlebox coverage setup should skip the unused non-instrumented BCS build" >&2
+  exit 17
+fi
 if [ "$*" = "--standalone --with-bcs-coverage start all" ]; then
   mkdir -p "${SINGLEBOX_COVERAGE_DIR:?}/backend" "${SINGLEBOX_COVERAGE_DIR:?}/baas"
   printf '%s\n' '{}' > "${SINGLEBOX_COVERAGE_DIR}/backend/.coverage.fake"

@@ -56,7 +56,7 @@ describe('groupMessageMapper', () => {
     expect(items.map((m) => m.content)).toEqual(['ok']);
   });
 
-  it('groups consecutive assistant messages with same run_id into one ChatMessage', () => {
+  it('groups assistant messages with the same run_id into one ChatMessage', () => {
     const items = mapGroupHistoryMessages([
       {
         id: 'm1',
@@ -131,6 +131,43 @@ describe('groupMessageMapper', () => {
     expect(items).toHaveLength(2);
   });
 
+  it('hydrates one run even when another bot run is interleaved', () => {
+    const items = mapGroupHistoryMessages([
+      {
+        id: 'a1',
+        timestamp: 1,
+        sender: 'bot-a',
+        content: 'a-db',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-a',
+      },
+      {
+        id: 'b1',
+        timestamp: 2,
+        sender: 'bot-b',
+        content: 'b',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-b',
+      },
+      {
+        id: 'a2',
+        timestamp: 3,
+        sender: 'bot-a',
+        content: 'a-pending',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-a',
+        metadata: { bcs_pending: true, pending_kind: 'chat' },
+      },
+    ] as GroupHistoryDto[]);
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ content: 'a-db\na-pending', status: 'streaming' });
+    expect(items[1]).toMatchObject({ content: 'b', status: 'history' });
+  });
+
   it('toolResultToToolStep marks error case on success===false', () => {
     const step = toolResultToToolStep({
       id: 'tr1',
@@ -142,6 +179,166 @@ describe('groupMessageMapper', () => {
       metadata: { tool_name: 'search', tool_call_id: 'call-1', arguments: { q: 'x' }, success: false, result: 'fail' },
     } as GroupHistoryDto);
     expect(step).toMatchObject({ tool: 'search', id: 'call-1', status: 'error', output: 'fail' });
+  });
+
+  it('merges tracker pending text into the durable run and marks it streaming', () => {
+    const items = mapGroupHistoryMessages([
+      {
+        id: 'db-1',
+        timestamp: 1,
+        sender: 'bot-a',
+        content: '已落库段',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+      },
+      {
+        id: 'bcs-run:run-1:bot-a',
+        timestamp: 2,
+        sender: 'bot-a',
+        content: '未落库段',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+        metadata: { bcs_pending: true, pending_kind: 'chat' },
+      },
+    ] as GroupHistoryDto[]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ content: '已落库段\n未落库段', status: 'streaming' });
+    expect(items[0].extra).toMatchObject({ runId: 'run-1', botUuid: 'bot-a', bcsPending: true });
+  });
+
+  it('maps a pending tool call to a running tool block', () => {
+    const items = mapGroupHistoryMessages([
+      {
+        id: 'bcs-run:run-1:bot-a',
+        timestamp: 1,
+        sender: 'bot-a',
+        content: '',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+        metadata: {
+          bcs_pending: true,
+          pending_kind: 'tool_call',
+          tool_call_id: 'call-1',
+          tool_name: 'search',
+          tool_args: { q: 'pending' },
+        },
+      },
+    ] as GroupHistoryDto[]);
+
+    expect(items[0].status).toBe('streaming');
+    expect(items[0].blocks?.[0]).toMatchObject({
+      type: 'tool_execution',
+      steps: [{ id: 'call-1', tool: 'search', status: 'running' }],
+    });
+  });
+
+  it('keeps a pending tool after intervening text so WS replay can hydrate the open block', () => {
+    const items = mapGroupHistoryMessages([
+      {
+        id: 'text-1',
+        timestamp: 1,
+        sender: 'bot-a',
+        content: '先检查环境',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+      },
+      {
+        id: 'tool-1',
+        timestamp: 2,
+        sender: 'bot-a',
+        content: 'ok',
+        message_type: 'bot',
+        role: 'tool_result',
+        run_id: 'run-1',
+        metadata: {
+          tool_call_id: 'call-old',
+          tool_name: 'Bash',
+          arguments: { command: 'which mcporter' },
+          result: 'ok',
+          is_error: false,
+        },
+      },
+      {
+        id: 'text-2',
+        timestamp: 3,
+        sender: 'bot-a',
+        content: '继续列出服务',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+      },
+      {
+        id: 'bcs-run:run-1:bot-a',
+        timestamp: 4,
+        sender: 'bot-a',
+        content: '',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+        metadata: {
+          bcs_pending: true,
+          pending_kind: 'tool_call',
+          tool_call_id: 'call-pending',
+          tool_name: 'Bash',
+          tool_args: { command: 'mcporter list' },
+        },
+      },
+    ] as GroupHistoryDto[]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0].blocks?.map((block) => block.type)).toEqual(['text', 'tool_execution', 'text', 'tool_execution']);
+    expect(items[0].blocks?.[3]).toMatchObject({
+      type: 'tool_execution',
+      steps: [{ id: 'call-pending', status: 'running' }],
+    });
+  });
+
+  it('updates the same tool_call_id instead of keeping tracker and DB copies', () => {
+    const items = mapGroupHistoryMessages([
+      {
+        id: 'bcs-run:run-1:bot-a',
+        timestamp: 1,
+        sender: 'bot-a',
+        content: '',
+        message_type: 'bot',
+        role: 'assistant',
+        run_id: 'run-1',
+        metadata: {
+          bcs_pending: true,
+          pending_kind: 'tool_call',
+          tool_call_id: 'call-1',
+          tool_name: 'Bash',
+          tool_args: { command: 'mcporter list' },
+        },
+      },
+      {
+        id: 'tool-result',
+        timestamp: 2,
+        sender: 'bot-a',
+        content: 'done',
+        message_type: 'bot',
+        role: 'tool_result',
+        run_id: 'run-1',
+        metadata: {
+          tool_call_id: 'call-1',
+          tool_name: 'Bash',
+          arguments: { command: 'mcporter list' },
+          result: 'done',
+          is_error: false,
+        },
+      },
+    ] as GroupHistoryDto[]);
+
+    const toolBlocks = items[0].blocks?.filter((block) => block.type === 'tool_execution') ?? [];
+    expect(toolBlocks).toHaveLength(1);
+    expect(toolBlocks[0]).toMatchObject({
+      steps: [{ id: 'call-1', status: 'success', output: 'done' }],
+    });
   });
 });
 

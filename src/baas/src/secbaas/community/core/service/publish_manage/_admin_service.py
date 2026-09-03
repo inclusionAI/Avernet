@@ -10,6 +10,7 @@ from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
     PublishNotFoundError,
+    UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
 from secbaas.community.core.repository.bot import BotRepository
@@ -141,6 +142,46 @@ class DefaultPublishAdminService(PublishAdminService):
 
         return UpdateDeviceStatusResult(
             device_uuid=device_uuid,
+            previous_status=previous_status,
+            new_status=status,
+        )
+
+    async def update_bot_status(
+        self,
+        *,
+        bot_id: int,
+        status: str,
+        operator: str,
+    ) -> UpdateBotStatusResult:
+        """Update a bot's status directly, bypassing normal state machine.
+
+        WARNING: Admin operation for test/development use only.
+        Does not trigger any publish workflow or PaaS operation.
+        Uses get_by_id_only() to allow cross-tenant/env admin access by PK.
+        """
+        bot = self._bot_repo.get_by_id_only(bot_id)
+        if bot is None:
+            raise PublishNotFoundError(f"Bot {bot_id} not found")
+
+        previous_status = bot.status
+        logger.warning(
+            f"ADMIN_UPDATE_BOT_STATUS: bot_id={bot_id} "
+            f"bot_uuid={bot.bot_uuid} tenant={bot.tenant} env={bot.env} "
+            f"previous_status={previous_status} "
+            f"new_status={status} operator={operator}"
+        )
+
+        self._bot_repo.update_status(
+            bot_id=bot_id,
+            tenant=bot.tenant,
+            env=bot.env,
+            status=status,
+            modifier=operator,
+        )
+
+        return UpdateBotStatusResult(
+            bot_id=bot_id,
+            bot_uuid=bot.bot_uuid,
             previous_status=previous_status,
             new_status=status,
         )

@@ -11,13 +11,26 @@ provider resolution, producer routing) instead of reaching into
 ``PublishFlowService`` private members — it is a standalone component, not a
 friend of the facade.
 """
+
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
-from agentclaw.community.core.service_bot.repository.models import BotPublishRecord, PublishStatus
-from agentclaw.community.core.service_bot.schemas.publish_schemas import PublishFlowResult
+from agentclaw.community.core.service_bot.repository.models import (
+    BotPublishRecord,
+    PublishStatus,
+)
+from agentclaw.community.core.service_bot.schemas.publish_schemas import (
+    PublishFlowResult,
+)
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+    ServiceArtifactBuildError,
+    ServiceArtifactBuildErrorCode,
+    ServiceArtifactLayoutObservation,
+)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
@@ -36,12 +49,16 @@ from agentclaw.community.core.service_bot.services.service_artifact_refs import 
 from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+    RuntimeLayoutProbeServiceProtocol,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
+from agentclaw.community.core.workspace.skill_layout import (
+    runtime_layout_engine_for_bot,
+)
 from agentclaw.community.log import get_logger
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentclaw.community.core.bot_management.services.bot_service import BotService
@@ -61,6 +78,7 @@ class BuildStageRunner:
         producer_router: DeployArtifactProducerRouter,
         provider_behaviors: ProviderBehaviorRouter,
         runtime_projector: BotRuntimeProjectorProtocol,
+        runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
     ) -> None:
         self._ext_state = ext_state
         self._bot_service = bot_service
@@ -68,6 +86,7 @@ class BuildStageRunner:
         self._producer_router = producer_router
         self._provider_behaviors = provider_behaviors
         self._runtime_projector = runtime_projector
+        self._runtime_layout_probe = runtime_layout_probe
 
     async def build(
         self,
@@ -87,7 +106,10 @@ class BuildStageRunner:
             logger.info(
                 "[BuildStageRunner] Starting build: publish_id=%s, bot_id=%s, "
                 "operator=%s, owner_id=%s",
-                publish_id, bot_id, operator, owner_id,
+                publish_id,
+                bot_id,
+                operator,
+                owner_id,
             )
 
             bot = self._bot_service.get_bot(bot_id=bot_id, user_id=owner_id)
@@ -98,11 +120,21 @@ class BuildStageRunner:
             # The projector owns Reader flush/version resolution and every
             # engine-specific application contract. Restart/scale/rollback of
             # a frozen release never enters this build path.
-            await self._runtime_projector.project(
-                bot_id=str(bot["bot_id"]),
-                owner_id=str(bot["owner_id"]),
-                scope=ProjectionScope.everything(),
-            )
+            try:
+                await self._runtime_projector.project(
+                    bot_id=str(bot["bot_id"]),
+                    owner_id=str(bot["owner_id"]),
+                    scope=ProjectionScope.everything(),
+                )
+            except Exception:
+                # Draft verification is the product gate for Service Bot
+                # publication. Runtime convergence remains best-effort here;
+                # Artifact construction below decides Build success.
+                logger.exception(
+                    "[BuildStageRunner] Runtime projection did not complete "
+                    "before Service Bot build: bot_id=%s",
+                    bot_id,
+                )
 
             # Select the artifact producer by device_provider: ARCA/baas → the
             # existing build(); teclaw → compose + freeze. produce_artifact is
@@ -111,23 +143,75 @@ class BuildStageRunner:
             device_provider = self._baas_service.resolve_container_provider(bot)
             producer = self._producer_router.resolve(device_provider)
             behavior = self._provider_behaviors.resolve(device_provider)
-            artifact = await asyncio.to_thread(producer.produce_artifact, bot, version)
+            layout_observation = None
+            if producer.requires_runtime_layout_observation:
+                # TODO: let BotRuntimeProjector hand off its fresh observation
+                # once that Service API can do so without coupling projection
+                # results to filesystem Artifact producers. Until then, one
+                # read-only probe keeps the build contract explicit and current.
+                runtime_engine = runtime_layout_engine_for_bot(bot)
+                probe = await self._runtime_layout_probe.probe_bot(
+                    bot_id=str(bot["bot_id"]),
+                    user_id=str(bot["owner_id"]),
+                    engine=runtime_engine,
+                )
+                layout_observation = ServiceArtifactLayoutObservation.from_probe(
+                    probe,
+                    expected_engine=runtime_engine,
+                )
+                logger.info(
+                    "[BuildStageRunner] Runtime layout observed: bot_id=%s, "
+                    "engine=%s, status=%s, center_mount=%s, reason=%s",
+                    bot_id,
+                    runtime_engine,
+                    layout_observation.status.value,
+                    layout_observation.center_mount_status,
+                    layout_observation.reason,
+                )
+                if layout_observation.resolved_layout is not None:
+                    resolved = layout_observation.resolved_layout
+                    logger.debug(
+                        "[BuildStageRunner] Runtime layout paths: bot_id=%s, "
+                        "active_root=%s, local_root=%s, repo_root=%s, "
+                        "center_root=%s",
+                        bot_id,
+                        resolved.active_root,
+                        resolved.local_root,
+                        resolved.repo_root,
+                        resolved.center_root,
+                    )
+
+            request = ArtifactBuildRequest.create(
+                bot=bot,
+                version=version,
+                layout_observation=layout_observation,
+            )
+            artifact = await asyncio.to_thread(producer.produce_artifact, request)
 
             if not artifact.success:
-                raise PublishFlowServiceError(artifact.message or "Build failed")
+                raise ServiceArtifactBuildError(
+                    ServiceArtifactBuildErrorCode.SNAPSHOT_INVALID,
+                    artifact.message or "Service Artifact snapshot build failed",
+                )
 
             # Provider-specific post-build file staging (teclaw snapshots the
             # running source container's files into OSS and embeds the refs;
             # ARCA/baas write the live FS the build already sees → no-op).
             await behavior.stage_build_files(
-                artifact=artifact, bot=bot, bot_id=bot_id,
-                owner_id=owner_id, publish_id=publish_id,
+                artifact=artifact,
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                publish_id=publish_id,
             )
 
             # Build succeeded: merge the artifact pointers into ext (ARCA =
             # migration_path/build_target_path; external = config_artifact/
             # content_hash/engine_ext).
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
+            ext.pop("error_code", None)
+            ext.pop("error_message", None)
+            ext.pop("source_status", None)
             ext.update(artifact.ext)
             center_skill_uuids = tuple(
                 sorted(
@@ -149,7 +233,8 @@ class BuildStageRunner:
 
             logger.info(
                 "[BuildStageRunner] Build completed: publish_id=%s, provider=%s",
-                publish_id, device_provider,
+                publish_id,
+                device_provider,
             )
 
             return PublishFlowResult(
@@ -160,11 +245,20 @@ class BuildStageRunner:
             )
 
         except Exception as e:
-            logger.error("[BuildStageRunner] Build failed: %s", e)
+            logger.exception("[BuildStageRunner] Build failed: %s", e)
 
             ext, expected_ext = self._ext_state.get_latest_ext_snapshot(publish_id)
             PublishExtState.clear_retry_flag(ext)
-            ext["error_message"] = str(e)
+            if isinstance(e, ServiceArtifactBuildError):
+                ext["error_code"] = e.code.value
+                error_message = str(e)
+            else:
+                ext.pop("error_code", None)
+                # Preserve the existing Legacy BFF diagnostic contract. The
+                # public OpenAPI facade independently sanitizes deployment
+                # failures before returning them to external callers.
+                error_message = str(e)
+            ext["error_message"] = error_message
             ext["source_status"] = PublishStatus.BUILDING.value
             self._ext_state.update_status(
                 publish_id=publish_id,
@@ -177,6 +271,6 @@ class BuildStageRunner:
             return PublishFlowResult(
                 publish_id=publish_id,
                 status=PublishStatus.FAILED,
-                message=f"Build failed: {str(e)}",
+                message=f"Build failed: {error_message}",
                 action="process",
             )

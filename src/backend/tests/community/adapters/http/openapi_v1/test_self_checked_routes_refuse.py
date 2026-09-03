@@ -42,7 +42,7 @@ from fastapi import FastAPI
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
+from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.admission import (
     HARNESS_SCOPED_OPERATIONS,
     SKILL_SCOPED_OPERATIONS,
@@ -243,7 +243,7 @@ def _make_client(services, grant_service):
                 binder.bind(protocol, to=services)
 
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.dependency_overrides[require_principal] = _app_caller
     attach_injector(app, Injector([_M()]))
     mount_public_error_handlers(app)

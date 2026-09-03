@@ -1,10 +1,10 @@
 // useAdmin：空间列表搜索（防抖）/ 类型筛选 / 分页 / 创建团队空间 / 打开详情拉成员 /
 // 成员增删改 / 申请加入。编排 store + adminService，错误 toast（经统一 notify 入口）。
+import { notifyError, notifySuccess } from '@/components/ui/notify';
 import type { Space } from '@/domain/admin/models';
 import { sortSpacesByDisplayOrder } from '@/domain/spaceContext';
 import { adminService } from '@/services/admin';
 import { useAdminStore } from '@/stores/adminStore';
-import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -281,6 +282,18 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
     ) -> ArcaSandbox:
+
+        # ACK 场景冷启动（拉镜像/调度）较慢，等待就绪的超时时间扩充 3 倍
+        logger.info(
+            "[aliyun_ack] ready timeout expanded 3x for ACK cold start: "
+            "template=%s, timeout=%ss -> %ss",
+            template_id,
+            ready_timeout_in_seconds,
+            ready_timeout_in_seconds * 3,
+        )
+        ready_timeout_in_seconds = ready_timeout_in_seconds * 3
+
+
         namespace = self._get_namespace()
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
@@ -432,11 +445,11 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
 
 
 def aliyun_ack_plugin_factory(
-    _credentials=None,
+    _credentials: ArcaCredentials | None = None,
     *,
     default_images: dict[str, dict[str, str]] | None = None,
     arca_utils: ArcaUtils | None = None,
-):
+) -> Callable[[ArcaCredentials], AliyunAckSandboxPlugin]:
     """Return a callable that builds AliyunAckSandboxPlugin with config baked in.
 
     The leading ``_credentials`` arg absorbs any positional argument that
@@ -449,7 +462,7 @@ def aliyun_ack_plugin_factory(
     and ``app_name`` respectively).
     """
 
-    def _build(credentials=None):
+    def _build(credentials: ArcaCredentials | None = None) -> AliyunAckSandboxPlugin:
         return AliyunAckSandboxPlugin(
             config=credentials,
             default_images=default_images,

@@ -13,6 +13,8 @@ from engine.community.core.skills.exceptions import (
     InvalidPoolMappingRequestError,
 )
 from engine.community.core.skills.models import (
+    PoolMappingApplyMode,
+    PoolMappingProjectionStatus,
     PoolLayoutActivateRequest,
     PoolLayoutActivationStatus,
     PoolLayoutRollbackRequest,
@@ -245,6 +247,41 @@ async def test_openclaw_adapter_propagates_logical_mapping_version() -> None:
         "retired_mappings": [expected_retired_mapping],
         "source_layout": "pool",
     }
+
+
+@pytest.mark.asyncio
+async def test_openclaw_adapter_preserves_best_effort_item_diagnostics() -> None:
+    port = MagicMock()
+    item = {
+        "target": "/skills/author-owned",
+        "source": "/pool/author-owned",
+        "status": "PENDING",
+        "code": "MAPPING_PUBLISH_IO_ERROR",
+        "retryable": True,
+    }
+    port.publish_pool_mappings = AsyncMock(
+        return_value={"published": False, "status": "PENDING", "items": [item]}
+    )
+    port.verify_pool_mappings = AsyncMock(
+        return_value={"valid": False, "status": "FUTURE", "items": [item]}
+    )
+    adapter = OpenClawSkillsAdapter(port)
+    mapping = SymlinkItem(source="/pool/author-owned", target="/skills/author-owned")
+
+    published = await adapter.publish_pool_mappings(
+        [mapping], apply_mode=PoolMappingApplyMode.BEST_EFFORT
+    )
+    verified = await adapter.verify_pool_mappings(
+        [mapping], apply_mode=PoolMappingApplyMode.BEST_EFFORT
+    )
+
+    assert published.status is PoolMappingProjectionStatus.PENDING
+    assert published.items[0].retryable is True
+    # Unknown newer values fail closed without discarding the item evidence.
+    assert verified.status is PoolMappingProjectionStatus.DEGRADED
+    assert verified.items[0].code == "MAPPING_PUBLISH_IO_ERROR"
+    assert port.publish_pool_mappings.await_args.args[0]["apply_mode"] == "BEST_EFFORT"
+    assert port.verify_pool_mappings.await_args.args[0]["apply_mode"] == "BEST_EFFORT"
 
 
 @pytest.mark.asyncio

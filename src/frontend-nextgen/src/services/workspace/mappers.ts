@@ -37,6 +37,10 @@ export interface GroupSessionDto {
   created_at: number;
   updated_at: number;
   collected?: boolean;
+  /** 会话创建者 actor_id（GET sessions/{sid} 与 GET groups/{gid}/sessions 返回）。 */
+  created_by?: string;
+  /** 发起调用的主体标识。 */
+  caller_principal?: string;
 }
 
 const STRATEGY_TO_KIND: Record<GroupStrategy, GroupKind> = {
@@ -98,6 +102,8 @@ export function mapSessionListItem(dto: GroupSessionDto): SessionView {
     lastMessageAt: dto.updated_at,
     createdAt: dto.created_at,
     favorite: dto.collected ?? false,
+    ...(dto.created_by ? { createdBy: dto.created_by } : {}),
+    ...(dto.caller_principal ? { callerPrincipal: dto.caller_principal } : {}),
   };
 }
 
@@ -128,6 +134,8 @@ export interface BcsSessionRaw {
   created_at?: number;
   updated_at?: number;
   collected?: boolean;
+  created_by?: string;
+  caller_principal?: string;
 }
 
 /** BCS raw 会话项 → SessionView 兜底映射（execute 建群链路专用，不碰预发 mapSessionListItem）。
@@ -152,5 +160,7 @@ export function mapBcsSessionItem(raw: BcsSessionRaw, fallbackGroupId: string): 
     lastMessageAt: raw.updated_at ?? 0,
     createdAt: raw.created_at ?? 0,
     favorite: raw.collected ?? false,
+    ...(raw.created_by ? { createdBy: raw.created_by } : {}),
+    ...(raw.caller_principal ? { callerPrincipal: raw.caller_principal } : {}),
   };
 }

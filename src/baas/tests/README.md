@@ -178,8 +178,8 @@ from secbaas.core.service.bot_run import BotRunner                  # 具体实�
 _bot_runner: BotRunnerProtocol = BotRunner(
     bot_service_selector=MagicMock(spec=BotServiceSelector),
     run_repository=MagicMock(spec=BotRunRepository),
-    binding_resolver=MagicMock(spec=BotBindingResolver),
-    dispatcher=MagicMock(spec=MessageDispatcher),
+    bot_service_plugin=MagicMock(spec=BotServicePlugin),
+    dispatchers=[MagicMock(spec=MessageDispatcher)],
 )
 ```
 

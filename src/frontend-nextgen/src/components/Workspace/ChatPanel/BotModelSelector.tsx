@@ -31,11 +31,11 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
           size="sm"
           disabled={disabled || loading}
           className={cn(
-            'h-8 gap-1.5 rounded-lg border border-[var(--color-border)] bg-white px-3 text-xs font-medium text-[var(--color-fg)]',
-            open && 'border-[var(--color-primary)] text-[var(--color-primary)]',
+            'h-8 gap-1.5 rounded-lg border border-border bg-background px-3 text-xs font-medium text-foreground',
+            open && 'border-primary text-primary',
           )}
         >
-          <Cpu className="h-3.5 w-3.5 text-[var(--color-muted)]" />
+          <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="max-w-[120px] truncate">{label}</span>
           <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
         </Button>
@@ -44,7 +44,7 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
         {loading ? (
           <Spin tip="加载模型列表..." />
         ) : models.length === 0 ? (
-          <p className="px-3 py-6 text-center text-xs text-[var(--color-muted)]">暂无可用模型</p>
+          <p className="px-3 py-6 text-center text-xs text-muted-foreground">暂无可用模型</p>
         ) : (
           <div className="max-h-72 overflow-y-auto">
             {models.map((model) => {
@@ -60,18 +60,16 @@ export function BotModelSelector({ models, activeModelId, loading, disabled, onS
                   }}
                   className={cn(
                     'h-auto w-full justify-between rounded-md px-3 py-2 text-left text-sm font-normal',
-                    selected
-                      ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-                      : 'text-[var(--color-fg)] hover:bg-[var(--color-panel-muted)]',
+                    selected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-2">
-                    <Bot className="h-4 w-4 flex-none text-[var(--color-muted)]" />
+                    <Bot className="h-4 w-4 flex-none text-muted-foreground" />
                     <span className="min-w-0 truncate">{model.name}</span>
                   </span>
                   <span className="flex items-center gap-1.5">
                     {model.provider ? <Badge tone="neutral">{model.provider}</Badge> : null}
-                    {selected ? <Check className="h-4 w-4 text-[var(--color-primary)]" /> : null}
+                    {selected ? <Check className="h-4 w-4 text-primary" /> : null}
                   </span>
                 </Button>
               );

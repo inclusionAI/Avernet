@@ -69,6 +69,21 @@ describe('buildGroupChatBridgeRequest — 根因 A 顶层 content + C 字段透�
     expect(buildGroupUserMessageExtra().displayTime).toEqual(expect.any(String));
     expect(buildEchoAttachments('s1', undefined)).toBeUndefined();
   });
+
+  it('发送者身份只写入本地 userMessage.extra，不改变顶层请求合同', () => {
+    const r = buildGroupChatBridgeRequest('s1', 'hi', undefined, {
+      senderId: 'human-1',
+      senderName: '章梧',
+      senderAvatarUrl: 'avatar-user',
+    });
+    expect(r.userMessage.extra).toMatchObject({
+      senderId: 'human-1',
+      senderName: '章梧',
+      senderAvatarUrl: 'avatar-user',
+    });
+    expect(r).not.toHaveProperty('senderName');
+    expect(r).not.toHaveProperty('senderAvatarUrl');
+  });
 });
 
 // 真链路数据级组合验证（buildRequestParams → provider.request payload）：

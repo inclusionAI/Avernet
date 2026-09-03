@@ -12,6 +12,7 @@ import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/servic
 import { cn } from '@/utils/cn';
 import { Bot, CalendarDays, Clock3, History, ListTodo } from 'lucide-react';
 import React from 'react';
+import { getBotDisplayName } from '../userTaskUtils';
 
 function formatDateTime(value?: string | null): string {
   if (!value) return '—';
@@ -38,14 +39,14 @@ function InfoCell({
   className?: string;
 }) {
   return (
-    <div className={cn('space-y-1', className)}>
-      <div className="flex items-center gap-1.5 text-xs font-medium text-[var(--color-muted)]">
-        <span className="flex size-5 items-center justify-center rounded-md bg-white text-[var(--color-primary)]">
+    <div className={cn('space-y-1.5', className)}>
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <span className="flex size-5 items-center justify-center rounded-md border border-border bg-background text-primary">
           {icon}
         </span>
         <span>{label}</span>
       </div>
-      <div className="break-words text-sm text-[var(--color-fg)]">{value || '—'}</div>
+      <div className="break-words text-xs text-foreground">{value || '—'}</div>
     </div>
   );
 }
@@ -57,6 +58,7 @@ export interface MyTaskRoutineDrawerProps {
   selectedRoutineRuns: ScheduledRoutineRunRecord[];
   selectedRoutineRunsLoading: boolean;
   selectedRoutineRunsError: string | null;
+  botNameMap: Record<string, string>;
 }
 
 export function MyTaskRoutineDrawer({
@@ -66,17 +68,22 @@ export function MyTaskRoutineDrawer({
   selectedRoutineRuns,
   selectedRoutineRunsLoading,
   selectedRoutineRunsError,
+  botNameMap,
 }: MyTaskRoutineDrawerProps) {
+  const ownerBotName = selectedRoutine
+    ? getBotDisplayName(botNameMap, selectedRoutine.botId, selectedRoutine.botName)
+    : '—';
+
   return (
     <Drawer open={Boolean(selectedRoutineKey)} onOpenChange={(open) => !open && onCloseRoutine()}>
-      <DrawerContent side="right" size="lg">
-        <DrawerHeader>
+      <DrawerContent side="right" size="lg" className="bg-background text-foreground">
+        <DrawerHeader className="mb-5 border-b border-border pb-4">
           <div className="flex items-start justify-between gap-3 pr-8">
             <div>
-              <DrawerTitle className="text-xl font-semibold text-[var(--color-fg)]">
+              <DrawerTitle className="text-lg font-semibold tracking-tight text-foreground">
                 {selectedRoutine?.name ?? '定时任务实例'}
               </DrawerTitle>
-              <DrawerDescription className="mt-2 text-sm text-[var(--color-muted)]">
+              <DrawerDescription className="mt-2 text-xs text-muted-foreground">
                 定时任务详情和实例列表均由后端 routines 接口返回。
               </DrawerDescription>
             </div>
@@ -84,14 +91,14 @@ export function MyTaskRoutineDrawer({
         </DrawerHeader>
         {selectedRoutine ? (
           <div className="space-y-6">
-            <section className="grid gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-muted)]/40 p-4 text-sm sm:grid-cols-2">
+            <section className="grid gap-4 rounded-lg border border-border bg-muted/30 p-4 sm:grid-cols-2">
               <InfoCell
                 icon={<Bot className="size-4" />}
                 label="Owner Bot"
                 value={
                   <div className="space-y-1">
-                    <div>{selectedRoutine.botName}</div>
-                    <div className="text-xs text-[var(--color-muted)]">Bot ID：{selectedRoutine.botId}</div>
+                    <div>{ownerBotName}</div>
+                    <div className="text-xs text-muted-foreground">Bot ID：{selectedRoutine.botId}</div>
                   </div>
                 }
               />
@@ -119,9 +126,9 @@ export function MyTaskRoutineDrawer({
             </section>
 
             <section className="space-y-3">
-              <h3 className="m-0 text-sm font-semibold text-[var(--color-fg)]">最近实例</h3>
+              <h3 className="m-0 text-sm font-semibold text-foreground">最近实例</h3>
               {selectedRoutineRunsLoading ? (
-                <div className="rounded-xl border border-[var(--color-border)] p-6 text-center text-sm text-[var(--color-muted)]">
+                <div className="rounded-lg border border-border bg-card p-6 text-center text-xs text-muted-foreground">
                   定时任务实例加载中…
                 </div>
               ) : selectedRoutineRunsError ? (
@@ -132,15 +139,15 @@ export function MyTaskRoutineDrawer({
                     selectedRoutineRuns.map((item) => (
                       <div
                         key={item.id}
-                        className="rounded-xl border border-[var(--color-border)] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                        className="rounded-lg border border-border bg-card p-4 shadow-sm transition-shadow hover:shadow"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="text-sm font-medium text-[var(--color-fg)]">{item.instanceNo}</span>
-                          <span className="text-xs text-[var(--color-muted)]">
+                          <span className="text-xs font-medium text-foreground">{item.instanceNo}</span>
+                          <span className="text-xs text-muted-foreground">
                             计划触发：{formatDateTime(item.plannedTriggerAt)}
                           </span>
                         </div>
-                        <div className="mt-3 grid gap-2 text-sm text-[var(--color-muted)] sm:grid-cols-2">
+                        <div className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-2">
                           <InfoCell
                             icon={<CalendarDays className="size-4" />}
                             label="实际触发"
@@ -155,10 +162,10 @@ export function MyTaskRoutineDrawer({
                           />
                         </div>
                         {item.outputSummary ? (
-                          <p className="mt-3 line-clamp-2 text-sm text-[var(--color-muted)]">{item.outputSummary}</p>
+                          <p className="mt-3 line-clamp-2 text-xs text-muted-foreground">{item.outputSummary}</p>
                         ) : null}
                         {item.errorMessage ? (
-                          <p className="mt-3 rounded-lg bg-[var(--color-error-soft)] px-3 py-2 text-sm text-[var(--color-error)]">
+                          <p className="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                             {item.errorMessage}
                           </p>
                         ) : null}
@@ -174,8 +181,10 @@ export function MyTaskRoutineDrawer({
         ) : (
           <Empty title="未找到定时任务" description="请从定时任务列表重新打开实例抽屉。" />
         )}
-        <DrawerFooter className="justify-end">
-          <Button onClick={onCloseRoutine}>关闭</Button>
+        <DrawerFooter className="justify-end border-t border-border pt-4">
+          <Button variant="outline" onClick={onCloseRoutine}>
+            关闭
+          </Button>
         </DrawerFooter>
       </DrawerContent>
     </Drawer>

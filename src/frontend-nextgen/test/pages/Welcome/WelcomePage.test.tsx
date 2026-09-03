@@ -1,0 +1,106 @@
+/** @jest-environment jsdom */
+import { extendCapabilities } from '@/capabilities';
+import Welcome from '@/pages/Welcome';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { navigateToUrl } from '@/utils/redirectCurrentTab';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+
+// 欢迎页依赖面:@umijs/max(history.push 导航 + request 兜底)、authApiController(探活/登录地址)、
+// notify、redirectCurrentTab;均 mock。链路模式与 test/components/ExternalLoginPromptModal.test.tsx 一致。
+jest.mock('@umijs/max', () => ({ request: jest.fn(), history: { push: jest.fn() } }));
+jest.mock('@/services/auth/authApiController');
+jest.mock('@/components/ui/notify');
+jest.mock('@/utils/redirectCurrentTab');
+
+import { getAuthProviders, getCurrentAuthUser } from '@/services/auth/authApiController';
+import { history } from '@umijs/max';
+
+const mockedHistoryPush = history.push as jest.Mock;
+const mockedGetCurrentAuthUser = getCurrentAuthUser as jest.Mock;
+const mockedGetAuthProviders = getAuthProviders as jest.Mock;
+const mockedNavigateToUrl = navigateToUrl as jest.MockedFunction<typeof navigateToUrl>;
+
+const AUTH_USER_DTO = { user_id: 'u-1', name: '外部用户', provider: 'sso' };
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  useExternalAuthStore.getState().reset();
+});
+
+afterEach(() => {
+  useExternalAuthStore.getState().reset();
+});
+
+describe('Welcome 欢迎页(Open 形态默认入口)', () => {
+  it('Hero 渲染品牌名大标题与 tagline(产品名经 getProductBrand 插值)', async () => {
+    // 挂载探活 401 → 稳定保持未登录态;render flush 进 act 以消化探活的异步 setState
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    await act(async () => {
+      render(<Welcome />);
+    });
+    expect(screen.getByRole('heading', { name: 'Avernet' })).toBeTruthy();
+    expect(screen.getByText('让智能体在此协同、执行、进化。')).toBeTruthy();
+  });
+
+  it('CTA「进入 Avernet」点击 → history.push(/workspace),登录态交给既有登录链路', async () => {
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    await act(async () => {
+      render(<Welcome />);
+    });
+    fireEvent.click(screen.getByRole('button', { name: '进入 Avernet' }));
+    expect(mockedHistoryPush).toHaveBeenCalledWith('/workspace');
+  });
+
+  it('GitHub 外链 Hero 与 Footer 两处均为开源仓地址 + target=_blank', async () => {
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    await act(async () => {
+      render(<Welcome />);
+    });
+    const links = screen.getAllByRole('link', { name: 'GitHub' });
+    expect(links).toHaveLength(2);
+    for (const link of links) {
+      expect(link.getAttribute('href')).toBe('https://github.com/inclusionAI/Avernet');
+      expect(link.getAttribute('target')).toBe('_blank');
+    }
+  });
+
+  it('oauth-provider 未登录:Header 渲染「登录」,点击拉 provider url 并发起登录', async () => {
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    mockedGetAuthProviders.mockResolvedValueOnce({
+      providers: [{ name: 'sso', url: 'https://login.example/sso' }],
+    });
+    await act(async () => {
+      render(<Welcome />);
+    });
+    expect(screen.getByRole('button', { name: '登录' })).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '登录' }));
+    });
+
+    expect(mockedGetAuthProviders).toHaveBeenCalled();
+    expect(mockedNavigateToUrl).toHaveBeenCalledWith('https://login.example/sso');
+  });
+
+  it('oauth-provider 已登录:隐藏「登录」按钮(一期不展示用户信息)', async () => {
+    useExternalAuthStore.getState().setAuthenticated({ userId: 'u-1', displayName: '外部用户', provider: 'sso' });
+    mockedGetCurrentAuthUser.mockResolvedValue(AUTH_USER_DTO);
+    await act(async () => {
+      render(<Welcome />);
+    });
+    expect(screen.queryByRole('button', { name: '登录' })).toBeNull();
+  });
+});
+
+describe('非 oauth-provider 策略(纵深防御)', () => {
+  it('ace-gateway 策略不渲染登录按钮', async () => {
+    // extendCapabilities 合并后无法恢复,故本组置于文件末尾,不影响前述 oauth-provider 用例。
+    // 探活仅在 oauth-provider 挂载,因此无需 mock getCurrentAuthUser。
+    extendCapabilities({ getLoginStrategy: () => ({ status: 'available', value: 'ace-gateway' }) });
+    useExternalAuthStore.getState().setUnauthenticated();
+    await act(async () => {
+      render(<Welcome />);
+    });
+    expect(screen.queryByRole('button', { name: '登录' })).toBeNull();
+  });
+});

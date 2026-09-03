@@ -1,15 +1,21 @@
 import { defaultCapabilities } from './defaultCapabilities';
 import type {
+  AgentCodingInternalResources,
   AppCapabilities,
+  BotEngineOption,
   CapabilityResult,
   CapabilityStatus,
   CurrentUserContext,
   HelpLink,
   HumanIdentity,
+  LoginStrategy,
   MetricsDashboardSpec,
+  PersonalSpaceInitOptions,
+  ProductBrand,
   ReleaseNotesCapability,
   ReleaseNotesData,
   SearchedUser,
+  ShellVisibility,
   UserSearchCapability,
 } from './types';
 
@@ -36,15 +42,21 @@ export function sealExtensions(): void {
 
 export { defaultCapabilities };
 export type {
+  AgentCodingInternalResources,
   AppCapabilities,
+  BotEngineOption,
   CapabilityResult,
   CapabilityStatus,
   CurrentUserContext,
   HelpLink,
   HumanIdentity,
+  LoginStrategy,
   MetricsDashboardSpec,
+  PersonalSpaceInitOptions,
+  ProductBrand,
   ReleaseNotesCapability,
   ReleaseNotesData,
   SearchedUser,
+  ShellVisibility,
   UserSearchCapability,
 };

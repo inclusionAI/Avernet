@@ -181,6 +181,7 @@ from .task import task_router
 from .bots.engine_config import router as engine_config_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
+from .bots.create_with_manifest import router as create_with_manifest_router
 from .org import dept_router as org_dept_router
 from .org import router as org_router
 from .channels import router as channels_router
@@ -303,6 +304,17 @@ _USER_SCOPED_SUBGROUPS = [
 
 _SUBGROUPS = [
     token_router,
+    # Creating a bot with its manifest (W13, #1696). Here rather than with the
+    # config-manifest groups below: those may address a shared bot and take the
+    # addressed-owner grant, while these two are a creation and its poll —
+    # refused to an application caller outright, and for most of a creation's
+    # life there is no bot record for a grant to be about.
+    #
+    # Its order relative to `bots` is load-bearing. `POST .../bots/with-manifest`
+    # is a top-level literal under the `{bot_id}` wildcard that group
+    # contributes, so mounting it after would let a future `/bots/{bot_id}`
+    # route capture "with-manifest" as a bot id.
+    create_with_manifest_router,
     # Both authorization groups precede `bots` below. `authorized_apps_router`
     # sits *under* `{bot_id}` so path shape already keeps it distinct, but
     # `authorized_bots_router` is a top-level literal and genuinely depends on

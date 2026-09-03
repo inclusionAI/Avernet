@@ -12,13 +12,23 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
     ResolvedSkillPlan,
+    RuntimeProjectionIssue,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
-from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    MAPPING_CONTRACT_V3,
+    mapping_contract_for,
+)
 from agentclaw.community.core.skills_pool.models import (
+    MappingApplyMode,
+    MappingProjectionStatus,
+    MappingPublishResult,
+    MappingVerificationResult,
     PoolSkillMapping,
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
@@ -76,7 +86,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Write the halves ``scope`` declares, and only those.
 
         A mutation that changed one half has nothing to say to the other, and
@@ -90,33 +100,73 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         snapshots, so they are evidence that Skills moved. Skipping them would
         strand a published mapping the desired state no longer holds.
         """
+        results: list[RuntimeProjectionResult] = []
         if scope.skills or retired_mappings:
-            await self._apply_skill_projection(
-                plan=plan, retired_mappings=retired_mappings
-            )
+            try:
+                results.append(
+                    await self._apply_skill_projection(
+                        plan=plan, retired_mappings=retired_mappings
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "[PerDomainRuntimeProjection] skill projection unavailable "
+                    "bot_id=%s engine=%s",
+                    plan.bot_id,
+                    plan.engine,
+                )
+                results.append(
+                    RuntimeProjectionResult.pending(
+                        code="SKILL_RUNTIME_UNAVAILABLE",
+                        reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                    )
+                )
         else:
             logger.info(
                 "[PerDomainRuntimeProjection] Skill projection skipped, scope "
                 "declares no Skill change: bot_id=%s, engine=%s",
                 plan.bot_id, plan.engine,
             )
+            results.append(RuntimeProjectionResult.skipped(reason="SKILL_SCOPE_UNCHANGED"))
         if scope.mcp:
             if not isinstance(plan, ResolvedCapabilityPlan):
-                raise SkillSetRuntimeReconcileError()
-            await self._apply_mcp_projection(plan=plan, scope=scope)
+                results.append(
+                    RuntimeProjectionResult.pending(
+                        code="MCP_RUNTIME_PLAN_UNAVAILABLE",
+                        reason="MCP 运行时配置暂不可用，能力状态已保存但尚未同步",
+                    )
+                )
+            else:
+                try:
+                    results.append(await self._apply_mcp_projection(plan=plan, scope=scope))
+                except Exception:
+                    logger.exception(
+                        "[PerDomainRuntimeProjection] MCP projection unavailable "
+                        "bot_id=%s engine=%s",
+                        plan.bot_id,
+                        plan.engine,
+                    )
+                    results.append(
+                        RuntimeProjectionResult.pending(
+                            code="MCP_RUNTIME_UNAVAILABLE",
+                            reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
+                        )
+                    )
         else:
             logger.info(
                 "[PerDomainRuntimeProjection] MCP projection skipped, scope "
                 "declares no MCP change: bot_id=%s, engine=%s",
                 plan.bot_id, plan.engine,
             )
+            results.append(RuntimeProjectionResult.skipped(reason="MCP_SCOPE_UNCHANGED"))
+        return RuntimeProjectionResult.combine(*results)
 
     async def _apply_skill_projection(
         self,
         *,
         plan: ResolvedSkillPlan,
         retired_mappings: Sequence[PoolSkillMapping],
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         mappings = list(plan.projection.skill_mappings)
         retired = list(retired_mappings)
         bot = plan.bot
@@ -138,7 +188,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             )
             or retired
         ):
-            await self._apply_pool_mappings(
+            return await self._apply_pool_mappings(
                 bot_id=plan.bot_id,
                 owner_id=plan.owner_id,
                 layout_engine=runtime_layout_engine_for_bot(bot),
@@ -156,14 +206,20 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         elif not await plan.service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
         ):
-            raise SkillSetRuntimeReconcileError()
+            return RuntimeProjectionResult.pending(
+                code="SKILL_RUNTIME_UNAVAILABLE",
+                reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
+        return RuntimeProjectionResult.converged(
+            components={"skills": RuntimeProjectionStatus.CONVERGED}
+        )
 
     async def _apply_mcp_projection(
         self,
         *,
         plan: ResolvedCapabilityPlan,
         scope: ProjectionScope,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         codes = set(plan.projection.mcp_server_codes)
         if scope.claim_all_mcp:
             # The device-activated listener, and only it. A freshly active
@@ -196,7 +252,13 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         if not await plan.service.project_mcps(
             claimed=claimed, released=released, declared=codes
         ):
-            raise SkillSetRuntimeReconcileError()
+            return RuntimeProjectionResult.pending(
+                code="MCP_RUNTIME_UNAVAILABLE",
+                reason="MCP 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
+        return RuntimeProjectionResult.converged(
+            components={"mcp": RuntimeProjectionStatus.CONVERGED}
+        )
 
     async def _apply_pool_mappings(
         self,
@@ -207,7 +269,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         mappings: list[PoolSkillMapping],
         retired_mappings: list[PoolSkillMapping],
         source_layout: SkillMappingSourceLayout,
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         try:
             contract_mappings = [*mappings, *retired_mappings]
             supported_versions: object = None
@@ -220,27 +282,195 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 supported_versions = probe.evidence.get(
                     "supported_mapping_contract_versions"
                 )
+                center_mount = probe.evidence.get("center_mount")
+                if (
+                    isinstance(center_mount, dict)
+                    and center_mount.get("restart_required") is True
+                    and (
+                        not isinstance(supported_versions, list)
+                        or MAPPING_CONTRACT_V3 not in supported_versions
+                    )
+                ):
+                    return RuntimeProjectionResult.pending(
+                        code="CENTER_RUNTIME_RESTART_REQUIRED",
+                        reason="Bot 尚未加载 Skill Center 目录，请重启 Bot 后重试",
+                    )
             contract = mapping_contract_for(contract_mappings, supported_versions)
-            published = await self._pool_runtime.publish_mappings(
+            raw_published = await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
                 retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
+                apply_mode=MappingApplyMode.BEST_EFFORT,
             )
-            verified = published and await self._pool_runtime.verify_mappings(
+            raw_verified = await self._pool_runtime.verify_mappings(
                 bot_id=bot_id,
                 user_id=owner_id,
                 mappings=mappings,
                 retired_mappings=retired_mappings,
                 source_layout=source_layout,
                 mapping_contract_version=contract,
+                apply_mode=MappingApplyMode.BEST_EFFORT,
             )
+            published = self._publish_result(raw_published)
+            verified = self._verification_result(raw_verified)
         except Exception as exc:
             raise SkillSetRuntimeReconcileError() from exc
-        if not verified:
-            raise SkillSetRuntimeReconcileError()
+        return self._mapping_result(
+            mappings=mappings,
+            published=published,
+            verified=verified,
+        )
+
+    @staticmethod
+    def _mapping_result(
+        *,
+        mappings: list[PoolSkillMapping],
+        published: MappingPublishResult,
+        verified: MappingVerificationResult,
+    ) -> RuntimeProjectionResult:
+        published_by_target = {item.target: item for item in published.items}
+        verified_by_target = {item.target: item for item in verified.items}
+        # Verify observes the filesystem *after* publish. If a transient
+        # publish I/O error left no target at all, verify can only call it
+        # TARGET_NOT_SYMLINK; retain the publisher's retryable PENDING rather
+        # than turning a recoverable outage into a non-retryable degradation.
+        item_by_target = {
+            target: (
+                published_item
+                if published_item.status is MappingProjectionStatus.PENDING
+                else verified_by_target.get(target, published_item)
+            )
+            for target, published_item in published_by_target.items()
+        }
+        item_by_target.update(
+            {
+                target: verified_item
+                for target, verified_item in verified_by_target.items()
+                if target not in item_by_target
+            }
+        )
+        issues: list[RuntimeProjectionIssue] = []
+        mapping_by_name = {mapping.link_name: mapping for mapping in mappings}
+        for item in item_by_target.values():
+            if item.status is MappingProjectionStatus.CONVERGED:
+                continue
+            logical_name = item.target.rsplit("/", 1)[-1]
+            mapping = mapping_by_name.get(logical_name)
+            code, reason, suggested_action, observed, expected = (
+                PerDomainRuntimeProjection._mapping_message(item.code)
+            )
+            issues.append(
+                RuntimeProjectionIssue(
+                    resource_type="SKILL",
+                    resource_id=None,
+                    name=logical_name,
+                    corpus=mapping.corpus.upper() if mapping is not None else None,
+                    code=code,
+                    reason=reason,
+                    status=(
+                        RuntimeProjectionStatus.PENDING
+                        if item.status is MappingProjectionStatus.PENDING
+                        else RuntimeProjectionStatus.DEGRADED
+                    ),
+                    retryable=item.retryable,
+                    observed_entry_type=observed,
+                    expected_entry_type=expected,
+                    logical_location=f"active-skills/{logical_name}",
+                    suggested_action=suggested_action,
+                )
+            )
+        item_statuses = {item.status for item in item_by_target.values()}
+        status = (
+            RuntimeProjectionStatus.DEGRADED
+            if MappingProjectionStatus.DEGRADED in item_statuses
+            else (
+                RuntimeProjectionStatus.PENDING
+                if MappingProjectionStatus.PENDING in item_statuses
+                else RuntimeProjectionStatus.CONVERGED
+            )
+        )
+        if not issues and status is not RuntimeProjectionStatus.CONVERGED:
+            issues.append(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code="SKILL_MAPPING_RUNTIME_UNAVAILABLE",
+                    reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                    status=status,
+                    retryable=status is RuntimeProjectionStatus.PENDING,
+                )
+            )
+        return RuntimeProjectionResult(
+            status=status,
+            components={"skills": status},
+            issues=tuple(issues),
+        )
+
+    @staticmethod
+    def _publish_result(value: object) -> MappingPublishResult:
+        if isinstance(value, MappingPublishResult):
+            return value
+        return MappingPublishResult(
+            published=bool(value),
+            status=(
+                MappingProjectionStatus.CONVERGED
+                if value
+                else MappingProjectionStatus.PENDING
+            ),
+        )
+
+    @staticmethod
+    def _verification_result(value: object) -> MappingVerificationResult:
+        if isinstance(value, MappingVerificationResult):
+            return value
+        return MappingVerificationResult(
+            valid=bool(value),
+            status=(
+                MappingProjectionStatus.CONVERGED
+                if value
+                else MappingProjectionStatus.PENDING
+            ),
+        )
+
+    @staticmethod
+    def _mapping_message(
+        code: str | None,
+    ) -> tuple[str, str, str, str | None, str | None]:
+        messages = {
+            "MANAGED_SOURCE_MISSING": (
+                "MANAGED_SOURCE_MISSING",
+                "Skill 的源文件已被删除或移动，平台已保留目标软链",
+                "请重新上传或恢复该 Skill；后续能力同步会再次尝试",
+                "DANGLING_SYMLINK",
+                "SYMLINK",
+            ),
+            "UNMANAGED_ACTIVE_ENTRY_RETAINED": (
+                "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                "Bot 生效目录中存在同名实体目录，平台没有覆盖或删除该目录",
+                "请备份并移走同名实体目录，然后重新执行能力变更",
+                "DIRECTORY",
+                "SYMLINK",
+            ),
+            "EXTERNAL_ACTIVE_ENTRY_RETAINED": (
+                "EXTERNAL_ACTIVE_ENTRY_RETAINED",
+                "同名软链指向平台管理目录之外，平台没有修改该软链",
+                "请确认该软链用途；如需平台管理，请先移走该软链",
+                "EXTERNAL_SYMLINK",
+                "SYMLINK",
+            ),
+        }
+        return messages.get(
+            code or "",
+            (
+                code or "SKILL_MAPPING_DEGRADED",
+                "Skill 运行时投影尚未完成",
+                "请在 Bot 运行环境恢复后再次执行能力变更",
+                None,
+                None,
+            ),
+        )
 
     @staticmethod
     def _desired_skills(

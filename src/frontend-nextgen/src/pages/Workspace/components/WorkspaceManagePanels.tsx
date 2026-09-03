@@ -50,7 +50,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
   return (
     <>
       {activePanel === 'manage' ? (
-        <div className="relative z-30 flex w-[380px] shrink-0 border-l border-[var(--color-border)]">
+        <div className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border">
           <GroupManagePanel
             key={group.groupId}
             group={group}
@@ -74,7 +74,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
       ) : null}
 
       {activePanel === 'sessionManage' && session ? (
-        <div className="relative z-30 flex w-[380px] shrink-0 border-l border-[var(--color-border)]">
+        <div className="relative z-30 flex w-[min(380px,36vw)] max-w-[36vw] shrink-0 border-l border-border">
           <SessionManagePanel
             key={session.sessionId}
             session={session}

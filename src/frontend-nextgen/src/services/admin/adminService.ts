@@ -3,6 +3,7 @@
 // 分页用 page_no；addMember body 用 member_user_id；requestJoin body 用 reason（必填）。
 // 错误标准化（catch BackendRequestError -> {message,apiPath}），不 throw 到 Component。
 
+import { getCapabilities } from '@/capabilities';
 import { mapSpaceDto, mapSpaceList, mapSpaceMemberDto, mapSpaceMemberList } from '@/domain/admin/mappers';
 import type {
   CreateTeamSpaceInput,
@@ -95,6 +96,7 @@ function normalizeListParams(query: SpaceListQuery, user_id: string): SpaceListP
   const p: SpaceListParams = { user_id, page_no: query.page ?? 1, page_size: query.pageSize ?? 20 };
   if (query.keyword?.trim()) p.keyword = query.keyword.trim();
   if (query.spaceType && query.spaceType !== 'UNKNOWN') p.space_type = query.spaceType;
+  if (query.scope) p.scope = query.scope;
   return p;
 }
 
@@ -247,7 +249,8 @@ export const adminService = {
     try {
       const params: SpaceUserIdParams = { user_id };
       if (user_name && user_name !== user_id) params.user_name = user_name;
-      await initializePersonalSpace(params);
+      // 部署形态差异收口：阿里云部署（Open Core）body 携带 skipSC:true，内部版覆盖为 {} 不传字段。
+      await initializePersonalSpace(params, getCapabilities().getPersonalSpaceInitOptions().value);
       return { data: true };
     } catch (e) {
       return { error: toServiceError(e) };

@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
 from injector import Injector, Module
 
-from agentclaw.community.adapters.http.openapi_v1 import build_public_router
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_discover_service import BotDiscoverServiceProtocol
 from agentclaw.community.api.bot_public_service import BotPublicServiceProtocol
@@ -27,7 +26,7 @@ from agentclaw.community.core.gateway_principal.models import (
     UserPrincipal,
 )
 from agentclaw.community.core.gateway_principal.verifier import VerifiedCaller
-from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers
+from tests.community.adapters.http.openapi_v1.conftest import mount_public_error_handlers, public_router
 
 _SEARCH_PATH = "/openapi/v1/bots/catalog/search"
 _DISCOVER_PATH = "/openapi/v1/bots/catalog/discover"
@@ -110,7 +109,7 @@ def app(services: tuple[_PublicService, _DiscoverService]) -> FastAPI:
             binder.bind(BotDiscoverServiceProtocol, to=discover_service)
 
     app = FastAPI()
-    app.include_router(build_public_router())
+    app.include_router(public_router())
     app.dependency_overrides[require_principal] = lambda: VerifiedCaller(
         principals=(
             UserPrincipal(subject=GatewayUser(id="caller-1", username="caller-1")),

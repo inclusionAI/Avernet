@@ -1,20 +1,28 @@
 import { backendRequest } from '../httpClient';
-import type { BackendApiEnvelope, BackendApiPage, BackendUnknownRecord } from '../types';
+import type { BackendApiEnvelope, BackendUnknownRecord } from '../types';
 import type { BotChatDetailDto, BotChatEnvelope, BotChatPageDto } from './botChatController';
 
 export type BotTraceDto = BackendUnknownRecord;
+
+/**
+ * Compatibility controller for callers that still use the historical log
+ * names. The gateway only publishes the bot-scoped OpenAPI chat routes, so
+ * these helpers forward to those routes instead of the retired logs API.
+ */
 export const BOT_LOG_ENDPOINTS = {
-  traces: '/openapi/v1/bots/logs/traces',
-  trace: (trace_id: string) => `/openapi/v1/bots/logs/traces/${trace_id}`,
-  groupTraces: (group_id: string) => `/openapi/v1/bots/logs/groups/${group_id}/traces`,
-  sessionTraces: (session_key: string) => `/openapi/v1/bots/logs/sessions/${session_key}/traces`,
-  taskTraces: (biz_scene: string, biz_task_id: string) =>
-    `/openapi/v1/bots/logs/tasks/${biz_scene}/${biz_task_id}/traces`,
+  traces: (botId: string) => `/openapi/v1/bots/${encodeURIComponent(botId)}/chats`,
+  trace: (botId: string, traceId: string) =>
+    `/openapi/v1/bots/${encodeURIComponent(botId)}/chats/${encodeURIComponent(traceId)}`,
+  groupTraces: (botId: string) => `/openapi/v1/bots/${encodeURIComponent(botId)}/chats`,
 };
 
+export interface BotTraceListParams extends BackendUnknownRecord {
+  bot_id: string;
+}
+
 // 查询 trace 列表，日志正文由上层 Service 做脱敏后再展示。
-export function listBotTraces(params?: BackendUnknownRecord) {
-  return backendRequest<BackendApiEnvelope<BackendApiPage<BotTraceDto>>>(BOT_LOG_ENDPOINTS.traces, {
+export function listBotTraces(params: BotTraceListParams) {
+  return backendRequest<BotChatEnvelope<BotChatPageDto>>(BOT_LOG_ENDPOINTS.traces(params.bot_id), {
     method: 'GET',
     params,
   });
@@ -26,6 +34,7 @@ export interface GroupBotTraceParams {
   owner_id?: string;
   page?: number;
   limit?: number;
+  time_scope?: 'default' | 'all';
 }
 
 export interface GroupBotTraceDetailParams {
@@ -36,21 +45,24 @@ export interface GroupBotTraceDetailParams {
 }
 
 export function listGroupBotTraces(groupId: string, params: GroupBotTraceParams) {
-  return backendRequest<BotChatEnvelope<BotChatPageDto>>(BOT_LOG_ENDPOINTS.groupTraces(groupId), {
+  return backendRequest<BotChatEnvelope<BotChatPageDto>>(BOT_LOG_ENDPOINTS.groupTraces(params.bot_id), {
     method: 'GET',
-    params: params as unknown as Record<string, unknown>,
+    params: { ...params, group_id: groupId, match_mode: 'exact', time_scope: params.time_scope ?? 'all' },
   });
 }
 
-// 查询 trace 详情。保留原有导出的参数和返回类型，避免影响其他调用方。
-export function getBotTrace(trace_id: string) {
-  return backendRequest<BackendApiEnvelope<BotTraceDto>>(BOT_LOG_ENDPOINTS.trace(trace_id), { method: 'GET' });
+// 查询 trace 详情。保留历史导出名，但使用 bot-scoped Gateway 路由。
+export function getBotTrace(traceId: string, params: { bot_id: string; user_id?: string; owner_id?: string }) {
+  return backendRequest<BackendApiEnvelope<BotTraceDto>>(BOT_LOG_ENDPOINTS.trace(params.bot_id, traceId), {
+    method: 'GET',
+    params: { user_id: params.user_id, owner_id: params.owner_id },
+  });
 }
 
 // 查询 Group 关联 trace 详情，仅供 Bot Chats Group 模式使用。
 export function getGroupBotTrace(traceId: string, params: GroupBotTraceDetailParams) {
-  return backendRequest<BotChatEnvelope<BotChatDetailDto>>(BOT_LOG_ENDPOINTS.trace(traceId), {
+  return backendRequest<BotChatEnvelope<BotChatDetailDto>>(BOT_LOG_ENDPOINTS.trace(params.bot_id, traceId), {
     method: 'GET',
-    params: params as unknown as Record<string, unknown>,
+    params: { user_id: params.user_id, owner_id: params.owner_id },
   });
 }

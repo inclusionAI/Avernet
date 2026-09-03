@@ -1,4 +1,5 @@
 export * from './admin';
+export * from './bcsfuse/bcsfuseController';
 export * from './bots/botApprovalController';
 export * from './bots/botConnectionController';
 export * from './bots/botController';
@@ -20,6 +21,7 @@ export * from './collaboration/collaborationInvitationController';
 export * from './collaboration/collaborationPublicationController';
 export * from './collaboration/publicBotController';
 export * from './collaboration/sessionController';
+export * from './collaboration/taskGrantController';
 export * from './harnessController';
 export * from './harnessFlow/harnessFlowController';
 export * from './org/orgDeptController';

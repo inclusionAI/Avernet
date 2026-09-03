@@ -1,7 +1,7 @@
-import type { PublicBotProfile } from '@/domain/collaborationSquare/types';
 import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
+import type { PublicBotProfile } from '@/domain/collaborationSquare/types';
 import { Copy } from 'lucide-react';
 
 interface BotProfileModalProps {
@@ -20,12 +20,45 @@ export function BotProfileModal({ open, profile, loading, onClose, onCopyId }: B
           <ModalTitle>{profile?.name ?? 'Bot 公开画像'}</ModalTitle>
           <ModalDescription>展示该 Bot 已公开的画像与能力。</ModalDescription>
         </ModalHeader>
-        {loading && <div aria-label="正在加载 Bot 画像" className="space-y-3"><Skeleton.Line /><Skeleton.Line className="w-2/3" /><Skeleton.Card /></div>}
-        {!loading && profile && <div className="space-y-5 text-sm">
-          <div><p className="mb-1 text-xs text-[var(--color-muted)]">Bot ID</p><div className="flex flex-wrap items-center gap-2"><code className="break-all text-[var(--color-fg)]">{profile.id}</code><Button variant="secondary" size="sm" onClick={() => onCopyId(profile.id)} leftIcon={<Copy aria-hidden className="h-4 w-4" />}>复制</Button></div></div>
-          <dl className="grid gap-3 sm:grid-cols-2"><div><dt className="text-xs text-[var(--color-muted)]">Owner用户</dt><dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.ownerName}</dd></div><div><dt className="text-xs text-[var(--color-muted)]">引擎类型</dt><dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.engine ?? '未公开'}</dd></div></dl>
-          <div><p className="mb-1 text-xs text-[var(--color-muted)]">公开描述</p><p className="m-0 leading-6 text-[var(--color-fg)]">{profile.description || '暂无公开描述'}</p></div>
-        </div>}
+        {loading && (
+          <div aria-label="正在加载 Bot 画像" className="space-y-3">
+            <Skeleton.Line />
+            <Skeleton.Line className="w-2/3" />
+            <Skeleton.Card />
+          </div>
+        )}
+        {!loading && profile && (
+          <div className="space-y-5 text-sm">
+            <div>
+              <p className="mb-1 text-xs text-[var(--color-muted)]">Bot UUID</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="break-all text-[var(--color-fg)]">{profile.id}</code>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onCopyId(profile.id)}
+                  leftIcon={<Copy aria-hidden className="h-4 w-4" />}
+                >
+                  复制
+                </Button>
+              </div>
+            </div>
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-[var(--color-muted)]">Owner用户</dt>
+                <dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.ownerName}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--color-muted)]">引擎类型</dt>
+                <dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.engine ?? '未公开'}</dd>
+              </div>
+            </dl>
+            <div>
+              <p className="mb-1 text-xs text-[var(--color-muted)]">公开描述</p>
+              <p className="m-0 leading-6 text-[var(--color-fg)]">{profile.description || '暂无公开描述'}</p>
+            </div>
+          </div>
+        )}
       </ModalContent>
     </Modal>
   );

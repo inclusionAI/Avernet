@@ -1103,6 +1103,33 @@ class SkillExecutionResult:
 }
 ```
 
+`publish` 与 `verify` 可选携带 `apply_mode`：省略时为 `STRICT`，保持所有既有
+Pool cutover、rollback、recovery 与旧 Backend 的全量 fail-closed 语义。产品 Bot 的
+能力变更显式传 `BEST_EFFORT`；它仍接收完整 desired/retired mapping snapshot，但逐项
+保留无法安全处理的用户入口，并返回：
+
+```json
+{
+  "published": false,
+  "status": "PENDING | DEGRADED | CONVERGED",
+  "items": [
+    {
+      "target": "<engine evidence only>",
+      "source": "<engine evidence only>",
+      "status": "PENDING | DEGRADED | CONVERGED",
+      "code": "MANAGED_SOURCE_MISSING | UNMANAGED_ACTIVE_ENTRY_RETAINED | EXTERNAL_ACTIVE_ENTRY_RETAINED",
+      "retryable": true
+    }
+  ]
+}
+```
+
+在 `BEST_EFFORT` 下，缺失 source 的平台受管目标可创建/保留悬空软链并记为
+`PENDING`；实体目录、普通文件和外部软链不得覆盖或删除，记为 `DEGRADED`；其他安全
+条目继续收敛。`published=false` / `valid=false` 继续表示没有完全收敛，保证旧布尔
+consumer 不会把部分结果误判为成功；新 Backend 读取 `status/items` 并向调用方提供
+脱敏诊断。STRICT 不返回或依赖此宽容语义。
+
 - v2 的 `corpus` 只允许 `local` 或 `repo`；`relative_path` 必须是规范化的相对
   POSIX 路径；`link_name` 必须是单个规范化路径段。绝对路径、路径逃逸、
   重复 target、未知 corpus 和额外/混合字段全部 fail closed。

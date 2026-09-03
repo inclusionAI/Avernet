@@ -153,11 +153,6 @@ class TestGoldenDeployConfig:
                     "local_dir": "/home/admin/nfs/bot-data",
                     "permission": "READ_WRITE",
                 },
-                {
-                    "remote_dir": "/skills-repo/b1",
-                    "local_dir": "/home/admin/.openclaw/workspace/skills/skills-repo",
-                    "permission": "READ_ONLY",
-                },
             ],
             "ttl_in_minutes": 10080,
             "outbound_operation_rule": {"header_operation_rules": []},

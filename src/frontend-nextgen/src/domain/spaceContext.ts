@@ -16,19 +16,6 @@ export interface SpaceContextState {
 }
 
 /**
- * 从 /openapi/v1/spaces 返回的可见全集中过滤出「当前账号已加入」的空间。
- * 判定（双判兼容后端字段缺失）：joinStatus 为 JOINED，或 currentUserRole 为 ADMIN/MEMBER。
- * 排除 AVAILABLE（可申请）与 APPLIED（申请中）的团队空间。
- */
-export function filterJoinedSpaces(spaces: Space[]): Space[] {
-  return spaces.filter((s) => {
-    if (s.joinStatus === 'JOINED') return true;
-    const role = s.currentUserRole;
-    return role === 'ADMIN' || role === 'MEMBER';
-  });
-}
-
-/**
  * 在已加入子集中取默认当前空间（初始化/无可还原 id 时调用）。
  * 优先级：个人空间 → 第一个已加入工作空间（团队）→ undefined（无空间则不选中）。
  * 每账号有且仅有一个个人空间（joinStatus 天然 JOINED），取第一个 PERSONAL；

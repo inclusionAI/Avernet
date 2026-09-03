@@ -28,6 +28,10 @@ from agentclaw.community.core.service_bot.repository.models import (  # noqa: F4
     PublishStatus,
 )
 from agentclaw.community.core.repository.implementations.publishing.publish_operation import OrmPublishOperationRepository as PublishOperationRepository
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+    RuntimeLayoutProbeResult,
+    RuntimeLayoutProbeStatus,
+)
 from agentclaw.community.core.service_bot.services.publish_flow_service import (
     PublishFlowService,
 )
@@ -148,6 +152,16 @@ def _flow(*, ledger, baas, build_service, publish_service=None):
     reader.overrides_for_stage.return_value = {}
     common_config_service = Mock()
     common_config_service.get_value.return_value = None
+    runtime_layout_probe = Mock()
+    runtime_layout_probe.probe_bot = AsyncMock(
+        side_effect=lambda *, engine, **_: RuntimeLayoutProbeResult(
+            status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+            engine=engine,
+            layout_contract_version="skills-pool-p3-v1",
+            preparation_id=None,
+            evidence={"reason": "test_runtime_without_probe"},
+        )
+    )
     svc = PublishFlowService(
         publish_service or Mock(),
         build_service,
@@ -163,6 +177,7 @@ def _flow(*, ledger, baas, build_service, publish_service=None):
         task_queue_service=Mock(),
         publish_operation_repo=ledger,
         runtime_projector=AsyncMock(),
+        runtime_layout_probe=runtime_layout_probe,
     )
     # ARCA delivery (no config_artifact) → compose_live no-ops to (delivery, None).
     svc._ext_state.owner_id = Mock(return_value="u1")

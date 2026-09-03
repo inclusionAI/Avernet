@@ -1,4 +1,4 @@
-import type { GroupKind, IdentityView } from '@/domain/collaboration';
+import type { GroupInitialRun, GroupKind, IdentityView } from '@/domain/collaboration';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 
 export type { WorkspaceView } from '@/domain/collaboration/availableViews';
@@ -46,6 +46,7 @@ export interface WorkspaceState {
   selectedBotSessionId: string | null;
   /** 点击会话时递增的计数器;chat hooks 监听变化以强制重新拉取历史消息。 */
   historyRefreshNonce: number;
+  pendingGroupBootstrap: { groupId: string; sessionId: string; run: GroupInitialRun } | null;
   lastSessionByIdentity: Record<string, IdentityMemo>;
   sessionTabsByGroup: Record<string, SessionTab>;
   sessionSearchText: string;
@@ -67,6 +68,8 @@ export interface WorkspaceState {
   setBotExpandedSection: (botId: string, sectionKey: string) => void;
   selectBotSession: (sessionId: string | null) => void;
   bumpHistoryRefresh: () => void;
+  setPendingGroupBootstrap: (value: WorkspaceState['pendingGroupBootstrap']) => void;
+  clearPendingGroupBootstrap: (runId?: string) => void;
   setSessionTabForGroup: (groupId: string, tab: SessionTab) => void;
   setSessionSearchText: (v: string) => void;
   setConnectionState: (s: ConnectionState) => void;
@@ -84,6 +87,7 @@ export const topLevelState = {
   view: 'chat' as WorkspaceView,
   collapsedGroups: [] as string[],
   historyRefreshNonce: 0,
+  pendingGroupBootstrap: null as WorkspaceState['pendingGroupBootstrap'],
   lastSessionByIdentity: {} as Record<string, IdentityMemo>,
 } satisfies Record<string, unknown>;
 

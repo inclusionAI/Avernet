@@ -23,6 +23,16 @@ pub struct WorkbenchChatAuthorizationCommand {
     pub session_id: Option<String>,
 }
 
+/// Authorize a Workbench Human to abort active runs for one Bot in one
+/// canonical Session. The target Bot is never treated as the caller.
+#[derive(Debug, Clone)]
+pub struct WorkbenchChatAbortAuthorizationCommand {
+    pub bound_actor_id: Option<String>,
+    pub group_id: String,
+    pub session_id: String,
+    pub target_bot_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkbenchParticipantView {
     pub bot_uuid: String,
@@ -51,6 +61,8 @@ pub enum WorkbenchUseCaseError {
     ParticipantAbsent,
     #[error("sender must be a participant of this group")]
     SenderNotInGroup,
+    #[error("target Bot must be a participant of this Session")]
+    TargetBotNotInSession,
     #[error("Group not found: {0}")]
     GroupNotFound(String),
     #[error(transparent)]
@@ -83,6 +95,7 @@ impl WorkbenchUseCaseError {
             Self::ForbiddenSender => "forbidden_sender",
             Self::ParticipantAbsent => "participant_absent",
             Self::SenderNotInGroup => "sender_not_in_group",
+            Self::TargetBotNotInSession => "target_bot_not_in_session",
             Self::GroupNotFound(_) => "group_not_found",
             Self::Group(_) | Self::Service(_) => "internal_error",
         }
@@ -104,4 +117,16 @@ pub trait WorkbenchSessionService: Send + Sync {
         &self,
         command: WorkbenchChatAuthorizationCommand,
     ) -> Result<(), WorkbenchUseCaseError>;
+
+    async fn authorize_chat_abort(
+        &self,
+        _command: WorkbenchChatAbortAuthorizationCommand,
+    ) -> Result<(), WorkbenchUseCaseError> {
+        Err(WorkbenchUseCaseError::Service(
+            ServiceError::InvalidOperation {
+                message: "chat.abort authorization is not configured".to_string(),
+                request_id: None,
+            },
+        ))
+    }
 }

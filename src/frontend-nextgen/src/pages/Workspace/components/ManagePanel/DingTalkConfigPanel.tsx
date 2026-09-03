@@ -100,7 +100,7 @@ export function DingTalkConfigPanel({
   const renderForm = () => (
     <div className="space-y-3">
       <label className="block">
-        <span className="mb-1.5 block text-xs text-[var(--color-muted)]">Robot Code</span>
+        <span className="mb-1.5 block text-xs text-muted-foreground">Robot Code</span>
         <Input
           value={form.robotCode}
           onChange={(e) => update('robotCode', e.target.value)}
@@ -108,7 +108,7 @@ export function DingTalkConfigPanel({
         />
       </label>
       <label className="block">
-        <span className="mb-1.5 block text-xs text-[var(--color-muted)]">app_key</span>
+        <span className="mb-1.5 block text-xs text-muted-foreground">app_key</span>
         <Input
           value={form.appKey}
           onChange={(e) => update('appKey', e.target.value)}
@@ -116,7 +116,7 @@ export function DingTalkConfigPanel({
         />
       </label>
       <label className="block">
-        <span className="mb-1.5 block text-xs text-[var(--color-muted)]">
+        <span className="mb-1.5 block text-xs text-muted-foreground">
           app_secret{isBound ? '（更新需重新输入）' : ''}
         </span>
         <Input
@@ -128,8 +128,8 @@ export function DingTalkConfigPanel({
       </label>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="m-0 text-sm text-[var(--color-fg)]">启用流式卡片</p>
-          <p className="m-0 mt-0.5 text-xs text-[var(--color-muted)]">开启后使用流式卡片模板输出。</p>
+          <p className="m-0 text-sm text-foreground">启用流式卡片</p>
+          <p className="m-0 mt-0.5 text-xs text-muted-foreground">开启后使用流式卡片模板输出。</p>
         </div>
         <Switch
           checked={form.enableStreamOutput}
@@ -139,7 +139,7 @@ export function DingTalkConfigPanel({
       </div>
       {form.enableStreamOutput && (
         <label className="block">
-          <span className="mb-1.5 block text-xs text-[var(--color-muted)]">卡片模板 ID</span>
+          <span className="mb-1.5 block text-xs text-muted-foreground">卡片模板 ID</span>
           <Input
             value={form.cardTemplateId}
             onChange={(e) => update('cardTemplateId', e.target.value)}
@@ -163,14 +163,14 @@ export function DingTalkConfigPanel({
   );
 
   return (
-    <Card className="rounded-2xl bg-white p-4 shadow-sm">
+    <Card className="rounded-lg bg-card p-3 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-[var(--color-primary)]" />
-          <p className="m-0 text-sm font-medium text-[var(--color-fg)]">钉钉机器人配置</p>
+          <Bot className="h-4 w-4 text-primary" />
+          <p className="m-0 text-sm font-medium text-foreground">钉钉机器人配置</p>
         </div>
         {loading ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--color-muted)]" />
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
         ) : isConflict ? (
           <Badge tone="warning">冲突</Badge>
         ) : boundView ? (
@@ -184,13 +184,13 @@ export function DingTalkConfigPanel({
 
       <div className="mt-3">
         {isConflict ? (
-          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-[var(--color-muted)]">
+          <p className="flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             当前群存在多条钉钉绑定，请联系管理员处理后在此操作。
           </p>
         ) : boundView && !editing ? (
           <div className="space-y-3">
-            <dl className="overflow-hidden rounded-xl border border-[var(--color-border)] text-xs">
+            <dl className="overflow-hidden rounded-xl border border-border text-xs">
               {(
                 [
                   ['Robot Code', boundView.config.robotCode || '—'],
@@ -207,17 +207,17 @@ export function DingTalkConfigPanel({
               ).map(([label, value]) => (
                 <div
                   key={label}
-                  className="flex items-baseline justify-between gap-3 border-b border-[var(--color-border)] px-3 py-2 last:border-b-0"
+                  className="flex items-baseline justify-between gap-3 border-b border-border px-3 py-2 last:border-b-0"
                 >
-                  <dt className="shrink-0 text-[var(--color-muted)]">{label}</dt>
-                  <dd className="m-0 break-all text-right font-medium text-[var(--color-fg)]">{value}</dd>
+                  <dt className="shrink-0 text-muted-foreground">{label}</dt>
+                  <dd className="m-0 break-all text-right font-medium text-foreground">{value}</dd>
                 </div>
               ))}
             </dl>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="m-0 text-sm text-[var(--color-fg)]">启用状态</p>
-                <p className="m-0 mt-0.5 text-xs text-[var(--color-muted)]">停用后钉钉机器人不再接收本群消息。</p>
+                <p className="m-0 text-sm text-foreground">启用状态</p>
+                <p className="m-0 mt-0.5 text-xs text-muted-foreground">停用后钉钉机器人不再接收本群消息。</p>
               </div>
               <Switch
                 checked={boundView.status === 'active'}
@@ -238,7 +238,7 @@ export function DingTalkConfigPanel({
                   confirmVariant="destructive"
                   onConfirm={() => void handleDelete()}
                 >
-                  <Button variant="ghost" size="sm" loading={deleting} className="text-[var(--color-error)]">
+                  <Button variant="ghost" size="sm" loading={deleting} className="text-destructive">
                     解绑
                   </Button>
                 </ConfirmDialog>
@@ -249,7 +249,7 @@ export function DingTalkConfigPanel({
           <>
             {renderForm()}
             {!canManage ? (
-              <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed text-[var(--color-muted)]">
+              <p className="mt-3 flex items-start gap-1.5 text-xs leading-relaxed text-muted-foreground">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 仅群主/驾驶位可编辑钉钉机器人配置。
               </p>

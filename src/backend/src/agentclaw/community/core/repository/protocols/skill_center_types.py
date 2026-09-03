@@ -168,6 +168,7 @@ class SkillUpgradeIdentityRecord(TypedDict):
     name: str
     space_type: Literal["PERSONAL", "TEAM"]
     sc_team_id: int | None
+    offline_at: datetime | None
 
 
 class DraftUpgradeRecord(TypedDict):
@@ -214,7 +215,7 @@ class SpaceSkillReadRecord(TypedDict):
     lease_holder_display_name: str | None
     gmt_created: datetime
     gmt_modified: datetime
-    source_type: Literal["FOLDER", "GIT"]
+    source_type: Literal["FOLDER", "GIT", "COPY"]
     draft_target_version: int | None
     draft_description: str | None
     draft_locator: str | None

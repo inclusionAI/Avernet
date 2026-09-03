@@ -40,6 +40,14 @@ class BotRepository(Protocol):
         """Get bot by ID including soft-deleted records."""
         ...
 
+    def get_by_id_only(self, bot_id: int) -> BotRecord | None:
+        """Get bot by primary key ID only (no tenant/env filter).
+
+        Filters is_deleted=0. Returns None if not found or soft-deleted.
+        Used by admin endpoints that need cross-tenant/env lookup by PK.
+        """
+        ...
+
     def get_by_bot_uuid(
         self, bot_uuid: str, tenant: str, env: str, status: str
     ) -> BotRecord | None:

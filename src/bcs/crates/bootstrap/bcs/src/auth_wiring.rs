@@ -91,6 +91,7 @@ pub fn resolve_auth_config(cfg: &AuthChainConfig, env: &str) -> AuthConfig {
                 base_url: o.base_url.clone(),
                 cookie_secure,
                 env: env.to_string(),
+                success_redirect_path: o.success_redirect_path.clone(),
             })
         }),
     }

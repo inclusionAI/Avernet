@@ -7,7 +7,7 @@ export interface UseOwnedBotsResult {
   isLoading: boolean;
 }
 
-/** 侧边栏「我的 Bot」数据源：用户身份下通过 GET /openapi/v1/bots 拉取，Bot 身份返回空列表。 */
+/** 侧边栏「已管理 Bot」数据源：用户身份下通过 GET /openapi/v1/bots 拉取，Bot 身份返回空列表。 */
 export function useOwnedBots(activeIdentityId: string | null, isUserIdentity: boolean): UseOwnedBotsResult {
   const [chatBots, setChatBots] = useState<ChatBotView[]>([]);
   const [isLoading, setIsLoading] = useState(false);

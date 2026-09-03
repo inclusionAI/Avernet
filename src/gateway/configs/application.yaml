@@ -182,7 +182,7 @@ user_config:
   # credential wins (design §5). Flavor-specific verification backends are wired
   # by PluginAccessor in the composition root.
   identity_strategies:
-    user: [google]
+    user: [oauth_session]
     bot: [bot_token]
     app: [app_token]
     access_key: [access_key_token]
@@ -283,10 +283,10 @@ user_config:
       user: optional
       app: required
 
-    "/openapi/v1/auth/**":
-      user: optional
-      app: optional
-      bot: optional
+    # Public OAuth/session facade. These endpoints must stay anonymous at the
+    # gateway edge: they issue/refresh/logout auth state rather than requiring
+    # the caller to present one.
+    "/openapi/v1/auth/**": {}
 
     "/openapi/v1/collaboration/**":
       user: optional

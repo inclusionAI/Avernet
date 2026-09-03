@@ -45,6 +45,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
     FetchedEntry,
+    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -233,10 +234,13 @@ class SkillsMaterialiser(Materialiser):
                 )
                 continue
 
-            source_url = entry.get("source")
-            if not isinstance(source_url, str) or not source_url:
+            if "from" not in entry and not isinstance(
+                entry.get("source"), (str, dict)
+            ):
                 failures.append(
-                    ResolveFailure(name, "a skills entry must declare 'source'")
+                    ResolveFailure(
+                        name, "a skills entry must declare 'source' or 'from'"
+                    )
                 )
                 continue
 
@@ -245,14 +249,11 @@ class SkillsMaterialiser(Materialiser):
                 # blob write) off the event loop — see the identity
                 # materialiser's note; a dry run must not park the server on
                 # a hung source.
-                fetched = await asyncio.to_thread(
-                    self._fetcher.fetch,
+                decl = await asyncio.to_thread(
+                    self._fetcher.fetch_declared,
                     ctx,
-                    source_url=source_url,
-                    digest=entry.get("digest"),
-                    auth=entry.get("auth"),
+                    entry=entry,
                     category=_FETCH_CATEGORY,
-                    keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
                     entry_identity=name,
                 )
             except EntryFetchError as exc:
@@ -265,12 +266,22 @@ class SkillsMaterialiser(Materialiser):
                 # a dry run runs this on the request event loop — the fetch
                 # got to_thread for exactly that reason (and the module's
                 # own comment says it).
-                package = await asyncio.to_thread(
-                    self._build_package,
-                    entry=entry,
-                    fetched=fetched,
-                    source_url=source_url,
-                )
+                if isinstance(decl, GitEntrySource):
+                    package = await asyncio.to_thread(
+                        self._git_package, ctx, decl, name
+                    )
+                else:
+                    package = await asyncio.to_thread(
+                        self._build_package,
+                        entry=entry,
+                        fetched=decl,
+                        source_url=decl.source_url
+                        or (
+                            entry["source"]
+                            if isinstance(entry.get("source"), str)
+                            else ""
+                        ),
+                    )
             except _PackageRefusal as exc:
                 failures.append(ResolveFailure(name, str(exc)))
                 continue
@@ -437,6 +448,39 @@ class SkillsMaterialiser(Materialiser):
             validated.canonical_zip,
             from_store=fetched.from_store,
             note=fetched.fallback_reason,
+        )
+
+    def _git_package(
+        self, ctx: "ApplyContext", decl: GitEntrySource, name: str
+    ) -> _SkillPackage:
+        """A git checkout's tree → a validated package, plus its W11 receipt.
+
+        The canonical zip the validator returns is what this entry delivers,
+        so it is also what the platform stores: the receipt a later keep_last
+        falls back to must be the deliverable bytes, not a re-derivation.
+        """
+        try:
+            files = decl.files()
+        except EntryFetchError as exc:
+            raise _PackageRefusal(str(exc)) from exc
+        validated = self._validate(self._validator.validate_directory, files)
+        try:
+            self._fetcher.file_bytes(
+                ctx,
+                content=validated.canonical_zip,
+                source_url=decl.receipt_url(),
+                category=_FETCH_CATEGORY,
+                entry_identity=name,
+                content_type="application/zip",
+                credential_name=decl.auth,
+            )
+        except EntryFetchError as exc:
+            raise _PackageRefusal(str(exc)) from exc
+        return _SkillPackage(
+            validated.name,
+            validated.canonical_zip,
+            from_store=False,
+            note=decl.moved_note(),
         )
 
     def _extract_subtree(

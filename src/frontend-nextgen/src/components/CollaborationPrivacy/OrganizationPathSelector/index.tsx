@@ -24,7 +24,7 @@ export function OrganizationPathSelector({ options, selected, onChange, label }:
         {columns.map((nodes, depth) => (
           <div
             key={depth}
-            className="max-h-56 w-56 shrink-0 space-y-1 overflow-y-auto rounded-lg border border-[var(--color-border)] p-1"
+            className="max-h-56 w-56 shrink-0 space-y-1 overflow-y-auto rounded-lg border border-border p-1"
           >
             {nodes.map((node) => {
               const active = activePath[depth] === node.label;
@@ -57,9 +57,9 @@ export function OrganizationPathSelector({ options, selected, onChange, label }:
           </div>
         ))}
       </div>
-      <div className="rounded-lg bg-[var(--color-panel-muted)] p-3">
+      <div className="border-t border-border pt-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="m-0 text-xs font-medium text-[var(--color-fg)]">已选组织范围（{selected.length}）</p>
+          <p className="m-0 text-xs font-medium text-foreground">已选组织范围（{selected.length}）</p>
           {selected.length > 0 && (
             <Button variant="ghost" size="sm" onClick={() => onChange([])}>
               清空
@@ -67,13 +67,13 @@ export function OrganizationPathSelector({ options, selected, onChange, label }:
           )}
         </div>
         {selected.length === 0 ? (
-          <p className="mb-0 mt-2 text-xs text-[var(--color-muted)]">可选择任意层级的组织节点，并支持跨组织多选。</p>
+          <p className="mb-0 mt-2 text-xs text-muted-foreground">可选择任意层级的组织节点，并支持跨组织多选。</p>
         ) : (
           <ul className="mb-0 mt-2 space-y-1 p-0">
             {selected.map((path) => (
               <li
                 key={organizationPathKey(path)}
-                className="flex items-center justify-between gap-2 text-xs text-[var(--color-muted)]"
+                className="flex items-center justify-between gap-2 text-xs text-muted-foreground"
               >
                 <span className="min-w-0 break-words">{visiblePath(path)}</span>
                 <IconButton

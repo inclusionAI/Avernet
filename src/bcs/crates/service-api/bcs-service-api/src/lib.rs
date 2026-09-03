@@ -150,8 +150,9 @@ pub use human_actors::{
 pub use message_flow::{
     A2aChatCommand, A2aChatOutcome, A2aChatRunService, A2aChatService, A2aRunStatus,
     AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BotEventCommand, BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, ChatEventState,
-    ChatResponseMode, ChatRunCancelCommand, ChatRunQueryCommand, Conflict, ConflictPosition,
+    BotEventCommand, BotEventOutcome, ChatAbortCommand, ChatAbortFailure, ChatAbortOutcome,
+    ChatAbortScope, ChatEventState, ChatResponseMode, ChatRunCancelCommand, ChatRunQueryCommand,
+    Conflict, ConflictPosition,
     FusionRequest, FusionResponse, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand,
     GroupChatOutcome, GroupFusionCommand, GroupFusionService, MessageDeliveryResult,
     MessageFlowService, ParticipantPerspective, PersistentGroupSendCommand,
@@ -180,10 +181,11 @@ pub use application::{
     UpdateOrganizationMemberProfileCommand,
 };
 pub use port::{
-    BotConnectionControlPort, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotMetricCount, BotMetricsSnapshotPort, BotRepoPort, BotRunContext,
-    BotControlPlaneRepoPort,
-    BotRunContextPort, BotTerminalEvent, BotTerminalObserverPort, BotTerminalState,
+    ActiveBotRunContext, BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort,
+    BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotMetricCount,
+    BotMetricsSnapshotPort, BotRepoPort, BotRunContext, BotControlPlaneRepoPort,
+    BotRunContextPort, BotRunScope, BotRunTransportOwner, BotTerminalEvent,
+    BotTerminalObserverPort, BotTerminalState,
     CompositeBotTerminalObserver, ProviderRunTransport, ProviderTransportPreference,
     NoopBotTerminalObserver, NoopChannelBindingCleanupPort, ChatRunCleanupPort,
     ChatRunEventPort, ChatRunMetricCount, DeliveryBlockContext,
@@ -222,8 +224,9 @@ pub use port::{
     WsCloseReason, WsErrorKind, WsLifecycleInstrumentationHook, WsPeer,
 };
 pub use workbench_use_cases::{
-    WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
-    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError,
+    WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
+    WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
+    WorkbenchSessionService, WorkbenchUseCaseError,
 };
 
 pub use types::{

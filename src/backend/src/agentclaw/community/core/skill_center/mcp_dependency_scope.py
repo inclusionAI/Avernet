@@ -18,7 +18,8 @@ from there without closing an import cycle.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+import json
 
 
 def mcp_dependency_codes(dependencies: Iterable[object]) -> tuple[str, ...]:
@@ -45,4 +46,16 @@ def mcp_dependency_codes(dependencies: Iterable[object]) -> tuple[str, ...]:
     return tuple(codes)
 
 
-__all__ = ["mcp_dependency_codes"]
+def mcp_dependency_codes_from_version_metadata(metadata_json: object) -> tuple[str, ...]:
+    """Decode exact Version metadata through the canonical dependency shape."""
+
+    metadata = json.loads(metadata_json) if isinstance(metadata_json, str) else metadata_json
+    if not isinstance(metadata, Mapping):
+        raise ValueError("Skill Version metadata must be an object")
+    dependencies = metadata.get("mcp_dependencies")
+    if not isinstance(dependencies, list):
+        raise ValueError("Skill Version has invalid MCP dependencies")
+    return mcp_dependency_codes(dependencies)
+
+
+__all__ = ["mcp_dependency_codes", "mcp_dependency_codes_from_version_metadata"]

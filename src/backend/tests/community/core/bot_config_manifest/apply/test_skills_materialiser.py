@@ -19,10 +19,14 @@ import importlib
 import io
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+    SourceSession,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
@@ -599,3 +603,133 @@ def test_a_deactivation_conflict_mid_write_reports_partially_written():
     # partially-written shape (the engine's write-raise classifier
     # classifies it, this documents the drive).
     assert uploads.uploads
+
+
+# ── the git road (W7) ───────────────────────────────────────────────────────
+
+_SKILL_MD = (
+    "---\nname: demo\ndescription: demo test skill.\n---\n# demo\n"
+).encode()
+
+SKILL_GIT_SOURCE = {
+    "git": "https://git.corp/skills.git",
+    "ref": "main",
+    "subpath": "pkg",
+    "auth": None,
+}
+
+
+class _StaticGit:
+    """A git client serving one checkout with a fixed tree — or a failure.
+
+    The checkout mirrors ``GitCheckout`` where the git road reaches it:
+    ``files(subpath)`` answers the subpath tree's contents (the root holds
+    them, not a nested copy), the way the guarded readers do."""
+
+    def __init__(
+        self,
+        files: list[tuple[str, bytes]] | None = None,
+        sha: str = "a" * 40,
+        error: Exception | None = None,
+    ) -> None:
+        self._files = files if files is not None else [("SKILL.md", _SKILL_MD)]
+        self.sha = sha
+        self.error = error
+        self.specs: list = []
+
+    def fetch(self, spec, *, headers=None):
+        self.specs.append(spec)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(
+            root=None,
+            sha=self.sha,
+            url=spec.url,
+            ref=spec.ref,
+            files=lambda subpath=None, file_limit=None: list(self._files),
+            read_file=lambda subpath=None, file_limit=None: b"",
+        )
+
+
+def _git_ctx(git: _StaticGit, *, sources=None, baselines=None):
+    """The W7 context: a source session over a scripted git client."""
+    session = SourceSession(
+        sources=sources or {}, baselines=baselines or {}, git=git
+    )
+    return _ctx(source_session=session)
+
+
+def test_a_skills_entry_from_a_git_tree_builds_a_package():
+    materialiser, uploads, _, _, _, _ = skill_rig()
+    git = _StaticGit()
+    ctx = _git_ctx(git, sources={"src": SKILL_GIT_SOURCE})
+    result, plan, written = _run(
+        _apply(materialiser, ctx, [{"name": "demo", "from": "src"}])
+    )
+    assert result.ok
+    assert [e.outcome.value for e in written] == ["created"]
+    # The manual-upload road unchanged: an installed skill IS an uploaded
+    # one — so the uploaded package must pass the real validator.
+    real_validator().validate_zip(uploads.uploads[0]["package"])
+    # The declaration's subpath is what the git road read the tree by.
+    assert git.specs[0].subpath == "pkg"
+
+
+def test_the_git_tree_road_files_the_canonical_zip_with_the_store():
+    materialiser, _, _, _, _, content = skill_rig()
+    git = _StaticGit()
+    ctx = _git_ctx(git, sources={"src": SKILL_GIT_SOURCE})
+    result, _, _ = _run(_apply(materialiser, ctx, [{"name": "demo", "from": "src"}]))
+    assert result.ok
+    # The receipt identity is the canonical git URL; the deliverable bytes
+    # (the canonical zip) are what the platform keeps a copy of, so a later
+    # keep_last falls back to what this entry actually installs.
+    call = content.store_calls[-1]
+    assert call["source_url"].startswith("git+https://git.corp/skills.git@")
+    assert call["source_url"].endswith(":pkg")
+    assert content.receipts[-1].content_type == "application/zip"
+
+
+def test_a_moved_ref_note_survives_into_the_package():
+    materialiser, _, _, _, _, _ = skill_rig()
+    git = _StaticGit(sha="a" * 40)
+    ctx = _git_ctx(
+        git,
+        sources={"src": SKILL_GIT_SOURCE},
+        baselines={"src": "b" * 40},
+    )
+    result, _, written = _run(_apply(materialiser, ctx, [{"name": "demo", "from": "src"}]))
+    assert result.ok
+    # Non-strict moves are applied and reported: both SHAs on the row.
+    note = written[0].note
+    assert note is not None
+    assert "b" * 40 in note
+    assert "a" * 40 in note
+
+
+def test_git_keep_last_serves_the_stored_zip_through_the_zip_road():
+    materialiser, uploads, _, _, _, content = skill_rig()
+    stored = build_skill_zip("demo")
+    target = f"git+https://git.corp/skills.git@{'b' * 40}:pkg"
+    content.store(
+        fetched_object(stored, url=target, content_type="application/zip"),
+        scope=None,
+        source_url=target,
+    )
+    git = _StaticGit(error=FetchFailedError("the git fetch failed"))
+    ctx = _git_ctx(
+        git,
+        sources={"src": SKILL_GIT_SOURCE},
+        baselines={"src": "b" * 40},
+    )
+    result, _, written = _run(
+        _apply(
+            materialiser,
+            ctx,
+            [{"name": "demo", "from": "src", "on_fetch_failure": "keep_last"}],
+        )
+    )
+    assert result.ok
+    assert [e.outcome.value for e in written] == ["created"]
+    real_validator().validate_zip(uploads.uploads[0]["package"])
+

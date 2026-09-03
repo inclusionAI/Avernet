@@ -7,6 +7,7 @@ export interface BotRuntimeSource {
 
 export interface BotRuntime {
   engine: string;
+  isAgentCodingBot: boolean;
   templateType?: string;
   botType?: string;
   isDefaultBot: boolean;

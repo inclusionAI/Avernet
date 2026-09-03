@@ -5,11 +5,19 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Switch } from '@/components/ui/Switch';
 import type { BotChannel, BotChannelInput } from '@/domain/botAdvancedConfig';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 
-const empty: BotChannelInput = { description: '', clientId: '', clientSecret: '' };
+const empty: BotChannelInput = {
+  description: '',
+  clientId: '',
+  clientSecret: '',
+  enableStreamingCards: false,
+  cardTemplateId: '',
+  cardTemplateKey: '',
+};
 export function ChannelConfigPanel({
   channels,
   editable,
@@ -30,7 +38,7 @@ export function ChannelConfigPanel({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="m-0 text-base font-semibold">渠道</h2>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">绑定钉钉机器人，并管理草稿渠道的启停。</p>
+          <p className="mt-1 text-xs text-muted-foreground">绑定钉钉机器人，并管理草稿渠道的启停。</p>
         </div>
         <Button disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
           绑定渠道
@@ -42,8 +50,11 @@ export function ChannelConfigPanel({
             <CardContent className="flex items-center gap-4">
               <div className="min-w-0 flex-1">
                 <p className="m-0 font-medium">钉钉 · {channel.description || channel.clientId}</p>
-                <p className="m-0 mt-1 text-xs text-[var(--color-muted)]">
+                <p className="m-0 mt-1 text-xs text-muted-foreground">
                   Client ID：{channel.clientId} · Secret {channel.hasSecret ? '已配置' : '未配置'}
+                </p>
+                <p className="m-0 mt-1 text-xs text-muted-foreground">
+                  流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'}
                 </p>
               </div>
               <Badge tone={channel.status === 'active' ? 'success' : 'neutral'}>
@@ -89,13 +100,42 @@ export function ChannelConfigPanel({
               value={form.clientSecret}
               onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
             />
+            <label className="flex items-center justify-between gap-4 rounded-lg border border-border p-3 text-xs">
+              <span>
+                <span className="block font-medium">流式输出</span>
+                <span className="mt-1 block text-muted-foreground">使用钉钉互动卡片持续更新 Bot 回复</span>
+              </span>
+              <Switch
+                checked={form.enableStreamingCards}
+                onCheckedChange={(enableStreamingCards) => setForm({ ...form, enableStreamingCards })}
+                aria-label="流式输出"
+              />
+            </label>
+            {form.enableStreamingCards ? (
+              <>
+                <Input
+                  placeholder="互动卡片模板 ID"
+                  value={form.cardTemplateId}
+                  onChange={(e) => setForm({ ...form, cardTemplateId: e.target.value })}
+                />
+                <Input
+                  placeholder="卡片正文模板字段（可选）"
+                  value={form.cardTemplateKey}
+                  onChange={(e) => setForm({ ...form, cardTemplateKey: e.target.value })}
+                />
+              </>
+            ) : null}
           </div>
           <ModalFooter>
             <Button variant="secondary" onClick={() => setOpen(false)}>
               取消
             </Button>
             <Button
-              disabled={!form.clientId.trim() || !form.clientSecret.trim()}
+              disabled={
+                !form.clientId.trim() ||
+                !form.clientSecret.trim() ||
+                (form.enableStreamingCards && !form.cardTemplateId.trim())
+              }
               onClick={() =>
                 void onCreate(form).then(() => {
                   setOpen(false);

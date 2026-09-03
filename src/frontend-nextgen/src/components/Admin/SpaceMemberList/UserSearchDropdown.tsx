@@ -131,10 +131,10 @@ export function UserSearchDropdown({
       </div>
 
       {supported && open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-white shadow-lg">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
-              <Loader2 size={16} className="animate-spin text-[var(--color-primary)]" />
+              <Loader2 size={16} className="animate-spin text-primary" />
               搜索中...
             </div>
           ) : items.length === 0 ? (
@@ -146,6 +146,12 @@ export function UserSearchDropdown({
               {items.map((u) => {
                 const isDisabled = !!u.disabled;
                 const initial = (u.nickName || u.realName || u.userId || '?').charAt(0).toUpperCase();
+                // 花名非空展示花名，花名为空展示真名，二者皆空退化为 userId
+                const primaryText = u.nickName
+                  ? `${u.nickName}(${u.userId})`
+                  : u.realName
+                  ? `${u.realName}(${u.userId})`
+                  : u.userId;
                 return (
                   <li key={u.userId}>
                     <Button
@@ -159,16 +165,14 @@ export function UserSearchDropdown({
                     >
                       <span
                         className={cn(
-                          'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium text-white',
-                          isDisabled ? 'bg-muted-foreground/40' : 'bg-[var(--color-primary)]',
+                          'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium text-primary-foreground',
+                          isDisabled ? 'bg-muted-foreground/40' : 'bg-primary',
                         )}
                       >
                         {initial}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-foreground">
-                          {u.nickName ? `${u.nickName}(${u.userId})` : u.userId}
-                        </span>
+                        <span className="block truncate text-sm font-medium text-foreground">{primaryText}</span>
                         <span className="block truncate text-xs text-muted-foreground">{u.email || u.userId}</span>
                       </span>
                       {isDisabled && <span className="shrink-0 text-xs text-muted-foreground">已添加</span>}

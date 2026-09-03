@@ -18,6 +18,11 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
+    MappingApplyMode,
+    MappingItemResult,
+    MappingProjectionStatus,
+    MappingPublishResult,
+    MappingVerificationResult,
     PoolCutoverResult,
     PoolCutoverStatus,
     PoolSkillMapping,
@@ -149,14 +154,19 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
-    ) -> bool:
+        apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
+    ) -> MappingPublishResult:
         if not await self._ensure_center_mappings(
             bot_id=bot_id,
             user_id=user_id,
             mappings=mappings,
             mapping_contract_version=mapping_contract_version,
         ):
-            return False
+            return MappingPublishResult(
+                published=False,
+                status=MappingProjectionStatus.PENDING,
+                evidence={"reason": "center_ensure_failed_before_mapping_publish"},
+            )
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -169,6 +179,7 @@ class SkillsPoolRuntime:
                         mapping.to_dict() for mapping in retired_mappings
                     ],
                     "source_layout": source_layout.value,
+                    "apply_mode": apply_mode.value,
                 },
             )
         except Exception:
@@ -176,9 +187,14 @@ class SkillsPoolRuntime:
                 "[skills_pool.runtime] mapping publish failed bot_id=%s",
                 bot_id,
             )
-            return False
-        success = response.get("success") is True
-        if not success:
+            return MappingPublishResult(
+                published=False,
+                status=MappingProjectionStatus.PENDING,
+                evidence={"reason": "runtime_mapping_publish_unavailable"},
+            )
+        data = response.get("data")
+        result = self._mapping_publish_result(response=response, data=data)
+        if not result.published:
             logger.warning(
                 "[skills_pool.runtime] mapping publish returned non-success "
                 "bot_id=%s user_id=%s contract=%s success=%s response=%s",
@@ -197,7 +213,7 @@ class SkillsPoolRuntime:
                 mapping_contract_version,
                 sorted(response.keys()),
             )
-        return success
+        return result
 
     async def rollback_to_legacy(
         self,
@@ -321,7 +337,8 @@ class SkillsPoolRuntime:
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = MAPPING_CONTRACT_VERSION,
-    ) -> bool:
+        apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
+    ) -> MappingVerificationResult:
         try:
             response = await self._invoke(
                 bot_id=bot_id,
@@ -334,6 +351,7 @@ class SkillsPoolRuntime:
                         mapping.to_dict() for mapping in retired_mappings
                     ],
                     "source_layout": source_layout.value,
+                    "apply_mode": apply_mode.value,
                 },
             )
         except Exception:
@@ -341,14 +359,14 @@ class SkillsPoolRuntime:
                 "[skills_pool.runtime] mapping verify failed bot_id=%s",
                 bot_id,
             )
-            return False
+            return MappingVerificationResult(
+                valid=False,
+                status=MappingProjectionStatus.PENDING,
+                evidence={"reason": "runtime_mapping_verify_unavailable"},
+            )
         data = response.get("data")
-        verified = (
-            response.get("success") is True
-            and isinstance(data, dict)
-            and data.get("valid") is True
-        )
-        if not verified:
+        result = self._mapping_verification_result(response=response, data=data)
+        if not result.valid:
             logger.warning(
                 "[skills_pool.runtime] mapping verify returned non-verified "
                 "bot_id=%s user_id=%s contract=%s success=%s valid=%s response=%s",
@@ -368,7 +386,88 @@ class SkillsPoolRuntime:
                 mapping_contract_version,
                 sorted(response.keys()),
             )
-        return verified
+        return result
+
+    @staticmethod
+    def _mapping_status(value: object, *, fallback: MappingProjectionStatus) -> MappingProjectionStatus:
+        try:
+            return MappingProjectionStatus(str(value))
+        except ValueError:
+            return fallback
+
+    @staticmethod
+    def _mapping_items(data: dict[str, Any]) -> tuple[MappingItemResult, ...]:
+        items: list[MappingItemResult] = []
+        for raw in data.get("items", []):
+            if not isinstance(raw, dict):
+                continue
+            status = SkillsPoolRuntime._mapping_status(
+                raw.get("status"),
+                fallback=MappingProjectionStatus.DEGRADED,
+            )
+            items.append(
+                MappingItemResult(
+                    target=str(raw.get("target") or ""),
+                    source=(
+                        str(raw["source"])
+                        if raw.get("source") is not None
+                        else None
+                    ),
+                    status=status,
+                    code=str(raw["code"]) if raw.get("code") is not None else None,
+                    retryable=bool(raw.get("retryable")),
+                    action=str(raw.get("action") or "APPLY"),
+                )
+            )
+        return tuple(items)
+
+    def _mapping_publish_result(
+        self, *, response: dict[str, Any], data: object
+    ) -> MappingPublishResult:
+        if not isinstance(data, dict):
+            return MappingPublishResult(
+                published=False,
+                status=MappingProjectionStatus.PENDING,
+                evidence={"reason": "invalid_runtime_response"},
+            )
+        published = data.get("published") is True
+        return MappingPublishResult(
+            published=published,
+            status=self._mapping_status(
+                data.get("status"),
+                fallback=(
+                    MappingProjectionStatus.CONVERGED
+                    if published
+                    else MappingProjectionStatus.PENDING
+                ),
+            ),
+            items=self._mapping_items(data),
+            evidence=dict(data.get("evidence") or {}),
+        )
+
+    def _mapping_verification_result(
+        self, *, response: dict[str, Any], data: object
+    ) -> MappingVerificationResult:
+        if not isinstance(data, dict):
+            return MappingVerificationResult(
+                valid=False,
+                status=MappingProjectionStatus.PENDING,
+                evidence={"reason": "invalid_runtime_response"},
+            )
+        valid = data.get("valid") is True
+        return MappingVerificationResult(
+            valid=valid,
+            status=self._mapping_status(
+                data.get("status"),
+                fallback=(
+                    MappingProjectionStatus.CONVERGED
+                    if valid
+                    else MappingProjectionStatus.PENDING
+                ),
+            ),
+            items=self._mapping_items(data),
+            evidence=dict(data.get("evidence") or {}),
+        )
 
     async def _ensure_center_mappings(
         self,

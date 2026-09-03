@@ -1,38 +1,32 @@
-import { parseSquareDeepLink } from '@/domain/collaborationSquare/mapper';
-import type { HumanBotActionContext, PublicBot, PublicGroup, SquareResource } from '@/domain/collaborationSquare/types';
+import { notifyError, notifySuccess } from '@/components/ui/notify';
+import {
+  canStartPublicBotConversation,
+  getPublicBotTargetId,
+  type HumanBotActionContext,
+  type PublicBot,
+  type PublicGroup,
+  type SquareResource,
+} from '@/domain/collaborationSquare/types';
 import { useCollaborationSquareList } from '@/hooks/useCollaborationSquareList';
+import { useCollaborationSquareTask } from '@/hooks/useCollaborationSquareTask';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useSquareDeepLink } from '@/hooks/useSquareDeepLink';
 import {
   CollaborationSquareError,
   collaborationSquareBotService,
+  collaborationSquareGroupService,
   collaborationSquareService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import {
+  clearCollaborationSquareTargetingSearch,
+  getCollaborationBotConversationUrl,
+  getCollaborationSquareErrorMessage,
+} from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
-import { useCallback, useEffect, useMemo } from 'react';
-import { notifyError, notifySuccess } from '@/components/ui/notify';
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作失败，请稍后重试';
-}
-function botConversationUrl(botId: string, sessionId: string) {
-  return `/workspace?tab=chat&bot=${encodeURIComponent(botId)}&session=${encodeURIComponent(sessionId)}`;
-}
-
-function clearTargetingSearch(resource: SquareResource, id: string) {
-  if (typeof window === 'undefined') return;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('resource') !== resource || params.get('id') !== id) return;
-  params.delete('resource');
-  params.delete('id');
-  const search = params.toString();
-  window.history.replaceState(
-    window.history.state,
-    '',
-    `${window.location.pathname}${search ? `?${search}` : ''}${window.location.hash}`,
-  );
-}
+import { useCallback, useMemo } from 'react';
+import { useCreateGroupSessionFlow } from './useCreateGroupSessionFlow';
 
 export function useCollaborationSquare(resource: SquareResource) {
   const store = useCollaborationSquareStore();
@@ -44,18 +38,28 @@ export function useCollaborationSquare(resource: SquareResource) {
     () => (actorId && humanIdentity?.userId ? { actorId, userId: humanIdentity.userId } : null),
     [actorId, humanIdentity?.userId],
   );
-  const load = useCollaborationSquareList({
+  const viewer = useMemo(
+    () => (humanBotContext ? { viewerActorType: 'human' as const, viewerActorId: humanBotContext.userId } : null),
+    [humanBotContext],
+  );
+  const botGroupList = useCollaborationSquareList({
     resource,
     humanBotContext,
     humanIdentityStatus,
     botQuery: store.botQuery,
     groupQuery: store.groupQuery,
     botSearchMode: store.botSearchMode,
+    viewer: viewer ?? undefined,
+    gateSmartEmpty: true,
     setBots: store.setBots,
+    appendBots: store.appendBots,
     setGroups: store.setGroups,
+    appendGroups: store.appendGroups,
     setLoading: store.setLoading,
     setError: store.setError,
   });
+  const taskView = useCollaborationSquareTask(resource);
+  const { load, loadMore, hasMore, loadingMore, loadMoreError } = resource === 'task' ? taskView.list : botGroupList;
 
   const closeBotProfile = useCallback(() => {
     store.setSelectedBotId(null);
@@ -68,7 +72,7 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   const handleTargetInvalid = useCallback(
     (targetResource: SquareResource, id: string) => {
-      clearTargetingSearch(targetResource, id);
+      clearCollaborationSquareTargetingSearch(targetResource, id);
       if (targetResource === 'bot') {
         store.removeBot(id);
         closeBotProfile();
@@ -90,7 +94,7 @@ export function useCollaborationSquare(resource: SquareResource) {
       } catch (error) {
         if (error instanceof CollaborationSquareError && error.code === 'target_invalid')
           handleTargetInvalid('bot', bot.id);
-        else notifyError(errorMessage(error));
+        else notifyError(getCollaborationSquareErrorMessage(error));
       } finally {
         store.setDetailLoading(false);
       }
@@ -101,14 +105,14 @@ export function useCollaborationSquare(resource: SquareResource) {
   const openGroupMembers = useCallback(
     async (group: PublicGroup) => {
       store.setSelectedGroupId(group.id);
-      if (group.memberListVisibility === 'count_only') return;
       store.setDetailLoading(true);
       try {
-        store.setGroupMembers(await collaborationSquareService.listGroupMembers(group.id));
+        // 公开群成员经群详情 participants 取得（见 adapter.listGroupMembers）。
+        store.setGroupMembers(await collaborationSquareGroupService.listGroupMembers(group.id));
       } catch (error) {
         if (error instanceof CollaborationSquareError && error.code === 'target_invalid')
           handleTargetInvalid('group', group.id);
-        else notifyError(errorMessage(error));
+        else notifyError(getCollaborationSquareErrorMessage(error));
       } finally {
         store.setDetailLoading(false);
       }
@@ -116,23 +120,10 @@ export function useCollaborationSquare(resource: SquareResource) {
     [handleTargetInvalid, store.setDetailLoading, store.setGroupMembers, store.setSelectedGroupId],
   );
 
-  useEffect(() => {
-    if (store.loading || typeof window === 'undefined') return;
-    const deepLink = parseSquareDeepLink(window.location.search, resource);
-    if (!deepLink) return;
-    if (resource === 'bot') {
-      const bot = store.bots.find((item) => item.id === deepLink.id);
-      if (bot) void openBotProfile(bot);
-      else handleTargetInvalid('bot', deepLink.id);
-    } else {
-      const group = store.groups.find((item) => item.id === deepLink.id);
-      if (group) void openGroupMembers(group);
-      else handleTargetInvalid('group', deepLink.id);
-    }
-  }, [handleTargetInvalid, openBotProfile, openGroupMembers, resource, store.bots, store.groups, store.loading]);
+  useSquareDeepLink({ resource, openBotProfile, openGroupMembers, handleTargetInvalid });
 
   const runBusy = useCallback(
-    async (key: string, task: () => Promise<void>) => {
+    async (key: string, task: () => Promise<void>, invalidTargetId?: string) => {
       if (store.busyKeys.includes(key)) return;
       store.setBusy(key, true);
       try {
@@ -141,9 +132,9 @@ export function useCollaborationSquare(resource: SquareResource) {
         if (error instanceof CollaborationSquareError && error.code === 'target_invalid') {
           const separator = key.indexOf(':');
           const kind = separator < 0 ? key : key.slice(0, separator);
-          const id = separator < 0 ? '' : key.slice(separator + 1);
+          const id = invalidTargetId ?? (separator < 0 ? '' : key.slice(separator + 1));
           handleTargetInvalid(kind === 'bot' ? 'bot' : 'group', id);
-        } else notifyError(errorMessage(error));
+        } else notifyError(getCollaborationSquareErrorMessage(error));
       } finally {
         store.setBusy(key, false);
       }
@@ -157,41 +148,40 @@ export function useCollaborationSquare(resource: SquareResource) {
         notifyError('当前用户身份不可用，请刷新后重试');
         return;
       }
-      if (bot.relationshipStatus === 'friend') {
-        void runBusy(`bot:${bot.id}`, async () => {
-          const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
-          history.push(botConversationUrl(bot.id, result.sessionId));
-        });
+      const targetId = getPublicBotTargetId(bot);
+      if (canStartPublicBotConversation(bot)) {
+        void runBusy(
+          `bot:${targetId}`,
+          async () => {
+            const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
+            history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
+          },
+          bot.id,
+        );
         return;
       }
-      void runBusy(`bot:${bot.id}`, async () => {
-        const result = await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext);
-        store.updateBotRelationship(bot.id, result.status);
-        if (result.status === 'friend') {
-          const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
-          notifySuccess('好友关系已建立，正在进入对话');
-          history.push(botConversationUrl(bot.id, conversation.sessionId));
-        } else if (result.status === 'applying') notifySuccess('好友申请已提交');
-        else notifyError('当前未建立好友关系，申请未提交');
-      });
+      void runBusy(
+        `bot:${targetId}`,
+        async () => {
+          const result = bot.friendRequestBotId
+            ? await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, bot.friendRequestBotId)
+            : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext);
+          store.updateBotRelationship(targetId, result.status);
+          if (result.status === 'friend') {
+            const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
+            notifySuccess('好友关系已建立，正在进入对话');
+            history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
+          } else if (result.status === 'applying') notifySuccess('好友申请已提交');
+          else notifyError('当前未建立好友关系，申请未提交');
+        },
+        bot.id,
+      );
     },
     [humanBotContext, runBusy, store.updateBotRelationship],
   );
 
-  const createGroupSession = useCallback(
-    (group: PublicGroup) => {
-      void runBusy(`group:${group.id}`, async () => {
-        const result = await collaborationSquareService.createGroupSession(group.id);
-        notifySuccess(`新会话已创建，你将以${result.defaultRole}身份临时加入本会话`);
-        history.push(
-          `/workspace?sessionId=${encodeURIComponent(result.sessionId)}&memberSource=${
-            result.memberSource
-          }&defaultRole=${encodeURIComponent(result.defaultRole)}`,
-        );
-      });
-    },
-    [runBusy],
-  );
+  const createSessionFlow = useCreateGroupSessionFlow(humanBotContext, runBusy);
+  const createGroupSession = createSessionFlow.open;
 
   const copyText = useCallback(async (value: string, success: string) => {
     try {
@@ -220,13 +210,24 @@ export function useCollaborationSquare(resource: SquareResource) {
     visibleGroups,
     selectedGroup,
     load,
+    reload: load,
+    loadMore,
+    hasMore,
+    loadingMore,
+    loadMoreError,
     openBotProfile,
     closeBotProfile,
     openGroupMembers,
     closeGroupMembers,
     primaryBotAction,
     createGroupSession,
-    copyBotId: (id: string) => copyText(id, 'Bot ID 已复制'),
+    openTaskDetail: taskView.openTaskDetail,
+    closeTaskDetail: taskView.closeTaskDetail,
+    createSessionTarget: createSessionFlow.target,
+    isCreatingSession: createSessionFlow.isCreating,
+    closeCreateSessionModal: createSessionFlow.close,
+    submitCreateSession: createSessionFlow.submit,
+    copyBotId: (id: string) => copyText(id, 'Bot UUID 已复制'),
     share,
   };
 }

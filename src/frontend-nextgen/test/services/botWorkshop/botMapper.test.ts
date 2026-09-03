@@ -73,6 +73,7 @@ describe('botMapper', () => {
     } as never);
 
     expect(result.item.spaceId).toBe('space-nested');
+    expect(result.item.spaceKind).toBe('team');
     expect(result.item.ownership).toBe('team');
     expect(result.item.harnessContext?.entityId).toBe('entity-nested');
   });
@@ -100,6 +101,32 @@ describe('botMapper', () => {
     expect(result.item.serviceMode).toBe('service');
   });
 
+  test('直接映射库存接口 edit_lock，不需要逐 Bot 补查锁接口', () => {
+    const result = mapBotDto({
+      bot_id: 'service-card-locked',
+      owner_entity_id: 'owner-1',
+      bot_type: 'service',
+      kind: 'service',
+      engine: 'openclaw',
+      display_state: 'service_draft',
+      edit_lock: {
+        locked: true,
+        holder_user_id: 'editor-1',
+        holder_name: '协作者',
+        has_collaborators: true,
+        is_owner_holder: false,
+        need_lock: true,
+      },
+    });
+
+    expect(result.item.lock).toEqual({
+      status: 'other',
+      holderUserId: 'editor-1',
+      holderName: '协作者',
+      lockedAt: undefined,
+    });
+  });
+
   test.each([
     ['service_draft', 'draft'],
     ['service_deploying', 'deploying'],
@@ -120,5 +147,30 @@ describe('botMapper', () => {
 
     expect(result.item.lifecycle).toBe(expected);
     expect(result.warnings).toEqual([]);
+  });
+});
+
+describe('Agent Coding Bot runtime classification', () => {
+  test('历史 aicoding 识别为 Agent Coding Bot', () => {
+    expect(
+      mapBotDto({ bot_id: 'legacy', engine: 'aicoding', template_type: 'anything' }).item.runtime.isAgentCodingBot,
+    ).toBe(true);
+  });
+
+  test('applicationCoding 识别为 Agent Coding Bot', () => {
+    expect(
+      mapBotDto({ bot_id: 'application', engine: 'claude_code', template_type: 'applicationCoding' }).item.runtime
+        .isAgentCodingBot,
+    ).toBe(true);
+  });
+
+  test('claude_code 下非普通 CC 模板识别为 Agent Coding Bot', () => {
+    expect(
+      mapBotDto({ bot_id: 'template', engine: 'claude_code', template_type: 'architect' }).item.runtime
+        .isAgentCodingBot,
+    ).toBe(true);
+    expect(
+      mapBotDto({ bot_id: 'normal', engine: 'claude_code', template_type: 'normalCC' }).item.runtime.isAgentCodingBot,
+    ).toBe(false);
   });
 });

@@ -45,5 +45,6 @@ export function validateDefinition(body: { definition_yaml: string }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     data: body,
+    injectUserId: false,
   });
 }

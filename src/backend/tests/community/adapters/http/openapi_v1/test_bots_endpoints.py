@@ -83,11 +83,12 @@ BOT = {
     "entity_id": "u1",
     "entity_type": "staff",
     "device_binding": {"device_id": "dev-9"},
-    # Stored template snapshot: the wire must keep only the allowlisted keys.
+    # Stored template snapshot: returned on the wire verbatim (2026-09-01
+    # passthrough decision — owner-scoped faces echo the caller's own input).
     "template_type": "applicationCoding",
     "template_config": {
         "devflow_workflow": "release-notes",
-        "token": "must-not-leak",
+        "token": "echoed-to-owner",
         "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
         "runtime": "codefuse",
     },
@@ -251,16 +252,19 @@ def test_list_bots(client):
     assert data["items"][0]["bot_id"] == "b1"
 
 
-def test_list_bots_carries_template_projection_and_space(client):
+def test_list_bots_carries_template_snapshot_and_space(client):
     data = _ok(client.get("/openapi/v1/bots"))
     item = data["items"][0]
-    # The stored snapshot's secrets never reach the wire; only the
-    # allowlisted display keys survive.
+    # The stored snapshot reaches the wire verbatim — the passthrough decision
+    # (2026-09-01): an owner-scoped face echoes the caller's own creation
+    # input, secrets included, with no allowlist filtering.
     assert item["template_type"] == "applicationCoding"
-    assert item["template_config"] == {"devflow_workflow": "release-notes"}
-    assert "token" not in item["template_config"]
-    assert "bot_template_config" not in item["template_config"]
-    assert "runtime" not in item["template_config"]
+    assert item["template_config"] == {
+        "devflow_workflow": "release-notes",
+        "token": "echoed-to-owner",
+        "bot_template_config": {"ext_config": {"thetaKey": "enc:v1:x"}},
+        "runtime": "codefuse",
+    }
     # A NULL ac_bots.space_id resolves to the owner's synthetic personal space.
     space = item["space"]
     assert space["kind"] == "personal"
@@ -724,7 +728,7 @@ def test_create_application_coding_maps_template_to_internal_spec(
             json={
                 **_CREATE_BODY,
                 "engine": "claude_code",
-                "engine_properties": {"template": properties},
+                "engine_properties": {"template_config": properties},
             },
         )
 
@@ -767,7 +771,7 @@ def test_create_rejects_unknown_engine_properties_fields(client, svc):
         json={
             **_CREATE_BODY,
             "engine_properties": {
-                "template": {},
+                "template_config": {},
                 "template_uid": "caller-controlled",
             },
         },
@@ -787,11 +791,162 @@ def test_create_engine_properties_for_non_coding_engine_is_combination_error(
         "/openapi/v1/bots",
         json={
             **_CREATE_BODY,
-            "engine_properties": {"template": {"devflow_workflow": "x"}},
+            "engine_properties": {"template_config": {"devflow_workflow": "x"}},
         },
     )
     assert response.status_code == 409, response.json()
     assert response.json()["code"] == 409000
+    svc.create_bot.assert_not_called()
+
+
+_FACTORY_SNAPSHOT_BODY = {
+    "template_type": "applicationCoding",
+    "template_config": {
+        "template_key": "applicationCoding",
+        "template_uid": "aicoding_bot_template",
+        "template_version": "V1",
+        "template_version_id": 2800006,
+        "template_name": "应用 Bot",
+        "image": "reg.antgroup-inc.cn/aixcoding/arca:20260901140138",
+        "resource_spec": {"cpu": "4", "memory": "8g", "disk": "50"},
+        "envs": {"AIX_SKIP_DAEMON": "false"},
+        "capabilities": {"channel_management": False},
+        "bot_template_config": {"id": 2800006},
+        "custom_field_values": {"field_a": "value_a"},
+    },
+}
+
+
+def test_create_factory_snapshot_passthrough_persists_verbatim(
+    client, svc, passport
+):
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
+            },
+        )
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "applicationCoding"
+    assert kwargs["template_config"] == _FACTORY_SNAPSHOT_BODY["template_config"]
+
+
+def test_create_factory_snapshot_missing_template_type_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                "template_config": _FACTORY_SNAPSHOT_BODY["template_config"]
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_server_managed_field_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                **_FACTORY_SNAPSHOT_BODY,
+                "template_config": {
+                    **_FACTORY_SNAPSHOT_BODY["template_config"],
+                    "engine_form": "aicoding",
+                },
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_with_form_fields_persists_verbatim(
+    client, svc, passport
+):
+    # tc-list 快照的 custom_field 表单值展开在顶层(与手填键同名):
+    # 工厂身份由 template_key+template_uid 判定,不按键名拒绝
+    passport.apply_first_agent_passport.return_value = {
+        "token": "tok",
+        "agent_code": "ac",
+    }
+    snapshot = {
+        **_FACTORY_SNAPSHOT_BODY["template_config"],
+        "architect_name": "大安全",
+        "yuque_kb_repos": [],
+        "devflow_workflow": None,
+    }
+    with patch.object(bots_router, "generate_bot_id", return_value="default"):
+        response = client.post(
+            "/openapi/v1/bots",
+            json={
+                **_CREATE_BODY,
+                "engine": "claude_code",
+                "engine_properties": {
+                    "template_type": "architect",
+                    "template_config": snapshot,
+                },
+            },
+        )
+    assert response.status_code == 201, response.json()
+    kwargs = svc.create_bot.call_args.kwargs
+    assert kwargs["template_type"] == "architect"
+    assert kwargs["template_config"] == snapshot
+
+
+def test_create_handcrafted_with_foreign_template_type_is_422(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {
+                "template_type": "architect",
+                "template_config": {"devflow_workflow": "x"},
+            },
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_rejects_legacy_template_key_name(client, svc):
+    # 改名反向回归:v1 契约的 "template" 键已不存在
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "engine_properties": {"template": {"devflow_workflow": "x"}},
+        },
+    )
+    assert response.status_code == 422, response.json()
+    svc.create_bot.assert_not_called()
+
+
+def test_create_factory_snapshot_for_service_bot_is_409(client, svc):
+    response = client.post(
+        "/openapi/v1/bots",
+        json={
+            **_CREATE_BODY,
+            "engine": "claude_code",
+            "bot_type": "service",
+            "engine_properties": dict(_FACTORY_SNAPSHOT_BODY),
+        },
+    )
+    assert response.status_code == 409, response.json()
     svc.create_bot.assert_not_called()
 
 
@@ -971,7 +1126,7 @@ def test_post_auth_status_maps_template_to_internal_spec(client, svc, passport):
         json={
             "engine": "claude_code",
             "cluster_name": "ACRA",
-            "engine_properties": {"template": properties},
+            "engine_properties": {"template_config": properties},
         },
     )
 
@@ -1385,7 +1540,7 @@ def test_create_schema_does_not_advertise_engine_options(client):
     assert "engine_options" not in schema["properties"]
 
 
-def test_create_schema_nests_template_under_engine_properties(client):
+def test_create_schema_nests_template_config_under_engine_properties(client):
     schemas = client.app.openapi()["components"]["schemas"]
     create_properties = schemas["BotCreate"]["properties"]
     poll_properties = schemas["BotAuthStatusPoll"]["properties"]
@@ -1399,7 +1554,8 @@ def test_create_schema_nests_template_under_engine_properties(client):
     assert "template_config" not in create_properties
     assert "template_type" not in poll_properties
     assert "template_config" not in poll_properties
-    assert set(engine_properties) == {"template"}
+    assert set(engine_properties) == {"template_type", "template_config"}
+    assert schemas["BotCreateEngineProperties"]["required"] == ["template_config"]
 
 
 def test_auth_status_validates_cluster_against_default_engine(client, svc, passport):
@@ -1807,13 +1963,9 @@ def test_the_write_contract_does_not_promise_starts_that_never_recompose(
     """
     # Asserted on the *published* description, not the docstring: that string is
     # what a caller reads, and it is what promised more than the feature does.
-    from fastapi import FastAPI
+    from tests.community.adapters.http.openapi_v1.conftest import public_document
 
-    from agentclaw.community.adapters.http.openapi_v1 import build_public_router
-
-    app = FastAPI()
-    app.include_router(build_public_router())
-    ops = app.openapi()["paths"]["/openapi/v1/bots/{bot_id}/startup-script"]
+    ops = public_document()["paths"]["/openapi/v1/bots/{bot_id}/startup-script"]
 
     put_doc = ops["put"]["description"]
     assert "composes" in put_doc

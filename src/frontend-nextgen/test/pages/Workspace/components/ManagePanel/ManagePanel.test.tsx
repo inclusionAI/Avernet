@@ -86,6 +86,35 @@ it('group panel advanced tab renders dingtalk binding form', () => {
   expect(screen.getByText('高级配置')).toBeInTheDocument();
 });
 
+// 非管理者：仅当当前身份是群直属成员（在 participants 名单中）才展示「退出协作群」；
+// 非成员（仅可查看的访客）不展示退出按钮，避免误以为自己是群成员。
+it('group panel shows 退出协作群 only for direct member when not manager', () => {
+  const denied: PolicyResult = { allowed: false, disabledReason: '无权限' };
+  const memberProps: GroupManagePanelProps = {
+    ...groupProps(),
+    canManage: denied,
+    group: { ...group, participants: [{ actorId: 'me', kind: 'human', name: '我', role: 'member', mode: 'present' }] },
+  };
+  render(<GroupManagePanel {...memberProps} />);
+  expect(screen.getByText('退出协作群')).toBeInTheDocument();
+  expect(screen.queryByText('删除协作群')).not.toBeInTheDocument();
+});
+
+it('group panel hides 退出协作群 for non-member viewer', () => {
+  const denied: PolicyResult = { allowed: false, disabledReason: '无权限' };
+  const viewerProps: GroupManagePanelProps = {
+    ...groupProps(),
+    canManage: denied,
+    group: {
+      ...group,
+      participants: [{ actorId: 'other', kind: 'human', name: '他人', role: 'owner', mode: 'present' }],
+    },
+  };
+  render(<GroupManagePanel {...viewerProps} />);
+  expect(screen.queryByText('退出协作群')).not.toBeInTheDocument();
+  expect(screen.queryByText('删除协作群')).not.toBeInTheDocument();
+});
+
 const sessionProps = (): SessionManagePanelProps => ({
   session,
   groupName: group.name,

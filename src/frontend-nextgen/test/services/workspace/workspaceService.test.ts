@@ -55,6 +55,39 @@ describe('workspaceService online TeamClaw support', () => {
     });
   });
 
+  it('maps private-session image attachments to the same ImageBlock fallback as group messages', () => {
+    const messages = mapPrivateHistoryMessages([
+      {
+        id: 'u-image',
+        role: 'user',
+        content: '请看图',
+        attachments: [
+          {
+            attachment_id: 'att-1',
+            type: 'image',
+            file_name: '截图.png',
+            mime_type: 'image/png',
+            url: 'https://cdn.example.com/image.png',
+          },
+        ],
+      },
+      {
+        id: 'u-gone',
+        role: 'user',
+        content: '',
+        attachments: [{ attachment_id: 'att-2', type: 'image', file_name: 'gone.png', url: '' }],
+      },
+    ]);
+
+    expect(messages[0].blocks?.[0]).toMatchObject({
+      type: 'image',
+      data: 'https://cdn.example.com/image.png',
+      name: '截图.png',
+    });
+    expect(messages[1].blocks?.[0]).toMatchObject({ type: 'image', name: 'gone.png' });
+    expect((messages[1].blocks?.[0] as unknown as { data: string }).data).toContain('data:image/svg+xml');
+  });
+
   it('maps open-claw tool results into SDK tool_execution blocks', () => {
     const messages = mapPrivateHistoryMessages([
       {

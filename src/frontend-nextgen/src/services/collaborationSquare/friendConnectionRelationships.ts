@@ -1,62 +1,38 @@
-import type { HumanBotActionContext } from '@/domain/collaborationSquare/types';
+import type { FriendRequestActor } from '@/domain/collaborationSquare/types';
+import { isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import {
   listFriendConnectionRequests,
   listFriendConnections,
 } from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import { CollaborationSquareError } from './collaborationSquareError';
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function isAceLoginResponse(value: unknown) {
-  return isRecord(value) && value.actionType === 'LOGIN' && value.buserviceErrorCode === 'USER_NOT_LOGIN';
-}
-
-function getBotActorId(
+/**
+ * 取好友关系/申请中「另一方」的 actor id（即非发起方 selfId 的那个参与方），
+ * 用于回填 Bot 卡片的 friend/applying 状态。selfId 即当前查询的 actor id。
+ */
+function getOtherActorId(
   fromActor: { type: string; id: string },
   toActor: { type: string; id: string },
-  humanId: string,
+  selfId: string,
 ) {
-  const actors = [fromActor, toActor];
-  if (actors.some((actor) => !actor || typeof actor.id !== 'string' || !actor.id)) {
+  if (
+    !fromActor ||
+    !toActor ||
+    typeof fromActor.id !== 'string' ||
+    typeof toActor.id !== 'string' ||
+    !fromActor.id ||
+    !toActor.id
+  ) {
     throw new CollaborationSquareError('protocol_error', '好友关系接口返回了无法识别的参与方');
   }
-  if (!actors.some((actor) => actor.type === 'human' && actor.id === humanId)) {
-    throw new CollaborationSquareError('protocol_error', '好友关系接口返回了无法识别的 Human 参与方');
-  }
-  const botActors = actors.filter((actor) => actor.type === 'bot');
-  if (botActors.length !== 1)
-    throw new CollaborationSquareError('protocol_error', '好友关系接口返回了无法识别的 Bot 参与方');
-  return botActors[0].id;
+  if (fromActor.id === selfId) return toActor.id;
+  if (toActor.id === selfId) return fromActor.id;
+  throw new CollaborationSquareError('protocol_error', '好友关系接口返回了无法识别的参与方');
 }
 
-export async function listFriendBotRelationships(context: HumanBotActionContext, signal?: AbortSignal) {
-  const friendIds = new Set<string>();
+/** Search 已提供 approved 状态时，仅补读 pending 申请，避免重复查询已确认的好友连接。 */
+export async function listPendingFriendBotRelationships(actor: FriendRequestActor, signal?: AbortSignal) {
   const applyingIds = new Set<string>();
-  const connectionsResponse = await listFriendConnections(
-    {
-      actor_type: 'human',
-      actor_id: context.userId,
-    },
-    signal,
-  );
-  if (isAceLoginResponse(connectionsResponse))
-    throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
-  if (connectionsResponse.code !== 20000)
-    throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的业务码');
-  const connections = connectionsResponse.data?.items;
-  if (!Array.isArray(connections))
-    throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的数据');
-  for (const connection of connections) {
-    if (!connection || (connection.status !== 'approved' && connection.status !== 'public_no_edge')) {
-      throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的状态');
-    }
-    if (connection.status === 'approved') {
-      friendIds.add(getBotActorId(connection.from_actor, connection.to_actor, context.userId));
-    }
-  }
-
   const pageSize = 100;
   let page = 1;
   while (true) {
@@ -64,8 +40,8 @@ export async function listFriendBotRelationships(context: HumanBotActionContext,
       {
         direction: 'sent',
         status: 'pending',
-        actor_type: 'human',
-        actor_id: context.userId,
+        actor_type: actor.type,
+        actor_id: actor.id,
         page,
         page_size: pageSize,
       },
@@ -82,12 +58,41 @@ export async function listFriendBotRelationships(context: HumanBotActionContext,
       if (!request || request.status !== 'pending') {
         throw new CollaborationSquareError('protocol_error', '好友申请接口返回了无法识别的状态');
       }
-      applyingIds.add(getBotActorId(request.from_actor, request.to_actor, context.userId));
+      applyingIds.add(getOtherActorId(request.from_actor, request.to_actor, actor.id));
     }
     const total = requestsResponse.data?.total;
     if (requests.length === 0 || (typeof total === 'number' ? page * pageSize >= total : requests.length < pageSize))
       break;
     page += 1;
   }
+  return applyingIds;
+}
+
+export async function listFriendBotRelationships(actor: FriendRequestActor, signal?: AbortSignal) {
+  const friendIds = new Set<string>();
+  const connectionsResponse = await listFriendConnections(
+    {
+      actor_type: actor.type,
+      actor_id: actor.id,
+    },
+    signal,
+  );
+  if (isAceLoginResponse(connectionsResponse))
+    throw new CollaborationSquareError('unauthenticated', '登录状态已失效，请重新登录后重试');
+  if (connectionsResponse.code !== 20000)
+    throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的业务码');
+  const connections = connectionsResponse.data?.items;
+  if (!Array.isArray(connections))
+    throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的数据');
+  for (const connection of connections) {
+    if (!connection || (connection.status !== 'approved' && connection.status !== 'public_no_edge')) {
+      throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的状态');
+    }
+    if (connection.status === 'approved') {
+      friendIds.add(getOtherActorId(connection.from_actor, connection.to_actor, actor.id));
+    }
+  }
+
+  const applyingIds = await listPendingFriendBotRelationships(actor, signal);
   return { friendIds, applyingIds };
 }

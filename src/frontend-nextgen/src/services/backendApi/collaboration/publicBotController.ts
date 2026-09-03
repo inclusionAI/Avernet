@@ -1,15 +1,22 @@
+import { isAceLoginResponse } from '../aceLoginBody';
 import { backendRequest } from '../httpClient';
+import { isEnvelopeFailure } from '../types';
 
 /** TeamClaw Gateway bot-catalog 的公开 Bot 普通搜索 DTO。 */
 export interface PublicBotCatalogDto {
   bot_id: string;
+  bot_uuid?: string;
   bot_type: string;
   description: string;
   engine: string;
-  entity_id: string;
+  entity_id?: string;
   name: string;
   owner_name: string;
   status: string;
+  /** Search 返回的当前 Human→Bot 好友关系；缺失时由 Domain 安全降级为 none。 */
+  is_friend?: boolean;
+  friend_ext?: Record<string, unknown>;
+  friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
 }
 
 /** 公开 Bot 普通搜索的 Gateway query。 */
@@ -17,6 +24,9 @@ export interface SearchPublicBotsParams extends Record<string, unknown> {
   search?: string;
   page?: number;
   page_size?: number;
+  /** 当前身份（viewer），用于以该身份过滤可见 Bot 与计算 is_friend。 */
+  viewer_actor_type?: 'human' | 'bot';
+  viewer_actor_id?: string;
 }
 
 export interface PublicBotCatalogPage {
@@ -36,6 +46,9 @@ export interface DiscoverPublicBotsParams extends Record<string, unknown> {
   top_k?: number;
   min_score?: number;
   runtime_state?: 'online';
+  /** 当前身份（viewer），与 Search 一致。 */
+  viewer_actor_type?: 'human' | 'bot';
+  viewer_actor_id?: string;
 }
 
 export interface PublicBotDiscoveryDto extends PublicBotCatalogDto {
@@ -69,15 +82,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function isAceLoginResponse(value: unknown) {
-  return (
-    isRecord(value) &&
-    value.actionType === 'LOGIN' &&
-    value.buserviceErrorCode === 'USER_NOT_LOGIN' &&
-    value.decisionBy === 'ACE'
-  );
-}
-
 function validateCatalogResponse<T extends PublicBotCatalogDto>(
   value: unknown,
 ): {
@@ -89,7 +93,7 @@ function validateCatalogResponse<T extends PublicBotCatalogDto>(
   if (isAceLoginResponse(value)) {
     throw new PublicBotCatalogError('unauthenticated', 'Bot Catalog request requires authentication');
   }
-  if (!isRecord(value) || value.code !== 200000) {
+  if (!isRecord(value) || isEnvelopeFailure(value)) {
     throw new PublicBotCatalogError('protocol_error', 'Unexpected Bot Catalog business response');
   }
   if (!isRecord(value.data) || !Array.isArray(value.data.items) || typeof value.data.total !== 'number') {

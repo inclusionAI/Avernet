@@ -1,6 +1,7 @@
 """Unit tests for opt-in work-order decision callbacks."""
 
 import json
+from collections.abc import Callable
 from datetime import datetime
 from unittest.mock import MagicMock
 
@@ -32,6 +33,47 @@ from agentclaw.community.plugin_api.http_client import HttpClient
 
 
 NOW = datetime(2026, 8, 27, 10, 0, 0)
+
+# What the re-signer hands back. A sentinel rather than a real JWT: this suite
+# asserts that the *re-addressed* credential is what reaches BCN and that the
+# inbound one is what reaches the re-signer — whether the copy satisfies BCN's
+# contract is ``core/gateway_principal``'s question, and ``test_signer.py``
+# answers it against that contract directly.
+READDRESSED_PRINCIPAL = "readdressed-principal-token"
+
+
+class StubResigner:
+    """Stands in for ``resign_principal_for_bcn``, recording what it was given."""
+
+    def __init__(self, readdressed: str = READDRESSED_PRINCIPAL) -> None:
+        self._readdressed = readdressed
+        self.calls: list[str] = []
+
+    def __call__(self, token: str) -> str:
+        self.calls.append(token)
+        return self._readdressed
+
+
+class FailingResigner:
+    """A re-signer that refuses, as it does for a token that does not verify."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self._error = error or ValueError("principal token rejected")
+
+    def __call__(self, token: str) -> str:
+        raise self._error
+
+
+def _handler(
+    http: HttpClient,
+    *,
+    resign: Callable[[str], str] | None = None,
+    timeout: float = 10.0,
+) -> FriendDecisionCallbackHandler:
+    """Build the handler under test with a re-signer that is never a no-op."""
+    return FriendDecisionCallbackHandler(
+        http, resign_principal=resign or StubResigner(), timeout=timeout
+    )
 
 
 def _context(
@@ -81,12 +123,25 @@ def _response(payload: object, status_code: int = 200) -> httpx.Response:
     )
 
 
-def test_friend_handler_accepts_and_forwards_only_supplied_credential() -> None:
+def test_friend_handler_readdresses_the_principal_and_forwards_the_rest() -> None:
+    """BCN is called with the re-addressed credential, and nothing else changes.
+
+    The inbound ``X-Avernet-Principal`` is addressed to ``backend`` and BCN
+    refuses it, so relaying it verbatim — as this handler used to — failed every
+    friend approval on BCN's audience check. Every other supplied header is
+    still forwarded untouched: this seam forwards a credential, it does not
+    compose a request.
+    """
     http = MagicMock(spec=HttpClient)
     http.post.return_value = _response({"success": True, "data": {}})
-    handler = FriendDecisionCallbackHandler(http, timeout=3.0)
+    resigner = StubResigner()
+    handler = _handler(http, resign=resigner, timeout=3.0)
     credential = WorkOrderCallbackCredential(
-        headers={"Authorization": "Bearer token", "X-Trace-Id": "trace"}
+        headers={
+            "Authorization": "Bearer token",
+            "X-Avernet-Principal": "principal-token",
+            "X-Trace-Id": "trace",
+        }
     )
 
     handler.handle(
@@ -96,12 +151,102 @@ def test_friend_handler_accepts_and_forwards_only_supplied_credential() -> None:
         credential=credential,
     )
 
+    assert resigner.calls == ["principal-token"]
     http.post.assert_called_once_with(
-        "/collaboration/friend-connections/requests/request%2F77/accept",
+        "/openapi/v1/collaboration/friend-connections/requests/request%2F77/accept",
         json=None,
-        headers={"Authorization": "Bearer token", "X-Trace-Id": "trace"},
+        headers={
+            "Authorization": "Bearer token",
+            "X-Avernet-Principal": READDRESSED_PRINCIPAL,
+            "X-Trace-Id": "trace",
+        },
         timeout=3.0,
     )
+    assert credential.headers["X-Avernet-Principal"] == "principal-token"
+
+
+def test_friend_handler_readdresses_a_lowercased_principal_header() -> None:
+    """Header names are case-insensitive; the inbound spelling is not ours to pick."""
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response({"success": True})
+    resigner = StubResigner()
+    handler = _handler(http, resign=resigner)
+
+    handler.handle(
+        context=_context(),
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        credential=WorkOrderCallbackCredential(
+            headers={"x-avernet-principal": "principal-token"}
+        ),
+    )
+
+    assert resigner.calls == ["principal-token"]
+    assert http.post.call_args.kwargs["headers"] == {
+        "x-avernet-principal": READDRESSED_PRINCIPAL
+    }
+
+
+def test_friend_handler_leaves_a_credential_without_a_principal_alone() -> None:
+    """Nothing to re-address, so nothing is invented — the call fails at BCN.
+
+    Which is the same outcome as before this change, with the existing
+    ``has_principal=False`` diagnostic already naming why.
+    """
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response({"success": True})
+    resigner = StubResigner()
+    handler = _handler(http, resign=resigner)
+
+    handler.handle(
+        context=_context(),
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        credential=WorkOrderCallbackCredential(
+            headers={"Authorization": "Bearer token", "X-Avernet-Principal": "  "}
+        ),
+    )
+
+    assert resigner.calls == []
+    assert http.post.call_args.kwargs["headers"] == {
+        "Authorization": "Bearer token",
+        "X-Avernet-Principal": "  ",
+    }
+
+
+def test_friend_handler_fails_closed_when_the_principal_cannot_be_readdressed(
+    caplog,
+) -> None:
+    """No credential BCN would accept means no call and no stored decision.
+
+    A token that does not verify, or a deployment with no signing key, both land
+    here. Sending the original anyway would only trade this failure for a 403
+    from BCN, and the approval must not be persisted either way.
+    """
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    handler = _handler(http, resign=FailingResigner())
+
+    with pytest.raises(WorkOrderCallbackError):
+        handler.handle(
+            context=_context(),
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=WorkOrderCallbackCredential(
+                headers={"X-Avernet-Principal": "secret-principal"}
+            ),
+        )
+
+    http.post.assert_not_called()
+    failure_log = next(
+        record
+        for record in caplog.records
+        if record.message.startswith(
+            "friend work-order BCN callback credential could not be re-addressed:"
+        )
+    )
+    assert "exception_type=ValueError" in failure_log.message
+    assert "secret-principal" not in caplog.text
 
 
 def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) -> None:
@@ -116,7 +261,7 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
         },
         status_code=403,
     )
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     with pytest.raises(WorkOrderCallbackError):
         handler.handle(
@@ -144,16 +289,60 @@ def test_friend_handler_logs_bcn_response_details_without_credentials(caplog) ->
     assert request_log.request_body is None
     assert request_log.has_authorization is True
     assert request_log.has_x_avernet_principal is True
+    auth_log = next(
+        record
+        for record in caplog.records
+        if record.message == "BCN callback auth headers"
+    )
+    assert auth_log.has_principal is True
+    assert auth_log.principal_header_count == 1
+    assert auth_log.principal_length == len(READDRESSED_PRINCIPAL)
+    assert auth_log.has_authorization is True
+    assert len(auth_log.principal_fingerprint) == 16
+    assert len(auth_log.source_principal_fingerprint) == 16
+    assert request_log.principal_header_count == 1
+    # The credential BCN was actually handed, not the one that arrived: after
+    # re-addressing they are different tokens, so both digests are logged and
+    # the hop stays correlatable across the two components' log lines.
+    assert request_log.principal_length == len(READDRESSED_PRINCIPAL)
+    assert len(request_log.principal_fingerprint) == 16
+    assert len(request_log.source_principal_fingerprint) == 16
+    assert (
+        request_log.source_principal_fingerprint != request_log.principal_fingerprint
+    )
+    assert "secret-principal" not in request_log.message
     assert response_log.http_status == 403
     assert response_log.response_code == 403201
     assert response_log.response_message == "Forbidden"
     assert response_log.response_request_id == "bcn-request-1"
     assert response_log.response_body_raw == (
-        '{"code":403201,"message":"Forbidden","data":null,'
-        '"request_id":"bcn-request-1"}'
+        '{"code":403201,"message":"Forbidden","data":null,"request_id":"bcn-request-1"}'
     )
+    assert response_log.duration_ms >= 0
     assert "secret-auth" not in caplog.text
     assert "secret-principal" not in caplog.text
+
+
+def test_friend_handler_accepts_openapi_success_envelope() -> None:
+    http = MagicMock(spec=HttpClient)
+    http.post.return_value = _response(
+        {
+            "code": 20_000,
+            "message": "OK",
+            "data": {"request_id": "request/77"},
+            "request_id": "bcn-request-1",
+        }
+    )
+    handler = _handler(http)
+
+    handler.handle(
+        context=_context(),
+        decision=WorkOrderDecision.APPROVED,
+        review_remark=None,
+        credential=WorkOrderCallbackCredential(
+            headers={"x-avernet-principal": "principal-token"}
+        ),
+    )
 
 
 def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
@@ -164,7 +353,7 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
         text="Bad Gateway",
         request=httpx.Request("POST", "https://bcn.test/callback"),
     )
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     with pytest.raises(WorkOrderCallbackError):
         handler.handle(
@@ -182,12 +371,51 @@ def test_friend_handler_logs_non_json_bcn_response(caplog) -> None:
     assert response_log.http_status == 502
     assert response_log.response_code is None
     assert response_log.response_body_raw == "Bad Gateway"
+    failure_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order decision callback failed"
+    )
+    assert failure_log.exception_type == "HTTPStatusError"
+    assert failure_log.response_body_raw == "Bad Gateway"
+    assert failure_log.principal_header_count == 0
+    assert failure_log.principal_fingerprint is None
+    assert failure_log.source_principal_fingerprint is None
+    assert failure_log.principal_length is None
+
+
+def test_friend_handler_truncates_large_response_body_in_logs(caplog) -> None:
+    caplog.set_level("INFO", logger="start")
+    http = MagicMock(spec=HttpClient)
+    large_body = "x" * 16_385
+    http.post.return_value = httpx.Response(
+        502,
+        text=large_body,
+        request=httpx.Request("POST", "https://bcn.test/callback"),
+    )
+    handler = _handler(http)
+
+    with pytest.raises(WorkOrderCallbackError):
+        handler.handle(
+            context=_context(),
+            decision=WorkOrderDecision.APPROVED,
+            review_remark=None,
+            credential=WorkOrderCallbackCredential(headers={}),
+        )
+
+    response_log = next(
+        record
+        for record in caplog.records
+        if record.message == "friend work-order BCN callback response"
+    )
+    assert response_log.response_body_raw.endswith("...<truncated>")
+    assert len(response_log.response_body_raw) == 16 * 1024 + len("...<truncated>")
 
 
 def test_friend_handler_rejects_with_review_reason() -> None:
     http = MagicMock(spec=HttpClient)
     http.post.return_value = _response({"success": True})
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     handler.handle(
         context=_context(event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED),
@@ -213,7 +441,7 @@ def test_friend_handler_turns_every_upstream_failure_into_callback_error(
 ) -> None:
     http = MagicMock(spec=HttpClient)
     http.post.return_value = response
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     with pytest.raises(WorkOrderCallbackError):
         handler.handle(
@@ -226,7 +454,7 @@ def test_friend_handler_turns_every_upstream_failure_into_callback_error(
 
 def test_friend_handler_rejects_wrong_biz_type_before_http() -> None:
     http = MagicMock(spec=HttpClient)
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     with pytest.raises(WorkOrderInvalidEventError, match="BOT_FRIEND"):
         handler.handle(
@@ -242,7 +470,7 @@ def test_friend_handler_rejects_wrong_biz_type_before_http() -> None:
 @pytest.mark.parametrize("biz_data", [None, "not-json", "[]"])
 def test_friend_handler_rejects_invalid_persisted_json(biz_data: str | None) -> None:
     http = MagicMock(spec=HttpClient)
-    handler = FriendDecisionCallbackHandler(http)
+    handler = _handler(http)
 
     with pytest.raises(WorkOrderInvalidEventError):
         handler.handle(
@@ -257,7 +485,9 @@ def test_friend_handler_rejects_invalid_persisted_json(biz_data: str | None) -> 
 
 def test_dispatcher_is_noop_for_unregistered_event() -> None:
     http = MagicMock(spec=HttpClient)
-    dispatcher = WorkOrderDecisionCallbackDispatcher(http)
+    dispatcher = WorkOrderDecisionCallbackDispatcher(
+        http, resign_principal=StubResigner()
+    )
     context = _context().model_copy(update={"source_event_type": "OTHER_APPLIED"})
 
     assert dispatcher.requires_callback(context.source_event_type) is False
@@ -272,7 +502,9 @@ def test_dispatcher_is_noop_for_unregistered_event() -> None:
 
 
 def test_dispatcher_registers_both_friend_events() -> None:
-    dispatcher = WorkOrderDecisionCallbackDispatcher(MagicMock(spec=HttpClient))
+    dispatcher = WorkOrderDecisionCallbackDispatcher(
+        MagicMock(spec=HttpClient), resign_principal=StubResigner()
+    )
 
     assert dispatcher.requires_callback(
         WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED.value
@@ -283,7 +515,9 @@ def test_dispatcher_registers_both_friend_events() -> None:
 def test_dispatcher_invokes_registered_friend_handler() -> None:
     http = MagicMock(spec=HttpClient)
     http.post.return_value = _response({"success": True})
-    dispatcher = WorkOrderDecisionCallbackDispatcher(http)
+    dispatcher = WorkOrderDecisionCallbackDispatcher(
+        http, resign_principal=StubResigner()
+    )
 
     dispatcher.dispatch(
         context=_context(),

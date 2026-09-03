@@ -23,26 +23,22 @@
         "type": "object"
       },
       "AcceptanceResultDTO": {
-        "description": "验收结论(PASS/FAIL + 通过项与缺口)。",
+        "description": "验收结论(DONE/FAILED + 通过项与缺口)。",
         "properties": {
           "acceptances_metric": {
-            "description": "通过的验收项标识列表",
-            "items": {
-              "type": "string"
-            },
+            "description": "通过的验收项明细列表(新协议为对象数组,[{项:结论}])",
+            "items": {},
             "title": "Acceptances Metric",
             "type": "array"
           },
           "gaps": {
-            "description": "未通过的验收项标识列表(gap)",
-            "items": {
-              "type": "string"
-            },
+            "description": "未通过的验收项明细/差距(对象数组 [{项:原因}] 或字符串数组)",
+            "items": {},
             "title": "Gaps",
             "type": "array"
           },
           "verdict": {
-            "description": "PASS / FAIL",
+            "description": "DONE / FAILED",
             "title": "Verdict",
             "type": "string"
           }
@@ -545,7 +541,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
+            "description": "Stored template snapshot, copied verbatim from the bot's creation input (no field filtering). Null without a template. May carry sensitive values the creator supplied (e.g. 'token', 'bot_template_config.ext_config.thetaKey') and the server-managed 'engine_form' marker — treat as sensitive.",
             "title": "Template Config"
           },
           "template_type": {
@@ -849,7 +845,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional engine-specific properties. Omit for a plain bot; provide template for an application-coding bot."
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot."
           },
           "space_id": {
             "anyOf": [
@@ -878,15 +874,27 @@
         "additionalProperties": false,
         "description": "Engine-specific properties used while creating a bot.",
         "properties": {
-          "template": {
+          "template_config": {
             "additionalProperties": true,
-            "description": "Application-coding template properties. Passed through unchanged to the template validator; platform-managed identity and lifecycle fields are not accepted.",
-            "title": "Template",
+            "description": "Template configuration. Either hand-written application-coding properties, or a template-factory snapshot (identified by template_key + template_uid) echoed verbatim from bot-templates/available-tc-list; platform-managed identity and lifecycle fields are not accepted.",
+            "title": "Template Config",
             "type": "object"
+          },
+          "template_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Template type declared with the config. Required for template-factory snapshots (any value, echoed from available-tc-list); for hand-written application-coding configs omit it or pass 'applicationCoding'.",
+            "title": "Template Type"
           }
         },
         "required": [
-          "template"
+          "template_config"
         ],
         "title": "BotCreateEngineProperties",
         "type": "object"
@@ -1306,7 +1314,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
+            "description": "Stored template snapshot, copied verbatim from the bot's creation input (no field filtering). Null without a template. May carry sensitive values the creator supplied (e.g. 'token', 'bot_template_config.ext_config.thetaKey') and the server-managed 'engine_form' marker — treat as sensitive.",
             "title": "Template Config"
           },
           "template_type": {
@@ -1345,6 +1353,28 @@
             "description": "Whether the MCP has a desired-state installation.",
             "title": "Active",
             "type": "boolean"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on an activate/deactivate response; the durable Desired State result."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on an activate/deactivate response; observed Runtime convergence."
           },
           "server_code": {
             "description": "The server's unique identifier in the marketplace catalogue — an opaque, case-sensitive string, e.g. 'mcp.example.weather'. Obtain it from the server listing; do not parse it.",
@@ -2835,6 +2865,12 @@
       "CreateSpaceRequest": {
         "description": "Request for creating a shared team Space.",
         "properties": {
+          "skipSC": {
+            "default": false,
+            "description": "Whether to skip creating the corresponding Skill Center Team.",
+            "title": "Skipsc",
+            "type": "boolean"
+          },
           "space_name": {
             "description": "Display name for the new Space.",
             "maxLength": 128,
@@ -3057,6 +3093,31 @@
           "dept_path"
         ],
         "title": "DeptSearchItem",
+        "type": "object"
+      },
+      "DesiredStateResult": {
+        "description": "The durable result of one idempotent Bot capability command.",
+        "properties": {
+          "changed": {
+            "description": "Whether this command changed Desired State.",
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "COMMITTED after a durable Desired State write; UNCHANGED for an idempotent no-op.",
+            "enum": [
+              "COMMITTED",
+              "UNCHANGED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "changed",
+          "status"
+        ],
+        "title": "DesiredStateResult",
         "type": "object"
       },
       "DiagnoseStartResponse": {
@@ -11659,14 +11720,28 @@
       },
       "ExecutionConfigDTO": {
         "additionalProperties": true,
-        "description": "执行配置(task_type 必填;静态单工作流/静态组工作流/workflow_id 可选;其余键允许透传)。",
+        "description": "执行配置(task_type 必填;yaml/workflow_id 可选;其余键允许透传)。",
         "properties": {
+          "panel_component_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "state_machine 协作群 opening_message 使用的业务面板组件名",
+            "title": "Panel Component Name"
+          },
           "task_type": {
             "description": "任务类型",
             "enum": [
               "yaml",
               "workflow",
-              "dynamic"
+              "dynamic",
+              "static_plan",
+              "bbs"
             ],
             "title": "Task Type",
             "type": "string"
@@ -12624,6 +12699,19 @@
           "git_url"
         ],
         "title": "ImportSpaceSkillFromGitRequest",
+        "type": "object"
+      },
+      "InitializePersonalSpaceRequest": {
+        "description": "Optional controls for initializing the current user's personal Space.",
+        "properties": {
+          "skipSC": {
+            "default": false,
+            "description": "Whether to skip creating or binding the corresponding Skill Center Team.",
+            "title": "Skipsc",
+            "type": "boolean"
+          }
+        },
+        "title": "InitializePersonalSpaceRequest",
         "type": "object"
       },
       "LifecycleAdvanceRequest": {
@@ -17511,10 +17599,8 @@
             "type": "object"
           },
           "output": {
-            "additionalProperties": true,
-            "description": "节点输出(checkpoint fold)",
-            "title": "Output",
-            "type": "object"
+            "description": "节点输出(checkpoint fold);adapter 路径以 output key 落 run_info.output,DTO 层展平为标量(去除两层 output 嵌套)",
+            "title": "Output"
           },
           "run_mode": {
             "anyOf": [
@@ -17542,6 +17628,217 @@
           }
         },
         "title": "RuntimeInfoDTO",
+        "type": "object"
+      },
+      "RuntimeProjectionIssue": {
+        "description": "One safe, actionable runtime observation without infrastructure paths.",
+        "properties": {
+          "code": {
+            "description": "Stable, machine-readable Runtime observation code.",
+            "title": "Code",
+            "type": "string"
+          },
+          "corpus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Skill corpus such as LOCAL, REPO, or CENTER.",
+            "title": "Corpus"
+          },
+          "expected_entry_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Expected active entry classification.",
+            "title": "Expected Entry Type"
+          },
+          "logical_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Logical Runtime location without an absolute filesystem path.",
+            "title": "Logical Location"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe display name of the affected capability.",
+            "title": "Name"
+          },
+          "observed_entry_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe classification of the existing active entry.",
+            "title": "Observed Entry Type"
+          },
+          "reason": {
+            "description": "Safe human-readable explanation without infrastructure details.",
+            "title": "Reason",
+            "type": "string"
+          },
+          "requested_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Requested Runtime action when the engine reported one.",
+            "title": "Requested Action"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable capability identifier when available.",
+            "title": "Resource Id"
+          },
+          "resource_type": {
+            "description": "The affected capability domain.",
+            "enum": [
+              "SKILL",
+              "MCP",
+              "RUNTIME"
+            ],
+            "title": "Resource Type",
+            "type": "string"
+          },
+          "retryable": {
+            "description": "Whether a later projection attempt may resolve the issue.",
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "Whether the observation is transient or requires user intervention.",
+            "enum": [
+              "PENDING",
+              "DEGRADED"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "suggested_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Safe next action suggested to the caller.",
+            "title": "Suggested Action"
+          }
+        },
+        "required": [
+          "resource_type",
+          "code",
+          "reason",
+          "status",
+          "retryable"
+        ],
+        "title": "RuntimeProjectionIssue",
+        "type": "object"
+      },
+      "RuntimeProjectionResult": {
+        "description": "Observed Runtime outcome; never a replacement for Installation.",
+        "properties": {
+          "components": {
+            "additionalProperties": {
+              "enum": [
+                "CONVERGED",
+                "PENDING",
+                "DEGRADED",
+                "SKIPPED"
+              ],
+              "type": "string"
+            },
+            "description": "Per-domain Runtime outcomes when the engine can report them.",
+            "title": "Components",
+            "type": "object"
+          },
+          "degraded_count": {
+            "default": 0,
+            "description": "Number of non-destructive degraded observations.",
+            "title": "Degraded Count",
+            "type": "integer"
+          },
+          "issues": {
+            "description": "Per-capability safe diagnostic details.",
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProjectionIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "pending_count": {
+            "default": 0,
+            "description": "Number of retryable pending observations.",
+            "title": "Pending Count",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reason for a skipped or aggregate Runtime observation.",
+            "title": "Reason"
+          },
+          "status": {
+            "description": "Aggregate Runtime observation for this command.",
+            "enum": [
+              "CONVERGED",
+              "PENDING",
+              "DEGRADED",
+              "SKIPPED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RuntimeProjectionResult",
         "type": "object"
       },
       "RuntimeStage": {
@@ -18780,6 +19077,12 @@
       "SkillActorPermissions": {
         "description": "ACL/Grant qualifications; current command state is checked separately.",
         "properties": {
+          "copy_offline_skill": {
+            "default": false,
+            "description": "Actor may copy an Offline Skill's exact Published Version.",
+            "title": "Copy Offline Skill",
+            "type": "boolean"
+          },
           "create_upgrade_draft": {
             "description": "Actor may request creation of an upgrade Draft.",
             "title": "Create Upgrade Draft",
@@ -18801,7 +19104,7 @@
             "type": "boolean"
           },
           "offline_skill": {
-            "description": "Actor may request recoverable Skill Offline.",
+            "description": "Actor may request terminal local Skill Offline.",
             "title": "Offline Skill",
             "type": "boolean"
           },
@@ -19646,7 +19949,7 @@
         "x-enum-descriptions": [
           "The Skill has a Draft but no Published Version.",
           "The Skill has at least one Published Version and is online.",
-          "The Skill is recoverably offline but remains editable."
+          "The Skill is offline, retains its Published history, and is not editable."
         ],
         "x-enum-varnames": [
           "DRAFT_ONLY",
@@ -19785,7 +20088,7 @@
         "type": "object"
       },
       "SkillOfflineBlockerKind": {
-        "description": "Reason a Space Skill cannot safely enter recoverable Offline.",
+        "description": "Category for an Offline blocker or a diagnostic warning.",
         "enum": [
           "DRAFT",
           "PUBLICATION",
@@ -19802,7 +20105,7 @@
           "An ordinary or Default SkillSet still contains the Skill.",
           "A Bot still has an effective Skill Installation.",
           "A live Service Bot can replay this exact Skill Version.",
-          "Artifact lineage could not be proved complete and valid."
+          "Artifact lineage could not be proved complete and valid; returned only as a non-blocking diagnostic warning."
         ],
         "x-enum-varnames": [
           "DRAFT",
@@ -19822,7 +20125,7 @@
         ]
       },
       "SkillOfflineImpact": {
-        "description": "Complete blocker counts plus one requested page of blocker details.",
+        "description": "Complete explicit blockers plus diagnostic warnings for recoverable Offline.",
         "properties": {
           "blocked": {
             "description": "Whether at least one blocker exists.",
@@ -19833,7 +20136,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "Non-zero blocker totals keyed by blocker category.",
+            "description": "Non-zero explicit blocker totals keyed by blocker category.",
             "title": "Counts",
             "type": "object"
           },
@@ -19846,10 +20149,18 @@
             "type": "array"
           },
           "total": {
-            "description": "Total blockers across all categories.",
+            "description": "Total explicit blockers across all categories.",
             "minimum": 0.0,
             "title": "Total",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Diagnostic findings that did not prove a live reference and therefore do not block Offline.",
+            "items": {
+              "$ref": "#/components/schemas/SkillOfflineImpactItem"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -19862,7 +20173,7 @@
         "type": "object"
       },
       "SkillOfflineImpactItem": {
-        "description": "One live fact that prevents recoverable Offline.",
+        "description": "One explicit blocker or diagnostic warning for recoverable Offline.",
         "properties": {
           "display_name": {
             "description": "Human-readable blocker label.",
@@ -19888,28 +20199,36 @@
         "type": "object"
       },
       "SkillOfflineResult": {
-        "description": "Recoverable Offline state and the editable next-version Draft.",
+        "description": "Terminal local Offline result for the existing Skill.",
         "properties": {
           "changed": {
             "description": "Whether this request newly moved the Skill Offline.",
             "title": "Changed",
             "type": "boolean"
           },
-          "draft": {
-            "$ref": "#/components/schemas/SkillDraftSummary",
-            "description": "Editable Vn+1 Draft retained for recovery publication."
-          },
           "lifecycle_status": {
             "const": "OFFLINE",
             "description": "Current recoverable lifecycle state.",
             "title": "Lifecycle Status",
             "type": "string"
+          },
+          "offline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC time at which Offline was recorded.",
+            "title": "Offline At"
           }
         },
         "required": [
           "changed",
-          "lifecycle_status",
-          "draft"
+          "lifecycle_status"
         ],
         "title": "SkillOfflineResult",
         "type": "object"
@@ -20146,6 +20465,17 @@
             "description": "Optional SkillSet description.",
             "title": "Description"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
+          },
           "id": {
             "description": "Decimal SkillSet identifier.",
             "title": "Id",
@@ -20165,6 +20495,17 @@
             "description": "Unique SkillSet name within this Bot.",
             "title": "Name",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [
@@ -20300,6 +20641,28 @@
             "description": "False when the requested membership state already existed.",
             "title": "Changed",
             "type": "boolean"
+          },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result for this membership command."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence for this membership command."
           }
         },
         "required": [
@@ -20362,6 +20725,28 @@
             "title": "Changed",
             "type": "boolean"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result for this mutation."
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence for this mutation."
+          },
           "skill": {
             "$ref": "#/components/schemas/Skill",
             "description": "The skill in its resulting state."
@@ -20390,6 +20775,17 @@
           }
         },
         "properties": {
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for an active package replacement; the committed Desired State result."
+          },
           "operation": {
             "description": "'created' — no skill of that name existed for the bot; a new one was created, inactive, and answers 201. 'updated' — a same-name skill existed and its package was replaced in place, keeping its id and active state; answers 200.",
             "enum": [
@@ -20398,6 +20794,17 @@
             ],
             "title": "Operation",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present for an active package replacement; observed Runtime convergence."
           },
           "skill": {
             "$ref": "#/components/schemas/Skill",
@@ -21056,7 +21463,7 @@
                 "type": "null"
               }
             ],
-            "description": "UTC recoverable Offline time, or null.",
+            "description": "UTC terminal local Offline time, or null.",
             "title": "Offline At"
           },
           "offline_by": {
@@ -21089,7 +21496,8 @@
             "description": "Original Space Skill creation source.",
             "enum": [
               "FOLDER",
-              "GIT"
+              "GIT",
+              "COPY"
             ],
             "title": "Source",
             "type": "string"
@@ -21383,6 +21791,12 @@
       "TaskExecutionGraphDTO": {
         "description": "任务执行图(图级运行态 + 节点表 + 分解树边 + 审计 DAG)。",
         "properties": {
+          "execution_config": {
+            "additionalProperties": true,
+            "description": "执行配置投影(task_type/yaml/workflow_id + 会话/群/父任务上下文扁平,扩展上下文兼容归一)",
+            "title": "Execution Config",
+            "type": "object"
+          },
           "execution_graph": {
             "anyOf": [
               {
@@ -21824,6 +22238,47 @@
           "metadata"
         ],
         "title": "TaskSpecDTO",
+        "type": "object"
+      },
+      "TemplateRunRequestDTO": {
+        "description": "运行仓内置静态模板;触发者身份从调用方上下文解析。\n\n触发者身份对称 dynamic execute:caller_bot_id 必填(触发执行的 bot id),\nowner_user_id/owner_account_id 由登录态 principal 解析后注入。",
+        "properties": {
+          "auto_advance": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "演示自驱开关:true=跳过真实派发用 mock 结果推进静态 DAG,false=强制真实派发,null=由服务端默认开关决定。",
+            "title": "Auto Advance"
+          },
+          "caller_bot_id": {
+            "description": "触发执行这条静态模板的 caller bot id(必填,对称 dynamic execute.owner_bot_id)",
+            "minLength": 1,
+            "title": "Caller Bot Id",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "模板输入键值,按模板 input_schema 规定填入",
+            "title": "Input",
+            "type": "object"
+          },
+          "template_id": {
+            "description": "仓内置静态模板标识,如 okr-implementation",
+            "minLength": 1,
+            "title": "Template Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id",
+          "caller_bot_id"
+        ],
+        "title": "TemplateRunRequestDTO",
         "type": "object"
       },
       "TransferSkillOwnerRequest": {
@@ -22796,6 +23251,17 @@
             "description": "Optional SkillSet description.",
             "title": "Description"
           },
+          "desired_state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DesiredStateResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durable Desired State result when returned by a mutation."
+          },
           "id": {
             "description": "Decimal SkillSet identifier.",
             "title": "Id",
@@ -22824,6 +23290,17 @@
             "description": "Unique SkillSet name within this Bot.",
             "title": "Name",
             "type": "string"
+          },
+          "runtime_projection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProjectionResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed Runtime convergence when returned by a mutation."
           }
         },
         "required": [
@@ -39353,6 +39830,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/InitializePersonalSpaceRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -47283,6 +47777,225 @@
         ]
       }
     },
+    "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy": {
+      "post": {
+        "operationId": "copy_offline_space_skill_version_openapi_v1_bots_spaces__space_id__skills__skill_id__versions__version__copy_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Business version ordinal.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Business version ordinal.",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable identity for replaying this creation command.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Stable identity for replaying this creation command.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceSkillDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Copy Offline Space Skill Version",
+        "tags": [
+          "space-skills"
+        ]
+      }
+    },
     "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files": {
       "get": {
         "operationId": "get_space_skill_version_file_tree_openapi_v1_bots_spaces__space_id__skills__skill_id__versions__version__files_get",
@@ -51098,7 +51811,7 @@
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
         "deprecated": true,
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template_config' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {
@@ -68569,6 +69282,214 @@
         ]
       }
     },
+    "/openapi/v1/bots/{bot_id}/resources/download-dir": {
+      "get": {
+        "description": "Download a whole directory as a zip archive, addressed by path.\n\nThe path may name any directory; omit it to download the entire\nworkspace. Raw bytes, not an envelope — the body is the archive.\n\nThe archive is built on disk before the response starts, so a walk\nfailure mid-way is still a clean error envelope, never a 200 with a\npartial zip. Exceeding the directory download caps is answered with\na 413.",
+        "operationId": "download_directory_openapi_v1_bots__bot_id__resources_download_dir_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace-relative path of the folder to download, e.g. 'docs/spec' — exactly as returned in a listing entry's `path`. Omit it to download the entire workspace. A leading slash is tolerated; '..' segments are refused (400).",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Workspace-relative path of the folder to download, e.g. 'docs/spec' — exactly as returned in a listing entry's `path`. Omit it to download the entire workspace. A leading slash is tolerated; '..' segments are refused (400).",
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/zip": {}
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413000,
+                  "message": "Directory too large to download",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The directory exceeds the download caps: 100 MB per file, 5000 files, 500 MB in total."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Download Directory",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
     "/openapi/v1/bots/{bot_id}/resources/mkdir": {
       "post": {
         "description": "Create a directory in the bot's workspace, addressed by path.\n\nIntermediate directories are created as needed. Directories exist on the\nworkspace filesystem only and are reported by listing it — they have no\nrecord.",
@@ -83364,7 +84285,7 @@
             }
           },
           {
-            "description": "可选 status 过滤记录状态;非法值 → 400",
+            "description": "可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400",
             "in": "query",
             "name": "status",
             "required": false,
@@ -83377,7 +84298,7 @@
                   "type": "null"
                 }
               ],
-              "description": "可选 status 过滤记录状态;非法值 → 400",
+              "description": "可选 status 过滤:运行时态枚举,逗号分隔多值(如 PLANNING,RUNNING);非法值 → 400",
               "title": "Status"
             }
           },
@@ -83706,6 +84627,187 @@
           }
         },
         "summary": "Revoke Task Claim",
+        "tags": [
+          "task"
+        ]
+      }
+    },
+    "/openapi/v1/collaboration/tasks/run-template": {
+      "post": {
+        "description": "运行预置静态模板;owner 由公开面鉴权 + user_id 自确认决定。\n\nuser_id 经 require_user_id 自确认(与签名 principal 不符→403);owner_user_id=user_id。\n触发执行 bot 由请求体提供并交由任务服务处理。",
+        "operationId": "run_template_openapi_v1_collaboration_tasks_run_template_post",
+        "parameters": [
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateRunRequestDTO"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TaskOpResultDTO_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Run Template",
         "tags": [
           "task"
         ]

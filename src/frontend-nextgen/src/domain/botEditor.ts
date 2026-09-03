@@ -17,6 +17,12 @@ export interface BotEditorMcp {
   source?: 'market' | 'workshop';
 }
 
+export interface BotEditorCli {
+  code: string;
+  name: string;
+  description?: string;
+}
+
 export interface BotCapabilitySet {
   id: string;
   name: string;
@@ -25,6 +31,7 @@ export interface BotCapabilitySet {
   active: boolean;
   skills: BotEditorSkill[];
   mcps: BotEditorMcp[];
+  clis: BotEditorCli[];
 }
 
 export interface BotRenderScreen {

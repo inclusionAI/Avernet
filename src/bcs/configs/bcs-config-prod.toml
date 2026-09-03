@@ -190,11 +190,25 @@ use_remote_login_check = false
 enabled = false
 
 [auth]
-chain = ["local", "session"]
-require_authentication = false
+chain = ["oauth_session", "session"]
+require_authentication = true
 mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
+
+[auth.oauth]
+base_url = "https://avernet.alipay.com"
+jwt_secret = "${BCS_ALIPAY_JWT_SECRET}"
+cookie_secure = true
+idle_timeout_minutes = 30
+# Preserve the prior hard-coded post-login redirect (frontend reads ?login=success).
+success_redirect_path = "/workspace"
+
+[auth.oauth.providers.alipay]
+kind = "alipay"
+client_id = "${BCS_ALIPAY_CLIENT_ID}"
+private_key = "${BCS_ALIPAY_PRIVATE_KEY}"
+alipay_public_key = "${BCS_ALIPAY_ALIPAY_PUBLIC_KEY}"
 
 [bcsfuse]
 enabled = false

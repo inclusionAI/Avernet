@@ -14,7 +14,7 @@ decorator kwargs to declare the case.
 """
 from __future__ import annotations
 
-import inspect
+import sys
 from typing import Callable, Mapping, Tuple
 
 from tests.community.framework.case import (
@@ -42,10 +42,17 @@ def _caller_location(depth: int = 2) -> str:
 
     Used purely for diagnostics — pinpointing duplicate registrations.
     Best-effort: falls back to ``"<unknown>"`` if introspection fails.
+
+    Reads the frame directly instead of ``inspect.stack()``: the latter
+    materialises a ``FrameInfo`` (with source-line lookup) for **every** frame
+    on the stack, and scans ``sys.modules`` per frame to resolve each file.
+    During collection the stack is deep and thousands of modules are loaded,
+    so that cost ~0.1–0.25s per call — ~1300 registrations made the endpoint
+    conftest take minutes to import in every xdist worker.
     """
     try:
-        frame = inspect.stack()[depth]
-        return f"{frame.filename}:{frame.lineno}"
+        frame = sys._getframe(depth)
+        return f"{frame.f_code.co_filename}:{frame.f_lineno}"
     except Exception:  # pragma: no cover — diagnostic-only
         return "<unknown>"
 

@@ -13,6 +13,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.base import Base
+from agentclaw.community.core.models.skill import Skill
+from agentclaw.community.core.models.space_skill import SkillVersion
 from agentclaw.community.core.repository.implementations.skill_center.skill_center_reference import (
     SkillCenterReferenceRepository,
 )
@@ -25,7 +27,6 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     SkillVersionMaterializationRequest,
-    SkillVersionScanResult,
 )
 from agentclaw.community.core.skill_center.public_center_identity import (
     PublicCenterSkillIdentity,
@@ -74,6 +75,16 @@ def _package() -> bytes:
     return stream.getvalue()
 
 
+def _wrapped_public_package() -> bytes:
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, "w") as archive:
+        archive.writestr(
+            "dima-official-skill/SKILL.md",
+            "---\nname: dima\ndescription: Dima CLI.\n---\n# Dima\n",
+        )
+    return stream.getvalue()
+
+
 class _Response:
     def __init__(self, content: bytes) -> None:
         self.content = content
@@ -104,11 +115,6 @@ class _Gateway:
         )
 
 
-class _Scanner:
-    def scan(self, _package) -> SkillVersionScanResult:
-        return SkillVersionScanResult(risk_tags=(), mcp_dependencies=())
-
-
 def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> None:
     db = _Database()
     references = SkillCenterReferenceRepository(db)
@@ -136,7 +142,6 @@ def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> Non
             gateway=_Gateway(package),
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
-            scanner=_Scanner(),
             store=store,
             clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
@@ -171,9 +176,94 @@ def test_public_identity_converges_and_remains_scope_isolated() -> None:
     assert replay == first
     assert UUID(first.skill_uuid).version == 4
     assert first.locator == "center://opaque-Code"
-    assert PublicCenterSkillIdentity.derive(
-        tenant="teamclaw", env="prod", skill_code="opaque-Code"
-    ).skill_uuid != first.skill_uuid
-    assert PublicCenterSkillIdentity.derive(
-        tenant="another-tenant", env="pre", skill_code="opaque-Code"
-    ).skill_uuid != first.skill_uuid
+    assert (
+        PublicCenterSkillIdentity.derive(
+            tenant="teamclaw", env="prod", skill_code="opaque-Code"
+        ).skill_uuid
+        != first.skill_uuid
+    )
+    assert (
+        PublicCenterSkillIdentity.derive(
+            tenant="another-tenant", env="pre", skill_code="opaque-Code"
+        ).skill_uuid
+        != first.skill_uuid
+    )
+
+
+def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> None:
+    db = _Database()
+    references = SkillCenterReferenceRepository(db)
+    versions = SkillVersionRepository(db)
+    identity = PublicCenterSkillIdentity.derive(
+        tenant="teamclaw", env="pre", skill_code="dima-official-skill"
+    )
+    package = _wrapped_public_package()
+
+    store = LocalCanonicalCenterVersionStore()
+    with avernet_tenant_scope("teamclaw"):
+        target = references.ensure_public_version(
+            env="pre",
+            actor_id="actor",
+            locator=identity.locator,
+            skill_uuid=identity.skill_uuid,
+            skill_name="Dima-cli-skill",
+            description="SC market description",
+            sc_skill_id=9001,
+            sc_version_number="1.0.0",
+            sc_version_id=10001,
+        )
+        published = SkillVersionMaterializer(
+            versions=versions,
+            gateway=_Gateway(package),
+            http=_Http(package),
+            validator=SkillPackageValidator(SkillParser()),
+            store=store,
+            clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
+        ).materialize(
+            SkillVersionMaterializationRequest(
+                env="pre",
+                skill_id=target.skill_id,
+                skill_version_id=target.skill_version_id,
+                scope=SkillCenterReadScope.PUBLIC,
+            )
+        )
+        next_target = references.ensure_public_version(
+            env="pre",
+            actor_id="actor",
+            locator=identity.locator,
+            skill_uuid=identity.skill_uuid,
+            skill_name="A newer SC display name",
+            description="SC market V2 description",
+            sc_skill_id=9001,
+            sc_version_number="2.0.0",
+            sc_version_id=10002,
+        )
+        next_published = SkillVersionMaterializer(
+            versions=versions,
+            gateway=_Gateway(package),
+            http=_Http(package),
+            validator=SkillPackageValidator(SkillParser()),
+            store=store,
+            clock=lambda: datetime(2026, 8, 31, tzinfo=UTC),
+        ).materialize(
+            SkillVersionMaterializationRequest(
+                env="pre",
+                skill_id=next_target.skill_id,
+                skill_version_id=next_target.skill_version_id,
+                scope=SkillCenterReadScope.PUBLIC,
+            )
+        )
+
+    assert published.name == "dima"
+    assert next_published.name == "dima"
+    assert next_published.version_ordinal == 2
+    with db.orm_session() as session:
+        skill = session.get(Skill, target.skill_id)
+        version = session.get(SkillVersion, target.skill_version_id)
+        assert skill is not None
+        assert skill.git_path == "center://dima-official-skill"
+        assert skill.skill_uuid == identity.skill_uuid
+        assert skill.name == "dima"
+        assert version is not None and version.name == "dima"
+        next_version = session.get(SkillVersion, next_target.skill_version_id)
+        assert next_version is not None and next_version.name == "dima"

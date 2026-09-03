@@ -112,7 +112,7 @@ export function WorkOrderTabs() {
       vw.value === 'pending_mine' && unreadCount > 0 ? (
         <span className="inline-flex items-center gap-1.5">
           {vw.label}
-          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-primary)] px-1 text-xs font-normal text-white">
+          <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-xs font-normal text-primary-foreground">
             {unreadCount}
           </span>
         </span>

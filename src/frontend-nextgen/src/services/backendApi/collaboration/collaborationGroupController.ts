@@ -1,3 +1,4 @@
+import { isAceLoginResponse } from '../aceLoginBody';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope, BackendApiPage } from '../types';
 
@@ -57,6 +58,16 @@ export interface GroupDetailData {
   // list 场景只暴露的字段
   membership?: 'direct' | 'session_only';
   participant_count?: number;
+  /** 创建群时后端同步生成的初始会话 ID；详情接口可能不返回。 */
+  initial_session_id?: string;
+  /** 创建群时同步启动的 Driver/Manager run；详情接口可能不返回。 */
+  initial_run?: {
+    run_id: string;
+    bot_uuid: string;
+    activity_kind: 'group_bootstrap';
+    state: 'running' | 'failed';
+    started_at: string;
+  };
 }
 export interface GroupCreateChatBody {
   group_kind: 'normal';
@@ -64,6 +75,7 @@ export interface GroupCreateChatBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationChat;
 }
 export interface GroupCreateManagerWorkerBody {
@@ -72,6 +84,7 @@ export interface GroupCreateManagerWorkerBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationManagerWorker;
 }
 export interface GroupCreateStateMachineBody {
@@ -80,6 +93,7 @@ export interface GroupCreateStateMachineBody {
   context?: string;
   participants: GroupParticipantInput[];
   driver_bot_uuid: string;
+  originator: string;
   collaboration: GroupCollaborationStateMachine;
 }
 export type CreateGroupBody = GroupCreateChatBody | GroupCreateManagerWorkerBody | GroupCreateStateMachineBody;
@@ -144,12 +158,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function validatePublicGroupCatalogResponse(value: unknown): PublicGroupCatalogResponse {
-  if (
-    isRecord(value) &&
-    value.actionType === 'LOGIN' &&
-    value.buserviceErrorCode === 'USER_NOT_LOGIN' &&
-    value.decisionBy === 'ACE'
-  ) {
+  if (isAceLoginResponse(value)) {
     throw new PublicGroupCatalogError('unauthenticated', 'Public group catalog request requires authentication');
   }
   if (!isRecord(value) || value.code !== 20000) {
@@ -162,25 +171,27 @@ function validatePublicGroupCatalogResponse(value: unknown): PublicGroupCatalogR
 }
 
 // 查询协作群组列表。
+// 不注入 user_id：该接口按 identity 视图(view_bot_id)与 membership 过滤，后端以会话态签别身份，
+// query 无需 user_id。默认注入依赖 identityStore.currentIdentityId，身份未就绪/被清空时
+// user_id 时有时无（正是本接口 user_id 不稳定的原因）。显式关闭注入，与 listPublicGroups 一致。
 export async function listGroups(params: ListGroupsParams) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<GroupDetailData>>>('/openapi/v1/collaboration/groups', {
     method: 'GET',
     params: params as Record<string, unknown>,
+    injectUserId: false,
   });
 }
 
-// 查询公开协作群目录。公开页面固定使用 visibility=public、kind=normal，且不传 view_bot_id。
+// 查询公开协作群目录（分页）。专用路由 GET /openapi/v1/collaboration/public-groups，
+// 参数仅 q（名称模糊匹配）/ offset / limit；响应为 {code:20000,data:{items,total}} 信封。
+// 不传 view_bot_id、不注入 user_id（公开目录无需身份视图）。
 export async function listPublicGroups(
   params: ListPublicGroupsParams = {},
   signal?: AbortSignal,
 ): Promise<PublicGroupCatalogResponse> {
-  const response = await backendRequest<unknown>('/openapi/v1/collaboration/groups', {
+  const response = await backendRequest<unknown>('/openapi/v1/collaboration/public-groups', {
     method: 'GET',
-    params: {
-      visibility: 'public',
-      kind: 'normal',
-      ...params,
-    },
+    params: params as Record<string, unknown>,
     injectUserId: false,
     signal,
   });
@@ -191,6 +202,7 @@ export async function listPublicGroups(
 export async function getGroup(group_id: string) {
   return backendRequest<BackendApiEnvelope<GroupDetailData>>(`/openapi/v1/collaboration/groups/${group_id}`, {
     method: 'GET',
+    injectUserId: false,
   });
 }
 
@@ -199,6 +211,7 @@ export async function createGroup(body: CreateGroupBody) {
   return backendRequest<BackendApiEnvelope<GroupDetailData>>('/openapi/v1/collaboration/groups', {
     method: 'POST',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -207,6 +220,7 @@ export async function updateGroup(group_id: string, patch: GroupUpdateBody) {
   return backendRequest<BackendApiEnvelope<GroupDetailData>>(`/openapi/v1/collaboration/groups/${group_id}`, {
     method: 'PATCH',
     data: patch,
+    injectUserId: false,
   });
 }
 
@@ -214,6 +228,7 @@ export async function updateGroup(group_id: string, patch: GroupUpdateBody) {
 export async function deleteGroup(group_id: string) {
   return backendRequest<BackendApiEnvelope<{ deleted: boolean }>>(`/openapi/v1/collaboration/groups/${group_id}`, {
     method: 'DELETE',
+    injectUserId: false,
   });
 }
 
@@ -222,6 +237,7 @@ export async function addGroupParticipant(group_id: string, actor_id: string) {
   return backendRequest<BackendApiEnvelope<void>>(`/openapi/v1/collaboration/groups/${group_id}/participants`, {
     method: 'POST',
     data: { actor_id },
+    injectUserId: false,
   });
 }
 
@@ -229,7 +245,7 @@ export async function addGroupParticipant(group_id: string, actor_id: string) {
 export async function deleteGroupParticipant(group_id: string, actor_id: string) {
   return backendRequest<BackendApiEnvelope<void>>(
     `/openapi/v1/collaboration/groups/${group_id}/participants/${actor_id}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', injectUserId: false },
   );
 }
 

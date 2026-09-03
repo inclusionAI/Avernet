@@ -23,8 +23,8 @@ export class CollaborationPrivacyService {
   private readonly inFlightActions = new Set<string>();
   constructor(private readonly gateway: CollaborationPrivacyGateway) {}
 
-  async loadOverview(signal?: AbortSignal) {
-    this.overview = await this.gateway.loadOverview(signal);
+  async loadOverview(userId: string, signal?: AbortSignal) {
+    this.overview = await this.gateway.loadOverview(userId, signal);
     return structuredClone(this.overview);
   }
 
@@ -40,12 +40,28 @@ export class CollaborationPrivacyService {
     return bot;
   }
 
-  async syncDepartment(signal?: AbortSignal) {
+  async refreshBot(botId: string, signal?: AbortSignal) {
+    this.requireBot(botId);
+    const actionKey = `refresh:${botId}`;
+    if (this.inFlightActions.has(actionKey)) throw new Error('该 Bot 状态正在刷新，请勿重复操作');
+    this.inFlightActions.add(actionKey);
+    try {
+      const refreshedBot = await this.gateway.refreshManagedBot(botId, signal);
+      if (refreshedBot.id !== botId) throw new Error('Bot 详情接口返回了不匹配的 Bot');
+      if (this.overview) {
+        this.overview.bots = this.overview.bots.map((bot) => (bot.id === botId ? refreshedBot : bot));
+      }
+      return structuredClone(refreshedBot);
+    } finally {
+      this.inFlightActions.delete(actionKey);
+    }
+  }
+  async syncDepartment(userId: string, signal?: AbortSignal) {
     const actionKey = 'syncDepartment';
     if (this.inFlightActions.has(actionKey)) throw new Error('用户部门信息正在同步，请勿重复操作');
     this.inFlightActions.add(actionKey);
     try {
-      const identity = await this.gateway.syncDepartment(signal);
+      const identity = await this.gateway.syncDepartment(userId, signal);
       const previous = this.overview?.currentUser;
       const changed =
         !previous ||
@@ -125,6 +141,33 @@ export class CollaborationPrivacyService {
     try {
       bot.friendApproval = await this.gateway.updateFriendApproval({ ...command, config }, signal);
       return structuredClone(bot);
+    } finally {
+      this.inFlightActions.delete(actionKey);
+    }
+  }
+
+  async enableTaskClaim(botId: string, signal?: AbortSignal) {
+    this.requireWritableBot(botId);
+    const actionKey = `direct:${botId}:taskClaimingEnabled`;
+    if (this.inFlightActions.has(actionKey)) throw new Error('任务认领授权正在提交，请勿重复操作');
+    this.inFlightActions.add(actionKey);
+    try {
+      const updated = await this.gateway.enableTaskClaim(botId, signal);
+      if (this.overview) this.overview.bots = this.overview.bots.map((item) => (item.id === botId ? updated : item));
+      return structuredClone(updated);
+    } finally {
+      this.inFlightActions.delete(actionKey);
+    }
+  }
+  async disableTaskClaim(botId: string, signal?: AbortSignal) {
+    this.requireWritableBot(botId);
+    const actionKey = `direct:${botId}:taskClaimingEnabled`;
+    if (this.inFlightActions.has(actionKey)) throw new Error('任务认领授权正在提交，请勿重复操作');
+    this.inFlightActions.add(actionKey);
+    try {
+      const updated = await this.gateway.disableTaskClaim(botId, signal);
+      if (this.overview) this.overview.bots = this.overview.bots.map((item) => (item.id === botId ? updated : item));
+      return structuredClone(updated);
     } finally {
       this.inFlightActions.delete(actionKey);
     }

@@ -2628,7 +2628,13 @@ class RecordingTransport:
                 },
             }
         if path.endswith("/publish"):
-            return {"success": True}
+            # The Engine publish contract returns an explicit outcome.  Keep
+            # this test transport faithful so a strict Pool reconciliation is
+            # not accidentally treated as an opaque success.
+            return {
+                "success": True,
+                "data": {"published": True, "status": "CONVERGED"},
+            }
         return {"success": True, "data": {"valid": True}}
 
 

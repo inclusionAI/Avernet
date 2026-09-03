@@ -278,6 +278,13 @@ SC 接入后，`skills-center` 作为 `skills-pool` 下与 `skills-repo`、`skil
 
 `skills-repo` 与 `skills-center` 只读是架构约束，而不是实现细节。已发布 Skill 的运行时内容不可被 Agent 对话直接修改；写操作必须经过相应的治理和发布路径。
 
+Center 映射能力还必须以运行时事实为准。Pool probe 可以在 Local/Repo
+布局就绪时保持 `READY`，但只有在版本化 `pool_center` 目录确实是可读挂载时
+才能声明支持 `skills-pool-mapping-v3`；挂载缺失时只声明 v2，并返回
+`restart_required` 证据供产品提示用户重启 Bot。`/api/skills/center/ensure`
+只核对挂载和精确 `<skill_uuid>/<sc_version_number>/SKILL.md`，不得创建目录、
+复制内容、更新 `current` 软链或承担任何分发职责。
+
 ### 4.3 引擎目录所有权与统一激活 API
 
 目标架构中，Backend 不再拼接或解释任何引擎物理目录，例如 `~/.openclaw/...`、`~/.claude_code/...`。路径、挂载和兼容桥的所有权统一收敛到 Engine Runtime。

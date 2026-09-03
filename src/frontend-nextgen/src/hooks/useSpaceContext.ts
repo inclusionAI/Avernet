@@ -1,6 +1,6 @@
 // 全局空间上下文 Hook：统一读写入口。
 // - useSpaceContext(selector): 选读 store（各模块用：const spaceId = useSpaceContext(s=>s.currentSpaceId)）
-// - initSpaceContext(): 进入管理区域时调用，拉可见全集→过滤已加入→首次无个人空间则 ensure+重拉→还原/默认
+// - initSpaceContext(): 进入管理区域时调用，拉已加入空间（scope=accessible）→首次无个人空间则 ensure+重拉→还原/默认
 //   （localStorage tc_personal_space_ensured 幂等标记，避免每次进管理页重复「查+建」往返）
 // - refreshSpaceContext(): 切换器气泡每次打开时调用，重拉最新列表（保留当前选中；失效则回落个人空间）
 // - switchSpaceContext(id): 切换器选择时调用，更新 store + 写 localStorage
@@ -8,7 +8,7 @@
 // 设计依据：docs/specs/2026-08-17-global-space-context-switcher/plan.md §2/§3。
 // Hook ≤ 150 行。localStorage key 用统一前缀风格（对齐 ocb storage.ts 范式）。
 import type { Space } from '@/domain/admin/models';
-import { filterJoinedSpaces, pickDefaultSpace } from '@/domain/spaceContext';
+import { pickDefaultSpace } from '@/domain/spaceContext';
 import { adminService } from '@/services/admin';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
 
@@ -59,11 +59,11 @@ function idInSpaces(spaces: Space[], id: number | undefined): boolean {
   return id === undefined ? false : spaces.some((s) => s.spaceId === id);
 }
 
-/** 拉可见全集并过滤出已加入子集；失败返回 error 文案。 */
+/** 拉已加入空间子集（后端 scope=accessible 已过滤，前端不再二次过滤）；失败返回 error 文案。 */
 async function fetchJoinedSpaces(): Promise<{ spaces?: Space[]; error?: string }> {
-  const r = await adminService.listSpaces({ page: 1, pageSize: 100 });
+  const r = await adminService.listSpaces({ page: 1, pageSize: 100, scope: 'accessible' });
   if (r.error) return { error: r.error.message || '加载空间列表失败' };
-  return { spaces: filterJoinedSpaces(r.data?.items ?? []) };
+  return { spaces: r.data?.items ?? [] };
 }
 
 export function useSpaceContext<T>(selector: (s: ReturnType<typeof useSpaceContextStore.getState>) => T): T {

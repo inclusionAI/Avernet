@@ -5,10 +5,15 @@ function unsupported(): never {
 }
 
 export const unsupportedCollaborationPrivacyAdapter: CollaborationPrivacyGateway = {
-  async loadOverview() {
+  async loadOverview(_userId: string) {
+    void _userId;
     return unsupported();
   },
-  async syncDepartment() {
+  async refreshManagedBot() {
+    return unsupported();
+  },
+  async syncDepartment(_userId: string) {
+    void _userId;
     return unsupported();
   },
   async searchDepartments() {
@@ -21,6 +26,12 @@ export const unsupportedCollaborationPrivacyAdapter: CollaborationPrivacyGateway
     return unsupported();
   },
   async updateFriendApproval() {
+    return unsupported();
+  },
+  async enableTaskClaim() {
+    return unsupported();
+  },
+  async disableTaskClaim() {
     return unsupported();
   },
 };

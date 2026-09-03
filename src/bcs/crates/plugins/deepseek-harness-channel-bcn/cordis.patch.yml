@@ -1,0 +1,5 @@
+- insert:
+    - id: deepseek-harness-channel-bcn
+      name: '@avernet-plugin/deepseek-harness-channel-bcn'
+      config:
+        enabled: false

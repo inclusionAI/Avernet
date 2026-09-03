@@ -1,4 +1,5 @@
 import {
+  fetchOwnerScheduledRoutines,
   fetchScheduledRoutineDetail,
   fetchScheduledRoutineRuns,
   fetchScheduledRoutines,
@@ -24,6 +25,8 @@ export type { RoutineBotTarget } from './routineTaskUtils';
 export function useRoutineTasks(
   selectedBotId: string,
   routineBots: RoutineBotTarget[],
+  page: number,
+  pageSize: number,
   selectedRoutineKey: string | null,
   historyOpen: boolean,
   enabled = true,
@@ -34,6 +37,7 @@ export function useRoutineTasks(
 
   const [selectedRoutineDetail, setSelectedRoutineDetail] = useState<ScheduledRoutineRecord | null>(null);
   const [selectedRoutineRuns, setSelectedRoutineRuns] = useState<ScheduledRoutineRunRecord[]>([]);
+  const [total, setTotal] = useState(0);
   const [selectedRoutineRunsLoading, setSelectedRoutineRunsLoading] = useState(false);
   const [selectedRoutineRunsError, setSelectedRoutineRunsError] = useState<string | null>(null);
 
@@ -46,40 +50,55 @@ export function useRoutineTasks(
     () => getSelectedTargets(normalizedSelectedBotId, routineBots),
     [normalizedSelectedBotId, routineBots],
   );
+  // 「全部」走 owner 聚合接口（含协作 Bot、跨 runtime stage、服务端全局分页）；
+  // 单个 Bot 保留 per-bot 精确查询。
+  const isAllBotsMode = !normalizedSelectedBotId || normalizedSelectedBotId === ALL_ROUTINE_BOT_VALUE;
 
   const refreshRoutines = useCallback(async () => {
-    if (!routineTargets.length) {
-      setRoutines([]);
-      setError(null);
-      setLoading(false);
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
-      const settled = await Promise.allSettled(routineTargets.map((target) => fetchScheduledRoutines(target.botId)));
+      if (isAllBotsMode) {
+        const result = await fetchOwnerScheduledRoutines({ page, page_size: pageSize });
+        const items = result.items.slice().sort((a, b) => getRoutineSortKey(a).localeCompare(getRoutineSortKey(b)));
+        setRoutines(items);
+        setTotal(result.total);
+        return;
+      }
+      if (!routineTargets.length) {
+        setRoutines([]);
+        setTotal(0);
+        return;
+      }
+      const settled = await Promise.allSettled(
+        routineTargets.map((target) => fetchScheduledRoutines(target.botId, { page, page_size: pageSize })),
+      );
       const items: ScheduledRoutineRecord[] = [];
+      let total = 0;
       const errors: string[] = [];
       settled.forEach((result, index) => {
         const target = routineTargets[index];
         if (result.status === 'fulfilled') {
-          items.push(...result.value);
+          items.push(...result.value.items);
+          total += result.value.total;
         } else {
           errors.push(`Bot「${target?.botName ?? target?.botId ?? 'unknown'}」定时任务列表加载失败`);
         }
       });
       items.sort((a, b) => getRoutineSortKey(a).localeCompare(getRoutineSortKey(b)));
       setRoutines(items);
+      setTotal(total);
       setError(buildErrorMessage(errors));
     } catch (err) {
-      const targetName = normalizedSelectedBotId === ALL_ROUTINE_BOT_VALUE ? '全部 Bot' : normalizedSelectedBotId;
+      const targetName = isAllBotsMode ? '全部 Bot' : normalizedSelectedBotId;
       const message = err instanceof Error ? err.message : `${targetName} 定时任务列表加载失败`;
       setError(message);
       setRoutines([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [normalizedSelectedBotId, routineTargets]);
+  }, [isAllBotsMode, normalizedSelectedBotId, page, pageSize, routineTargets]);
 
   const refreshSelectedRoutineRuns = useCallback(async (routine: ScheduledRoutineRecord | null) => {
     if (!routine) {
@@ -158,11 +177,15 @@ export function useRoutineTasks(
     void refreshRoutines();
   }, [enabled, refreshRoutines]);
 
+  const selectedRoutineFromList = useMemo(
+    () => routines.find((item) => isSameRoutineKey(item, selectedRoutineKey)) ?? null,
+    [routines, selectedRoutineKey],
+  );
+
   useEffect(() => {
     if (!enabled) return;
-    const selectedRoutine = routines.find((item) => isSameRoutineKey(item, selectedRoutineKey)) ?? null;
-    void refreshSelectedRoutineRuns(selectedRoutine);
-  }, [enabled, refreshSelectedRoutineRuns, routines, selectedRoutineKey]);
+    void refreshSelectedRoutineRuns(selectedRoutineFromList);
+  }, [enabled, refreshSelectedRoutineRuns, selectedRoutineFromList]);
 
   useEffect(() => {
     if (!enabled || !historyOpen) {
@@ -175,8 +198,11 @@ export function useRoutineTasks(
   }, [enabled, historyOpen, refreshHistoryRuns, routines]);
 
   const selectedRoutine = useMemo(
-    () => selectedRoutineDetail ?? routines.find((item) => isSameRoutineKey(item, selectedRoutineKey)) ?? null,
-    [routines, selectedRoutineDetail, selectedRoutineKey],
+    () =>
+      selectedRoutineDetail && isSameRoutineKey(selectedRoutineDetail, selectedRoutineKey)
+        ? selectedRoutineDetail
+        : selectedRoutineFromList,
+    [selectedRoutineDetail, selectedRoutineFromList, selectedRoutineKey],
   );
 
   const historyRunsWithRoutineName = useMemo(
@@ -204,6 +230,7 @@ export function useRoutineTasks(
     routines,
     loading,
     error,
+    total,
     refreshRoutines,
     selectedRoutine,
     selectedRoutineRuns,

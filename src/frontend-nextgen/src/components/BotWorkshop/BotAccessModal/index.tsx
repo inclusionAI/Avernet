@@ -1,3 +1,5 @@
+import type { SearchedUser } from '@/capabilities';
+import { UserSearchDropdown } from '@/components/Admin/SpaceMemberList/UserSearchDropdown';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
@@ -5,7 +7,7 @@ import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { BotDomain } from '@/domain/botWorkshop';
 import type { BotCollaborator, BotSpaceOption } from '@/services/botWorkshop/botManagementService';
-import { Plus, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 interface Props {
@@ -13,23 +15,29 @@ interface Props {
   bot?: BotDomain;
   spaces: BotSpaceOption[];
   loading: boolean;
+  operation?: string;
   collaborators: BotCollaborator[];
   onClose: () => void;
   onChangeSpace: (id: number) => Promise<void>;
-  onAddCollaborator: (userId: string, role: BotCollaborator['role']) => Promise<void>;
+  onCreateTeamAndChangeSpace: (name: string) => Promise<void>;
+  onAddCollaborator: (userId: string, name: string | undefined, role: BotCollaborator['role']) => Promise<boolean>;
   onUpdateCollaborator: (id: number, role: BotCollaborator['role']) => Promise<void>;
   onRemoveCollaborator: (id: number) => Promise<void>;
   onRequestAccess: (reason: string) => Promise<void>;
 }
 
 export function BotAccessModal(props: Props) {
-  const { mode, bot, spaces, loading, collaborators, onClose } = props;
+  const { mode, bot, spaces, loading, operation, collaborators, onClose } = props;
   const [spaceId, setSpaceId] = useState('');
-  const [userId, setUserId] = useState('');
+  const [selectedUser, setSelectedUser] = useState<SearchedUser>();
+  const [spaceMode, setSpaceMode] = useState<'existing' | 'create'>('existing');
+  const [teamName, setTeamName] = useState('');
   const [reason, setReason] = useState('');
   useEffect(() => {
     setSpaceId('');
-    setUserId('');
+    setSelectedUser(undefined);
+    setSpaceMode('existing');
+    setTeamName('');
     setReason('');
   }, [bot?.id, mode]);
   if (!mode || !bot) return null;
@@ -43,21 +51,52 @@ export function BotAccessModal(props: Props) {
           </ModalTitle>
         </ModalHeader>
         {mode === 'space' ? (
-          <Select value={spaceId} onValueChange={setSpaceId}>
-            <SelectTrigger aria-label="目标空间">
-              <SelectValue placeholder="请选择目标空间" />
-            </SelectTrigger>
-            <SelectContent>
-              {spaces.map((space) => (
-                <SelectItem key={space.id} value={String(space.id)}>
-                  {space.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="space-y-4">
+            <div className="flex rounded-lg bg-muted p-1">
+              <Button
+                variant={spaceMode === 'existing' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="flex-1"
+                onClick={() => setSpaceMode('existing')}
+              >
+                迁移到已有团队
+              </Button>
+              <Button
+                variant={spaceMode === 'create' ? 'secondary' : 'ghost'}
+                size="sm"
+                className="flex-1"
+                onClick={() => setSpaceMode('create')}
+              >
+                创建新团队
+              </Button>
+            </div>
+            {spaceMode === 'existing' ? (
+              <Select value={spaceId} onValueChange={setSpaceId}>
+                <SelectTrigger aria-label="目标空间">
+                  <SelectValue placeholder="请选择目标空间" />
+                </SelectTrigger>
+                <SelectContent>
+                  {spaces.map((space) => (
+                    <SelectItem key={space.id} value={String(space.id)}>
+                      {space.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="space-y-2">
+                <Input
+                  value={teamName}
+                  onChange={(event) => setTeamName(event.target.value)}
+                  placeholder="新团队名称"
+                />
+                <p className="m-0 text-xs text-muted-foreground">将创建团队空间，并在创建成功后把 Bot 迁入该团队。</p>
+              </div>
+            )}
+          </div>
         ) : mode === 'request' ? (
           <div className="space-y-2">
-            <p className="text-sm text-[var(--color-muted)]">请说明申请原因，将生成待 Owner 审批的工单。</p>
+            <p className="text-sm text-muted-foreground">请说明申请原因，将生成待 Owner 审批的工单。</p>
             <Input
               value={reason}
               onChange={(event) => setReason(event.target.value)}
@@ -68,25 +107,48 @@ export function BotAccessModal(props: Props) {
         ) : (
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <Input value={userId} onChange={(event) => setUserId(event.target.value)} placeholder="输入用户 ID" />
+              <UserSearchDropdown
+                className="min-w-0 flex-1"
+                disabled={operation === 'add'}
+                disabledUserIds={collaborators.map((item) => item.userId)}
+                onSelect={setSelectedUser}
+              />
               <Button
                 variant="secondary"
                 leftIcon={<Plus className="size-4" />}
-                disabled={!userId.trim()}
-                onClick={() => void props.onAddCollaborator(userId.trim(), 'member').then(() => setUserId(''))}
+                loading={operation === 'add'}
+                disabled={!selectedUser}
+                onClick={() =>
+                  selectedUser &&
+                  void props
+                    .onAddCollaborator(
+                      selectedUser.userId,
+                      selectedUser.nickName || selectedUser.realName || selectedUser.displayName,
+                      'member',
+                    )
+                    .then((added) => added && setSelectedUser(undefined))
+                }
               >
                 添加
               </Button>
             </div>
+            {selectedUser ? (
+              <p className="m-0 text-xs text-muted-foreground">
+                待添加：
+                {selectedUser.nickName || selectedUser.realName || selectedUser.displayName || selectedUser.userId}（
+                {selectedUser.userId}）
+              </p>
+            ) : null}
             {collaborators.length ? (
               collaborators.map((item) => (
                 <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
                   <div className="min-w-0 flex-1">
                     <p className="m-0 text-sm font-medium">{item.name}</p>
-                    <p className="m-0 text-xs text-[var(--color-muted)]">{item.userId}</p>
+                    <p className="m-0 text-xs text-muted-foreground">{item.userId}</p>
                   </div>
                   <Select
                     value={item.role}
+                    disabled={operation === `update:${item.id}`}
                     onValueChange={(role) => void props.onUpdateCollaborator(item.id, role as BotCollaborator['role'])}
                   >
                     <SelectTrigger className="w-28" aria-label={`${item.name} 权限`}>
@@ -97,11 +159,16 @@ export function BotAccessModal(props: Props) {
                       <SelectItem value="admin">管理员</SelectItem>
                     </SelectContent>
                   </Select>
+                  {operation === `update:${item.id}` ? (
+                    <Loader2 aria-label="角色更新中" className="size-4 animate-spin text-primary" />
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="icon"
                     aria-label={`移除 ${item.name}`}
                     leftIcon={<Trash2 className="size-4" />}
+                    loading={operation === `remove:${item.id}`}
+                    disabled={Boolean(operation)}
                     onClick={() => void props.onRemoveCollaborator(item.id)}
                   />
                 </div>
@@ -113,13 +180,20 @@ export function BotAccessModal(props: Props) {
         )}
         <ModalFooter>
           <Button variant="secondary" onClick={onClose}>
-            取消
+            {mode === 'authorize' ? '完成' : '取消'}
           </Button>
           {mode !== 'authorize' ? (
             <Button
-              disabled={loading || (mode === 'space' ? !spaceId : !reason.trim())}
+              disabled={
+                loading ||
+                (mode === 'space' ? (spaceMode === 'existing' ? !spaceId : !teamName.trim()) : !reason.trim())
+              }
               onClick={() =>
-                void (mode === 'space' ? props.onChangeSpace(Number(spaceId)) : props.onRequestAccess(reason.trim()))
+                void (mode === 'space'
+                  ? spaceMode === 'existing'
+                    ? props.onChangeSpace(Number(spaceId))
+                    : props.onCreateTeamAndChangeSpace(teamName.trim())
+                  : props.onRequestAccess(reason.trim()))
               }
             >
               {loading ? '处理中…' : '确认'}
