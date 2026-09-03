@@ -91,7 +91,7 @@ DEFAULT_CREATE_DEADLINE_SECONDS = 10 * 60
 #: So the handler notices first (within one ``POLL_DELAY_SECONDS`` of the window)
 #: and cleans up, and the queue's deadline stays what it was meant to be — the
 #: outer backstop for a job that somehow stops making progress.
-CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 5 * 60
+CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 10 * 60
 
 #: The ``Fail`` reason a creation carries when its authorization window elapsed
 #: rather than being declined.
