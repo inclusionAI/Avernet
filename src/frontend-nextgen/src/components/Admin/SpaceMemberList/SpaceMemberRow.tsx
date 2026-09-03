@@ -84,7 +84,7 @@ export function SpaceMemberRow({
       {/* 成员 */}
       <div className="flex min-w-0 items-center gap-2">
         <Avatar name={name} src={avatarUrl} size={28} />
-        <span className="truncate text-sm font-medium text-foreground">{name}</span>
+        <span className="truncate font-medium">{name}</span>
       </div>
 
       {/* 角色：始终渲染下拉（borderless），disabled 时 Tooltip 提示原因 */}
@@ -101,7 +101,7 @@ export function SpaceMemberRow({
               >
                 <SelectTrigger
                   className={cn(
-                    'h-8 w-[90px] border-0 bg-transparent px-2 font-medium shadow-none',
+                    'h-8 w-[90px] border-0 bg-transparent px-2 text-xs font-medium shadow-none',
                     roleDisabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent/60',
                     isAdmin ? 'text-warning' : 'text-muted-foreground',
                   )}

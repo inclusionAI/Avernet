@@ -1,5 +1,6 @@
 import { backendRequest } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
 import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -130,9 +131,11 @@ describe('httpClient ACE 登录拦截探测', () => {
   });
 });
 
-// 会话过期反应口(add-external-oauth-login 8.9):oauth 策略下业务 401 + BCS unauthenticated 体 → 登录弹窗信号,
-// 不投递通用错误 toast;ace-gateway 行为不变(spec「登录处置信号统一出口与单飞」外部模式弹窗 Scenario)。
-describe('httpClient 业务 401 unauthenticated 反应口', () => {
+// 未登录反应口与静默(external-oauth-login「未登录静默与统一登录处置」):
+// oauth 策略下未登录失败(HTTP 401 任意体 / 信封双方言 401 段体,含网关误包 HTTP 200 形态)→ 单飞登记登录弹窗信号,
+// 静默上抛 AceLoginRedirectError,不投递逐条通用错误 toast;已确认未登录态后的其余失败同样静默。
+// ace-gateway 行为不变(spec「登录处置信号统一出口与单飞」外部模式弹窗 Scenario)。
+describe('httpClient 未登录反应口与静默', () => {
   const bcsUnauthBody = {
     code: 40100,
     message: 'Authentication is required',
@@ -143,6 +146,7 @@ describe('httpClient 业务 401 unauthenticated 反应口', () => {
   beforeEach(() => {
     useLoginRedirectStore.getState().reset();
     useErrorNotifyStore.setState({ queue: [] });
+    useExternalAuthStore.setState({ status: 'unknown', user: null, error: null, isCheckingAuth: false });
   });
 
   it('oauth-provider + 401 + unauthenticated 体 → prompt 信号 + 抛 AceLoginRedirectError,不入错误提示队列', async () => {
@@ -157,17 +161,71 @@ describe('httpClient 业务 401 unauthenticated 反应口', () => {
     expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 
-  it('oauth-provider + 401 + 其他错误体 → 既有 BackendRequestError 路径(不动)', async () => {
+  it('oauth-provider + 401 + 其他错误体(HTTP 401 即未登录语义)→ prompt 信号 + 静默抛 AceLoginRedirectError', async () => {
     useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
-    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, { code: 40300, data: { error_code: 'forbidden' } }));
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonStatus(401, { code: 40300, data: { error_code: 'forbidden' } }));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'AceLoginRedirectError',
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('oauth-provider + 401 + 无信封裸体 → prompt 信号 + 静默抛 AceLoginRedirectError', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(401, { message: 'unauthorized' }));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'AceLoginRedirectError',
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('oauth-provider + HTTP 200 + 网关误包 40100(BCS 5 位,无 error_code)→ prompt 信号 + 静默抛 AceLoginRedirectError', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonOk({ code: 40100, message: 'Authentication is required', request_id: 'r' }));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'AceLoginRedirectError',
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('oauth-provider + HTTP 200 + 网关误包 401000(python 6 位)→ prompt 信号 + 静默抛 AceLoginRedirectError', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonOk({ code: 401000, message: '未登录', request_id: 'r' }));
+
+    await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
+      name: 'AceLoginRedirectError',
+    });
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('oauth-provider + 已确认未登录 + 非 401 失败(500)→ 静默抛 BackendRequestError,不入错误提示队列', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    useExternalAuthStore.getState().setUnauthenticated();
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(500, { code: 500001, message: '服务异常' }));
 
     await expect(backendRequest('/openapi/v1/collaboration/sessions', { injectUserId: false })).rejects.toMatchObject({
       name: 'BackendRequestError',
-      status: 401,
+      status: 500,
     });
 
-    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
-    expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
   });
 
   it('ace-gateway + 401 + unauthenticated 体 → 行为不变(BackendRequestError,无弹窗信号)', async () => {
@@ -180,5 +238,18 @@ describe('httpClient 业务 401 unauthenticated 反应口', () => {
     });
 
     expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+  });
+
+  it('ace-gateway + 已确认未登录态 + 500 → 行为不变(照常投递默认提示)', async () => {
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
+    useExternalAuthStore.getState().setUnauthenticated();
+    global.fetch = jest.fn<typeof fetch>().mockResolvedValue(jsonStatus(500, { code: 500001, message: '服务异常' }));
+
+    await expect(backendRequest('/openapi/v1/admin/spaces', { injectUserId: false })).rejects.toMatchObject({
+      name: 'BackendRequestError',
+      status: 500,
+    });
+
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
   });
 });

@@ -200,7 +200,7 @@ describe('BotHealthCheckDrawer', () => {
     );
 
     expect(screen.getByText('异常')).toBeInTheDocument();
-    expect(screen.getByText('补充安全边界')).toBeInTheDocument();
+    expect(screen.getByText(/补充安全边界/)).toBeInTheDocument();
     expect(screen.queryByText('检测失败：未知原因')).not.toBeInTheDocument();
   });
 });

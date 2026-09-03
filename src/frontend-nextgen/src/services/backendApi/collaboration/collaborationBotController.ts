@@ -127,7 +127,7 @@ export function listMyCollaborationBots(params: ListMyBotsParams = {}, signal?: 
   return listMyBots(params, signal);
 }
 
-// 查询协作广场 Bot（residual，未在新 Service 层消费）。
+// 批量查询协作 Bot 详情；bots/query 直接使用完整复合 Bot ID。
 export function queryCollaborationBots(body: QueryCollaborationBotsRequest | QueryCollaborationBotsBody) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationBotDto>>>(COLLABORATION_BOT_ENDPOINTS.query, {
     method: 'POST',

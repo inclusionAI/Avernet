@@ -16,7 +16,7 @@ interface Props {
 }
 
 export const ApplicationCodingConfigForm = forwardRef<AppCodingConfigFormRef, Props>(
-  function ApplicationCodingConfigForm({ value, initialConfig, disabled, onChange, onValidationChange }, ref) {
+  ({ value, initialConfig, disabled, onChange, onValidationChange }, ref) => {
     // 旧版表单是“内部状态 + initialConfig 回填”模型。保留其生命周期语义，
     // 避免用户输入时父层 value 变化触发整张表单重新初始化。
     const initialConfigRef = useRef<TemplateConfig>({

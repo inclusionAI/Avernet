@@ -69,6 +69,7 @@ const BotCard: React.FC<BotCardProps> = ({
   const showHealthCheck = !isAgentCodingBot && Boolean(healthCheckAvailability?.visible && onHealthCheck);
   const showEdit = !isAgentCodingBot && Boolean(onEdit);
   const lockedByOther = bot.lock?.status === 'other';
+  const failureReason = bot.lifecycle === 'failed' ? bot.disabledActions.restart : undefined;
 
   return (
     <Card className="flex min-h-64 min-w-0 flex-col overflow-hidden transition-all duration-200 hover:border-brand/40 hover:shadow">
@@ -79,11 +80,32 @@ const BotCard: React.FC<BotCardProps> = ({
             <div className="flex items-center gap-2">
               <h3 className="m-0 truncate text-base font-semibold text-foreground">{bot.name}</h3>
               <BotEditLockAction bot={bot} onClaimLock={onClaimLock} />
-              <Badge
-                tone={bot.lifecycle === 'running' ? 'success' : bot.lifecycle === 'unknown' ? 'warning' : 'neutral'}
-              >
-                {lifecycleLabel[bot.lifecycle]}
-              </Badge>
+              {failureReason ? (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Badge tone="error">{lifecycleLabel[bot.lifecycle]}</Badge>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>{failureReason}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                <Badge
+                  tone={
+                    bot.lifecycle === 'running'
+                      ? 'success'
+                      : bot.lifecycle === 'failed'
+                      ? 'error'
+                      : bot.lifecycle === 'unknown'
+                      ? 'warning'
+                      : 'neutral'
+                  }
+                >
+                  {lifecycleLabel[bot.lifecycle]}
+                </Badge>
+              )}
             </div>
             <p className="mt-1 line-clamp-2 min-h-8 text-xs leading-4 text-muted-foreground">
               {bot.description ?? '暂无描述'}
@@ -91,7 +113,11 @@ const BotCard: React.FC<BotCardProps> = ({
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-1.5">
-          <Badge tone="primary">{bot.runtime.engine}</Badge>
+          <Badge tone="primary">
+            {isAgentCodingBot
+              ? bot.runtime.templateName ?? bot.runtime.templateType ?? 'AgentCoding'
+              : bot.runtime.engine}
+          </Badge>
           <Badge>
             {bot.deployment === 'local' ? (
               <Laptop aria-hidden className="mr-1 size-3" />
@@ -105,6 +131,9 @@ const BotCard: React.FC<BotCardProps> = ({
             {bot.ownership === 'team' ? '团队' : '个人'}
           </Badge>
           {bot.serviceMode === 'service' && <Badge tone="success">服务 Bot</Badge>}
+          {bot.serviceMode === 'service' && bot.publicationVersion !== undefined ? (
+            <Badge tone="primary">V{bot.publicationVersion}</Badge>
+          ) : null}
         </div>
         <div className="mt-auto pt-4 text-xs text-muted-foreground">
           <div className="flex min-h-6 flex-wrap items-center gap-x-3 gap-y-1">
@@ -123,7 +152,18 @@ const BotCard: React.FC<BotCardProps> = ({
           </div>
           <div className="mt-3 flex min-w-0 items-start gap-2 border-t border-border pt-3">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-              {inventoryActions.chat?.visible && onConversation ? (
+              {isAgentCodingBot ? (
+                onConversation ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<MessageSquare className="size-3.5" />}
+                    onClick={() => onConversation(bot)}
+                  >
+                    去使用
+                  </Button>
+                ) : null
+              ) : inventoryActions.chat?.visible && onConversation ? (
                 <ActionButton availability={inventoryActions.chat} label="对话">
                   <Button
                     variant="ghost"
@@ -132,7 +172,7 @@ const BotCard: React.FC<BotCardProps> = ({
                     leftIcon={<MessageSquare className="size-3.5" />}
                     onClick={() => onConversation(bot)}
                   >
-                    {isAgentCodingBot ? '去使用' : '对话'}
+                    对话
                   </Button>
                 </ActionButton>
               ) : null}

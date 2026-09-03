@@ -21,6 +21,7 @@ interface BotItemProps {
   favoriteSessionMeta?: BotSessionPageMeta;
   selectedBotSessionId: string | null;
   onToggleBotExpanded: (botId: string) => void;
+  onSelectBot: (bot: ChatBotView) => void;
   onSelectSession: (botId: string, sessionId: string) => void;
   onCreateSession: (botId: string) => void;
   onDeleteSession: (botId: string, sessionId: string) => Promise<boolean>;
@@ -32,7 +33,7 @@ interface BotItemProps {
   onManageBot?: (bot: ChatBotView) => void;
 }
 
-/** Bot 行与协作群行共享同一高度和信息层级；新建会话入口固定在可聊 Bot 卡片右侧。 */
+/** Bot 行与协作群行共享同一高度和信息层级；AgentCoding Bot 由工作台引导使用。 */
 export const BotItem = React.memo(function BotItem({
   bot,
   expanded,
@@ -42,6 +43,7 @@ export const BotItem = React.memo(function BotItem({
   favoriteSessionMeta,
   selectedBotSessionId,
   onToggleBotExpanded,
+  onSelectBot,
   onSelectSession,
   onCreateSession,
   onDeleteSession,
@@ -64,7 +66,12 @@ export const BotItem = React.memo(function BotItem({
     void onLoadFavorites(bot.botId);
   }, [bot.botId, bot.chatable, expanded, favoriteSessionMeta, onLoadFavorites]);
   const toggle = () => {
-    if (bot.chatable) onToggleBotExpanded(bot.botId);
+    if (!bot.chatable) return;
+    if (bot.isAgentCodingBot) {
+      onSelectBot(bot);
+      return;
+    }
+    onToggleBotExpanded(bot.botId);
   };
   const isUnavailable = !bot.chatable;
   const botEngineLabel = getBotEngineLabel(bot.engine);
@@ -107,8 +114,12 @@ export const BotItem = React.memo(function BotItem({
               </Tooltip>
             </TooltipProvider>
             <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground">
-              {botEngineLabel && <span className="shrink-0">{botEngineLabel}</span>}
-              {botEngineLabel && botTypeLabel && (
+              {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && (
+                <span className="shrink-0">
+                  {bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel}
+                </span>
+              )}
+              {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && botTypeLabel && (
                 <>
                   <span aria-hidden="true" className="text-muted-foreground/50">
                     ·
@@ -129,7 +140,7 @@ export const BotItem = React.memo(function BotItem({
             </div>
           </div>
         </Button>
-        {bot.chatable && (
+        {bot.chatable && !bot.isAgentCodingBot && (
           <IconButton
             label="新建会话"
             size="sm"

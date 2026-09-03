@@ -13,6 +13,7 @@ export interface WorkOrderState {
   setView: (view: WorkOrderView) => void;
   setCategory: (category: WorkOrderCategory) => void;
   setPageNo: (pageNo: number) => void;
+  setPageSize: (pageSize: number) => void;
   setList: (items: WorkOrder[], total: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: ServiceError | null) => void;
@@ -35,6 +36,7 @@ export const useWorkOrderStore = create<WorkOrderState>((set) => ({
   setView: (view) => set({ view, pageNo: 1 }),
   setCategory: (category) => set({ category, pageNo: 1 }),
   setPageNo: (pageNo) => set({ pageNo }),
+  setPageSize: (pageSize) => set({ pageSize, pageNo: 1 }),
   setList: (items, total) => set({ items, total }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),

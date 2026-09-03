@@ -4,7 +4,7 @@
 // 视觉对齐 admin 视觉交互指南 §7.3：无外框列表行，底分割线 border-border，hover bg-muted/50，次行 content+内联时间。
 // 类型 Tag 颜色取自 domain 单一映射（wo.typeTone/typeLabel），禁止硬编码。
 // 驳回走 Modal+Textarea 收集 review_remark（后端 reject 要求非空，否则 422）。
-import { Button, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
+import { Button, Card, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
 import { workOrderService } from '@/services/admin/workOrderService';
 import { cn } from '@/utils/cn';
@@ -60,10 +60,9 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
 
   return (
     <>
-      <div
+      <Card
         className={cn(
-          'flex items-center gap-5 border-b border-border py-4 transition-colors last:border-b-0 hover:bg-muted/50',
-          'cursor-pointer',
+          'flex cursor-pointer items-center gap-5 rounded-none border-x-0 border-t-0 border-border bg-transparent py-4 shadow-none transition-colors last:border-b-0 hover:bg-muted/50',
           !isApproval && wo.isRead && 'opacity-75',
         )}
         onClick={() => onView?.(wo)}
@@ -82,11 +81,27 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
         <div className="flex shrink-0 items-center gap-2">
           {isApproval ? (
             actionable ? (
-              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                <Button size="sm" variant="primary" disabled={!canAct} onClick={() => onApprove?.(wo.workOrderId)}>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={!canAct}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onApprove?.(wo.workOrderId);
+                  }}
+                >
                   同意
                 </Button>
-                <Button size="sm" variant="destructive" disabled={!canAct} onClick={() => setRejectOpen(true)}>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  disabled={!canAct}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setRejectOpen(true);
+                  }}
+                >
                   驳回
                 </Button>
               </div>
@@ -96,20 +111,23 @@ export function WorkOrderCard({ workOrder: wo, onApprove, onReject, onView, canA
           ) : wo.isRead ? (
             <Tag>已查看</Tag>
           ) : (
-            <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 variant="secondary"
                 leftIcon={<Eye size={14} />}
                 disabled={!canAct}
-                onClick={() => onView?.(wo)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onView?.(wo);
+                }}
               >
                 查看
               </Button>
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* 驳回弹窗：收集 review_remark（后端 reject 必填非空 max512） */}
       <Modal open={rejectOpen} onOpenChange={(o) => !submitting && setRejectOpen(o)}>

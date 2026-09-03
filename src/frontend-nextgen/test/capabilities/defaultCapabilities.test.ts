@@ -58,12 +58,11 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toEqual([]);
   });
 
-  test('getBotEngineOptions 默认仅 OpenClaw（不暴露 Claude Code 原生创建入口）', () => {
+  test('getBotEngineOptions 默认 OpenClaw + Claudecode引擎-原生（阿里云部署依赖原生 CC 直建入口）', () => {
     const r = defaultCapabilities.getBotEngineOptions();
     expect(r.status).toBe('available');
-    expect(r.value.map((o) => o.value)).toEqual(['openclaw']);
-    // label 与 internal overlay 全量清单逐项一致（见 test/internal/brandAndEngineCapabilities.test.ts）
-    expect(r.value.map((o) => o.label)).toEqual(['OpenClaw']);
+    expect(r.value.map((o) => o.value)).toEqual(['openclaw', 'claude_code']);
+    expect(r.value.map((o) => o.label)).toEqual(['OpenClaw', 'Claudecode引擎-原生']);
   });
 
   test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {

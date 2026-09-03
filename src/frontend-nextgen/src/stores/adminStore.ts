@@ -19,6 +19,7 @@ export interface AdminState {
   membersLoading: boolean;
   setSpaceType: (spaceType: SpaceType | 'ALL') => void;
   setPageNo: (pageNo: number) => void;
+  setPageSize: (pageSize: number) => void;
   setList: (items: Space[], total: number) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: ServiceError | null) => void;
@@ -34,7 +35,7 @@ export const useAdminStore = create<AdminState>((set) => ({
   setKeyword: (keyword) => set({ keyword, pageNo: 1 }),
   spaceType: 'ALL',
   pageNo: 1,
-  pageSize: 12,
+  pageSize: 20,
   items: [],
   total: 0,
   loading: false,
@@ -44,6 +45,7 @@ export const useAdminStore = create<AdminState>((set) => ({
   membersLoading: false,
   setSpaceType: (spaceType) => set({ spaceType, pageNo: 1 }),
   setPageNo: (pageNo) => set({ pageNo }),
+  setPageSize: (pageSize) => set({ pageSize, pageNo: 1 }),
   setList: (items, total) => set({ items, total }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),
@@ -55,7 +57,7 @@ export const useAdminStore = create<AdminState>((set) => ({
       keyword: '',
       spaceType: 'ALL',
       pageNo: 1,
-      pageSize: 12,
+      pageSize: 20,
       items: [],
       total: 0,
       loading: false,

@@ -80,25 +80,45 @@ export const NodeListView: React.FC<{
       {orderedNodes.map((node, idx) => {
         const isLast = idx === orderedNodes.length - 1;
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
-        const canDrillSession = Boolean(node.sessionId) && Boolean(onOpenGroupSession);
+        // assignee 为空即「未分配」:未派发到任何 bot/group,不回退任务归属 bot 当执行人,也不可下钻。
+        const isUnassigned = !node.assignee;
+        const canDrillSession = !isUnassigned && Boolean(node.sessionId) && Boolean(onOpenGroupSession);
         const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
         // 根节点的执行者可能只由 graph 级 owner_bot_id 兜底到 assignee，名称字段仍为空；
         // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
-        // 只有明确的 coop_group 才按群名称展示，避免 BBS 节点携带 groupId 时误走群展示分支。
-        const isGroupNode = node.runMode === 'coop_group' || (!node.runMode && Boolean(node.groupId));
-        const executorLabel = isGroupNode
-          ? node.groupName ?? node.executor ?? node.assignee ?? ownerBotId ?? 'BCS协作群'
+        // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group,真实模式由 actual_run_mode 覆盖到 runMode。
+        // 故「下钻通道」必须按物理 session 形态判定（协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId），
+        // 不能再据 run_mode 选端点——否则单 bot 绕过群 session 时会错误跳 tab=chat。
+        const isGroupSession = Boolean(node.groupId) || (node.sessionId?.startsWith('bcs_grp_') ?? false);
+        // 执行者展示:
+        // - coop_group → 群名
+        // - single_bot/bbs(绕过群执行,assignee 常为 bcs 群 id):有 assignee_name → 显示 bot 名;否则占位「Bot/BBS 执行会话」。
+        const isCoopGroupDisplay = node.runMode === 'coop_group' || (!node.runMode && Boolean(node.groupId));
+        const isSingleOrBbs = node.runMode === 'single_bot' || node.runMode === 'bbs';
+        // 执行者展示:assignee_name 全局优先(已分配节点);空时按真实执行模式占位。
+        //   - single_bot/bbs → Bot/BBS 执行会话; - coop_group → 协作群会话。
+        const executorLabel = isUnassigned
+          ? '未分配'
+          : node.assigneeName
+          ? node.assigneeName
+          : isSingleOrBbs
+          ? node.runMode === 'single_bot'
+            ? 'Bot执行会话'
+            : 'BBS执行会话'
+          : isCoopGroupDisplay
+          ? '协作群会话'
           : node.executor ?? node.assignee ?? ownerBotId;
         // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
         // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
         // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
-        const conversationHref = node.sessionId
-          ? isGroupNode
-            ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
-            : getConversationBotId(node)
-            ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
-            : null
-          : null;
+        const conversationHref =
+          !isUnassigned && node.sessionId
+            ? isGroupSession
+              ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
+              : getConversationBotId(node)
+              ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
+              : null
+            : null;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {

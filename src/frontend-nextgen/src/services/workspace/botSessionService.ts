@@ -1,3 +1,4 @@
+import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { IdentityView } from '@/domain/collaboration';
 import { resolveOpenApiUserId } from '@/domain/userIdentity';
 import { listBots as listOwnedBotsApi, type OwnedBotDto } from '@/services/backendApi/bots/botController';
@@ -32,6 +33,11 @@ export interface ChatBotView {
   chatable: boolean;
   engine?: string;
   botType?: string;
+  isAgentCodingBot?: boolean;
+  templateType?: string;
+  templateName?: string;
+  spaceId?: string;
+  spaceName?: string;
   /** 当前对话所连接的运行阶段；普通工作台会话缺省使用 online。 */
   runtimeStage?: BotIamTokenStage;
 }
@@ -136,9 +142,48 @@ function toModelView(s: BotModelDto): BotModelView {
   return { modelId: s.model_id, name: s.name, provider: s.provider };
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+}
+
+function readTemplateType(dto: OwnedBotDto): string | undefined {
+  const engineProperties = asRecord(dto.engine_properties);
+  const templateConfig = asRecord(engineProperties.template_config ?? dto.template_config);
+  const value =
+    dto.template_type ?? engineProperties.template_type ?? templateConfig.template_type ?? templateConfig.template_key;
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function readTemplateName(dto: OwnedBotDto, templateType?: string): string | undefined {
+  const engineProperties = asRecord(dto.engine_properties);
+  const templateConfig = asRecord(engineProperties.template_config ?? dto.template_config);
+  const botTemplateConfig = asRecord(templateConfig.bot_template_config ?? dto.bot_template_config);
+  const value = [
+    (dto as OwnedBotDto & { template_name?: unknown }).template_name,
+    engineProperties.template_name,
+    templateConfig.template_name,
+    botTemplateConfig.template_name,
+  ].find((item) => typeof item === 'string' && item.trim());
+  if (typeof value === 'string') return value.trim();
+
+  const normalized = templateType?.toLowerCase().replace(/[\s_-]/g, '');
+  if (normalized === 'applicationcoding') return '应用 Bot';
+  if (normalized === 'personalcoding') return '个人 Coding Bot';
+  return undefined;
+}
+
 function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   const botId = dto.bot_id.includes(':') || !dto.owner_entity_id ? dto.bot_id : `${dto.bot_id}:${dto.owner_entity_id}`;
   const { realBotId, ownerId } = splitBotId(botId);
+  const templateType = readTemplateType(dto);
+  const templateName = readTemplateName(dto, templateType);
+  const runtime = resolveBotRuntime({
+    engine: dto.engine_type ?? dto.engine,
+    templateType,
+    templateName,
+    botType: dto.bot_type,
+    botId,
+  });
   return {
     botId,
     realBotId,
@@ -147,8 +192,13 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
     online: dto.status === 'ACTIVE' || dto.status === 'online',
     reachability: 'reachable',
     chatable: COMPOUND_ID_RE.test(botId),
-    engine: dto.engine,
+    engine: dto.engine_type ?? dto.engine,
     botType: dto.bot_type,
+    isAgentCodingBot: runtime.isAgentCodingBot,
+    templateType: runtime.templateType,
+    templateName: runtime.templateName,
+    spaceId: dto.space_id === undefined ? undefined : String(dto.space_id),
+    spaceName: dto.space_name,
   };
 }
 
@@ -294,7 +344,7 @@ export const botSessionService = {
 
   async listModels(bot: ChatBotView, userId: string): Promise<DomainResult<BotModelView[]>> {
     try {
-      const params = { user_id: resolveUserId(userId), page: 1, page_size: 50 };
+      const params = { user_id: resolveUserId(userId), owner_id: bot.ownerId, page: 1, page_size: 50 };
       const resp = await listBotModels(bot.realBotId, params);
       return { ok: true, data: (resp.data?.items ?? []).map(toModelView) };
     } catch (e) {

@@ -32,8 +32,8 @@ function toChatBotView(bot: {
 }
 
 /**
- * useFriendBots —— 当活跃身份为用户（human）时，通过 friendships + metadata/queries 两步拉取好友 Bot 列表，
- * 映射为 ChatBotView 与 mine Bot 统一消费。Bot 身份不加载好友（返回空数组）。
+ * useFriendBots —— 通过 Friend Connections + metadata/queries 两步拉取当前身份的好友 Bot 列表，
+ * 映射为 ChatBotView 与 mine Bot 统一消费。
  */
 export function useFriendBots(
   activeIdentityId: string | null,
@@ -48,19 +48,25 @@ export function useFriendBots(
       setFriendBots([]);
       return;
     }
-    const currentUserId = getCapabilities().getCurrentOpenApiUserId({
-      activeIdentityId: activeIdentityId ?? undefined,
-    });
-    const actorId =
-      currentUserId.status === 'available' && currentUserId.value ? `human_${currentUserId.value}` : activeIdentityId;
-    if (!actorId || (!isUserIdentity && !actorId.startsWith('human_'))) {
+    let actorId = activeIdentityId;
+    if (isUserIdentity) {
+      const currentUserId = getCapabilities().getCurrentOpenApiUserId({
+        activeIdentityId: activeIdentityId ?? undefined,
+      });
+      if (currentUserId.status === 'available' && currentUserId.value) actorId = currentUserId.value;
+    }
+    if (!actorId || actorId === 'me') {
       setFriendBots([]);
       return;
     }
     let cancelled = false;
     setIsLoading(true);
     collaborationCandidateService
-      .listFriends(actorId, { offset: 0, limit: 100 })
+      .listFriends(actorId, {
+        actorType: isUserIdentity ? 'human' : 'bot',
+        offset: 0,
+        limit: 100,
+      })
       .then((res) => {
         if (cancelled) return;
         setFriendBots(res.ok ? res.data.items.map(toChatBotView) : []);

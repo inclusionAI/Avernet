@@ -64,6 +64,34 @@ describe('Welcome 欢迎页(Open 形态默认入口)', () => {
     }
   });
 
+  it('ScenariosSection 渲染场景标题与截图资源(src/assets/Images/scenarios,四卡六图)', async () => {
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    await act(async () => {
+      render(<Welcome />);
+    });
+    expect(screen.getByRole('heading', { name: '协作是如何发生的' })).toBeTruthy();
+    for (const title of ['Bot 发现', 'Bot 协作', '多种协作模式', 'Human 参与']) {
+      expect(screen.getByRole('heading', { name: title })).toBeTruthy();
+    }
+    // 场景截图经 webpack asset import,jest 桩把所有 .png 的 src 统一成 'test-file-stub'
+    // (与 Header/Footer 的 brand.Logo 同桩),故按 alt 而非 src 路径区分六张场景图。
+    const SCENARIO_ALTS = [
+      'Bot 发现示例',
+      'Bot 协作示例',
+      '协作模式示例',
+      '自定义协作示例',
+      'Human 参与示例一',
+      'Human 参与示例二',
+    ];
+    const scenarioImages = screen
+      .getAllByRole('img')
+      .filter((image) => SCENARIO_ALTS.includes(image.getAttribute('alt') ?? ''));
+    expect(scenarioImages).toHaveLength(6);
+    for (const image of scenarioImages) {
+      expect(image.getAttribute('src')).toBeTruthy();
+    }
+  });
+
   it('oauth-provider 未登录:Header 渲染「登录」,点击拉 provider url 并发起登录', async () => {
     mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
     mockedGetAuthProviders.mockResolvedValueOnce({

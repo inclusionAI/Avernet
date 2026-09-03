@@ -7,10 +7,13 @@ import { useMinWidth } from '@/hooks/useMediaQuery';
 import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
 import { useTaskExecution } from '@/hooks/useTaskExecution';
 import { useWorkspace } from '@/hooks/useWorkspace';
+import { AgentCodingGuide } from '@/pages/Workspace/components/AgentCodingGuide';
 import { ChatSessionSidebarSlot } from '@/pages/Workspace/components/ChatSessionSidebarSlot';
 import { AddFriendModal } from '@/pages/Workspace/components/Modals/AddFriendModal';
 import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
+import { buildAgentCodingChatPath } from '@/services/workspace';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { resolveUserId } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ResourceReference } from '@tc-chat/core';
@@ -28,6 +31,8 @@ const WorkspacePage: React.FC = () => {
   const { availableViews } = workspace;
   const navigate = useNavigate();
   const openCollaborationPermissions = () => navigate('/collaboration-privacy');
+  const openAgentCodingBot = (bot: ChatBotView) =>
+    navigate(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
   // 聊天视图「+」打开的共享创建协作群弹窗；创建成功后切到协作群视图并选中该群。
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   // 添加好友（Bot 广场）弹窗状态，与创建协作群弹窗并列。
@@ -183,41 +188,45 @@ const WorkspacePage: React.FC = () => {
           userAvatarUrl={workspace.currentUserAvatarUrl}
           onManageBot={(bot) => navigate(`/bot-workshop/detail?type=view&id=${encodeURIComponent(bot.realBotId)}`)}
         />
-        <ChatPanel
-          target={workspace.botChatTarget}
-          viewer={workspace.activeIdentity}
-          userAvatarUrl={workspace.currentUserAvatarUrl}
-          messages={botChat.chat.messages}
-          isRequesting={botChat.chat.isRequesting}
-          isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
-          connectionStatus={botChat.connectionStatus}
-          retryCount={botChat.chat.retryCount}
-          supportState={botChat.supportState}
-          draft={workspace.draft}
-          panelRef={workspace.panelRef}
-          chatBridge={workspace.chatBridge}
-          onDraftChange={workspace.setDraft}
-          onSend={handleSend}
-          onStop={botChat.stop}
-          onReconnect={() => void botChat.reconnect()}
-          onPanelAction={workspace.handlePanelAction}
-          modelSelector={
-            <BotModelSelectorContainer
-              chatBots={[...workspace.chatBots, ...workspace.friendBots]}
-              session={workspace.botSessions.selectedSession}
-              activeIdentityId={workspace.activeIdentityId}
-              onSessionModelChange={workspace.botSessions.updateSessionModel}
-            />
-          }
-          taskComposer={taskComposerNode}
-          fileChip={fileFeature.fileChip}
-          command={fileFeature.command}
-          fileToolbar={fileFeature.fileToolbar}
-          senderRef={fileFeature.senderRef}
-          mode="bot"
-          interactive
-          inputRef={workspace.inputRef}
-        />
+        {workspace.selectedAgentCodingBot ? (
+          <AgentCodingGuide bot={workspace.selectedAgentCodingBot} onOpen={openAgentCodingBot} />
+        ) : (
+          <ChatPanel
+            target={workspace.botChatTarget}
+            viewer={workspace.activeIdentity}
+            userAvatarUrl={workspace.currentUserAvatarUrl}
+            messages={botChat.chat.messages}
+            isRequesting={botChat.chat.isRequesting}
+            isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
+            connectionStatus={botChat.connectionStatus}
+            retryCount={botChat.chat.retryCount}
+            supportState={botChat.supportState}
+            draft={workspace.draft}
+            panelRef={workspace.panelRef}
+            chatBridge={workspace.chatBridge}
+            onDraftChange={workspace.setDraft}
+            onSend={handleSend}
+            onStop={botChat.stop}
+            onReconnect={() => void botChat.reconnect()}
+            onPanelAction={workspace.handlePanelAction}
+            modelSelector={
+              <BotModelSelectorContainer
+                chatBots={[...workspace.chatBots, ...workspace.friendBots]}
+                session={workspace.botSessions.selectedSession}
+                activeIdentityId={workspace.activeIdentityId}
+                onSessionModelChange={workspace.botSessions.updateSessionModel}
+              />
+            }
+            taskComposer={taskComposerNode}
+            fileChip={fileFeature.fileChip}
+            command={fileFeature.command}
+            fileToolbar={fileFeature.fileToolbar}
+            senderRef={fileFeature.senderRef}
+            mode="bot"
+            interactive
+            inputRef={workspace.inputRef}
+          />
+        )}
         {fileFeature.featureNode}
       </>
     );

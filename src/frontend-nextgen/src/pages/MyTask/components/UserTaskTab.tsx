@@ -238,7 +238,10 @@ export function UserTaskTab({
                               variant="secondary"
                               size="sm"
                               leftIcon={<Eye className="size-4" />}
-                              onClick={() => onSelectTask(record.task_id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onSelectTask(record.task_id);
+                              }}
                             >
                               查看详情
                             </Button>

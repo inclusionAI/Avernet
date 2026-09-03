@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/Card';
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotChatDetail, BotChatPage, BotChatRelationScope } from '@/domain/botChats';
 import { useEffect, useState } from 'react';
@@ -79,7 +80,7 @@ export function BotChatObservationView({
   useEffect(() => setSelection({ kind: 'trace' }), [detail.id]);
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)]">
+    <Card className="overflow-hidden shadow-sm">
       <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border)] px-4 py-3">
         <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
           <span>sessionID：</span>
@@ -118,6 +119,6 @@ export function BotChatObservationView({
         <BotChatTimeline detail={detail} selection={selection} onSelect={setSelection} />
         <BotChatNodeDetails detail={detail} selection={selection} />
       </div>
-    </div>
+    </Card>
   );
 }

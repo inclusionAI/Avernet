@@ -27,7 +27,6 @@ export function Hosting24x7ConfigField({
   return (
     <div className="space-y-1.5">
       <label
-        onClick={() => !disabled && onChange(!value)}
         className={cn(
           'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all',
           value ? 'bg-[#eff6ff]/70 border-[#bfdbfe]' : 'bg-background border-[#e2e8f0] hover:border-[#cbd5e1]',

@@ -1,8 +1,9 @@
+import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { createBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
-import { describe, expect, test } from '@jest/globals';
+import { afterEach, describe, expect, test } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botController', () => ({
   createBot: jest.fn(),
@@ -13,6 +14,11 @@ jest.mock('@/services/backendApi/bots/botController', () => ({
 const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
 const mockedListBotInventory = listBotInventory as jest.MockedFunction<typeof listBotInventory>;
 const mockedPollBotAuthStatus = pollBotAuthStatus as jest.MockedFunction<typeof pollBotAuthStatus>;
+
+afterEach(() => {
+  // 覆盖过引擎清单的用例退出时还原 Open 默认，避免污染同文件后续用例。
+  extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
+});
 
 describe('botWorkshopService', () => {
   test.each([
@@ -105,7 +111,40 @@ describe('botWorkshopService', () => {
     });
   });
 
-  test('rejects creating an ordinary personal Claude Code bot', () => {
+  test('Open Core（阿里云部署）默认清单允许原生 Claude Code 个人云端直建', () => {
+    const request = botWorkshopService.toCreateRequest({
+      scenario: 'cloud',
+      name: 'claude_code Bot',
+      description: 'AI Coding',
+      engine: 'claude_code',
+      spaceId: '10001',
+      ownership: 'personal',
+      serviceMode: 'non-service',
+      initialize: true,
+    });
+    expect(request).toEqual({
+      bot_name: 'claude_code Bot',
+      bot_desc: 'AI Coding',
+      engine: 'claude_code',
+      cluster_name: 'ACRA',
+      bot_type: 'personal',
+      space_id: '10001',
+    });
+  });
+
+  test('rejects creating an ordinary personal Claude Code bot when the form offers no native entry', () => {
+    // internal overlay（AgentCoding 接管 CC 创建）：引擎清单不含 claude_code，普通 CC 直建仍拦截。
+    extendCapabilities({
+      getBotEngineOptions: () => ({
+        status: 'available',
+        value: [
+          { value: 'openclaw', label: 'OpenClaw' },
+          { value: 'aicoding', label: 'AgentCoding' },
+          { value: 'hermes', label: 'Hermes' },
+          { value: 'teclaw', label: 'TEClaw' },
+        ],
+      }),
+    });
     expect(() =>
       botWorkshopService.toCreateRequest({
         scenario: 'cloud',
@@ -164,7 +203,65 @@ describe('botWorkshopService', () => {
     });
   });
 
-  test('rejects service creation for the aicoding engine', () => {
+  test('allows service creation for a template that explicitly enables the service Bot capability', () => {
+    const request = botWorkshopService.toCreateRequest({
+      scenario: 'cloud',
+      name: '架构服务 Bot',
+      description: '',
+      engine: 'aicoding',
+      spaceId: '10001',
+      ownership: 'personal',
+      serviceMode: 'service',
+      initialize: true,
+      agentCoding: {
+        kind: 'template',
+        template: {
+          key: 'architect',
+          versionId: '2600004',
+          name: '架构 Bot',
+          engine: 'claude_code',
+          source: 'official',
+          templateType: 'architect',
+          fields: [],
+          config: { capabilities: { upgrade_service_bot: true } },
+        },
+        values: {},
+      },
+    });
+
+    expect(request).toEqual(expect.objectContaining({ engine: 'claude_code', bot_type: 'service' }));
+  });
+
+  test('rejects service creation for a template without the service Bot capability', () => {
+    expect(() =>
+      botWorkshopService.toCreateRequest({
+        scenario: 'cloud',
+        name: '架构服务 Bot',
+        description: '',
+        engine: 'aicoding',
+        spaceId: '10001',
+        ownership: 'personal',
+        serviceMode: 'service',
+        initialize: true,
+        agentCoding: {
+          kind: 'template',
+          template: {
+            key: 'architect',
+            versionId: '2600004',
+            name: '架构 Bot',
+            engine: 'claude_code',
+            source: 'official',
+            templateType: 'architect',
+            fields: [],
+            config: {},
+          },
+          values: {},
+        },
+      }),
+    ).toThrow('当前模板未开启服务 Bot 能力');
+  });
+
+  test('rejects service creation when AgentCoding has no selected template', () => {
     expect(() =>
       botWorkshopService.toCreateRequest({
         scenario: 'cloud',
@@ -176,7 +273,7 @@ describe('botWorkshopService', () => {
         serviceMode: 'service',
         initialize: true,
       }),
-    ).toThrow('AIcoding 暂不支持服务化');
+    ).toThrow('请选择 AgentCoding 模板');
   });
 
   test('returns the AgentPass iframe authorization step from the OpenAPI 202 payload', async () => {

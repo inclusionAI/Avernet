@@ -246,8 +246,8 @@ export interface AppCapabilities {
   getInternalRouteMetas: () => CapabilityResult<RouteMeta[]>;
   /**
    * Bot 工坊引擎可选清单（筛选下拉、创建弹窗的唯一事实源，组件不得自行硬编码）。
-   * Open Core 默认仅 `openclaw`（不暴露 Claude Code 原生创建入口）；
-   * internal overlay 覆盖为全量 4 项（字面量随 overlay 物理剥离）。
+   * Open Core 默认 `openclaw` + `claude_code`（保留原生 CC 直建入口，阿里云部署依赖）；
+   * internal overlay 覆盖为 4 项（CC 创建由 AgentCoding 接管，剥离原生入口）。
    * 注意：引擎领域映射规则（服务化矩阵、cluster_name、AgentCoding 家族、WS 路径等）
    * 是后端契约事实，MUST 保留全量，不随本清单收窄。
    */

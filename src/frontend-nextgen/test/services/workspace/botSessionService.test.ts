@@ -1,10 +1,13 @@
 /** @jest-environment jsdom */
 import type { IdentityView } from '@/domain/collaboration';
+import * as botCtrl from '@/services/backendApi/bots/botController';
 import * as ctrl from '@/services/backendApi/bots/privateBotSessionController';
 import { botSessionService, listChatBots, splitBotId } from '@/services/workspace/botSessionService';
 import { describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/privateBotSessionController');
+jest.mock('@/services/backendApi/bots/botController');
+const ownedMocked = botCtrl as unknown as Record<string, jest.Mock<any>>;
 const mocked = ctrl as unknown as Record<string, jest.Mock<any>>;
 
 describe('splitBotId', () => {
@@ -57,6 +60,49 @@ describe('botSessionService', () => {
     online: true,
     chatable: true,
   };
+
+  it('listOwnedBots 展示模板名称并兼容历史个人/应用 Coding Bot', async () => {
+    ownedMocked.listBots.mockResolvedValue({
+      data: {
+        items: [
+          {
+            bot_id: 'application:1',
+            bot_name: '应用实例',
+            engine_type: 'claude_code',
+            template_type: 'applicationCoding',
+            owner_entity_id: '1',
+            status: 'ACTIVE',
+          },
+          {
+            bot_id: 'personal:2',
+            bot_name: '个人实例',
+            engine_type: 'claude_code',
+            template_type: 'personalCoding',
+            owner_entity_id: '2',
+            status: 'ACTIVE',
+          },
+          {
+            bot_id: 'architect:3',
+            bot_name: '架构实例',
+            engine_type: 'claude_code',
+            engine_properties: { template_type: 'architect', template_config: { template_name: '架构 Bot' } },
+            owner_entity_id: '3',
+            status: 'ACTIVE',
+          },
+        ],
+      },
+    });
+
+    const res = await botSessionService.listOwnedBots('human_327325');
+    expect(ownedMocked.listBots).toHaveBeenCalledWith({ user_id: '327325', page: 1, page_size: 100 });
+    expect(res.ok && res.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ displayName: '应用实例', isAgentCodingBot: true, templateName: '应用 Bot' }),
+        expect.objectContaining({ displayName: '个人实例', isAgentCodingBot: true, templateName: '个人 Coding Bot' }),
+        expect.objectContaining({ displayName: '架构实例', isAgentCodingBot: true, templateName: '架构 Bot' }),
+      ]),
+    );
+  });
 
   it('listSessions 调用 controller 并映射为 BotChatSessionView', async () => {
     mocked.listBotSessions.mockResolvedValue({
@@ -202,6 +248,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.listModels(bot, 'human_327325');
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '327325',
+      owner_id: '2088',
       page: 1,
       page_size: 50,
     });

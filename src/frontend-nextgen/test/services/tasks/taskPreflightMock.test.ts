@@ -2,41 +2,41 @@ import type { TaskComposerForm } from '@/services/tasks/taskMapper';
 import { isDemoOkrMarketingTask, runTaskPreflightMock } from '@/services/tasks/taskPreflightMock';
 
 const baseForm: TaskComposerForm = {
-  title: '大促 GMV 增长 OKR',
-  objective: '提升大促期间 GMV 增长',
-  instruction: '目标：提升大促期间 GMV 增长',
+  title: '18 周年店庆客流与护理双增长 OKR',
+  objective: '18 周年店庆实现客流与护理双增长，沉淀可复购会员',
+  instruction: '目标：18 周年店庆实现客流与护理双增长',
   acceptances: [],
   taskType: 'dynamic',
 };
 
 describe('taskPreflightMock', () => {
-  it('仅在同时包含 GMV 增长目标和大促场景时命中', () => {
+  it('仅在同时包含「周年店庆」语义和「客流/护理/会员复购增长」场景时命中', () => {
     expect(isDemoOkrMarketingTask(baseForm)).toBe(true);
     expect(
       isDemoOkrMarketingTask({
         ...baseForm,
-        title: '大促活动页面',
-        objective: '开发活动页面',
-        instruction: '目标：开发活动页面',
+        title: '护理客流活动',
+        objective: '提升护理客流',
+        instruction: '目标：提升护理客流',
       }),
     ).toBe(false);
     expect(
       isDemoOkrMarketingTask({
         ...baseForm,
-        title: '增长目标',
-        objective: '提升 GMV 增长',
-        instruction: '目标：提升 GMV 增长',
+        title: '周年店庆',
+        objective: '举办周年店庆',
+        instruction: '目标：举办周年店庆',
       }),
     ).toBe(false);
   });
 
-  it('命中后返回固定的需求分析与专家委派剧本', async () => {
+  it('命中后返回固定的需求分析与店主委派剧本', async () => {
     const result = await runTaskPreflightMock(baseForm);
 
     expect(result.matched).toBe(true);
     expect(result.message).toContain('我已收到任务需求，正在进行分析。');
-    expect(result.message).toContain('当前 Bot 不具备完整的大促营销策略制定能力');
-    expect(result.message).toContain('已发现「大促营销策略专家 Bot」');
-    expect(result.message).toContain('现将该任务指派给「大促营销策略专家 Bot」执行');
+    expect(result.message).toContain('当前 Bot 无法独立完成该需求');
+    expect(result.message).toContain('未发现');
+    expect(result.message).toContain('现将该任务指派给「店主Bot」执行');
   });
 });

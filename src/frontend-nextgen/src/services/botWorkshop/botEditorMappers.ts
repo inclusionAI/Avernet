@@ -18,6 +18,7 @@ export const mapSkill = (item: SkillDto): BotEditorSkill => ({
   id: item.skill_id,
   name: item.name,
   description: item.description,
+  source: 'local',
   active: item.active,
 });
 

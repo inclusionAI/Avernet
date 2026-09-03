@@ -6,6 +6,7 @@ const ok = () =>
     ok: true,
     headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => ({ code: 200000, data: null }),
+    blob: async () => new Blob(),
   } as Response);
 describe('botEditorController', () => {
   afterEach(() => {
@@ -22,6 +23,12 @@ describe('botEditorController', () => {
       'resources',
       () => botEditorController.listResources('bot-1', 'docs'),
       '/openapi/v1/bots/bot-1/resources?path=docs&page=1&page_size=100',
+      'GET',
+    ],
+    [
+      'resource directory download',
+      () => botEditorController.downloadResourceDirectory('bot-1', 'docs/spec'),
+      '/openapi/v1/bots/bot-1/resources/download-dir?path=docs%2Fspec',
       'GET',
     ],
     [
@@ -82,8 +89,8 @@ describe('botEditorController', () => {
     ],
     [
       'Skill workshop',
-      () => botEditorController.listSpaceSkills('12'),
-      '/openapi/v1/bots/spaces/12/skills?page_no=1&page_size=100',
+      () => botEditorController.listConsumableSpaceSkills('12'),
+      '/openapi/v1/bots/spaces/12/skills/consumable?page=1&page_size=100',
       'GET',
     ],
     [
@@ -116,6 +123,15 @@ describe('botEditorController', () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
     await invoke();
     expect(fetch).toHaveBeenCalledWith(url, expect.objectContaining({ method }));
+  });
+
+  it('render screen list passes owner_id for friend bots', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await botEditorController.listRenderScreens('bot-1', 'owner-1');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/render-screens?owner_id=owner-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
   });
   test('upgrades a running service publication through OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);

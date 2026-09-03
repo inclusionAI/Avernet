@@ -63,7 +63,8 @@ export function ChatSessionSidebarSlot({
     favoriteSessionPageMetaByBotId: botSessions.favoriteSessionPageMetaByBotId,
     isSessionsLoading: botSessions.isSessionsLoading,
     selectedBotSessionId: botSessions.selectedBotSessionId,
-    onToggleBotExpanded: workspace.toggleBotExpanded,
+    onToggleBotExpanded: workspace.onToggleBotExpanded,
+    onSelectBot: workspace.onSelectAgentCodingBot,
     onSelectSession: botSessions.openSession,
     onCreateSession: (botId) => {
       const bot = [...workspace.chatBots, ...workspace.friendBots].find((b) => b.botId === botId);
