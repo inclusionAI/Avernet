@@ -39,6 +39,13 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 # SQLite only auto-increments columns declared as exactly "INTEGER PRIMARY KEY".
 # BigInteger renders as "BIGINT" in SQLite, which breaks autoincrement.
+#
+# Declared locally rather than imported from ``plugin_api.models``, matching all
+# four sibling model modules in this package. The canonical one lives across a
+# module boundary this package does not declare, and widening
+# ``internal_dependencies`` for a two-line constant would trade an enforced
+# architectural rule for a de-duplication — ``test_declared_deps_cover_actual_imports``
+# is what makes that a real choice rather than a preference.
 AutoIncrementBigInteger = BigInteger().with_variant(Integer, "sqlite")
 
 #: Who installed a tool, when it was not a user. Stored in ``installed_by``
@@ -117,8 +124,12 @@ class BotCliToolModel(Base):
     # The platform's own object key — where *we* kept the bytes. Not a
     # container path: the engine owns placement and never tells us where.
     oss_key = Column(String(512), nullable=False, comment="平台保存字节的对象键")
+    # 1024, matching ``modifier`` — both hold the same acting-user principal,
+    # so a width that fits one must fit the other. A narrower ``installed_by``
+    # would fail the whole upsert on a long principal *after* the bytes are in
+    # OSS and the tool is already installed, leaving no row for a live tool.
     installed_by = Column(
-        String(256), nullable=False, comment="'manifest' 或安装它的用户 ID"
+        String(1024), nullable=False, comment="'manifest' 或安装它的用户 ID"
     )
     modifier = Column(String(1024), nullable=False, comment="审计：最后写入者")
 
@@ -192,7 +203,6 @@ register_avernet_tenant_guard(BotCliToolModel)
 
 __all__ = [
     "INSTALLED_BY_MANIFEST",
-    "AutoIncrementBigInteger",
     "BotCliToolModel",
     "BotCliToolRecord",
 ]

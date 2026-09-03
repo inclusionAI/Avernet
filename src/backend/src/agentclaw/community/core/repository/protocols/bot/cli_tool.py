@@ -81,11 +81,16 @@ class BotCliToolRepositoryProtocol(Protocol):
         ...
 
     @abstractmethod
-    def delete_all(self, *, env: str, entity_id: str, bot_id: str) -> int:
-        """Hard-delete every row for the bot. Returns how many were removed.
+    def delete_all(self, *, env: str, entity_id: str, bot_id: str) -> Sequence[str]:
+        """Hard-delete every row for the bot; return their ``oss_key``s.
 
         The creation-cleanup entry point: a W13 job that fails after installing
         tools but before a bot exists would otherwise leave rows for a
         ``bot_id`` that was never created, and nothing else would collect them.
+
+        It returns the object keys rather than a count **so the objects can be
+        cleaned up too**. ``oss_key`` lives only on these rows, so a caller that
+        deleted first and asked afterwards could never enumerate what it had
+        just orphaned.
         """
         ...

@@ -19,6 +19,7 @@ from typing import Optional, Sequence
 
 from injector import inject
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql import func
 
 from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
     BotCliToolModel,
@@ -91,10 +92,18 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
                     self._Tool.entity_id == entity_id,
                     self._Tool.bot_id == bot_id,
                 )
-                .order_by(self._Tool.name)
                 .all()
             )
-            return [row.to_record() for row in rows]
+            # Sorted here, not with ``ORDER BY name``. SQL ordering is
+            # collation-dependent — SQLite is BINARY, OceanBase's default is
+            # case-insensitive — so ``Zip`` and ``aws`` come back in opposite
+            # orders in tests and in prod. The composed artifact's ref list is
+            # built from this sequence and its byte-identity is asserted, so a
+            # collation difference would pass CI and diverge in production.
+            # Python compares by code point, which is the same everywhere.
+            return sorted(
+                (row.to_record() for row in rows), key=lambda r: r.name
+            )
 
     # ── writes ───────────────────────────────────────────────────────────
 
@@ -141,13 +150,23 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
         )
         try:
             return self._upsert_once(**fields)
-        except IntegrityError:
+        except IntegrityError as exc:
+            # Most often a concurrent first write for the same key: the
+            # read-then-insert below is not atomic, so two callers can both see
+            # ``None`` and the UNIQUE constraint fails one of them. The retry
+            # takes the update branch that loser was always entitled to.
+            #
+            # It is *not* only that — a NOT NULL violation raises the same
+            # class — so the log names the ambiguity rather than asserting a
+            # race, and a second failure propagates untouched.
             logger.info(
-                "[cli_tool.upsert] insert lost a race, retrying as an update: "
-                "env=%s, bot_id=%s, name=%s",
+                "[cli_tool.upsert] integrity conflict (likely a concurrent "
+                "insert); retrying once as an update: env=%s, bot_id=%s, "
+                "name=%s, error=%s",
                 env,
                 bot_id,
                 name,
+                exc.__class__.__name__,
             )
             return self._upsert_once(**fields)
 
@@ -194,9 +213,28 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
             row.oss_key = oss_key
             row.installed_by = installed_by
             row.modifier = modifier
+            # Force the timestamp even when nothing else changed. SQLAlchemy
+            # emits no UPDATE at all when every assigned value equals what is
+            # already there, so ``onupdate`` never fires and a re-install or a
+            # re-applied manifest would leave the audit columns showing the
+            # *previous* write. A SQL expression never compares equal to the
+            # stored scalar, so it forces the dirty mark; DB time also keeps
+            # gmt_create and gmt_modified on one clock.
+            row.gmt_modified = func.now()
             db.flush()
             db.refresh(row)
-            return row.to_record()
+            record = row.to_record()
+        logger.info(
+            "[cli_tool.upsert] stored, env=%s, bot_id=%s, name=%s, "
+            "size_bytes=%s, installed_by=%s, modifier=%s",
+            env,
+            bot_id,
+            name,
+            size_bytes,
+            installed_by,
+            modifier,
+        )
+        return record
 
     def delete(self, *, env: str, entity_id: str, bot_id: str, name: str) -> bool:
         with self._db.orm_session() as db:
@@ -210,16 +248,40 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
                 )
                 .delete(synchronize_session=False)
             )
-            return bool(removed)
+        logger.info(
+            "[cli_tool.delete] env=%s, bot_id=%s, name=%s, deleted=%s",
+            env,
+            bot_id,
+            name,
+            removed,
+        )
+        return bool(removed)
 
-    def delete_all(self, *, env: str, entity_id: str, bot_id: str) -> int:
+    def delete_all(self, *, env: str, entity_id: str, bot_id: str) -> Sequence[str]:
+        """Delete every row for the bot; return the ``oss_key``s that were on
+        them.
+
+        Returning the keys rather than a count is what stops the objects being
+        orphaned: ``oss_key`` lives only on these rows, so a caller that
+        deleted first and asked later could never enumerate what to clean up.
+        """
         with self._db.orm_session() as db:
-            return int(
+            rows = (
                 db.query(self._Tool)
                 .filter(
                     self._Tool.env == env,
                     self._Tool.entity_id == entity_id,
                     self._Tool.bot_id == bot_id,
                 )
-                .delete(synchronize_session=False)
+                .all()
             )
+            keys = [row.oss_key for row in rows]
+            for row in rows:
+                db.delete(row)
+        logger.info(
+            "[cli_tool.delete_all] env=%s, bot_id=%s, deleted=%s",
+            env,
+            bot_id,
+            len(keys),
+        )
+        return keys
