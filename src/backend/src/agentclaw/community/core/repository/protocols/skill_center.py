@@ -425,11 +425,13 @@ class SkillRepository(Protocol):
         page_size: int,
         active: bool | None,
         keyword: str | None,
+        source: str | None = None,
     ) -> tuple[int, list[dict]]:
         """Page desired-state metadata for every Skill one Bot reaches.
 
         ``skill_set_member_ids`` are the Skills a SkillSet bridges to the Bot,
         resolved by the SkillSet control plane; Bot-owned rows are found here.
+        ``source=LOCAL`` narrows to Bot-owned ``local://`` rows only.
         """
         ...
 

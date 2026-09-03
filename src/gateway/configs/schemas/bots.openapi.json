@@ -37300,7 +37300,7 @@
     "/openapi/v1/bots/skills": {
       "get": {
         "deprecated": true,
-        "description": "List every skill the bot has, from stored desired state (paginated).\n\nCovers both ways a bot reaches a skill: skills uploaded to this bot, and\nskills a capability set of the bot's brings to it. Answers even while the\nbot is offline — active is the desired state, not the live runtime.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills instead.",
+        "description": "List every skill the bot has, from stored desired state (paginated).\n\nWithout the source filter, covers every way a Bot reaches a Skill: uploads to\nthis Bot, SkillSet membership, and direct installation. source=LOCAL\nnarrows the page to Bot-owned Local uploads. Answers even while the Bot is\noffline — active is desired state, not observed runtime.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills instead.",
         "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
@@ -37366,6 +37366,25 @@
               ],
               "description": "Filter: case-insensitive substring match against the skill's name and description.",
               "title": "Keyword"
+            }
+          },
+          {
+            "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "LOCAL",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+              "title": "Source"
             }
           },
           {
@@ -80622,7 +80641,7 @@
     },
     "/openapi/v1/bots/{bot_id}/skills": {
       "get": {
-        "description": "List every skill the bot has, from stored desired state (paginated).\n\nCovers both ways a bot reaches a skill: skills uploaded to this bot, and\nskills a capability set of the bot's brings to it. Answers even while the\nbot is offline — active is the desired state, not the live runtime.",
+        "description": "List every skill the bot has, from stored desired state (paginated).\n\nWithout the source filter, covers every way a Bot reaches a Skill: uploads to\nthis Bot, SkillSet membership, and direct installation. source=LOCAL\nnarrows the page to Bot-owned Local uploads. Answers even while the Bot is\noffline — active is desired state, not observed runtime.",
         "operationId": "list_skills_openapi_v1_bots__bot_id__skills_get",
         "parameters": [
           {
@@ -80670,6 +80689,25 @@
               ],
               "description": "Filter: case-insensitive substring match against the skill's name and description.",
               "title": "Keyword"
+            }
+          },
+          {
+            "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "LOCAL",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+              "title": "Source"
             }
           },
           {

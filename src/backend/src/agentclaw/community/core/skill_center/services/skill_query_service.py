@@ -154,6 +154,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
         page_size: int,
         active: bool | None,
         keyword: str | None,
+        source: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]:
         """Page every Skill the Bot has — owned rows and SkillSet-bridged ones.
 
@@ -175,6 +176,7 @@ class SkillQueryService(SkillQueryServiceProtocol):
             page_size=page_size,
             active=active,
             keyword=keyword,
+            source=source,
         )
 
     # ── Detail ──────────────────────────────────────────────────────
