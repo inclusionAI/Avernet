@@ -65,9 +65,14 @@ class FakeCopyingObjectStorage(FakeObjectStorage):
 class FakeCliToolRepo:
     """An in-memory ``BotCliToolRepositoryProtocol``, scoped like the real one."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, write_error=None, write_error_names=None) -> None:
         self.rows: dict[tuple[str, str, str, str], object] = {}
         self.deletes: list[str] = []
+        # A persistence failure on the write, for the names given (all of them
+        # when ``write_error_names`` is None). The real one raises whatever the
+        # driver raises; the service's contract is that it never escapes.
+        self.write_error = write_error
+        self.write_error_names = write_error_names
 
     @staticmethod
     def _key(env, entity_id, bot_id, name):
@@ -88,6 +93,11 @@ class FakeCliToolRepo:
             BotCliToolRecord,
         )
 
+        if self.write_error is not None and (
+            self.write_error_names is None
+            or kwargs["name"] in self.write_error_names
+        ):
+            raise self.write_error
         record = BotCliToolRecord(id=len(self.rows) + 1, **kwargs)
         self.rows[
             self._key(kwargs["env"], kwargs["entity_id"], kwargs["bot_id"], kwargs["name"])

@@ -4,6 +4,7 @@ Exercised against in-memory SQLite — the same single ORM body that runs on pro
 OceanBase, so the UNIQUE guard, the upsert-not-duplicate behavior and the
 deterministic ordering are tested against a real database rather than a mock.
 """
+import inspect
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -407,3 +408,22 @@ def test_insert_scopes_by_env_and_entity_like_every_other_write(repo):
     assert repo.insert(**_fields(name="mycli", env="prod")) is not None
     assert repo.insert(**_fields(name="mycli", entity_id="other-ent")) is not None
     assert repo.insert(**_fields(name="mycli")) is None
+
+
+def test_delete_all_enumerates_under_a_lock() -> None:
+    """Enumerating by id fixes *which* rows are deleted; it does not fix what
+    is on them.
+
+    A concurrent ``upsert`` that replaces an enumerated row's ``oss_key``
+    between the SELECT and the DELETE is still deleted by its id, but the keys
+    already read report the previous value — and the key the vanished row
+    actually referenced then appears in no row again, so nothing can ever
+    enumerate it. The object leaks permanently, which is the one failure
+    returning keys exists to prevent.
+
+    Asserted on the source because SQLite silently drops ``FOR UPDATE``: the
+    behaviour cannot be reproduced on the engine these tests run against, and
+    a test that passed either way would pin nothing.
+    """
+    source = inspect.getsource(BotCliToolRepository.delete_all)
+    assert ".with_for_update()" in source

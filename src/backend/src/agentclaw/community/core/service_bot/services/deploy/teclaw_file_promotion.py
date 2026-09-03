@@ -209,7 +209,13 @@ class TeclawFilePromotion:
                 target = out.resources if ns == WORKSPACE_NS else out.identity_files
                 target.append(ref)
 
-        out.cli_tools = self._promote_cli_tools(
+        # Off the event loop, like the ``put_object`` above: this reads the
+        # metadata table and then copies each tool object — a server-side copy
+        # where the store offers one, and a full read-through of up to a few
+        # hundred megabytes where it does not. Left inline it would stall every
+        # other coroutine on the worker for the length of the transfer.
+        out.cli_tools = await asyncio.to_thread(
+            self._promote_cli_tools,
             env=env, entity_type=entity_type, entity_id=entity_id,
             bot_id=bot_id, publish_id=publish_id, stage=stage,
         )

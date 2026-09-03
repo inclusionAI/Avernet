@@ -8,6 +8,8 @@ which is what these cases pin.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
@@ -192,3 +194,36 @@ async def test_a_promotion_wired_without_the_table_carries_no_tool_refs() -> Non
     promotion = TeclawFilePromotion(oss_storage=FakeCopyingObjectStorage())
     refs = await _stage(promotion)
     assert refs.cli_tools == []
+
+
+@pytest.mark.asyncio
+async def test_the_copy_does_not_run_on_the_event_loop() -> None:
+    """A tool object can be a few hundred megabytes, and a store without a
+    server-side copy reads it through in one blocking call. Run inline it would
+    stall every other coroutine on the worker for the length of the transfer —
+    so the whole sweep goes to a thread, as the sibling ``put_object`` above it
+    already does.
+
+    Asserted by asking, from inside the copy, whether a running loop is
+    visible: a worker thread has none.
+    """
+    seen: list[bool] = []
+
+    class _AsksWhereItIsRunning(FakeCopyingObjectStorage):
+        def copy_object(self, source_key: str, dest_key: str) -> bool:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                seen.append(False)
+            else:
+                seen.append(True)
+            return super().copy_object(source_key, dest_key)
+
+    oss = _AsksWhereItIsRunning()
+    promotion, _, repo = _promotion(oss=oss)
+    _row(repo, "mycli")
+    oss.objects[f"{_LIVE}/mycli"] = b"\x7fELF"
+
+    await _stage(promotion)
+
+    assert seen == [False], "the promotion copied a tool on the event loop"

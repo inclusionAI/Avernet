@@ -349,7 +349,23 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
             # Deleting by primary key makes the two statements describe the
             # same rows by construction: the delete can only remove what was
             # enumerated, whatever commits alongside it.
-            rows = db.query(self._Tool.id, self._Tool.oss_key).filter(*scope).all()
+            #
+            # ``FOR UPDATE`` closes the other half. Enumerating by id fixes
+            # *which* rows are deleted; it does not fix what is *on* them. A
+            # concurrent ``upsert`` that updates an enumerated row's
+            # ``oss_key`` between the two statements would be deleted by the
+            # id, but ``keys`` would report the value the plain read saw — and
+            # the key actually referenced by the row that vanished appears in
+            # no row again, so nothing can ever enumerate it. The lock makes
+            # the reported keys the deleted keys. SQLite ignores the clause,
+            # which is why the tests here still describe the ordinary path
+            # rather than this one.
+            rows = (
+                db.query(self._Tool.id, self._Tool.oss_key)
+                .filter(*scope)
+                .with_for_update()
+                .all()
+            )
             keys = [key for (_, key) in rows]
             removed = 0
             if rows:

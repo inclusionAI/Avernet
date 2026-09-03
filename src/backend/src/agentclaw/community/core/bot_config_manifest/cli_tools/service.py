@@ -212,22 +212,46 @@ class CliToolService:
             return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
 
         write = self._repo.insert if expect_absent else self._repo.upsert
-        record = await asyncio.to_thread(
-            write,
-            env=ctx.env,
-            entity_id=ctx.entity_id,
-            bot_id=ctx.bot_id,
-            name=decl.name,
-            source=decl.source_url,
-            digest=decl.digest,
-            subpath=decl.subpath,
-            md5=md5,
-            size_bytes=len(data),
-            version=decl.version,
-            oss_key=stored.store_key,
-            installed_by=installed_by,
-            modifier=ctx.actor_id,
-        )
+        try:
+            record = await asyncio.to_thread(
+                write,
+                env=ctx.env,
+                entity_id=ctx.entity_id,
+                bot_id=ctx.bot_id,
+                name=decl.name,
+                source=decl.source_url,
+                digest=decl.digest,
+                subpath=decl.subpath,
+                md5=md5,
+                size_bytes=len(data),
+                version=decl.version,
+                oss_key=stored.store_key,
+                installed_by=installed_by,
+                modifier=ctx.actor_id,
+            )
+        except Exception as error:  # noqa: BLE001 — see below
+            # The class promises every failure comes back as an outcome, and
+            # this write is the one that had no such handling: a flaky
+            # persistence error here aborted the whole batch, so a full
+            # override reported nothing for the tools it had not reached yet.
+            # Broad on purpose — a driver raises whatever it raises, and the
+            # alternative to translating it is losing the other declarations.
+            #
+            # Logged at exception, never swallowed: the engine has *accepted*
+            # the tool at this point, so platform state and container state now
+            # disagree, and the next full override is what reconciles them.
+            logger.exception(
+                "[cli_tools] bot=%s name=%s: the engine accepted the tool but "
+                "recording it failed; the container is ahead of the platform",
+                ctx.bot_id, decl.name,
+            )
+            if superseded is None or superseded.oss_key != stored.store_key:
+                await self._discard(stored.store_key)
+            return CliToolOutcome(
+                decl.name,
+                CliToolOp.FAILED,
+                f"the tool was installed but could not be recorded: {error}",
+            )
         if record is None:
             # ``insert`` alone can answer this, and only at the moment of the
             # write: the name was free when this install started and is taken

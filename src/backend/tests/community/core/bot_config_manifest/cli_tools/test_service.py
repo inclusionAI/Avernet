@@ -893,3 +893,68 @@ async def test_a_conflict_over_identical_bytes_keeps_the_winners_object() -> Non
     assert outcome.op is CliToolOp.CONFLICT
     key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
     assert key not in oss.deletes and oss.objects[key] == _TOOL
+
+
+# ── a persistence failure is an outcome, not an exception ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_failed_record_is_reported_rather_than_raised() -> None:
+    """The class promises every failure comes back as an outcome. This write
+    was the one that did not honour it, and it is the *last* step — the engine
+    has already accepted the tool by the time it runs."""
+    service, repo, delivery, _, oss = _service()
+    repo.write_error = RuntimeError("connection reset")
+
+    outcome = await service.install(_CTX, _decl(), installed_by="u2")
+
+    assert outcome.op is CliToolOp.FAILED and outcome.failed
+    assert "could not be recorded" in (outcome.detail or "")
+    # The engine got it — that is exactly why this is worth logging — and the
+    # unreferenced object is not left behind.
+    assert [name for name, _ in delivery.installed] == ["mycli"]
+    assert _key() in oss.deletes and _key() not in oss.objects
+
+
+@pytest.mark.asyncio
+async def test_a_batch_continues_past_one_tools_persistence_failure() -> None:
+    """A full override reports per tool. An uncaught exception here aborted the
+    whole batch, so the tools after the failing one were neither installed nor
+    reported — the caller could not tell they had been skipped."""
+    service, repo, _, _, _ = _service()
+    repo.write_error = RuntimeError("connection reset")
+    repo.write_error_names = {"first"}
+
+    outcomes = await service.replace_all(
+        _CTX,
+        [_decl(name="first"), _decl(name="second")],
+        installed_by="manifest",
+    )
+
+    assert [(o.name, o.op) for o in outcomes] == [
+        ("first", CliToolOp.FAILED),
+        ("second", CliToolOp.INSTALLED),
+    ]
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="second")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
+    """The same rule the other discard paths follow: only a key nothing
+    references is removed, so a replacement that cannot be recorded leaves the
+    row it failed to replace still describing bytes that exist."""
+    service, repo, _, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    repo.write_error = RuntimeError("connection reset")
+
+    outcome = await service.install(
+        _CTX, _decl(digest=other_digest), installed_by="u2"
+    )
+
+    assert outcome.op is CliToolOp.FAILED
+    assert oss.objects[old_key] == _TOOL and old_key not in oss.deletes
