@@ -186,7 +186,7 @@ class WorkOrderMessageContent(StrEnum):
         "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
     )
     SKILL_COLLABORATOR_PENDING = (
-        "用户「{applicant_name}」申请共同编辑 Skill「{skill_name}」，请及时处理。"
+        "用户{applicant_display}申请共同编辑 Skill「{skill_name}」，请及时处理。"
     )
     SKILL_COLLABORATOR_APPROVED = "你共同编辑 Skill「{skill_name}」的申请已通过。"
     SKILL_COLLABORATOR_REJECTED = (
