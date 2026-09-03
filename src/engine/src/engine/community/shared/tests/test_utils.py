@@ -3,7 +3,42 @@
 """
 import pytest
 
-from engine.community.shared.utils import decode_session_key, encode_session_key
+from engine.community.shared.utils import (
+    decode_session_key,
+    encode_session_key,
+    managed_session_keys_equal,
+    normalize_managed_session_lookup_key,
+)
+
+
+def test_managed_session_lookup_key_matches_openclaw_normalization():
+    assert normalize_managed_session_lookup_key(
+        "session:ABC-123:user:CloudUser"
+    ) == "session:abc-123:user:clouduser"
+    assert normalize_managed_session_lookup_key(
+        "agent:Main:session:ABC-123:user:CloudUser"
+    ) == "agent:Main:session:ABC-123:user:CloudUser"
+    assert normalize_managed_session_lookup_key("discord:dm:OpaqueUser") == (
+        "discord:dm:OpaqueUser"
+    )
+
+
+def test_managed_session_keys_match_relative_and_agent_scoped_forms():
+    relative = "session:ABC-123:user:CloudUser"
+    canonical = "agent:main:session:abc-123:user:clouduser"
+
+    assert managed_session_keys_equal(canonical, relative)
+    assert managed_session_keys_equal(relative, canonical)
+    assert not managed_session_keys_equal(
+        relative,
+        "session:abc-123:user:clouduser",
+    )
+    assert not managed_session_keys_equal(
+        canonical,
+        "agent:other:session:abc-123:user:clouduser",
+    )
+    assert not managed_session_keys_equal("Opaque-ID", "opaque-id")
+    assert not managed_session_keys_equal("prefix:target", "target")
 
 
 class TestEncodeSessionKey:
