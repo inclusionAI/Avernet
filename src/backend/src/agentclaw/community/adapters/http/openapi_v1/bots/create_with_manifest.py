@@ -95,6 +95,7 @@ from agentclaw.community.plugin_api.passport import PassportPlugin
 # engine this surface refuses to create on must be refused here too, and a
 # second copy of the rule is a second thing to forget.
 from .router import (
+    BOT_QUOTA_CONFLICT_RESPONSES,
     _engine_properties_from_body,
     _require_publicly_creatable_engine,
     _require_service_capable_engine,
@@ -132,7 +133,7 @@ router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicA
     # no grant to check before the bot exists, so without this an application
     # could create a bot as any user. See ``admission.py``.
     dependencies=[Depends(refuse_app_only_caller)],
-    responses=USER_SCOPED_403,
+    responses={**USER_SCOPED_403, **BOT_QUOTA_CONFLICT_RESPONSES},
     operation_id="create_bot_with_manifest",
 )
 @envelope_errors
@@ -210,6 +211,7 @@ async def create_bot_with_manifest(
         context=BotCreateContext(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
             space_kind=current_space.kind,
+            space_quota=True,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,

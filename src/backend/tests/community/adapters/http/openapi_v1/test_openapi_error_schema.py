@@ -24,6 +24,10 @@ _ERROR_REF = "#/components/schemas/ErrorEnvelope"
 # as failures, but the state itself is what the caller acts on, so it stays in
 # ``data`` and the route declares that shape. Every other error stays uniform.
 _DOCUMENTED_DATA_BEARING_ERRORS = {
+    ("/openapi/v1/bots", 409),
+    ("/openapi/v1/bots/with-manifest", 409),
+    ("/openapi/v1/bots/{bot_id}/auth-status", 409),
+    ("/openapi/v1/bots/{bot_id}/space", 409),
     ("/openapi/v1/bots/{bot_id}/auth-status", 400),
     ("/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline", 409),
 }

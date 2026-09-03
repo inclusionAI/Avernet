@@ -14,8 +14,24 @@ class PolicyServiceProtocol(Protocol):
 
     def disallow(self, *, entity_id: str, entity_type: str) -> None: ...
 
-    def get_bots_ceiling(self, *, entity_id: str, default: int = 5) -> int: ...
+    def get_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        default: int = 5,
+        entity_type: str = "staff",
+    ) -> int: ...
 
-    def set_bots_ceiling(self, *, entity_id: str, ceiling: int) -> None: ...
+    def set_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        ceiling: int,
+        entity_type: str = "staff",
+    ) -> None: ...
+
+    def clear_bots_ceiling(
+        self, *, entity_id: str, entity_type: str = "staff"
+    ) -> bool: ...
 
     def get_quota(self) -> dict: ...

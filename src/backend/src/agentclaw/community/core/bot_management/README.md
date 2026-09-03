@@ -19,6 +19,7 @@ provides:
   - "TeclawPublishTaskLifecycle"
   - "CreateBotForOthersService"
   - "DefaultBotPassportRepairService"
+  - "BotQuotaService and BotQuotaScope"
 consumes:
   - "DeviceAccessor"
   - "PassportPlugin"
@@ -33,6 +34,8 @@ consumes:
   - "HandlerRegistry"
   - "CommonConfigService"
   - "BotSpaceAccessProtocol (implemented by the Spaces context)"
+  - "SpaceAccessServiceProtocol"
+  - "CachePlugin quota lock"
 internal_dependencies:
   - agentclaw.community.core.repository.protocols.bot    # repository contracts consumed by this module
   - agentclaw.community.core.repository.protocols.devices    # repository contracts consumed by this module
@@ -57,6 +60,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_management.bot_space    # narrow cross-context Space membership contract
   - agentclaw.community.core.spaces.errors    # typed Space membership failures propagated by Bot Space assignment
   - agentclaw.community.core.spaces.models    # SpaceRecord/SpaceType used by Bot Space assignment
+  - agentclaw.community.core.spaces.protocols    # Space lookup used by quota configuration
   - agentclaw.community.core.skill_center
   - agentclaw.community.core.task_queue
   - agentclaw.community.core.workspace
@@ -70,6 +74,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.passport
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.auth_relationship
+  - agentclaw.community.plugin_api.cache
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils

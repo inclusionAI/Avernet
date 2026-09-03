@@ -59,6 +59,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page,
 )
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
@@ -141,6 +142,7 @@ from .schemas import (
     BotAuthStatusPoll,
     BotCreate,
     BotInventoryItem,
+    BotQuotaExceededData,
     BotStatus,
     BotType,
     BotSpaceAssignment,
@@ -176,6 +178,13 @@ _GRANT_CHECKED_OWN_BOT = [Depends(require_granted_own_bot)]
 #: decision visible on the route that carries it, and holds even if the table
 #: entry were ever mislabelled. See ``refuse_app_only_caller``.
 _REFUSES_APP_ONLY = [Depends(refuse_app_only_caller)]
+
+BOT_QUOTA_CONFLICT_RESPONSES = {
+    409: {
+        "model": Envelope[BotQuotaExceededData],
+        "description": "The target Space has no capacity for another Bot.",
+    }
+}
 
 router = APIRouter(prefix="/openapi/v1/bots", tags=["bots"], route_class=PublicAPIRoute)
 
@@ -459,6 +468,7 @@ def _engine_properties_from_body(
     dependencies=_REFUSES_APP_ONLY,
     responses={
         **USER_SCOPED_403,
+        **BOT_QUOTA_CONFLICT_RESPONSES,
         202: {
             "model": Envelope[BotAuthPending],
             "description": "Needs user authorization",
@@ -539,6 +549,7 @@ async def create_bot(
         context=BotCreateContext(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
             space_kind=current_space.kind,
+            space_quota=True,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
@@ -719,15 +730,24 @@ async def get_bots_ceiling(
     request: Request,
     owner_id: UserIdDep,
     caller: ActingCallerDep,
-    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
+    x_space_id: Annotated[
+        str | None,
+        Header(
+            alias="X-Space-Id",
+            description="Business-space context; omit to use the personal space.",
+        ),
+    ] = None,
+    quota_service: BotQuotaServiceProtocol = Injected(BotQuotaServiceProtocol),
+    space_context: BusinessSpaceContextProtocol = Injected(
+        BusinessSpaceContextProtocol
+    ),
 ) -> Envelope[Ceiling]:
-    """Get the named user's bot-creation quota ceiling.
+    """Get the Bot ceiling for the selected business Space.
 
-    The number creation actually enforces: creating a bot while the user owns
-    this many live bots is refused (409). A ceiling of 0 or less means the
-    limit is disabled. For an application caller, reading it requires holding
-    at least one live delegation from the named user; without one the user is
-    answered as if they did not exist.
+    Personal Space keeps the named user's configured ceiling. Team Space uses
+    its own ceiling and counts Bots created by every member. For an application
+    caller, reading it still requires at least one live delegation from the
+    named user; without one the user is answered as if they did not exist.
     """
     # Names no bot, so there is no grant to check against one — but the answer
     # is still about a person's account, and a stranger application must not be
@@ -736,11 +756,6 @@ async def get_bots_ceiling(
     # relationship, the closest thing this operation has to a scope. An
     # application with no delegation learns nothing it did not already know.
     #
-    # Resolved through the same method creation enforces, not
-    # PolicyService.get_bots_ceiling directly: that one falls back to its own
-    # hardcoded default of 5, while creation falls back to the configured
-    # max_devices_per_entity. Reading it directly would advertise 5 to a caller
-    # whose deployment allows (or rejects at) a different number.
     granted = caller.granted_bot_ids()
     if granted is not None and not granted:
         # The named user goes to the log bounded and escaped, never into the
@@ -753,8 +768,13 @@ async def get_bots_ceiling(
             for_log(owner_id),
         )
         raise BotNotFoundError("no authorization from the named user")
-    ceiling = bot_service.get_bots_ceiling_for_owner(owner_id)
-    return envelope(Ceiling(ceiling=ceiling), request)
+    current_space = space_context.resolve_current(
+        owner_id=owner_id, header_space_id=x_space_id
+    )
+    snapshot = quota_service.inspect(
+        owner_id=owner_id, space_id=current_space.numeric_id
+    )
+    return envelope(Ceiling(ceiling=snapshot.ceiling), request)
 
 
 # ── Bot inventory card surface ─────────────────────────────────────────────
@@ -976,7 +996,7 @@ async def update_bot(
 @router.put(
     "/{bot_id}/space",
     response_model=Envelope[BotSpaceAssignment],
-    responses=USER_SCOPED_403,
+    responses={**USER_SCOPED_403, **BOT_QUOTA_CONFLICT_RESPONSES},
     dependencies=_GRANT_CHECKED_OWN_BOT,
 )
 @envelope_errors
@@ -1068,6 +1088,7 @@ async def restart_bot(
 #: model it actually returns.
 AUTH_STATUS_RESPONSES = {
     **USER_SCOPED_403,
+    **BOT_QUOTA_CONFLICT_RESPONSES,
     400: {
         "model": Envelope[BotAuthStatus],
         "description": "Authorization did not complete; `data.status` "
@@ -1153,11 +1174,12 @@ def _complete_auth_status(
             context=BotCreateContext(
                 deployment_mode=BotCreateDeploymentMode.CLOUD,
                 space_kind=current_space.kind,
+                space_quota=True,
             ),
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
-            )
+        )
     except AuthStatusUnavailableError:
         # The passport service answered with no status at all — typically the
         # apply is still propagating and the Passport is not ready yet. On this

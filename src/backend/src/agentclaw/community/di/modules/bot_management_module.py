@@ -31,6 +31,7 @@ from injector import (
 )
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.create_bot_for_others_service import (
     CreateBotForOthersServiceProtocol,
@@ -511,6 +512,7 @@ class BotManagementModule(Module):
         task_queue_service: TaskQueueService,
         common_config_service: CommonConfigService,
         caller_identity_repo: CallerIdentityRepositoryProtocol,
+        bot_quota_service: BotQuotaServiceProtocol,
         injector: Injector,
     ) -> BotService:
         # Explicit provider: ``BotService.__init__`` types several
@@ -557,6 +559,7 @@ class BotManagementModule(Module):
             common_config_service=common_config_service,
             caller_identity_repo=caller_identity_repo,
             runtime_reconciler_provider=lambda: injector.get(CoreBotRuntimeProjectorProtocol),
+            bot_quota_service=bot_quota_service,
         )
 
     @singleton

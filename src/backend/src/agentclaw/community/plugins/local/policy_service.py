@@ -56,15 +56,39 @@ class LocalPolicyService:
             entity_id,
         )
 
-    def get_bots_ceiling(self, *, entity_id: str, default: int = 5) -> int:
+    def get_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        default: int = 5,
+        entity_type: str = "staff",
+    ) -> int:
         """singlebox 不限 bot 数量上限。返回一个足够大的值。"""
         return 9999
 
-    def set_bots_ceiling(self, *, entity_id: str, ceiling: int) -> None:
+    def set_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        ceiling: int,
+        entity_type: str = "staff",
+    ) -> None:
         logger.info(
-            "[LocalPolicyService] set_bots_ceiling(entity_id=%s, ceiling=%d) -> no-op",
-            entity_id, ceiling,
+            "[LocalPolicyService] set_bots_ceiling(entity_type=%s, "
+            "entity_id=%s, ceiling=%d) -> no-op",
+            entity_type,
+            entity_id,
+            ceiling,
         )
+
+    def clear_bots_ceiling(self, *, entity_id: str, entity_type: str = "staff") -> bool:
+        logger.info(
+            "[LocalPolicyService] clear_bots_ceiling(entity_type=%s, "
+            "entity_id=%s) -> no-op",
+            entity_type,
+            entity_id,
+        )
+        return False
 
     def get_quota(self) -> dict:
         """Return the API-facing unlimited quota shape used by the router."""

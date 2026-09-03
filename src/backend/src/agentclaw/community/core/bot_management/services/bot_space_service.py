@@ -8,6 +8,9 @@ from agentclaw.community.core.bot_management.bot_space import (
     BotSpaceAccessProtocol,
     BotSpaceAssignmentResult,
 )
+from agentclaw.community.core.bot_management.bot_quota_service_protocol import (
+    BotQuotaServiceProtocol,
+)
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
@@ -15,7 +18,9 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.spaces.errors import SpaceAccessDeniedError
 from agentclaw.community.core.spaces.models import SpaceType
-from agentclaw.community.core.bot_management.bot_space_service_protocol import BotSpaceServiceProtocol
+from agentclaw.community.core.bot_management.bot_space_service_protocol import (
+    BotSpaceServiceProtocol,
+)
 
 
 class BotSpaceService(BotSpaceServiceProtocol):
@@ -30,9 +35,11 @@ class BotSpaceService(BotSpaceServiceProtocol):
         self,
         repository: BotRepository,
         space_access: BotSpaceAccessProtocol,
+        bot_quota: BotQuotaServiceProtocol,
     ) -> None:
         self._repository = repository
         self._space_access = space_access
+        self._bot_quota = bot_quota
 
     def change_space(
         self, *, bot_id: str, owner_id: str, space_id: int
@@ -70,11 +77,24 @@ class BotSpaceService(BotSpaceServiceProtocol):
         if not changed:
             return BotSpaceAssignmentResult(bot=bot, space=space, changed=False)
 
-        updated = self._repository.update_space_by_owner(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            space_id=persisted_space_id,
+        normalizes_legacy_personal = (
+            bot.get("space_id") is None
+            and space.space_type is SpaceType.PERSONAL
+            and space.personal_owner_id == owner_id
         )
+        if bot.get("bot_type") == "desktop" or normalizes_legacy_personal:
+            updated = self._repository.update_space_by_owner(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                space_id=persisted_space_id,
+            )
+        else:
+            with self._bot_quota.guard_add(owner_id=owner_id, space_id=space.id):
+                updated = self._repository.update_space_by_owner(
+                    bot_id=bot_id,
+                    owner_id=owner_id,
+                    space_id=persisted_space_id,
+                )
         if updated is None:
             # The Bot may have been deleted between the read and write. Mask it
             # exactly like the initial owner-scoped lookup.

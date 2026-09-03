@@ -52,6 +52,7 @@ from agentclaw.community.api.cron_relay_service import (
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
+from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.market_favorite_service import (
     MarketFavoriteServiceProtocol,
@@ -93,6 +94,11 @@ from agentclaw.community.core.bot_inventory.types import (
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaScope,
+    BotQuotaSnapshot,
+)
+from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.gateway_principal import (
     AppPrincipal,
     GatewayApp,
@@ -217,6 +223,20 @@ class _Bots:
         return False
 
 
+class _Quota:
+    def inspect(self, *, owner_id: str, space_id: int | None) -> BotQuotaSnapshot:
+        return BotQuotaSnapshot(
+            scope=BotQuotaScope(
+                owner_id=owner_id,
+                space_id=space_id,
+                space_name="Personal",
+                space_type=SpaceType.PERSONAL,
+            ),
+            ceiling=5,
+            used=0,
+        )
+
+
 @pytest.fixture
 def bots():
     return _Bots()
@@ -234,6 +254,7 @@ def make_client(bots):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(BotServiceProtocol, to=bots)
+                binder.bind(BotQuotaServiceProtocol, to=_Quota())
                 binder.bind(BotAppGrantServiceProtocol, to=_Grants(*grant_ids))
                 unexpected = _UnexpectedService()
                 binder.bind(CronRelayServiceProtocol, to=unexpected)
@@ -627,7 +648,7 @@ def test_an_owner_scoped_listing_does_not_widen_through_a_shared_bot_id(
 
 
 def test_the_ceiling_is_readable_with_a_delegation(make_client):
-    client = make_client(GRANTED)
+    client = make_client(GRANTED, space_context=NoopBusinessSpaceContext())
 
     assert _data(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 5
 
