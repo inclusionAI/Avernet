@@ -59,6 +59,45 @@ from agentclaw.community.core.repository.protocols.bot import (
 
 logger = get_logger()
 
+#: ``aicoding`` is ``claude_code``'s internal runtime form (engine/form
+#: vocabulary split), not an independently filterable engine value: a
+#: ``engine=aicoding`` filter must match both the legacy literal
+#: ``active_engine='aicoding'`` rows and the post-split ``claude_code`` rows
+#: carrying a coding template. The SQL criterion below mirrors
+#: ``workspace.runtime_identity.uses_aicoding_runtime`` arm-by-arm (legacy
+#: short-circuit / form marker / non-empty non-``normalCC`` template): the
+#: form-marker arm cannot be expressed on these columns (the marker lives in
+#: the ``ac_templates.ext`` snapshot), but every form-marked row also matches
+#: the template arm — creation writes the marker only for template-backed
+#: bots. Parity with the predicate is pinned by
+#: ``test_repository_engine_form_filter_parity``.
+_CODING_FORM_ENGINE = "aicoding"
+_REAL_CODING_ENGINE = "claude_code"
+_NEUTRAL_TEMPLATE_TYPE = "normalcc"
+
+
+def engine_form_filter_criterion(model: Any, engine: str) -> Any:
+    """One SQLAlchemy criterion for an engine filter value, form-aware.
+
+    ``aicoding`` expands to the union of both spellings; every other value
+    keeps its historical exact-match semantics (``engine=claude_code`` stays
+    the full claude_code population, aicoding form included — unchanged by
+    design, matching the /bots/all expansion).
+    """
+    normalized = (engine or "").strip().lower().replace("-", "_")
+    if normalized != _CODING_FORM_ENGINE:
+        return model.active_engine == engine
+    coding_template = and_(
+        model.template_type.isnot(None),
+        model.template_type != "",
+        func.lower(model.template_type) != _NEUTRAL_TEMPLATE_TYPE,
+    )
+    return or_(
+        model.active_engine == _CODING_FORM_ENGINE,
+        and_(model.active_engine == _REAL_CODING_ENGINE, coding_template),
+    )
+
+
 # Prod's exact ``update_by_owner`` allowlist. Any field not here
 # (e.g. engine_types, creator_id, entity_id) is silently ignored —
 # faithful prod parity.
@@ -385,7 +424,8 @@ class BotRepository(
             if space_id is not None:
                 query = query.filter(self.Model.space_id == space_id)
             if engine:
-                query = query.filter(self.Model.active_engine == engine)
+                # aicoding form-aware: exact-match for every other value.
+                query = query.filter(engine_form_filter_criterion(self.Model, engine))
             if status:
                 query = query.filter(self.Model.status == status)
             total = query.count()
@@ -873,9 +913,11 @@ class BotRepository(
             if bot_type:
                 query = query.filter(self.Model.bot_type == bot_type)
 
-            # active_engine 过滤
+            # active_engine 过滤 (aicoding form-aware: exact-match otherwise)
             if active_engine:
-                query = query.filter(self.Model.active_engine == active_engine)
+                query = query.filter(
+                    engine_form_filter_criterion(self.Model, active_engine)
+                )
 
             # bot_id 过滤
             if bot_id:
