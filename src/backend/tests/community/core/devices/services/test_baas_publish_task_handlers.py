@@ -22,7 +22,11 @@ from agentclaw.community.core.devices.services.baas_publish_task_handlers import
     build_restart_publish_poll_payload,
 )
 from agentclaw.community.core.events.bus import get_event_bus, reset_event_bus
-from agentclaw.community.core.events.types import BaasPublishCompletedEvent
+from agentclaw.community.core.events.types import (
+    BaasPublishCompletedEvent,
+    DeviceActivatedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.types import Complete, Fail, Reschedule, Retry
 
@@ -1468,6 +1472,7 @@ def test_restart_poll_retries_on_transient_status_and_direct_unexpected_status()
         publish_id=1001,
         bot_uuid="uuid-001",
         bot={},
+        binding=repo.get_by_id.return_value,
     ) == Retry("unexpected publish status: ODD")
 
 
@@ -1640,10 +1645,23 @@ def test_create_init_replay_after_active_reemits_reconciliation_wakeup():
         reset_event_bus()
 
 
-def test_restart_success_publishes_baas_reconciliation_wakeup():
+def test_restart_success_requests_runtime_projection_and_baas_reconciliation():
     reset_event_bus()
     received: list[BaasPublishCompletedEvent] = []
+    projected: list[RuntimeProjectionRequestedEvent] = []
+    activated: list[DeviceActivatedEvent] = []
+    delivery_order: list[str] = []
     get_event_bus().subscribe(BaasPublishCompletedEvent, received.append)
+    get_event_bus().subscribe(RuntimeProjectionRequestedEvent, projected.append)
+    get_event_bus().subscribe(DeviceActivatedEvent, activated.append)
+    get_event_bus().subscribe(
+        BaasPublishCompletedEvent,
+        lambda _event: delivery_order.append("baas_completed"),
+    )
+    get_event_bus().subscribe(
+        RuntimeProjectionRequestedEvent,
+        lambda _event: delivery_order.append("runtime_projection"),
+    )
     try:
         repo = MagicMock()
         repo.get_by_id.return_value = _make_binding(
@@ -1694,6 +1712,18 @@ def test_restart_success_publishes_baas_reconciliation_wakeup():
                 publish_kind="restart",
             )
         ]
+        assert projected == [
+            RuntimeProjectionRequestedEvent(
+                device_id="device-001",
+                binding_id=42,
+                entity_id="owner-001",
+                entity_type="staff",
+                device_provider="baas",
+                sandbox_id=None,
+            )
+        ]
+        assert activated == []
+        assert delivery_order == ["runtime_projection", "baas_completed"]
     finally:
         reset_event_bus()
 

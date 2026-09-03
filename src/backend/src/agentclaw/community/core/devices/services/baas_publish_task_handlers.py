@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from agentclaw.community.core.bot_management.engines import resolve_provisioning
 from agentclaw.community.core.common_config.service import CommonConfigService
 from agentclaw.community.core.bot_management.utils import clear_baas_publish_failure_ext
 from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.events.bus import get_event_bus
-from agentclaw.community.core.events.types import BaasPublishCompletedEvent
+from agentclaw.community.core.events.types import (
+    BaasPublishCompletedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
     persist_default_image_policy,
 )
@@ -57,6 +61,21 @@ def _publish_baas_completed(
             owner_id=owner_id,
             publish_id=publish_id,
             publish_kind=publish_kind,
+        )
+    )
+
+
+def _request_baas_runtime_projection(binding: DeviceBindingRecord) -> None:
+    """Request a full desired-state projection after a BaaS restart."""
+
+    get_event_bus().publish(
+        RuntimeProjectionRequestedEvent(
+            device_id=binding.device_id,
+            binding_id=binding.id,
+            entity_id=binding.entity_id,
+            entity_type=binding.entity_type,
+            device_provider=binding.device_provider,
+            sandbox_id=binding.device_props.get("sandbox_id"),
         )
     )
 
@@ -452,6 +471,7 @@ class BaasRestartPublishPollHandler:
         )
         if preflight is not None:
             return preflight
+        binding = cast(DeviceBindingRecord, binding)
         bot = None
         if self._bot_repository is not None:
             bot = self._bot_repository.get_by_binding_id(binding_id)
@@ -488,6 +508,7 @@ class BaasRestartPublishPollHandler:
             publish_id=publish_id,
             bot_uuid=bot_uuid,
             bot=bot,
+            binding=binding,
             image_policy_on_success=image_policy_on_success,
         )
 
@@ -656,6 +677,7 @@ class BaasRestartPublishPollHandler:
         publish_id: int,
         bot_uuid: str | None,
         bot: Any,
+        binding: DeviceBindingRecord,
         image_policy_on_success: str | None = None,
     ) -> TaskOutcome:
         if status == DeviceBindingStatus.ACTIVE.value:
@@ -694,6 +716,7 @@ class BaasRestartPublishPollHandler:
                 bot_id=bot_id,
                 owner_id=owner_id,
                 publish_id=publish_id,
+                binding=binding,
                 image_policy_on_success=image_policy_on_success,
             )
         if status == DeviceBindingStatus.FAILED.value:
@@ -714,6 +737,7 @@ class BaasRestartPublishPollHandler:
         bot_id: str,
         owner_id: str,
         publish_id: int,
+        binding: DeviceBindingRecord,
         image_policy_on_success: str | None,
     ) -> TaskOutcome:
         if image_policy_on_success == _DEFAULT_IMAGE_POLICY_VALUE:
@@ -740,6 +764,7 @@ class BaasRestartPublishPollHandler:
         # Clear only after every success-side persistence step has completed.
         # A failure above keeps the durable request/baseline/policy for replay.
         self._clear_restart_recovery_intent(binding_id=binding_id)
+        _request_baas_runtime_projection(binding)
         _publish_baas_completed(
             binding_id=binding_id,
             bot_id=bot_id,

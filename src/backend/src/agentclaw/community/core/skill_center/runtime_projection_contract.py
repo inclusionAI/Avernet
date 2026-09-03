@@ -369,12 +369,12 @@ class ProjectionScope:
     released_mcp: frozenset[str] = frozenset()
     #: Treat *every* projected MCP code as claimed, ignoring ``claimed_mcp``.
     #:
-    #: Exactly one caller sets this: the device-activated listener
-    #: (``SkillSymlinkListener``, via ``DeviceActivatedEvent``). It is the one
-    #: place where "just re-declare the allow-list" is not enough, because a
-    #: newly active container holds *no* MCP configuration to refresh — there
-    #: is no prior state to converge on, only an empty device. Every other
-    #: path is mutation-triggered and names its own delta.
+    #: Exactly one listener sets this: ``SkillSymlinkListener``, via either a
+    #: first ``DeviceActivatedEvent`` or a post-restart
+    #: ``RuntimeProjectionRequestedEvent``. It is the one place where "just
+    #: re-declare the allow-list" is not enough, because a newly active or
+    #: restarted container must converge from its current runtime contents.
+    #: Every mutation-triggered path names its own delta instead.
     #:
     #: It is load-bearing, not a convenience: ``report_device_alive``
     #: deliberately does not push MCP details itself (see
