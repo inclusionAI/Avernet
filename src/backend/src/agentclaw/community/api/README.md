@@ -162,7 +162,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.auth              # AuthRequestContext — typed in caller_iam_token_service.py
   - agentclaw.community.plugin_api.passport          # PassportPlugin — typed in caller_identity_service.py
   - agentclaw.community.plugin_api.skill_center_gateway # Public catalogue request/result DTOs typed in skill_center_gateway_service.py
-  - agentclaw.community.core.task.task_runner.client.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
+  - agentclaw.community.core.task.task_runner.integration.ports  # OpenApiBotPort — typed in task_grant_service.py (stateless secbaas grant/revoke relay)
   - agentclaw.community.log                          # get_logger used by task_grant_service.py grant/revoke relay logging
   - agentclaw.community.core.access.policy_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.access.user_service_protocol  # Protocol defined in its owning core module, re-exported here

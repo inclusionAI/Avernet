@@ -14,7 +14,6 @@ collaboration-templates/
 │   ├── write-and-review.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
-│   ├── merchant-operations-goal-to-plan.yaml
 │   ├── parallel-expert-review.yaml
 │   ├── solution-and-risk-review.yaml
 │   └── single-bot-guided-answer.yaml
@@ -22,7 +21,6 @@ collaboration-templates/
 │   ├── write-and-review.yaml
 │   ├── world-cup-preview-content-production.yaml
 │   ├── micro-merchant-event-orchestration.yaml
-│   ├── merchant-operations-goal-to-plan.yaml
 │   ├── parallel-expert-review.yaml
 │   ├── solution-and-risk-review.yaml
 │   └── single-bot-guided-answer.yaml
@@ -42,7 +40,6 @@ collaboration-templates/
 | write-and-review | [写作质检协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/write-and-review.yaml) | [Write & Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/write-and-review.yaml) |
 | world-cup-preview-content-production | [世界杯比赛前瞻内容生产](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/world-cup-preview-content-production.yaml) | [World Cup Preview Content Production](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/world-cup-preview-content-production.yaml) |
 | micro-merchant-event-orchestration | [小微商家活动协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/micro-merchant-event-orchestration.yaml) | [Micro-Merchant Event Orchestration](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/micro-merchant-event-orchestration.yaml) |
-| merchant-operations-goal-to-plan | [商家经营目标到经营方案](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/merchant-operations-goal-to-plan.yaml) | — |
 | parallel-expert-review | [多专家并行协同](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/parallel-expert-review.yaml) | [Parallel Expert Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/parallel-expert-review.yaml) |
 | solution-and-risk-review | [方案与风险评审](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/solution-and-risk-review.yaml) | [Solution & Risk Review](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/solution-and-risk-review.yaml) |
 | single-bot-guided-answer | [单 Bot 引导回答](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/zh-CN/single-bot-guided-answer.yaml) | [Guided Single Answer](https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/seeds/collaboration-templates/en-US/single-bot-guided-answer.yaml) |

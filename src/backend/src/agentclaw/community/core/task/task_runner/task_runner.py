@@ -118,7 +118,7 @@ class TaskRunner:
         注入 execution_backend 时委托其真实建群;否则 Avernet stub:生成 group_id 并记录 GroupFormation。
         prod BCS wiring(group_strategy=collab_mode;state_machine 注入 workflow yaml)在 ocb 仓。"""
         logger.info("[task][task_runner] form_coop_group begin, group_formation=%s", gf)
-        
+
         if self._execution_backend is not None:
             return await self._execution_backend.form_coop_group(gf)
         gid = f"grp_{uuid.uuid4().hex[:8]}"

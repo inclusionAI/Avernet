@@ -545,29 +545,29 @@ Then the provider:
 
 ```python
     @singleton
-@provider
-@inject
-def task_service(
+    @provider
+    @inject
+    def task_service(
         self,
         graph: TaskGraphService,
         discover: BotDiscoverServiceProtocol,
         bot_public: BotPublicServiceProtocol,
         injector: Injector,
         task_info_repo: TaskInfoRepositoryProtocol,
-) -> TaskService:
-    bot, bcs = self._resolve_ports()
-    discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
-    bcs_identity = None
-    if bcs is not None:
-        from agentclaw.community.core.task.task_runner.client.bcs_bot_identity_resolver import (
-            BotServiceBcsBotIdentityResolver,
+    ) -> TaskService:
+        bot, bcs = self._resolve_ports()
+        discover_port = self._resolve_discover(default=discover, bot_public=bot_public)
+        bcs_identity = None
+        if bcs is not None:
+            from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
+                BotServiceBcsBotIdentityResolver,
+            )
+            bcs_identity = BotServiceBcsBotIdentityResolver(injector.get(BotServiceProtocol))
+        harness = TaskHarness(graph)
+        return TaskService(
+            graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
+            bcs_identity=bcs_identity, task_info_repo=task_info_repo,
         )
-        bcs_identity = BotServiceBcsBotIdentityResolver(injector.get(BotServiceProtocol))
-    harness = TaskHarness(graph)
-    return TaskService(
-        graph, harness=harness, bot=bot, bcs=bcs, discover=discover_port,
-        bcs_identity=bcs_identity, task_info_repo=task_info_repo,
-    )
 ```
 
 (`task_id_provider` is left default = `uuid4` in prod — do not pass it.)

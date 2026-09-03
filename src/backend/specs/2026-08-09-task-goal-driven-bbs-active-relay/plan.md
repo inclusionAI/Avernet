@@ -37,8 +37,8 @@
 import asyncio
 import json
 from unittest.mock import MagicMock, AsyncMock, patch
-from community.core.task.task_runner.modal_executor.bbs_modal_executor import notify
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BotTaskModeRoster
+from agentclaw.community.core.task.task_runner.integration.bbs_runner import notify
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BotTaskModeRoster
 
 
 def _run(coro):
@@ -67,7 +67,7 @@ class _FakeBot:
 
     async def send_message(self, *, bot_id, message, metadata):
         self.sent_messages.append((bot_id, message, metadata))
-        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
@@ -105,8 +105,7 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     graph = _FakeGraph()
     g = _execution_graph()
 
-    _run(notify(g, bcs=bcs, bot=bot, graph=graph, backend_url="http://localhost:8888",
-                skill_name="bbs-relay-single-task"))
+    _run(notify(g, bcs=bcs, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
 
     assert graph.claimed == "B"  # highest completion_rate
     assert len(bot.sent_messages) == 1
@@ -127,7 +126,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'agentclaw...bbs_runne
 - [ ] **Step 3: Write the implementation**
 
 ```python
-# src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_modal_executor.py
+# src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_runner.py
 """BBS 主动触发:bid→select→claim→dispatch。
 升 BBS 可恢复态后,向 dream-mode roster 广播评估消息;从回复中选 completion_rate 最高的 bot;
 引擎服务端 claim_bbs_owner;发任务消息给胜出 bot(best-effort,不抛)。"""
@@ -331,7 +330,7 @@ Expected: PASS (5 passed)
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_modal_executor.py \
+git add src/backend/src/agentclaw/community/core/task/task_runner/integration/bbs_runner.py \
   src/backend/tests/community/core/task/task_runner/integration/test_bbs_runner.py
 git commit -m "feat(bbs-runner): bid→select→claim→dispatch module for BBS active trigger"
 ```
@@ -354,7 +353,7 @@ git commit -m "feat(bbs-runner): bid→select→claim→dispatch module for BBS 
 # tests/community/core/task/task_runner/integration/test_bbs_executor.py
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 
 
 def _run(coro):
@@ -367,8 +366,7 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
                        sink=None, poller=None, api_base_url="http://test:8888")
     g = MagicMock()
     g.task_id = "t1"
-    with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
-               new_callable=AsyncMock) as mock_notify:
+    with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify", new_callable=AsyncMock) as mock_notify:
         _run(exe.run_bbs(g))
         mock_notify.assert_awaited_once()
         call_kwargs = mock_notify.call_args
@@ -390,7 +388,7 @@ In `task_executor.py`:
 ```python
 async def run_bbs(self, execution_graph) -> None:
     """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。"""
-    from community.core.task.task_runner.modal_executor import bbs_modal_executor
+    from agentclaw.community.core.task.task_runner.integration import bbs_runner
     await bbs_runner.notify(
         execution_graph,
         bcs=self._bcs, bot=self._bot,
@@ -436,7 +434,7 @@ git commit -m "feat(task-executor): run_bbs delegates to bbs_runner + api_base_u
 # tests/community/core/task/task_runner/integration/test_runner_bbs.py
 import asyncio
 from unittest.mock import MagicMock, AsyncMock
-from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
+from agentclaw.community.core.task.task_runner.runner import TaskRunner
 
 
 def _run(coro):
@@ -487,7 +485,7 @@ Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py \
+git add src/backend/src/agentclaw/community/core/task/task_runner/runner.py \
   src/backend/tests/community/core/task/task_runner/integration/test_runner_bbs.py
 git commit -m "feat(runner): run_bbs delegates to execution_backend for BBS active trigger"
 ```

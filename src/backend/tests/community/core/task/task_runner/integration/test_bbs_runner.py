@@ -146,7 +146,11 @@ class _FakeGraph:
         return MagicMock(success=True)
 
     def update_task_node_info(self, patch):
-        if patch.extend_props_patch and patch.extend_props_patch.get("bbs_owner") is None:
+        if (
+            patch.extend_props_patch
+            and "bbs_owner" in patch.extend_props_patch
+            and patch.extend_props_patch["bbs_owner"] is None
+        ):
             self.bbs_owner = None
             self.cleared = True
 
@@ -227,14 +231,11 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert len(bot.sent_messages) == 1           # 只给胜出 bot dispatch 一次
     msg_bot, msg_text, msg_meta = bot.sent_messages[0]
     assert msg_bot == "B"
-    # 收口走引擎:on_bbs_report 被调一次,patch 带 assignee(通过持有者校验)、scoped SUCCESS、无验收结果
-    assert len(on_bbs_report.calls) == 1
-    patch = on_bbs_report.calls[0]
-    assert patch.node_id.startswith("bbs-")
-    assert patch.status == Status.SUCCESS
-    assert patch.acceptance_result is None
-    assert patch.assignee == "B"
-    assert graph.cleared          # 收口 finally 释放了 claim(bbs_owner=None)
+    # notify 仅完成 BBS 投递与 scoped 节点回写；根节点仍保持 HUNG，
+    # 后续由 callback/report 进入 engine.on_bbs_report 才能统一收口。
+    assert on_bbs_report.calls == []
+    assert graph.bbs_owner == "B"
+    assert not graph.cleared
     assert len(graph.added_nodes) == 1
     scoped = graph.added_nodes[0]
     assert scoped.run_info.start_time is not None
@@ -317,12 +318,11 @@ class _RecordingGraph(_FakeGraph):
         super().update_task_node_info(patch)
 
 
-def test_notify_without_callback_never_writes_root_output():
-    """无 on_bbs_report 回调(else 回退路径)遵守 bbs 模式不变量:只改根节点状态 + graph 加关系,
-    绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
+def test_notify_without_callback_keeps_root_untouched_and_records_scoped_output():
+    """缺少 callback/report 收口时，BBS notify 只能写 scoped 节点，根保持 HUNG 和 claim。
 
-    回归 root.run_info.output == bbs output 的污染 bug:else 旧实现把 bbs task_result 直写根
-    output_patch/extend_props.output。修复后根 patch 仅释放 bbs_owner,保持 HUNG,无 output 写入。
+    这避免执行器在 BBS lease 尚未被 callback 确认时提前释放 ``bbs_owner``、
+    改写根 output 或把根节点重新推进为 PLANNING/EXECUTING。
     """
     roster = _roster("W")
     bot = _FakeBot(rates={"W": 80})
@@ -333,15 +333,9 @@ def test_notify_without_callback_never_writes_root_output():
     _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))  # on_bbs_report 缺省 None
 
     root_patches = [p for p in graph.patches if p.node_id == "t6"]
-    assert len(root_patches) == 1, f"应只写一次根 patch,实际 {len(root_patches)}"
-    rp = root_patches[0]
-    # 不变量:根节点只释放 claim,不改状态或 output
-    assert rp.status is None
-    assert rp.extend_props_patch == {"bbs_owner": None}
-    assert rp.output_patch is None, f"else 路径违规直写根 output_patch={rp.output_patch}"
-    assert rp.extend_props_patch is None or "output" not in rp.extend_props_patch, (
-        f"else 路径违规直写根 extend_props.output={rp.extend_props_patch}"
-    )
+    assert root_patches == []
+    assert graph.bbs_owner == "W"
+    assert not graph.cleared
     # scoped 接力节点仍落自身执行产出(属 runner 执行完成回投,非根 output 污染)
     scoped = [p for p in graph.patches if p.node_id != "t6"]
     # _bbs_output = task_result["result"] = {"content": "dispatched-task-result"}(FakeBot dispatch 返回结构)
@@ -385,7 +379,7 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
         reasons={"A": "A 可做", "B": "已产出相关交付,可补完剩余 gap", "C": "C 可做"},
     )
     bcn = _FakeBcn(roster)
-    graph = _FakeGraph()
+    graph = _RecordingGraph()
     g = _execution_graph("t1", _GOAL)
     on_bbs_report = _FakeOnBbsReport(graph)
 
@@ -393,9 +387,10 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
                 skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
 
     assert graph.claimed == "B"  # 最高 completion_rate 胜出(选优键未变)
-    assert len(on_bbs_report.calls) == 1
-    patch = on_bbs_report.calls[0]
-    assert patch.extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
+    assert on_bbs_report.calls == []
+    scoped = [p for p in graph.patches if p.node_id != "t1"]
+    assert len(scoped) == 1
+    assert scoped[0].extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
 
 
 def test_bid_prompt_asks_for_title_and_goal_of_completable_part():

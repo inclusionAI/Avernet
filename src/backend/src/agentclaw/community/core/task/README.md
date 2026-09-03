@@ -41,9 +41,9 @@ core/task/
 
 ## 节点状态机流转(6 节点态 + 图态;双机实现于 TaskGraphService)
 
-节点态:`PENDING` / `PLANNING` / `RUNNING` / `DONE` / `SUCCESS` / `FAILED` / `HUNG` / `CANCELLED`;图态:`RUNNING` / `DONE` / `SUCCESS` / `HUNG` / `FAILED` / `CANCELLED`。
+节点态:`PENDING` / `PLANNING` / `RUNNING` / `DONE` / `FAILED` / `HUNG`;图态:`RUNNING` / `DONE` / `HUNG`。
 
-- `_ACCEPTANCE_TRANSITIONS`(唯一验收翻转依据 = `TaskNodePatch.acceptance_result`,skill 回投):`RUNNING→{SUCCESS,DONE}`。验收通过为 `SUCCESS`,验收未通过为 `DONE`;`FAILED` 仅表示执行失败。
+- `_ACCEPTANCE_TRANSITIONS`(唯一终态翻转依据 = `TaskNodePatch.acceptance_result`,skill 回投):`RUNNING→{DONE,FAILED}`。
 - `_DIRECT_TRANSITIONS`(框架内部 status 直驱:派发/复位/传播/HUNG):见下图合法边。
 - `_DELEGATABLE_PARENT={PENDING,FAILED,PLANNING}`:`add_task_nodes` 侧向改结构时,父可被委托进 `PLANNING`。
 - **语义解耦**:`PLANNING`=规划中(显式委托态,等子完成/gap 重算);`RUNNING`=真执行叶子(`single_bot`/`coop_group`/`bbs`)。规划出子的父永不为 `RUNNING`,始终 `PLANNING`。
@@ -62,13 +62,12 @@ stateDiagram-v2
     PENDING --> PLANNING : add_task_nodes 委托为结构父(父→PLANNING) / on_miss(depth<MAX → plan 拆细)
     PENDING --> HUNG : on_miss(depth>=MAX 拆不动,连续 MISS)
 
-    PLANNING --> SUCCESS : 子全 SUCCESS + plan 返 [](gap 闭)→ 传播治愈(非根) / 根 gap 闭 → 图 SUCCESS
+    PLANNING --> DONE : 子全 DONE + plan 返 [](gap 闭)→ 传播治愈(非根) / 根 gap 闭 → 图 DONE
     PLANNING --> HUNG : on_miss(depth>=MAX 拆不出子) / gap_no_progress(有 gap 拆不出)
     PLANNING --> PLANNING : 新子 add_task_nodes(父维持委托态)
 
-    RUNNING --> SUCCESS : 回投 verdict=DONE(_on_pass_collect)
-    RUNNING --> DONE : 仅执行完成回投,尚未产生验收结论
-    RUNNING --> DONE : 回投 verdict=FAILED,执行完成但验收未通过(只记录结论)
+    RUNNING --> DONE : 回投 verdict=DONE(_on_pass_collect)
+    RUNNING --> FAILED : 回投 verdict=FAILED+gaps(_on_fail_collect)
     RUNNING --> PENDING : Harness 复位(超时/崩溃/exec_error _on_harness_collect)
     RUNNING --> HUNG : Harness 重试达 MAX_HARNESS
 
@@ -76,8 +75,7 @@ stateDiagram-v2
     FAILED --> HUNG : Harness 重试达 MAX_HARNESS(→ 升 BBS:loop_round++ + bbs_mode)
     FAILED --> PLANNING : 条件 b 补救(经 add_task_nodes 委托;_DELEGATABLE_PARENT 含 FAILED)
 
-    DONE --> [*] : 终态(执行完成但未通过验收)
-    SUCCESS --> [*] : 终态(执行完成且验收通过)
+    DONE --> [*] : 终态(成功)
     HUNG --> [*] : 终态(STUCK:人介入)
 
     note right of PENDING
@@ -102,7 +100,7 @@ stateDiagram-v2
         on_start: PENDING→RUNNING(幂等纯翻态)
         执行报错(exec_error) ≠ 验收不过(FAIL+gaps):
           报错 → harness 复位重投(计数)
-          验收不过 → DONE,保留验收结论,不重派
+          验收不过 → FAILED → harness 重派重试
     end note
 
     note right of HUNG
@@ -119,14 +117,12 @@ stateDiagram-v2
 stateDiagram-v2
     direction LR
     [*] --> Graph_RUNNING : initialize_graph
-    Graph_RUNNING --> Graph_SUCCESS : 根 gap 闭(终验 PASS,全非根 SUCCESS) → update_task_graph_info(status=SUCCESS, output_patch)
+    Graph_RUNNING --> Graph_DONE : 根 gap 闭(终验 PASS,全非根 DONE) → update_task_graph_info(status=DONE, output_patch)
     Graph_RUNNING --> Graph_HUNG : STUCK:loop_round>=MAX_LOOP → hung_reason=loop_exhausted / root_stuck / child_hung 冒泡到根
     Graph_DONE --> [*]
-    Graph_SUCCESS --> [*]
-    Graph_SUCCESS --> [*]
     Graph_HUNG --> [*]
     note right of Graph_RUNNING
-        图无验收 FAILED:验收未通过由节点 DONE + acceptance_result.gaps 表达;执行失败才使用 FAILED/HUNG
+        图无 FAILED:terminal FAIL 由节点 STUCK→HUNG 表达
         loop_round 仅升 BBS 时 ++(根 gap 复发盘口子 A / HUNG 升 BBS)
     end note
 ```
@@ -136,12 +132,12 @@ stateDiagram-v2
 | 驱动源 | 入口 | 触发条件 | 状态推进 |
 |---|---|---|---|
 | `TaskService.execute` | `on_execute` | 条件 a:根 PENDING | 根→plan→add 子(父→PLANNING)→dispatch→start_run |
-| skill 回投 PASS | `on_report`(→`_on_pass_collect`) | 子 SUCCESS | 父 plan:有子→add+dispatch;gap 闭→传播 SUCCESS 上行/根→图 SUCCESS |
-| skill 回投 FAIL+gaps | `on_report` | 叶验收不过 | 叶→DONE,保留验收结论,不重派/不删除 |
-| skill 回投 exec_error | `on_report`(→`_on_harness_collect`) | 网络/超时/进程等执行失败 | RUNNING/FAILED→PENDING 复位重投;达 MAX_HARNESS→HUNG 升 BBS |
+| skill 回投 PASS | `on_report`(→`_on_pass_collect`) | 子 DONE | 父 plan:有子→add+dispatch;gap 闭→传播 DONE 上行/根→图 DONE |
+| skill 回投 FAIL+gaps | `on_report`(→`_on_fail_collect`) | 叶验收不过 | 叶→FAILED,等 harness 重派重试(不立即拆) |
+| skill 回投 exec_error | `on_report`(→`_on_harness_collect`) | bot 没跑通 | RUNNING/FAILED→PENDING 复位重投;达 MAX_HARNESS→HUNG 升 BBS |
 | dispatcher MISS | `on_miss` | 搜推未匹配执行者 | depth<MAX→plan 拆子;depth>=MAX→HUNG 升 BBS |
 | `on_start` 回调 | `on_start` | 投递开始 | PENDING→RUNNING(幂等纯翻态,不触发传播) |
-| TaskHarness 巡检 | `on_harness` | 执行超时/崩溃/FAILED | 复位重投;达 MAX_HARNESS→HUNG 升 BBS;PENDING 派发卡 180s→重搜推 |
+| TaskHarness 巡检 | `on_harness` | 超时/崩溃/FAILED | 复位重投;达 MAX_HARNESS→HUNG 升 BBS;PENDING 派发卡 180s→重搜推 |
 
 ## 协程化约束(任务执行是耗时任务;对齐 backend lifecycle async 模式)
 

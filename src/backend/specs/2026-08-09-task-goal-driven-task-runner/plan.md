@@ -69,7 +69,7 @@ spec §7.7 称 `dispatch` 为「同步入口」+ executor「自有后台事件�
 from typing import Any, Protocol, runtime_checkable  # noqa: F401
 import pytest
 
-from agentclaw.community.core.task.task_runner.client.ports import (
+from agentclaw.community.core.task.task_runner.integration.ports import (
     ApiKeyProvider, BcsClientPort, OpenApiBotPort, PromptFormatter,
     ResultSink, TaskContextBuilder,
 )
@@ -215,7 +215,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 - [ ] **Step 1: 写失败测试**
 
 ```python
-from agentclaw.community.core.task.task_runner.client.translators import (
+from agentclaw.community.core.task.task_runner.integration.translators import (
     BcsSessionTranslator, BcsStateMachineRunTranslator, SingleBotRunTranslator,
 )
 
@@ -389,7 +389,7 @@ import logging
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 
 
 def _node(node_id="c1", task_id="t1", run_mode="bbs", assignee="b1"):
@@ -426,7 +426,7 @@ def test_dispatch_returns_one_bool_per_node():
 
 def test_runner_falls_back_to_stub_without_backend():
     from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-    from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
+    from agentclaw.community.core.task.task_runner.runner import TaskRunner
     g = TaskGraphService()
     r = TaskRunner(g)  # 无 execution_backend
     res = _run(r.start_run([_node()]))
@@ -561,7 +561,7 @@ Expected: PASS（新 4 + 既有 121 不破）
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agentclaw/community/core/task/task_runner/integration/task_executor.py src/agentclaw/community/core/task/task_runner/task_runner.py tests/community/core/task/task_runner/integration/test_task_executor_skeleton.py
+git add src/agentclaw/community/core/task/task_runner/integration/task_executor.py src/agentclaw/community/core/task/task_runner/runner.py tests/community/core/task/task_runner/integration/test_task_executor_skeleton.py
 git commit -m "feat(task-runner-integration): TaskExecutor skeleton + TaskRunner execution_backend injection (bbs no-op)
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
@@ -585,7 +585,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 import httpx
 import pytest
 
-from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
+from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBotAdapter, OpenApiServerError, parse_bot_id,
 )
 
@@ -615,26 +615,22 @@ def test_parse_bot_id():
 
 def test_ensure_grant_already_allowed():
     allowed = {"data": {"allowed_bots": ["bot9:ent1"]}}
-
     def h(req): return httpx.Response(200, json=allowed)
-
     a = _adapter(h)
     _run(a.ensure_grant("bot9:ent1"))  # 不抛
 
 
 def test_ensure_grant_grants_when_missing():
     state = {"allowed": False}
-
     def h(req):
         if req.url.path.endswith("/allowed-bots") and req.method == "GET":
             return httpx.Response(200, json={"data": {"allowed_bots": [] if not state["allowed"] else ["bot9:ent1"]}})
         if req.url.path.endswith("/grant") and req.method == "POST":
-            assert "sess=1" in req.headers.get("cookie", "")  # 登录态
+            assert "sess=1" in req.headers.get("cookie", "")      # 登录态
             assert req.headers.get("referer") == "http://b/"
             state["allowed"] = True
             return httpx.Response(200, json={"data": {"bot_id": "bot9:ent1"}})
         return httpx.Response(404)
-
     _run(_adapter(h).ensure_grant("bot9:ent1"))
     assert state["allowed"] is True
 
@@ -643,7 +639,6 @@ def test_ensure_grant_403_raises_auth():
     def h(req):
         if req.method == "GET": return httpx.Response(200, json={"data": {"allowed_bots": []}})
         return httpx.Response(403)
-
     with pytest.raises(OpenApiAuthError):
         _run(_adapter(h).ensure_grant("bot9:ent1"))
 
@@ -655,7 +650,6 @@ def test_send_message_returns_run_id_and_uses_bearer():
         body = req.read()
         assert b'"bot_id":"bot9:ent1"' in body
         return httpx.Response(200, json={"data": {"message_id": "mid_77"}})
-
     rid = _run(_adapter(h).send_message(bot_id="bot9:ent1", message="hi", metadata={}))
     assert rid == "mid_77"
 
@@ -664,14 +658,12 @@ def test_get_run_status_case_insensitive():
     def h(req):
         assert req.url.path == "/openapi/v1/messages/mid_77"
         return httpx.Response(200, json={"data": {"status": "COMPLETED", "result": {"content": "x"}}})
-
     d = _run(_adapter(h).get_run("mid_77"))
     assert d["status"] == "COMPLETED"
 
 
 def test_server_error_raises():
     def h(req): return httpx.Response(500)
-
     with pytest.raises(OpenApiServerError):
         _run(_adapter(h).get_run("mid_77"))
 ```
@@ -696,24 +688,14 @@ from typing import Any
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.ports import ApiKeyProvider, OpenApiBotPort
+from agentclaw.community.core.task.task_runner.integration.ports import ApiKeyProvider, OpenApiBotPort
 
 
 class OpenApiError(Exception): ...
-
-
-class OpenApiAuthError(OpenApiError): ...  # 401/403 grant 失败不可重试
-
-
+class OpenApiAuthError(OpenApiError): ...        # 401/403 grant 失败不可重试
 class OpenApiBadRequestError(OpenApiError): ...  # 4xx 不重试
-
-
-class OpenApiRateLimitError(OpenApiError): ...  # 429 可重试
-
-
-class OpenApiServerError(OpenApiError): ...  # 5xx 可重试
-
-
+class OpenApiRateLimitError(OpenApiError): ...   # 429 可重试
+class OpenApiServerError(OpenApiError): ...      # 5xx 可重试
 class OpenApiTimeoutError(OpenApiError): ...
 
 
@@ -806,15 +788,14 @@ import time
 import pytest
 
 from agentclaw.community.core.task.domain.models import TaskCallbackData
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     SingleBotHandle, TaskExecutorResultPoller,
 )
-from agentclaw.community.core.task.task_runner.client.translators import SingleBotRunTranslator
+from agentclaw.community.core.task.task_runner.integration.translators import SingleBotRunTranslator
 
 
 class _Bot:
     def __init__(self, runs): self._runs = runs; self.calls = 0
-
     async def get_run(self, run_id):
         self.calls += 1
         return self._runs[run_id]
@@ -822,7 +803,6 @@ class _Bot:
 
 class _Sink:
     def __init__(self): self.reports = []
-
     async def report_result(self, data): self.reports.append(data)
 
 
@@ -838,8 +818,7 @@ def _poller(bot, sink, *, clock=None, sla=1000.0):
 def test_single_bot_terminal_reports_and_unregisters():
     bot = _Bot({"r1": {"status": "COMPLETED", "result": {"content": "done"}}})
     sink = _Sink()
-    p = _poller(bot, sink);
-    p.set_on_result(sink)
+    p = _poller(bot, sink); p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     _run(p._poll_once())
     assert sink.reports[0].result["success"] is True
@@ -849,8 +828,7 @@ def test_single_bot_terminal_reports_and_unregisters():
 def test_single_bot_not_terminal_no_report():
     bot = _Bot({"r1": {"status": "RUNNING"}})
     sink = _Sink()
-    p = _poller(bot, sink);
-    p.set_on_result(sink)
+    p = _poller(bot, sink); p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     _run(p._poll_once())
     assert sink.reports == []
@@ -860,8 +838,7 @@ def test_sla_timeout_reports_fail_and_unregisters():
     bot = _Bot({"r1": {"status": "RUNNING"}})
     sink = _Sink()
     t = [0.0]
-    p = _poller(bot, sink, clock=lambda: t[0], sla=1.0);
-    p.set_on_result(sink)
+    p = _poller(bot, sink, clock=lambda: t[0], sla=1.0); p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=0.0))
     t[0] = 100.0  # 远超 sla
     _run(p._poll_once())
@@ -873,10 +850,8 @@ def test_sla_timeout_reports_fail_and_unregisters():
 def test_consecutive_failures_report_poll_exhausted():
     class _ErrBot:
         async def get_run(self, run_id): raise RuntimeError("boom")
-
     sink = _Sink()
-    p = _poller(_ErrBot(), sink);
-    p.set_on_result(sink)
+    p = _poller(_ErrBot(), sink); p.set_on_result(sink)
     p.register(SingleBotHandle(loop_task_id="t1::c1", run_id="r1", bot_id="b1", registered_at=time.monotonic()))
     for _ in range(5):
         _run(p._poll_once())
@@ -906,7 +881,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agentclaw.community.core.task.domain.models import TaskCallbackData
-from agentclaw.community.core.task.task_runner.client.translators import (
+from agentclaw.community.core.task.task_runner.integration.translators import (
     BcsSessionTranslator, BcsStateMachineRunTranslator, SingleBotRunTranslator,
 )
 
@@ -957,9 +932,7 @@ class TaskExecutorResultPoller:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
-    def set_on_result(self, sink) -> None:
-        self._sink = sink
-
+    def set_on_result(self, sink) -> None: self._sink = sink
     def pending(self) -> int:
         with self._lock: return len(self._handles)
 
@@ -982,8 +955,7 @@ class TaskExecutorResultPoller:
     async def _poll_one(self, handle) -> None:
         now = self._clock()
         if now - handle.registered_at > self._sla_for(handle):
-            await self._report(self._fail(handle, "sla_timeout"), handle);
-            return
+            await self._report(self._fail(handle, "sla_timeout"), handle); return
         try:
             data = await self._poll_terminal(handle)
         except Exception:  # noqa: BLE001
@@ -1010,8 +982,7 @@ class TaskExecutorResultPoller:
         if isinstance(handle, BcsGroupHandle):  # session 模
             group = await self._bcs.get_group(handle.group_id)
             sess = (group.get("session") or {})
-            if str(sess.get("status") or "").lower() in _TERMINAL_SM or str(
-                    sess.get("status") or "").lower() == "completed":
+            if str(sess.get("status") or "").lower() in _TERMINAL_SM or str(sess.get("status") or "").lower() == "completed":
                 msgs = await self._bcs.get_session_messages(handle.session_id, since_msg_id=handle.since_cursor)
                 return BcsSessionTranslator.adapt(group, msgs, handle.loop_task_id)
             return None
@@ -1019,8 +990,7 @@ class TaskExecutorResultPoller:
 
     def _fail(self, handle, reason: str) -> TaskCallbackData:
         return TaskCallbackData(
-            loop_task_id=handle.loop_task_id,
-            workflow_type="single_bot" if isinstance(handle, SingleBotHandle) else "bcn_coop_group",
+            loop_task_id=handle.loop_task_id, workflow_type="single_bot" if isinstance(handle, SingleBotHandle) else "bcn_coop_group",
             workflow_id=0, instance_id=0, result={"success": False, "fail_detail": reason},
         )
 
@@ -1104,11 +1074,11 @@ import pytest
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import OpenApiAuthError
-from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
+from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import OpenApiAuthError
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
     PromptFormatterImpl, _RunnerContextBuilder,
 )
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 
 
 def _node(assignee="bot9:ent1"):
@@ -1121,23 +1091,16 @@ def _node(assignee="bot9:ent1"):
 
 class _Bot:
     def __init__(self, run_id="mid_1", grant_fail=False):
-        self._rid = run_id;
-        self._gf = grant_fail;
-        self.sent = []
-
+        self._rid = run_id; self._gf = grant_fail; self.sent = []
     async def ensure_grant(self, bot_id):
         if self._gf: raise OpenApiAuthError("403")
-
     async def send_message(self, *, bot_id, message, metadata):
-        self.sent.append((bot_id, message, metadata));
-        return self._rid
+        self.sent.append((bot_id, message, metadata)); return self._rid
 
 
 class _Poller:
     def __init__(self): self.registered = []
-
     def register(self, h): self.registered.append(h)
-
     def pending(self): return len(self.registered)
 
 
@@ -1149,8 +1112,7 @@ def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_dispatch_single_bot_registers_handle():
-    bot = _Bot();
-    poller = _Poller()
+    bot = _Bot(); poller = _Poller()
     fmt = PromptFormatterImpl()
     exe = TaskExecutor(bot=bot, bcs=None, formatter=fmt, context=_Ctx(), sink=None, poller=poller)
     ok = _run(exe.dispatch([_node()]))
@@ -1161,8 +1123,7 @@ def test_dispatch_single_bot_registers_handle():
 
 
 def test_dispatch_single_bot_grant_fail_returns_false():
-    bot = _Bot(grant_fail=True);
-    poller = _Poller()
+    bot = _Bot(grant_fail=True); poller = _Poller()
     exe = TaskExecutor(bot=bot, bcs=None, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
     ok = _run(exe.dispatch([_node()]))
     assert ok == [False]
@@ -1193,7 +1154,7 @@ from __future__ import annotations
 from typing import Any
 
 from agentclaw.community.core.task.domain.models import TaskNode
-from agentclaw.community.core.task.task_runner.client.ports import (
+from agentclaw.community.core.task.task_runner.integration.ports import (
     PromptFormatter, TaskContextBuilder,
 )
 
@@ -1229,31 +1190,31 @@ class _RunnerContextBuilder(TaskContextBuilder):
 
 ```python
     async def _dispatch_single_bot(self, node: TaskNode, sem: asyncio.Semaphore) -> bool:
-    from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
-        OpenApiAuthError, OpenApiBadRequestError,
-    )
-    bot_id = node.run_info.assignee
-    loop_task_id = f"{node.task_id}::{node.node_id}"
-    async with sem:
-        try:
-            await self._bot.ensure_grant(bot_id)
-            ctx = self._context.build(node.task_id, node.node_id)
-            message = self._formatter.format_execute(ctx, node)
-            run_id = await self._bot.send_message(
-                bot_id=bot_id, message=message,
-                metadata={"biz_task_id": node.task_id},
-            )
-        except (OpenApiAuthError, OpenApiBadRequestError):
-            return False
-        import time
-        self._poller.register(
-            __import__("agentclaw.community.core.task.task_runner.client.task_executor_result_poller",
-                       fromlist=["SingleBotHandle"]).SingleBotHandle(
-                loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
-                registered_at=time.monotonic(),
-            )
+        from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+            OpenApiAuthError, OpenApiBadRequestError,
         )
-        return True
+        bot_id = node.run_info.assignee
+        loop_task_id = f"{node.task_id}::{node.node_id}"
+        async with sem:
+            try:
+                await self._bot.ensure_grant(bot_id)
+                ctx = self._context.build(node.task_id, node.node_id)
+                message = self._formatter.format_execute(ctx, node)
+                run_id = await self._bot.send_message(
+                    bot_id=bot_id, message=message,
+                    metadata={"biz_task_id": node.task_id},
+                )
+            except (OpenApiAuthError, OpenApiBadRequestError):
+                return False
+            import time
+            self._poller.register(
+                __import__("agentclaw.community.core.task.task_runner.integration.task_executor_result_poller",
+                           fromlist=["SingleBotHandle"]).SingleBotHandle(
+                    loop_task_id=loop_task_id, run_id=run_id, bot_id=bot_id,
+                    registered_at=time.monotonic(),
+                )
+            )
+            return True
 ```
 
 > 把顶部 `import time` 提到模块 import 区，避免函数内 `__import__`；`SingleBotHandle` 在文件顶部 import。最终文件顶部加 `import time` 与 `from ...task_executor_result_poller import SingleBotHandle, BcsGroupHandle`，函数内直接用。
@@ -1297,15 +1258,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 import httpx
 import pytest
 
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
     BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
 )
 
 
 class _Tok:
-    token = "drv";
-    secret = "s3c";
-    base_url = "http://bcs"
+    token = "drv"; secret = "s3c"; base_url = "http://bcs"
 
 
 def _adapter(handler):
@@ -1314,16 +1273,13 @@ def _adapter(handler):
 
 
 def _run(coro):
-    import asyncio;
-    return asyncio.new_event_loop().run_until_complete(coro)
+    import asyncio; return asyncio.new_event_loop().run_until_complete(coro)
 
 
 def test_create_group_chat_signs_and_sends_idempotency():
     seen = {}
-
     def h(req):
-        seen["method"] = req.method;
-        seen["path"] = req.url.path
+        seen["method"] = req.method; seen["path"] = req.url.path
         seen["sig"] = req.headers.get("X-ECB-Signature")
         seen["tok"] = req.headers.get("X-ECB-Token")
         seen["idem"] = req.headers.get("Idempotency-Key")
@@ -1332,7 +1288,6 @@ def test_create_group_chat_signs_and_sends_idempotency():
         exp = hmac.new(b"s3c", f"{ts}{req.method}{req.url.path}".encode(), hashlib.sha256).hexdigest()
         assert req.headers["X-ECB-Signature"] == exp
         return httpx.Response(200, json={"group_id": "g1", "session_id": None})
-
     req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}])
     res = _run(_adapter(h).create_group(req))
     assert res.group_id == "g1"
@@ -1342,11 +1297,9 @@ def test_create_group_chat_signs_and_sends_idempotency():
 
 def test_create_group_state_machine_forces_strategy_and_start_false():
     seen = {}
-
     def h(req):
         seen["body"] = req.read().decode()
         return httpx.Response(200, json={"group_id": "g2", "definition_ref": {"id": "d1", "version": 1}})
-
     req = BcsCreateGroupRequest(driver_bot="drv", participants=[{"bot_uuid": "drv"}],
                                 group_strategy="state_machine",
                                 collaboration_definition_yaml="kind: collab",
@@ -1362,7 +1315,6 @@ def test_create_session_returns_session_id():
     def h(req):
         assert req.url.path == "/groups/g1/sessions"
         return httpx.Response(200, json={"session_id": "s1"})
-
     rid = _run(_adapter(h).create_session("g1", bootstrap_prompt="hi"))
     assert rid == "s1"
 
@@ -1371,7 +1323,6 @@ def test_get_group():
     def h(req):
         assert req.url.path == "/groups/g1"
         return httpx.Response(200, json={"session": {"status": "completed"}})
-
     d = _run(_adapter(h).get_group("g1"))
     assert d["session"]["status"] == "completed"
 
@@ -1380,21 +1331,18 @@ def test_get_session_messages_since_cursor():
     def h(req):
         assert "since_msg_id=m9" in str(req.url)
         return httpx.Response(200, json=[{"role": "assistant", "content": "ans"}])
-
     msgs = _run(_adapter(h).get_session_messages("s1", since_msg_id="m9"))
     assert msgs[0]["content"] == "ans"
 
 
 def test_server_error_raises():
     def h(req): return httpx.Response(500)
-
     with pytest.raises(BcsServerError):
         _run(_adapter(h).get_group("g1"))
 
 
 def test_client_4xx_raises():
     def h(req): return httpx.Response(400)
-
     with pytest.raises(BcsClientRequestError):
         _run(_adapter(h).get_group("g1"))
 ```
@@ -1443,21 +1391,13 @@ from typing import Any
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.client.bcs_token_provider import BcsTokenProvider
+from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
 
 
 class BcsClientError(Exception): ...
-
-
-class BcsServerError(BcsClientError): ...  # 5xx 可重试
-
-
-class BcsClientRequestError(BcsClientError): ...  # 4xx 不重试
-
-
-class BcsRateLimitError(BcsClientError): ...  # 429
-
-
+class BcsServerError(BcsClientError): ...        # 5xx 可重试
+class BcsClientRequestError(BcsClientError): ... # 4xx 不重试
+class BcsRateLimitError(BcsClientError): ...     # 429
 class BcsTimeoutError(BcsClientError): ...
 
 
@@ -1465,7 +1405,7 @@ class BcsTimeoutError(BcsClientError): ...
 class BcsCreateGroupRequest:
     driver_bot: str
     participants: list[dict[str, Any]]
-    group_strategy: str | None = None  # chat(省略)/manager_worker/state_machine
+    group_strategy: str | None = None           # chat(省略)/manager_worker/state_machine
     context: str | None = None
     topic: str | None = None
     collaboration_definition_yaml: str | None = None
@@ -1593,7 +1533,7 @@ class BcsHttpAdapter:
 `ports.py` 末尾删 `BcsCreateGroupRequest`/`Result` 占位 Protocol，改顶部 `if TYPE_CHECKING` 加：
 
 ```python
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
     BcsCreateGroupRequest as BcsCreateGroupRequest, BcsCreateGroupResult as BcsCreateGroupResult,
 )
 ```
@@ -1636,9 +1576,9 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsCreateGroupResult
-from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsCreateGroupResult
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 
 
 def _node(group_id="g1", task_id="t1"):
@@ -1651,23 +1591,16 @@ def _node(group_id="g1", task_id="t1"):
 
 class _Bcs:
     def __init__(self): self.created = []; self.sessions = []
-
     async def create_group(self, req):
-        self.created.append(req);
-        return BcsCreateGroupResult(group_id="g1", definition_ref=None)
-
+        self.created.append(req); return BcsCreateGroupResult(group_id="g1", definition_ref=None)
     async def create_session(self, group_id, *, bootstrap_prompt=None, idempotency_key=None):
-        self.sessions.append((group_id, bootstrap_prompt));
-        return "s1"
-
+        self.sessions.append((group_id, bootstrap_prompt)); return "s1"
     async def get_group(self, group_id): return {"session": {"status": "completed", "output": {"r": 1}}}
-
     async def get_session_messages(self, sid, *, limit=50, since_msg_id=None): return []
 
 
 class _Poller:
     def __init__(self): self.registered = []
-
     def register(self, h): self.registered.append(h)
 
 
@@ -1696,8 +1629,7 @@ def test_form_coop_group_manager_worker_sets_strategy():
 
 
 def test_dispatch_coop_group_session_mode_registers_session_handle():
-    bcs = _Bcs();
-    poller = _Poller()
+    bcs = _Bcs(); poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="chat")))
     ok = _run(exe.dispatch([_node(group_id="g1")]))
@@ -1810,17 +1742,15 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
     BcsCreateGroupResult, BcsHttpAdapter,
 )
-from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
 
 
 class _Tok:
-    token = "drv";
-    secret = "s3c";
-    base_url = "http://bcs"
+    token = "drv"; secret = "s3c"; base_url = "http://bcs"
 
 
 def _adapter(handler):
@@ -1837,7 +1767,6 @@ def test_start_state_machine_run_returns_run_id():
         body = req.read().decode()
         assert '"id":"d1"' in body and '"version":1' in body
         return httpx.Response(202, json={"run": {"run_id": "run_9"}})
-
     a = _adapter(h)
     rid = _run(a.start_state_machine_run("g1", definition_yaml=None,
                                          definition_ref={"id": "d1", "version": 1},
@@ -1849,7 +1778,6 @@ def test_get_state_machine_run():
     def h(req):
         assert req.url.path == "/state-machine-runs/run_9"
         return httpx.Response(200, json={"status": "completed", "output": {"x": 1}})
-
     d = _run(_adapter(h).get_state_machine_run("run_9"))
     assert d["status"] == "completed"
 
@@ -1864,20 +1792,14 @@ def _node(group_id="g1"):
 
 class _Bcs:
     def __init__(self): self.run_input = None
-
-    async def create_group(self, req): return BcsCreateGroupResult(group_id="g1",
-                                                                   definition_ref={"id": "d1", "version": 1})
-
+    async def create_group(self, req): return BcsCreateGroupResult(group_id="g1", definition_ref={"id": "d1", "version": 1})
     async def start_state_machine_run(self, group_id, *, definition_yaml, definition_ref, session_id, input):
-        self.run_input = input;
-        return "run_9"
-
+        self.run_input = input; return "run_9"
     async def get_state_machine_run(self, run_id): return {"status": "completed", "output": {}}
 
 
 class _Poller:
     def __init__(self): self.registered = []
-
     def register(self, h): self.registered.append(h)
 
 
@@ -1886,8 +1808,7 @@ class _Ctx:
 
 
 def test_dispatch_state_machine_registers_run_handle():
-    bcs = _Bcs();
-    poller = _Poller()
+    bcs = _Bcs(); poller = _Poller()
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=PromptFormatterImpl(), context=_Ctx(), sink=None, poller=poller)
     _run(exe.form_coop_group(GroupFormation(bot_ids=["drv"], collab_mode="state_machine",
                                             extend_props={"collaboration_definition_yaml": "kind: collab"})))
@@ -1980,9 +1901,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 import asyncio
 import pytest
 
-from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.client.double.double_context_provider import (
+from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import (
     _DoubleApiKeyProvider, _DoubleContextProvider, _DoubleSink,
 )
 
@@ -2032,7 +1953,7 @@ def test_double_sink_collects():
 
 ```python
 def test_double_bcs_client_session_flow():
-    from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+    from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
         BcsCreateGroupRequest, BcsCreateGroupResult,
     )
     c = _DoubleBcsClient(session_status="completed", session_output={"r": 1})
@@ -2046,9 +1967,9 @@ def test_double_bcs_client_session_flow():
 
 ```python
 import asyncio, time
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.client.double.double_context_provider import _DoubleSink
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import _DoubleSink
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     BcsGroupHandle, TaskExecutorResultPoller,
 )
 
@@ -2148,7 +2069,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
     BcsCreateGroupRequest, BcsCreateGroupResult,
 )
 
@@ -2156,10 +2077,8 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
 class _DoubleBcsClient:
     def __init__(self, *, session_status: str = "completed", session_output: Any = None,
                  sm_status: str = "completed", sm_output: Any = None) -> None:
-        self._session_status = session_status;
-        self._session_output = session_output
-        self._sm_status = sm_status;
-        self._sm_output = sm_output
+        self._session_status = session_status; self._session_output = session_output
+        self._sm_status = sm_status; self._sm_output = sm_output
 
     async def create_group(self, req: BcsCreateGroupRequest) -> BcsCreateGroupResult:
         gid = f"grp_{uuid.uuid4().hex[:8]}"
@@ -2195,14 +2114,14 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.client.double.double_context_provider import (
+from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import (
     _DoubleApiKeyProvider, _DoubleContextProvider, _DoubleSink,
 )
-from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
-from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 
@@ -2215,10 +2134,10 @@ def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = 
         ctx = _DoubleContextProvider()
         keys = _DoubleApiKeyProvider()
     else:
-        from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsHttpAdapter
-        from agentclaw.community.core.task.task_runner.client.bcs_token_provider import _RealToken  # corp 覆写
-        from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import OpenApiBotAdapter
-        from agentclaw.community.core.task.task_runner.client.prompt_formatter import _RunnerContextBuilder
+        from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsHttpAdapter
+        from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import _RealToken  # corp 覆写
+        from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import OpenApiBotAdapter
+        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import _RunnerContextBuilder
         bot = OpenApiBotAdapter(keys)
         bcs = BcsHttpAdapter(_RealToken())
         ctx = _RunnerContextBuilder(runner) if runner is not None else _DoubleContextProvider()
@@ -2293,8 +2212,8 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.client import build_integration
-from agentclaw.community.core.task.task_runner.client.double.double_context_provider import _DoubleSink
+from agentclaw.community.core.task.task_runner.integration import build_integration
+from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import _DoubleSink
 
 
 def _run(coro): return asyncio.new_event_loop().run_until_complete(coro)
@@ -2338,8 +2257,7 @@ Run: `grep -rn "gwqie46v7hzr1w6h\|_wire_facade" tests/community/ | head`
 在定位到的 wire 函数内，`TaskService(g)` 构造后追加：
 
 ```python
-from agentclaw.community.core.task.task_runner.client import build_integration
-
+from agentclaw.community.core.task.task_runner.integration import build_integration
 exe = build_integration(double=True, sink=svc.callback, runner=None, poller_thread=True)
 svc._engine._runner._execution_backend = exe
 ```

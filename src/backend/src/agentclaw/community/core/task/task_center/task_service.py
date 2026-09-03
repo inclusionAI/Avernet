@@ -876,7 +876,7 @@ class TaskService:
 
         仅 merchant-operations-goal-to-plan 模板的首节点会把入口身份展示为触发方;其他模板/Runtime
         均不读此字段,故这里严格按 static_plan_id 限定,避免影响其它静态剧本。名称解析失败则不写入,
-        Runtime 自然回退到入口占位,绝不阻断 execute。""" 
+        Runtime 自然回退到入口占位,绝不阻断 execute。"""
         template_id = request.execution_config.get("static_plan_id")
         if template_id != "merchant-operations-goal-to-plan":
             return

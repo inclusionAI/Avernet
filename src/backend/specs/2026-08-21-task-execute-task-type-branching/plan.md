@@ -69,29 +69,24 @@ tests/.../task_center/test_execute_task_type_branching.py (new) Task 4
 
 ```python
 from agentclaw.community.core.task.domain.models import RuntimeInfo, Status, TaskNode
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 
 
 class _FakeBot:
     async def ensure_grant(self, bot_id): return None
-
     async def send_message(self, *, bot_id, message, metadata):
         return BotSendResult(run_id="run-1", session_id="sess-1")
-
     async def get_run(self, run_id): return {}
-
     async def cancel_run(self, run_id): return None
-
     async def send_and_wait_async(self, **kw): return {}
 
 
 class _FakeFormatter:
     def format_execute(self, ctx, node): return "hello"
-
     def format_verify(self, ctx, node): return ""
 
 
@@ -177,7 +172,7 @@ And the early-failure return (the `isinstance(resolved, str)` branch) to:
         return BotSendResult(run_id=run_id, session_id=None)
 ```
 
-Add the import: `from agentclaw.community.core.task.task_runner.client.ports import BotSendResult` (it already imports from `ports` or can). `session_key` is the local from `target, session_key = resolved`.
+Add the import: `from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult` (it already imports from `ports` or can). `session_key` is the local from `target, session_key = resolved`.
 
 - [ ] **Step 5: Update `OpenApiBotAdapter.send_message` (`open_api_bot_adapter.py`)**
 
@@ -193,7 +188,7 @@ Lines ~87-92; change the return:
         return BotSendResult(run_id=message_id, session_id=None)
 ```
 
-Add `from agentclaw.community.core.task.task_runner.client.ports import BotSendResult` import.
+Add `from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult` import.
 
 - [ ] **Step 6: Add `session_id` to `SingleBotHandle` (`task_executor_result_poller.py`)**
 
@@ -274,24 +269,20 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 ```python
 import asyncio
 
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
-from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
+from agentclaw.community.core.task.task_runner.runner import TaskRunner
 
 
 class _FakeBot:
     async def ensure_grant(self, bot_id): return None
-
     async def send_message(self, *, bot_id, message, metadata):
         return BotSendResult(run_id="r", session_id="ws-session")
-
     async def get_run(self, run_id): return {}
-
     async def cancel_run(self, run_id): return None
-
     async def send_and_wait_async(self, **kw): return {}
 
 
@@ -348,19 +339,18 @@ Add (after `form_coop_group`):
 ```python
     async def trigger_workflow(self, *, bot_id: str, message: str,
                                metadata: dict[str, Any] | None = None) -> "BotSendResult":
-    """Single-bot workflow trigger: send the message, return run_id + session_id."""
-    if self._execution_backend is not None:
-        return await self._execution_backend.trigger_workflow(
-            bot_id=bot_id, message=message, metadata=metadata)
-    from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-    return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
+        """Single-bot workflow trigger: send the message, return run_id + session_id."""
+        if self._execution_backend is not None:
+            return await self._execution_backend.trigger_workflow(
+                bot_id=bot_id, message=message, metadata=metadata)
+        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
 
-
-async def get_group_session(self, group_id: str) -> str | None:
-    """Fetch the initial session_id for a coop group; create one if absent."""
-    if self._execution_backend is not None:
-        return await self._execution_backend.get_group_session(group_id)
-    return None
+    async def get_group_session(self, group_id: str) -> str | None:
+        """Fetch the initial session_id for a coop group; create one if absent."""
+        if self._execution_backend is not None:
+            return await self._execution_backend.get_group_session(group_id)
+        return None
 ```
 
 - [ ] **Step 4: Add impls to `TaskExecutor` (`task_executor.py`)**
@@ -399,7 +389,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py \
+git add src/backend/src/agentclaw/community/core/task/task_runner/runner.py \
         src/backend/src/agentclaw/community/core/task/task_runner/integration/task_executor.py \
         src/backend/tests/community/core/task/task_runner/integration/test_runner_workflow_session.py
 git commit -m "feat(task): add TaskRunner.trigger_workflow + get_group_session
@@ -428,16 +418,14 @@ import asyncio
 
 from agentclaw.community.core.task_dispatch.strategies import GroupFormation
 from agentclaw.community.core.task.task_center.engine import CoopGroupStart, ExecutionEngine
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
 
 
 class _FakeRunner:
     async def trigger_workflow(self, *, bot_id, message, metadata=None):
         return BotSendResult(run_id="r", session_id="ws-s")
-
     async def form_coop_group(self, gf):
         return "grp-1"
-
     async def get_group_session(self, group_id):
         return "sess-for-grp-1"
 
@@ -566,29 +554,24 @@ from agentclaw.community.core.task.task_context.task_graph_service import TaskGr
 class _SqliteDB:
     def __init__(self, engine):
         self._f = sessionmaker(bind=engine, autoflush=False)
-
     @contextmanager
     def orm_session(self):
         db = self._f()
         try:
-            yield db;
-            db.commit()
+            yield db; db.commit()
         except Exception:
-            db.rollback();
-            raise
+            db.rollback(); raise
         finally:
             db.close()
 
 
 class _FakeEngine:
     """Stands in for ExecutionEngine; records calls."""
-
     def __init__(self, graph):
         self._graph = graph
         self.workflow_session = "wf-session-1"
         self.group_start = CoopGroupStart(group_id="grp-1", session_id="yaml-session-1")
         self.calls: list[tuple] = []
-
     async def on_execute(self, task_id):
         self.calls.append(("on_execute", task_id))
 
@@ -625,18 +608,15 @@ def _service(task_type_stub_engine):
 
 def test_execute_workflow_persists_session_id():
     eng = _FakeEngine(graph=None)
-
     # patch the engine method used by execute:
     async def trig(*, task_id, bot_id, message):
         eng.calls.append(("workflow", task_id, bot_id, message))
-        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
         return BotSendResult(run_id="r", session_id=eng.workflow_session)
-
     eng.trigger_single_bot_workflow = trig
     svc, node_repo, run_repo = _service(eng)
 
-    result = asyncio.new_event_loop().run_until_complete(
-        svc.execute(_request(TaskType.WORKFLOW, workflow_id="wf", args=["1", "2"])))
+    result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.WORKFLOW, workflow_id="wf", args=["1", "2"])))
     assert result.success is True and result.task_id == "t1"
     run = run_repo.get_latest("t1", "t1")
     assert run is not None and run.run_mode == "single_bot" and run.session_id == "wf-session-1"
@@ -648,11 +628,9 @@ def test_execute_workflow_persists_session_id():
 
 def test_execute_yaml_persists_session_id_with_state_machine():
     eng = _FakeEngine(graph=None)
-
     async def start(gf):
         eng.calls.append(("yaml", gf.collab_mode, gf.extend_props.get("definition_yaml")))
         return eng.group_start
-
     eng.start_coop_group = start
     svc, node_repo, run_repo = _service(eng)
 
@@ -666,11 +644,9 @@ def test_execute_yaml_persists_session_id_with_state_machine():
 
 def test_execute_yaml_without_yaml_uses_manager_worker():
     eng = _FakeEngine(graph=None)
-
     async def start(gf):
         eng.calls.append(("yaml", gf.collab_mode))
         return eng.group_start
-
     eng.start_coop_group = start
     svc, _, _ = _service(eng)
     asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.YAML)))
@@ -880,7 +856,7 @@ cd src/backend && .venv/bin/python -m flake8 \
   src/agentclaw/community/core/task/task_runner/integration/open_api_bot_adapter.py \
   src/agentclaw/community/core/task/task_runner/integration/task_executor.py \
   src/agentclaw/community/core/task/task_runner/integration/task_executor_result_poller.py \
-  src/agentclaw/community/core/task/task_runner/task_runner.py \
+  src/agentclaw/community/core/task/task_runner/runner.py \
   src/agentclaw/community/core/task/task_center/engine.py \
   src/agentclaw/community/core/task/task_center/task_service.py \
   src/agentclaw/community/di/modules/task_module.py 2>/dev/null || echo "flake8 not available — antflake deferred to pre-push/CI"

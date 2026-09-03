@@ -168,4 +168,3 @@ def test_form_coop_group_recovers_owner_via_task_id_for_run_yaml_path():
     assert {"bot_uuid": "human_35983", "bot_name": "35983", "role": "observer"} in req.participants
     assert req.routing_policy == {"default_bot_final_delivery": "inject_observers"}
     assert req.originator is None  # originator 须为 Bot Actor(BCS 拒 human);人类仅作 participant 观察者
-
