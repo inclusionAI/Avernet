@@ -11,9 +11,34 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, Sequence, runtime_checkable
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, runtime_checkable
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+
+if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
+    from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+        ActivationPort,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+    from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+        ManifestIdentityPort,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+        ManifestResourcePort,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
+        SkillPackageUploadPort,
+    )
+    from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+        BotStartupScriptServiceProtocol,
+    )
+    from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
+        MCPAuthServiceProtocol,
+    )
+    from agentclaw.community.core.skill_center.capability_state_contract import (
+        BotCapabilityStateReaderProtocol,
+    )
+    from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyConstruct,
     EntryResult,
@@ -165,15 +190,15 @@ class Materialiser(Protocol):
 
 def build_materialisers(
     *,
-    script_service: Any,
-    activation_service: Any,
-    mcp_auth_service: Any,
-    identity_service: Any,
-    upload_service: Any,
-    capability_reader: Any,
-    package_validator: Any,
-    entry_fetcher: Any,
-    resource_service: Any,
+    script_service: "BotStartupScriptServiceProtocol",
+    activation_service: "ActivationPort",
+    mcp_auth_service: "MCPAuthServiceProtocol",
+    identity_service: "ManifestIdentityPort",
+    upload_service: "SkillPackageUploadPort",
+    capability_reader: "BotCapabilityStateReaderProtocol",
+    package_validator: "SkillPackageValidator",
+    entry_fetcher: "EntryFetcher",
+    resource_service: "ManifestResourcePort",
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 

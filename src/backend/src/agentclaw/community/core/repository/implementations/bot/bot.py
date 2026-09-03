@@ -21,7 +21,8 @@ SQLite twin (flagged in the PR):
    prod does. The old SQLite twin ``setattr``'d any field.
 3. **``get_device_provider_*``** — implements prod's real
    ``ac_bots`` ⟕ ``ac_entity_device_binding`` join (the old SQLite
-   twin was a stub returning ``None``).
+   twin was a stub returning ``None``); lives in
+   :class:`BotDeviceProviderQueries` (``device_provider.py``).
 
 ``insert`` is a **plain INSERT** (``db.add`` + ``db.flush``) — the
 table has no unique key; never an upsert. ``update_by_owner`` /
@@ -39,12 +40,16 @@ prod consumers only read the projected subset) plus a nested
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from injector import inject
-from sqlalchemy import and_, func, or_
+from sqlalchemy import DateTime, and_, func, or_, select, type_coerce
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.repository.implementations.bot.device_provider import (
+    BotDeviceProviderQueries,
+)
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
@@ -81,7 +86,13 @@ _UPDATE_ALLOWED_FIELDS = (
 _JSON_FIELDS = ("share_policy", "ext")
 
 
+def _as_naive(dt: datetime) -> datetime:
+    """Drop tzinfo so the DB's "now" and a stored ``gmt_modified`` compare."""
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
 class BotRepository(
+    BotDeviceProviderQueries,
     BotReachabilityQueries,
     BotRepositoryProtocol,
 ):
@@ -498,6 +509,63 @@ class BotRepository(
 
     # ── updates (single conditional statements) ─────────────────
 
+    def claim_provisioning(
+        self,
+        bot_id: str,
+        owner_id: str,
+        *,
+        reclaim_after_seconds: Optional[int] = None,
+    ) -> bool:
+        with self._db.orm_session() as db:
+            rowcount = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self.Model.status == "PENDING",
+                    self.Model.binding_id.is_(None),
+                    self._env(),
+                )
+                .update(
+                    {self.Model.status: "PROVISIONING", self.Model.gmt_modified: func.now()},
+                    synchronize_session=False,
+                )
+            )
+            if rowcount == 1 or reclaim_after_seconds is None:
+                return rowcount == 1
+            # A claim whose holder died leaves the row at PROVISIONING and
+            # unbound with nothing left to release it. Judged on the database
+            # clock alone (both "now" and ``gmt_modified`` are the DB's, the
+            # way the apply lock judges staleness), and taken by one
+            # conditional update: refreshing ``gmt_modified`` is what moves
+            # the row past the cutoff, so of two reclaimers only one wins.
+            db_now = db.execute(select(type_coerce(func.now(), DateTime))).scalar()
+            if db_now is None:
+                return False
+            cutoff = _as_naive(db_now) - timedelta(seconds=reclaim_after_seconds)
+            rowcount = (
+                db.query(self.Model)
+                .filter(
+                    self.Model.bot_id == bot_id,
+                    self.Model.owner_id == owner_id,
+                    self.Model.is_delete == 0,
+                    self.Model.status == "PROVISIONING",
+                    self.Model.binding_id.is_(None),
+                    self.Model.gmt_modified <= cutoff,
+                    self._env(),
+                )
+                .update({self.Model.gmt_modified: func.now()}, synchronize_session=False)
+            )
+            if rowcount == 1:
+                logger.warning(
+                    "[bot_repository.claim_provisioning] reclaimed a stale provisioning "
+                    "claim: bot_id=%s, older than %ss",
+                    bot_id,
+                    reclaim_after_seconds,
+                )
+        return rowcount == 1
+
     def update_by_owner(
         self, bot_id: str, owner_id: str, update_data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
@@ -692,88 +760,6 @@ class BotRepository(
                 .first()
             )
             return bot.to_dict() if bot else None
-
-    # ── device-provider join (adopt prod — drop the local stub) ─
-
-    def _device_provider_result(
-        self, device_provider, device_props_json, bot_type=None
-    ) -> Dict[str, Any]:
-        result: Dict[str, Any] = {
-            "device_provider": device_provider,
-            "bot_type": bot_type or "",
-        }
-        if device_provider == "arca":
-            try:
-                props = (
-                    json.loads(device_props_json)
-                    if isinstance(device_props_json, str)
-                    else device_props_json
-                )
-                sandbox_id = (props or {}).get("sandbox_id")
-                if sandbox_id:
-                    result["sandbox_id"] = sandbox_id
-            except (json.JSONDecodeError, TypeError, AttributeError):
-                pass
-        return result
-
-    def get_device_provider_by_bot_id_and_owner(
-        self, bot_id: str, owner_id: str
-    ) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import (
-            EntityDeviceBinding,
-        )
-
-        with self._db.orm_session() as db:
-            row = (
-                db.query(
-                    EntityDeviceBinding.device_provider,
-                    EntityDeviceBinding.device_props,
-                    self.Model.bot_type,
-                )
-                .select_from(self.Model)
-                .outerjoin(
-                    EntityDeviceBinding,
-                    self.Model.device_id == EntityDeviceBinding.device_id,
-                )
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.owner_id == owner_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .first()
-            )
-            if row is None:
-                return None
-            return self._device_provider_result(row[0], row[1], row[2])
-
-    def get_device_provider_by_bot_id(self, bot_id: str) -> Optional[Dict[str, Any]]:
-        from agentclaw.community.core.devices.repository.models import (
-            EntityDeviceBinding,
-        )
-
-        with self._db.orm_session() as db:
-            row = (
-                db.query(
-                    EntityDeviceBinding.device_provider,
-                    EntityDeviceBinding.device_props,
-                    self.Model.bot_type,
-                )
-                .select_from(self.Model)
-                .outerjoin(
-                    EntityDeviceBinding,
-                    self.Model.device_id == EntityDeviceBinding.device_id,
-                )
-                .filter(
-                    self.Model.bot_id == bot_id,
-                    self.Model.is_delete == 0,
-                    self._env(),
-                )
-                .first()
-            )
-            if row is None:
-                return None
-            return self._device_provider_result(row[0], row[1], row[2])
 
     # ── search / active (env-scoped JOIN to bot_publish) ────────
 

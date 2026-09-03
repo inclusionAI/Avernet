@@ -81,7 +81,6 @@ def _seam(applies=None, manifests=None, scripts=None, jobs=None):
         manifest_service=manifests or _Manifests(),
         apply_service=applies or _Applies(),
         script_service_provider=lambda: scripts or _Scripts(),
-        is_teclaw=lambda engine: engine == "teclaw",
         start_job=jobs.start,
         find_job=jobs.find,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,

@@ -58,7 +58,36 @@ from agentclaw.community.core.bot_config_manifest.credentials.service_protocol i
     SourceCredentialServiceProtocol,
 )
 from agentclaw.community.di import config as cfg
+from agentclaw.community.core.bot_config_manifest.managed_files import (
+    ManagedFilesComposeReader,
+    ManagedFilesStore,
+)
+from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
+    BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    MaterialiserPorts,
+    TeclawPlatformBindings,
+)
+from agentclaw.community.core.bot_config_manifest.apply.record_only_activation import (
+    RecordOnlyActivation,
+)
+from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
+from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+    StoreIdentityPort,
+    StoreResourcePort,
+    StoreSkillPackagePort,
+)
+from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
+from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
 from agentclaw.community.di.modules.config_module import read_user_config
+from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
 class ManifestFetchModule(Module):
@@ -78,6 +107,9 @@ class ManifestFetchModule(Module):
         consumers stay defined together. This provider is only the one sofa
         read, through config_module's public seam.
         """
+        from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+            teclaw_platform_managed_from_config,
+        )
         from agentclaw.community.core.bot_config_manifest.content.settings import (
             content_store_root_from_config,
         )
@@ -91,9 +123,51 @@ class ManifestFetchModule(Module):
                 sorted(transport_allowlist_from_config(tree))
             ),
             content_store_dir=str(content_store_root_from_config(tree)),
+            # W8's switch, parsed by the delivery seam's own reader so the yaml
+            # key and its consumer stay defined together.
+            teclaw_platform_managed=teclaw_platform_managed_from_config(tree),
         )
 
     # ── the machine parts ──────────────────────────────────────────────────
+
+    @singleton
+    @provider
+    @inject
+    def manifest_managed_files_store(
+        self, object_storage: ObjectStoragePlugin
+    ) -> ManagedFilesStore:
+        """W8: the platform's own copy of a teclaw bot's manifest-delivered files.
+
+        Bytes in the same OSS bucket the teclaw promotion stages into, under the
+        same ``bot-data`` base, so the composer's store coordinates resolve a
+        manifest-delivered ref exactly as they resolve a promoted one. The key
+        layout is the record; there is no index table beside it.
+        """
+        from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
+
+        return ManagedFilesStore(
+            object_storage=object_storage, store_base=get_teclaw_bolt_data_prefix
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_managed_files_reader(
+        self,
+        store: ManagedFilesStore,
+        injector: Injector,
+        manifest_config: cfg.BotConfigManifestConfig,
+    ) -> ManagedFilesComposeReader:
+        """W8: what the teclaw composer reads — which categories the platform
+        asserts, and the refs it holds for them. The manifest service is lazy
+        for the cycle reason every other manifest collaborator is."""
+        return ManagedFilesComposeReader(
+            store=store,
+            manifest_service_provider=lambda: injector.get(
+                BotConfigManifestServiceProtocol
+            ),
+            platform_managed=lambda: manifest_config.teclaw_platform_managed,
+        )
 
     @singleton
     @provider
@@ -292,3 +366,87 @@ class ManifestFetchModule(Module):
         """The lazy lookup the apply service builds each apply's source
         session through — a fresh map and fresh checkouts every apply."""
         return lambda: injector.get(GitSourceClient)
+
+    # ── W8: the platform-managed teclaw path ───────────────────────────────
+
+    @singleton
+    @provider
+    def bot_create_with_manifest_config(self) -> cfg.BotCreateWithManifestConfig:
+        """W13's creation policy, read through ``config_module``'s public seam.
+
+        Parsed here, with the manifest config cluster: the read goes through
+        the one seam, and the parsing lives with the graph that consumes it.
+        """
+        return cfg.BotCreateWithManifestConfig.from_block(
+            read_user_config().get("bot_create_with_manifest") or {}
+        )
+
+    @singleton
+    @provider
+    @inject
+    def manifest_teclaw_platform_bindings(
+        self,
+        injector: Injector,
+        store: ManagedFilesStore,
+        script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
+        activation_service_provider: Callable[[], DirectActivationServiceProtocol],
+        mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
+        capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
+        package_validator_provider: Callable[[], SkillPackageValidator],
+        entry_fetcher_provider: Callable[[], EntryFetcher],
+    ) -> TeclawPlatformBindings:
+        """The store-backed ports and the closing redeliver (W8, spec D-7).
+
+        The three file categories write to the managed-files store instead of
+        a container; activation records without projecting; the closing step
+        hands the running container the whole artifact once. Everything the
+        family shares with ARCA — the script service, the permission check,
+        the capability reader, the validator, the fetch pipeline — is the
+        same object ARCA's ports carry.
+
+        The device graph is resolved lazily and by function-level import for
+        the reason the resource factory above records: it reaches the device
+        dispatcher graph at import time.
+        """
+        def platform_ports() -> MaterialiserPorts:
+            validator = package_validator_provider()
+            return MaterialiserPorts(
+                script_service=script_service_provider(),
+                activation_service=RecordOnlyActivation(activation_service_provider()),
+                mcp_auth_service=mcp_auth_service_provider(),
+                identity_service=StoreIdentityPort(store),
+                upload_service=StoreSkillPackagePort(
+                    store,
+                    validator=validator,
+                    skill_repository=injector.get(SkillRepository),
+                ),
+                capability_reader=capability_reader_provider(),
+                package_validator=validator,
+                entry_fetcher=entry_fetcher_provider(),
+                resource_service=StoreResourcePort(store),
+            )
+
+        def resolve(bot_id: str, owner_id: str):
+            from agentclaw.community.core.devices.services.device_context_resolver import (
+                DeviceContextResolver,
+            )
+
+            return injector.get(DeviceContextResolver).resolve_for_bot(bot_id, owner_id)
+
+        def dispatch(device):
+            from agentclaw.community.plugin_api.device_sync_dispatcher import (
+                DeviceSyncDispatcher,
+            )
+
+            return injector.get(DeviceSyncDispatcher).dispatch(device)
+
+        from agentclaw.community.core.devices.services.device_context import (
+            DeviceNotBoundError,
+        )
+
+        return TeclawPlatformBindings(
+            platform_ports=platform_ports,
+            redeliver=TeclawRedeliver(
+                resolve=resolve, dispatch=dispatch, not_bound=DeviceNotBoundError
+            ),
+        )

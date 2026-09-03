@@ -68,7 +68,8 @@
     },
     "bot_config_manifest": {
       "content_store_dir": "./data/manifest_content",
-      "fetch_transport_allowlist": []
+      "fetch_transport_allowlist": [],
+      "teclaw_platform_managed": false
     },
     "bot_oss_config": {
       "access_key_secret": "oss_m_manual_agentclaw_botdata",

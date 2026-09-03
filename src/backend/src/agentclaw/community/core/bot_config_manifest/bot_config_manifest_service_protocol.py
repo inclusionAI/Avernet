@@ -63,6 +63,10 @@ class ManifestWriteResult:
 
     record: BotConfigManifestRecord
     warnings: tuple[str, ...]
+    #: Whether the document declares a startup ``script`` (W8): the one
+    #: construct a running bot does not pick up until its next start, which
+    #: the ``PUT`` response tells the caller about.
+    declares_script: bool = False
 
 
 __all__ = [

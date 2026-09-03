@@ -380,10 +380,10 @@ the seam's `persist` resolves the storage key itself and returns it.
 no materialiser can act on: the document sits inert and nothing has been created.
 Here the same acceptance costs a Passport application, a user's authorization
 click and a live bot before the failure appears, so such a construct is refused
-at submission. The extra teclaw refusal is structural rather than a missing
-materialiser — teclaw composes a config artifact at provision time, a different
-mechanism from this pre/post-container delivery — and W8 (#1476) owns that arm,
-including lifting the refusal.
+at submission. Every engine family creates here since W8 (#1476): what a family
+cannot deliver is the validator's per-construct refusal (`script` on teclaw is
+`unsupported_script`), and which order the creation runs in is the delivery
+strategy's `creation_sequence` — see *Lifecycle apply points* below.
 
 ### Operational precondition
 
@@ -396,6 +396,78 @@ create-with-manifest still answers `202` and its poll sits at
 `AWAITING_AUTHORIZATION` until the creation deadline retires it as
 `AUTHORIZATION_EXPIRED`. Neither ever completes. It is the first thing to check
 when a creation or an apply appears stuck.
+
+## Lifecycle apply points and the delivery seam (W8, #1476)
+
+Two engine families deliver a bot's configuration by opposite mechanisms, and
+the apply engine must not know which it is running for. `apply/delivery.py`
+names the difference: a `DeliveryStrategy` owns the phase each construct
+belongs to, the write ports the materialisers are handed, the creation sequence
+the W13 job runs, and the step that closes an apply — and nothing else. The
+orchestrator sees phases and the materialisers see ports; neither learns the
+family.
+
+|  | ARCA (`ArcaDelivery`) | teclaw, switch **on** (`TeclawDelivery`) | teclaw, switch **off** |
+| --- | --- | --- | --- |
+| Phases | `script` PRE_CONTAINER, the rest ON_CONTAINER — `APPLY_ORDER`'s own table | every construct PRE_CONTAINER (`script` is refused by the validator) | the rest ON_CONTAINER, as before W8 |
+| Ports | the device-backed services | the store-backed ports over `managed_files/` + record-only activation | the device-backed services |
+| Closing step | none — the owning services project as they write | one whole-artifact redeliver to the running container, none when unbound | none |
+| Creation sequence | `CREATE_BETWEEN_PHASES`: phase A, create + provision, wait ACTIVE, phase B | `RECORD_APPLY_PROVISION`: record, the single phase against it, provision, wait ACTIVE | `CREATE_BETWEEN_PHASES` |
+
+**The platform is the source of truth for what a manifest applies, on both
+families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
+the delivery, so the platform holds its own copy of every manifest-delivered
+file: bytes in the bot-data object store under the promotion key layout with a
+`_manifest` segment, no index table beside them — the key layout is the record
+(`managed_files/`, see its README). The teclaw composer writes the artifact's
+**`ownership`** map — the engine contract's §9 — and **ownership follows the
+operation**, not the bot's declarations (`ComposeOccasion` on the compose
+request): the closing redeliver of a manifest apply, and the first artifact
+of a bot that carries a manifest, are the platform's for every category, and
+the composer lists the store for the file categories; every runtime edit — a
+skill or resource upload, an MCP edit, a channel change, a publish build — is
+the engine's for every category and reads no managed file. `mcp` is the
+platform's on every occasion (the artifact has carried the whole MCP set
+since W12); ARCA artifacts carry no map. A local skill the manifest installs
+rides as a `SkillRef` with a store address (R-O3) plus its files as resources
+refs; the collector emits it only while the bot has the skill active.
+
+**The switch.** `user_config.bot_config_manifest.teclaw_platform_managed`
+(default `false`), read once at boot by `DeliveryStrategyFactory` and nowhere
+else, strict about booleans. It stays off until the teclaw engine implements
+the `ownership` map (R-O1/R-O2/R-O3); off, teclaw runs the shape it ran before
+W8 and the only artifact change is an all-`engine` map. **Before flipping it on
+an existing deployment, explicitly apply each teclaw bot's manifest once** so
+the store carries its files: the next apply's redeliver asserts `platform`
+for every category, and an empty prefix under an asserted category means
+"remove the area" to an engine that honours the map.
+
+**`PUT` starts an apply** (§2.6): the document is stored and validated exactly
+as before, then both phases are started under trigger `put`; the response's
+`apply` field says `RUNNING` with the id or `NOT_STARTED` with why, and the
+write is a `200` either way. `warnings` carries the script delivery note and,
+on a bot that is not `ACTIVE` whose strategy has container-bound constructs,
+the note that those will be recorded as failed. Restart and republish are
+**not** apply points in this iteration (spec D-1): a change to the git repo a
+manifest ref points at is picked up by an explicit apply or the next `PUT`.
+
+**The legacy `…/startup-script` routes are untouched.** The manifest is a
+layer the startup script does not know about (review decision on
+inclusionAI/Avernet#1836): the routes read and write the
+`ac_bot_startup_script` row as before, and a manifest that declares `script`
+materialises into that same row on apply. An edit made through the legacy
+route on a bot whose manifest declares `script` is therefore replaced by the
+next apply — the manifest is the source of truth for what it declares.
+
+**Trigger vocabulary** (`apply/triggers.py`): `explicit`, `put`,
+`create:pre_container`, `create:on_container`. The apply record's column is 32
+wide and a test pins every trigger to it.
+
+**Deferred, recorded.** Restart and republish as apply points; the publish
+gather for platform-managed teclaw files (the promotion step still snapshots
+the container); a health surface for a failed closing redeliver beyond the
+report's `notes`; and an ARCA pre-binding port (ARCA still needs the container
+for every non-script construct).
 
 ## Where the HTTP seam is
 
@@ -593,6 +665,9 @@ consumed_by:
   - "adapters/http/openapi_v1/source_credentials — the public tenant credential register/rotate/read/delete surface (OPEN admission; app-operated — the edge requires an app credential, owner-app guarded)"
 internal_dependencies:
   - agentclaw.community.core.base
+  - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
+  - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
+  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8)
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.token_vault

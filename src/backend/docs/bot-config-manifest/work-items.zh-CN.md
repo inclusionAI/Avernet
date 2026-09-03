@@ -80,24 +80,13 @@ TC Open API 已经在用的那些 core service，写出真实的平台实体。�
 - `BaasService._get_start_cmd` 永远不知道 manifest 的存在，所以 #935「无脚本时
   启动命令逐字节不变」这个不变量是**由构造保证**的，而不是靠测试守着（设计
   §10.4 的测试照样要写）。
-- 既有的 `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 端点继续工作，
-  因为它们的表仍然是物化目标——**但「原样不变」只对没有 manifest 的 bot 成立，
-  这个区别很关键。**在 manifest 声明了 `script` 的 bot 上，走老端点 `PUT` 只会写
-  `ac_bot_startup_script`：`GET .../config-manifest` 仍返回旧的 `script`，两边不一致，
-  而**下一次 apply 会静默地把用户的改动覆盖回去**——一个返回 `200` 的修改，被一次
-  无关的重新发布撤销。
-
-  设计 §6 本来就回答了这件事，是这份计划把答案悄悄丢了：老端点是 manifest `script`
-  的**别名视图（write-through）**。现在作为要求恢复回来，而不是当成一处分歧：
-
-  - **有 manifest 的 bot**——老端点的 `PUT`/`DELETE` **写穿**到 manifest 文档的
-    `script` 字段，然后再物化，于是声明始终是事实，后续 apply 也没有什么可 revert 的。
-    老端点的 `GET` 读 manifest 里的 `script`。
-  - **没有 manifest 的 bot**——行为与今天逐字节一致，#935 的既有流程不受任何影响。
-
-  **这件事归 W8**，因为分歧会浮现的那些 apply 点归它管。W1 的「不改
-  `/startup-script` 端点」说的是 *W1* 的范围，不是承诺这个特性永远不碰它们——
-  别名和不碰，这两件事不可能同时成立。
+- 既有的 `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 端点继续工作、
+  原样不变，因为它们的表仍然是物化目标——**而且它们不感知 manifest 的存在。**
+  这份计划的早期版本曾把老端点做成 manifest `script` 的别名视图（write-through）；
+  W8 评审（inclusionAI/Avernet#1836）撤回了它：manifest 是上层，启动脚本是它物化
+  进去的实体之一，不是它的视图。后果说清楚，免得被当成 bug：在 manifest 声明了
+  `script` 的 bot 上，走老端点 `PUT` 写的是那一行，下一次 apply 会把声明的正文写
+  回去——manifest 是它所声明内容的真相源，要改就改 manifest。
 - 以后要不要把 `ac_bot_startup_script` 并进 manifest 模块，是个可逆决策，推迟。
   这解掉了设计 §8 的开放选项。
 - apply 对这个类目**唯一**做的事就是那一次 DB 写入；平台自己会把脚本拼进启动
@@ -1797,12 +1786,9 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 - [ ] **`script` 立即下发、下次启动生效**，且响应要说清楚。它在构造 payload 时被
       烤进启动命令（§2.12），所以它是唯一效果被延后的类目——这与 §2.7「记录下发而
       非执行」的边界一致，不是它的例外。
-- [ ] **老的 `/startup-script` 端点写穿到 manifest**（§2.2）。在**有** manifest 的
-      bot 上，`PUT`/`DELETE .../bots/{bot_id}/startup-script` 先更新 manifest 文档的
-      `script` 字段再物化，`GET` 读 manifest 里的 `script`；在**没有** manifest 的
-      bot 上，行为与今天逐字节一致。不做这件事，端点就会返回 `200` 然后被下一次
-      apply 静默覆盖——正是 §2.2 要防的那个 bug，而分歧浮现的那些 apply 点归本项管。
-      两条臂都要有测试钉住。
+- [x] **老的 `/startup-script` 端点原样不变**（§2.2，评审后修订）。它们只读写
+      自己的那一行，不从 manifest 层注入任何东西；manifest 声明的 `script` 在 apply
+      时物化进同一行。既有测试一字不改地通过。
 - [ ] **§2.7 在两个引擎系上都成立：apply 不往 bot 记录写任何东西，也不按是否首启
       分支。**apply 的记录到「下发」为止——`ac_bot_startup_script` 那一行写入、
       artifact 递交、逐文件写落地。容器的启动命令或引擎之后拿它做什么，是另一层的
@@ -1825,6 +1811,34 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 `TeclawProvisionService`。
 
 ---
+
+**进展（已落地，PR inclusionAI/Avernet#1836）。**spec 第 3 版
+（`specs/2026-09-02-manifest-lifecycle-apply-points/`）把本项收窄为 `PUT` 与 teclaw
+创建，并加入了投递策略缝；评审（第 5 版）让 `ownership` 跟着操作走，并撤回了
+startup-script 别名视图。逐条验收：
+
+- **teclaw 第一份 artifact 带着 manifest**——在平台管理路径上成立：创建 job 先只写
+  bot 记录，对着它跑唯一一个容器前阶段（每个类目写平台状态——store 后端的端口把
+  字节写进 bot-data 对象存储，键布局即记录、没有索引表；激活只记录
+  不投影），再开通；composer 列出对象存储前缀并写出 `ownership` 映射（引擎契约 §9）。
+  **`ownership` 跟着操作走**：manifest apply 的整包重投与带 manifest 的 bot 的第一份
+  artifact，所有类目都是平台的；上传 skill、上传资源、改 MCP、发布构建，所有类目
+  都是引擎的（`mcp` 任何时候都是平台的）。
+- **teclaw 创建、解除拒绝**——已完成；轮询走
+  `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`。
+- **`PUT` 生效**——已完成：`PUT` 先存，再以 `put` 触发器启动一次 apply；响应的
+  `apply` 字段报告它；未 ACTIVE 与 script 的提示放在 `warnings`。两个引擎系都不重启
+  （有测试钉住）。
+- **别名视图**——评审中撤回：老的 `/startup-script` 端点与 W8 之前逐字节一致。
+- **缝**——`DeliveryStrategy`（`apply/delivery.py`）：`ArcaDelivery` 就是今天的行为；
+  `TeclawDelivery` 在开关打开时把所有类目放到容器前、走 store 后端端口、最后整包
+  重投一次；开关关闭时保持 W8 之前的逐文件形态。
+- **开关**——`user_config.bot_config_manifest.teclaw_platform_managed`，默认**关**；
+  等 teclaw 引擎实现 `ownership`（R-O1/R-O2/R-O3）后再翻开，翻开前先对每个已有
+  manifest 的 teclaw bot 显式 apply 一次让索引落上文件。
+- **推迟**（spec D-1 与 *Follow-ups*）：重新发布与重启作为 apply 点；平台管理的
+  teclaw 文件在发布时的 gather；关闭步骤重投失败在报告 `notes` 之外的健康面；
+  ARCA 的绑定前端口。
 
 #### W9 — `cli_tools` —— 已推迟 · #1477
 

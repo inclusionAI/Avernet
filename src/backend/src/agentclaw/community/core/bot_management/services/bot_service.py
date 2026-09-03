@@ -126,6 +126,13 @@ logger = get_logger()
 # and is reaped on the next restart attempt so a bot is never permanently
 # blocked from restarting.
 RESTART_LOCK_TTL_SECONDS = 120
+#: How long an unbound ``PROVISIONING`` record may sit before a later
+#: ``provision_bot`` call treats the claim as abandoned and takes it over (W8).
+#: Longer than step 2 normally takes — a device allocation is seconds to a
+#: minute — so a live, slow holder that lost its task lease is not raced; the
+#: creation job only reaches this on a re-invocation, and the queue's own
+#: deadline bounds the whole creation anyway.
+PROVISIONING_CLAIM_STALE_SECONDS = 5 * 60
 
 # Passport refresh is callback-driven and retryable. Keep caller-instance
 # fan-out bounded while still attempting every instance before reporting an
@@ -1267,6 +1274,7 @@ class BotService(BotServiceProtocol):
         template_config: Optional[Dict[str, Any]] = None,
         cookie: Optional[str] = None,
         space_id: Optional[int] = None,
+        provision: bool = True,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1286,6 +1294,9 @@ class BotService(BotServiceProtocol):
             bot_type: Bot type (default: "personal", can be "personal" or "service")
             template_type: Template type (optional, e.g., "applicationCoding")
             template_config: Template configuration dictionary (optional)
+            provision: ``False`` writes the record (steps 1 and 1.5) and
+                returns it ``PENDING`` with no binding; :meth:`provision_bot`
+                runs the rest later (W8, teclaw platform-managed creation).
 
         Returns:
             Created bot record with PENDING status and binding info
@@ -1487,256 +1498,403 @@ class BotService(BotServiceProtocol):
                 )
                 return bot_record
 
-            # Bot 已落库并完成名称/简介解析后，在设备分配前注册 BCN Provider。
-            # 这样创建路径与 start_bot 对齐；BCN 注册为 best-effort，不影响后续分配。
-            should_register_bcn = self._should_register_bcn_provider(
-                active_engine=resolved_active_engine,
-                bot_type=resolved_bot_type,
+            if not provision:
+                # W8: the record is the whole first step. The device, the
+                # publish record and the rest wait for ``provision_bot``,
+                # which the creation job calls once the manifest's
+                # pre-container phase has written the platform state the
+                # first artifact is composed from.
+                logger.info(
+                    f"[bot_service.create_bot] Bot {bot_id} recorded; provisioning deferred"
+                )
+                return bot_record
+
+            return self._provision_created_bot(
+                bot_record,
+                bot_id=bot_id,
+                user_id=user_id,
+                nick_name=nick_name,
+                bot_desc=bot_desc,
+                resolved_bot_name=resolved_bot_name,
+                resolved_entity_id=resolved_entity_id,
+                resolved_entity_type=resolved_entity_type,
+                resolved_engine_types=resolved_engine_types,
+                resolved_active_engine=resolved_active_engine,
+                resolved_bot_type=resolved_bot_type,
                 template_type=template_type,
                 template_config=template_config,
+                cookie=cookie,
             )
-            connection_mode = self._resolve_bcn_provider_connection_mode(
-                active_engine=resolved_active_engine,
-                bot_type=resolved_bot_type,
-            )
-            if should_register_bcn:
-                logger.info(
-                    f"[bot_service.create_bot] register bot to BCN as provider: "
-                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                    f"bot_type={resolved_bot_type} template_type={template_type} "
-                    f"connection_mode={connection_mode}"
-                )
-                try:
-                    self._register_bot_to_bcn_as_provider(
-                        bot_id=bot_id,
-                        user_id=user_id,
-                        owner_workno=user_id,
-                        bot_name=resolved_bot_name or bot_id,
-                        bot_summary=bot_desc or "",
-                        connection_mode=connection_mode,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
-                        f"connection_mode={connection_mode}, "
-                        f"error_type={type(e).__name__}, will retry on next start"
-                    )
-            else:
-                logger.info(
-                    f"[bot_service.create_bot] skip BCN provider registration: "
-                    f"bot_id={bot_id} active_engine={resolved_active_engine} "
-                    f"bot_type={resolved_bot_type} template_type={template_type} "
-                    f"connection_mode={connection_mode}"
-                )
-
-            # Step 2: 设备分配（错误立即透出给前端）。teclaw bot 走 BaaS 即时备容器
-            # (create + approve)，不经 DeviceService.apply_device()；其余引擎走 apply_device。
-            # 两条路径汇合到下方共享尾部（更新 bot_record + 注册 BCN + service 发布单创建）。
-            # 注：teclaw service bot 的 source/草稿 容器在此即时备好；其 verify/online
-            # 容器仍由发布流程（按 device_provider）单独备好。
-            # teclaw 即时备容器时投递的初始 artifact —— 用于在下方创建草稿发布单后
-            # 回填其 ext.config_artifact（仅 teclaw service bot）。
-            teclaw_config_artifact: dict | None = None
-            try:
-                teclaw_provision = self._teclaw_provision_provider()
-                if teclaw_provision.is_teclaw(resolved_active_engine):
-                    logger.info(
-                        f"[bot_service.create_bot] Bot {bot_id} is teclaw, provisioning "
-                        f"container via BaaS (skipping DeviceService.apply_device)"
-                    )
-                    # The passport token is fetched and pushed by the create
-                    # publish poll task once BaaS reports the container started —
-                    # the PaaS device it is written onto does not exist yet here.
-                    provision = teclaw_provision.provision(
-                        bot=bot_record,
-                        owner_id=user_id,
-                    )
-                    binding_id = provision.binding_id
-                    device_id = provision.device_id
-                    final_status = provision.status
-                    teclaw_config_artifact = provision.config_artifact
-                else:
-                    service = self._device_service_provider()
-                    operator = _compose_operator_context(user_id, nick_name)
-
-                    # DRM: 判断新建 bot 是否走 NAS
-                    force_nas = self._is_new_bot_use_nas()
-
-                    # 生成软链配置
-                    symlink_mappings: List[SynlinkMappingInfo] = []
-                    try:
-                        skill_set_service = self._skill_set_factory.create(
-                            entity_id=resolved_entity_id,
-                            entity_type=resolved_entity_type,
-                            bot_id=str(bot_id),
-                            engine_type=resolved_active_engine,
-                        )
-                        symlink_mappings = skill_set_service.get_symlink_mappings(
-                            user_id=resolved_entity_id,
-                            bolt_id=str(bot_id)
-                        )
-                        logger.info(f"[bot_service.create_bot] Generated symlink_mappings: {len(symlink_mappings)}")
-                    except Exception as e:
-                        logger.warning(f"[bot_service.create_bot] Failed to get symlink_mappings: {e}")
-
-                    # Engine strategy 场景：按具体引擎策略传入额外环境变量。
-                    extra_envs = None
-                    # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
-                    # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
-                    device_template_config = self._attach_template_uid_context(
-                        bot_id=str(bot_id),
-                        user_id=user_id,
-                        bot_type=resolved_bot_type,
-                        engine_type=resolved_active_engine,
-                        template_type=template_type,
-                        template_config=template_config,
-                    )
-                    device_template_config = overlay_image_pin_on_template_config(
-                        device_template_config,
-                        bot_record.get("ext"),
-                    )
-                    extra_envs = self._build_engine_extra_envs(
-                        bot_id=str(bot_id),
-                        owner_id=user_id,
-                        active_engine=resolved_active_engine,
-                        bot_type=resolved_bot_type,
-                        template_type=template_type,
-                        template_config=template_config,
-                        log_context="bot_service.create_bot",
-                    )
-
-                    device_result = service.apply_device(
-                        apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
-                        entity_id=resolved_entity_id,
-                        entity_type=resolved_entity_type,
-                        operator=operator,
-                        bot_id=str(bot_id),
-                        engine=resolved_active_engine,
-                        bot_type=resolved_bot_type,
-                        owner_id=user_id,  # 创建时，owner_id 是当前登录用户
-                        symbol=symlink_mappings,
-                        force_nas=force_nas,
-                        extra_envs=extra_envs,
-                        admins=None,  # 新建 bot 还未添加协作者
-                        template_type=template_type,
-                        template_config=device_template_config,
-                    )
-
-                    if not device_result:
-                        raise DeviceAllocationError("设备申请返回空结果")
-
-                    binding_id = device_result.id
-                    device_id = device_result.device_id
-                    device_status = device_result.status
-
-                    # 更新 bot 记录（绑定设备）
-                    if device_status == DeviceBindingStatus.ACTIVE.value:
-                        final_status = "ACTIVE"
-                    else:
-                        final_status = "PENDING"  # DaaS 设备等待回调
-
-                self._repository.update_by_owner(bot_id, user_id, {
-                    "binding_id": binding_id,
-                    "device_id": device_id,
-                })
-                logger.info(f"[bot_service.create_bot] Bot {bot_id} device allocated: "
-                           f"binding_id={binding_id}, status={final_status}")
-
-                bot_record["binding_id"] = binding_id
-                bot_record["device_id"] = device_id
-                bot_record["status"] = final_status
-                bot_record["engine_types"] = resolved_engine_types
-
-                # 如果是服务型 bot，创建发布单
-                if resolved_bot_type == "service":
-                    try:
-                        publish_service = self._bot_publish_provider()
-
-                        publish_record = publish_service.create_publish(
-                            source_bot_pk=bot_record["id"],
-                            source_bot_id=bot_id,
-                            publish_bot_id=bot_id,
-                            name=resolved_bot_name,
-                            owner_id=user_id,
-                            permission_owner="owner",
-                            description=bot_desc,
-                            owner_name=nick_name,
-                        )
-                        # 将发布单信息保存到 bot_record 中
-                        bot_record["publish"] = publish_record.to_dict()
-                        logger.info(f"[bot_service.create_bot] Created publish record for service bot {bot_id}")
-
-                    except Exception as e:
-                        logger.error(f"[bot_service.create_bot] Failed to create publish record for service bot {bot_id}: {e}")
-
-                    # teclaw service bot：把即时备容器时投递的初始 artifact 回填到
-                    # 刚创建的草稿发布单 ext.config_artifact，使草稿期也有当前配置的
-                    # 持久记录。独立 try（不与建单混淆日志），best-effort 不影响建 bot。
-                    # 草稿期 publish_bot_id == bot_id，故 record_draft_artifact 按
-                    # publish_bot_id 即可定位该草稿行。
-                    if teclaw_config_artifact is not None:
-                        try:
-                            publish_service.record_draft_artifact(
-                                bot_id=bot_id,
-                                artifact=teclaw_config_artifact,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"[bot_service.create_bot] draft artifact record "
-                                f"failed for bot {bot_id}: {e}"
-                            )
-
-                # Attach template_config to bot_record if template was created
-                if template_config and template_type:
-                    bot_record["template_config"] = template_config
-
-                # applicationCoding 保留原 memory 初始化；新通用 CC / 架构师 Bot
-                # 的业务知识库、Wiki、RepoWiki 复用同一链路，但从
-                # template_config resolved 快照检测配置来源。
-                if self._should_trigger_memory_initialization(
-                    active_engine=resolved_active_engine,
-                    template_type=template_type,
-                    template_config=template_config,
-                    on_create=True,
-                ):
-                    logger.info(
-                        f"[bot_service.create_bot] Triggering memory initialization for "
-                        f"template-backed bot {bot_id}, template_type={template_type}"
-                    )
-                    from agentclaw.community.core.bot_management.utils import trigger_memory_initialization
-
-                    trigger_memory_initialization(
-                        bot_id=bot_id,
-                        bot_name=resolved_bot_name,
-                        user_id=user_id,
-                        template_config=template_config,
-                        cookie=cookie or "",
-                        aixcore_base_url=self._workspace_hosting_config.aixcore_base_url,
-                        aixcore_base_url_pre=self._workspace_hosting_config.aixcore_base_url_pre,
-                    )
-                    logger.info(
-                        f"[bot_service.create_bot] Memory initialization completed for bot {bot_id}"
-                    )
-
-                return bot_record
-            except (ResourceInsufficientError, DeviceAllocateError, DeviceLimitExceededError) as e:
-                # 设备申请失败，删除 bot 记录并立即抛出错误（default bot 除外）
-                logger.error(f"[bot_service.create_bot] Device allocation failed for bot {bot_id}: {e}")
-                if bot_id != "default":
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
-                raise BotServiceError(f"设备申请失败: {e}")
-            except Exception as e:
-                # 其他异常（default bot 除外，不删除）
-                logger.exception(f"[bot_service.create_bot] Unexpected error during device allocation for bot {bot_id}: {e}")
-                if bot_id != "default":
-                    self._repository.soft_delete_by_owner(bot_id, user_id)
-                raise BotServiceError(f"设备申请失败: {e}")
 
         except BotServiceError:
             raise
         except Exception as e:
             logger.error(f"[bot_service.create_bot] Failed to create bot record: {e}")
             raise BotServiceError(f"Failed to create bot record: {e}")
+
+    def provision_bot(
+        self,
+        bot_id: str,
+        user_id: str,
+        nick_name: str,
+        *,
+        template_type: Optional[str] = None,
+        template_config: Optional[Dict[str, Any]] = None,
+        cookie: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Run step 2 and its tail for a bot created with ``provision=False``.
+
+        Idempotent, durably: a record that already carries a binding is
+        returned as it is, and before any of step 2's work begins the record is
+        moved from ``PENDING`` to ``PROVISIONING`` by one conditional update
+        (``claim_provisioning``). A second call that finds the claim taken —
+        an at-least-once re-invocation of the creation job while the first is
+        still allocating — returns the record untouched rather than allocating
+        a second device. A claim left behind by a holder that died (still
+        unbound after ``PROVISIONING_CLAIM_STALE_SECONDS`` on the database
+        clock) is taken over instead, so the record does not stay stranded at
+        ``PROVISIONING``. Everything after the record — BCN registration, the
+        device or teclaw container, the publish record, the draft artifact,
+        memory initialisation — runs exactly as ``create_bot`` runs it, from
+        the same code, so ``create_bot()`` and ``create_bot(provision=False)``
+        followed by this are the same writes in the same order (W8).
+
+        ``template_type`` / ``template_config`` / ``cookie`` are not on the
+        record (the template row is, but the config the tail reads is the
+        caller's); the caller that deferred provisioning still holds them.
+        """
+        record = self._repository.get_by_id_and_owner(bot_id, user_id)
+        if not record:
+            raise BotServiceError(f"Bot {bot_id} not found for user {user_id}")
+        if record.get("binding_id"):
+            logger.info(
+                f"[bot_service.provision_bot] Bot {bot_id} already provisioned "
+                f"(binding_id={record.get('binding_id')})"
+            )
+            return record
+
+        if not self._repository.claim_provisioning(
+            bot_id, user_id, reclaim_after_seconds=PROVISIONING_CLAIM_STALE_SECONDS
+        ):
+            logger.info(
+                f"[bot_service.provision_bot] Bot {bot_id} is being provisioned by "
+                f"another call (status={record.get('status')}); returning the record"
+            )
+            return record
+
+        engine_types = record.get("engine_types") or _get_engine_types()
+        if isinstance(engine_types, str):
+            engine_types = [engine_types]
+        active_engine = record.get("active_engine") or DEFAULT_ENGINE_TYPE
+        engine_types = list(engine_types)
+        if active_engine not in engine_types:
+            engine_types.append(active_engine)
+        try:
+            return self._provision_created_bot(
+                dict(record),
+                bot_id=bot_id,
+                user_id=user_id,
+                nick_name=nick_name,
+                bot_desc=record.get("bot_desc"),
+                resolved_bot_name=record.get("bot_name"),
+                resolved_entity_id=str(record.get("entity_id") or f"staff_{user_id}"),
+                resolved_entity_type=str(record.get("entity_type") or "staff"),
+                resolved_engine_types=engine_types,
+                resolved_active_engine=active_engine,
+                resolved_bot_type=str(record.get("bot_type") or "personal"),
+                template_type=template_type or record.get("template_type"),
+                template_config=template_config,
+                cookie=cookie,
+            )
+        except BotServiceError:
+            self._release_provisioning_claim(bot_id, user_id)
+            raise
+        except Exception as e:
+            logger.error(f"[bot_service.provision_bot] Failed to provision bot {bot_id}: {e}")
+            self._release_provisioning_claim(bot_id, user_id)
+            raise BotServiceError(f"Failed to provision bot: {e}")
+
+    def _release_provisioning_claim(self, bot_id: str, user_id: str) -> None:
+        """Best effort: a record the failed step 2 left behind goes back to
+        ``PENDING``. A soft-deleted record (the allocation failures delete it)
+        is not found and nothing is written."""
+        try:
+            current = self._repository.get_by_id_and_owner(bot_id, user_id)
+            if current and current.get("status") == "PROVISIONING" and not current.get("binding_id"):
+                self._repository.update_by_owner(bot_id, user_id, {"status": "PENDING"})
+        except Exception as e:  # noqa: BLE001 — the original error is the one to raise
+            logger.warning(f"[bot_service.provision_bot] could not release the claim for {bot_id}: {e}")
+
+    def _provision_created_bot(
+        self,
+        bot_record: Dict[str, Any],
+        *,
+        bot_id: str,
+        user_id: str,
+        nick_name: str,
+        bot_desc: Optional[str],
+        resolved_bot_name: Optional[str],
+        resolved_entity_id: str,
+        resolved_entity_type: str,
+        resolved_engine_types: list[str],
+        resolved_active_engine: str,
+        resolved_bot_type: str,
+        template_type: Optional[str],
+        template_config: Optional[Dict[str, Any]],
+        cookie: Optional[str],
+    ) -> Dict[str, Any]:
+        """Step 2 and its tail, shared by ``create_bot`` and ``provision_bot``.
+
+        The body is ``create_bot``'s own, moved: BCN registration, the device
+        allocation (or the teclaw container), the record update, the publish
+        record, the draft artifact, the template attach and memory
+        initialisation. A device-allocation failure soft-deletes the record
+        and raises ``BotServiceError``, as it always has.
+        """
+        # Bot 已落库并完成名称/简介解析后，在设备分配前注册 BCN Provider。
+        # 这样创建路径与 start_bot 对齐；BCN 注册为 best-effort，不影响后续分配。
+        should_register_bcn = self._should_register_bcn_provider(
+            active_engine=resolved_active_engine,
+            bot_type=resolved_bot_type,
+            template_type=template_type,
+            template_config=template_config,
+        )
+        connection_mode = self._resolve_bcn_provider_connection_mode(
+            active_engine=resolved_active_engine,
+            bot_type=resolved_bot_type,
+        )
+        if should_register_bcn:
+            logger.info(
+                f"[bot_service.create_bot] register bot to BCN as provider: "
+                f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                f"bot_type={resolved_bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
+            )
+            try:
+                self._register_bot_to_bcn_as_provider(
+                    bot_id=bot_id,
+                    user_id=user_id,
+                    owner_workno=user_id,
+                    bot_name=resolved_bot_name or bot_id,
+                    bot_summary=bot_desc or "",
+                    connection_mode=connection_mode,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[bot_service.create_bot] BCN provider registration failed for bot {bot_id}, "
+                    f"connection_mode={connection_mode}, "
+                    f"error_type={type(e).__name__}, will retry on next start"
+                )
+        else:
+            logger.info(
+                f"[bot_service.create_bot] skip BCN provider registration: "
+                f"bot_id={bot_id} active_engine={resolved_active_engine} "
+                f"bot_type={resolved_bot_type} template_type={template_type} "
+                f"connection_mode={connection_mode}"
+            )
+
+        # Step 2: 设备分配（错误立即透出给前端）。teclaw bot 走 BaaS 即时备容器
+        # (create + approve)，不经 DeviceService.apply_device()；其余引擎走 apply_device。
+        # 两条路径汇合到下方共享尾部（更新 bot_record + 注册 BCN + service 发布单创建）。
+        # 注：teclaw service bot 的 source/草稿 容器在此即时备好；其 verify/online
+        # 容器仍由发布流程（按 device_provider）单独备好。
+        # teclaw 即时备容器时投递的初始 artifact —— 用于在下方创建草稿发布单后
+        # 回填其 ext.config_artifact（仅 teclaw service bot）。
+        teclaw_config_artifact: dict | None = None
+        try:
+            teclaw_provision = self._teclaw_provision_provider()
+            if teclaw_provision.is_teclaw(resolved_active_engine):
+                logger.info(
+                    f"[bot_service.create_bot] Bot {bot_id} is teclaw, provisioning "
+                    f"container via BaaS (skipping DeviceService.apply_device)"
+                )
+                # The passport token is fetched and pushed by the create
+                # publish poll task once BaaS reports the container started —
+                # the PaaS device it is written onto does not exist yet here.
+                provision = teclaw_provision.provision(
+                    bot=bot_record,
+                    owner_id=user_id,
+                )
+                binding_id = provision.binding_id
+                device_id = provision.device_id
+                final_status = provision.status
+                teclaw_config_artifact = provision.config_artifact
+            else:
+                service = self._device_service_provider()
+                operator = _compose_operator_context(user_id, nick_name)
+
+                # DRM: 判断新建 bot 是否走 NAS
+                force_nas = self._is_new_bot_use_nas()
+
+                # 生成软链配置
+                symlink_mappings: List[SynlinkMappingInfo] = []
+                try:
+                    skill_set_service = self._skill_set_factory.create(
+                        entity_id=resolved_entity_id,
+                        entity_type=resolved_entity_type,
+                        bot_id=str(bot_id),
+                        engine_type=resolved_active_engine,
+                    )
+                    symlink_mappings = skill_set_service.get_symlink_mappings(
+                        user_id=resolved_entity_id,
+                        bolt_id=str(bot_id)
+                    )
+                    logger.info(f"[bot_service.create_bot] Generated symlink_mappings: {len(symlink_mappings)}")
+                except Exception as e:
+                    logger.warning(f"[bot_service.create_bot] Failed to get symlink_mappings: {e}")
+
+                # Engine strategy 场景：按具体引擎策略传入额外环境变量。
+                extra_envs = None
+                # 路由到具体 provider 前，先把 template_uid 上下文带给 device 层。
+                # 解析失败先记下来；只有后续真正走 BaaS 时才需要 fail-fast。
+                device_template_config = self._attach_template_uid_context(
+                    bot_id=str(bot_id),
+                    user_id=user_id,
+                    bot_type=resolved_bot_type,
+                    engine_type=resolved_active_engine,
+                    template_type=template_type,
+                    template_config=template_config,
+                )
+                device_template_config = overlay_image_pin_on_template_config(
+                    device_template_config,
+                    bot_record.get("ext"),
+                )
+                extra_envs = self._build_engine_extra_envs(
+                    bot_id=str(bot_id),
+                    owner_id=user_id,
+                    active_engine=resolved_active_engine,
+                    bot_type=resolved_bot_type,
+                    template_type=template_type,
+                    template_config=template_config,
+                    log_context="bot_service.create_bot",
+                )
+
+                device_result = service.apply_device(
+                    apply_reason=f"Create bot: {resolved_bot_name or bot_id}",
+                    entity_id=resolved_entity_id,
+                    entity_type=resolved_entity_type,
+                    operator=operator,
+                    bot_id=str(bot_id),
+                    engine=resolved_active_engine,
+                    bot_type=resolved_bot_type,
+                    owner_id=user_id,  # 创建时，owner_id 是当前登录用户
+                    symbol=symlink_mappings,
+                    force_nas=force_nas,
+                    extra_envs=extra_envs,
+                    admins=None,  # 新建 bot 还未添加协作者
+                    template_type=template_type,
+                    template_config=device_template_config,
+                )
+
+                if not device_result:
+                    raise DeviceAllocationError("设备申请返回空结果")
+
+                binding_id = device_result.id
+                device_id = device_result.device_id
+                device_status = device_result.status
+
+                # 更新 bot 记录（绑定设备）
+                if device_status == DeviceBindingStatus.ACTIVE.value:
+                    final_status = "ACTIVE"
+                else:
+                    final_status = "PENDING"  # DaaS 设备等待回调
+
+            self._repository.update_by_owner(bot_id, user_id, {
+                "binding_id": binding_id,
+                "device_id": device_id,
+            })
+            logger.info(f"[bot_service.create_bot] Bot {bot_id} device allocated: "
+                       f"binding_id={binding_id}, status={final_status}")
+
+            bot_record["binding_id"] = binding_id
+            bot_record["device_id"] = device_id
+            bot_record["status"] = final_status
+            bot_record["engine_types"] = resolved_engine_types
+
+            # 如果是服务型 bot，创建发布单
+            if resolved_bot_type == "service":
+                try:
+                    publish_service = self._bot_publish_provider()
+
+                    publish_record = publish_service.create_publish(
+                        source_bot_pk=bot_record["id"],
+                        source_bot_id=bot_id,
+                        publish_bot_id=bot_id,
+                        name=resolved_bot_name,
+                        owner_id=user_id,
+                        permission_owner="owner",
+                        description=bot_desc,
+                        owner_name=nick_name,
+                    )
+                    # 将发布单信息保存到 bot_record 中
+                    bot_record["publish"] = publish_record.to_dict()
+                    logger.info(f"[bot_service.create_bot] Created publish record for service bot {bot_id}")
+
+                except Exception as e:
+                    logger.error(f"[bot_service.create_bot] Failed to create publish record for service bot {bot_id}: {e}")
+
+                # teclaw service bot：把即时备容器时投递的初始 artifact 回填到
+                # 刚创建的草稿发布单 ext.config_artifact，使草稿期也有当前配置的
+                # 持久记录。独立 try（不与建单混淆日志），best-effort 不影响建 bot。
+                # 草稿期 publish_bot_id == bot_id，故 record_draft_artifact 按
+                # publish_bot_id 即可定位该草稿行。
+                if teclaw_config_artifact is not None:
+                    try:
+                        publish_service.record_draft_artifact(
+                            bot_id=bot_id,
+                            artifact=teclaw_config_artifact,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[bot_service.create_bot] draft artifact record "
+                            f"failed for bot {bot_id}: {e}"
+                        )
+
+            # Attach template_config to bot_record if template was created
+            if template_config and template_type:
+                bot_record["template_config"] = template_config
+
+            # applicationCoding 保留原 memory 初始化；新通用 CC / 架构师 Bot
+            # 的业务知识库、Wiki、RepoWiki 复用同一链路，但从
+            # template_config resolved 快照检测配置来源。
+            if self._should_trigger_memory_initialization(
+                active_engine=resolved_active_engine,
+                template_type=template_type,
+                template_config=template_config,
+                on_create=True,
+            ):
+                logger.info(
+                    f"[bot_service.create_bot] Triggering memory initialization for "
+                    f"template-backed bot {bot_id}, template_type={template_type}"
+                )
+                from agentclaw.community.core.bot_management.utils import trigger_memory_initialization
+
+                trigger_memory_initialization(
+                    bot_id=bot_id,
+                    bot_name=resolved_bot_name,
+                    user_id=user_id,
+                    template_config=template_config,
+                    cookie=cookie or "",
+                    aixcore_base_url=self._workspace_hosting_config.aixcore_base_url,
+                    aixcore_base_url_pre=self._workspace_hosting_config.aixcore_base_url_pre,
+                )
+                logger.info(
+                    f"[bot_service.create_bot] Memory initialization completed for bot {bot_id}"
+                )
+
+            return bot_record
+        except (ResourceInsufficientError, DeviceAllocateError, DeviceLimitExceededError) as e:
+            # 设备申请失败，删除 bot 记录并立即抛出错误（default bot 除外）
+            logger.error(f"[bot_service.create_bot] Device allocation failed for bot {bot_id}: {e}")
+            if bot_id != "default":
+                self._repository.soft_delete_by_owner(bot_id, user_id)
+            raise BotServiceError(f"设备申请失败: {e}")
+        except Exception as e:
+            # 其他异常（default bot 除外，不删除）
+            logger.exception(f"[bot_service.create_bot] Unexpected error during device allocation for bot {bot_id}: {e}")
+            if bot_id != "default":
+                self._repository.soft_delete_by_owner(bot_id, user_id)
+            raise BotServiceError(f"设备申请失败: {e}")
 
     def _allocate_device_async(
         self,

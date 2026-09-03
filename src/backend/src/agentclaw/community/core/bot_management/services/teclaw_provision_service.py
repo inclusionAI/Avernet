@@ -42,6 +42,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable
 
+from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.bot_management.services.teclaw_publish_task_handler import (
     TECLAW_CREATE_PUBLISH_POLL_TASK,
@@ -154,13 +155,17 @@ class TeclawProvisionService:
         #    publish snapshot. (``owner_id`` is spliced in for the producer's
         #    ``_compose_request``, which reads the bot row's ``owner_id``.) Runtime
         #    edits later push updates via the teclaw device-sync variant.
+        #    ``PROVISION`` names the occasion (W8): the first artifact of a bot
+        #    that carries a manifest says the platform owns every category.
         from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
             ArtifactBuildRequest,
         )
 
         deploy = self._producer_router.resolve(TECLAW_DEVICE_PROVIDER).produce_artifact(
             ArtifactBuildRequest.create(
-                bot={**bot, "owner_id": owner_id}, version=None
+                bot={**bot, "owner_id": owner_id},
+                version=None,
+                compose_occasion=ComposeOccasion.PROVISION,
             )
         )
         config_artifact = deploy.ext["config_artifact"]

@@ -607,6 +607,27 @@ class ConfigManifestWrite(BaseModel):
     )
 
 
+class ConfigManifestApplyStarted(BaseModel):
+    """What `PUT …/config-manifest` did after storing the document (W8, §2.6).
+
+    A write starts an apply of the stored document; this says whether it
+    started. `RUNNING` carries the id to poll; `NOT_STARTED` carries why —
+    `apply_in_progress` when another apply holds the bot, `not_started` when
+    the apply could not be started for another reason. The document is stored
+    in every case.
+    """
+
+    apply_id: str = Field(
+        description="The apply to poll (`GET .../config-manifest/applies/{apply_id}`); "
+        "empty when nothing started."
+    )
+    result: str = Field(description="`RUNNING` or `NOT_STARTED`.")
+    reason: str | None = Field(
+        default=None,
+        description="Why nothing started: `apply_in_progress` or `not_started`.",
+    )
+
+
 class ConfigManifest(BaseModel):
     """A bot's stored configuration manifest. Every field but the document is
     server-derived."""
@@ -646,8 +667,17 @@ class ConfigManifest(BaseModel):
         default_factory=list,
         description=(
             "Non-fatal notes about the document just written — for example a "
-            "source declared under `sources` that nothing references. Always "
+            "source declared under `sources` that nothing references, a "
+            "startup script that takes effect on the next start, or "
+            "container-bound categories on a bot that is not ACTIVE. Always "
             "empty on a read."
+        ),
+    )
+    apply: ConfigManifestApplyStarted | None = Field(
+        default=None,
+        description=(
+            "The apply a write started (W8): `PUT` stores the document and then "
+            "starts an apply of it. Absent on a read."
         ),
     )
 

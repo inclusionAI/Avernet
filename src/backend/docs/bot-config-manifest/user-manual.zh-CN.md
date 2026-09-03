@@ -493,9 +493,17 @@ APPLYING                 清单 apply 进行中（取源 → 物化 → 下发�
 
 1. **先落库并校验。**接受一份文档从不依赖 bot 的运行时状态——bot 是 ACTIVE 还是
    别的状态，都不影响一份合法清单被接受。
-2. **被声明的类目按 §3.3 覆盖。不需要重启**，两个引擎系都不需要。
-3. **`script` 是唯一的例外**，而且与其说是「要重启」不如说是「延后生效」：它现在
-   就写下去，**下次启动时执行**。响应里会说清楚这件事。
+2. **落库之后立刻启动一次 apply**（W8）——和 `POST …/config-manifest/apply` 启动的
+   是同一种 apply，触发器记为 `put`。响应里多一个 `apply` 字段：`RUNNING` 带着
+   可轮询的 `apply_id`；或者 `NOT_STARTED` 并说明原因——`apply_in_progress`（这个
+   bot 上另一个 apply 还没结束，等它完成后再 `POST …/apply`）或 `not_started`。
+   **无论哪种情况文档都已经存下了，响应都是 `200`。**
+3. **被声明的类目按 §3.3 覆盖。不需要重启**，两个引擎系都不需要。
+4. **`script` 是唯一的例外**，而且与其说是「要重启」不如说是「延后生效」：它现在
+   就写下去，**下次启动时执行**。响应的 `warnings` 里会说清楚这件事。
+5. **bot 还不是 ACTIVE 时**（比如刚创建、容器还没起来）：apply 照样启动；在 ARCA 系
+   上需要容器的类目会被记成失败，`warnings` 会告诉你等 bot ACTIVE 之后调用哪个
+   apply 接口再来一次。teclaw 平台管理路径（见 §7.1）不需要容器，所以没有这条提示。
 
 > **永远不要为了让清单生效去重启 teclaw bot。**teclaw 重启会销毁容器、重新分配
 > 失败会把 bot 打成坏状态并丢失容器内文件；平台自己也不会这么做。按上面的机制，
@@ -730,10 +738,11 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 脚本不会丢**，只是要等下一次开设备。它**不会**在一个已经跑着的容器里被重新执行。
 报告里那一条的 `note` 就是这么说的。
 
-**老端点还能用**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 继续
-工作。对**有清单**的 bot，它是清单 `script` 字段的**别名视图**（write-through）
-——`PUT` 会先更新清单文档再物化，所以你的改动不会被下一次 apply 悄悄回滚。对
-**没有清单**的 bot，行为与今天逐字节一致。
+**老端点还能用，且不感知清单**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
+继续读写 `ac_bot_startup_script` 那一行，行为与今天逐字节一致——清单是上层，
+启动脚本这一层不知道它的存在（W8 评审决定）。清单声明的 `script` 在 apply 时
+物化进同一行，所以在**清单声明了 `script`** 的 bot 上，通过老端点改的脚本会被
+下一次 apply 覆盖回清单声明的内容：清单是它所声明内容的真相源，要改就改清单。
 
 ### 5.6 暂不开放：`engine_config` 与 `cli_tools`
 
@@ -826,22 +835,57 @@ digest 不匹配按 fetch 失败处理，不是「损坏的成功」。
 
 | 你做了什么 | 什么时候生效 | 要重启吗 |
 | --- | --- | --- |
-| `PUT` 清单（`identity` / `resources` / `skills` / `mcp`） | **立即** | 否 |
+| `PUT` 清单（`identity` / `resources` / `skills` / `mcp`） | **立即**——`PUT` 自己就启动了一次 apply（§4.6） | 否 |
 | `PUT` 清单里的 `script` | **立即下发，下次启动执行** | 否（但要等下次启动才跑） |
 | `POST …/apply` | 立即 | 否 |
 | 轮换凭证（重 `PUT` 同名） | 下一个 apply 点 | 否，且**不触发** apply |
-| bot 创建 | 创建流程内部 apply，第一个容器就带着 | —— |
-| publish / republish | 自动 apply | —— |
-| 重建式 restart | 自动 apply | —— |
+| bot 创建 | 创建流程内部 apply，第一个容器就带着（两个引擎系都是） | —— |
+| publish / republish | **不自动 apply**（第一期推迟，见下） | —— |
+| 重建式 restart | **不自动 apply**（第一期推迟，见下） | —— |
 | 扩容（scale-out） | **不重新 apply**——实例共享同一份平台状态，天然一致 | —— |
 
-同一个 bot 的 apply 是**串行**的，所以显式 apply 撞上 republish 也不会互相踩。
+同一个 bot 的 apply 是**串行**的，所以显式 apply 撞上 `PUT` 启动的那一次也不会互相
+踩——后来的那个会得到 `apply_in_progress`，等前一个结束再来。
 
-⚠️ **首启存在一个「bot 已 ACTIVE、但配置还在下发」的窗口**：第一期只有 `script`
-在容器起来**之前**下发，其余类目在之后。用创建 API 的调用方会看到 `APPLYING`
-状态，等到 `READY` 就跨过了这个窗口；**重新发布和重建式重启这两条路径上没有轮询
-循环**，窗口不是实时可观测的，事后读 `last-apply`。这个窗口会在启动前下发（#1508）
-落地后从根上关掉。
+**重新发布与重建式重启第一期不是 apply 点。**它们要解决的是「清单 `ref` 指向的
+git 仓库有人推了新提交」这类事，第一期的答案是：显式 `POST …/apply` 一次，或者
+再 `PUT` 一次清单。平台状态在两个引擎系上都是真相来源，容器重开只是把它再投一遍。
+
+⚠️ **ARCA 系首启存在一个「bot 已 ACTIVE、但配置还在下发」的窗口**：第一期只有
+`script` 在容器起来**之前**下发，其余类目在之后。用创建 API 的调用方会看到
+`APPLYING` 状态，等到 `READY` 就跨过了这个窗口。teclaw 平台管理路径（§7.1）没有
+这个窗口：所有类目在容器起来之前就已经在第一份 artifact 里了。
+
+### 7.1 teclaw：第一份 artifact 就带着清单
+
+teclaw 引擎不是「容器起来再逐文件写」，而是**靠一份 artifact 启动**——整包配置的
+清单，引擎自己按引用去对象存储拉文件。所以在 teclaw 上，清单的 apply 是把每个
+类目**物化进平台状态**：`mcp` 与 `skills` 进数据库；`identity`、`resources` 与本地
+skill 的包文件进平台自己的托管副本（bot-data 对象存储 + 一张索引表）。artifact 由
+平台状态组装，天然就带着清单的结果，并附一个 `ownership` 映射告诉引擎这份
+artifact 由谁断言——**跟着操作走**：apply 结束时的整包重投、以及带清单的 bot 的
+第一份 artifact，所有类目都是 `platform`（列表就是完整期望状态，空列表 = 区域
+清空）；上传 skill、上传资源、改 MCP 等其他操作触发的组装，所有类目都是 `engine`
+（引擎自己的状态是真相；`mcp` 除外，它任何时候都是 `platform`）。
+
+- **创建**：先只写 bot 记录，对着它跑那唯一一个 apply 阶段，再开容器——容器拿到的
+  **第一份** artifact 已经是清单的结果。轮询状态会从 `CREATING` → `APPLYING` →
+  `CREATING` → `READY`，报告只有这一个阶段。
+- **运行中 `PUT`**：apply 写平台状态，最后把整包 artifact 重投一次给运行中的容器
+  （不是逐文件写）；重投失败不会让 apply 失败，会记在报告的 `notes` 里，
+  再 `POST …/apply` 一次即可。
+- **本地 skill**：清单装的 skill 在 artifact 的 `skills` 里是一条 `scope: "user"` 且带
+  `store`/`path` 的引用，指向包目录，引擎按前缀拉整个包；当清单同时声明了
+  `resources`（于是 `resources` 也由平台断言）时，包里的每个文件还会作为 `resources`
+  引用出现。被清单删掉的 skill 不再出现在 artifact 里（文件留在平台副本，与 ARCA 上
+  停用一个 skill 时文件留在主机一致）。
+
+**这条路径由部署开关 `user_config.bot_config_manifest.teclaw_platform_managed`
+控制，默认关闭。**关闭时 teclaw 与 W8 之前一样：容器起来之后逐文件写，artifact 里
+只多一个全为 `engine` 的 `ownership` 映射。开关要等 teclaw 引擎实现 `ownership`
+语义（引擎收敛契约 §9）之后再翻开；**翻开之前，先对每个已有清单的 teclaw bot 显式
+apply 一次**，让平台副本落上文件——否则第一份带 `platform` 断言的 artifact 会把声明
+了却为空的类目当成「清空」。
 
 ---
 
@@ -1137,7 +1181,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `PUT /openapi/v1/bots/source-credentials/{name}` | 注册/轮换租户级凭证 |
 | `GET /openapi/v1/bots/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
 | `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
-| `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点；对有清单的 bot 是 `script` 的别名视图 |
+| `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点，不感知清单；清单声明的 `script` 在 apply 时写进同一行 |
 | 用清单创建 bot | 异步创建 API，见 §4.5（端点路径以实现为准） |
 
 ---

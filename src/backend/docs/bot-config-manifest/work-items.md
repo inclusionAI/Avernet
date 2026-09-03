@@ -89,29 +89,16 @@ apply materialises it into the existing `ac_bot_startup_script` store through
   byte-identical-without-a-script invariant is preserved by construction rather
   than defended by a test (design §10.4 still gets its test).
 - The existing `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
-  endpoints keep working, because their table is still the materialisation
-  target — **but "unchanged" is only true for a bot that has no manifest, and
-  the difference matters.** On a bot whose manifest declares `script`, a legacy
-  `PUT` writes `ac_bot_startup_script` and nothing else: `GET .../config-manifest`
-  still returns the old `script`, the two disagree, and **the next apply silently
-  reverts the user's edit** — a change accepted with `200` and then undone by an
-  unrelated republish.
-
-  Design §6 already answers this and this plan had quietly dropped the answer:
-  the legacy endpoints are an **alias view (write-through)** onto the manifest's
-  `script`. Restored as a requirement rather than a divergence:
-
-  - **Bot with a manifest** — a legacy `PUT`/`DELETE` writes through to the
-    manifest document's `script` field and then materialises, so the declaration
-    stays the truth and there is nothing for a later apply to revert. A legacy
-    `GET` reads the manifest's `script`.
-  - **Bot without a manifest** — behaviour is byte-for-byte what it is today.
-    Nothing about #935's existing flow changes.
-
-  **W8 owns this**, since it owns the apply points where the divergence would
-  otherwise surface. W1's "no change to the `/startup-script` endpoints" is a
-  statement about *W1's* scope, not a promise that the feature never touches
-  them — they cannot both be an alias and be untouched.
+  endpoints keep working, unchanged, because their table is still the
+  materialisation target — **and they do not know the manifest exists.** An
+  earlier revision of this plan made them an alias view (write-through) onto
+  the manifest's `script`; W8's review (inclusionAI/Avernet#1836) withdrew
+  that: the manifest is the upper layer, and the startup script is one of the
+  entities it materialises into, not a view of it. Consequence, stated so it
+  is not mistaken for a bug: on a bot whose manifest declares `script`, a
+  legacy `PUT` writes the row and the next apply writes the declared body
+  back over it — the manifest is the source of truth for what it declares,
+  and the place to change it is the manifest.
 - Whether to later collapse `ac_bot_startup_script` into the manifest module is
   a reversible decision, deferred. This resolves design §8's open choice.
 - Apply's *only* action for this category is that one DB write; the platform
@@ -2219,14 +2206,10 @@ manifest level, so there is no de-activation for W8 to place.)
       response says so. It is baked into the start command at payload-build time
       (§2.12), so it is the one category whose effect is deferred — consistent
       with §2.7's delivery-not-execution boundary, not an exception to it.
-- [ ] **The legacy `/startup-script` endpoints write through to the manifest**
-      (§2.2). On a bot **with** a manifest, `PUT`/`DELETE
-      .../bots/{bot_id}/startup-script` updates the manifest document's `script`
-      field and then materialises, and `GET` reads the manifest's `script`. On a
-      bot **without** a manifest, behaviour is byte-for-byte what it is today.
-      Without this the endpoint returns `200` and the next apply silently
-      overwrites the user's edit — the bug §2.2 exists to prevent, and this item
-      owns the apply points where it would surface. A test pins both arms.
+- [x] **The legacy `/startup-script` endpoints are untouched** (§2.2, as
+      revised in review). They read and write their own row and inject nothing
+      from the manifest layer; a manifest that declares `script` materialises
+      into that row on apply. Their existing tests pass unedited.
 - [ ] **§2.7 holds on both engine families: apply writes nothing to the bot
       record, and does not branch on first boot.** Apply's record ends at
       delivery — the `ac_bot_startup_script` row written, the artifact handed
@@ -2255,6 +2238,43 @@ manifest level, so there is no de-activation for W8 to place.)
 `TeclawProvisionService`.
 
 ---
+
+**Progress (landed, PR inclusionAI/Avernet#1836).** Spec revision 3
+(`specs/2026-09-02-manifest-lifecycle-apply-points/`) narrowed the item to
+`PUT` and teclaw creation and added the delivery seam; review (revision 5)
+made ownership follow the operation and withdrew the startup-script alias.
+Per criterion:
+
+- **The first teclaw artifact carries the manifest** — yes, on the
+  platform-managed path: the creation job records the bot, runs the single
+  pre-container phase against the record (every construct writes platform
+  state — the store-backed ports write bytes to the bot-data store under a
+  key layout that is the record, no index table; activation records without
+  projecting), then provisions; the composer lists the store and emits the
+  `ownership` map (engine contract §9). **Ownership follows the operation**:
+  a manifest apply's redeliver and a manifest bot's first artifact are the
+  platform's for every category; a skill upload, a resource upload, an MCP
+  edit or a publish build is the engine's for every category (`mcp` always
+  the platform's).
+- **teclaw creation, the refusal lifted** — done; the poll walks
+  `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`.
+- **`PUT` takes effect** — done: `PUT` stores, then starts an apply under
+  trigger `put`; the response's `apply` field reports it; the not-ACTIVE and
+  script notes ride in `warnings`. No restart on either family (pinned).
+- **The alias view** — withdrawn in review: the legacy `/startup-script`
+  routes are byte-for-byte what they were before W8.
+- **The seam** — `DeliveryStrategy` (`apply/delivery.py`): `ArcaDelivery` is
+  today's behaviour; `TeclawDelivery` runs every construct pre-container over
+  store-backed ports with one closing whole-artifact redeliver when the switch
+  is on, and the pre-W8 per-file shape when it is off.
+- **The switch** — `user_config.bot_config_manifest.teclaw_platform_managed`,
+  default **off**; flip once the teclaw engine implements `ownership`
+  (R-O1/R-O2/R-O3), after explicitly applying each existing teclaw bot's
+  manifest so the store is populated.
+- **Deferred** (spec D-1 and *Follow-ups*): restart and republish as apply
+  points; the publish gather for platform-managed teclaw files; a health
+  surface for a failed closing redeliver beyond the report's `notes`; an ARCA
+  pre-binding port.
 
 #### W9 — `cli_tools` — deferred · #1477
 

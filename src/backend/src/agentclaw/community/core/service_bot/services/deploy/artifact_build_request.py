@@ -13,6 +13,7 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
     RuntimeLayoutProbeResult,
     RuntimeLayoutProbeStatus,
@@ -239,6 +240,11 @@ class ArtifactBuildRequest:
     bot: Mapping[str, Any]
     version: int | None
     layout_observation: ServiceArtifactLayoutObservation | None = None
+    compose_occasion: ComposeOccasion = ComposeOccasion.RUNTIME
+    """What a compose-backed build is for (W8): a publish build is a runtime
+    compose; eager teclaw provisioning names ``PROVISION`` so the first
+    artifact of a bot that carries a manifest says the platform owns every
+    category. Snapshot producers ignore it."""
 
     @classmethod
     def create(
@@ -247,11 +253,13 @@ class ArtifactBuildRequest:
         bot: Mapping[str, Any],
         version: int | None,
         layout_observation: ServiceArtifactLayoutObservation | None = None,
+        compose_occasion: ComposeOccasion = ComposeOccasion.RUNTIME,
     ) -> ArtifactBuildRequest:
         return cls(
             bot=MappingProxyType(dict(bot)),
             version=version,
             layout_observation=layout_observation,
+            compose_occasion=compose_occasion,
         )
 
 

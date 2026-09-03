@@ -528,13 +528,9 @@ def create_bot_with_authorization(
 
     ``cookie`` forwards the browser session down to the service layer, which is
     **bad practice** — a transport credential has no business below the adapter
-    boundary. It is threaded through only for backward compatibility with the
-    internal ``/api/bots`` path, whose downstream memoryos call still relies on
-    it. The public ``/openapi/v1`` surface deliberately does not pass it (its
-    callers are registered tenants, not browser sessions), so it is optional and
-    should stay unset for any new caller; ``create_bot`` treats ``None`` as "no
-    cookie". Remove the parameter entirely once the internal path stops needing
-    it.
+    boundary. Threaded through only for the internal ``/api/bots`` path, whose
+    downstream memoryos call still relies on it; the public ``/openapi/v1``
+    surface does not pass it. Remove once the internal path stops needing it.
     """
     # Creation policy is evaluated here, rather than in either transport, so no
     # caller can bypass template/combination rules before Passport or writes.
@@ -909,13 +905,14 @@ def complete_manifest_creation(
     bot_service: BotService,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
+    provision: bool = True,
 ) -> AuthStatusResult:
     """Finish a create-from-manifest by the ordinary completion path.
 
-    Reuses :func:`complete_bot_authorization` **unmodified**, which is what keeps
-    creation itself a single implementation. It is idempotent on a supplied
-    ``bot_id`` — ``create_bot`` returns the existing bot — so a re-claimed task
-    cannot produce a second one.
+    Reuses :func:`complete_bot_authorization`, which is what keeps creation a
+    single implementation. Idempotent on a supplied ``bot_id`` (``create_bot``
+    returns the existing bot), so a re-claimed task cannot produce a second one.
+    ``provision=False`` records the bot without provisioning it (W8).
     """
     spec, context = creation_spec_from_payload(job_payload["spec"])
     user_id = str(job_payload["user_id"])
@@ -928,6 +925,7 @@ def complete_manifest_creation(
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
+        provision=provision,
     )
 
 
@@ -942,6 +940,7 @@ def complete_bot_authorization(
     bot_service: BotService,
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
+    provision: bool = True,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
 
@@ -949,12 +948,12 @@ def complete_bot_authorization(
     and records the owner relationship; any other status is returned verbatim for
     the caller to map. Raises ``PassportError`` (query failure) and the create
     domain errors for the caller to map; a query that returns nothing raises
-    ``RuntimeError`` (mapped to the internal 500).
+    ``RuntimeError`` (mapped to the internal 500). ``provision`` is
+    ``create_bot``'s (W8): ``False`` records the bot and leaves provisioning to
+    ``provision_bot``.
 
-    ``cookie`` carries the browser session into the service layer, which is
-    **bad practice** — see :func:`create_bot_with_authorization` for the full
-    note. Kept only for the internal ``/api/bots`` path; the public
-    ``/openapi/v1`` surface does not pass it.
+    ``cookie`` carries the browser session into the service layer — **bad
+    practice**, see :func:`create_bot_with_authorization`; internal path only.
     """
     # Re-run the same policy on authorization completion because callers echo
     # the creation attributes and must not bypass the original create contract.
@@ -990,6 +989,7 @@ def complete_bot_authorization(
         template_config=spec.template_config,
         cookie=cookie,
         space_id=spec.space_id,
+        provision=provision,
     )
 
     _record_owner_relationship(

@@ -64,6 +64,18 @@
       "description": "Command-line tools the model can invoke. Added without a schema_version bump; compatibility rests on the engine contract's ignore-unknown-fields rule. NOT in 'required' only because nothing populates it yet - once the composer does, it is always present and always complete, like every other category, and [] simply means the bot has no platform-delivered tools.",
       "items": { "$ref": "#/definitions/cliToolRef" }
     },
+    "ownership": {
+      "type": "object",
+      "description": "W8: which categories the PLATFORM asserts in this artifact and which it leaves to the engine. Keys are category field names (mcp, skills, resources, identity_files, cli_tools). 'platform' = the list in this artifact is the complete desired state for that category's area (engine contract section 5); an empty list means remove everything in the area. 'engine' = the engine owns the category and ignores the list here. A category absent from the map, or the map absent entirely, means the engine's pre-W8 behaviour. Added without a schema_version bump under the ignore-unknown-fields rule (A5); NOT in 'required' because an artifact that asserts no ownership carries no map.",
+      "additionalProperties": false,
+      "properties": {
+        "mcp": { "$ref": "#/definitions/ownership" },
+        "skills": { "$ref": "#/definitions/ownership" },
+        "resources": { "$ref": "#/definitions/ownership" },
+        "identity_files": { "$ref": "#/definitions/ownership" },
+        "cli_tools": { "$ref": "#/definitions/ownership" }
+      }
+    },
     "stores": {
       "type": "object",
       "description": "Physical coordinates of content stores, keyed by store_id (the source scheme; name it for the store, not the scope). Location only — NEVER credentials. A ref {store:'skill-repo', path:'team/x'} resolves against stores['skill-repo'].",
@@ -76,6 +88,11 @@
     }
   },
   "definitions": {
+    "ownership": {
+      "type": "string",
+      "enum": ["platform", "engine"],
+      "description": "Who asserts a category in this delivery: the platform (the list is the complete desired state) or the engine (the list is ignored)."
+    },
     "storeRef": {
       "type": "object",
       "additionalProperties": false,

@@ -24,6 +24,7 @@ every observable behaviour of ``POST …/config-manifest/apply`` is what it was.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import time
 import uuid
@@ -38,6 +39,12 @@ from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
     carry_forward,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    DeliveryStrategy,
+    DeliveryStrategyFactory,
+    MaterialiserPorts,
+    Redeliver,
+)
 from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
     APPLY_TASK_DEADLINE_SECONDS,
     APPLY_TASK_TYPE,
@@ -76,6 +83,12 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
+)
+from agentclaw.community.core.bot_config_manifest.services.apply_termination import (
+    parse_started_at,
+    record_engine_failure,
+    terminate_on_launch_failure,
+    terminate_unstartable,
 )
 from agentclaw.community.core.bot_config_manifest.services.apply_report_codec import (
     report_from_payload,
@@ -139,15 +152,6 @@ class ManifestApplyBotMissingError(RuntimeError):
         super().__init__(f"bot {bot_id} not found for a queued apply")
 
 
-def _parse_started_at(value: Optional[str]) -> datetime:
-    """The apply's own start time, or now if the payload predates the field."""
-    if not value:
-        return datetime.now()
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return datetime.now()
-
 
 def _engine_and_bot_type(
     bot: Optional[dict],
@@ -198,6 +202,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
+        *,
+        is_teclaw: Optional[Callable[[Optional[str]], bool]] = None,
+        teclaw_platform_managed: bool = False,
+        teclaw_platform_ports_provider: Optional[Callable[[], MaterialiserPorts]] = None,
+        redeliver: Optional[Redeliver] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_repository
@@ -243,6 +252,21 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # The repository has no such problem and is injected directly.
         self._task_queue_provider = task_queue_provider
         self._bots = bot_repository
+        # W8: the delivery seam. The factory is the one reader of the
+        # platform-managed switch; ARCA's ports are the providers above, held
+        # as a thunk so they are resolved per apply like everything else here.
+        # ``is_teclaw`` is the engine authority (``TeclawProvisionService``),
+        # passed in by the DI module; ``None`` — a test constructing the
+        # service without one — makes every bot ARCA, which is the pre-W8
+        # behaviour and never a silent teclaw misroute in production, where
+        # the module always binds it.
+        self._strategies = DeliveryStrategyFactory(
+            is_teclaw=is_teclaw or (lambda _engine: False),
+            teclaw_platform_managed=teclaw_platform_managed,
+            arca_ports=self._arca_ports,
+            teclaw_platform_ports=teclaw_platform_ports_provider,
+            redeliver=redeliver,
+        )
 
     # ── starting ────────────────────────────────────────────────────────────
 
@@ -406,7 +430,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             # TTL (30 minutes of ManifestApplyInProgressError) for work that never
             # ran. The apply is terminally FAILED here, the lock released for the
             # next attempt, and the caller hears the original failure.
-            self._terminate_on_launch_failure(
+            terminate_on_launch_failure(
+                self._applies,
+                self._locks,
                 env=env,
                 entity_id=entity_id,
                 bot_id=bot_id,
@@ -440,8 +466,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         """
         report: ApplyReport | None = None
         try:
+            strategy = self.delivery_for_engine(ctx.engine_type)
             report = asyncio.run(
-                self._orchestrator().apply(
+                self._apply_and_finish(
+                    strategy,
                     ctx,
                     parsed,
                     apply_id=apply_id,
@@ -465,7 +493,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                 finished_at=datetime.now(),
                 categories=(),
             )
-            self._record_engine_failure(report, exc)
+            record_engine_failure(report, exc)
         else:
             report = carry_forward(
                 report,
@@ -502,70 +530,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                         lock_token=lock_token,
                     )
 
-    def _terminate_on_launch_failure(
-        self,
-        *,
-        env: str,
-        entity_id: str,
-        bot_id: str,
-        apply_id: str,
-        trigger: str,
-        started_at: datetime,
-        lock_token: str,
-        exc: BaseException,
-    ) -> None:
-        """A RUNNING report whose work never launched: finish it, free the bot.
-
-        The mirrored ``finally`` of ``_run`` for the one path that cannot run
-        it: a terminal ``FAILED`` record (the failure swims in the log, not
-        the stored report, same rule as ``_record_engine_failure``) written
-        *before* the lock is released, so a poller never observes a
-        lock-less RUNNING row and a re-apply never waits out the TTL for an
-        apply that never started.
-        """
-        logger.error(
-            "[manifest_apply] launch failed before the work could be "
-            "handed off, apply_id=%s, bot_id=%s: %s",
-            apply_id,
-            bot_id,
-            exc,
-        )
-        try:
-            self._applies.finish(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                apply_id=apply_id,
-                status=ApplyStatus.FAILED.value,
-                report=json.dumps(
-                    ApplyReport(
-                        apply_id=apply_id,
-                        bot_id=bot_id,
-                        trigger=trigger,
-                        status=ApplyStatus.FAILED,
-                        started_at=started_at,
-                        finished_at=datetime.now(),
-                        categories=(),
-                    ).as_payload()
-                ),
-            )
-        except Exception:
-            # The lock release is the load-bearing half here; a record that
-            # could not be terminated is a stranded-RUNNING row, which the
-            # read-time abandonment derivation already answers for.
-            logger.exception(
-                "[manifest_apply] could not terminate a launch-failed report, "
-                "apply_id=%s",
-                apply_id,
-            )
-        finally:
-            self._locks.release(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                lock_token=lock_token,
-            )
-
     def run_apply_task(self, payload: dict) -> None:
         """Execute one apply from its task payload. Called only by the handler.
 
@@ -601,14 +565,14 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
                     payload.get("apply_id"),
                     bot_id,
                 )
-                self._terminate_unstartable(payload, exc)
+                terminate_unstartable(self._applies, self._locks, payload, exc)
                 return
             self._run(
                 ctx=ctx,
                 parsed=parsed,
                 apply_id=str(payload["apply_id"]),
                 trigger=str(payload["trigger"]),
-                started_at=_parse_started_at(payload.get("started_at")),
+                started_at=parse_started_at(payload.get("started_at")),
                 phases=phases_from_payload(payload["phases"]),
                 lock_token=str(payload["lock_token"]),
                 carry_from_apply_id=payload.get("carry_from_apply_id"),
@@ -676,44 +640,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         )
         return ctx, parsed
 
-    def _terminate_unstartable(self, payload: dict, exc: Exception) -> None:
-        """Record a FAILED report and release the lock for an apply that cannot run.
-
-        Both halves matter. Without the report the row polls ``RUNNING`` until
-        its lock goes stale; without the release the bot is locked against every
-        future apply for the whole TTL.
-        """
-        env = str(payload["env"])
-        entity_id = str(payload["entity_id"])
-        bot_id = str(payload["bot_id"])
-        apply_id = str(payload["apply_id"])
-        report = ApplyReport(
-            apply_id=apply_id,
-            bot_id=bot_id,
-            trigger=str(payload["trigger"]),
-            status=ApplyStatus.FAILED,
-            started_at=_parse_started_at(payload.get("started_at")),
-            finished_at=datetime.now(),
-            categories=(),
-        )
-        self._record_engine_failure(report, exc)
-        try:
-            self._applies.finish(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                apply_id=apply_id,
-                status=report.status.value,
-                report=json.dumps(report.as_payload()),
-            )
-        finally:
-            self._locks.release(
-                env=env,
-                entity_id=entity_id,
-                bot_id=bot_id,
-                lock_token=str(payload["lock_token"]),
-            )
-
     def _bot_or_none(self, *, entity_id: str, bot_id: str) -> Optional[dict]:
         """The bot record, or ``None`` when it does not exist yet.
 
@@ -723,19 +649,6 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         composed.
         """
         return self._bots.get_by_id_and_entity(bot_id, entity_id)
-
-    def _record_engine_failure(self, report: ApplyReport, exc: Exception) -> None:
-        """Log the cause; the stored report says FAILED with no entries.
-
-        Deliberately not putting ``str(exc)`` in the report: an exception from
-        the engine itself is a bug rather than something a caller can act on,
-        and its text is the one place raw internals could reach a response body.
-        """
-        logger.error(
-            "[manifest_apply] engine failure recorded, apply_id=%s: %s",
-            report.apply_id,
-            exc,
-        )
 
     # ── dry run ─────────────────────────────────────────────────────────────
 
@@ -776,7 +689,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             ),
         )
         try:
-            return await self._orchestrator().apply(
+            return await self._orchestrator(
+                self.delivery_for_engine(ctx.engine_type)
+            ).apply(
                 ctx,
                 parsed,
                 # No id: a dry run appears in no history, so there is nothing to
@@ -863,14 +778,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         """
         return frozenset(self._build_materialisers().keys())
 
-    def _build_materialisers(self):
-        """The one construction site for the registry.
-
-        Named rather than inlined into ``_orchestrator`` so
-        ``materialised_constructs`` reads the *same* registry the engine runs,
-        instead of a second list that would drift from it.
-        """
-        return build_materialisers(
+    def _arca_ports(self) -> MaterialiserPorts:
+        """The device-backed write targets: ARCA's, and teclaw's with the switch off."""
+        return MaterialiserPorts(
             script_service=self._script_service_provider(),
             activation_service=self._activation_service_provider(),
             mcp_auth_service=self._mcp_auth_service_provider(),
@@ -882,9 +792,71 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             resource_service=self._resource_service_provider(),
         )
 
-    def _orchestrator(self) -> ApplyOrchestrator:
-        """A fresh orchestrator over the registry. Holds no state between calls."""
-        return ApplyOrchestrator(self._build_materialisers())
+    def _build_materialisers(self, strategy: Optional[DeliveryStrategy] = None):
+        """The one construction site for the registry.
+
+        Named rather than inlined into ``_orchestrator`` so
+        ``materialised_constructs`` reads the *same* registry the engine runs,
+        instead of a second list that would drift from it. The ports come from
+        the strategy (W8): the registry's *keys* are the same for every family
+        — which is why ``materialised_constructs`` may build it without one —
+        while what sits behind each port is the family's.
+        """
+        ports = strategy.ports() if strategy is not None else self._arca_ports()
+        return build_materialisers(**ports.as_kwargs())
+
+    def _orchestrator(self, strategy: DeliveryStrategy) -> ApplyOrchestrator:
+        """A fresh orchestrator over the strategy's registry and phase table."""
+        return ApplyOrchestrator(
+            self._build_materialisers(strategy), steps=strategy.steps_for
+        )
+
+    # ── the delivery seam (W8) ──────────────────────────────────────────────
+
+    def delivery_for_engine(self, engine_type: Optional[str]) -> DeliveryStrategy:
+        """The strategy a bot of this engine applies through."""
+        return self._strategies.for_engine(engine_type)
+
+    def delivery_for_bot(self, bot: dict) -> DeliveryStrategy:
+        return self._strategies.for_bot(bot)
+
+    async def _apply_and_finish(
+        self,
+        strategy: DeliveryStrategy,
+        ctx: ApplyContext,
+        parsed: dict,
+        *,
+        apply_id: str,
+        trigger: str,
+        started_at: datetime,
+        phases: frozenset[ApplyPhase],
+    ) -> ApplyReport:
+        """Walk the categories, then let the strategy close the apply.
+
+        The closing step runs only after every category has been written and
+        only for a real apply; its failure is a note on the report, never a
+        raise (§2.7: a manifest problem does not fail what it rode on).
+        """
+        report = await self._orchestrator(strategy).apply(
+            ctx,
+            parsed,
+            apply_id=apply_id,
+            trigger=trigger,
+            started_at=started_at,
+            phases=phases,
+        )
+        try:
+            note = await strategy.finish(ctx, report)
+        except Exception as exc:  # noqa: BLE001 — recorded, never raised
+            logger.exception(
+                "[manifest_apply] closing step raised, apply_id=%s, bot_id=%s",
+                apply_id,
+                ctx.bot_id,
+            )
+            note = f"delivery could not be closed: {exc.__class__.__name__}"
+        if note:
+            report = dataclasses.replace(report, notes=report.notes + (note,))
+        return report
 
     def _context(
         self,

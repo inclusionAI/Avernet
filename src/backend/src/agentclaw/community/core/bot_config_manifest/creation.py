@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     APPLY_ORDER,
     ApplyPhase,
@@ -59,15 +62,6 @@ logger = get_logger()
 CREATE_PRE_CONTAINER_TRIGGER = "create:pre_container"
 #: The trigger the post-container phase records under.
 CREATE_ON_CONTAINER_TRIGGER = "create:on_container"
-
-_TECLAW_REFUSAL = (
-    "creating a bot from a manifest is not available on this engine: a teclaw "
-    "bot is configured by the artifact composed when its container is "
-    "provisioned, which is a different mechanism from this endpoint's "
-    "pre/post-container delivery. Tracked by W8 (#1476); until it lands, create "
-    "the bot first and PUT its manifest afterwards"
-)
-
 
 def _no_materialiser_refusal(construct: ApplyConstruct) -> str:
     return (
@@ -126,7 +120,6 @@ def preflight_creation_manifest(
     bot_type: Optional[str],
     validate: Callable[..., Any],
     materialised: frozenset[ApplyConstruct],
-    is_teclaw: Callable[[Optional[str]], bool],
 ) -> dict[str, Any]:
     """Refuse anything this creation path could not actually deliver.
 
@@ -134,35 +127,17 @@ def preflight_creation_manifest(
     **every** reason at once — the same all-or-nothing shape `PUT` has, so fixing
     a document is one pass rather than a queue of resubmissions.
 
-    Ordering is deliberate: the engine refusal is reported *alongside* whatever
-    else is wrong rather than short-circuiting, because a caller on teclaw with a
-    typo should learn both.
+    Every engine family creates here (W8): what a family cannot deliver is the
+    validator's to refuse per construct (``script`` on teclaw is
+    ``unsupported_script``), not this preflight's to refuse per engine.
     """
     violations: list[Violation] = []
-    if is_teclaw(engine_type):
-        violations.append(
-            Violation(
-                location="engine",
-                code="engine_not_supported_for_creation",
-                message=_TECLAW_REFUSAL,
-            )
-        )
 
-    # W1's validator, unchanged: whatever it refuses, this refuses.
-    #
-    # Its violations are **merged** rather than allowed to propagate on their
-    # own. Letting it raise here would silently drop anything already collected
-    # above — a caller on teclaw with a typo would be told about the typo, fix
-    # it, resubmit, and only then learn the engine is not supported. That is the
-    # resubmission queue the all-or-nothing rule exists to prevent.
-    try:
-        parsed = validate(
-            document=document, active_engine=engine_type, bot_type=bot_type
-        ).parsed
-    except ManifestValidationError as refused:
-        raise ManifestValidationError(
-            tuple(violations) + tuple(refused.violations)
-        ) from None
+    # W1's validator, unchanged: whatever it refuses, this refuses. Its
+    # violations propagate as they are — the all-or-nothing shape is its own.
+    parsed = validate(
+        document=document, active_engine=engine_type, bot_type=bot_type
+    ).parsed
 
     for construct in declared_constructs(parsed):
         if construct not in materialised:
@@ -205,8 +180,8 @@ class BotCreationManifestSeam:
 
     Both are passed in rather than imported, because ``create_job`` imports this
     module for the triggers below: wiring them at construction is how the DI
-    module already resolves the same shape for ``is_teclaw`` and the job's own
-    collaborators, and it keeps the two modules' dependency in one direction.
+    module already resolves the job's own collaborators, and it keeps the two
+    modules' dependency in one direction.
     """
 
     def __init__(
@@ -215,17 +190,25 @@ class BotCreationManifestSeam:
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: BotConfigManifestApplyServiceProtocol,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        is_teclaw: Callable[[Optional[str]], bool],
         start_job: Callable[..., None],
         find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
+        purge_managed_files: Optional[Callable[[str, str], int]] = None,
+        creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
         self._manifests = manifest_service
         self._applies = apply_service
         self._script_service_provider = script_service_provider
-        self._is_teclaw = is_teclaw
         self._start_job = start_job
         self._find_job = find_job
+        # W8: ``(owner_id, bot_id) -> rows removed`` — the managed-files store's
+        # purge, for a creation that ends without a bot after its pre-container
+        # phase wrote platform state. None means no store is bound.
+        self._purge_managed_files = purge_managed_files
+        # W8: the delivery strategy's sequence for an engine, frozen into the
+        # job's payload at submission. None (the pre-W8 wiring) freezes nothing
+        # and the job asks the live strategy on each run.
+        self._creation_sequence = creation_sequence
         # Read from configuration once, at construction, and handed to the
         # enqueue below. The job freezes it into its payload, so a creation
         # keeps the window it was submitted under even if the setting moves.
@@ -246,7 +229,6 @@ class BotCreationManifestSeam:
             bot_type=bot_type,
             validate=self._manifests.validate,
             materialised=self._applies.materialised_constructs(),
-            is_teclaw=self._is_teclaw,
         )
 
     def persist(
@@ -295,13 +277,18 @@ class BotCreationManifestSeam:
         actor_id: str,
         engine_type: Optional[str],
         bot_type: Optional[str],
+        bot: Optional[dict[str, Any]] = None,
     ) -> Optional[str]:
         """Apply the pre-container phase. Returns its ``apply_id``.
 
-        **Runs before the bot record exists**, which is what makes the ordering
-        guarantee structural rather than a hook in the right place: the
-        startup-script row is keyed by ``(entity_id, bot_id)`` and needs no
-        record, so the row is written before anything composes a start command.
+        **Runs before the bot record exists** under the ``CREATE_BETWEEN_PHASES``
+        sequence, which is what makes the ordering guarantee structural rather
+        than a hook in the right place: the startup-script row is keyed by
+        ``(entity_id, bot_id)`` and needs no record, so the row is written
+        before anything composes a start command. Under
+        ``RECORD_APPLY_PROVISION`` (W8) the record exists first and is handed in
+        as ``bot``, so the materialisers that read the record (the skills
+        area's flush) see the real row rather than the stand-in.
 
         **Never raises.** A manifest-layer failure must not abort creation
         (§2.7): the bot is still created, and the failure surfaces in the poll's
@@ -317,7 +304,7 @@ class BotCreationManifestSeam:
             accepted = self._applies.start_apply(
                 entity_id=entity_id,
                 bot_id=bot_id,
-                bot=None,
+                bot=bot,
                 owner_id=owner_id,
                 actor_id=actor_id,
                 trigger=CREATE_PRE_CONTAINER_TRIGGER,
@@ -362,6 +349,11 @@ class BotCreationManifestSeam:
             iframe_url=iframe_url,
             redirect_url=redirect_url,
             window_seconds=self._authorization_window_seconds,
+            creation_sequence=(
+                self._creation_sequence(spec.get("engine_type")).value
+                if self._creation_sequence is not None
+                else None
+            ),
         )
 
     def find_job(self, *, entity_id: str, bot_id: str) -> Optional[TaskRecord]:
@@ -380,8 +372,15 @@ class BotCreationManifestSeam:
             bot_id=bot_id,
         )
 
-    def discard(self, *, entity_id: str, bot_id: str) -> bool:
+    def discard(
+        self, *, entity_id: str, bot_id: str, owner_id: Optional[str] = None
+    ) -> bool:
         """Remove what submission and the pre-container phase wrote.
+
+        With ``owner_id`` (W8) the managed-files store is purged as well: under
+        the ``RECORD_APPLY_PROVISION`` sequence the pre-container phase writes
+        platform files for a bot that, if creation then ends without one, has
+        no record for ordinary deletion to reach.
 
         Called when a creation ends **without a bot** — declined or expired. Both
         deletes are idempotent, and both are needed: the manifest row is keyed by
@@ -401,14 +400,20 @@ class BotCreationManifestSeam:
         still there, and this is the only thing that can ever reach them.
         """
         discarded = True
-        for what, delete in (
+        deletes: list[tuple[str, Callable[[], Any]]] = [
             ("manifest", lambda: self._manifests.delete(
                 entity_id=entity_id, bot_id=bot_id
             )),
             ("startup script", lambda: self._script_service_provider().delete(
                 entity_id=entity_id, bot_id=bot_id
             )),
-        ):
+        ]
+        if owner_id is not None and self._purge_managed_files is not None:
+            purge = self._purge_managed_files
+            deletes.append(
+                ("managed files", lambda: purge(owner_id, bot_id))
+            )
+        for what, delete in deletes:
             try:
                 delete()
             except Exception:  # noqa: BLE001 — see docstring
