@@ -32,15 +32,17 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
   - [ ] `version` reaches the report and the index and never affects convergence.
 - **Depends on:** Task 1
 
-## Task 3: Register the materialiser and move `cli_tools` to `PRE_CONTAINER`
-- **Goal:** Wire the materialiser into both delivery strategies and re-phase the step so it needs no container.
-- **Files:** `.../apply/order.py`, `.../apply/registry.py`, `.../apply/delivery.py`, `.../apply/materialisers/__init__.py`, the DI module that builds the strategies
+## Task 3: Register the materialiser and add its two ports
+- **Goal:** Wire the materialiser into both delivery strategies, with a store port and a projection port.
+- **Files:** `.../apply/registry.py`, `.../apply/delivery.py`, `.../apply/cli_tools_port.py` (new), `.../apply/materialisers/__init__.py`, the DI module that builds the strategies
 - **Done when:**
-  - [ ] `APPLY_ORDER`'s `CLI_TOOLS` row is `PRE_CONTAINER`, keeping position 6.
-  - [ ] `MaterialiserPorts` gains `cli_tool_store`, both strategies bind it to the same store, and `as_kwargs` carries it.
+  - [ ] `CliToolProjectionPort` exists, named the way `ActivationPort` names activation's methods.
+  - [ ] `MaterialiserPorts` gains `cli_tool_store` and `cli_tool_projection`; `as_kwargs` carries both.
+  - [ ] Both strategies bind the same store; ARCA binds the real projector and the platform-managed teclaw path binds the record-only stand-in, because the artifact is teclaw's projection.
   - [ ] `build_materialisers` constructs `CliToolsMaterialiser`; the registry test pinning every key to an `APPLY_ORDER` row still passes.
+  - [ ] **`order.py` is not modified** — `cli_tools` is already `ON_CONTAINER` at position 6, which is where a live projection belongs.
   - [ ] The stale "`cli_tools` arrives with W9" comments in `registry.py:218` and `materialisers/__init__.py:10` are removed.
-  - [ ] The orchestrator, the order table and the materialisers still name no engine — the existing "orchestrator stays generic" and "no materialiser names an engine" tests pass unedited.
+  - [ ] The existing "orchestrator stays generic" and "no materialiser names an engine" tests pass unedited.
 - **Depends on:** Task 2
 
 ## Task 4: Unlock the capability
@@ -57,7 +59,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 - **Files:** `tests/community/core/bot_config_manifest/apply/test_cli_tools_materialiser.py` (new), `tests/.../test_iteration1_ordering.py`
 - **Done when:**
   - [ ] The nine cases named in `plan.md`'s test strategy for the materialiser pass — notably `same digest + different subpath is a change` and `index is written after the bytes`.
-  - [ ] A test pins `cli_tools` as `PRE_CONTAINER` on both families, added as a new row rather than by editing an existing assertion.
+  - [ ] A test pins `cli_tools` as `ON_CONTAINER` on both families, added as a new row rather than by editing an existing assertion.
   - [ ] Non-ELF and wrong-architecture inputs each fail their entry with a message naming what was found.
 - **Depends on:** Task 4
 
@@ -82,47 +84,46 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
   - [ ] `ownership.cli_tools` follows the operation, as W8 established.
 - **Depends on:** Task 6
 
-## Task 8: Render the ARCA boot-chain prologue
-- **Goal:** Produce the shell that stages tools, sets the executable bit and exports `PATH`.
-- **Files:** `src/agentclaw/community/core/bot_config_manifest/cli_tools_prologue.py` (new)
+## Task 8: Add the `cli_tools` domain to the runtime projection
+- **Goal:** Make tools a third projection domain beside skills and MCP, on the seam that already spans the ARCA family.
+- **Files:** `core/skill_center/runtime_projection_contract.py`, `core/skill_center/services/runtime_projections/per_domain.py`
 - **Done when:**
-  - [ ] `render_prologue([])` returns `""`.
-  - [ ] The rendered shell implements the same four contract behaviours as teclaw: placement, `md5` change test (a match skips the download), executable bit, `PATH` — plus full replacement of the tools directory.
-  - [ ] Each tool is fetched to a `.part` file, `md5`-verified, `chmod +x`'d and moved into place atomically.
-  - [ ] A failed fetch or `md5` mismatch prints the tool's name to stderr and does not abort the rest.
-  - [ ] The rendered string is asserted directly; no container is needed to test it.
+  - [ ] `ProjectionScope` gains its tools half, declared by the mutation rather than inferred.
+  - [ ] `PerDomainRuntimeProjection` calls the engine's tools endpoint with the declared set, sending the **`cliToolRef` shape verbatim** — the same refs teclaw gets from the artifact.
+  - [ ] `validate_plan` refuses a `cli_tools` plan an engine has no contract for **before any runtime request is emitted**.
+  - [ ] A tools-only scope does not force a skills or MCP rewrite.
+  - [ ] An empty declared list projects removal of every platform-delivered tool.
+  - [ ] `WholeArtifactRuntimeProjection` needs no `cli_tools` branch; a test says so.
 - **Depends on:** Task 3
 
-## Task 9: Wire the prologue into the ARCA deploy path
-- **Goal:** Resolve the prologue per payload and prepend it to the boot chain.
-- **Files:** `core/service_bot/services/deploy/deploy_models.py`, `core/service_bot/services/baas_service.py`
+## Task 9: Report honestly for an engine without the endpoint
+- **Goal:** Make "this engine cannot do tools yet" a first-class, visible outcome rather than silence.
+- **Files:** `core/skill_center/services/runtime_projections/per_domain.py`, `.../apply/materialisers/cli_tools.py`
 - **Done when:**
-  - [ ] `BotDeployContext` gains `cli_tools_prologue: str = ""` with the comment stating the byte-identical guarantee.
-  - [ ] `_resolve_cli_tools_prologue` reads the tool index and signs one short-lived GET per tool, mirroring `_resolve_startup_script`; it is re-read on every payload, so create, restart and republish all pick up the current set.
-  - [ ] `_compose_start_command` prepends the prologue **before** the chain, so the engine and everything it spawns inherit `PATH`.
-  - [ ] `__OCB_RC` still comes from the chain: a tool that failed to stage never fails the boot.
-  - [ ] The signed-URL expiry is sized to the boot window, not left at the plugin default.
+  - [ ] An engine with no tools endpoint yields `SKIPPED` — or `DEGRADED` when other domains converged — with a `RuntimeProjectionIssue` naming the engine and the missing endpoint, and `retryable` set honestly.
+  - [ ] The materialiser surfaces that outcome in the apply report per entry, using the existing status vocabulary; no new report shape.
+  - [ ] A `cli_tools` apply on such an engine **never reports success**.
+  - [ ] The store is still converged in that case, so the tools are delivered the moment the engine gains the endpoint.
 - **Depends on:** Task 8
 
-## Task 10: ARCA deploy tests
-- **Goal:** Guard the invariants that a regression here would break silently.
-- **Files:** `tests/community/core/service_bot/test_cli_tools_prologue.py` (new)
+## Task 10: Projection tests
+- **Goal:** Pin the protocol's behaviour without needing a real engine.
+- **Files:** `tests/community/core/skill_center/test_cli_tools_projection.py` (new)
 - **Done when:**
-  - [ ] A bot with no tools composes a **byte-identical** start command; #935's existing assertion is kept and not edited.
-  - [ ] The prologue precedes the chain.
-  - [ ] A matching `md5` skips the download; an undeclared file in the tools directory is removed.
-  - [ ] A prologue failure does not change the boot exit status.
-  - [ ] The hook carrying signed URLs stays elided in BaaS logs.
+  - [ ] The five cases named in `plan.md`'s test strategy for the projection pass.
+  - [ ] A test pins that **no deploy-path file changed**: the composed start command is byte-identical for every bot and #935's assertion is unedited.
+  - [ ] The `SKIPPED` path is asserted end to end, from the projection through to the apply report entry.
 - **Depends on:** Task 9
 
-## Task 11: Verify the tools directory per deploy runtime (A2)
-- **Goal:** Confirm the chosen `TOOLS_DIR` is writable and readable by the user the chain starts the engine as, on each ARCA runtime.
-- **Files:** `docs/bot-config-manifest/engine-requirements.zh-CN.md`
+## Task 11: Write the ARCA-facing CLI protocol document
+- **Goal:** Give the ARCA engine owners the spec they implement against, as `teclaw-cli-contract.zh-CN.md` does for teclaw.
+- **Files:** `docs/bot-config-manifest/arca-cli-contract.zh-CN.md` (new), `docs/bot-config-manifest/engine-requirements.zh-CN.md`
 - **Done when:**
-  - [ ] The directory is confirmed against the ACK and managed runtimes' mounts (`managed_composer.py:428`, `deploy_models.py:167`).
-  - [ ] A2 is updated from an open confirmation to what shipped: one verification per image, not one design per engine.
-  - [ ] Any runtime that does not fit is recorded with what it would need, rather than silently assumed to work.
-- **Depends on:** Task 9
+  - [ ] The document states the ref shape, the four behaviours (placement, `md5` change test, executable bit, `PATH`), full-replacement semantics, and the projection result an engine returns.
+  - [ ] It states what the platform guarantees: one self-contained executable per entry, `sha256` already enforced, architecture already verified.
+  - [ ] It includes the removal and empty-list cases, and the idempotent redelivery case.
+  - [ ] `engine-requirements.zh-CN.md` is updated: the "zero changes" line now carries the `cli_tools` exception, and **A2 is closed** — the PATH injection point is the engine's internal decision under this protocol, not a platform-side answer.
+- **Depends on:** Task 8
 
 ## Task 12: Documentation and work-item reconciliation
 - **Goal:** State the limits and the timing rule in the places a user and the teclaw owner read, and correct what is now stale.
@@ -130,11 +131,11 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 - **Done when:**
   - [ ] Schema §3.7 states plainly that a delivered tool is one self-contained executable file, and that a tool needing an in-package helper or a sibling `lib/` must be built as a static binary.
   - [ ] The user manual gains a `cli_tools` section: the two source forms, the mandatory `digest`, the per-family timing rule, and that teaching the model to *use* a tool is the owner's job.
-  - [ ] The §2.6 exception is written down: on ARCA a `PUT` is delivered now and effective at the next provisioning; on teclaw it is immediate.
+  - [ ] The user manual states that `cli_tools` takes effect immediately on both families, like every other category — **no §2.6 exception**.
   - [ ] The `cli_tools` rows are removed from the "not yet open" gate tables in schema §7 and work-items §5 W1.
   - [ ] `teclaw-cli-contract.zh-CN.md` is reconciled: the `schema_version` 4 → 5 claim and the `entrypoints` / "engine receives an unpacked directory" language are corrected to the shipped one-entry-one-file shape.
   - [ ] The W9 entry in both work-items files reflects what shipped, and the two stale rows are fixed (`${BOT_ARCH}` already landed with W1; the artifact field already landed with #1734).
-- **Depends on:** Task 11
+- **Depends on:** Tasks 10, 11
 
 ## Task 13: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
@@ -151,12 +152,12 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477.
 ## Groups
 
 - **Group A — Store and materialiser:** Tasks 1, 2, 3
-  - Theme: One desired state, one convergence rule. The `cli_tools` category exists in the store, the materialiser converges it, and it is registered as a pre-container step on both families. Nothing is user-reachable yet.
+  - Theme: One desired state, one convergence rule. The `cli_tools` category exists in the store, the materialiser converges it, and it is registered with its two ports. Nothing is user-reachable yet.
 - **Group B — Admission:** Tasks 4, 5
   - Theme: The category becomes acceptable at `PUT`, with the pipeline's behaviour pinned — including the two silent-wrong-file failure modes.
 - **Group C — teclaw arm:** Tasks 6, 7
   - Theme: The artifact carries `cli_tools` refs, and a bot without tools still composes byte-identical output.
-- **Group D — ARCA arm:** Tasks 8, 9, 10, 11
-  - Theme: The boot-chain prologue implements the same contract the platform wrote for teclaw, wired into the deploy path and verified per runtime.
+- **Group D — The engine protocol:** Tasks 8, 9, 10, 11
+  - Theme: Tools become a third projection domain on the seam that already spans the engines, an engine without the endpoint reports `SKIPPED` rather than silence, and the ARCA engine owners get the contract they implement against.
 - **Group E — Docs and verification:** Tasks 12, 13
-  - Theme: The limits and the timing exception are written down where they are read, the stale docs are reconciled, and the spec's criteria are checked off.
+  - Theme: The limits are written down where they are read, the stale docs are reconciled, and the spec's criteria are checked off.

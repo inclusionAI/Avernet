@@ -37,63 +37,90 @@ bit. This is new machinery, not a second implementation.
 1. **Nothing in any delivery path can set an executable bit.** `DeviceFileSystem`
    offers `read_file` / `write_file` / `delete_tree` / `delete_file` and no
    `chmod`; there is no exec channel on the device protocol, and no `PATH`
-   injection anywhere in `service_bot/` or `devices/`. So the executable bit and
-   `PATH` cannot be a property of *writing the file* on either family — they
-   have to be someone's explicit act after the bytes land.
-2. **On ARCA the platform composes the container's boot line.**
-   `DeployConfigComposer.build_start_command` is platform code per deploy
-   runtime, and it chains image-baked scripts (`ack_composer` invokes
-   `start_service.sh`; `managed_composer` chains bootstrap → install engine →
-   sandbox service → watchdog with `&&`). This is a platform-owned seam, not a
-   cross-team API.
-3. **The boot line is recomposed on every device provisioning.**
-   `_build_create_bot_payload` is reached from `create_bot` and `upgrade_bot`,
-   and `restart_bot` releases the device and allocates a new one. So a prologue
-   added there runs on create, restart and republish alike.
-4. **`after_create_cmd_hook` is already elided from BaaS logs**
-   (`baas_service.py:176-188`), which is what makes it safe to embed a
-   short-lived signed URL in it.
-5. **`ObjectStoragePlugin.sign_url(key, expires)` exists**, so a container can
-   pull an object without holding any store credential of its own.
+   injection anywhere in `service_bot/` or `devices/`. So placement, the
+   executable bit and `PATH` cannot be properties of the platform *writing a
+   file*. They belong to whoever owns the container's filesystem: the engine.
+2. **A cross-engine projection seam already exists, and `skills` and `mcp` use
+   it.** `EngineRuntimeProjection` (`runtime_projection_contract.py:266`)
+   defines `validate_plan` (refuse desired state a runtime has no contract for,
+   before any request is emitted) and `apply` (converge this bot's runtime,
+   returning an observed outcome). `EngineRuntimeProjectionRegistry` resolves
+   one per engine off `ac_bots.active_engine`, with the per-domain contract as
+   the **default** — so an ordinary new engine needs no entry at all.
+3. **Its two implementations are already the two families' shapes.**
+   `PerDomainRuntimeProjection` writes each domain to its own runtime endpoint;
+   `WholeArtifactRuntimeProjection` recomposes the whole artifact and discards
+   the arguments. `cli_tools` fits both without inventing a third shape.
+4. **The result vocabulary already covers an engine that cannot do it yet.**
+   `RuntimeProjectionStatus` is `CONVERGED` / `PENDING` / `DEGRADED` /
+   `SKIPPED`, and `RuntimeProjectionIssue` carries a code, a reason, a
+   `retryable` flag and a suggested action. Nothing new is needed to report
+   "this engine has no tools endpoint yet".
+5. **`ActivationPort` is the precedent for reaching that seam from a
+   materialiser.** The `mcp` and `skills` materialisers already call live
+   activation through a narrow port that a delivery strategy binds — the real
+   `DirectActivationService` on ARCA, `RecordOnlyActivation` on the
+   platform-managed teclaw path. A `cli_tools` port is the same move.
 6. **The managed-files store from W8 is the right home for the bytes.**
    `ManagedFilesStore` already keeps the platform's own copy of a bot's
    manifest-delivered files by category and namespace, and
-   `ManagedFilesComposeReader` is what the teclaw composer reads. Adding a
-   category is the shape it was built for.
+   `ManagedFilesComposeReader` is what the teclaw composer reads. It becomes
+   the shared content plane both families' projections reference.
 7. **`${BOT_ARCH}` already resolves to `amd64`** (`schema/placeholders.py`,
    `BOT_ARCH_VALUE`), contrary to the W9 progress table — W1 shipped it. Only
    the ELF verification half of that row is outstanding.
 8. **The schema already parses a `cli_tools` entry** and already enforces the
    mandatory `digest` (`schema/entries.py`), because W1 parses the whole
-   vocabulary. `fetch/limits.py` already carries the 200 MiB `cli_tools` width.
-   The category is refused today only by the capability gate.
+   vocabulary. `fetch/limits.py` already carries the 200 MiB `cli_tools` width,
+   and `APPLY_ORDER` already places `cli_tools` at `ON_CONTAINER`. The category
+   is refused today only by the capability gate.
 
 ## The delivery decision
 
-**One contract, two implementers — and the platform ships ARCA's
-implementation of it.**
+**One declarative contract, projected onto whichever engine the bot runs, live.**
 
-The already-merged `cliToolRef` says *"physical placement and PATH exposure
-decided by the engine owner"*, and its `md5` is *"the engine's change test, not
-an integrity gate"*. That is a declarative desired-state protocol, and it is
-what teclaw implements per `teclaw-cli-contract.zh-CN.md` §3.4: placement,
-`md5`-based skip, executable bit, `PATH`, full-replacement semantics.
+The platform never places a file or edits a `PATH` itself. It converges a
+desired state and hands each engine the same per-tool ref — `{name, store,
+path, md5, version}`, the shape `cliToolRef` already defines — through the
+seam that already exists for exactly this: `EngineRuntimeProjection`
+(`runtime_projection_contract.py:266`), which `skills` and `mcp` already
+project through, resolved per engine by `EngineRuntimeProjectionRegistry`.
 
-ARCA-family engines were promised **zero changes**
-(`engine-requirements.zh-CN.md:16`), and A2 was scoped as "confirm your PATH
-injection point", not "implement a protocol". So rather than asking five images
-to implement the contract, the platform emits a **boot-chain prologue** ahead of
-the engine's own boot script that implements the same four behaviours once, in
-shell, for every ARCA image.
+That seam is what makes this a protocol rather than an arrangement. Its two
+implementations are already the two families' native shapes:
 
-The consequence that makes this coherent: because the prologue pulls the tools
-itself at boot, **`cli_tools` needs no bound device on either family**. It is a
-pre-container construct everywhere, so a bot created with tools has them in its
-*first* container — the business case — rather than one restart later.
+- `PerDomainRuntimeProjection` — engines with separate runtime endpoints per
+  domain. `cli_tools` becomes a third domain beside skills and MCP: the
+  platform calls the engine's tools endpoint with the declared set, and the
+  engine places the files, sets the executable bit, exposes them on `PATH`,
+  and removes what the set no longer names.
+- `WholeArtifactRuntimeProjection` — teclaw. Its projection *is* recomposing
+  the artifact, so `cli_tools` refs plus the existing `ownership.cli_tools`
+  are the whole of its side.
 
-An ARCA engine that later wants its own tools directory or sandbox policy
-implements the contract itself and tells the platform to skip the prologue.
-That is option 1's end state, reached without a contract change.
+A new engine therefore supports `cli_tools` the way it supports skills and
+MCP: it implements the projection, or it inherits the registry's default. It
+never needs a bespoke arrangement in platform code, and nothing about tool
+delivery lives in a start command.
+
+Because the projection targets a **live** runtime, `cli_tools` is an
+`ON_CONTAINER` construct — unchanged from where `APPLY_ORDER` already has it
+— and a `PUT` takes effect immediately on both families, with **no §2.6
+exception for this category**.
+
+### The cost, stated plainly
+
+This asks the ARCA-family engines for a new runtime endpoint, which is a
+change to `engine-requirements.zh-CN.md:16`'s "zero changes" line. That is
+the deliberate trade: a start-command arrangement would have cost the engines
+nothing now and cost every future engine a bespoke integration, and the tool
+would only have become effective at the next provisioning. The protocol costs
+one endpoint per engine and generalises.
+
+Until an engine implements it, the projection answers with the vocabulary the
+contract already has — `SKIPPED` or `DEGRADED` with a `RuntimeProjectionIssue`
+naming the engine and the missing endpoint — so a bot on an engine that is not
+ready reports honestly in the apply report instead of silently doing nothing.
 
 ## User Stories
 
@@ -101,10 +128,10 @@ That is option 1's end state, reached without a contract change.
   invoke it by name in the container.
 - As a bot owner, I declare a tool that lives inside a `.tar.gz` by naming its
   `subpath`, and only that one file is delivered.
-- As a bot owner, I create a bot whose manifest declares tools, and its **first**
-  container already has them on `PATH`.
-- As a bot owner, I change a tool's version and the next provisioning replaces
-  it; I remove it from the manifest and it is gone from the container.
+- As a bot owner, I `PUT` a manifest that adds a tool and the running bot has it
+  on `PATH` when the apply finishes — no restart, like every other category.
+- As a bot owner, I change a tool's version and the apply replaces it in place;
+  I remove it from the manifest and it is gone from the container.
 - As a bot owner, I declare a tool built for the wrong architecture and the
   apply report tells me so, instead of the model hitting `exec format error`
   mid-task.
@@ -112,8 +139,11 @@ That is option 1's end state, reached without a contract change.
   will not distribute an unpinned executable on my behalf.
 - As the teclaw engine owner, the artifact tells me exactly which single file to
   place per tool, and an `md5` that says whether I already have it.
-- As an operator, the ARCA prologue is inert for every bot that declares no
-  tools — the composed start command is byte-identical to today's.
+- As an ARCA engine owner, `cli_tools` reaches me the same way skills and MCP
+  do — one more domain on the projection I already implement.
+- As a bot owner on an engine whose tools endpoint does not exist yet, the apply
+  report tells me the category was skipped and why, rather than reporting
+  success and delivering nothing.
 
 ## Acceptance Criteria
 
@@ -174,10 +204,16 @@ That is option 1's end state, reached without a contract change.
 - [ ] Convergence is observed from the store — an unchanged tool writes nothing
       and plans `unchanged` — matching how the identity and resource
       materialisers behave.
-- [ ] `cli_tools` is a **`PRE_CONTAINER`** construct in both delivery
-      strategies, since nothing about it requires a bound device.
-- [ ] A bot's tool objects are deleted when a W13 creation ends without a bot,
-      with the rest of that bot's manifest state.
+- [ ] `cli_tools` stays an **`ON_CONTAINER`** construct in both delivery
+      strategies — where `APPLY_ORDER` already has it — because the projection
+      targets a live runtime. On the W13 creation path it therefore lands in
+      phase B, with `identity`, `resources`, `skills` and `mcp`.
+- [ ] **Creation cleanup:** when a W13 creation job fails after the store was
+      written but before a bot exists (provisioning failed, the container never
+      reached `ACTIVE`), the tool objects are deleted along with the rest of
+      that bot's manifest state — the manifest row and the script row the job
+      already deletes. Without this the store keeps bytes for a `bot_id` that
+      was never created and nothing will ever collect them.
 
 ### teclaw arm
 
@@ -199,42 +235,43 @@ That is option 1's end state, reached without a contract change.
       directory" / `entrypoints` language are stale against the flattened
       one-entry-one-file shape and the no-bump decision.
 
-### ARCA arm
+### ARCA arm — the engine projection
 
-- [ ] `build_start_command` gains a platform-generated prologue, ahead of the
-      engine's own boot chain, that for each declared tool: pulls the object via
-      a short-lived signed URL, verifies the recorded `md5`, places it in a
-      platform-defined tools directory on the bot's NAS, sets the executable
-      bit, and prepends that directory to `PATH` for everything the chain starts.
-- [ ] The prologue implements the same four contract behaviours as teclaw:
-      placement, `md5` change test (a matching `md5` skips the download and the
-      replace), executable bit, and **full replacement** — a tool in the
-      directory that the desired state no longer names is removed.
-- [ ] **A bot with no declared tools composes a byte-identical start command to
-      today's.** The prologue is emitted only when the bot has a non-empty
-      `cli_tools` desired state, and #935's existing start-command assertion is
-      kept unedited.
-- [ ] The prologue's failure does not silently strand the bot: a failed pull or
-      an `md5` mismatch is visible in the boot log with the tool's name, and the
-      chain's exit status behaves as the runtime's existing contract requires.
-- [ ] Signed URLs expire on the order of the boot window, not days, and the hook
-      carrying them stays elided in BaaS logs.
-- [ ] The prologue is emitted per deploy runtime through the composer that
-      already owns that runtime's chain; no engine image is modified.
+- [ ] A `cli_tools` domain is added to `PerDomainRuntimeProjection`: given the
+      declared set of refs, it calls the engine's tools endpoint, and the
+      engine owns placement, the executable bit, `PATH` exposure and removal of
+      what the set no longer names.
+- [ ] The platform sends the **same ref shape both families get** —
+      `{name, store, path, md5, version}` per `cliToolRef` — so there is one
+      protocol, not an ARCA dialect. The engine fetches the bytes from the
+      store address it is given.
+- [ ] `validate_plan` refuses a `cli_tools` plan an engine has no contract for
+      **before any runtime request is emitted**, per the seam's own guarantee.
+- [ ] An engine without a tools endpoint yields `SKIPPED` (or `DEGRADED` when
+      other domains converged) with a `RuntimeProjectionIssue` naming the
+      engine and the missing endpoint, `retryable` set honestly, and the apply
+      report carries it. It never reports success having delivered nothing.
+- [ ] `ProjectionScope` gains the `cli_tools` half, so a mutation that touched
+      only tools does not force a skills or MCP rewrite — the same round-trip
+      economy the existing halves buy.
+- [ ] The whole-artifact projection needs no `cli_tools` branch: recomposing
+      the artifact already carries the refs (teclaw arm above).
+- [ ] **No engine image is modified by this work item.** The endpoint is the
+      engine side's to implement; this item delivers the platform half, the
+      protocol document, and the honest `SKIPPED` until they ship.
 
-### `PUT` timing, stated rather than discovered
+### `PUT` takes effect immediately, on both families
 
-- [ ] On **teclaw**, a `PUT` that changes `cli_tools` takes effect immediately —
-      the apply materialises to the store and the closing redeliver carries the
-      new artifact, per §2.6.
-- [ ] On **ARCA**, a `PUT` that changes `cli_tools` is *delivered* now (the
-      store is converged and the apply report says so) and becomes *effective*
-      at the next device provisioning — create, restart or republish — exactly
-      like `script`. The apply response carries a delivery note saying so in
-      those terms.
-- [ ] This is an explicit, documented **§2.6 exception for this one category on
-      one family**, recorded in the user manual and the work-items entry rather
-      than left for a user to discover.
+- [ ] A `PUT` that changes `cli_tools` stores the document, triggers the apply,
+      and the materialiser converges the store and projects onto the live
+      runtime. The effect is immediate on **both** families, exactly like every
+      other category — **no §2.6 exception for `cli_tools`**, and no delivery
+      note about a later provisioning.
+- [ ] No restart, republish or payload rebuild is issued. A test pins that the
+      `cli_tools` path names none of them.
+- [ ] On a bot that is not `ACTIVE`, `cli_tools` behaves like the other
+      `ON_CONTAINER` categories: recorded as failed with the existing warning
+      naming the apply call to make once the bot is up. No new behaviour.
 
 ### Documentation
 
@@ -254,50 +291,65 @@ That is option 1's end state, reached without a contract change.
 
 - [ ] No other category, materialiser, or apply point changes behaviour.
 - [ ] `engine_config` stays unsupported, with its existing reason.
-- [ ] The orchestrator and the order table stay engine-agnostic; the ARCA
-      prologue lives in the deploy composer, not in the materialiser.
+- [ ] The orchestrator and the order table stay engine-agnostic; the engine
+      difference lives in the projection registry, where it already lives for
+      `skills` and `mcp`, and the materialiser names no engine.
+- [ ] **No deploy-path change.** `build_start_command`, `BotDeployContext` and
+      `_compose_start_command` are untouched, so every bot's composed start
+      command is byte-identical to today's and #935's assertion is unedited.
 - [ ] Every existing manifest, artifact, creation and deploy test passes with
       assertions untouched.
 
 ## Decisions
 
-**D-1 — One declarative contract; the platform implements ARCA's side of it.**
-Rejected: an engine-side *command* protocol, where the platform issues
-`chmod`/`mv`/`PATH` instructions. It contradicts `manifest-schema` §6's
-commitment that physical placement is always the engine's decision; it makes
-`cliToolRef.md5` meaningless (the platform would have to compute the diff, which
-needs container state it does not have); full replacement and idempotent
-redelivery stop being free; and a general remote-exec channel into customer
-containers is the largest security surface this feature could add, in a feature
-whose whole posture is supply-chain narrowing. Also rejected: asking five ARCA
-images to implement the contract now, which breaks the zero-changes promise for
-no benefit this iteration.
+**D-1 — One declarative contract, projected live through the seam `skills` and
+`mcp` already use.** The platform converges desired state and hands every
+engine the same `cliToolRef`; the engine owns placement, the executable bit and
+`PATH`. Rejected: an engine-side *command* protocol (platform issues
+`chmod`/`mv`/`PATH` instructions) — it contradicts `manifest-schema` §6's
+"physical placement is always the engine's decision", makes `cliToolRef.md5`
+meaningless because the platform would have to diff against container state it
+does not have, and opens a remote-exec channel into customer containers.
+Rejected in review (PR #1870): a platform-composed **start-command prologue**
+— it is an arrangement, not a protocol, so every future engine would need a
+bespoke integration, and it made the category effective only at the next
+provisioning.
 
-**D-2 — `cli_tools` is a pre-container construct on both families.** It follows
-from D-1: the ARCA prologue pulls at boot, so nothing needs a bound device. This
-is what makes the first container of a newly created bot already carry its
-tools.
+**D-2 — `cli_tools` is an `ON_CONTAINER` construct**, unchanged from
+`APPLY_ORDER`. It projects onto a live runtime, so it needs the container, and
+on the W13 creation path it lands in phase B with the other four categories.
 
-**D-3 — Effectiveness on ARCA is deferred to the next provisioning.** The cost
-of D-1, stated rather than discovered. Same lifecycle as `script`, and the only
-§2.6 exception in the feature.
+**D-3 — `PUT` takes effect immediately on both families. No §2.6 exception.**
+This is what D-1 buys over the rejected prologue, and it is why the protocol is
+worth its cost.
 
-**D-4 — The managed-files store is the single desired-state record for both
-arms.** teclaw's composer reads it, the ARCA prologue pulls from it. One
-materialiser, one convergence rule, two deliveries.
+**D-4 — The managed-files store is the single content plane for both arms.**
+teclaw's composer reads it into artifact refs; the ARCA projection hands the
+engine the same store address. One materialiser, one convergence rule, one ref
+shape, two transports.
 
-**D-5 — Convergence keys on `digest` *and* `subpath`.** Stated in the work item;
-restated here because judging on `digest` alone is the silent-wrong-file bug.
+**D-5 — Convergence keys on `digest` *and* `subpath`.** `subpath` is a
+**source-side** path — which member of the fetched archive is the tool — never
+a target path, since placement is the engine's. So the same archive with
+`subpath` moved from `bin/old` to `bin/new` delivers a *different file* under
+the same command name; keying on `digest` alone would report `unchanged`, send
+nothing, and leave the old binary answering to a name whose declaration now
+means the new one.
 
-**D-6 — `SCHEMA_VERSION` stays 4.** Settled with the teclaw owner on 2026-08-31
-and already pinned by a test. The accepted cost, written down: `schema_version`
-no longer tracks this contract's evolution, so "does this artifact carry
+**D-6 — `SCHEMA_VERSION` stays 4.** Settled with the teclaw owner on
+2026-08-31 and already pinned by a test. The accepted cost: `schema_version` no
+longer tracks this contract's evolution, so "does this artifact carry
 `cli_tools`?" is answered by probing for the field.
 
 **D-7 — v1 delivers one self-contained executable per entry.** The flattening
-that removed `entrypoints` also removed the shape that could express "executable
-but not a command", so an in-package helper cannot be made executable. Rather
-than reopen "do we trust an archive's mode bits", v1 states the limit.
+that removed `entrypoints` also removed the shape that could express
+"executable but not a command", so an in-package helper cannot be made
+executable. Rather than reopen "do we trust an archive's mode bits", v1 states
+the limit.
+
+**D-8 — An engine without the endpoint reports `SKIPPED`, not success.** The
+projection contract's existing status vocabulary carries it, so shipping the
+platform half ahead of the engines is honest rather than silently inert.
 
 ## In Scope
 
@@ -305,35 +357,44 @@ than reopen "do we trust an archive's mode bits", v1 states the limit.
 - The `cli_tools` materialiser: fetch, `sha256` enforcement, unpack, `subpath`
   selection, ELF verification, `md5`, store write, replacement semantics.
 - The `cli_tools` category in the managed-files store.
-- The teclaw arm: composer `cli_tools` refs and `ownership.cli_tools`.
-- The ARCA arm: the boot-chain prologue and its emission per deploy runtime.
-- The apply-report entries and the ARCA delivery note.
+- The teclaw arm: composer `cli_tools` refs (`ownership.cli_tools` already exists).
+- The ARCA arm's **platform half**: the `cli_tools` domain on the per-domain
+  projection, its `ProjectionScope` half, `validate_plan`, and the honest
+  `SKIPPED` for an engine without the endpoint.
+- The engine-facing protocol document for the ARCA family.
+- The apply-report entries.
 - Schema, user manual, teclaw contract reconciliation, and work-items updates.
 
 ## Out of Scope
 
+- **The ARCA engines' own tools endpoints.** Each engine implements the
+  protocol on its side; this item ships the platform half and the document.
+  Until an engine does, its bots report `SKIPPED`.
 - **`bcs-cli` as the first consumer.** The explicit next step: retire the
   singlebox script that hand-places it and onboard it through the manifest.
-  Deliberately deferred so the mechanism lands first.
-- **The default-skillset tool-usage skill.** The per-engine default skill set
-  entry that teaches the model which tools exist and how to call them.
-  `SkillSetService` already has the mechanism; wiring it is follow-up work.
-- **An ARCA engine owning its own placement.** The opt-out that lets an image
-  implement the contract itself and skip the prologue. Designed for by D-1, not
-  built.
+- **The default-skillset tool-usage skill.** `SkillSetService` already has the
+  mechanism; wiring it is follow-up work.
 - **Multi-architecture sources.** `linux/amd64` only, one URL per tool (X3).
-  `${BOT_ARCH}` exists so that a future mixed fleet changes where the value
-  comes from, not the schema.
+  `${BOT_ARCH}` exists so a future mixed fleet changes where the value comes
+  from, not the schema.
 - **Package-manager installs.** Imperative, and already routed to `script`.
 - **`engine_config`**, still out on the X2/T3 decision.
 
 ## Open Questions
 
-None blocking. Two items to confirm as the plan lands, neither of which changes
-the design:
+None blocking the platform half. Two are with the engine owners and gate only
+when a given engine's bots stop reporting `SKIPPED`:
 
-- The exact NAS tools directory per deploy runtime, and confirmation that the
-  runtime's boot chain starts the engine as a user that reads it — the concrete
-  form of A2, now one verification per image rather than one design per engine.
-- Whether the signed-URL expiry needs to exceed a slow first boot; the fallback
-  is a longer expiry, not a different mechanism.
+- The tools endpoint's concrete shape per ARCA engine — the successor to A2,
+  which asked where a platform tools directory joins `PATH`. Under D-1 that
+  question is the engine's to answer internally, and A2 is closed by the
+  protocol rather than by a platform-side answer.
+- Whether any engine needs a sandbox policy for user-supplied binaries beyond
+  what it already applies to skills.
+
+## Revision history
+
+| | What changed, and why |
+| --- | --- |
+| **rev 1** | Platform-composed start-command prologue for the ARCA arm; `cli_tools` re-phased to `PRE_CONTAINER`; a §2.6 exception making it effective only at the next provisioning. |
+| **rev 2** | Review of inclusionAI/Avernet#1870. The prologue is withdrawn: it is an arrangement, not a protocol, so every future engine would need a bespoke integration. `cli_tools` projects live through `EngineRuntimeProjection` — the seam `skills` and `mcp` already use — so it stays `ON_CONTAINER` (D-2), `PUT` is immediate on both families and the §2.6 exception is gone (D-3), and the deploy path is untouched. The cost moves onto the engines: one endpoint each, with an honest `SKIPPED` until they ship (D-8). |

@@ -5,15 +5,21 @@ Spec: `spec.md` in this directory. Work item W9, issue #1477.
 ## Approach
 
 One materialiser converges a single desired state — the managed-files store —
-and each family reads it its own way. The materialiser fetches, enforces the
-declared `sha256`, unpacks, selects the one `subpath` file, verifies its ELF
-header, computes the `md5`, and writes bytes plus a small per-bot **index**
-object. teclaw's composer turns that index into artifact `cli_tools` refs;
-ARCA's deploy path turns it into a **boot-chain prologue** that pulls each tool
-over a signed URL, sets the executable bit and prepends the tools directory to
-`PATH`. Because both arms read the store rather than a container, `cli_tools`
-moves to `PRE_CONTAINER` on both families, which is what makes a newly created
-bot's *first* container carry its tools.
+and each engine family consumes it through the projection seam `skills` and
+`mcp` already use. The materialiser fetches, enforces the declared `sha256`,
+unpacks, selects the one `subpath` file, verifies its ELF header, computes the
+`md5`, and writes bytes plus a per-bot **index** object. teclaw's composer turns
+that index into artifact `cli_tools` refs; the ARCA family gets the *same refs*
+through a new `cli_tools` domain on `PerDomainRuntimeProjection`, which calls
+the engine's tools endpoint live. `cli_tools` therefore stays `ON_CONTAINER`
+where `APPLY_ORDER` already has it, and a `PUT` takes effect immediately on both
+families. No deploy-path code is touched.
+
+> **Revision 2** (PR #1870 review). Revision 1 delivered the ARCA arm as a
+> platform-composed start-command prologue. Withdrawn: an arrangement in
+> platform code is not a protocol, so every future engine would have needed a
+> bespoke integration, and the category would have been effective only at the
+> next provisioning. The projection seam is the protocol, and it already exists.
 
 ## Affected Components
 
@@ -21,14 +27,20 @@ bot's *first* container carry its tools.
 - `core/bot_config_manifest/managed_files/` — new `cli_tools` category, `tools/`
   namespace, and the index object.
 - `core/bot_config_manifest/apply/materialisers/cli_tools.py` — **new**, the
-  fetch → verify → select → store pipeline.
-- `core/bot_config_manifest/apply/{order,registry,delivery}.py` — phase move,
-  registration, and the new port on `MaterialiserPorts`.
-- `core/config_compose/{protocols.py,models.py,services/config_composer.py}` and
+  fetch → verify → select → store → project pipeline.
+- `core/bot_config_manifest/apply/{registry,delivery}.py` — registration and the
+  new port on `MaterialiserPorts`. `order.py` is **not** touched.
+- `core/bot_config_manifest/apply/cli_tools_port.py` — **new**, the narrow port
+  the materialiser projects through, bound per strategy.
+- `core/skill_center/runtime_projection_contract.py`,
+  `core/skill_center/services/runtime_projections/per_domain.py` — the
+  `cli_tools` domain and its `ProjectionScope` half.
+- `core/config_compose/{protocols,models}.py`, `services/config_composer.py`,
   `managed_files/reader.py` — the teclaw arm: `cli_tools` refs in the artifact.
-- `core/service_bot/services/{baas_service.py,deploy/*}` — the ARCA arm: the
-  prologue, resolved by the service and prepended by the composer.
-- `docs/bot-config-manifest/*` and `docs/.../user-manual.zh-CN.md` — the docs.
+- `docs/bot-config-manifest/*` — the ARCA-facing protocol document and the docs.
+
+**Not touched:** `core/service_bot/services/baas_service.py` and everything
+under `services/deploy/`. Revision 1 changed them; revision 2 does not.
 
 ## Data Model Changes
 
@@ -62,7 +74,7 @@ index object that the other categories do not need:
 **Why an index, when `store.py` says "the key layout *is* the record".** The
 other three categories need no per-file metadata beyond the path, so their
 layout carries everything. `cli_tools` needs four things a path cannot hold:
-`md5` (the artifact field and the prologue's change test), `version`, and the
+`md5` (the artifact field and the engine's change test), `version`, and the
 convergence key `digest` + `subpath`. The alternative is reading every tool's
 bytes back on every compose to recompute `md5` — up to 200 MiB per tool per
 artifact. The index is a deliberate, argued exception; `store.py`'s module
@@ -147,7 +159,7 @@ class CliToolsMaterialiser(Materialiser):
 ```
 
 The index is rewritten **after** the bytes, so a crash mid-write leaves an index
-that under-claims rather than over-claims: the prologue and the composer never
+that under-claims rather than over-claims: the projection and the composer never
 name a tool whose bytes are absent, and the next apply re-converges.
 
 `resolve` is where the two new checks live:
@@ -186,39 +198,47 @@ fetched = self._fetch.fetch(
 )
 ```
 
-## Phase and registration
+## Registration and the port
 
-```diff
-# core/bot_config_manifest/apply/order.py:79
--    ApplyStep(ManifestCategory.CLI_TOOLS, ApplyPhase.ON_CONTAINER, 6),
-+    ApplyStep(ManifestCategory.CLI_TOOLS, ApplyPhase.PRE_CONTAINER, 6),
-```
-
-`PRE_CONTAINER` is defined as "a plain database write, no device involved"
-(`order.py:30`); a store write qualifies, and this is the one category where it
-is true on ARCA as well. On the ARCA creation path this is load-bearing: the
-step must land before `_build_create_bot_payload` composes the start command,
-because that is when the prologue is rendered — the same reason `script` is
-`PRE_CONTAINER`.
+`order.py` is **not** modified: `APPLY_ORDER` already carries
+`ApplyStep(ManifestCategory.CLI_TOOLS, ApplyPhase.ON_CONTAINER, 6)`, which is
+where a live projection belongs.
 
 ```diff
 # core/bot_config_manifest/apply/delivery.py:92 — MaterialiserPorts
      entry_fetcher: EntryFetcher
      resource_service: ManifestResourcePort
 +    cli_tool_store: ManifestCliToolStore
++    cli_tool_projection: CliToolProjectionPort
 ```
 
-Both strategies bind `cli_tool_store` to the same `ManagedFilesStore` — this is
-the one port that does not vary by family, and the field exists so the
-materialiser is constructed the same way as the others rather than reaching for
-a singleton.
+```python
+# core/bot_config_manifest/apply/cli_tools_port.py (new)
+@runtime_checkable
+class CliToolProjectionPort(Protocol):
+    """What the cli_tools materialiser asks of the runtime projection.
+
+    The ``ActivationPort`` move, for a third domain: the ARCA strategy binds
+    the real projector, the platform-managed teclaw strategy binds a
+    record-only stand-in because the artifact is its projection.
+    """
+
+    async def project_cli_tools(
+        self, *, bot_id: str, owner_id: str, actor_id: str,
+        tools: Sequence[CliToolRef],
+    ) -> RuntimeProjectionResult: ...
+```
 
 ```diff
 # core/bot_config_manifest/apply/registry.py:238 — build_materialisers
          ResourcesMaterialiser(resource_service, entry_fetcher),
-+        CliToolsMaterialiser(cli_tool_store, entry_fetcher),
++        CliToolsMaterialiser(cli_tool_store, cli_tool_projection, entry_fetcher),
      )
 ```
+
+Both strategies bind `cli_tool_store` to the same `ManagedFilesStore`. They
+differ on `cli_tool_projection`: ARCA binds the real projector, teclaw binds the
+record-only stand-in — the same split `ActivationPort` already makes.
 
 ## Capability unlock
 
@@ -271,167 +291,155 @@ def cli_tools(self, req: ComposeRequest) -> list[CollectedCliTool]:
 today's, and the existing "`to_dict` omits `cli_tools` when unset" test keeps
 passing. `SCHEMA_VERSION` is untouched.
 
-## ARCA arm
+## ARCA arm — the `cli_tools` projection domain
 
-The prologue is *resolved* by the service (which crosses boundaries already) and
-*rendered into the chain* by the composer (which crosses none) — the same split
-`startup_script` uses today (`baas_service.py:711`, `:2318`).
-
-```diff
-# core/service_bot/services/deploy/deploy_models.py — BotDeployContext
-     ext_info: Optional[Dict[str, Any]] = None
-+    #: Platform-rendered shell that stages this bot's cli_tools and exports
-+    #: PATH. Empty for a bot that declares none — and then the composed start
-+    #: command is byte-identical to today's.
-+    cli_tools_prologue: str = ""
-```
+A third domain beside skills and MCP on the projection that already spans the
+ARCA family. No deploy-path code is involved.
 
 ```diff
-# core/service_bot/services/baas_service.py:711
-             startup_script = self._resolve_startup_script(
-                 entity_id=entity_id, bot_id=bot_id
-             )
-+        cli_tools_prologue = self._resolve_cli_tools_prologue(
-+            owner_id=owner_id, bot_id=bot_id
-+        )
+# core/skill_center/runtime_projection_contract.py — ProjectionScope
+   claimed_mcp: frozenset[str] = frozenset()
+   released_mcp: frozenset[str] = frozenset()
++  #: The tools half. Declared by the mutation, never inferred — so a
++  #: tools-only apply does not force a skills or MCP rewrite.
++  touched_cli_tools: bool = False
 ```
 
 ```python
-# core/service_bot/services/baas_service.py (new)
-def _resolve_cli_tools_prologue(self, *, owner_id: str, bot_id: str) -> str:
-    """Render this bot's tool staging, or "" when it declares none.
+# core/skill_center/services/runtime_projections/per_domain.py (new method)
+async def _apply_cli_tools(
+    self, *, tools: Sequence[CliToolRef], scope: ProjectionScope
+) -> RuntimeProjectionResult:
+    """Call the engine's tools endpoint with the declared set.
 
-    Reads the tool index and signs one short-lived GET per tool. Mirrors
-    ``_resolve_startup_script``: re-read on every payload the platform
-    composes, so create / restart / republish all pick up the current set.
+    The engine owns placement, the executable bit, PATH exposure and removal
+    of what the set no longer names. The platform sends the same ref shape
+    teclaw gets from the artifact — one protocol, not an ARCA dialect.
     """
 ```
 
-```python
-# core/bot_config_manifest/cli_tools_prologue.py (new)
-TOOLS_DIR = "/home/admin/nfs/bot-data/.platform-tools"
-
-def render_prologue(tools: Sequence[SignedTool], *, tools_dir: str = TOOLS_DIR) -> str:
-    """POSIX sh implementing the same four behaviours teclaw implements:
-    placement, md5 change test, executable bit, PATH — plus full replacement.
-    Returns "" for an empty list."""
+```jsonc
+// what the engine receives — the cliToolRef shape, verbatim
+{ "cli_tools": [
+    { "name": "mycli", "store": "bot-data",
+      "path": "staff_u1/bot7_manifest/teclaw/tools/mycli",
+      "md5": "9f2c…", "version": "1.4.2" }
+] }
 ```
 
-Rendered shape (one block, prepended to the chain):
-
-```bash
-# rendered by cli_tools_prologue.render_prologue
-mkdir -p "$TD"
-# full replacement: anything not declared goes
-for f in "$TD"/*; do case " mycli tk " in *" ${f##*/} "*) ;; *) rm -f "$f";; esac; done
-# per tool: skip when the md5 already matches, else fetch, verify, chmod
-if [ "$(md5sum "$TD/mycli" 2>/dev/null | cut -d' ' -f1)" != "9f2c…" ]; then
-  curl -fsSL -o "$TD/mycli.part" '<signed-url>' \
-    && [ "$(md5sum "$TD/mycli.part" | cut -d' ' -f1)" = "9f2c…" ] \
-    && chmod +x "$TD/mycli.part" && mv -f "$TD/mycli.part" "$TD/mycli" \
-    || echo "[cli_tools] FAILED to stage mycli" >&2
-fi
-export PATH="$TD:$PATH"
-```
+`validate_plan` gains the refusal so an engine with no tools contract fails
+before any request is emitted:
 
 ```diff
-# core/service_bot/services/baas_service.py:2328 — _compose_start_command
--        chain = self._deploy_composer.build_start_command(ctx)
-+        chain = self._deploy_composer.build_start_command(ctx)
-+        if ctx.cli_tools_prologue:
-+            # Before the chain, so the engine and everything it spawns inherit
-+            # PATH. Non-fatal by construction: __OCB_RC still comes from the
-+            # chain, so a tool that failed to stage never fails the boot.
-+            chain = f"{ctx.cli_tools_prologue}\n{chain}"
+# core/skill_center/services/runtime_projections/per_domain.py — validate_plan
++  if plan.cli_tools and not self._runtime.supports_cli_tools:
++      raise SkillSetRuntimeReconcileError(...)   # refused before any request
 ```
 
-Prepending in `_compose_start_command` rather than in each composer means the
-ACK and managed runtimes get it from one place, and no composer's own
-`build_start_command` changes.
+An engine without the endpoint yields the existing vocabulary rather than a new
+one:
+
+```python
+# the SKIPPED result an engine without a tools endpoint produces
+RuntimeProjectionResult(
+    status=RuntimeProjectionStatus.SKIPPED,
+    issues=[RuntimeProjectionIssue(
+        resource_type="cli_tool", code="engine_no_cli_endpoint",
+        reason="engine '<x>' has no cli_tools runtime endpoint yet",
+        status=RuntimeProjectionStatus.SKIPPED, retryable=False,
+        suggested_action="...",
+    )],
+)
+```
 
 ## API / Interface Changes
 
-No HTTP surface changes. `PUT`/`GET`/`DELETE …/config-manifest` and
-`POST …/config-manifest/apply` keep their shapes; the only visible difference is
-that a document declaring `cli_tools` is now accepted, and
-`GET …/config-manifest/capabilities` reports it supported:
+No HTTP surface changes on the platform's own API. `PUT`/`GET`/`DELETE
+…/config-manifest` and `POST …/config-manifest/apply` keep their shapes; the
+only visible difference is that a document declaring `cli_tools` is now
+accepted, and capabilities reports it supported:
 
 ```jsonc
 // GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities → 200 (excerpt)
 { "kind": "category", "name": "cli_tools", "supported": true, "reason": "" }
 ```
 
-The ARCA delivery note rides the apply report's existing warning channel:
+**New engine-facing contract (the ARCA family's half, implemented by engines):**
 
-```text
-delivered now; effective at this bot's next device provisioning
-(create, restart or republish)
+```jsonc
+// engine tools endpoint — request body
+{ "cli_tools": [ { "name": "mycli", "store": "bot-data", "path": "…",
+                   "md5": "9f2c…", "version": "1.4.2" } ] }
+// the engine: fetches by {store, path}, skips when md5 already matches,
+// places the file, sets +x, exposes `name` on PATH, and removes any
+// platform-delivered tool this list no longer names. An empty list removes all.
 ```
+
+The apply report carries the projection outcome per entry, using the existing
+`RuntimeProjectionStatus` vocabulary — no new report shape.
 
 ## Dependencies
 
-None. `hashlib` (md5), `curl` and `md5sum` in the container image — both already
-relied on by the existing boot chain.
+None. `hashlib` for the md5. The engine-side endpoint is an external
+dependency on each ARCA engine team, tracked as out-of-scope in the spec, not a
+package.
 
 ## Risks & Mitigations
 
-- **Risk:** the prologue is rendered from the index at compose time, so a tool
-  written *after* the payload was composed is not in that container.
-  **Mitigation:** this is D-3, the accepted §2.6 exception; the apply response
-  says so in the delivery note, and the next provisioning converges.
-- **Risk:** signed URLs expire before a slow first boot finishes.
-  **Mitigation:** expiry sized to the boot window with headroom, not the default
-  7200s ceiling reasoned about in isolation; a failure is loud in the boot log
-  and the next provisioning retries. Named in the spec's open questions.
-- **Risk:** a signed URL leaking through logs.
-  **Mitigation:** `after_create_cmd_hook` is already elided in BaaS logs
-  (`baas_service.py:176-188`); a test pins that the elision still covers the
-  hook once the prologue is in it.
-- **Risk:** `TOOLS_DIR` is not writable, or the chain's user cannot read it, on
-  some runtime.
-  **Mitigation:** it sits under the NAS mount every managed bot already has
-  (`managed_composer.py:428`, `deploy_models.py:167`); verifying it per runtime
-  is the concrete form of A2 and is a task, not an assumption.
-- **Risk:** a partially written tool is served to the model.
-  **Mitigation:** fetch to `.part`, verify `md5`, `chmod`, then atomic `mv`;
-  and the index is written after the bytes so it never over-claims.
-- **Risk:** the phase move changes ARCA ordering for an existing bot.
-  **Mitigation:** `cli_tools` has never been appliable, so no stored document
-  contains it and no existing apply changes shape. The ordering test gains a
-  `cli_tools` row rather than editing an existing assertion.
+- **Risk:** no ARCA engine has the tools endpoint on day one, so the feature
+  ships inert for that family.
+  **Mitigation:** by design (spec D-8) — the projection returns `SKIPPED` with
+  an issue naming the engine, so the apply report is honest instead of claiming
+  a delivery that did not happen. The platform half, the protocol document and
+  teclaw's arm all land and are testable without any engine change.
+- **Risk:** a tools-only apply forces a full skills/MCP rewrite on every engine.
+  **Mitigation:** `ProjectionScope` gains the tools half, which is exactly what
+  the existing halves exist for.
+- **Risk:** the engine fetches by `{store, path}` and cannot reach the store.
+  **Mitigation:** it is the same `bot-data` store and the same ref shape the
+  teclaw engine already resolves for identity, resources and skills — not a new
+  content plane. Confirmed per engine as part of the protocol document.
+- **Risk:** a partially written index names a tool whose bytes are absent.
+  **Mitigation:** bytes are written before the index, so it under-claims rather
+  than over-claims, and the next apply re-converges.
+- **Risk:** the index departs from the store's "layout is the record" rule and
+  becomes a precedent.
+  **Mitigation:** the reason is written into `store.py`'s docstring — four
+  fields that cannot live in a path — so the next category has to make the same
+  argument rather than inherit the exception.
 
 ## Alternatives Considered
 
+- **A platform-composed start-command prologue** (revision 1). Rejected in
+  review of PR #1870: an arrangement in platform code is not a protocol, so
+  every future engine needs a bespoke integration; and it made `cli_tools`
+  effective only at the next device provisioning, forcing a §2.6 exception.
 - **An engine-side *command* protocol** (platform issues `chmod`/`mv`/`PATH`).
   Rejected in spec D-1: contradicts `manifest-schema` §6, makes
   `cliToolRef.md5` meaningless, loses free full-replacement, and opens a
   remote-exec channel into customer containers.
-- **Five ARCA images implement the contract now.** Rejected: breaks the
-  zero-changes promise (`engine-requirements.zh-CN.md:16`) for no benefit this
-  iteration. The prologue is the same contract, implemented once; an image can
-  take it over later without a contract change.
+- **A new projection seam for tools alone.** Rejected: `EngineRuntimeProjection`
+  already spans the engines with the right result vocabulary; a parallel seam
+  would be a second way to say the same thing.
 - **No index; recompute `md5` at compose time.** Rejected: re-reads every tool's
   bytes (≤200 MiB each) on every artifact compose.
-- **`md5` as a field on `ManagedFile`.** Rejected: `store.list` reads keys only
-  and would return `None` for it, so the composer would still have to read
-  bytes — the index is the same information in one object.
 - **Push bytes through `DeviceFileSystem` into the container.** Rejected: there
-  is no `chmod` on that protocol, so the tool arrives non-executable, and it
-  needs a bound device, which would push `cli_tools` back to `ON_CONTAINER` and
-  lose the first-container guarantee.
+  is no `chmod` on that protocol, so the tool arrives non-executable, and
+  placement would become the platform's decision.
 
 ## Rollout
 
-No flag of its own. The teclaw arm rides W8's existing switch —
-`user_config.bot_config_manifest.teclaw_platform_managed`, still default off —
-because it composes through the same reader. The ARCA arm needs no switch: the
-prologue is empty for every bot that declares no tools, which is every bot until
-someone writes one.
+No flag of its own. The teclaw arm rides W8's existing
+`user_config.bot_config_manifest.teclaw_platform_managed`, still default off.
+The ARCA arm needs no switch: an engine without the endpoint reports `SKIPPED`,
+which is the honest state until it ships one.
 
 ```bash
 # no migration; the store is the only new state
-uv run pytest tests/community/core/bot_config_manifest tests/community/core/config_compose \
-              tests/community/core/service_bot tests/community/kernel/test_bot_config_artifact.py
+uv run pytest tests/community/core/bot_config_manifest \
+              tests/community/core/config_compose \
+              tests/community/core/skill_center \
+              tests/community/kernel/test_bot_config_artifact.py
 ```
 
 ## Test Strategy
@@ -463,20 +471,23 @@ def test_schema_version_stays_4(): ...
 ```
 
 ```python
-# tests/community/core/service_bot/test_cli_tools_prologue.py (new)
-def test_no_tools_composes_a_byte_identical_start_command(): ...   # guards #935
-def test_prologue_precedes_the_chain_so_path_is_inherited(): ...
-def test_matching_md5_skips_the_download(): ...
-def test_undeclared_file_in_the_tools_dir_is_removed(): ...
-def test_prologue_failure_does_not_change_the_boot_exit_status(): ...
-def test_hook_carrying_signed_urls_stays_elided_in_logs(): ...
+# tests/community/core/skill_center/test_cli_tools_projection.py (new)
+def test_per_domain_projection_sends_the_cli_tool_ref_shape(): ...
+def test_engine_without_tools_endpoint_yields_skipped_with_an_issue(): ...
+def test_validate_plan_refuses_before_any_runtime_request(): ...
+def test_tools_only_scope_does_not_rewrite_skills_or_mcp(): ...
+def test_empty_declared_list_projects_removal_of_every_tool(): ...
 ```
 
 ```python
 # tests/community/core/bot_config_manifest/test_iteration1_ordering.py (extend)
-def test_cli_tools_is_pre_container_on_both_families(): ...
+def test_cli_tools_stays_on_container_on_both_families(): ...
 ```
 
-Manual: none required — the prologue's rendered shell is asserted as a string,
-and A2's per-runtime directory check is a task with a named owner rather than a
-test.
+Also extended: a test pinning that no deploy-path file changed — the composed
+start command is byte-identical for every bot, so #935's assertion stands
+unedited.
+
+Manual: none required. The engine half is exercised through the projection
+port's fake; a real end-to-end run waits on the first engine to ship the
+endpoint.
