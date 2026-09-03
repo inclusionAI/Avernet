@@ -282,6 +282,18 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         timeout_in_millis: int = 60000,
         ready_timeout_in_seconds: int = 60,
     ) -> ArcaSandbox:
+
+        # ACK 场景冷启动（拉镜像/调度）较慢，等待就绪的超时时间扩充 3 倍
+        logger.info(
+            "[aliyun_ack] ready timeout expanded 3x for ACK cold start: "
+            "template=%s, timeout=%ss -> %ss",
+            template_id,
+            ready_timeout_in_seconds,
+            ready_timeout_in_seconds * 3,
+        )
+        ready_timeout_in_seconds = ready_timeout_in_seconds * 3
+
+
         namespace = self._get_namespace()
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
         uid = _sanitize_pod_name(sandbox_id)
