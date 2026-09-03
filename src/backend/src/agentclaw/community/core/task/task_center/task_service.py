@@ -344,6 +344,7 @@ class TaskService:
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
         graph = self._graph.initialize_graph(task_info)
+        self._enrich_anniversary_trigger_bot_name(request, graph)
         logger.info(
             "[task][execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
             task_id,
@@ -869,6 +870,37 @@ class TaskService:
             if isinstance(info, dict):
                 node.run_info.extend_props["assignee_owner_id"] = info.get("owner_id")
                 node.run_info.extend_props["assignee_name"] = info.get("bot_name")
+
+    def _enrich_anniversary_trigger_bot_name(self, request, graph) -> None:
+        """best-effort 把店庆模板入口"接自"展示为实际触发 Bot 的名称,而非固定入口名。
+
+        仅 merchant-operations-goal-to-plan 模板的首节点会把入口身份展示为触发方;其他模板/Runtime
+        均不读此字段,故这里严格按 static_plan_id 限定,避免影响其它静态剧本。名称解析失败则不写入,
+        Runtime 自然回退到入口占位,绝不阻断 execute。""" 
+        template_id = request.execution_config.get("static_plan_id")
+        if template_id != "merchant-operations-goal-to-plan":
+            return
+        if self._bot_service is None:
+            return
+        bare_bot_id, _, embedded_owner = str(request.owner_bot_id or "").partition(":")
+        if not bare_bot_id:
+            return
+        info = None
+        try:
+            info = self._bot_service.get_bot_by_id(bare_bot_id)
+        except Exception as exc:  # noqa: BLE001 展示富化,失败不影响
+            logger.debug(
+                "[task][execute] trigger bot name lookup failed bot_id=%s: %s",
+                bare_bot_id, exc,
+            )
+            return
+        name = info.get("bot_name") if isinstance(info, dict) else None
+        if name:
+            graph.extend_props.setdefault("trigger_bot_name", name)
+            logger.info(
+                "[task][execute] anniversary trigger bot display resolved task=%s bot_id=%s name=%s",
+                graph.task_id, bare_bot_id, name,
+            )
 
     @staticmethod
     def _split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]:
