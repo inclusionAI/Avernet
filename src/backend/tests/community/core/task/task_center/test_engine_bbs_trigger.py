@@ -32,8 +32,8 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.runner import TaskRunner
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 
 # ===== domain helpers (mirrors test_engine.py minimal setup) =====
@@ -245,7 +245,7 @@ def test_engine_bbs_schedule_reaches_notify_through_start_run():
     with patch.object(engine, "_ensure_bbs_loop", return_value=MagicMock()), \
          patch("asyncio.run_coroutine_threadsafe", side_effect=submit), \
          patch(
-             "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+             "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
              new_callable=AsyncMock,
          ) as notify:
         engine._schedule_bbs_notify("t1", fake_g)

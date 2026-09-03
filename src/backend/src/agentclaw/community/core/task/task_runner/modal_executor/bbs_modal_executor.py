@@ -200,11 +200,8 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,
-            output_patch={
-                #"output": _bbs_output
-            },
+            output_patch={"output": _bbs_output},
             extend_props_patch={
-                #"output": _bbs_output,
                 "actual_run_mode": "bbs",
                 "assignee_bot_id": winner_bot_id,
                 "session_id": _bbs_session,

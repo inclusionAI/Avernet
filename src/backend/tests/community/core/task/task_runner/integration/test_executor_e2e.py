@@ -278,7 +278,7 @@ class TestBbsDispatchE2E:
                      node_run_graph=None)  # type: ignore[arg-type]
         svc.add_task_nodes([n], parent_node_id="t_bbs")
         with patch(
-            "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+            "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
             new_callable=AsyncMock,
         ) as notify:
             ok = _run(exe._executor.dispatch([n]))  # type: ignore[attr-defined]
