@@ -37,12 +37,16 @@ def actions_for(
 
     if kind is BotInventoryKind.PERSONAL_CLOUD:
         if display_state is DisplayState.RUNNING:
+            # ENGINE_RESTART relays the device engine daemon's process restart
+            # (POST /openapi/v1/bots/{bot_id}/engine/restart) — a lighter verb
+            # than the container re-provision RESTART names, granted beside it.
             return (
                 (
                     BotAction.VIEW,
                     BotAction.CHAT,
                     BotAction.EDIT,
                     BotAction.RESTART,
+                    BotAction.ENGINE_RESTART,
                     BotAction.DELETE,
                     BotAction.PASSPORT,
                     BotAction.ENGINE_CONFIG,
@@ -54,13 +58,16 @@ def actions_for(
             disabled[BotAction.CHAT.value] = "activate first"
             disabled[BotAction.EDIT.value] = "activate first"
             disabled[BotAction.RESTART.value] = "activate first"
+            disabled[BotAction.ENGINE_RESTART.value] = "activate first"
             return ((BotAction.VIEW, BotAction.ACTIVATE, BotAction.DELETE), disabled)
         if display_state is DisplayState.FAILED:
             disabled[BotAction.RESTART.value] = "bot provisioning failed"
+            disabled[BotAction.ENGINE_RESTART.value] = "bot provisioning failed"
             return ((BotAction.VIEW, BotAction.DELETE), disabled)
         disabled[BotAction.CHAT.value] = "bot not ready"
         disabled[BotAction.EDIT.value] = "bot not ready"
         disabled[BotAction.RESTART.value] = "bot not ready"
+        disabled[BotAction.ENGINE_RESTART.value] = "bot not ready"
         return ((BotAction.VIEW,), disabled)
 
     return ((BotAction.VIEW,), disabled)
