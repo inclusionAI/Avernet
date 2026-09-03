@@ -122,7 +122,16 @@ class _Skills:
         }
 
     def list_bot_skills(
-        self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
+        self,
+        *,
+        bot_id,
+        owner_id,
+        actor_id,
+        page,
+        page_size,
+        active=None,
+        keyword=None,
+        source=None,
     ):
         assert (bot_id, owner_id) == (BOT, OWNER), (bot_id, owner_id)
         return 0, []
@@ -217,8 +226,8 @@ PAIRS = [
     (
         "list",
         "GET",
-        f"/openapi/v1/bots/{BOT}/skills?user_id={CALLER}&owner_id={OWNER}",
-        f"/openapi/v1/bots/skills?user_id={CALLER}&bot_id={BOT}&owner_entity_id={OWNER}",
+        f"/openapi/v1/bots/{BOT}/skills?user_id={CALLER}&owner_id={OWNER}&source=LOCAL",
+        f"/openapi/v1/bots/skills?user_id={CALLER}&bot_id={BOT}&owner_entity_id={OWNER}&source=LOCAL",
     ),
     (
         "get",

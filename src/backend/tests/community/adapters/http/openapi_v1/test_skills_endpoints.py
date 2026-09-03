@@ -492,7 +492,23 @@ def test_list_uses_verified_actor_and_exposes_only_public_metadata():
         "page_size": 7,
         "active": False,
         "keyword": "cast",
+        "source": None,
     }
+
+
+def test_list_forwards_local_source_filter_and_rejects_other_sources():
+    query = _Query()
+    client = _client(query)
+
+    response = client.get("/openapi/v1/bots/bot-1/skills?owner_id=owner&source=LOCAL")
+
+    assert response.status_code == 200
+    assert query.list_args is not None
+    assert query.list_args["source"] == "LOCAL"
+
+    invalid = client.get("/openapi/v1/bots/bot-1/skills?owner_id=owner&source=REPO")
+
+    assert invalid.status_code == 422
 
 
 def test_detail_derives_scope_from_skill_id_and_masks_invisible_rows():

@@ -27,6 +27,7 @@ class SkillQueryServiceProtocol(Protocol):
         page_size: int,
         active: bool | None,
         keyword: str | None,
+        source: str | None = None,
     ) -> tuple[int, list[dict[str, Any]]]: ...
 
     @abstractmethod

@@ -164,7 +164,16 @@ class _Skills:
         }
 
     def list_bot_skills(
-        self, *, bot_id, owner_id, actor_id, page, page_size, active=None, keyword=None
+        self,
+        *,
+        bot_id,
+        owner_id,
+        actor_id,
+        page,
+        page_size,
+        active=None,
+        keyword=None,
+        source=None,
     ):
         self.listed.append((bot_id, owner_id))
         return 0, []

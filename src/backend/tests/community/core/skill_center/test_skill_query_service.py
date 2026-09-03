@@ -129,7 +129,7 @@ def _listing_service(
     return service, skills, sets, bots
 
 
-def _list(service, *, actor_id: str = "owner"):
+def _list(service, *, actor_id: str = "owner", source: str | None = None):
     return service.list_bot_skills(
         bot_id="bot",
         owner_id="owner",
@@ -138,6 +138,7 @@ def _list(service, *, actor_id: str = "owner"):
         page_size=20,
         active=None,
         keyword=None,
+        source=source,
     )
 
 
@@ -160,6 +161,16 @@ def test_the_repair_runs_before_the_page_is_cut():
     assert skills.calls[0]["skill_set_member_ids"] == frozenset({1, 2})
     assert skills.calls[0]["bot_id"] == "bot"
     assert skills.calls[0]["user_id"] == "owner"
+    assert skills.calls[0]["source"] is None
+
+
+def test_local_source_filter_is_forwarded_after_the_standard_flush():
+    service, skills, sets, _bots = _listing_service(bridge=_EMPTY)
+
+    _list(service, source="LOCAL")
+
+    assert len(sets.calls) == 1
+    assert skills.calls[0]["source"] == "LOCAL"
 
 
 def test_the_skillset_scope_uses_the_bots_engine_and_layout_precedence():
