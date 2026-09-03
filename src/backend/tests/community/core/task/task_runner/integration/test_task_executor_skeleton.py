@@ -4,7 +4,7 @@ import logging
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _node(node_id="c1", task_id="t1", run_mode="bbs", assignee="b1"):

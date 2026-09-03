@@ -3,7 +3,7 @@ import time
 
 from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
 from agentclaw.community.core.task.task_runner.client.double.double_context_provider import _DoubleSink
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle, TaskExecutorResultPoller,
 )
 

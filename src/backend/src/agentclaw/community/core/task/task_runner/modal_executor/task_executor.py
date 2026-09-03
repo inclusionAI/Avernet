@@ -29,7 +29,7 @@ from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
 )
 from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle,
     SingleBotHandle,
 )

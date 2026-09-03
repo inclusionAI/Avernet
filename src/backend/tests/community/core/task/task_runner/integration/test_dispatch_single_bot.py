@@ -16,7 +16,7 @@ from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter impor
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     PromptFormatterImpl,
 )
-from community.core.task.task_runner.modal_executor.task_executor import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
     TaskExecutor,
 )
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (

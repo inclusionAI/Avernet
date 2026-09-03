@@ -15,8 +15,8 @@ from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_iden
     _DoubleBcsBotIdentityResolver,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
-from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 
