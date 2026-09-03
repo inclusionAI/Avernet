@@ -902,12 +902,8 @@ class ExecutionEngine:
                 bot_id = getattr(definition, "bot_id", None) or ""
                 static_input = node.task_spec.context.extend_props.get("static_input") or {}
                 items = static_input.get("unhandled_tasks")
-                if not (isinstance(items, list) and items):
-                    # 业务实施节点也可以直接声明一个结构化 BBS 任务；上游只提供
-                    # 业务事实和能力缺口，研发 Bot 自己决定技术拆解。
-                    items = static_input.get("bbs_task_items")
                 if isinstance(items, list) and items:
-                    pass  # 原样保留业务任务内容，不替下游预写技术清单
+                    pass  # 真实风险评估上报了结构化不可实现任务 → 原样用其内容
                 else:
                     # 真实评估为自然语言、无结构化 unhandled_tasks → 兜底 mock 占位(与 _static_auto_report
                     # 的 _UHT_MOCK 同口径),安全架构师 不致收到空;真实检测到时优先用真实内容。
@@ -1049,11 +1045,6 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["approved"] = True
-        if definition is not None and any(
-            isinstance(v, str) and v.startswith("$.result.bbs_needed")
-            for v in definition.output.values()
-        ):
-            mock_result["bbs_needed"] = True
         # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群):
         # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 安全架构师)。
         if definition is not None and any(

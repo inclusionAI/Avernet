@@ -206,36 +206,15 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 "assignee_bot_id": winner_bot_id,
                 "session_id": _bbs_session,
                 "relay_reason": winner.get("relay_reason", ""),
-            },
+            }
         )
-        if on_bbs_report is not None:
-            # 收口走引擎:记录 scoped SUCCESS → finally 释放 bbs_owner → 继续既有图收敛
-            # (plan(root)→_maybe_finish_graph/HUNG)。不再直写根 status=PLANNING(收敛自驱根态),
-            # 也不再裸写 scoped —— 全部由 on_bbs_report 一次落入 SSOT 并触发收敛。
-            await on_bbs_report(_scoped_patch)
-            logger.info(
-                "[task][bbs_mode] on_bbs_report 收口 task_id=%s node=%s",
-                task_id, bbs_task_node.node_id,
-            )
-        else:
-            # 无引擎回调(轻量/stub):遵守 bbs 模式不变量——只能改根节点状态 + graph 加关系,
-            # 绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
-            # 故此处仅落 scoped 接力节点终态(其自身执行产出,属 runner 回投)+ 保持根 HUNG(可恢复态,
-            # 等下段重 claim/升 BBS);不驱动收敛(需 engine 收口)、不直写根 output/extend_props.output。
-            logger.warning(
-                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 保持根 HUNG,"
-                "不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
-                task_id,
-            )
-            graph.update_task_node_info(_scoped_patch)
-            graph.update_task_node_info(
-                TaskNodePatch(
-                    task_id=task_id,
-                    node_id=task_id,
-                    extend_props_patch={"bbs_owner": None},
-                )
-            )
-        logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
+
+        logger.warning(
+        "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 保持根 HUNG, 不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
+        task_id
+        )
+        graph.update_task_node_info(_scoped_patch)
+        logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s, scoped_patch=%s", task_id, task_result, _scoped_patch)
     except Exception as exc:
         logger.error("[task][bbs_mode] rely_task_meet_exception, task_id=%s, exception=%s", task_id, exc)
         # send 失败 → 回收 claim(释放 bbs_owner,避免泄漏挡住后续重升 BBS)。
