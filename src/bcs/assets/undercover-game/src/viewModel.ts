@@ -60,7 +60,13 @@ export function mapPublicOutputEvents(
   const byIdentity = new Map<string, PublicOutputEvent>();
   for (const message of messages) {
     const metadata = stateMachineMetadata(message);
-    if (!metadata || metadata.event !== 'output' || metadata.run_id !== params.runId) continue;
+    if (
+      !metadata ||
+      metadata.event !== 'output' ||
+      metadata.run_id !== params.runId ||
+      metadata.visibility === 'private' ||
+      metadata.public === false
+    ) continue;
     const nodeId = typeof metadata.node_id === 'string' ? metadata.node_id : '';
     const actorId = nodeId ? params.nodeActorMap[nodeId] : undefined;
     const text = outputText(message.content);

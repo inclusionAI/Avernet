@@ -44,6 +44,7 @@ const params = normalizePanelParams({
   ],
   nodeActorMap: { 'node-a': 'a', 'node-b': 'b', 'node-host': 'host' },
   currentViewerActorId: 'a',
+  currentAction: { actorId: 'a', type: 'vote', nodeId: 'node-a' },
   voteCandidates: [
     { actorId: 'b', displayName: 'B', eligible: true },
     { actorId: 'c', displayName: 'C', eligible: true, eliminated: true },
@@ -51,6 +52,7 @@ const params = normalizePanelParams({
   ],
 });
 
+assert.equal(params.apiBaseUrl, '/bcnproxy');
 assert.equal(getSeatCoordinates(params.seatOrder).map((seat) => seat.actorId).join(','), 'a,b,c');
 assert.deepEqual(eligibleVoteCandidates(params.voteCandidates), [{ actorId: 'b', displayName: 'B', eligible: true }]);
 assert.equal(serializeVoteContent('b'), '{"kind":"vote","target_actor_id":"b"}');
@@ -61,9 +63,11 @@ const messages = [
   { id: 'new', sequence: 2, content: { text: 'new' }, metadata: { state_machine: { event: 'output', run_id: 'run-example', node_id: 'node-a', attempt: 1 } } },
   { id: 'host', sequence: 3, content: 'announcement', metadata: { state_machine: { event: 'output', run_id: 'run-example', node_id: 'node-host', attempt: 1 } } },
   { id: 'other-run', sequence: 99, content: 'private', metadata: { state_machine: { event: 'output', run_id: 'other-run', node_id: 'node-a', attempt: 1 } } },
+  { id: 'private-state', sequence: 100, content: 'secret role', metadata: { state_machine: { event: 'output', visibility: 'private', run_id: 'run-example', node_id: 'node-a', attempt: 2 } } },
 ];
 const events = mapPublicOutputEvents(messages, params);
 assert.equal(events.length, 2);
+assert.equal(params.currentAction?.nodeId, 'node-a');
 const model = normalizeUndercoverGameViewModel(params, {
   run: { run_id: 'run-example', status: 'running', updated_at: 4 },
   nodes: [
@@ -74,6 +78,7 @@ const model = normalizeUndercoverGameViewModel(params, {
 assert.equal(model.actors.find((actor) => actor.actor.actorId === 'a').latestOutput.text, 'new');
 assert.equal(model.actors.find((actor) => actor.actor.actorId === 'host').latestOutput.text, 'announcement');
 assert.equal(model.actors.find((actor) => actor.actor.actorId === 'c').state, 'eliminated');
+assert.equal(model.pendingHumanActorId, 'a');
 assert.equal(model.terminal, false);
 
 assert.throws(() => normalizePanelParams({ phase: 'speaking', round: 1 }), /runId is required/);

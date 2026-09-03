@@ -157,7 +157,7 @@ async fn collaborate_run_posts_yaml_bindings_and_input_once() {
 }
 
 #[tokio::test]
-async fn collaborate_run_posts_structured_panel_opening_message() {
+async fn collaborate_run_posts_undercover_game_opening_message() {
     let ctx = TestContext::new()
         .await
         .expect("Failed to create test context");
@@ -166,7 +166,7 @@ async fn collaborate_run_posts_structured_panel_opening_message() {
     std::fs::write(&yaml_file, WORKFLOW_YAML).unwrap();
     std::fs::write(
         &params_file,
-        r#"{"scene":"release","runId":"{{bcs.run_id}}"}"#,
+        r#"{"runId":"{{bcs.run_id}}","groupId":"{{bcs.group_id}}","sessionId":"{{bcs.session_id}}","gameSessionId":"{{bcs.session_id}}","phase":"speaking","round":1,"host":{"actorId":"referee","displayName":"主持人"},"seatOrder":["human"],"players":[{"actorId":"human","displayName":"1号 你","isHuman":true,"alive":true}],"nodeActorMap":{"speak_1":"human"},"currentViewerActorId":"human","currentAction":{"actorId":"human","type":"speech","nodeId":"speak_1"}}"#,
     )
     .unwrap();
 
@@ -181,14 +181,24 @@ async fn collaborate_run_posts_structured_panel_opening_message() {
             "input": {},
             "opening_message": {
                 "type": "panel",
-                "component": "partnerPanel.OneShotRunView",
+                "component": "undercoverGame.UndercoverGamePanel",
                 "params": {
-                    "scene": "release",
-                    "runId": "{{bcs.run_id}}"
+                    "runId": "{{bcs.run_id}}",
+                    "groupId": "{{bcs.group_id}}",
+                    "sessionId": "{{bcs.session_id}}",
+                    "gameSessionId": "{{bcs.session_id}}",
+                    "phase": "speaking",
+                    "round": 1,
+                    "host": {"actorId": "referee", "displayName": "主持人"},
+                    "seatOrder": ["human"],
+                    "players": [{"actorId": "human", "displayName": "1号 你", "isHuman": true, "alive": true}],
+                    "nodeActorMap": {"speak_1": "human"},
+                    "currentViewerActorId": "human",
+                    "currentAction": {"actorId": "human", "type": "speech", "nodeId": "speak_1"}
                 },
                 "tab": {
-                    "id": "one-shot-{{bcs.run_id}}",
-                    "title": "一次性协作",
+                    "id": "undercover-session-1-speak-r1-a1-{{bcs.run_id}}",
+                    "title": "谁是卧底 · 第 1 轮发言",
                     "closable": true
                 }
             }
@@ -224,13 +234,13 @@ async fn collaborate_run_posts_structured_panel_opening_message() {
         .arg("--binding")
         .arg("writer=bot-writer")
         .arg("--panel-component")
-        .arg("partnerPanel.OneShotRunView")
+        .arg("undercoverGame.UndercoverGamePanel")
         .arg("--panel-params")
         .arg(format!("@{}", params_file.display()))
         .arg("--panel-tab-id")
-        .arg("one-shot-{{bcs.run_id}}")
+        .arg("undercover-session-1-speak-r1-a1-{{bcs.run_id}}")
         .arg("--panel-tab-title")
-        .arg("一次性协作")
+        .arg("谁是卧底 · 第 1 轮发言")
         .arg("--panel-tab-closable")
         .arg("true")
         .output()

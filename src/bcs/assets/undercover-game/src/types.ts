@@ -37,6 +37,13 @@ export type PlayerState =
   | 'retrying'
   | 'error';
 
+export interface CurrentAction {
+  actorId: string;
+  type: 'speech' | 'vote' | string;
+  nodeId: string;
+  deadlineAt?: number;
+}
+
 export interface VoteCandidate {
   actorId: string;
   displayName: string;
@@ -66,6 +73,7 @@ export interface UndercoverGamePanelParams {
   voteCandidates?: VoteCandidate[];
   apiBaseUrl?: string;
   currentViewerActorId?: string;
+  currentAction?: CurrentAction;
   display?: PublicDisplayFlags;
   pollingInterval?: number;
   autoRefresh?: boolean;

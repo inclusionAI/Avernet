@@ -2347,6 +2347,32 @@ file = "assets/panel/dist/index.umd.js"
     }
 
     #[test]
+    fn test_config_with_undercover_game_file_bundle() {
+        let toml = r#"
+bots_base_dir = "/bots"
+
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "file"
+file = "assets/panel/dist/index.umd.js"
+
+[[manifest.bundles]]
+name = "undercoverGame"
+type = "file"
+file = "assets/undercover-game/dist/index.umd.js"
+"#;
+
+        let config: BcsConfig = toml::from_str(toml).unwrap();
+
+        assert_eq!(config.manifest.bundles.len(), 2);
+        assert_eq!(config.manifest.bundles[1].name, "undercoverGame");
+        assert_eq!(
+            config.manifest.bundles[1].file.as_deref(),
+            Some("assets/undercover-game/dist/index.umd.js")
+        );
+    }
+
+    #[test]
     fn test_config_loader_resolves_local_paths_relative_to_config_root() {
         let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join("configs");

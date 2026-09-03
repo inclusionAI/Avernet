@@ -44,7 +44,7 @@ published parameter file.
     { "actorId": "player-b", "displayName": "玩家乙", "eligible": true },
     { "actorId": "player-c", "displayName": "玩家丙", "eligible": true }
   ],
-  "apiBaseUrl": "/api/v1/collaboration",
+  "apiBaseUrl": "/bcnproxy",
   "currentViewerActorId": "player-a",
   "display": {
     "showTimer": true,

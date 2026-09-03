@@ -271,6 +271,11 @@ name = "bcsPanel"
 type = "url"
 url = "https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/bcs-panel/1.2.0/dist/index.umd.js"
 
+[[manifest.bundles]]
+name = "undercoverGame"
+type = "url"
+url = "https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/undercover-game-panel/1.0.0/dist/index.umd.js"
+
 [gateway_principal]
 issuers = ["gateway", "backend"]
 audience = "bcs"

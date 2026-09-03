@@ -1,6 +1,9 @@
 import type { UndercoverGamePanelParams, UndercoverGamePanelProps, PlayerActor } from './types';
 
-export const DEFAULT_API_BASE_URL = '/api/v1/collaboration';
+// Browser panels are served by the frontend, so use its BCS proxy by default.
+// Direct /api/v1 routes target the management gateway and are unavailable in
+// standalone BCN deployments.
+export const DEFAULT_API_BASE_URL = '/bcnproxy';
 export const DEFAULT_POLLING_INTERVAL = 3000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
 
@@ -85,6 +88,18 @@ export function normalizePanelParams(props: UndercoverGamePanelProps): Undercove
     ]),
   );
 
+  const currentActionValue = raw.currentAction;
+  const currentAction = currentActionValue && typeof currentActionValue === 'object' && !Array.isArray(currentActionValue)
+    ? {
+        actorId: requireText((currentActionValue as Record<string, unknown>).actorId, 'currentAction.actorId'),
+        type: requireText((currentActionValue as Record<string, unknown>).type, 'currentAction.type'),
+        nodeId: requireText((currentActionValue as Record<string, unknown>).nodeId, 'currentAction.nodeId'),
+        deadlineAt: typeof (currentActionValue as Record<string, unknown>).deadlineAt === 'number'
+          ? (currentActionValue as Record<string, unknown>).deadlineAt as number
+          : undefined,
+      }
+    : undefined;
+
   return {
     runId,
     groupId,
@@ -100,6 +115,7 @@ export function normalizePanelParams(props: UndercoverGamePanelProps): Undercove
     voteCandidates: Array.isArray(raw.voteCandidates) ? raw.voteCandidates as UndercoverGamePanelParams['voteCandidates'] : [],
     apiBaseUrl: typeof raw.apiBaseUrl === 'string' && raw.apiBaseUrl.trim() ? raw.apiBaseUrl.trim() : DEFAULT_API_BASE_URL,
     currentViewerActorId: typeof raw.currentViewerActorId === 'string' ? raw.currentViewerActorId : undefined,
+    currentAction,
     display: raw.display && typeof raw.display === 'object' ? raw.display as UndercoverGamePanelParams['display'] : {},
     pollingInterval: typeof raw.pollingInterval === 'number' && raw.pollingInterval > 0 ? raw.pollingInterval : DEFAULT_POLLING_INTERVAL,
     autoRefresh: raw.autoRefresh !== false,

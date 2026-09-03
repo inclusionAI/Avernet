@@ -262,3 +262,8 @@ schema_version = 1
 name = "bcsPanel"
 type = "file"
 file = "assets/panel/dist/index.umd.js"
+
+[[manifest.bundles]]
+name = "undercoverGame"
+type = "file"
+file = "assets/undercover-game/dist/index.umd.js"

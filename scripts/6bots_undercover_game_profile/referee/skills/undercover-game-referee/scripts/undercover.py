@@ -597,13 +597,102 @@ def forbid_line(word: str) -> str:
     return "；".join(parts) + "。"
 
 
-def write_run_files(session_id: str, kind: str, yaml_text: str, run_input: dict[str, Any]) -> tuple[str, str]:
+PANEL_COMPONENT = "undercoverGame.UndercoverGamePanel"
+RUN_ID_TEMPLATE = "{{bcs.run_id}}"
+
+
+def actor_id_for(seat: dict[str, Any], state: dict[str, Any]) -> str:
+    return state["human_actor_id"] if seat["kind"] == "human" else seat["bot_uuid"]
+
+
+def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> dict[str, Any]:
+    """Build the game panel's public, whitelisted phase projection.
+
+    Never serialize a referee state object directly: it contains role, word, raw
+    speech, and unrevealed votes. This function is the only source for panel
+    params, so every key below is intentionally public and renderable.
+    """
+    living = sorted(alive_seats(state), key=lambda seat: seat["seat"])
+    phase = "speaking" if kind == "speak" else "voting"
+    node_prefix = "speak" if kind == "speak" else "vote"
+    seat_order = [actor_id_for(seat, state) for seat in living]
+    players = [
+        {
+            "actorId": actor_id_for(seat, state),
+            "displayName": f"{seat['seat']}号 {seat['display']}",
+            "isHuman": seat["kind"] == "human",
+            "alive": bool(seat["alive"]),
+            "eliminated": not bool(seat["alive"]),
+            "publicFields": {"seat": seat["seat"]},
+        }
+        for seat in sorted(state["seats"], key=lambda seat: seat["seat"])
+    ]
+    node_actor_map = {
+        f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state)
+        for seat in living
+    }
+    human = next((seat for seat in living if seat["kind"] == "human"), None)
+    current_action = None
+    if human is not None:
+        current_action = {
+            "actorId": actor_id_for(human, state),
+            "type": "speech" if kind == "speak" else "vote",
+            "nodeId": f"{node_prefix}_{human['seat']}",
+        }
+    params: dict[str, Any] = {
+        "runId": RUN_ID_TEMPLATE,
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": state["group_id"] or "{{bcs.group_id}}",
+        "sessionId": state["session_id"],
+        "gameSessionId": state["session_id"],
+        "phase": phase,
+        "round": state["round"],
+        "attempt": attempt,
+        "host": {"actorId": state["referee_uuid"], "displayName": "主持人"},
+        "seatOrder": seat_order,
+        "players": players,
+        "nodeActorMap": node_actor_map,
+        "currentViewerActorId": state["human_actor_id"],
+        "currentAction": current_action,
+    }
+    if kind == "vote" and human is not None:
+        viewer_id = actor_id_for(human, state)
+        params["voteCandidates"] = [
+            {
+                "actorId": actor_id_for(seat, state),
+                "displayName": f"{seat['seat']}号 {seat['display']}",
+                "eligible": True,
+                "publicFields": {"seat": seat["seat"]},
+            }
+            for seat in living
+            if actor_id_for(seat, state) != viewer_id
+        ]
+    return params
+
+
+def panel_tab_metadata(state: dict[str, Any], kind: str, attempt: int) -> dict[str, str]:
+    phase = "发言" if kind == "speak" else "投票"
+    return {
+        "id": f"undercover-{state['session_id']}-{kind}-r{state['round']}-a{attempt}-{RUN_ID_TEMPLATE}",
+        "title": f"谁是卧底 · 第 {state['round']} 轮{phase}",
+    }
+
+
+def write_run_files(
+    session_id: str,
+    kind: str,
+    yaml_text: str,
+    run_input: dict[str, Any],
+    panel_params: dict[str, Any],
+) -> tuple[str, str, str]:
     d = work_dir(session_id)
     yaml_path = d / f"{kind}.yaml"
     input_path = d / f"{kind}-input.json"
+    panel_params_path = d / f"{kind}-panel-params.json"
     yaml_path.write_text(yaml_text, encoding="utf-8")
     input_path.write_text(json.dumps(run_input, ensure_ascii=False, indent=2), encoding="utf-8")
-    return str(yaml_path), str(input_path)
+    panel_params_path.write_text(json.dumps(panel_params, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(yaml_path), str(input_path), str(panel_params_path)
 
 
 def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
@@ -920,12 +1009,26 @@ def bcs_url() -> str:
     return os.environ.get("BCS_API_BASE_URL") or "http://127.0.0.1:21000"
 
 
-def run_command(session_id: str, yaml_path: str, input_path: str, bindings: list[str]) -> str:
-    """给人看的、可以原样粘进 shell 的提交命令（用技能里定义的 bcs 函数）。"""
+def run_command(
+    session_id: str,
+    yaml_path: str,
+    input_path: str,
+    panel_params_path: str,
+    panel_tab: dict[str, str],
+    bindings: list[str],
+) -> str:
+    """Give the exact same custom-panel command used by ``submit_run``."""
     parts = ["bcs collaborate run", shlex.quote(yaml_path), "--session", shlex.quote(session_id)]
     for b in bindings:
         parts += ["--binding", shlex.quote(b)]
-    parts += ["--input", "@" + shlex.quote(input_path)]
+    parts += [
+        "--input", "@" + shlex.quote(input_path),
+        "--panel-component", PANEL_COMPONENT,
+        "--panel-params", "@" + shlex.quote(panel_params_path),
+        "--panel-tab-id", shlex.quote(panel_tab["id"]),
+        "--panel-tab-title", shlex.quote(panel_tab["title"]),
+        "--panel-tab-closable", "true",
+    ]
     return " ".join(parts)
 
 
@@ -1035,11 +1138,25 @@ def self_lock_hint(session_id: str, phase: str) -> tuple[str, str] | None:
     )
 
 
-def submit_run(session_id: str, yaml_path: str, input_path: str, bindings: list[str]) -> dict[str, Any]:
+def submit_run(
+    session_id: str,
+    yaml_path: str,
+    input_path: str,
+    panel_params_path: str,
+    panel_tab: dict[str, str],
+    bindings: list[str],
+) -> dict[str, Any]:
     args = ["collaborate", "run", yaml_path, "--session", session_id]
     for b in bindings:
         args += ["--binding", b]
-    args += ["--input", "@" + input_path]
+    args += [
+        "--input", "@" + input_path,
+        "--panel-component", PANEL_COMPONENT,
+        "--panel-params", "@" + panel_params_path,
+        "--panel-tab-id", panel_tab["id"],
+        "--panel-tab-title", panel_tab["title"],
+        "--panel-tab-closable", "true",
+    ]
     code, out, err = bcs_cli(*args)
     data = last_json(out)
     if code != 0 or data is None:
@@ -1319,8 +1436,10 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
                 f"本轮的描述要钝到至少还能套在 {bluntness_n(state['round'])} 样别的东西上"
             ),
         }
-        yaml_path, input_path = write_run_files(
-            session_id, run_file_kind("speak", state["round"], attempt), yaml_text, run_input
+        panel_params = public_panel_projection(state, "speak", attempt)
+        panel_tab = panel_tab_metadata(state, "speak", attempt)
+        yaml_path, input_path, panel_params_path = write_run_files(
+            session_id, run_file_kind("speak", state["round"], attempt), yaml_text, run_input, panel_params
         )
         save_state(state)
 
@@ -1330,9 +1449,11 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
         "attempt": attempt,
         "yaml_path": yaml_path,
         "input_path": input_path,
+        "panel_params_path": panel_params_path,
+        "panel_tab": panel_tab,
         "bindings": bindings,
         "binding_args": " ".join(f'--binding "{b}"' for b in bindings),
-        "run_command": run_command(session_id, yaml_path, input_path, bindings),
+        "run_command": run_command(session_id, yaml_path, input_path, panel_params_path, panel_tab, bindings),
     }
 
 
@@ -1421,8 +1542,10 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
             "history": public_history(state),
             "rule": "只根据所有人历史全部发言，投出你认为词语和大家不一样的人；不能投自己；只交票号，不写理由",
         }
-        yaml_path, input_path = write_run_files(
-            session_id, run_file_kind("vote", state["round"], attempt), yaml_text, run_input
+        panel_params = public_panel_projection(state, "vote", attempt)
+        panel_tab = panel_tab_metadata(state, "vote", attempt)
+        yaml_path, input_path, panel_params_path = write_run_files(
+            session_id, run_file_kind("vote", state["round"], attempt), yaml_text, run_input, panel_params
         )
         save_state(state)
 
@@ -1432,9 +1555,11 @@ def prepare_vote_run(session_id: str, retry: bool) -> dict[str, Any]:
         "attempt": attempt,
         "yaml_path": yaml_path,
         "input_path": input_path,
+        "panel_params_path": panel_params_path,
+        "panel_tab": panel_tab,
         "bindings": bindings,
         "binding_args": " ".join(f'--binding "{b}"' for b in bindings),
-        "run_command": run_command(session_id, yaml_path, input_path, bindings),
+        "run_command": run_command(session_id, yaml_path, input_path, panel_params_path, panel_tab, bindings),
     }
 
 
@@ -1802,7 +1927,14 @@ def cmd_open_round(args: argparse.Namespace) -> None:
     busy = None if args.retry else self_lock_hint(args.session, "AWAIT_NEXT_ROUND")
     require_run_slot(args.session, busy)
     payload = prepare_speak_run(args.session, args.retry)
-    result = submit_run(args.session, payload["yaml_path"], payload["input_path"], payload["bindings"])
+    result = submit_run(
+        args.session,
+        payload["yaml_path"],
+        payload["input_path"],
+        payload["panel_params_path"],
+        payload["panel_tab"],
+        payload["bindings"],
+    )
     emit(
         {
             "phase": payload["phase"],
@@ -1834,7 +1966,14 @@ def cmd_open_vote(args: argparse.Namespace) -> None:
     busy = None if args.retry else self_lock_hint(args.session, "AWAIT_VOTE_START")
     require_run_slot(args.session, busy)
     payload = prepare_vote_run(args.session, args.retry)
-    result = submit_run(args.session, payload["yaml_path"], payload["input_path"], payload["bindings"])
+    result = submit_run(
+        args.session,
+        payload["yaml_path"],
+        payload["input_path"],
+        payload["panel_params_path"],
+        payload["panel_tab"],
+        payload["bindings"],
+    )
     emit(
         {
             "phase": payload["phase"],

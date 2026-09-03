@@ -11,6 +11,7 @@ BCS_BOTS_STACK_LOG="${LOG_DIR}/bcs_bots_stack.log"
 BCS_BOTS_STACK_PID_FILE="${DEP_DIR}/bcs_bots_stack.pid"
 BCS_RUNTIME_CONFIG_DIR="${DEP_DIR}/bcs-config"
 BCS_PANEL_ASSET_DIR="${BCS_DIR}/assets/panel"
+BCS_UNDERCOVER_GAME_ASSET_DIR="${BCS_DIR}/assets/undercover-game"
 BCS_BOT_PORTS_FILE="${BCS_BOT_PORTS_FILE:-${DEP_DIR}/bcs_bot_ports.env}"
 BCS_BOT_PORT_AUTO="${BCS_BOT_PORT_AUTO:-0}"
 BOT1_PORT="${BOT1_PORT:-30001}"
@@ -386,13 +387,41 @@ build_bcs_panel_asset() {
 
     log_info "Building BCS panel asset..."
     cd "${BCS_PANEL_ASSET_DIR}"
-
     if ! npm run build; then
         log_error "Failed to build BCS panel asset"
         return 1
     fi
-
+    if [[ ! -f "${BCS_PANEL_ASSET_DIR}/dist/index.umd.js" ]]; then
+        log_error "BCS panel asset resolution failed: missing dist/index.umd.js"
+        return 1
+    fi
     log_info "BCS panel asset built successfully"
+}
+
+build_bcs_undercover_game_asset() {
+    if [ ! -f "${BCS_UNDERCOVER_GAME_ASSET_DIR}/package.json" ]; then
+        log_error "Undercover game panel asset package is missing: ${BCS_UNDERCOVER_GAME_ASSET_DIR}/package.json"
+        return 1
+    fi
+    if ! check_node_available || ! check_command npm; then
+        log_error "Undercover game panel asset requires Node.js and npm."
+        return 1
+    fi
+
+    log_info "Building undercover game panel asset..."
+    cd "${BCS_UNDERCOVER_GAME_ASSET_DIR}"
+    if [ ! -d node_modules ]; then
+        npm ci || return 1
+    fi
+    if ! npm run build || ! npm run test:umd; then
+        log_error "Undercover game panel asset resolution failed during build or UMD export validation"
+        return 1
+    fi
+    if [[ ! -f "${BCS_UNDERCOVER_GAME_ASSET_DIR}/dist/index.umd.js" ]]; then
+        log_error "Undercover game panel asset resolution failed: missing dist/index.umd.js"
+        return 1
+    fi
+    log_info "Undercover game panel asset built successfully"
 }
 
 bcs_binaries_stale() {
@@ -950,6 +979,7 @@ bcs_setup() {
     fi
 
     build_bcs_panel_asset || return 1
+    build_bcs_undercover_game_asset || return 1
 
     # The coverage stack (--with-bcs-coverage) builds and runs its own
     # LLVM-instrumented bcs/bcs-cli under target/cov-e2e and exports
@@ -962,6 +992,7 @@ bcs_setup() {
         log_info "BCS build needed: ${BCS_BUILD_REASON}"
         build_bcs || return 1
         build_bcs_panel_asset || return 1
+        build_bcs_undercover_game_asset || return 1
     else
         log_info "BCS binaries are up to date"
     fi

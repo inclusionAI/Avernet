@@ -1,6 +1,7 @@
 export { default as UndercoverGamePanel } from './UndercoverGamePanel';
 export type {
   ActorViewModel,
+  CurrentAction,
   HostActor,
   PendingHumanNode,
   PlayerActor,

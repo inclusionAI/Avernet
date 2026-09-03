@@ -62,12 +62,20 @@ async fn manifest_file_bundle_returns_asset_url_and_serves_file_at_runtime() {
 
     let manifest = ManifestConfig {
         schema_version: 1,
-        bundles: vec![ManifestBundleConfig {
-            name: "bcsPanel".to_string(),
-            source_type: Some(ManifestBundleSourceType::File),
-            url: None,
-            file: Some(bundle_path.display().to_string()),
-        }],
+        bundles: vec![
+            ManifestBundleConfig {
+                name: "bcsPanel".to_string(),
+                source_type: Some(ManifestBundleSourceType::File),
+                url: None,
+                file: Some(bundle_path.display().to_string()),
+            },
+            ManifestBundleConfig {
+                name: "undercoverGame".to_string(),
+                source_type: Some(ManifestBundleSourceType::File),
+                url: None,
+                file: Some(bundle_path.display().to_string()),
+            },
+        ],
     };
     let app = build_router(
         HttpAppState::new(Services::noop()).with_manifest_config("local".to_string(), manifest),
@@ -92,6 +100,11 @@ async fn manifest_file_bundle_returns_asset_url_and_serves_file_at_runtime() {
     assert_eq!(
         manifest_body["bundles"][0]["url"],
         "/assets/bcsPanel/index.umd.js"
+    );
+    assert_eq!(manifest_body["bundles"][1]["name"], "undercoverGame");
+    assert_eq!(
+        manifest_body["bundles"][1]["url"],
+        "/assets/undercoverGame/index.umd.js"
     );
 
     let response = app
