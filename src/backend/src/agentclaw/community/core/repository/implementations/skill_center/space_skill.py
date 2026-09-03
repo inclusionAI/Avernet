@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from injector import inject
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -466,7 +465,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 raise SpaceSkillGrantConflictError("owner cannot be removed as manager")
             if grant is not None and grant.status == "ACTIVE":
                 grant.status = "REVOKED"
-                grant.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+                grant.revoked_at = func.now()
                 grant.revoked_by = actor_id
                 self._invalidate_lease(
                     session,
@@ -555,7 +554,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             current_owner.revoked_at = (
                 None
                 if retain_previous_owner_as_manager
-                else datetime.now(UTC).replace(tzinfo=None)
+                else func.now()
             )
             current_owner.revoked_by = (
                 None if retain_previous_owner_as_manager else actor_id
@@ -636,7 +635,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                     skill_id=skill_id,
                     holder_user_id=actor_id,
                     fencing_token=1,
-                    acquired_at=datetime.now(UTC).replace(tzinfo=None),
+                    acquired_at=func.now(),
                     env=env,
                 )
                 session.add(lease)
@@ -645,7 +644,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
             else:
                 lease.holder_user_id = actor_id
                 lease.fencing_token += 1
-                lease.acquired_at = datetime.now(UTC).replace(tzinfo=None)
+                lease.acquired_at = func.now()
             session.flush()
             return self._lease_to_dict(lease)
 
@@ -698,7 +697,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                     skill_id=skill_id,
                     holder_user_id=actor_id,
                     fencing_token=1,
-                    acquired_at=datetime.now(UTC).replace(tzinfo=None),
+                    acquired_at=func.now(),
                     last_takeover_by=actor_id,
                     env=env,
                 )
@@ -709,7 +708,7 @@ class SpaceSkillRepository(SpaceSkillRepositoryProtocol):
                 # ignores it. Keep the fencing increment in SQL so concurrent local
                 # takeovers cannot both write the same value from a stale ORM object.
                 lease.fencing_token = SkillDraftEditLease.fencing_token + 1
-                lease.acquired_at = datetime.now(UTC).replace(tzinfo=None)
+                lease.acquired_at = func.now()
                 lease.last_takeover_by = actor_id
             session.flush()
             session.refresh(lease)

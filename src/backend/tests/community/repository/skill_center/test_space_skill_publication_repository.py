@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 import io
 import logging
@@ -230,12 +231,10 @@ def _seed_waiting_publication(
     )
     repository.claim_sc_submission(
         attempt_id=attempt.attempt_id,
-        started_at=datetime(2026, 8, 30, 11, 0, tzinfo=UTC),
         env="test",
     )
     repository.mark_waiting_sc(
         attempt_id=attempt.attempt_id,
-        accepted_at=datetime(2026, 8, 30, 11, 1, tzinfo=UTC),
         env="test",
     )
     return space_id, skill_id, attempt.attempt_id
@@ -327,7 +326,6 @@ def test_mark_failed_rejects_version_that_appears_during_locking(
             attempt_id=attempt_id,
             error_code="SC_PUBLISH_REJECTED",
             error_message="rejected",
-            completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
             env="test",
         )
 
@@ -365,7 +363,6 @@ def test_complete_success_rechecks_attempt_after_canonical_locks(
         SpaceSkillPublicationRepository(db).complete_success(
             attempt_id=attempt_id,
             skill_version_id=version_id,
-            completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
             env="test",
         )
 
@@ -396,7 +393,6 @@ def test_complete_success_and_offline_overlap_converges(
             SpaceSkillPublicationRepository(db).complete_success(
                 attempt_id=attempt_id,
                 skill_version_id=version_id,
-                completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
                 env="test",
             )
         except BaseException as exc:  # pragma: no cover - asserted below
@@ -462,7 +458,6 @@ def test_mark_failed_and_begin_materialization_overlap_serializes_to_failed(
                 attempt_id=attempt_id,
                 error_code="SC_PUBLISH_REJECTED",
                 error_message="rejected",
-                completed_at=datetime(2026, 8, 30, 12, 1, tzinfo=UTC),
                 env="test",
             )
         except BaseException as exc:  # pragma: no cover - asserted below
@@ -1017,9 +1012,34 @@ def _handler(
         materializer=materializer,
         tenant_provider=get_current_avernet_tenant,
         env_provider=lambda: "test",
-        clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         auto_retry_seconds=auto_retry_seconds,
     )
+
+
+def test_deadline_uses_database_session_clock() -> None:
+    db = _Database()
+    space_id, skill_id, attempt_id = _seed_waiting_publication(db)
+    repository = SpaceSkillPublicationRepository(db)
+    with db.orm_session() as session:
+        attempt = session.get(SkillPublicationAttempt, attempt_id)
+        assert attempt is not None
+        attempt.sc_post_started_at = datetime(2026, 8, 30, 10, 0)
+
+    handler = _handler(
+        db,
+        repository,
+        _Gateway(),
+        _Materializer(db),
+        auto_retry_seconds=15 * 60,
+    )
+
+    work = replace(
+        repository.get_work(attempt_id=attempt_id, env="test"),
+        database_now=datetime(2026, 8, 30, 10, 16),
+    )
+    assert work.space_id == space_id
+    assert work.attempt.skill_id == skill_id
+    assert handler._expired(work) is True
 
 
 def test_worker_submits_once_materializes_and_emits_published_seam() -> None:

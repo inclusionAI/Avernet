@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import UTC, datetime
 import hashlib
 import io
 import zipfile
@@ -143,7 +142,6 @@ def test_deterministic_public_identity_passes_real_canonical_ready_gate() -> Non
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
             store=store,
-            clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
             SkillVersionMaterializationRequest(
                 env="pre",
@@ -218,7 +216,6 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
             store=store,
-            clock=lambda: datetime(2026, 8, 30, tzinfo=UTC),
         ).materialize(
             SkillVersionMaterializationRequest(
                 env="pre",
@@ -244,7 +241,6 @@ def test_public_wrapper_and_market_display_name_converge_to_manifest_name() -> N
             http=_Http(package),
             validator=SkillPackageValidator(SkillParser()),
             store=store,
-            clock=lambda: datetime(2026, 8, 31, tzinfo=UTC),
         ).materialize(
             SkillVersionMaterializationRequest(
                 env="pre",

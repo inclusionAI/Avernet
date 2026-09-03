@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
-
 from injector import inject
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 
 from agentclaw.community.core.models.skill import (
     BotSkillInstallation,
@@ -92,13 +90,14 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 )
 
             guard(inspection)
-            offline_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            skill.offline_at = offline_at
+            skill.offline_at = func.now()
             skill.offline_by = actor_id
             session.flush()
+            session.refresh(skill)
+            assert skill.offline_at is not None
             return OfflineCommit(
                 changed=True,
-                offline_at=offline_at,
+                offline_at=skill.offline_at,
             )
 
     def _inspection(

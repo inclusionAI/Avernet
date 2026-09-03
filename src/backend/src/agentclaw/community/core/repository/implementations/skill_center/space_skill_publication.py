@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from injector import inject
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
 from agentclaw.community.core.models.skill import (
@@ -449,7 +449,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             return self._work(session, attempt_id=attempt_id, env=env)
 
     def claim_sc_submission(
-        self, *, attempt_id: int, started_at: datetime, env: str
+        self, *, attempt_id: int, env: str
     ) -> PublicationSubmissionClaim:
         with self._db.transactional_orm_session() as session:
             attempt, _skill, _version = self._lock_attempt_aggregate(
@@ -460,28 +460,30 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             if attempt.status == "PREPARING" and attempt.sc_post_started_at is None:
                 if not work.package_url:
                     raise RuntimeError("Publication package is not prepared")
-                attempt.sc_post_started_at = started_at
+                attempt.sc_post_started_at = func.now()
                 attempt.status = "SC_SUBMITTING"
                 attempt.recovery_state = "AUTO_RETRYING"
                 attempt.recovery_kind = "SC_STATUS_CHECK"
                 may_submit = True
                 session.flush()
+                session.refresh(attempt)
                 work = self._work(session, attempt_id=attempt_id, env=env)
             return PublicationSubmissionClaim(work=work, may_submit=may_submit)
 
     def mark_waiting_sc(
-        self, *, attempt_id: int, accepted_at: datetime, env: str
+        self, *, attempt_id: int, env: str
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
             attempt = self._attempt(session, attempt_id=attempt_id, env=env, lock=True)
             if attempt.status in ("SC_SUBMITTING", "RESULT_UNKNOWN"):
                 attempt.status = "WAITING_SC"
-                attempt.sc_accepted_at = attempt.sc_accepted_at or accepted_at
+                attempt.sc_accepted_at = attempt.sc_accepted_at or func.now()
                 attempt.recovery_state = "AUTO_RETRYING"
                 attempt.recovery_kind = "SC_STATUS_CHECK"
                 attempt.error_code = None
                 attempt.error_message = None
                 session.flush()
+                session.refresh(attempt)
             return self._record(attempt)
 
     def mark_result_unknown(
@@ -512,7 +514,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         attempt_id: int,
         error_code: str,
         error_message: str,
-        completed_at: datetime,
         env: str,
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
@@ -535,8 +536,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             attempt.error_message = error_message
             attempt.recovery_state = "NOT_AVAILABLE"
             attempt.recovery_kind = None
-            attempt.completed_at = completed_at
+            attempt.completed_at = func.now()
             session.flush()
+            session.refresh(attempt)
             return self._record(attempt)
 
     def begin_materialization(
@@ -608,7 +610,6 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         *,
         attempt_id: int,
         skill_version_id: int,
-        completed_at: datetime,
         env: str,
     ) -> PublicationAttemptRecord:
         with self._db.transactional_orm_session() as session:
@@ -662,8 +663,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             attempt.recovery_kind = None
             attempt.error_code = None
             attempt.error_message = None
-            attempt.completed_at = completed_at
+            attempt.completed_at = func.now()
             session.flush()
+            session.refresh(attempt)
             return self._record(attempt)
 
     def mark_recovery_available(
@@ -757,6 +759,9 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
         if row is None:
             raise PublicationAttemptNotFoundError("publication attempt not found")
         attempt, skill, binding, space = row
+        database_now = session.query(func.now()).scalar()
+        if not isinstance(database_now, datetime):
+            raise RuntimeError("database CURRENT_TIMESTAMP is not a datetime")
         if (
             attempt.status in ACTIVE_SKILL_PUBLICATION_ATTEMPT_STATUSES
             and not attempt.frozen_draft_locator
@@ -773,6 +778,7 @@ class SpaceSkillPublicationRepository(SpaceSkillPublicationRepositoryProtocol):
             skill_name=skill.name,
             draft_description=skill.draft_description or skill.description or "",
             package_url=skill.package_url,
+            database_now=database_now,
         )
 
     @staticmethod

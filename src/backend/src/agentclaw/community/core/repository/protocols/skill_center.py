@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from collections.abc import Iterable
-from datetime import datetime
 from typing import Any, List, Optional, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -357,7 +356,6 @@ class SkillVersionMaterializationRepositoryProtocol(Protocol):
         name: str,
         metadata_json: str,
         description: str,
-        published_at: datetime,
     ) -> PublishedMaterializedSkillVersion: ...
 
 
