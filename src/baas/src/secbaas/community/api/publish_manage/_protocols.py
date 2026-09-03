@@ -46,7 +46,7 @@ class PublishAdminService(Protocol):
     async def update_bot_status(
         self,
         *,
-        bot_uuid: str,
+        bot_id: int,
         status: str,
         operator: str,
     ) -> UpdateBotStatusResult: ...

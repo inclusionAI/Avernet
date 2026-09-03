@@ -40,6 +40,7 @@ class UpdateDeviceStatusResult:
 class UpdateBotStatusResult:
     """Result of a bot status update operation."""
 
+    bot_id: int
     bot_uuid: str
     previous_status: str
     new_status: str
