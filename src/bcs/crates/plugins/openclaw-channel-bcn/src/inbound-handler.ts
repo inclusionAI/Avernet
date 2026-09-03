@@ -18,6 +18,7 @@ import { getBcsRuntime } from './runtime.js';
 import type {
   RequestFrame,
   ChatSendParams,
+  ChatAbortParams,
   ChatInjectParams,
   ChatHistoryParams,
   ChatHistoryMessage,
@@ -199,9 +200,11 @@ const activeStreams = new Map<string, AbortController>();
 type RunContext = {
   groupId: string;
   client: BcsWsClient;
+  abortSessionKey: string;
   sessionKey?: string;
   agentRunId?: string;
   finalSent?: boolean;
+  terminalState?: 'final' | 'aborted' | 'error';
   sawToolEvent: boolean;
   preparedAttachments?: PreparedAttachment[];
   terminalTimer?: ReturnType<typeof setTimeout>;
@@ -209,6 +212,25 @@ type RunContext = {
 
 /** Run context for agent event routing: run_id -> context used for BCS event emission. */
 const runContexts = new Map<string, RunContext>();
+
+type TerminalRunTombstone = {
+  sessionKey: string;
+  state: 'final' | 'aborted' | 'error';
+  expiresAt: number;
+};
+
+const TERMINAL_RUN_TOMBSTONE_TTL_MS = 10 * 60 * 1000;
+const terminalRuns = new Map<string, TerminalRunTombstone>();
+
+function terminalRun(runId: string): TerminalRunTombstone | undefined {
+  const tombstone = terminalRuns.get(runId);
+  if (!tombstone) return undefined;
+  if (tombstone.expiresAt <= Date.now()) {
+    terminalRuns.delete(runId);
+    return undefined;
+  }
+  return tombstone;
+}
 
 /** Actual OpenClaw agent run ID -> BCS-visible run ID. */
 const bcsRunIdByAgentRunId = new Map<string, string>();
@@ -522,6 +544,14 @@ function cleanupRunContext(
 
   const context = runContexts.get(runId);
   if (!context) return Promise.resolve();
+
+  if (context.terminalState) {
+    terminalRuns.set(runId, {
+      sessionKey: context.abortSessionKey,
+      state: context.terminalState,
+      expiresAt: Date.now() + TERMINAL_RUN_TOMBSTONE_TTL_MS,
+    });
+  }
 
   if (context.terminalTimer) {
     clearTimeout(context.terminalTimer);
@@ -1123,6 +1153,7 @@ function sendFinalVisibleReplyOnce(
   );
   context.client.sendEvent('chat.event', chatPayload as unknown as Record<string, unknown>, nextSeq(context.client));
   context.finalSent = true;
+  context.terminalState = 'final';
 
   const source = options?.source ? ` (source=${options.source})` : '';
   if (routeIntent) {
@@ -1151,8 +1182,107 @@ function sendRunErrorOnce(
     nextSeq(context.client),
   );
   context.finalSent = true;
+  context.terminalState = 'error';
   log?.warn?.(`[BCS] Sent chat.event error for run_id=${runId}${detail ? ` (${detail})` : ''}`);
   return true;
+}
+
+/** Abort exactly one BCS-visible run. Session-wide lookup is intentionally
+ * unsupported because one Session may contain multiple concurrent runs. */
+export async function handleChatAbort(
+  request: RequestFrame,
+  client: BcsWsClient,
+  log?: { info: (...args: unknown[]) => void; warn: (...args: unknown[]) => void },
+): Promise<void> {
+  const raw = request.params as unknown;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'chat.abort params must be an object',
+      retryable: false,
+    });
+    return;
+  }
+  const params = raw as Partial<ChatAbortParams>;
+  const runId = nonEmptyString(params.run_id);
+  const sessionKey = nonEmptyString(params.session_key);
+  if (!runId || !sessionKey) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'INVALID_REQUEST',
+      message: 'chat.abort requires non-empty session_key and run_id',
+      retryable: false,
+    });
+    return;
+  }
+
+  const context = runContexts.get(runId);
+  if (!context) {
+    const tombstone = terminalRun(runId);
+    if (tombstone && tombstone.sessionKey !== sessionKey) {
+      client.sendResponse(request.id, false, undefined, {
+        code: 'SCOPE_MISMATCH',
+        message: 'run_id does not belong to session_key',
+        retryable: false,
+      });
+      return;
+    }
+    if (tombstone) {
+      client.sendResponse(request.id, true, {
+        aborted: false,
+        aborted_run_ids: [],
+      });
+      return;
+    }
+    client.sendResponse(request.id, false, undefined, {
+      code: 'RUN_NOT_FOUND',
+      message: 'Unknown run_id',
+      retryable: false,
+    });
+    return;
+  }
+  if (context.abortSessionKey !== sessionKey) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'SCOPE_MISMATCH',
+      message: 'run_id does not belong to session_key',
+      retryable: false,
+    });
+    return;
+  }
+  if (context.finalSent) {
+    client.sendResponse(request.id, true, {
+      aborted: false,
+      aborted_run_ids: [],
+    });
+    return;
+  }
+
+  const controller = activeStreams.get(runId);
+  if (!controller) {
+    client.sendResponse(request.id, false, undefined, {
+      code: 'RUN_NOT_ABORTABLE',
+      message: 'Run has no active AbortController',
+      retryable: true,
+    });
+    return;
+  }
+
+  // Claim terminal state synchronously before invoking AbortController so
+  // late dispatcher/agent callbacks observe finalSent and cannot emit a
+  // competing final/error event.
+  context.finalSent = true;
+  context.terminalState = 'aborted';
+  controller.abort();
+  context.client.sendEvent(
+    'chat.event',
+    buildChatEventPayload(runId, context.groupId, 'aborted') as unknown as Record<string, unknown>,
+    nextSeq(context.client),
+  );
+  client.sendResponse(request.id, true, {
+    aborted: true,
+    aborted_run_ids: [ runId ],
+  });
+  log?.info?.(`[BCS] Aborted exact run_id=${runId}`);
+  await cleanupRunContext(runId, log);
 }
 
 /** Extract GroupContext from params for logging/context. */
@@ -1222,7 +1352,6 @@ export async function handleChatSend(
   // Preserve the BCS correlation id when available. Older callers that do not
   // provide one still receive a stable request-id or generated run-id fallback.
   const runId = resolveChatRunId(request.id, params.idempotency_key);
-  client.sendResponse(request.id, true, { run_id: runId });
 
   const { fromDisplayName, senderName, senderId, strippedText } = resolveInboundSender(
     text,
@@ -1240,9 +1369,18 @@ export async function handleChatSend(
   let preparedAttachments: PreparedAttachment[] = [];
 
   // Track run context for agent event routing
-  runContexts.set(runId, { groupId: bcsGroupId, client, sawToolEvent: false });
+  const abortSessionKey = nonEmptyString(params.bcs_session_id)
+    || nonEmptyString(params.session_key)
+    || bcsGroupId;
+  runContexts.set(runId, {
+    groupId: bcsGroupId,
+    client,
+    abortSessionKey,
+    sawToolEvent: false,
+  });
   ensureVisibleReplyState(runId);
   armRunTerminalTimeout(runId, log);
+  client.sendResponse(request.id, true, { run_id: runId });
 
   try {
     const rt = getBcsRuntime();
@@ -2105,6 +2243,7 @@ export function abortAllStreams(): void {
   pendingRouteByRunId.clear();
   pendingRouteBySessionKey.clear();
   activeRunIdForSession.clear();
+  terminalRuns.clear();
   sessionKeyToGroupId.clear();
   sessionKeyToBcsSessionId.clear();
   sessionKeyToRouteScope.clear();

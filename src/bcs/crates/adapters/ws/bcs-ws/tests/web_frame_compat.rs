@@ -6,25 +6,26 @@ use bcs_domain::{
     StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
 };
 use bcs_protocol::{BcsFrame, RequestFrame, ResponseFrame};
+use bcs_service_api::application::v1::{
+    ActorKind, ApplicationError, AuthorizeGroupSessionConnection, AuthorizedGroupSessionConnection,
+    GroupSessionConnectionBinding, GroupSessionConnectionError, GroupSessionConnectionService,
+    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantRole,
+    SessionParticipant, VerifyGroupSessionConnectionToken,
+};
 use bcs_service_api::{
     BotEventCommand, BotEventOutcome, CancelStateMachineRunCommand, ChatAbortCommand,
-    ChatAbortOutcome, CollaborationRuntimeError, CollaborationRuntimeService,
+    ChatAbortFailure, ChatAbortOutcome, ChatAbortScope, CollaborationRuntimeError,
+    CollaborationRuntimeService,
     ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome, GroupCallbackCommand,
     GroupCallbackOutcome, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, MessageFlowService,
     ParticipantKind, ParticipantMode, RespondHumanNodeOutcome, ServiceResult, SessionHistoryResult,
     StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineRunView,
     TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
-    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome, WorkbenchChatAuthorizationCommand,
+    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
+    WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
     WorkbenchSessionService, WorkbenchUseCaseError,
-};
-use bcs_service_api::application::v1::{
-    ActorKind, ApplicationError, AuthorizeGroupSessionConnection,
-    AuthorizedGroupSessionConnection, GroupSessionConnectionBinding,
-    GroupSessionConnectionError, GroupSessionConnectionService,
-    IssueGroupSessionConnectionToken, IssuedGroupSessionConnectionToken, ParticipantRole,
-    SessionParticipant, VerifyGroupSessionConnectionToken,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionRequestedOutcome, InteractionService,
@@ -190,12 +191,14 @@ impl CollaborationRuntimeService for RecordingCollaborationRuntime {
 struct RecordingMessageFlow {
     web_sends: Mutex<Vec<WebSendCommand>>,
     aborts: Mutex<Vec<ChatAbortCommand>>,
+    abort_outcome: Mutex<Option<ChatAbortOutcome>>,
 }
 
 #[derive(Default)]
 struct RecordingWorkbenchSessions {
     connects: Mutex<Vec<WorkbenchConnectCommand>>,
     authorizations: Mutex<Vec<WorkbenchChatAuthorizationCommand>>,
+    abort_authorizations: Mutex<Vec<WorkbenchChatAbortAuthorizationCommand>>,
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
 }
 
@@ -271,6 +274,14 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
         self.authorizations.lock().await.push(command);
         Ok(())
     }
+
+    async fn authorize_chat_abort(
+        &self,
+        command: WorkbenchChatAbortAuthorizationCommand,
+    ) -> Result<(), WorkbenchUseCaseError> {
+        self.abort_authorizations.lock().await.push(command);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -303,14 +314,31 @@ impl MessageFlowService for RecordingMessageFlow {
     }
 
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
-        let aborted_run_ids = cmd.run_id.clone().into_iter().collect();
         self.aborts.lock().await.push(cmd);
+        if let Some(outcome) = self.abort_outcome.lock().await.take() {
+            return Ok(outcome);
+        }
         Ok(ChatAbortOutcome {
             aborted: true,
-            aborted_run_ids,
+            aborted_run_ids: vec!["run-web-1".to_string()],
             bot_deliveries: vec![],
             frontend_deliveries: vec![],
+            failures: vec![],
         })
+    }
+
+    async fn resolve_chat_abort_scope(
+        &self,
+        group_id: &str,
+        run_id: &str,
+    ) -> ServiceResult<Option<ChatAbortScope>> {
+        Ok(
+            (group_id == "group-web-1" && run_id == "run-legacy").then(|| ChatAbortScope {
+                group_id: group_id.to_string(),
+                session_id: "session-web-1".to_string(),
+                bot_id: "bot-target".to_string(),
+            }),
+        )
     }
 
     async fn register_task_run_alias(
@@ -471,7 +499,10 @@ async fn web_connect_frame_subscribes_frontend_registry() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome, WebDispatchOutcome::ClientConnect { subscribed: true });
+    assert_eq!(
+        outcome,
+        WebDispatchOutcome::ClientConnect { subscribed: true }
+    );
 
     let connected = recv_response(&mut rx).await;
     assert!(connected.ok);
@@ -489,12 +520,14 @@ async fn web_connect_frame_subscribes_frontend_registry() {
     assert_eq!(connects[0].group_id, "group-web-1");
     assert_eq!(connects[0].session_id, None);
     assert_eq!(connects[0].bound_actor_id.as_deref(), Some("human_100001"));
-    assert!(state
-        .group_session_connections
-        .authorizations
-        .lock()
-        .await
-        .is_empty());
+    assert!(
+        state
+            .group_session_connections
+            .authorizations
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -523,7 +556,10 @@ async fn web_connect_with_session_id_subscribes_session_registry_key() {
     )
     .await
     .unwrap();
-    assert_eq!(outcome, WebDispatchOutcome::ClientConnect { subscribed: true });
+    assert_eq!(
+        outcome,
+        WebDispatchOutcome::ClientConnect { subscribed: true }
+    );
 
     let connected = recv_response(&mut rx).await;
     assert!(connected.ok);
@@ -834,12 +870,33 @@ async fn user_bound_chat_abort_preserves_existing_response() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-abort",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
     let abort = BcsFrame::Request(RequestFrame::new(
         "abort-1",
         "chat.abort",
         Some(serde_json::json!({
             "group_id": "group-web-1",
-            "run_id": "run-web-1"
+            "session_id": "session-web-1",
+            "bot_id": "bot-target"
         })),
     ));
 
@@ -859,9 +916,303 @@ async fn user_bound_chat_abort_preserves_existing_response() {
     assert!(response.ok);
     assert_eq!(response.payload.as_ref().expect("payload")["aborted"], true);
     assert_eq!(state.message_flow.aborts.lock().await.len(), 1);
+    let authorizations = state.workbench_sessions.abort_authorizations.lock().await;
+    assert_eq!(
+        authorizations[0].bound_actor_id.as_deref(),
+        Some("human_100001")
+    );
+    assert_eq!(authorizations[0].target_bot_id, "bot-target");
+    assert!(state.message_flow.aborts.lock().await[0].run_id.is_none());
     assert_eq!(
         *state.interactions.invalidations.lock().await,
         vec![("run-web-1".to_string(), "chat_abort".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn user_bound_chat_abort_reports_legacy_plugin_restart_resolution() {
+    let state = new_state();
+    *state.message_flow.abort_outcome.lock().await = Some(ChatAbortOutcome {
+        aborted: false,
+        aborted_run_ids: vec![],
+        bot_deliveries: vec![],
+        frontend_deliveries: vec![],
+        failures: vec![ChatAbortFailure {
+            run_id: "run-legacy".to_string(),
+            code: "chat_abort_not_supported".to_string(),
+            message: "Bot does not support chat.abort".to_string(),
+        }],
+    });
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+    };
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-abort-legacy",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-legacy-plugin",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1",
+            "bot_id": "bot-target"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+
+    let response = recv_response(&mut rx).await;
+    assert!(!response.ok);
+    let error = response.error.expect("structured abort capability error");
+    assert_eq!(error.code, "chat_abort_not_supported");
+    assert!(!error.retryable);
+    let details = error.details.expect("restart resolution details");
+    assert_eq!(details["bot_id"], "bot-target");
+    assert_eq!(details["resolution"], "restart_bot");
+    assert_eq!(
+        details["failures"][0]["code"],
+        "chat_abort_not_supported"
+    );
+}
+
+#[tokio::test]
+async fn user_bound_legacy_run_id_resolves_to_bot_session_scope() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+    };
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-legacy-abort",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-legacy",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "run_id": "run-legacy"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    let aborts = state.message_flow.aborts.lock().await;
+    assert_eq!(aborts.len(), 1);
+    assert_eq!(aborts[0].group_id, "group-web-1");
+    assert_eq!(aborts[0].session_id, "session-web-1");
+    assert_eq!(aborts[0].bot_id, "bot-target");
+    assert!(aborts[0].run_id.is_none());
+}
+
+#[tokio::test]
+async fn user_bound_chat_abort_requires_connect() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-before-connect",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1",
+            "bot_id": "bot-target"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let response = recv_response(&mut rx).await;
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("connect_required")
+    );
+    assert!(
+        state
+            .workbench_sessions
+            .abort_authorizations
+            .lock()
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn anonymous_user_bound_chat_abort_is_unauthorized_after_connect() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound { actor_id: None };
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-anonymous",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-anonymous",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1",
+            "bot_id": "bot-target"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+
+    let response = recv_response(&mut rx).await;
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("unauthorized")
+    );
+    assert!(
+        state
+            .workbench_sessions
+            .abort_authorizations
+            .lock()
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn user_bound_chat_abort_requires_target_session_subscription() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+    };
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-one-session",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-1"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+    assert!(recv_response(&mut rx).await.ok);
+
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-other-session",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "session-web-2",
+            "bot_id": "bot-target"
+        })),
+    ));
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &auth,
+    )
+    .await
+    .unwrap();
+
+    let response = recv_response(&mut rx).await;
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("session_not_subscribed")
+    );
+    assert!(
+        state
+            .workbench_sessions
+            .abort_authorizations
+            .lock()
+            .await
+            .is_empty()
     );
 }
 
@@ -1055,7 +1406,10 @@ async fn interaction_resolve_returns_accepted_and_structured_failures() {
         commands[0].expected_bcs_session_id.as_deref(),
         Some("session-bound-1")
     );
-    assert_eq!(commands[0].expected_group_id.as_deref(), Some("group-web-1"));
+    assert_eq!(
+        commands[0].expected_group_id.as_deref(),
+        Some("group-web-1")
+    );
     assert_eq!(commands[0].resolution["decision"], "allow_once");
     drop(commands);
 
@@ -1413,7 +1767,14 @@ async fn session_bound_chat_send_cannot_escape_bound_scope() {
         response.error.as_ref().map(|error| error.code.as_str()),
         Some("token_scope_mismatch")
     );
-    assert!(state.workbench_sessions.authorizations.lock().await.is_empty());
+    assert!(
+        state
+            .workbench_sessions
+            .authorizations
+            .lock()
+            .await
+            .is_empty()
+    );
     assert!(state.message_flow.web_sends.lock().await.is_empty());
 }
 
@@ -1466,7 +1827,7 @@ async fn session_bound_chat_abort_passes_only_the_bound_session() {
         "chat.abort",
         Some(serde_json::json!({
             "group_id": "group-web-1",
-            "run_id": "run-bound"
+            "bot_id": "bot-target"
         })),
     ));
 
@@ -1484,8 +1845,51 @@ async fn session_bound_chat_abort_passes_only_the_bound_session() {
     let aborts = state.message_flow.aborts.lock().await;
     assert_eq!(aborts.len(), 1);
     assert_eq!(aborts[0].group_id, "group-web-1");
-    assert_eq!(aborts[0].run_id.as_deref(), Some("run-bound"));
-    assert_eq!(aborts[0].session_id.as_deref(), Some("session-bound-1"));
+    assert!(aborts[0].run_id.is_none());
+    assert_eq!(aborts[0].session_id, "session-bound-1");
+    assert_eq!(aborts[0].bot_id, "bot-target");
+}
+
+#[tokio::test]
+async fn session_bound_chat_abort_scope_mismatch_closes_connection() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    connect_session_bound(&state, &tx, &mut rx, &mut connection_state).await;
+    let abort = BcsFrame::Request(RequestFrame::new(
+        "abort-scope-mismatch",
+        "chat.abort",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "session_id": "other-session",
+            "bot_id": "bot-target"
+        })),
+    ));
+
+    let outcome = dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&abort).unwrap(),
+        &tx,
+        &mut connection_state,
+        &session_bound_auth(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(outcome, WebDispatchOutcome::Close);
+    let response = recv_response(&mut rx).await;
+    assert_eq!(
+        response.error.as_ref().map(|error| error.code.as_str()),
+        Some("token_scope_mismatch")
+    );
+    assert!(
+        state
+            .workbench_sessions
+            .abort_authorizations
+            .lock()
+            .await
+            .is_empty()
+    );
 }
 
 #[tokio::test]

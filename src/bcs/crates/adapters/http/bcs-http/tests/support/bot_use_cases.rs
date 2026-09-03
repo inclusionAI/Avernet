@@ -306,6 +306,12 @@ fn clone_service_error(error: &ServiceError) -> ServiceError {
             ServiceError::FriendRequestNotFound(request_id.clone())
         }
         ServiceError::PrivateBotCannotCollaborate => ServiceError::PrivateBotCannotCollaborate,
+        ServiceError::BotMethodUnsupported { bot_id, method } => {
+            ServiceError::BotMethodUnsupported {
+                bot_id: bot_id.clone(),
+                method: method.clone(),
+            }
+        }
         ServiceError::IoError(error) => {
             ServiceError::IoError(std::io::Error::new(error.kind(), error.to_string()))
         }

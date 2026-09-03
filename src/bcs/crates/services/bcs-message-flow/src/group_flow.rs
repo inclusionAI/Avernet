@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
@@ -6,27 +6,28 @@ use bcs_domain::{Attachment, NewMessage, SenderType};
 use bcs_protocol::{
     Attachment as WireAttachment, BcsFrame, ChannelInfo, ChannelSource, RequestFrame,
     apply_channel_info, build_chat_inject_frame, build_chat_send_frame,
-    build_direct_chat_inject_frame, build_direct_chat_send_frame, build_session_key, now_ms,
+    build_direct_chat_inject_frame, build_direct_chat_send_frame, now_ms,
 };
 use bcs_service_api::{
-    ActorKind, ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome, BotRegistryCoreService,
-    BotRunContext, BotRunContextPort, BotTerminalObserverPort, CallerContext, ChannelService,
-    ChatAbortCommand, ChatAbortOutcome, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, DeliveryBlockContext,
-    DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind, DeliveryMetricTarget,
-    DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort,
-    FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupCallbackCommand,
-    GroupCallbackOutcome, GroupChatCommand, GroupChatOutcome, GroupCoreService, GroupKind,
-    GroupMessage, GroupMessageType, GroupStatus, GroupStrategy, HiddenMentionInfo,
-    MESSAGE_LOG_SCHEMA_VERSION, MessageDeliveryResult, MessageFlowService, MessageLogContent,
-    MessageLogEventType, MessageLogMode, MessageLogStatus, MessageLogTargetSummary, MessageRole,
-    NoopBotTerminalObserver, Participant, ParticipantMode, ParticipantRole,
-    PersistentGroupSendCommand, PersistentGroupSendOutcome, ProviderStreamGrayList,
-    RouteParticipantOverlay, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
-    ServiceResult, SessionManagementService, SessionStatus, SystemMessageEvent,
-    SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
-    TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome, TaskRunAliasRegistration,
-    WebSendCommand, WebSendOutcome, backfill_bot_names,
+    ActiveBotRunContext, ActorKind, ActorStatus, BotAbortDeliveryCommand, BotDeliveryCommand,
+    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand,
+    BotEventOutcome, BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
+    BotRunTransportOwner, BotTerminalObserverPort, CallerContext, ChannelService, ChatAbortCommand,
+    ChatAbortFailure, ChatAbortOutcome, ChatAbortScope, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
+    DeliveryBlockContext, DeliveryBlockReason, DeliveryBlockSurface, DeliveryMetricKind,
+    DeliveryMetricTarget, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget, Group,
+    GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand, GroupChatOutcome,
+    GroupCoreService, GroupKind, GroupMessage, GroupMessageType, GroupStatus, GroupStrategy,
+    HiddenMentionInfo, MESSAGE_LOG_SCHEMA_VERSION, MessageDeliveryResult, MessageFlowService,
+    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
+    MessageLogTargetSummary, MessageRole, NoopBotTerminalObserver, Participant, ParticipantMode,
+    ParticipantRole, PersistentGroupSendCommand, PersistentGroupSendOutcome,
+    ProviderStreamGrayList, RouteParticipantOverlay, RoutingCoreService, RoutingDecision,
+    RoutingTarget, ServiceError, ServiceResult, SessionManagementService, SessionStatus,
+    SystemMessageEvent, SystemMessageService, TaskCompleteCommand, TaskCompleteOutcome,
+    TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand, TaskMessageOutcome,
+    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome, backfill_bot_names,
     interceptor::{
         BlockReason, InterceptorChain, InterceptorDecision, MessageInterceptor, OutboundMessage,
     },
@@ -36,9 +37,10 @@ use bcs_service_api::{
     types::{EVENT_SCHEMA_VERSION_V1, EventActor, EventActorType, EventScope, EventSubject},
 };
 use chrono::{SecondsFormat, TimeZone, Utc};
+use futures::{StreamExt, stream};
 use regex::Regex;
 use serde_json::Value;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::MSG_LOG_TARGET;
 use crate::protocol_context::{group_context_input, group_type_wire};
@@ -209,31 +211,100 @@ impl BcsMessageFlow {
         self
     }
 
-    pub(crate) async fn record_successful_send_context(
+    pub(crate) async fn register_send_context(
         &self,
         delivery_type: DeliveryType,
-        result: &BotDeliveryResult,
+        delivery_target: &BotDeliveryTarget,
+        frame: &BcsFrame,
         run_id: &str,
         bot_id: &str,
         group_id: &str,
         bcs_session_id: Option<&str>,
-    ) {
-        if delivery_type != DeliveryType::Send || !result.delivered {
-            return;
+    ) -> ServiceResult<()> {
+        if delivery_type != DeliveryType::Send {
+            return Ok(());
         }
         if let Some(run_context) = &self.bot_run_context {
+            let deadline_ms = now_ms().saturating_add(self.provider_chat_run_timeout_ms);
+            let session_id = bcs_session_id.unwrap_or(group_id).to_string();
             run_context
                 .put_context(BotRunContext {
                     run_id: run_id.to_string(),
                     bot_id: bot_id.to_string(),
                     group_id: group_id.to_string(),
-                    bcs_session_id: bcs_session_id.map(str::to_string),
-                    deadline_ms: now_ms().saturating_add(self.provider_chat_run_timeout_ms),
+                    bcs_session_id: Some(session_id.clone()),
+                    deadline_ms,
                     terminal: false,
                 })
                 .await;
+            let transport_owner = match delivery_target {
+                BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
+                BotDeliveryTarget::HttpProvider {
+                    provider_id,
+                    provider_bot_ref,
+                    ..
+                } => BotRunTransportOwner::HttpProvider {
+                    provider_id: provider_id.clone(),
+                    provider_bot_ref: provider_bot_ref.clone(),
+                },
+            };
+            run_context
+                .register_active_run(ActiveBotRunContext {
+                    canonical_run_id: run_id.to_string(),
+                    downstream_run_id: run_id.to_string(),
+                    downstream_session_key: request_session_key(frame),
+                    scope: BotRunScope {
+                        group_id: group_id.to_string(),
+                        session_id,
+                        bot_id: bot_id.to_string(),
+                    },
+                    transport_owner,
+                    deadline_ms,
+                })
+                .await?;
         }
+        Ok(())
     }
+
+    pub(crate) async fn discard_send_context(&self, run_id: &str) -> ServiceResult<()> {
+        let Some(run_context) = self.bot_run_context.as_ref() else {
+            return Ok(());
+        };
+        let Some(context) = run_context.find_active_run(run_id).await? else {
+            return Ok(());
+        };
+        let _ = run_context.mark_terminal(run_id).await;
+        run_context
+            .remove_active_run(&context.scope, &context.canonical_run_id)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn complete_send_context(&self, run_id: &str) -> ServiceResult<()> {
+        let Some(run_context) = self.bot_run_context.as_ref() else {
+            return Ok(());
+        };
+        let Some(context) = run_context.find_active_run(run_id).await? else {
+            return Ok(());
+        };
+        let _ = run_context.mark_terminal(&context.canonical_run_id).await;
+        run_context
+            .remove_active_run(&context.scope, &context.canonical_run_id)
+            .await?;
+        Ok(())
+    }
+}
+
+fn request_session_key(frame: &BcsFrame) -> Option<String> {
+    let BcsFrame::Request(request) = frame else {
+        return None;
+    };
+    request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("session_key"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 #[async_trait]
@@ -266,6 +337,27 @@ impl MessageFlowService for BcsMessageFlow {
 
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome> {
         handle_chat_abort(self, cmd).await
+    }
+
+    async fn resolve_chat_abort_scope(
+        &self,
+        group_id: &str,
+        run_id: &str,
+    ) -> ServiceResult<Option<ChatAbortScope>> {
+        let Some(run_context) = self.bot_run_context.as_ref() else {
+            return Ok(None);
+        };
+        let Some(context) = run_context.find_active_run(run_id).await? else {
+            return Ok(None);
+        };
+        if context.scope.group_id != group_id {
+            return Ok(None);
+        }
+        Ok(Some(ChatAbortScope {
+            group_id: context.scope.group_id,
+            session_id: context.scope.session_id,
+            bot_id: context.scope.bot_id,
+        }))
     }
 
     async fn rebind_channel_source_message(
@@ -911,6 +1003,18 @@ pub async fn handle_web_send(
                 .cache_channel_source_message_id(&run_id, message_id)
                 .await;
         }
+        // Register before transport delivery so an immediate chat.abort can
+        // discover the run even before the Bot acknowledges chat.send.
+        flow.register_send_context(
+            delivery_type,
+            &delivery_target,
+            &frame,
+            &run_id,
+            &target_bot_id,
+            &cmd.group_id,
+            cmd.session_id.as_deref(),
+        )
+        .await?;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -937,16 +1041,10 @@ pub async fn handle_web_send(
                 );
                 if delivery_type == DeliveryType::Send && result.delivered {
                     active_run_ids.push(run_id.clone());
-                    flow.record_successful_send_context(
-                        delivery_type,
-                        &result,
-                        &run_id,
-                        &target_bot_id,
-                        &cmd.group_id,
-                        cmd.session_id.as_deref(),
-                    )
-                    .await;
-                } else if source_im_message_id.is_some() {
+                } else {
+                    flow.discard_send_context(&run_id).await?;
+                }
+                if !result.delivered && source_im_message_id.is_some() {
                     flow.message_tracker
                         .remove_channel_source_message_id(&run_id)
                         .await;
@@ -960,6 +1058,7 @@ pub async fn handle_web_send(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                flow.discard_send_context(&run_id).await?;
                 if source_im_message_id.is_some() {
                     flow.message_tracker
                         .remove_channel_source_message_id(&run_id)
@@ -1404,6 +1503,16 @@ pub async fn handle_persistent_group_send(
         )
         .await;
         let delivery_kind = bot_delivery_kind(target.delivery_type);
+        flow.register_send_context(
+            target.delivery_type,
+            &delivery_target,
+            &frame,
+            &run_id,
+            &target.bot_uuid,
+            &cmd.group_id,
+            None,
+        )
+        .await?;
         let result = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1417,16 +1526,8 @@ pub async fn handle_persistent_group_send(
             .await;
         match result {
             Ok(result) => {
-                flow.record_successful_send_context(
-                    target.delivery_type,
-                    &result,
-                    &run_id,
-                    &target.bot_uuid,
-                    &cmd.group_id,
-                    None,
-                )
-                .await;
                 if !result.delivered {
+                    flow.discard_send_context(&run_id).await?;
                     warn!(
                         session_id = %cmd.group_id,
                         bot_uuid = %target.bot_uuid,
@@ -1436,6 +1537,7 @@ pub async fn handle_persistent_group_send(
                 }
             }
             Err(error) => {
+                flow.discard_send_context(&run_id).await?;
                 warn!(
                     session_id = %cmd.group_id,
                     bot_uuid = %target.bot_uuid,
@@ -1871,6 +1973,16 @@ pub async fn handle_group_callback(
         .await;
 
         let delivery_kind = bot_delivery_kind(delivery_type);
+        flow.register_send_context(
+            delivery_type,
+            &delivery_target,
+            &frame,
+            &run_id,
+            &target_bot_id,
+            &cmd.group_id,
+            None,
+        )
+        .await?;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -1885,15 +1997,9 @@ pub async fn handle_group_callback(
 
         match delivery {
             Ok(result) => {
-                flow.record_successful_send_context(
-                    delivery_type,
-                    &result,
-                    &run_id,
-                    &target_bot_id,
-                    &cmd.group_id,
-                    None,
-                )
-                .await;
+                if !result.delivered {
+                    flow.discard_send_context(&run_id).await?;
+                }
                 delivery_results.push(delivery_result_summary(
                     &target_bot_id,
                     delivery_type,
@@ -1903,6 +2009,7 @@ pub async fn handle_group_callback(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                flow.discard_send_context(&run_id).await?;
                 delivery_results.push(delivery_result_summary(
                     &target_bot_id,
                     delivery_type,
@@ -1940,88 +2047,91 @@ pub async fn handle_chat_abort(
     flow: &BcsMessageFlow,
     cmd: ChatAbortCommand,
 ) -> ServiceResult<ChatAbortOutcome> {
-    if !abort_run_matches_session_scope(flow, &cmd).await {
-        warn!(
-            group_id = %cmd.group_id,
-            "chat.abort run does not belong to the bound session"
-        );
-        return Ok(ChatAbortOutcome {
-            aborted: false,
-            aborted_run_ids: Vec::new(),
-            bot_deliveries: Vec::new(),
-            frontend_deliveries: Vec::new(),
-        });
-    }
+    const ABORT_DELIVERY_TIMEOUT_MS: u64 = 60_000;
+    const MAX_PLUGIN_ABORT_CONCURRENCY: usize = 8;
 
-    let Some(group) = flow.group.get(&cmd.group_id).await else {
-        warn!(
-            group_id = %cmd.group_id,
-            "group not found for chat.abort; returning success"
-        );
-        return Ok(ChatAbortOutcome {
-            aborted: false,
-            aborted_run_ids: Vec::new(),
-            bot_deliveries: Vec::new(),
-            frontend_deliveries: Vec::new(),
+    let Some(run_context) = flow.bot_run_context.as_ref() else {
+        return Err(ServiceError::InvalidOperation {
+            message: "chat.abort requires the Bot run context index".to_string(),
+            request_id: cmd.run_id,
         });
     };
+    let scope = BotRunScope {
+        group_id: cmd.group_id.clone(),
+        session_id: cmd.session_id.clone(),
+        bot_id: cmd.bot_id.clone(),
+    };
+    let mut active = run_context.list_active_runs(&scope).await?;
+    if let Some(requested_run_id) = cmd.run_id.as_deref() {
+        active.retain(|context| {
+            context.canonical_run_id == requested_run_id
+                || context.downstream_run_id == requested_run_id
+        });
+    }
+    if active.is_empty() {
+        return Ok(ChatAbortOutcome {
+            aborted: false,
+            aborted_run_ids: Vec::new(),
+            bot_deliveries: Vec::new(),
+            frontend_deliveries: Vec::new(),
+            failures: Vec::new(),
+        });
+    }
 
-    let session_key = cmd
-        .session_id
-        .clone()
-        .unwrap_or_else(|| build_session_key(&cmd.group_id));
-    let participant_ids: Vec<String> = group
-        .bot_participant_ids()
+    let (plugin_runs, provider_runs): (Vec<_>, Vec<_>) = active
         .into_iter()
-        .map(str::to_string)
-        .collect();
-    let has_participants = !participant_ids.is_empty();
-    let mut bot_deliveries = Vec::new();
-
-    for bot_id in participant_ids {
-        let delivery_target = match flow.registry.resolve_delivery_target(&bot_id).await {
-            Ok(target) => target,
-            Err(error) => {
-                bot_deliveries.push(BotDeliveryResult {
-                    target_bot_id: bot_id.clone(),
-                    delivered: false,
-                    error: Some(error),
-                });
-                continue;
-            }
-        };
-        if !flow.bot_delivery.is_available(&delivery_target).await {
-            debug!(bot_id = %bot_id, "bot target unavailable, skipping chat.abort");
-            continue;
+        .partition(|context| matches!(context.transport_owner, BotRunTransportOwner::WebSocket));
+    let plugin_results = stream::iter(plugin_runs.into_iter().map(|context| {
+        let delivery = flow.bot_delivery.clone();
+        let scope = scope.clone();
+        async move {
+            let command = BotAbortDeliveryCommand {
+                target: BotDeliveryTarget::WebSocket {
+                    bot_id: scope.bot_id.clone(),
+                },
+                command_id: uuid::Uuid::new_v4().to_string(),
+                group_id: scope.group_id,
+                session_id: context
+                    .downstream_session_key
+                    .clone()
+                    .unwrap_or(scope.session_id),
+                run_id: Some(context.downstream_run_id.clone()),
+                timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
+            };
+            (context, delivery.abort(command).await)
         }
+    }))
+    .buffer_unordered(MAX_PLUGIN_ABORT_CONCURRENCY)
+    .collect::<Vec<_>>()
+    .await;
 
-        let delivery_run_id = cmd
-            .run_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let delivery = flow
-            .bot_delivery
-            .deliver(BotDeliveryCommand {
-                target: delivery_target,
-                run_id: delivery_run_id,
-                frame: build_chat_abort_frame(&session_key, cmd.run_id.as_deref()),
-                delivery_kind: BotDeliveryKind::Abort,
-                provider_transport: Default::default(),
-                provider_bypass_headers: Vec::new(),
-            })
-            .await;
-
-        match delivery {
-            Ok(result) => bot_deliveries.push(result),
-            Err(error) => {
-                warn!(
-                    group_id = %cmd.group_id,
-                    bot_id = %bot_id,
-                    error = %error,
-                    "failed to deliver chat.abort"
-                );
+    let mut bot_deliveries = Vec::new();
+    let mut confirmed = Vec::new();
+    let mut failures = Vec::new();
+    for (context, result) in plugin_results {
+        match result {
+            Ok(result) => {
+                let acknowledged = result
+                    .aborted_run_ids
+                    .iter()
+                    .any(|run_id| run_id == &context.downstream_run_id);
                 bot_deliveries.push(BotDeliveryResult {
-                    target_bot_id: bot_id,
+                    target_bot_id: result.target_bot_id,
+                    delivered: true,
+                    error: None,
+                });
+                if acknowledged {
+                    confirmed.push(context);
+                }
+            }
+            Err(error) => {
+                failures.push(ChatAbortFailure {
+                    run_id: context.canonical_run_id.clone(),
+                    code: chat_abort_failure_code(&error).to_string(),
+                    message: error.to_string(),
+                });
+                bot_deliveries.push(BotDeliveryResult {
+                    target_bot_id: cmd.bot_id.clone(),
                     delivered: false,
                     error: Some(error),
                 });
@@ -2029,37 +2139,161 @@ pub async fn handle_chat_abort(
         }
     }
 
-    let aborted_run_ids = cmd.run_id.into_iter().collect::<Vec<_>>();
-    let frontend_deliveries = publish_chat_abort_event(
-        flow,
-        &cmd.group_id,
-        cmd.session_id.as_deref(),
-        &aborted_run_ids,
-    )
-    .await;
+    if !provider_runs.is_empty() {
+        let expected_by_downstream: HashMap<String, ActiveBotRunContext> = provider_runs
+            .iter()
+            .cloned()
+            .map(|context| (context.downstream_run_id.clone(), context))
+            .collect();
+        let owners: HashSet<BotRunTransportOwner> = provider_runs
+            .iter()
+            .map(|context| context.transport_owner.clone())
+            .collect();
+        let current_target = flow.registry.resolve_delivery_target(&cmd.bot_id).await;
+        let delivery = match (owners.len(), current_target) {
+            (1, Ok(target))
+                if provider_owner_matches_target(
+                    owners.iter().next().expect("one owner"),
+                    &target,
+                ) =>
+            {
+                flow.bot_delivery
+                    .abort(BotAbortDeliveryCommand {
+                        target,
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        group_id: cmd.group_id.clone(),
+                        session_id: cmd.session_id.clone(),
+                        run_id: None,
+                        timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
+                    })
+                    .await
+            }
+            (1, Ok(_)) => Err(ServiceError::InvalidOperation {
+                message: "Provider transport ownership changed after run creation".to_string(),
+                request_id: cmd.run_id.clone(),
+            }),
+            (_, Ok(_)) => Err(ServiceError::InvalidOperation {
+                message: "active Provider runs have conflicting transport ownership".to_string(),
+                request_id: cmd.run_id.clone(),
+            }),
+            (_, Err(error)) => Err(error),
+        };
+        match delivery {
+            Ok(result) => {
+                let mut invalid_ids = Vec::new();
+                for downstream_run_id in result.aborted_run_ids {
+                    if let Some(context) = expected_by_downstream.get(&downstream_run_id) {
+                        confirmed.push(context.clone());
+                    } else {
+                        invalid_ids.push(downstream_run_id);
+                    }
+                }
+                if !invalid_ids.is_empty() {
+                    failures.push(ChatAbortFailure {
+                        run_id: invalid_ids.join(","),
+                        code: "scope_mismatch".to_string(),
+                        message:
+                            "Provider returned run ids outside the requested Bot/Session scope"
+                                .to_string(),
+                    });
+                }
+                bot_deliveries.push(BotDeliveryResult {
+                    target_bot_id: result.target_bot_id,
+                    delivered: invalid_ids.is_empty(),
+                    error: None,
+                });
+            }
+            Err(error) => {
+                let message = error.to_string();
+                failures.extend(provider_runs.iter().map(|context| ChatAbortFailure {
+                    run_id: context.canonical_run_id.clone(),
+                    code: chat_abort_failure_code(&error).to_string(),
+                    message: message.clone(),
+                }));
+                bot_deliveries.push(BotDeliveryResult {
+                    target_bot_id: cmd.bot_id.clone(),
+                    delivered: false,
+                    error: Some(error),
+                });
+            }
+        }
+    }
+
+    let mut aborted_run_ids = Vec::new();
+    for context in confirmed {
+        if commit_aborted_run(run_context.as_ref(), &context).await? {
+            aborted_run_ids.push(context.canonical_run_id);
+        }
+    }
+    aborted_run_ids.sort();
+    aborted_run_ids.dedup();
+    let frontend_deliveries =
+        publish_chat_abort_event(flow, &cmd.group_id, Some(&cmd.session_id), &aborted_run_ids)
+            .await;
 
     Ok(ChatAbortOutcome {
-        aborted: !aborted_run_ids.is_empty() || !has_participants,
+        aborted: !aborted_run_ids.is_empty(),
         aborted_run_ids,
         bot_deliveries,
         frontend_deliveries,
+        failures,
     })
 }
 
-async fn abort_run_matches_session_scope(flow: &BcsMessageFlow, cmd: &ChatAbortCommand) -> bool {
-    let Some(session_id) = cmd.session_id.as_deref() else {
-        return true;
+fn chat_abort_failure_code(error: &ServiceError) -> &'static str {
+    match error {
+        ServiceError::BotMethodUnsupported { .. } => "chat_abort_not_supported",
+        _ => "chat_abort_failed",
+    }
+}
+
+fn provider_owner_matches_target(owner: &BotRunTransportOwner, target: &BotDeliveryTarget) -> bool {
+    matches!(
+        (owner, target),
+        (
+            BotRunTransportOwner::HttpProvider {
+                provider_id: owner_provider_id,
+                provider_bot_ref: owner_bot_ref,
+            },
+            BotDeliveryTarget::HttpProvider {
+                provider_id,
+                provider_bot_ref,
+                ..
+            }
+        ) if owner_provider_id == provider_id && owner_bot_ref == provider_bot_ref
+    )
+}
+
+async fn commit_aborted_run(
+    run_context: &dyn BotRunContextPort,
+    context: &ActiveBotRunContext,
+) -> ServiceResult<bool> {
+    let committed = if run_context
+        .try_begin_terminal(&context.canonical_run_id)
+        .await
+    {
+        let committed = run_context.mark_terminal(&context.canonical_run_id).await;
+        if !committed {
+            run_context
+                .release_terminal(&context.canonical_run_id)
+                .await;
+        }
+        committed
+    } else {
+        run_context
+            .get_context(&context.canonical_run_id)
+            .await
+            .is_some_and(|run| run.terminal)
     };
-    let Some(run_id) = cmd.run_id.as_deref() else {
-        return true;
-    };
-    let Some(run_context) = flow.bot_run_context.as_ref() else {
-        return false;
-    };
-    let Some(context) = run_context.get_context(run_id).await else {
-        return false;
-    };
-    context.group_id == cmd.group_id && context.bcs_session_id.as_deref() == Some(session_id)
+    if committed {
+        run_context
+            .mark_provider_transport_terminal(&context.canonical_run_id)
+            .await;
+        run_context
+            .remove_active_run(&context.scope, &context.canonical_run_id)
+            .await?;
+    }
+    Ok(committed)
 }
 
 fn resolve_group_chat_sender(cmd: &GroupChatCommand) -> ServiceResult<String> {
@@ -2334,7 +2568,7 @@ fn build_explicit_mention_decision(
     message: &str,
     overlay: &[RouteParticipantOverlay],
 ) -> RoutingDecision {
-    let overlay_map: std::collections::HashMap<&str, &RouteParticipantOverlay> =
+    let overlay_map: HashMap<&str, &RouteParticipantOverlay> =
         overlay.iter().map(|o| (o.bot_uuid.as_str(), o)).collect();
 
     let mut valid_mentions: Vec<String> = Vec::new();

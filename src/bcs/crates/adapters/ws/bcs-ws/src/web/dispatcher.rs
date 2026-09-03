@@ -3,15 +3,16 @@ use std::sync::Arc;
 
 use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
 use bcs_service_api::application::v1::{
-    AuthorizeGroupSessionConnection, GroupSessionConnectionBinding,
-    GroupSessionConnectionService, ParticipantRole,
+    AuthorizeGroupSessionConnection, GroupSessionConnectionBinding, GroupSessionConnectionService,
+    ParticipantRole,
 };
 use bcs_service_api::{
     CallerContext, ChatAbortCommand, CollaborationRuntimeError, CollaborationRuntimeService,
     HandleSessionHumanInputCommand, HandleSessionHumanInputOutcome, HumanActor,
-    HumanResponseSource, MessageFlowService, ServiceError, WebSendCommand,
-    ParticipantKind, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
-    WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
+    HumanResponseSource, MessageFlowService, ParticipantKind, ServiceError, WebSendCommand,
+    WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
+    WorkbenchConnectCommand, WorkbenchConnectOutcome, WorkbenchParticipantView,
+    WorkbenchSessionService,
 };
 use bcs_service_api::{
     InteractionFrontendEvent, InteractionService, InteractionServiceError, InteractionStatus,
@@ -110,8 +111,7 @@ pub async fn dispatch_client_frame(
         BcsFrame::Request(req) => {
             let is_connect = req.method == "connect";
             let subscribed_before = connection_state.subscribed_sessions.len();
-            if let Err(error) =
-                handle_client_request(state, &req, tx, connection_state, auth).await
+            if let Err(error) = handle_client_request(state, &req, tx, connection_state, auth).await
             {
                 if is_connect {
                     return Err(WebWsDispatchError::ClientConnectError(Box::new(error)));
@@ -122,14 +122,11 @@ pub async fn dispatch_client_frame(
                 return Ok(WebDispatchOutcome::Close);
             }
             if is_connect {
-                let subscribed =
-                    connection_state.subscribed_sessions.len() > subscribed_before;
+                let subscribed = connection_state.subscribed_sessions.len() > subscribed_before;
                 if matches!(auth, WorkbenchConnectionAuth::SessionBound { .. }) && !subscribed {
                     return Ok(WebDispatchOutcome::Dispatched);
                 }
-                return Ok(WebDispatchOutcome::ClientConnect {
-                    subscribed,
-                });
+                return Ok(WebDispatchOutcome::ClientConnect { subscribed });
             }
         }
         BcsFrame::Response(res) => {
@@ -153,7 +150,9 @@ async fn handle_client_request(
     debug!(id = %req.id, method = %req.method, "Handling client RequestFrame");
     info!(method = %req.method, "Client request received");
 
-    if matches!(auth, WorkbenchConnectionAuth::SessionBound { .. })
+    let requires_connect =
+        matches!(auth, WorkbenchConnectionAuth::SessionBound { .. }) || req.method == "chat.abort";
+    if requires_connect
         && connection_state.phase == WebConnectionPhase::AwaitingConnect
         && req.method != "connect"
     {
@@ -220,6 +219,17 @@ async fn handle_connect(
         WebWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
     })?;
 
+    if connection_state.phase == WebConnectionPhase::Connected {
+        send_error(
+            tx,
+            &req.id,
+            "already_connected",
+            "This WebSocket is already connected",
+        )
+        .await?;
+        return Ok(());
+    }
+
     let (group_id, session_id) = match auth {
         WorkbenchConnectionAuth::UserBound { .. } => {
             (params.group_id.clone(), params.session_id.clone())
@@ -229,16 +239,6 @@ async fn handle_connect(
             session_id,
             ..
         } => {
-            if connection_state.phase == WebConnectionPhase::Connected {
-                send_error(
-                    tx,
-                    &req.id,
-                    "already_connected",
-                    "This WebSocket is already connected",
-                )
-                .await?;
-                return Ok(());
-            }
             if params.group_id != *group_id || params.session_id.as_deref() != Some(session_id) {
                 send_error(
                     tx,
@@ -296,16 +296,18 @@ async fn handle_connect(
                 .filter(|user_id| !user_id.is_empty());
             let service = state.group_session_connections.as_ref();
             let authorized = match (service, user_id) {
-                (Some(service), Some(user_id)) => service
-                    .authorize_connect(AuthorizeGroupSessionConnection {
-                        binding: GroupSessionConnectionBinding {
-                            tenant: tenant.clone(),
-                            user_id: user_id.to_string(),
-                            group_id: group_id.clone(),
-                            session_id: session_id.clone(),
-                        },
-                    })
-                    .await,
+                (Some(service), Some(user_id)) => {
+                    service
+                        .authorize_connect(AuthorizeGroupSessionConnection {
+                            binding: GroupSessionConnectionBinding {
+                                tenant: tenant.clone(),
+                                user_id: user_id.to_string(),
+                                group_id: group_id.clone(),
+                                session_id: session_id.clone(),
+                            },
+                        })
+                        .await
+                }
                 _ => {
                     warn!("session-bound connect is missing a valid V1 authorization context");
                     send_session_access_revoked(tx, &req.id, connection_state).await?;
@@ -350,9 +352,7 @@ async fn handle_connect(
     connection_state
         .subscribed_sessions
         .push((subscription_key, conn_id));
-    if matches!(auth, WorkbenchConnectionAuth::SessionBound { .. }) {
-        connection_state.phase = WebConnectionPhase::Connected;
-    }
+    connection_state.phase = WebConnectionPhase::Connected;
 
     let participants: Vec<Value> = outcome
         .participants
@@ -732,13 +732,7 @@ async fn handle_chat_send(
                 status: "accepted".to_string(),
             };
             send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
-            send_empty_human_input_final(
-                tx,
-                &group_id,
-                session_id.as_deref(),
-                &run_id,
-            )
-            .await?;
+            send_empty_human_input_final(tx, &group_id, session_id.as_deref(), &run_id).await?;
             return Ok(());
         }
         Err(error) => {
@@ -868,14 +862,21 @@ fn collaboration_error_code(error: &CollaborationRuntimeError) -> &'static str {
 
 #[derive(Debug, Serialize)]
 struct ChatAbortResult {
-    ok: bool,
     aborted: bool,
+    aborted_run_ids: Vec<String>,
+    /// Deprecated response alias retained for one compatibility version.
     run_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ClientChatAbortParams {
-    group_id: String,
+    #[serde(default)]
+    group_id: Option<String>,
+    #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
+    session_id: Option<String>,
+    #[serde(default, alias = "bot_uuid")]
+    bot_id: Option<String>,
+    #[serde(default)]
     run_id: Option<String>,
 }
 
@@ -891,19 +892,39 @@ async fn handle_chat_abort(
             WebWsDispatchError::InvalidFrameFormat(format!("Invalid chat.abort params: {}", e))
         })?;
 
-    let mut group_id = params.group_id;
-    let run_id = params.run_id;
-    let (caller, session_id) = match auth {
+    let Some(bound_actor_id) = auth.actor_id() else {
+        send_error(
+            tx,
+            &req.id,
+            "unauthorized",
+            "An authenticated Human is required to abort chat runs",
+        )
+        .await?;
+        return Ok(());
+    };
+    let run_id = params.run_id.clone();
+    let (requested_group_id, bound_session_id) = match auth {
         WorkbenchConnectionAuth::UserBound { .. } => {
-            (caller_context_from_bound_actor(None, "unknown"), None)
+            let Some(group_id) = params.group_id.clone() else {
+                send_error(tx, &req.id, "invalid_request", "group_id is required").await?;
+                return Ok(());
+            };
+            (group_id, None)
         }
         WorkbenchConnectionAuth::SessionBound {
-            actor_id,
             group_id: bound_group_id,
             session_id,
             ..
         } => {
-            if group_id != *bound_group_id {
+            if params
+                .group_id
+                .as_deref()
+                .is_some_and(|group_id| group_id != bound_group_id)
+                || params
+                    .session_id
+                    .as_deref()
+                    .is_some_and(|requested| requested != session_id)
+            {
                 send_error(
                     tx,
                     &req.id,
@@ -914,16 +935,87 @@ async fn handle_chat_abort(
                 connection_state.phase = WebConnectionPhase::Closed;
                 return Ok(());
             }
-            group_id = bound_group_id.clone();
-            (
-                caller_context_from_bound_actor(Some(actor_id), actor_id),
-                Some(session_id.clone()),
-            )
+            (bound_group_id.clone(), Some(session_id.clone()))
         }
     };
 
+    let (group_id, session_id, bot_id) = match (
+        params.session_id.clone().or(bound_session_id),
+        params.bot_id.clone(),
+    ) {
+        (Some(session_id), Some(bot_id)) => (requested_group_id.clone(), session_id, bot_id),
+        _ => {
+            let Some(legacy_run_id) = run_id.as_deref() else {
+                send_error(
+                    tx,
+                    &req.id,
+                    "invalid_request",
+                    "session_id and bot_id are required",
+                )
+                .await?;
+                return Ok(());
+            };
+            let Some(scope) = state
+                .message_flow
+                .resolve_chat_abort_scope(&requested_group_id, legacy_run_id)
+                .await?
+            else {
+                send_error(
+                    tx,
+                    &req.id,
+                    "run_not_found",
+                    "The legacy run_id is unknown or outside this Group",
+                )
+                .await?;
+                return Ok(());
+            };
+            (scope.group_id, scope.session_id, scope.bot_id)
+        }
+    };
+
+    let subscribed = connection_state
+        .subscribed_sessions
+        .iter()
+        .any(|(subscription, _)| subscription == &session_id);
+    if !subscribed {
+        send_error(
+            tx,
+            &req.id,
+            "session_not_subscribed",
+            "The connection is not subscribed to the requested Session",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    if let Err(err) = state
+        .workbench_sessions
+        .authorize_chat_abort(WorkbenchChatAbortAuthorizationCommand {
+            bound_actor_id: Some(bound_actor_id.to_string()),
+            group_id: group_id.clone(),
+            session_id: session_id.clone(),
+            target_bot_id: bot_id.clone(),
+        })
+        .await
+    {
+        warn!(
+            actor_id = %bound_actor_id,
+            group_id = %group_id,
+            session_id = %session_id,
+            bot_id = %bot_id,
+            error = ?err,
+            "chat.abort rejected by Workbench WS authorization"
+        );
+        send_error(tx, &req.id, err.code(), &err.message()).await?;
+        return Ok(());
+    }
+
+    let caller = caller_context_from_bound_actor(Some(bound_actor_id), bound_actor_id);
+
     info!(
         group_id = %group_id,
+        session_id = %session_id,
+        bot_id = %bot_id,
         run_id = ?run_id,
         "Processing chat.abort"
     );
@@ -933,8 +1025,12 @@ async fn handle_chat_abort(
         .handle_chat_abort(ChatAbortCommand {
             caller,
             group_id: group_id.clone(),
-            session_id,
-            run_id,
+            session_id: session_id.clone(),
+            bot_id: bot_id.clone(),
+            // A legacy run_id only resolves the canonical Bot/Session scope.
+            // The abort itself remains scope-based and fans out to every
+            // active run owned by that Bot in the Session.
+            run_id: None,
         })
         .await?;
 
@@ -955,9 +1051,47 @@ async fn handle_chat_abort(
         }
     }
 
+    if !outcome.failures.is_empty() {
+        let abort_not_supported = outcome.aborted_run_ids.is_empty()
+            && outcome
+                .failures
+                .iter()
+                .all(|failure| failure.code == "chat_abort_not_supported");
+        send_error_shape(
+            tx,
+            &req.id,
+            ErrorShape {
+                code: if abort_not_supported {
+                    "chat_abort_not_supported".to_string()
+                } else {
+                    "chat_abort_partial_failure".to_string()
+                },
+                message: if abort_not_supported {
+                    "Target Bot plugin does not support chat.abort".to_string()
+                } else {
+                    "Some chat runs could not be aborted".to_string()
+                },
+                details: Some(serde_json::json!({
+                    "bot_id": bot_id,
+                    "resolution": if abort_not_supported { Some("restart_bot") } else { None },
+                    "aborted_run_ids": outcome.aborted_run_ids,
+                    "failures": outcome.failures.iter().map(|failure| serde_json::json!({
+                        "run_id": failure.run_id,
+                        "code": failure.code,
+                        "message": failure.message,
+                    })).collect::<Vec<_>>(),
+                })),
+                retryable: !abort_not_supported,
+                retry_after_ms: None,
+            },
+        )
+        .await?;
+        return Ok(());
+    }
+
     let result = ChatAbortResult {
-        ok: true,
         aborted: outcome.aborted,
+        aborted_run_ids: outcome.aborted_run_ids.clone(),
         run_ids: outcome.aborted_run_ids,
     };
 

@@ -9,11 +9,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_domain::{DeliveryType, Group, GroupStrategy, NewMessage, Participant, PersistMode, SenderType, SystemGroupMessage, SystemMessageEvent, SystemMessageEventKind};
 use bcs_protocol::{
-    build_chat_inject_frame, build_chat_send_frame, now_ms, BotDeliveryKind, GroupContextInput,
-    GroupContextParticipant,
+    build_chat_inject_frame, build_chat_send_frame, now_ms, BcsFrame, BotDeliveryKind,
+    GroupContextInput, GroupContextParticipant,
 };
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget, BotRegistryCoreService, BotRunContext, BotRunContextPort,
+    ActiveBotRunContext, BotDeliveryCommand, BotDeliveryPort, BotDeliveryTarget,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
+    BotRunTransportOwner,
     DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
     FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryTarget,
     ProviderStreamGrayList,
@@ -145,6 +147,29 @@ struct PendingSystemMessageDelivery {
     delivery_type: DeliveryType,
     group_id: String,
     bcs_session_id: Option<String>,
+}
+
+fn request_session_key(frame: &BcsFrame) -> Option<String> {
+    let BcsFrame::Request(request) = frame else {
+        return None;
+    };
+    request
+        .params
+        .as_ref()
+        .and_then(|params| params.get("session_key"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+async fn discard_send_context(
+    run_context: &dyn BotRunContextPort,
+    context: &ActiveBotRunContext,
+) -> ServiceResult<()> {
+    let _ = run_context.mark_terminal(&context.canonical_run_id).await;
+    run_context
+        .remove_active_run(&context.scope, &context.canonical_run_id)
+        .await?;
+    Ok(())
 }
 
 #[async_trait]
@@ -328,6 +353,69 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
             let bot_run_context = bot_run_context.clone();
             async move {
                 let is_provider_send = cmd.is_provider_send;
+                let active_context = if cmd.record_run_context {
+                    if let Some(run_context) = bot_run_context.as_ref() {
+                        let deadline_ms =
+                            now_ms().saturating_add(provider_chat_run_timeout_ms);
+                        let session_id = cmd
+                            .bcs_session_id
+                            .clone()
+                            .unwrap_or_else(|| cmd.group_id.clone());
+                        run_context
+                            .put_context(BotRunContext {
+                                run_id: cmd.run_id.clone(),
+                                bot_id: recipient.clone(),
+                                group_id: cmd.group_id.clone(),
+                                bcs_session_id: Some(session_id.clone()),
+                                deadline_ms,
+                                terminal: false,
+                            })
+                            .await;
+                        let transport_owner = match &cmd.cmd.target {
+                            BotDeliveryTarget::WebSocket { .. } => {
+                                BotRunTransportOwner::WebSocket
+                            }
+                            BotDeliveryTarget::HttpProvider {
+                                provider_id,
+                                provider_bot_ref,
+                                ..
+                            } => BotRunTransportOwner::HttpProvider {
+                                provider_id: provider_id.clone(),
+                                provider_bot_ref: provider_bot_ref.clone(),
+                            },
+                        };
+                        let context = ActiveBotRunContext {
+                            canonical_run_id: cmd.run_id.clone(),
+                            downstream_run_id: cmd.run_id.clone(),
+                            downstream_session_key: request_session_key(&cmd.cmd.frame),
+                            scope: BotRunScope {
+                                group_id: cmd.group_id.clone(),
+                                session_id,
+                                bot_id: recipient.clone(),
+                            },
+                            transport_owner,
+                            deadline_ms,
+                        };
+                        if let Err(error) = run_context.register_active_run(context.clone()).await {
+                            let _ = run_context.mark_terminal(&cmd.run_id).await;
+                            return (
+                                SystemMessageRecipientResult {
+                                    recipient_id: recipient,
+                                    run_id: cmd.run_id,
+                                    delivery_type: cmd.delivery_type,
+                                    delivered: false,
+                                    error: Some(error),
+                                },
+                                is_provider_send,
+                            );
+                        }
+                        Some(context)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
                 let (delivered, mut error) = match delivery.deliver(cmd.cmd).await {
                     Ok(r) => (r.delivered, r.error),
                     Err(e) => {
@@ -335,19 +423,22 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                         (false, Some(e))
                     }
                 };
-                if delivered && cmd.record_run_context {
-                    if let Some(run_context) = bot_run_context {
-                        run_context
-                            .put_context(BotRunContext {
-                                run_id: cmd.run_id.clone(),
-                                bot_id: recipient.clone(),
-                                group_id: cmd.group_id,
-                                bcs_session_id: cmd.bcs_session_id,
-                                deadline_ms: now_ms()
-                                    .saturating_add(provider_chat_run_timeout_ms),
-                                terminal: false,
-                            })
-                            .await;
+                if !delivered {
+                    if let (Some(run_context), Some(context)) =
+                        (bot_run_context.as_ref(), active_context.as_ref())
+                    {
+                        if let Err(cleanup_error) =
+                            discard_send_context(run_context.as_ref(), context).await
+                        {
+                            tracing::warn!(
+                                %recipient,
+                                error = %cleanup_error,
+                                "failed to discard system message run context"
+                            );
+                            if error.is_none() {
+                                error = Some(cleanup_error);
+                            }
+                        }
                     }
                 }
                 if !delivered && error.is_none() {

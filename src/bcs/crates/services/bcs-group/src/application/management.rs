@@ -27,9 +27,10 @@ use bcs_service_api::{
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
     ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
-    DeliveryType, SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
-    WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
-    WorkbenchUseCaseError, backfill_bot_names, generated_group_id, validate_sender_routes,
+    DeliveryType, SystemMessageEvent, WorkbenchChatAbortAuthorizationCommand,
+    WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
+    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
+    generated_group_id, validate_sender_routes,
 };
 use tracing::warn;
 
@@ -2039,6 +2040,71 @@ impl WorkbenchSessionService for GroupManagement {
             Some(_) => Ok(()),
             None => Err(WorkbenchUseCaseError::SenderNotInGroup),
         }
+    }
+
+    async fn authorize_chat_abort(
+        &self,
+        command: WorkbenchChatAbortAuthorizationCommand,
+    ) -> Result<(), WorkbenchUseCaseError> {
+        let actor_id = command
+            .bound_actor_id
+            .as_deref()
+            .ok_or(WorkbenchUseCaseError::Unauthorized)?;
+        let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
+        let session = self
+            .session_management
+            .get(&command.session_id)
+            .await
+            .map_err(|error| {
+                WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
+            })?
+            .filter(|session| session.group_id == command.group_id)
+            .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+
+        let direct_humans = session
+            .participants
+            .iter()
+            .filter(|participant| participant.is_human() && participant.bot_uuid == actor_id)
+            .collect::<Vec<_>>();
+        if direct_humans
+            .iter()
+            .any(|participant| participant.effective_mode() == ParticipantMode::Absent)
+        {
+            return Err(WorkbenchUseCaseError::ParticipantAbsent);
+        }
+
+        // COSEC: abort authorization is recalculated from the current Session
+        // on every request. A stale WebSocket subscription never grants access.
+        let mut may_operate_session = !direct_humans.is_empty();
+        if !may_operate_session {
+            for participant in session
+                .participants
+                .iter()
+                .filter(|participant| participant.is_bot())
+            {
+                let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
+                    continue;
+                };
+                if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no)
+                {
+                    may_operate_session = true;
+                    break;
+                }
+            }
+        }
+        if !may_operate_session {
+            return Err(WorkbenchUseCaseError::ForbiddenGroupAccess);
+        }
+
+        let target = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.target_bot_id);
+        if !target.is_some_and(|participant| participant.is_bot()) {
+            return Err(WorkbenchUseCaseError::TargetBotNotInSession);
+        }
+
+        Ok(())
     }
 }
 

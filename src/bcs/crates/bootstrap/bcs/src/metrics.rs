@@ -1505,6 +1505,7 @@ fn service_error_code(error: &ServiceError) -> DeliveryErrorCode {
         | ServiceError::FriendRequestNotFound(_) => DeliveryErrorCode::NotFound,
         ServiceError::BotNotRegistered(_) => DeliveryErrorCode::NotRegistered,
         ServiceError::BotNotConnected(_) => DeliveryErrorCode::NotConnected,
+        ServiceError::BotMethodUnsupported { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::InvalidOperation { .. } => DeliveryErrorCode::InvalidOperation,
         ServiceError::Conflict(_) => DeliveryErrorCode::InvalidOperation,
         ServiceError::Unauthorized(_) => DeliveryErrorCode::Unauthorized,

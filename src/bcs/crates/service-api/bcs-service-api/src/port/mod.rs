@@ -34,16 +34,14 @@ pub use channel_delivery::{
     ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
 };
 pub use chat_run::{
-    BotRunContext, BotRunContextPort, ChatRunCleanupPort, ChatRunEventPort, ProviderRunTransport,
+    ActiveBotRunContext, BotRunContext, BotRunContextPort, BotRunScope, BotRunTransportOwner,
+    ChatRunCleanupPort, ChatRunEventPort, ProviderRunTransport,
 };
 pub use delivery::{
-    BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
-    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryPort, FrontendDeliveryResult,
-    FrontendDeliveryTarget, ProviderTransportPreference, RunFallbackDelivery,
-};
-pub use friend_connect_notification::{
-    FriendConnectNotificationCommand, FriendConnectNotificationKind,
-    FriendConnectNotificationPort, NoopFriendConnectNotificationPort,
+    BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, FrontendDeliveryCommand, FrontendDeliveryKind,
+    FrontendDeliveryPort, FrontendDeliveryResult, FrontendDeliveryTarget,
+    ProviderTransportPreference, RunFallbackDelivery,
 };
 pub use human_notify::{
     HumanMentionNotifyPort, MentionNotification, MentionedHuman, NoopHumanMentionNotifyPort,
@@ -51,6 +49,10 @@ pub use human_notify::{
 pub use event_delivery::*;
 pub use event_metrics::*;
 pub use event_recording::*;
+pub use friend_connect_notification::{
+    FriendConnectNotificationCommand, FriendConnectNotificationKind, FriendConnectNotificationPort,
+    NoopFriendConnectNotificationPort,
+};
 pub use group_context::{GroupDispatchContextPort, GroupHistoryBotRequestPort};
 pub use group_session_token::{
     GROUP_SESSION_TOKEN_MAX_COMPACT_LEN, GroupSessionTokenClaims, GroupSessionTokenError,
@@ -86,16 +88,16 @@ pub use repo::{
     ChannelBindingRepoPort, CollaborationDefinitionRecord, CollaborationEventRecord,
     CollaborationEventRepoPort, CollaborationTemplateEntry, CollaborationTemplateRepoPort,
     ConversationSessionRepoPort, CreateOrganizationRecord, CreateStateMachineRerun,
-    CreateStateMachineRerunOutcome, EventRepoPort, FriendRepoPort,
-    FriendRequestRepoPort, GroupRepoPort, GroupRuntimeBindingRepoPort,
-    HumanInputEnqueueDisposition, HumanInputRequestRepoPort, ImParticipantRepoPort,
-    ListOrganizationMembersPageQuery, ListOrganizationMembersQuery, ListOrganizationsQuery,
-    MarkHumanNodeRunningCommand, NewSessionParams, OrganizationCandidateReadPage,
-    OrganizationCandidateReadPort, OrganizationCandidateReadQuery, OrganizationMemberPage,
-    OrganizationRepoPort, ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord,
-    ProviderBotDiscoverySelector, ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort,
-    SessionRepoPort, StateMachineDefinitionRepoPort, StateMachineRunRepoPort,
-    UpdateOrganizationRecord, UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
+    CreateStateMachineRerunOutcome, EventRepoPort, FriendRepoPort, FriendRequestRepoPort,
+    GroupRepoPort, GroupRuntimeBindingRepoPort, HumanInputEnqueueDisposition,
+    HumanInputRequestRepoPort, ImParticipantRepoPort, ListOrganizationMembersPageQuery,
+    ListOrganizationMembersQuery, ListOrganizationsQuery, MarkHumanNodeRunningCommand,
+    NewSessionParams, OrganizationCandidateReadPage, OrganizationCandidateReadPort,
+    OrganizationCandidateReadQuery, OrganizationMemberPage, OrganizationRepoPort,
+    ProviderBotBindingRepoPort, ProviderBotDiscoveryRecord, ProviderBotDiscoverySelector,
+    ProviderCredentialRepoPort, ProviderRepoPort, RelationRepoPort, SessionRepoPort,
+    StateMachineDefinitionRepoPort, StateMachineRunRepoPort, UpdateOrganizationRecord,
+    UpsertOrganizationMemberRecord, UserIdentity, UserIdentityRepoPort,
 };
 pub use secret::{SecretAccessError, SecretAccessPort, SecretRecord};
 pub use session_callback::SessionCallbackDispatchPort;

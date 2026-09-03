@@ -176,8 +176,23 @@ pub struct GroupCallbackOutcome {
 pub struct ChatAbortCommand {
     pub caller: CallerContext,
     pub group_id: String,
-    pub session_id: Option<String>,
+    pub session_id: String,
+    pub bot_id: String,
     pub run_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatAbortScope {
+    pub group_id: String,
+    pub session_id: String,
+    pub bot_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatAbortFailure {
+    pub run_id: String,
+    pub code: String,
+    pub message: String,
 }
 
 #[derive(Debug)]
@@ -186,6 +201,7 @@ pub struct ChatAbortOutcome {
     pub aborted_run_ids: Vec<String>,
     pub bot_deliveries: Vec<BotDeliveryResult>,
     pub frontend_deliveries: Vec<FrontendDeliveryResult>,
+    pub failures: Vec<ChatAbortFailure>,
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +353,13 @@ pub trait MessageFlowService: Send + Sync {
         cmd: GroupCallbackCommand,
     ) -> ServiceResult<GroupCallbackOutcome>;
     async fn handle_chat_abort(&self, cmd: ChatAbortCommand) -> ServiceResult<ChatAbortOutcome>;
+    async fn resolve_chat_abort_scope(
+        &self,
+        _group_id: &str,
+        _run_id: &str,
+    ) -> ServiceResult<Option<ChatAbortScope>> {
+        Ok(None)
+    }
     async fn rebind_channel_source_message(
         &self,
         _source_run_id: &str,

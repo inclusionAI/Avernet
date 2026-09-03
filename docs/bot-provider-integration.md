@@ -258,14 +258,16 @@ reasoning.
 
 ### `chat.abort` response
 
-`chat.abort` cancels running tasks for the given `session_id` on a best-effort
-basis. The response shape:
+BCS sends one `chat.abort` for `(provider_bot_ref, session_id)`, without an
+`env` supplied by the client. The Provider combines its server-side environment
+and atomically cancels only `RUNNING` runs. `PENDING` runs remain unchanged.
+The response shape:
 
 | Session state | HTTP | Body |
 | --- | --- | --- |
-| Has RUNNING/PENDING run(s) | 200 | `{"ok": true, "aborted": true, "aborted_run_ids": ["..."]}` |
+| Has RUNNING run(s) | 200 | `{"ok": true, "aborted": true, "aborted_run_ids": ["..."]}` |
 | No abortable run but terminal run record exists | 410 | `{"ok": false, "error": {"code": "run_terminated", "message": "...", "retryable": false}}` |
-| No run record for the session | 200 | `{"ok": true, "aborted": false, "aborted_run_ids": []}` |
+| No RUNNING run (including PENDING-only or no record) | 200 | `{"ok": true, "aborted": false, "aborted_run_ids": []}` |
 
 `body.id` is the idempotency key. Repeating `chat.abort` on the same terminal run
 stably returns 410 `run_terminated` without side effects.

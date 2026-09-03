@@ -21,7 +21,10 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
 
     let group = Arc::new(GroupServiceFake);
     let group = MetricsGroupManagementService::new(group, env.clone());
-    let created = group.create_group(group_create_cmd()).await.expect("create group");
+    let created = group
+        .create_group(group_create_cmd())
+        .await
+        .expect("create group");
     assert_eq!(created.group_id, "group-wrapper");
     let _ = group
         .update_status(group_status_cmd("completed"))
@@ -35,15 +38,27 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         .update_status(group_status_cmd("active"))
         .await
         .expect("status update group");
-    let _ = group.add_member(group_add_member_cmd()).await.expect("add member");
-    let deleted = group.delete_group(group_delete_cmd()).await.expect("delete group");
+    let _ = group
+        .add_member(group_add_member_cmd())
+        .await
+        .expect("add member");
+    let deleted = group
+        .delete_group(group_delete_cmd())
+        .await
+        .expect("delete group");
     assert!(deleted.deleted);
 
     let flow = Arc::new(MessageFlowFake);
     let flow = InstrumentedMessageFlowService::new(flow, env.clone());
-    assert_eq!(flow.handle_web_send(web_send_cmd()).await.unwrap().status, "ok");
     assert_eq!(
-        flow.handle_group_chat(group_chat_cmd()).await.unwrap().group_id,
+        flow.handle_web_send(web_send_cmd()).await.unwrap().status,
+        "ok"
+    );
+    assert_eq!(
+        flow.handle_group_chat(group_chat_cmd())
+            .await
+            .unwrap()
+            .group_id,
         "group-wrapper"
     );
     let _ = flow
@@ -60,7 +75,10 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         .handle_task_dispatch(task_dispatch_cmd())
         .await
         .unwrap();
-    let _ = flow.handle_task_complete(task_complete_cmd()).await.unwrap();
+    let _ = flow
+        .handle_task_complete(task_complete_cmd())
+        .await
+        .unwrap();
 
     let direct = Arc::new(A2aRunFake);
     let direct = InstrumentedA2aChatRunService::new(direct, env.clone());
@@ -73,9 +91,8 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         "pending"
     );
 
-    let bot_delivery = MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake {
-        delivered: true,
-    }), env.clone());
+    let bot_delivery =
+        MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake { delivered: true }), env.clone());
     assert!(
         bot_delivery
             .deliver(bot_delivery_cmd(BotDeliveryKind::Send))
@@ -83,9 +100,8 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
             .unwrap()
             .delivered
     );
-    let bot_delivery = MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake {
-        delivered: false,
-    }), env.clone());
+    let bot_delivery =
+        MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake { delivered: false }), env.clone());
     assert!(
         !bot_delivery
             .deliver(bot_delivery_cmd(BotDeliveryKind::TaskDispatch))
@@ -94,9 +110,10 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
             .delivered
     );
 
-    let frontend = MetricsFrontendDeliveryPort::new(Arc::new(FrontendDeliveryFake {
-        delivered: 0,
-    }), env.clone());
+    let frontend = MetricsFrontendDeliveryPort::new(
+        Arc::new(FrontendDeliveryFake { delivered: 0 }),
+        env.clone(),
+    );
     assert_eq!(
         frontend
             .publish(frontend_delivery_cmd())
@@ -138,7 +155,10 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         "target=\"bot\",delivery_kind=\"send\",result=\"blocked\",error_code=\"policy_blocked\"",
         "bcs_message_delivery_duration_seconds_bucket",
     ] {
-        assert!(body.contains(expected), "missing metrics fragment: {expected}");
+        assert!(
+            body.contains(expected),
+            "missing metrics fragment: {expected}"
+        );
     }
     assert!(!body.contains("raw policy message"));
 }
@@ -350,6 +370,7 @@ impl MessageFlowService for MessageFlowFake {
             aborted_run_ids: vec!["run-wrapper".to_string()],
             bot_deliveries: vec![],
             frontend_deliveries: vec![],
+            failures: vec![],
         })
     }
 
@@ -635,7 +656,8 @@ fn chat_abort_cmd() -> ChatAbortCommand {
     ChatAbortCommand {
         caller: CallerContext::Public,
         group_id: "group-wrapper".to_string(),
-        session_id: None,
+        session_id: "session-wrapper".to_string(),
+        bot_id: "bot-wrapper".to_string(),
         run_id: Some("run-wrapper".to_string()),
     }
 }

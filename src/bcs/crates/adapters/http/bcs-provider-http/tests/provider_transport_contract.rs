@@ -8,24 +8,24 @@ use std::{
 };
 
 use axum::{
-    body::Body,
     Json, Router,
+    body::Body,
     extract::State,
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
     routing::post,
 };
 use bcs_domain::{BotDeliveryTarget, RedactedToken};
-use bcs_provider_http::HttpProviderTransport;
 use bcs_protocol::{BCN_TRANSPORT_HEADER, BcsFrame, BotDeliveryKind, RequestFrame};
+use bcs_provider_http::HttpProviderTransport;
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome, BotRunContext,
-    BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState, GroupCallbackCommand,
-    GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
+    BotAbortDeliveryCommand, BotDeliveryCommand, BotDeliveryPort, BotEventCommand, BotEventOutcome,
+    BotRunContext, BotRunContextPort, ChatAbortCommand, ChatAbortOutcome, ChatEventState,
+    GroupCallbackCommand, GroupCallbackOutcome, GroupHistoryBotRequestPort, MessageFlowService,
     ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
-    ProviderRunTransport, ProviderTransportPreference, ServiceResult,
-    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
-    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
+    ProviderRunTransport, ProviderTransportPreference, ServiceResult, TaskCompleteCommand,
+    TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
+    WebSendCommand, WebSendOutcome,
 };
 use bcs_service_api::{InteractionKind, InteractionProviderCommand, InteractionProviderPort};
 
@@ -210,9 +210,90 @@ struct CapturedRequest {
     body: Value,
 }
 
+#[tokio::test]
+async fn provider_abort_sends_one_bot_session_scope_request_and_returns_actual_ids() {
+    let captured: CapturedState = Arc::new(Mutex::new(None));
+    let app = Router::new()
+        .route("/webhook", post(capture_abort_ack))
+        .with_state(captured.clone());
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let result = HttpProviderTransport::allowing_private_networks_for_tests()
+        .abort(BotAbortDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            command_id: "abort-command-1".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            timeout_ms: 60_000,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(result.target_bot_id, "bot-provider");
+    assert_eq!(result.aborted_run_ids, ["run-1", "run-2"]);
+    let request = captured.lock().await.clone().unwrap();
+    assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
+    assert_eq!(request.body["type"], "req");
+    assert_eq!(request.body["id"], "abort-command-1");
+    assert_eq!(request.body["method"], "chat.abort");
+    assert!(request.body["params"].is_null());
+    assert_eq!(request.body["session_id"], "session-1");
+    assert_eq!(request.body["bcn_group_id"], "group-1");
+    assert_eq!(request.body["to_bot"]["provider_id"], "provider-1");
+    assert_eq!(request.body["to_bot"]["provider_bot_ref"], "reviewer-v2");
+    assert!(request.body.get("env").is_none());
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_abort_treats_run_terminated_gone_as_idempotent_noop() {
+    let app = Router::new().route("/webhook", post(abort_gone));
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let result = HttpProviderTransport::allowing_private_networks_for_tests()
+        .abort(BotAbortDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            command_id: "abort-command-gone".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            timeout_ms: 60_000,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.aborted_run_ids.is_empty());
+    server.abort();
+}
+
+#[tokio::test]
+async fn provider_abort_rejects_unrelated_gone_response() {
+    let app = Router::new().route("/webhook", post(abort_unrelated_gone));
+    let (webhook_url, server) = spawn_server(app).await;
+
+    let error = HttpProviderTransport::allowing_private_networks_for_tests()
+        .abort(BotAbortDeliveryCommand {
+            target: provider_target_v2(webhook_url),
+            command_id: "abort-command-unrelated-gone".to_string(),
+            group_id: "group-1".to_string(),
+            session_id: "session-1".to_string(),
+            run_id: None,
+            timeout_ms: 60_000,
+        })
+        .await
+        .expect_err("only run_terminated is an idempotent 410");
+
+    assert!(error.to_string().contains("unexpected chat.abort 410"));
+    server.abort();
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn provider_delivery_injects_current_gateway_span_context() {
-    use opentelemetry::{global, trace::{TraceContextExt as _, TracerProvider as _}};
+    use opentelemetry::{
+        global,
+        trace::{TraceContextExt as _, TracerProvider as _},
+    };
     use opentelemetry_sdk::{
         propagation::TraceContextPropagator,
         trace::{InMemorySpanExporterBuilder, SdkTracerProvider},
@@ -224,8 +305,8 @@ async fn provider_delivery_injects_current_gateway_span_context() {
         .with_simple_exporter(exporter)
         .build();
     let tracer = provider.tracer("bcn-provider-transport-test");
-    let subscriber = tracing_subscriber::registry()
-        .with(tracing_opentelemetry::layer().with_tracer(tracer));
+    let subscriber =
+        tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
     let dispatch = tracing::Dispatch::new(subscriber);
     let _dispatch_guard = tracing::dispatcher::set_default(&dispatch);
 
@@ -332,9 +413,18 @@ async fn provider_delivery_ignores_reserved_bypass_headers() {
             provider_transport: Default::default(),
             provider_bypass_headers: vec![
                 ("authorization".to_string(), "Bearer attacker".to_string()),
-                ("bcn-message-id".to_string(), "attacker-message-id".to_string()),
-                ("x-bcs-bot-token".to_string(), "bot-token-secret".to_string()),
-                ("x-bcs-service-key".to_string(), "service-key-secret".to_string()),
+                (
+                    "bcn-message-id".to_string(),
+                    "attacker-message-id".to_string(),
+                ),
+                (
+                    "x-bcs-bot-token".to_string(),
+                    "bot-token-secret".to_string(),
+                ),
+                (
+                    "x-bcs-service-key".to_string(),
+                    "service-key-secret".to_string(),
+                ),
             ],
         })
         .await
@@ -384,12 +474,9 @@ where
                     | "provider downlink: webhook blocked by outbound URL policy"
             )
         }) {
-            self.events
-                .lock()
-                .unwrap()
-                .push(CapturedLogEvent {
-                    fields: visitor.fields,
-                });
+            self.events.lock().unwrap().push(CapturedLogEvent {
+                fields: visitor.fields,
+            });
         }
     }
 }
@@ -401,19 +488,23 @@ struct FieldVisitor {
 
 impl Visit for FieldVisitor {
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.fields.insert(field.name().to_string(), value.to_string());
+        self.fields
+            .insert(field.name().to_string(), value.to_string());
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
@@ -491,8 +582,18 @@ async fn provider_delivery_posts_bearer_token_and_chat_send_body() {
     let request = captured.lock().await.clone().unwrap();
     assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
     assert_eq!(request.protocol_version.as_deref(), Some("1.0"));
-    assert!(request.message_id.as_deref().is_some_and(|id| !id.is_empty()));
-    assert!(request.timestamp.as_deref().is_some_and(|ts| !ts.is_empty()));
+    assert!(
+        request
+            .message_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert!(
+        request
+            .timestamp
+            .as_deref()
+            .is_some_and(|ts| !ts.is_empty())
+    );
     assert_eq!(request.legacy_protocol_version.as_deref(), None);
     assert_eq!(request.body["id"], "run-1");
     assert!(request.body.get("run_id").is_none());
@@ -589,7 +690,10 @@ async fn provider_delivery_rejects_private_webhook_url_before_request() {
         .await
         .expect_err("private webhook URL should be rejected before request");
 
-    assert!(err.to_string().contains("provider webhook_url is not allowed"));
+    assert!(
+        err.to_string()
+            .contains("provider webhook_url is not allowed")
+    );
 }
 
 #[tokio::test]
@@ -614,7 +718,10 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
         .await
         .expect_err("private webhook URL should be rejected before request");
 
-    assert!(err.to_string().contains("provider webhook_url is not allowed"));
+    assert!(
+        err.to_string()
+            .contains("provider webhook_url is not allowed")
+    );
     let events = logs.lock().unwrap();
     let event = events
         .iter()
@@ -628,10 +735,15 @@ async fn provider_delivery_logs_policy_rejection_with_provider_url_ip_and_reason
         event.field("webhook_url").as_deref(),
         Some("http://127.0.0.1:1/webhook")
     );
-    assert_eq!(event.field("resolved_ip").as_deref(), Some("Some(127.0.0.1)"));
-    assert!(event
-        .field("reason")
-        .is_some_and(|reason| reason.contains("not allowed for outbound callbacks")));
+    assert_eq!(
+        event.field("resolved_ip").as_deref(),
+        Some("Some(127.0.0.1)")
+    );
+    assert!(
+        event
+            .field("reason")
+            .is_some_and(|reason| reason.contains("not allowed for outbound callbacks"))
+    );
 }
 
 #[tokio::test]
@@ -882,8 +994,18 @@ async fn provider_history_returns_messages_payload_for_converter() {
 
     let request = captured.lock().await.clone().unwrap();
     assert_eq!(request.protocol_version.as_deref(), Some("1.0"));
-    assert!(request.message_id.as_deref().is_some_and(|id| !id.is_empty()));
-    assert!(request.timestamp.as_deref().is_some_and(|ts| !ts.is_empty()));
+    assert!(
+        request
+            .message_id
+            .as_deref()
+            .is_some_and(|id| !id.is_empty())
+    );
+    assert!(
+        request
+            .timestamp
+            .as_deref()
+            .is_some_and(|ts| !ts.is_empty())
+    );
     assert_eq!(request.legacy_protocol_version.as_deref(), None);
     assert!(request.body["id"].as_str().is_some_and(|id| !id.is_empty()));
     assert!(request.body.get("run_id").is_none());
@@ -961,13 +1083,19 @@ async fn provider_history_logs_provider_bot_group_and_history_response() {
         response_event.field("target_bot_id").as_deref(),
         Some("bot-provider")
     );
-    assert_eq!(response_event.field("http_version").as_deref(), Some("HTTP/1.1"));
+    assert_eq!(
+        response_event.field("http_version").as_deref(),
+        Some("HTTP/1.1")
+    );
     assert_eq!(
         response_event.field("content_type").as_deref(),
         Some("application/json")
     );
     assert!(response_event.field("content_length").is_some());
-    assert_eq!(response_event.field("transfer_encoding").as_deref(), Some(""));
+    assert_eq!(
+        response_event.field("transfer_encoding").as_deref(),
+        Some("")
+    );
     assert!(response_event.field("headers_elapsed_ms").is_some());
 
     let event = events
@@ -975,9 +1103,15 @@ async fn provider_history_logs_provider_bot_group_and_history_response() {
         .find(|event| event.field("session_id").as_deref() == Some("group-log:cafebabe"))
         .expect("history response log");
 
-    assert_eq!(event.field("target_bot_id").as_deref(), Some("bot-provider"));
+    assert_eq!(
+        event.field("target_bot_id").as_deref(),
+        Some("bot-provider")
+    );
     assert_eq!(event.field("provider_id").as_deref(), Some("provider-1"));
-    assert_eq!(event.field("provider_bot_ref").as_deref(), Some("reviewer-v2"));
+    assert_eq!(
+        event.field("provider_bot_ref").as_deref(),
+        Some("reviewer-v2")
+    );
     assert_eq!(event.field("method").as_deref(), Some("chat.history"));
     assert_eq!(event.field("bcn_group_id").as_deref(), Some("group-log"));
     assert_eq!(event.field("message_count").as_deref(), Some("1"));
@@ -1111,6 +1245,39 @@ async fn capture_ack(
     }))
 }
 
+async fn capture_abort_ack(
+    State(captured): State<CapturedState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    capture(captured, headers, body).await;
+    Json(json!({
+        "ok": true,
+        "aborted": true,
+        "aborted_run_ids": ["run-1", "run-2"]
+    }))
+}
+
+async fn abort_gone() -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::GONE,
+        Json(json!({
+            "ok": false,
+            "error": "run_terminated"
+        })),
+    )
+}
+
+async fn abort_unrelated_gone() -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::GONE,
+        Json(json!({
+            "ok": false,
+            "error": { "code": "resource_gone" }
+        })),
+    )
+}
+
 async fn capture_history(
     State(captured): State<CapturedState>,
     headers: HeaderMap,
@@ -1223,9 +1390,7 @@ async fn capture(captured: CapturedState, headers: HeaderMap, body: Value) {
 }
 
 async fn spawn_server(app: Router) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let handle = tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -1298,11 +1463,7 @@ impl BotRunContextPort for RecordingRunContext {
         true
     }
 
-    async fn bind_provider_transport(
-        &self,
-        run_id: &str,
-        transport: ProviderRunTransport,
-    ) -> bool {
+    async fn bind_provider_transport(&self, run_id: &str, transport: ProviderRunTransport) -> bool {
         self.provider_transports
             .write()
             .await
@@ -1450,7 +1611,10 @@ async fn provider_delivery_2_0_inject_accepts_json_ack() {
         .await
         .expect("2.0 inject JSON ack must be accepted, not InternalError");
 
-    assert!(result.delivered, "2.0 inject JSON ack should mark delivered");
+    assert!(
+        result.delivered,
+        "2.0 inject JSON ack should mark delivered"
+    );
     assert!(result.error.is_none());
     let request = captured.lock().await.clone().unwrap();
     assert_eq!(request.protocol_version.as_deref(), Some("2.0"));

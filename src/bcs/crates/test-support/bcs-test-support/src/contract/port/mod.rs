@@ -10,7 +10,8 @@ use bcs_service_api::port::{
     EventRecorderPort, EventingInstrumentationPort, NewEvent,
 };
 use bcs_service_api::{
-    BotDeliveryPort, CanResolveInteractionPort, ChatRunCleanupPort, ChatRunEventPort,
+    ActiveBotRunContext, BotDeliveryPort, BotRunContext, BotRunContextPort, BotRunScope,
+    BotRunTransportOwner, CanResolveInteractionPort, ChatRunCleanupPort, ChatRunEventPort,
     FrontendDeliveryPort, GroupHistoryBotRequestPort, HumanInputReadyEvent,
     InteractionFrontendPort, InteractionProviderPort, InteractionStorePort, LeaderElectionPort,
     LeaderStatus, SessionChannelDeliveryOutcome, SessionChannelOutboundPort,
@@ -28,6 +29,103 @@ pub use metrics::{
 };
 
 pub async fn bot_delivery_port_contract_tests<T: BotDeliveryPort + ?Sized>(_port: &T) {}
+
+pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
+    port: &T,
+    namespace: &str,
+) {
+    let canonical_run_id = format!("{namespace}-canonical");
+    let initial_downstream_run_id = format!("{namespace}-downstream-initial");
+    let bound_downstream_run_id = format!("{namespace}-downstream-bound");
+    let scope = BotRunScope {
+        group_id: format!("{namespace}-group"),
+        session_id: format!("{namespace}-session"),
+        bot_id: format!("{namespace}-bot"),
+    };
+    port.put_context(BotRunContext {
+        run_id: canonical_run_id.clone(),
+        bot_id: scope.bot_id.clone(),
+        group_id: scope.group_id.clone(),
+        bcs_session_id: Some(scope.session_id.clone()),
+        deadline_ms: u64::MAX,
+        terminal: false,
+    })
+    .await;
+    port.register_active_run(ActiveBotRunContext {
+        canonical_run_id: canonical_run_id.clone(),
+        downstream_run_id: initial_downstream_run_id.clone(),
+        downstream_session_key: Some(format!("{namespace}-wire-session")),
+        scope: scope.clone(),
+        transport_owner: BotRunTransportOwner::WebSocket,
+        deadline_ms: u64::MAX,
+    })
+    .await
+    .expect("register active run");
+
+    let active = port
+        .list_active_runs(&scope)
+        .await
+        .expect("list active runs");
+    assert_eq!(active.len(), 1, "scope contains exactly the registered run");
+    assert_eq!(active[0].canonical_run_id, canonical_run_id);
+    assert_eq!(
+        port.find_active_run(&initial_downstream_run_id)
+            .await
+            .expect("resolve initial alias")
+            .expect("initial alias exists")
+            .scope,
+        scope
+    );
+
+    assert!(
+        port.bind_downstream_run_id(&canonical_run_id, &bound_downstream_run_id)
+            .await
+            .expect("bind downstream run id")
+    );
+    assert!(
+        port.find_active_run(&initial_downstream_run_id)
+            .await
+            .expect("query replaced alias")
+            .is_none(),
+        "replaced downstream alias must no longer resolve"
+    );
+    assert_eq!(
+        port.find_active_run(&bound_downstream_run_id)
+            .await
+            .expect("resolve bound alias")
+            .expect("bound alias exists")
+            .canonical_run_id,
+        canonical_run_id
+    );
+
+    let wrong_scope = BotRunScope {
+        session_id: format!("{namespace}-other-session"),
+        ..scope.clone()
+    };
+    assert!(
+        !port
+            .remove_active_run(&wrong_scope, &canonical_run_id)
+            .await
+            .expect("reject cross-scope removal")
+    );
+    assert!(
+        port.remove_active_run(&scope, &canonical_run_id)
+            .await
+            .expect("remove active run")
+    );
+    assert!(
+        port.list_active_runs(&scope)
+            .await
+            .expect("list after removal")
+            .is_empty()
+    );
+    assert!(
+        port.find_active_run(&bound_downstream_run_id)
+            .await
+            .expect("query removed alias")
+            .is_none()
+    );
+}
 
 pub async fn event_recorder_port_contract_tests<T: EventRecorderPort + ?Sized>(
     port: &T,
