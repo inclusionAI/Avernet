@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skills_pool.models import PoolSkillMapping
 
@@ -30,7 +31,7 @@ class BotRuntimeProjectorProtocol(
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
-    ) -> None: ...
+    ) -> RuntimeProjectionResult: ...
 
     async def project_mcp_and_cli(
         self,
@@ -38,7 +39,7 @@ class BotRuntimeProjectorProtocol(
         bot_id: str,
         owner_id: str,
         scope: ProjectionScope,
-    ) -> None: ...
+    ) -> RuntimeProjectionResult: ...
 
 
 __all__ = ["BotRuntimeProjectorProtocol"]

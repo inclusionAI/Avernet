@@ -9,19 +9,18 @@ use async_trait::async_trait;
 use bcs_protocol::{
     AgentEventPayload, AgentStream, BCS_MIN_SUPPORTED_VERSION, BCS_PROTOCOL_VERSION, BcsFrame,
     BotConnectParams as WireBotConnectParams, BotConnectResponse, BotStatus as WsBotStatus,
-    BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape, EventFrame,
-    RequestFrame, ResponseFrame, RouteSelectorWire,
+    BotStatusParams, ChatEventPayload, ChatEventState, ErrorShape, EventFrame, RequestFrame,
+    ResponseFrame, RouteSelectorWire,
 };
 use bcs_service_api::{
-    BotEventCommand, BotRuntimeConnectCommand, BotRuntimeConnectionService,
-    BotRunContextPort, BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotUseCaseError,
-    ChatEventState as AppChatEventState,
-    CollaborationRuntimeService, ConnectError, GroupDispatchContextPort, MessageFlowService,
-    MessageLogEventType, MessageLogMode, MessageLogStatus, MESSAGE_LOG_SCHEMA_VERSION,
-    MSG_LOG_TARGET, ServiceError, SessionCallbackDispatchPort,
-    Participant, ParticipantRole, SessionManagementService, SessionUseCaseError,
-    SystemMessageService, TaskCompleteCommand, TaskDispatchCommand,
-    TaskMessageCommand, TaskRunAliasRegistration,
+    BotEventCommand, BotRunContextPort, BotRuntimeConnectCommand, BotRuntimeConnectionService,
+    BotRuntimeDisconnectCommand, BotRuntimeStatusCommand, BotUseCaseError,
+    ChatEventState as AppChatEventState, CollaborationRuntimeService, ConnectError,
+    GroupDispatchContextPort, MESSAGE_LOG_SCHEMA_VERSION, MSG_LOG_TARGET, MessageFlowService,
+    MessageLogEventType, MessageLogMode, MessageLogStatus, Participant, ParticipantRole,
+    ServiceError, SessionCallbackDispatchPort, SessionManagementService, SessionUseCaseError,
+    SystemMessageService, TaskCompleteCommand, TaskDispatchCommand, TaskMessageCommand,
+    TaskRunAliasRegistration,
 };
 use opentelemetry::Context;
 use opentelemetry::trace::TraceContextExt;
@@ -37,8 +36,7 @@ use crate::shared::RunChannelManager;
 pub type Result<T> = std::result::Result<T, BotWsDispatchError>;
 
 const BOT_DELIVERY_IS_PROVIDER_CODE: &str = "bot_delivery_is_provider";
-const BOT_DELIVERY_IS_PROVIDER_MESSAGE: &str =
-    "Bot delivery is configured for HttpProvider; WebSocket uplink is no longer accepted for this bot";
+const BOT_DELIVERY_IS_PROVIDER_MESSAGE: &str = "Bot delivery is configured for HttpProvider; WebSocket uplink is no longer accepted for this bot";
 const BOT_RESPONSE_CONTENT_LIMIT_BYTES: usize = 4096;
 const TRUNCATION_MARKER: &str = "...[TRUNCATED]...";
 
@@ -222,16 +220,26 @@ async fn handle_session_complete(
         error: Option<String>,
     }
 
-    let params: SessionCompleteParams = serde_json::from_value(params)
-        .map_err(|e| BotWsDispatchError::InvalidFrameFormat(format!("invalid session.complete params: {e}")))?;
+    let params: SessionCompleteParams = serde_json::from_value(params).map_err(|e| {
+        BotWsDispatchError::InvalidFrameFormat(format!("invalid session.complete params: {e}"))
+    })?;
 
-    match state.session_management.complete_if_running(&params.session_id, params.output, params.error).await {
+    match state
+        .session_management
+        .complete_if_running(&params.session_id, params.output, params.error)
+        .await
+    {
         Ok(Some(session)) => {
             state
                 .callback_dispatch
                 .maybe_dispatch(session.clone(), state.session_management.clone())
                 .await;
-            send_ok(tx, req_id, serde_json::to_value(&session).unwrap_or(Value::Null)).await?;
+            send_ok(
+                tx,
+                req_id,
+                serde_json::to_value(&session).unwrap_or(Value::Null),
+            )
+            .await?;
         }
         Ok(None) => {
             send_ok(tx, req_id, serde_json::json!({"already_completed": true})).await?;
@@ -416,11 +424,7 @@ async fn reject_provider_delivery_websocket(
     req_id: &str,
     bot_id: &str,
 ) -> Result<bool> {
-    match state
-        .bot_runtime
-        .is_provider_downlink_bot(bot_id)
-        .await
-    {
+    match state.bot_runtime.is_provider_downlink_bot(bot_id).await {
         Ok(true) => {
             send_error(
                 tx,
@@ -560,6 +564,15 @@ async fn handle_response_frame(
 ) -> Result<()> {
     let run_id = &res.id;
 
+    if state
+        .bot_connections
+        .resolve_pending_abort_request(run_id, res.clone())
+        .await
+    {
+        debug!(request_id = %run_id, ok = res.ok, "matched chat.abort ResponseFrame");
+        return Ok(());
+    }
+
     // Check if this is a one-shot pending request (e.g., chat.history)
     let payload = if res.ok {
         res.payload.clone().unwrap_or(Value::Null)
@@ -652,7 +665,11 @@ async fn log_bot_response_frame(
     registered_bot_id: &Option<String>,
 ) {
     let run_context = state.bot_run_context.get_context(run_id).await;
-    let correlation = match state.collaboration_runtime.lookup_delivery_correlation(run_id).await {
+    let correlation = match state
+        .collaboration_runtime
+        .lookup_delivery_correlation(run_id)
+        .await
+    {
         Ok(correlation) => correlation,
         Err(error) => {
             debug!(
@@ -695,7 +712,11 @@ async fn log_bot_response_frame(
     let session_id = state_machine_run
         .as_ref()
         .map(|view| view.run.session_id.clone())
-        .or_else(|| run_context.as_ref().and_then(|ctx| ctx.bcs_session_id.clone()))
+        .or_else(|| {
+            run_context
+                .as_ref()
+                .and_then(|ctx| ctx.bcs_session_id.clone())
+        })
         .or_else(|| run_context.as_ref().map(|ctx| ctx.group_id.clone()))
         .unwrap_or_else(|| group_id.clone());
     let bot_id = correlation
@@ -720,8 +741,16 @@ async fn log_bot_response_frame(
     } else {
         MessageLogStatus::Rejected
     };
-    let error_code = res.error.as_ref().map(|error| error.code.as_str()).unwrap_or("");
-    let error_message = res.error.as_ref().map(|error| error.message.as_str()).unwrap_or("");
+    let error_code = res
+        .error
+        .as_ref()
+        .map(|error| error.code.as_str())
+        .unwrap_or("");
+    let error_message = res
+        .error
+        .as_ref()
+        .map(|error| error.message.as_str())
+        .unwrap_or("");
     let state_machine_run_id = correlation
         .as_ref()
         .map(|corr| corr.state_machine_run_id.as_str())
@@ -848,17 +877,9 @@ async fn handle_event_frame(
 
     let event_payload = event.payload.clone().unwrap_or(Value::Null);
     let event_state = chat_event_state.unwrap_or(ChatEventState::Delta);
-    let explicit_session_id = event_payload
-        .get("bcs_session_id")
-        .and_then(|v| v.as_str());
-    let (real_group_id, mut bcs_session_id) = resolve_bot_event_scope(
-        state,
-        &bot_id,
-        &run_id,
-        &bcs_group_id,
-        explicit_session_id,
-    )
-    .await;
+    let explicit_session_id = event_payload.get("bcs_session_id").and_then(|v| v.as_str());
+    let (real_group_id, mut bcs_session_id) =
+        resolve_bot_event_scope(state, &bot_id, &run_id, &bcs_group_id, explicit_session_id).await;
     if bcs_session_id.is_none() {
         if let Some(mapped_session_id) = state.run_channels.session_for_run(&run_id).await {
             let restored_session_id = if mapped_session_id.contains(':') {
@@ -897,7 +918,9 @@ async fn handle_event_frame(
         .collaboration_runtime
         .lookup_delivery_correlation(&run_id)
         .await
-        .map_err(|error| BotWsDispatchError::ServiceError(ServiceError::InternalError(error.to_string())))?
+        .map_err(|error| {
+            BotWsDispatchError::ServiceError(ServiceError::InternalError(error.to_string()))
+        })?
         .is_some()
     {
         let terminal = matches!(
@@ -1067,9 +1090,7 @@ fn bot_response_finish_reason(event_state: &ChatEventState) -> Option<&'static s
         ChatEventState::Final => Some("stop"),
         ChatEventState::Error => Some("error"),
         ChatEventState::Aborted => Some("aborted"),
-        ChatEventState::Delta
-        | ChatEventState::ToolCallStart
-        | ChatEventState::ToolCallEnd => None,
+        ChatEventState::Delta | ChatEventState::ToolCallStart | ChatEventState::ToolCallEnd => None,
     }
 }
 
@@ -1210,6 +1231,18 @@ async fn handle_accepted_run_id_response(
         .and_then(|v| v.as_str())
     {
         if sub_run_id != run_id {
+            if let Err(error) = state
+                .bot_run_context
+                .bind_downstream_run_id(run_id, sub_run_id)
+                .await
+            {
+                warn!(
+                    canonical_run_id = %run_id,
+                    downstream_run_id = %sub_run_id,
+                    error = %error,
+                    "failed to bind downstream run id for chat.abort routing"
+                );
+            }
             let channel_source_message_rebound = match state
                 .message_flow
                 .rebind_channel_source_message(run_id, sub_run_id)
@@ -1346,7 +1379,11 @@ async fn handle_state_machine_response(
     run_id: &str,
     res: &ResponseFrame,
 ) {
-    let correlation = match state.collaboration_runtime.lookup_delivery_correlation(run_id).await {
+    let correlation = match state
+        .collaboration_runtime
+        .lookup_delivery_correlation(run_id)
+        .await
+    {
         Ok(Some(correlation)) => correlation,
         Ok(None) => return,
         Err(error) => {
@@ -1370,7 +1407,10 @@ async fn handle_state_machine_response(
     };
     if let Err(error) = state
         .collaboration_runtime
-        .register_delivery_alias(&correlation.delivery_request_id, bot_delivery_run_id.clone())
+        .register_delivery_alias(
+            &correlation.delivery_request_id,
+            bot_delivery_run_id.clone(),
+        )
         .await
     {
         warn!(
@@ -1612,7 +1652,10 @@ fn resolve_route_selectors(
         match selector.selector_type.as_str() {
             "bot" => {
                 if value.is_empty() {
-                    return invalid_route_selector(participants, "'bot' selector requires a non-empty value");
+                    return invalid_route_selector(
+                        participants,
+                        "'bot' selector requires a non-empty value",
+                    );
                 }
                 match participants
                     .iter()
@@ -1630,7 +1673,10 @@ fn resolve_route_selectors(
             }
             "name" => {
                 if value.is_empty() {
-                    return invalid_route_selector(participants, "'name' selector requires a non-empty value");
+                    return invalid_route_selector(
+                        participants,
+                        "'name' selector requires a non-empty value",
+                    );
                 }
                 let matches: Vec<_> = participants
                     .iter()
@@ -1655,7 +1701,9 @@ fn resolve_route_selectors(
                         return RouteResolveResult {
                             ok: false,
                             error: Some("AMBIGUOUS_ROUTE_TARGET".to_string()),
-                            message: Some(format!("Multiple participants matched name \"{value}\"")),
+                            message: Some(format!(
+                                "Multiple participants matched name \"{value}\""
+                            )),
                             resolved: Vec::new(),
                             candidates: matches.into_iter().map(route_candidate).collect(),
                         };
@@ -1695,7 +1743,10 @@ fn push_resolved_target(resolved: &mut Vec<RouteResolveTarget>, participant: &Pa
     });
 }
 
-fn invalid_route_selector(participants: &[Participant], message: impl Into<String>) -> RouteResolveResult {
+fn invalid_route_selector(
+    participants: &[Participant],
+    message: impl Into<String>,
+) -> RouteResolveResult {
     RouteResolveResult {
         ok: false,
         error: Some("INVALID_ROUTE_SELECTOR".to_string()),
@@ -1705,7 +1756,11 @@ fn invalid_route_selector(participants: &[Participant], message: impl Into<Strin
     }
 }
 
-fn unknown_route_target(participants: &[Participant], value: &str, message: String) -> RouteResolveResult {
+fn unknown_route_target(
+    participants: &[Participant],
+    value: &str,
+    message: String,
+) -> RouteResolveResult {
     RouteResolveResult {
         ok: false,
         error: Some("UNKNOWN_ROUTE_TARGET".to_string()),
@@ -1715,7 +1770,10 @@ fn unknown_route_target(participants: &[Participant], value: &str, message: Stri
     }
 }
 
-fn route_candidates(participants: &[Participant], query: Option<&str>) -> Vec<RouteResolveCandidate> {
+fn route_candidates(
+    participants: &[Participant],
+    query: Option<&str>,
+) -> Vec<RouteResolveCandidate> {
     let query = query.map(|value| value.to_lowercase());
     let mut candidates: Vec<_> = participants
         .iter()
@@ -1726,7 +1784,10 @@ fn route_candidates(participants: &[Participant], query: Option<&str>) -> Vec<Ro
                     || participant
                         .bot_name
                         .as_deref()
-                        .map(|name| name.to_lowercase().contains(query) || query.contains(&name.to_lowercase()))
+                        .map(|name| {
+                            name.to_lowercase().contains(query)
+                                || query.contains(&name.to_lowercase())
+                        })
                         .unwrap_or(false)
             }
             _ => true,
@@ -1852,9 +1913,7 @@ async fn handle_route_resolve(
                         tx,
                         req_id,
                         "invalid_session",
-                        &format!(
-                            "Session {session_id} does not belong to group {real_group_id}"
-                        ),
+                        &format!("Session {session_id} does not belong to group {real_group_id}"),
                     )
                     .await?;
                     return Ok(());
@@ -2138,8 +2197,7 @@ mod tests {
 
     #[test]
     fn unwrap_outbound_group_id_accepts_legacy_plain_group_session_param() {
-        let (group_id, session_id) =
-            unwrap_outbound_group_id("group-1:abcdef12", Some("group-1"));
+        let (group_id, session_id) = unwrap_outbound_group_id("group-1:abcdef12", Some("group-1"));
 
         assert_eq!(group_id, "group-1");
         assert_eq!(session_id.as_deref(), Some("group-1:abcdef12"));
@@ -2208,9 +2266,11 @@ mod tests {
             }),
         );
 
-        assert!(span.attributes.iter().all(|attribute| {
-            attribute.key.as_str() != "gen_ai.output.messages"
-        }));
+        assert!(
+            span.attributes
+                .iter()
+                .all(|attribute| { attribute.key.as_str() != "gen_ai.output.messages" })
+        );
         assert!(span.attributes.iter().any(|attribute| {
             attribute.key.as_str() == "bcn.bot.response.chunk"
                 && matches!(&attribute.value, opentelemetry::Value::String(value) if value.as_str() == "partial response")
@@ -2253,8 +2313,8 @@ mod tests {
             .with_simple_exporter(exporter.clone())
             .build();
         let tracer = provider.tracer("bcn-ws-response-test");
-        let subscriber = tracing_subscriber::registry()
-            .with(tracing_opentelemetry::layer().with_tracer(tracer));
+        let subscriber =
+            tracing_subscriber::registry().with(tracing_opentelemetry::layer().with_tracer(tracer));
 
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!(target: "bcn_otel", "bcn.bot.response");

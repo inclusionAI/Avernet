@@ -1,11 +1,11 @@
-"""Unit tests for the B6 community device impls (real, vendor-free, no-op-by-design).
+"""Unit tests for the B6 community device implementations.
 
 Covers:
 - ``CommunityHealthProbe`` — direct-HTTP /readiness probe (all branches: no
   bindings, no-url binding, healthy/unhealthy/exception probes, payload parsing,
   list_bindings failure, sandbox unsupported).
 - ``CommunityDeviceSyncDispatcher`` — selects the DI-provided BaaS DeviceSync service.
-- ``CommunityDeviceAdapterTransport`` — no-op relay transport.
+- ``CommunityDeviceAdapterTransport`` — BaaS-backed relay transport.
 
 These ship in the community distribution, so they must be exercised directly
 (the contract/wiring suites only prove they're *bound*).
@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 from agentclaw.community.plugins.community.device_adapter_transport import (
     CommunityDeviceAdapterTransport,
@@ -173,11 +174,11 @@ def test_sandbox_health_unsupported():
 
 # ── CommunityDeviceAdapterTransport ──────────────────────────────────────────
 
-def test_adapter_transport_invoke_is_noop_envelope():
-    out = asyncio.run(
-        CommunityDeviceAdapterTransport().invoke(
-            conn_info={"url": "http://x"}, method="POST", path="/api/cron", body={"a": 1},
+def test_adapter_transport_requires_binding_id():
+    baas_service = MagicMock()
+    with pytest.raises(ValueError, match="binding_id"):
+        asyncio.run(
+            CommunityDeviceAdapterTransport(baas_service).invoke(
+                conn_info={"url": "http://x"}, method="POST", path="/api/cron", body={"a": 1},
+            )
         )
-    )
-    assert out["success"] is False
-    assert "no device adapter" in out["message"]

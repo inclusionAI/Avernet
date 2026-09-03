@@ -2,6 +2,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+fn default_worker_send_task_message_enabled() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderAuthMode {
@@ -69,6 +77,13 @@ pub enum CoordinationMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCoordinationConfig {
     pub mode: CoordinationMode,
+    /// Whether manager-worker worker contexts should explain the optional
+    /// `bcs_send_task_message` tool.
+    #[serde(
+        default = "default_worker_send_task_message_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub worker_send_task_message_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_server: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -98,6 +113,7 @@ impl ProviderCoordinationConfig {
     pub fn disabled() -> Self {
         Self {
             mode: CoordinationMode::Disabled,
+            worker_send_task_message_enabled: true,
             mcp_server: None,
             mcporter_command: None,
             tool_name_mapping: BTreeMap::new(),
@@ -108,6 +124,13 @@ impl ProviderCoordinationConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoordinationSurface {
     pub mode: CoordinationMode,
+    /// Effective Provider setting for the optional worker send-message tool
+    /// guidance. Non-Provider surfaces use the backward-compatible default.
+    #[serde(
+        default = "default_worker_send_task_message_enabled",
+        skip_serializing_if = "is_true"
+    )]
+    pub worker_send_task_message_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_server: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -121,6 +144,7 @@ impl CoordinationSurface {
     pub fn legacy_upstream() -> Self {
         Self {
             mode: CoordinationMode::LegacyUpstream,
+            worker_send_task_message_enabled: true,
             mcp_server: None,
             mcporter_command: None,
             tool_name_mapping: BTreeMap::new(),
@@ -130,6 +154,7 @@ impl CoordinationSurface {
     pub fn native_tool() -> Self {
         Self {
             mode: CoordinationMode::NativeTool,
+            worker_send_task_message_enabled: true,
             mcp_server: None,
             mcporter_command: None,
             tool_name_mapping: BTreeMap::new(),
@@ -141,6 +166,7 @@ impl From<ProviderCoordinationConfig> for CoordinationSurface {
     fn from(config: ProviderCoordinationConfig) -> Self {
         Self {
             mode: config.mode,
+            worker_send_task_message_enabled: config.worker_send_task_message_enabled,
             mcp_server: config.mcp_server,
             mcporter_command: config.mcporter_command,
             tool_name_mapping: config.tool_name_mapping,

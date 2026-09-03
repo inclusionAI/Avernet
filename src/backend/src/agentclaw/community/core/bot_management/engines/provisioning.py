@@ -155,7 +155,7 @@ class EngineProvisioningStrategy(ABC):
         strategy may interpret its keys. Called before Passport apply and any
         persistence, so every violation must raise, never silently drop input.
 
-        ``{"template": None}`` is a Core-only legacy compatibility shape (the
+        ``{"template_config": None}`` is a Core-only legacy compatibility shape (the
         public schema requires a non-empty object): the key's *presence* carries
         the application-coding intent when a legacy caller omitted the config.
 

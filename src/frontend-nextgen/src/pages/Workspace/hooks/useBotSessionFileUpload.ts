@@ -66,28 +66,38 @@ export function useBotSessionFileUpload(
       uploadingRef.current = true;
       store.setIsUploading(true);
       try {
-        const queue = [...store.uploadTasks.filter((t) => t.phase === 'staged')];
-        for (const task of queue) {
+        // stageFiles 与 submit 可能在同一个文件选择事件中连续调用，读取 store 最新快照避免闭包拿到旧队列。
+        // 每轮重新读取队列，确保上传进行中追加选择的文件也会自动进入同一上传流程。
+        const updateProgress = (localId: string) => (loaded: number, total: number) => {
+          store.updateTask(localId, { progress: total > 0 ? Math.round((loaded / total) * 100) : 0 });
+        };
+        let task = useBotSessionFileStore.getState().uploadTasks.find((item) => item.phase === 'staged');
+        while (task) {
+          const currentTask = task;
           const abortController = new AbortController();
-          store.updateTask(task.localId, { phase: 'uploading', progress: 0, abortController });
-          const res = await botSessionFileService.uploadOne(botId, sessionId, userId, task.file, {
+          store.updateTask(currentTask.localId, { phase: 'uploading', progress: 0, abortController });
+          const res = await botSessionFileService.uploadOne(botId, sessionId, userId, currentTask.file, {
             ownerId,
             signal: abortController.signal,
-            onProgress: (loaded, total) =>
-              store.updateTask(task.localId, { progress: total > 0 ? Math.round((loaded / total) * 100) : 0 }),
+            onProgress: updateProgress(currentTask.localId),
           });
           if (res.ok) {
-            store.updateTask(task.localId, { phase: 'ready', progress: 100, resourceId: res.data.resourceId });
+            store.updateTask(currentTask.localId, {
+              phase: 'ready',
+              progress: 100,
+              resourceId: res.data.resourceId,
+            });
             store.addReadyFile(res.data);
             onFileReady?.(res.data);
           } else {
-            store.updateTask(task.localId, {
+            store.updateTask(currentTask.localId, {
               phase: 'failed',
               error: res.error.friendlyMessage,
               abortController: undefined,
             });
-            toast.error(`「${task.name}」${res.error.friendlyMessage}`);
+            toast.error(`「${currentTask.name}」${res.error.friendlyMessage}`);
           }
+          task = useBotSessionFileStore.getState().uploadTasks.find((item) => item.phase === 'staged');
         }
       } finally {
         uploadingRef.current = false;

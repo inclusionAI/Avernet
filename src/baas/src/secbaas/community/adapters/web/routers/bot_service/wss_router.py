@@ -39,6 +39,7 @@ class BotWsConnectionInfoResponse(BaseModel):
         ..., description="Target identifier (format: {platform}_{device_id}:{port})"
     )
     expires_at: datetime = Field(..., description="Token expiration timestamp (UTC)")
+    device_id: str = Field(..., description="PaaS device id of the selected device")
 
 
 class BotWsConnectionErrorResponse(BaseModel):
@@ -151,6 +152,7 @@ async def get_bot_ws_connection_info(
                 token=conn_info.token,
                 target=conn_info.target,
                 expires_at=conn_info.expires_at,
+                device_id=conn_info.device_id,
             )
         )
 

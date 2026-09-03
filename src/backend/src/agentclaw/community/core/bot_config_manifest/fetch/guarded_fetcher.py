@@ -39,7 +39,6 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import re
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -48,6 +47,7 @@ from typing import Iterable, Optional, Protocol
 import httpx
 
 from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    DIGEST_RE,
     FetchBudget,
     MAX_REDIRECTS,
     SAFE_SCHEMES,
@@ -58,8 +58,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import (
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
-
-_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class FetchRefusedError(Exception):
@@ -237,7 +235,7 @@ class GuardedFetcher:
         return min(addresses, key=lambda ip: (ip.version, int(ip)))
 
     def fetch(self, request: FetchRequest) -> FetchedObject:
-        if request.expected_digest is not None and not _DIGEST_RE.match(
+        if request.expected_digest is not None and not DIGEST_RE.match(
             request.expected_digest
         ):
             raise FetchRefusedError(

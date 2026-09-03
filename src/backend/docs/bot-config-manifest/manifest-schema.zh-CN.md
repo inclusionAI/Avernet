@@ -145,7 +145,7 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 git 源调托管服务 HTTP API、URL 源发普通 GET，注入动作相同。
 
 ```text
-PUT /openapi/v1/source-credentials/{name}
+PUT /openapi/v1/bots/source-credentials/{name}
 {
   "type": "header",                     # 判别键；v1 唯一实现，缺省即 header
   "allowed_prefixes": ["…"],            # 所有 type 共有（见下）
@@ -157,7 +157,7 @@ PUT /openapi/v1/source-credentials/{name}
 两个实际调用（同一端点、同一 schema，只是 `{name}` 与取值不同）：
 
 ```text
-PUT /openapi/v1/source-credentials/corp-git-content
+PUT /openapi/v1/bots/source-credentials/corp-git-content
 {
   "type": "header",
   "header_name": "Authorization",                                  # 按托管服务定（下方「token 选型」）
@@ -165,7 +165,7 @@ PUT /openapi/v1/source-credentials/corp-git-content
   "allowed_prefixes": ["https://code.example-corp.com/team/content"]
 }
 
-PUT /openapi/v1/source-credentials/oss-artifacts
+PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
   "type": "header",
   "header_name": "Authorization",
@@ -385,13 +385,49 @@ manifest:
 
 ```yaml
 mcp:
-  - server_code: github          # 平台 MCP 注册表引用（必填）
-    config: { … }                # 可选，per-bot 配置，形状同现有 MCP config API
+  - server_code: github          # 平台 MCP 注册表引用（必填，且是唯一的字段）
 ```
 
-- 只接受注册表引用；**凭证永不出现在 manifest**（design §4.5）。
+- **一个条目就是一个注册表引用，没有别的字段。**只接受注册表引用；**凭证永不
+  出现在 manifest**（design §4.5）。
 - 校验：`server_code` 必须存在于注册表且租户有权限（复用现有
-  `check_mcp_permission` 逻辑）；apply 动作等价于现有「启用 + 配置」API。
+  `check_mcp_permission` 逻辑）。
+- apply 动作是**收敛这个 bot 的已启用 server 集合**——也正是 §3.2 给这个类目
+  定义的区域：声明了但未启用的启用，已启用但不再声明的停用，已经一致的记
+  `unchanged`。经既有的 per-bot 启用服务（`DirectActivationService` →
+  `ac_bot_mcp_installation`）完成。
+
+#### `config` 已从 v1 移除（W4 评审结论）
+
+本节早先写着 `config: { … }  # 可选，per-bot 配置，形状同现有 MCP config API`。
+**那两句不可能同时为真**，而这个字段已被删除、写入时按名拒绝（与已废弃的
+`cli_tools.entrypoints` 同样处理）。
+
+- **那个 API 不是 per-bot 的。**它写 `ac_user_mcp_config`，键为
+  `(user_id, server_code)`，且写入路径会调用
+  `sync_mcp_detail_to_all_bots`——**扇出到该 owner 名下的每一个 bot**。于是
+  「应用某一个 bot 的 manifest」会改掉他所有 bot 的 MCP 配置：这个影响范围是
+  别的类目都没有的，§3.2 的「区域逐类目定义」也从未授权它。
+- **它装的正是凭证。**`api_key` 与 `custom_headers` 是它的载荷，而 design §4.5
+  规定凭证不得进入 manifest。
+- **真正 per-bot 的那个东西已经被覆盖了**：`ac_bot_mcp_installation`，也就是
+  §3.2 说的「已启用的 server 集合」。
+
+所以账号级的 MCP 配置（api_key / headers / endpoint_env / transport_protocol）
+仍然通过既有的公开端点管理，它本来就是账号级的：
+
+```text
+GET  /openapi/v1/bots/mcp/servers/{server_code}/config
+PUT  /openapi/v1/bots/mcp/servers/{server_code}/config
+```
+
+**留作后续（可加性，不破坏兼容）：**`ac_bot_mcp_call_config` 的 `call_type`
+（`owner` / `caller`）是另一个确实 per-bot 的 MCP 事实，端点为
+`PATCH /openapi/v1/bots/{bot_id}/mcps/{server_code}/call-type`。它没有被纳入
+v1，因为它在 §3.2 给本类目定义的区域**之外**，而且它的写入带有 draft 状态、
+lock epoch 与不可逆语义（`CallerLockEpochError`、`CallerIdentityReadOnlyError`），
+一个幂等、可重跑的 apply 必须先回答这些问题。往一个封闭集合里加一个键是可加
+的，所以这件事可以以后做，且不需要 v2。
 
 ### 3.2 `resources` — workspace 资源文件
 
@@ -474,6 +510,10 @@ skills:
 - **归档自动识别**：平台按内容类型/扩展名判定是否需要解包，`unpack` 仅在
   扩展名不可靠时作为显式覆盖。两种形态下用户声明的都是「我要这个
   skill」，怎么取回来是平台的事。
+- **W5 起 `content` 内联在 skills 条目上被拒绝**（`content_not_a_skill_package`）：
+  skill 是包（SKILL.md + 其引用的文件），一段内联文本成不了包——按「这个面
+  不接受它物化不了的东西」的既定规则在 `PUT` 拒绝。identity 类目不受此
+  限制（一个 identity 文件本身就是一段文本）。
 - teclaw：物化进 bot-data store 后以 `SkillRef(scope="user")` 进 artifact，
   与今天手工 upload 的 skill 走完全相同的路。
 - v2 预留来源：`source: center://<skill_uuid>@<version>`（skill center 引用，
@@ -637,6 +677,7 @@ cli_tools:
 | 配置清单文档总大小 | 64 KiB（script 部分另按现状 24 KiB） |
 | 每类别条目数 | 50 |
 | `content` 内联单条 | 64 KiB |
+| `source` URL 单条 | 2048 字符（与 provenance 列宽一致；PUT 时拒绝——长度是准入可见的，不是取完后才该知道的） |
 | fetch 单条目 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB；cli_tools 单工具 200 MiB |
 | resources 目录条目 | 单归档 200 MiB；解包后 500 MiB；单归档文件数 5000 |
 | 单次 apply fetch 总量 | 500 MiB（目录条目计解包后大小） |

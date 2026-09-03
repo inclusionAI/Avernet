@@ -24,6 +24,7 @@ export interface CapabilitySetManagerProps {
   onSkill: (setId: string, skillId: string, active: boolean) => Promise<void>;
   onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
   onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
+  onLoadCandidates: () => Promise<void>;
 }
 
 type Picker = { set: BotCapabilitySet; kind: 'skill' | 'mcp' };
@@ -42,6 +43,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
     onSkill,
     onMcp,
     onUploadSkillFolder,
+    onLoadCandidates,
   } = props;
   const [expanded, setExpanded] = useState<string[]>(sets[0] ? [sets[0].id] : []);
   const [createOpen, setCreateOpen] = useState(false);
@@ -61,7 +63,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div>
           <h2 className="m-0 text-sm font-semibold">能力集管理</h2>
-          <p className="m-0 mt-1 text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill 与 MCP。</p>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">按能力集组织 Bot 引用的 Skill、MCP 与 CLI。</p>
         </div>
         <Button
           size="sm"
@@ -94,7 +96,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
                       </span>
                       <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                        {set.skills.length} Skill · {set.mcps.length} MCP
+                        {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
                       </span>
                     </span>
                   </Button>
@@ -126,7 +128,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       kind="skill"
                       items={set.skills}
                       editable={editable}
-                      onAdd={() => setPicker({ set, kind: 'skill' })}
+                      onAdd={
+                        set.isDefault
+                          ? undefined
+                          : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'skill' }))
+                      }
                       onRemove={(id) => onSkill(set.id, id, false)}
                     />
                     <CapabilityMembers
@@ -140,9 +146,14 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                           [id]: current[id] === 'caller' ? 'owner' : 'caller',
                         }))
                       }
-                      onAdd={() => setPicker({ set, kind: 'mcp' })}
+                      onAdd={
+                        set.isDefault
+                          ? undefined
+                          : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'mcp' }))
+                      }
                       onRemove={(id) => onMcp(set.id, id, false)}
                     />
+                    {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
                   </div>
                 ) : null}
               </section>

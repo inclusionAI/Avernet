@@ -279,6 +279,37 @@ def test_wrapper_must_match_the_manifest_name_and_contain_every_file() -> None:
     assert conflict.value.reason == "invalid_wrapper"
 
 
+def test_public_center_accepts_one_opaque_wrapper_without_relaxing_layout() -> None:
+    validator = SkillPackageValidator(SkillParser())
+    manifest = _skill_md(name="dima")
+
+    package = validator.validate_public_center_zip(
+        _zip(
+            [
+                ("dima-official-skill/SKILL.md", manifest),
+                ("dima-official-skill/scripts/run.py", b"pass\n"),
+            ]
+        )
+    )
+
+    assert package.name == "dima"
+    assert package.files == (
+        ("SKILL.md", manifest),
+        ("scripts/run.py", b"pass\n"),
+    )
+    with pytest.raises(SkillPackageInvalidError) as invalid:
+        validator.validate_public_center_zip(
+            _zip(
+                [
+                    ("dima-official-skill/SKILL.md", manifest),
+                    ("outside.txt", b"outside"),
+                ]
+            )
+        )
+
+    assert invalid.value.reason == "invalid_wrapper"
+
+
 @pytest.mark.parametrize("name", ["skills-center", "skills-local", "skills-repo"])
 def test_reserved_content_store_names_are_rejected(name: str) -> None:
     with pytest.raises(SkillPackageInvalidError) as error:
@@ -305,9 +336,7 @@ def test_strict_validator_rejects_a_manifest_without_frontmatter() -> None:
     assert error.value.reason == "invalid_metadata"
 
 
-def test_strict_directory_validation_rejects_a_manifest_without_frontmatter() -> (
-    None
-):
+def test_strict_directory_validation_rejects_a_manifest_without_frontmatter() -> None:
     with pytest.raises(SkillPackageInvalidError) as error:
         SkillPackageValidator(SkillParser()).validate_directory(
             [

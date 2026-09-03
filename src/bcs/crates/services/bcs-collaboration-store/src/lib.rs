@@ -10,8 +10,9 @@ use bcs_db_api::{
 };
 use bcs_domain::{
     CollaborationDefinition, CollaborationDefinitionRef, GroupRuntimeBinding,
-    ResolvedParticipantBinding, RuntimeParticipantBinding, StateMachineDeliveryCorrelation,
-    StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun, StateMachineRunStatus,
+    OpeningMessage, ResolvedParticipantBinding, RuntimeParticipantBinding,
+    StateMachineDeliveryCorrelation, StateMachineNodeRun, StateMachineNodeStatus, StateMachineRun,
+    StateMachineRunStatus,
 };
 use bcs_event_store::{EventAppendTransactionPlan, MemoryEventStore};
 use bcs_service_api::port::repo::StateMachineEventfulTransition;
@@ -26,10 +27,11 @@ use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 
 const CURRENT_GROUP_VERSION_SENTINEL: i32 = 2_147_483_647;
+const RUN_OPENING_MESSAGE_OVERRIDE_PARAM_INDEX: usize = 13;
 const SM_RUN_SELECT_COLS: &str = "run_id, root_run_id, rerun_of, definition_id, \
     definition_version, group_id, group_version, session_id, session_activation_count, \
-    created_by, status, input_json, output_text, error_message, created_at_ms, updated_at_ms, \
-    completed_at_ms";
+    created_by, status, input_json, opening_message_override_json, output_text, error_message, \
+    created_at_ms, updated_at_ms, completed_at_ms";
 const SM_NODE_SELECT_COLS: &str = "run_id, node_id, status, attempt, node_timeout_ms, \
     timeout_deadline_ms, max_attempts, assignee_bot_id, outcome, responded_by, \
     delivery_request_id, bot_delivery_run_id, artifact_text, error_message, \
@@ -394,6 +396,7 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
         let Some(source) = inner.runs.get(&command.source_run_id) else {
             return Ok(CreateStateMachineRerunOutcome::Conflict);
         };
+        let opening_message_override = source.opening_message_override.clone();
         if source.status != StateMachineRunStatus::Failed
             || source.session_id != command.run.session_id
             || inner.runs.values().any(|run| {
@@ -450,13 +453,15 @@ impl StateMachineRunRepoPort for MemoryCollaborationStore {
             );
         }
         let run_id = command.run.run_id.clone();
+        let mut run = command.run;
+        run.opening_message_override = opening_message_override;
         inner.run_snapshots.insert(run_id.clone(), snapshot);
         if let Some(resolved_bindings) = resolved_bindings {
             inner
                 .run_resolved_participant_bindings
                 .insert(run_id.clone(), resolved_bindings);
         }
-        inner.runs.insert(run_id.clone(), command.run);
+        inner.runs.insert(run_id.clone(), run);
         for node in command.nodes {
             inner
                 .nodes
@@ -2073,12 +2078,12 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let run_sql = "INSERT INTO bcs_state_machine_runs \
                        (env, run_id, root_run_id, rerun_of, definition_id, definition_version, group_id, \
                         group_version, session_id, session_activation_count, created_by, status, input_json, \
-                        output_text, error_message, created_at_ms, updated_at_ms, \
+                        opening_message_override_json, output_text, error_message, created_at_ms, updated_at_ms, \
                         completed_at_ms, record_status) \
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')";
         let mut steps = vec![DbTransactionStep::Execute(DbStatement::with_params(
             run_sql,
-            run_insert_params(&self.env, &run),
+            run_insert_params(&self.env, &run)?,
         ))];
         if let Some((node_sql, node_params)) =
             build_node_runs_insert(&self.env, &run.run_id, &nodes)
@@ -2110,9 +2115,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let run_sql = "INSERT INTO bcs_state_machine_runs \
                        (env, run_id, root_run_id, rerun_of, definition_id, definition_version, group_id, \
                         group_version, session_id, session_activation_count, created_by, status, input_json, \
-                        output_text, error_message, created_at_ms, updated_at_ms, \
+                        opening_message_override_json, output_text, error_message, created_at_ms, updated_at_ms, \
                         completed_at_ms, record_status) \
-                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
                        FROM bcs_group_sessions session_lock \
                        WHERE session_lock.env = ? AND session_lock.session_id = ? \
                          AND NOT EXISTS ( \
@@ -2123,7 +2128,7 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                              AND active_run.record_status = 'active' \
                          ) \
                        LIMIT 1";
-        let mut run_params = run_insert_params(&self.env, &run);
+        let mut run_params = run_insert_params(&self.env, &run)?;
         run_params.extend([
             DbValue::from(self.env.as_str()),
             DbValue::from(run.session_id.as_str()),
@@ -2183,9 +2188,10 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
         let run_sql = "INSERT INTO bcs_state_machine_runs \
                        (env, run_id, root_run_id, rerun_of, definition_id, definition_version, \
                         group_id, group_version, session_id, session_activation_count, created_by, \
-                        status, input_json, output_text, error_message, created_at_ms, updated_at_ms, \
+                        status, input_json, opening_message_override_json, output_text, error_message, created_at_ms, updated_at_ms, \
                         completed_at_ms, record_status) \
-                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active' \
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
+                              source_run.opening_message_override_json, ?, ?, ?, ?, ?, 'active' \
                        FROM bcs_state_machine_runs source_run \
                        INNER JOIN bcs_group_sessions session_state \
                          ON session_state.env = source_run.env \
@@ -2221,7 +2227,9 @@ impl StateMachineRunRepoPort for MySqlCollaborationStore {
                            WHERE source_snapshot.env = source_run.env \
                              AND source_snapshot.run_id = source_run.run_id) \
                        LIMIT 1";
-        let mut run_params = run_insert_params(&self.env, &command.run);
+        let mut run_params = run_insert_params(&self.env, &command.run)?;
+        // The rerun INSERT copies this value directly from the source row.
+        run_params.remove(RUN_OPENING_MESSAGE_OVERRIDE_PARAM_INDEX);
         run_params.extend([
             DbValue::from(self.env.as_str()),
             DbValue::from(command.source_run_id.as_str()),
@@ -3265,8 +3273,18 @@ fn optional_u64_value(value: Option<u64>) -> DbValue {
     value.map(DbValue::from).unwrap_or(DbValue::Null)
 }
 
-fn run_insert_params(env: &str, run: &StateMachineRun) -> Vec<DbValue> {
-    vec![
+fn run_insert_params(env: &str, run: &StateMachineRun) -> ServiceResult<Vec<DbValue>> {
+    let opening_message_override_json = run
+        .opening_message_override
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|error| {
+            ServiceError::InternalError(format!(
+                "serialize state-machine opening_message_override: {error}"
+            ))
+        })?;
+    Ok(vec![
         DbValue::from(env),
         DbValue::from(run.run_id.as_str()),
         DbValue::from(run.root_run_id.as_deref()),
@@ -3282,12 +3300,13 @@ fn run_insert_params(env: &str, run: &StateMachineRun) -> Vec<DbValue> {
         DbValue::from(run.created_by.as_deref()),
         DbValue::from(run_status_to_str(run.status)),
         DbValue::from(run.input.to_string()),
+        DbValue::from(opening_message_override_json.as_deref()),
         DbValue::from(run.output.as_deref()),
         DbValue::from(run.error.as_deref()),
         DbValue::from(run.created_at),
         DbValue::from(run.updated_at),
         optional_u64_value(run.completed_at),
-    ]
+    ])
 }
 
 fn build_guarded_node_runs_inserts(
@@ -3385,6 +3404,7 @@ fn row_to_state_machine_run(row: DbRow) -> ServiceResult<StateMachineRun> {
         created_by: db_optional_string(&row, "created_by")?,
         status: parse_run_status(&status_raw)?,
         input: db_json(&row, "input_json")?.unwrap_or(serde_json::Value::Null),
+        opening_message_override: db_opening_message_override(&row)?,
         output: db_optional_string(&row, "output_text")?,
         error: db_optional_string(&row, "error_message")?,
         created_at: db_u64(&row, "created_at_ms")?,
@@ -3719,6 +3739,20 @@ fn db_json(row: &DbRow, column: &str) -> ServiceResult<Option<serde_json::Value>
     }
 }
 
+fn db_opening_message_override(row: &DbRow) -> ServiceResult<Option<OpeningMessage>> {
+    match db_optional_string(row, "opening_message_override_json")? {
+        None => Ok(None),
+        Some(value) if value.is_empty() => Err(ServiceError::InternalError(
+            "opening_message_override_json: persisted value must not be empty".to_string(),
+        )),
+        Some(value) => serde_json::from_str(&value).map(Some).map_err(|error| {
+            ServiceError::InternalError(format!(
+                "opening_message_override_json: json parse: {error}"
+            ))
+        }),
+    }
+}
+
 fn run_status_to_str(status: StateMachineRunStatus) -> &'static str {
     match status {
         StateMachineRunStatus::Pending => "pending",
@@ -3887,6 +3921,7 @@ mod tests {
                 created_by TEXT DEFAULT NULL,
                 status TEXT NOT NULL,
                 input_json TEXT DEFAULT NULL,
+                opening_message_override_json TEXT DEFAULT NULL,
                 output_text TEXT DEFAULT NULL,
                 error_message TEXT DEFAULT NULL,
                 created_at_ms INTEGER NOT NULL,
@@ -3972,6 +4007,7 @@ mod tests {
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: serde_json::Value::Null,
+            opening_message_override: None,
             output: None,
             error: None,
             created_at: 1_000,
@@ -4017,6 +4053,7 @@ mod tests {
                         created_by: None,
                         status: StateMachineRunStatus::Running,
                         input: serde_json::Value::Null,
+                        opening_message_override: None,
                         output: None,
                         error: None,
                         created_at: 1_001,
@@ -4063,6 +4100,163 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sqlite_store_round_trips_and_rejects_invalid_run_opening_message_overrides()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (db, store) = sqlite_state_machine_store().await?;
+        let opening_messages = vec![
+            None,
+            Some(OpeningMessage::Text("Run {{bcs.run_id}}".to_string())),
+            Some(serde_json::from_value(serde_json::json!({
+                "type": "card",
+                "component": "partnerCard.OneShotSummary",
+                "params": {"runId": "{{bcs.run_id}}"}
+            }))?),
+            Some(serde_json::from_value(serde_json::json!({
+                "type": "panel",
+                "component": "partnerPanel.OneShotRunView",
+                "params": {"runId": "{{bcs.run_id}}"},
+                "tab": {"title": "One Shot", "closable": true}
+            }))?),
+        ];
+
+        for (index, opening_message_override) in opening_messages.into_iter().enumerate() {
+            let run_id = format!("run-opening-{index}");
+            let run = StateMachineRun {
+                run_id: run_id.clone(),
+                root_run_id: Some(run_id.clone()),
+                rerun_of: None,
+                definition_id: "definition".to_string(),
+                definition_version: 1,
+                group_id: "group".to_string(),
+                group_version: 1,
+                session_id: format!("session-opening-{index}"),
+                session_activation_count: None,
+                created_by: None,
+                status: StateMachineRunStatus::Running,
+                input: serde_json::Value::Null,
+                opening_message_override: opening_message_override.clone(),
+                output: None,
+                error: None,
+                created_at: index as u64 + 1,
+                updated_at: index as u64 + 1,
+                completed_at: None,
+            };
+            store.create_run(run, Vec::new()).await?;
+            assert_eq!(
+                store
+                    .get_run(&run_id)
+                    .await?
+                    .expect("round-tripped run")
+                    .opening_message_override,
+                opening_message_override
+            );
+        }
+
+        db.execute(DbStatement::with_params(
+            "UPDATE bcs_state_machine_runs \
+             SET opening_message_override_json = ? WHERE env = ? AND run_id = ?",
+            vec![
+                DbValue::from("{invalid"),
+                DbValue::from("dev"),
+                DbValue::from("run-opening-0"),
+            ],
+        ))
+        .await?;
+        let error = store
+            .get_run("run-opening-0")
+            .await
+            .expect_err("invalid persisted override must fail the read");
+        assert!(error.to_string().contains("opening_message_override_json"));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sqlite_one_shot_rerun_atomically_inherits_source_opening_message_override()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (db, store) = sqlite_state_machine_store().await?;
+        db.execute(DbStatement::with_params(
+            "INSERT INTO bcs_group_sessions \
+             (env, session_id, group_id, session_kind, status, activation_count) \
+             VALUES (?, ?, ?, 'chat', 'running', 1)",
+            vec![
+                DbValue::from("dev"),
+                DbValue::from("session-one-shot-rerun"),
+                DbValue::from("group"),
+            ],
+        ))
+        .await?;
+        let definition: CollaborationDefinition = serde_yaml::from_str(
+            r#"
+api_version: bcs.collaboration/v1
+id: definition
+version: 1
+name: One-Shot Rerun Definition
+runtime:
+  kind: chat
+"#,
+        )?;
+        let opening_message: OpeningMessage = serde_json::from_value(serde_json::json!({
+            "type": "panel",
+            "component": "partnerPanel.OneShotRunView",
+            "params": {"runId": "{{bcs.run_id}}"}
+        }))?;
+        let source = StateMachineRun {
+            run_id: "run-one-shot-source".to_string(),
+            root_run_id: Some("run-one-shot-source".to_string()),
+            rerun_of: None,
+            definition_id: "definition".to_string(),
+            definition_version: 1,
+            group_id: "group".to_string(),
+            group_version: 1,
+            session_id: "session-one-shot-rerun".to_string(),
+            session_activation_count: None,
+            created_by: None,
+            status: StateMachineRunStatus::Failed,
+            input: serde_json::Value::Null,
+            opening_message_override: Some(opening_message.clone()),
+            output: None,
+            error: Some("failed".to_string()),
+            created_at: 1,
+            updated_at: 2,
+            completed_at: Some(2),
+        };
+        store.create_run(source.clone(), Vec::new()).await?;
+        store
+            .save_run_snapshot(&source, 1, &definition, None)
+            .await?;
+        let mut child = source.clone();
+        child.run_id = "run-one-shot-child".to_string();
+        child.rerun_of = Some(source.run_id.clone());
+        child.status = StateMachineRunStatus::Pending;
+        child.opening_message_override = None;
+        child.error = None;
+        child.created_at = 3;
+        child.updated_at = 3;
+        child.completed_at = None;
+
+        assert!(matches!(
+            store
+                .create_rerun_if_session_idle(CreateStateMachineRerun {
+                    source_run_id: source.run_id,
+                    run: child.clone(),
+                    nodes: Vec::new(),
+                    reactivate_service_session: false,
+                })
+                .await?,
+            CreateStateMachineRerunOutcome::Created
+        ));
+        assert_eq!(
+            store
+                .get_run(&child.run_id)
+                .await?
+                .expect("rerun child")
+                .opening_message_override,
+            Some(opening_message)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn sqlite_store_reactivates_session_creates_one_rerun_and_copies_snapshot_atomically()
     -> Result<(), Box<dyn std::error::Error>> {
         let (db, store) = sqlite_state_machine_store().await?;
@@ -4100,6 +4294,7 @@ runtime:
             created_by: None,
             status: StateMachineRunStatus::Failed,
             input: serde_json::json!({"question": "retry"}),
+            opening_message_override: None,
             output: None,
             error: Some("failed".to_string()),
             created_at: 1,
@@ -4392,6 +4587,7 @@ runtime:
             created_by: None,
             status: StateMachineRunStatus::Running,
             input: serde_json::Value::Null,
+            opening_message_override: None,
             output: None,
             error: None,
             created_at: 1,

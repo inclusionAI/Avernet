@@ -35,7 +35,7 @@ onboard_binding_enabled = false
 
 dingtalk_accounts = []
 api_keys = []
-allowed_switch_provider_ids = []
+allowed_switch_provider_ids = ["${DEFAULT_PROVIDER_ID}"]
 
 [cors]
 allowed_origins = [
@@ -101,8 +101,26 @@ base_dir = "seeds/collaboration-templates"
 default_language = "zh-CN"
 
 [logging]
-default_level = "debug"
+default_level = "info"
 console = true
+
+[[logging.outputs]]
+name = "main"
+path = "./logs"
+file = "bcs.log"
+level = "info"
+rotation = "daily"
+targets = ["*", "!bcs_chat_digest", "!bcs_message", "!bcs_sse_detail", "!bcs_event_webhook", "!ding_group_message"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "common-error"
+path = "./logs"
+file = "common-error.log"
+level = "error"
+rotation = "daily"
+targets = ["*"]
+max_keep_days = 7
 
 [[logging.outputs]]
 name = "messages"
@@ -123,8 +141,35 @@ rotation = "daily"
 targets = ["bcs_chat_digest"]
 max_keep_days = 7
 
-[logging.tags]
-bcs_chat_digest = "off"
+# SSE downlink detail log — per-frame consumption trace + lag alerts, keep 7 days
+[[logging.outputs]]
+name = "sse-detail"
+path = "./logs"
+file = "bcs-sse-detail.log"
+level = "info"
+rotation = "daily"
+format = "json"
+targets = ["bcs_sse_detail"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "group-messages"
+path = "./logs"
+file = "dingtalk-group-messages.log"
+level = "info"
+rotation = "daily"
+targets = ["ding_group_message"]
+max_keep_days = 7
+
+[[logging.outputs]]
+name = "event-webhook"
+path = "./logs"
+file = "bcs-event-webhook.log"
+level = "info"
+rotation = "daily"
+format = "json"
+targets = ["bcs_event_webhook"]
+max_keep_days = 7
 
 [logging.modules]
 hyper = "warn"
@@ -145,11 +190,23 @@ use_remote_login_check = false
 enabled = false
 
 [auth]
-chain = ["local", "session"]
-require_authentication = false
+chain = ["oauth_session", "session"]
+require_authentication = true
 mock_user_id = "000000"
 mock_user_name = "guest"
 allow_mock_headers = true
+
+[auth.oauth]
+base_url = "https://avernet.alipay.com"
+jwt_secret = "${BCS_ALIPAY_JWT_SECRET}"
+cookie_secure = true
+idle_timeout_minutes = 30
+
+[auth.oauth.providers.alipay]
+kind = "alipay"
+client_id = "${BCS_ALIPAY_CLIENT_ID}"
+private_key = "${BCS_ALIPAY_PRIVATE_KEY}"
+alipay_public_key = "${BCS_ALIPAY_ALIPAY_PUBLIC_KEY}"
 
 [bcsfuse]
 enabled = false
@@ -213,7 +270,7 @@ type = "url"
 url = "https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/bcs-panel/1.2.0/dist/index.umd.js"
 
 [gateway_principal]
-issuer = "gateway"
+issuers = ["gateway", "backend"]
 audience = "bcs"
 key_id = "bare"
 signing_key_env = "PRINCIPAL_SIGNING_KEY"

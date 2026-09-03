@@ -32,6 +32,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.teclaw_compose_producer import (
     TeclawComposeProducer,
 )
@@ -72,7 +75,11 @@ def test_consumer_surfaces_empty_engine_ext_from_local_noop() -> None:
     client = LocalEngineExtClient()
     producer = TeclawComposeProducer(_StubComposer(), client)
 
-    result = producer.produce_artifact({"bot_id": "b1", "entity_id": "u1"}, 3)
+    result = producer.produce_artifact(
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "b1", "entity_id": "u1"}, version=3
+        )
+    )
 
     assert result.success is True
     # Engine payload empty (Noop); producer injects identity + draft stage (owner_id
@@ -108,7 +115,11 @@ def test_consumer_carries_mock_engine_ext_verbatim() -> None:
     client.set_response("fetch", opaque)
     producer = TeclawComposeProducer(_StubComposer(), client)
 
-    result = producer.produce_artifact({"bot_id": "b2", "entity_id": "u2"}, 5)
+    result = producer.produce_artifact(
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "b2", "entity_id": "u2"}, version=5
+        )
+    )
 
     pinned = result.ext["config_artifact"]
     # Opaque payload carried byte-for-byte (verbatim, not merged/normalized), with

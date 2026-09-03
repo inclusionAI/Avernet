@@ -53,6 +53,8 @@ def _block(name: str) -> dict[str, Any]:
     raw = _user_config().get(name) or {}
     return dict(raw) if isinstance(raw, dict) else {}
 
+read_user_config = _user_config  # public seam for sibling DI config modules
+
 def _object_prefix_setting(name: str, default: str) -> Any:
     raw = _user_config().get(name)
     if raw is None:

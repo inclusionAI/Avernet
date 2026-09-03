@@ -176,6 +176,22 @@ class TestGetBotClassification:
             strict=True,
         )
 
+    def test_classification_forwards_entity_id(
+        self,
+        gw_client,
+        app_with_testing_modules,
+    ):
+        svc = _bind_bot(app_with_testing_modules)
+
+        resp = gw_client.get(
+            "/api/bots/default/classification?entity_id=service-owner"
+        )
+
+        assert_success(resp.json(), "GET /api/bots/{id}/classification")
+        svc.get_bot_classification.assert_called_once_with(
+            "default", entity_id="service-owner"
+        )
+
 
 class TestCreateBot:
     def test_create_bot_response_schema(self, gw_client, app_with_testing_modules, contract_snapshot_update):

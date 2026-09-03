@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bcs_service_api::{
-    BotControlPlaneCoreService, BotRegistryCoreService, BotTaskModesQuery,
+    ActorKind, BotControlPlaneCoreService, BotRegistryCoreService, BotTaskModesQuery,
     ChannelBindingCleanupPort, DeleteProviderBotCommand, DeleteProviderBotOutcome,
     NoopChannelBindingCleanupPort, ProviderBotBinding, ProviderBotCoreService,
     ProviderBotRosterItem, ProviderBotTaskModesFilter, ProviderCoreService,
@@ -283,6 +283,23 @@ impl ProviderManagementService for ProviderManagement {
         if !duplicate_registration {
             self.ensure_owner_binding(&binding.bot_uuid, &owner).await?;
         }
+        let created = !duplicate_registration;
+        let capabilities = if created {
+            match self.registry.get(&binding.bot_uuid).await {
+                Some(bot) => Some(bot.capabilities),
+                None => {
+                    tracing::warn!(
+                        bot_uuid = %binding.bot_uuid,
+                        provider_id = %binding.provider_id,
+                        "register_provider_bot: freshly created bot missing from registry; \
+                         capabilities unavailable for visibility sync"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
         Ok(RegisterProviderBotOutcome {
             bot_uuid: binding.bot_uuid,
             provider_id: binding.provider_id,
@@ -290,6 +307,9 @@ impl ProviderManagementService for ProviderManagement {
             bot_runtime_token,
             message: duplicate_registration
                 .then(|| "provider bot ref already registered; returning existing bot".to_string()),
+            created,
+            capabilities,
+            actor_kind: ActorKind::Bot,
         })
     }
 

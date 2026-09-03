@@ -10,12 +10,16 @@ a :class:`DeployArtifact`. The exact deployable pointers the build phase pins
 This is the ARCA branch of the provider-keyed producer selection wired in
 Task 12; external bots take :class:`TeclawComposeProducer` instead.
 """
+
 from __future__ import annotations
 
 import os
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifact,
     DeployArtifactProducer,
@@ -27,11 +31,15 @@ from agentclaw.community.core.service_bot.services.deploy.service_skills_manifes
 )
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
+    from agentclaw.community.core.service_bot.services.bot_build_service import (
+        BotBuildService,
+    )
 
 
 class ArcaSnapshotProducer(DeployArtifactProducer):
     """Wraps the existing ARCA build (rsync + mcporter snapshot), behavior-equivalent."""
+
+    requires_runtime_layout_observation = True
 
     def __init__(
         self,
@@ -44,7 +52,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         self._build_service = build_service
         self._skills_manifest_builder = skills_manifest_builder
 
-    def produce_artifact(self, bot: dict[str, Any], version: int) -> DeployArtifact:
+    def produce_artifact(self, request: ArtifactBuildRequest) -> DeployArtifact:
         """Delegate to ``build()`` and map its result onto :class:`DeployArtifact`.
 
         The build phase used to read ``success`` / ``migration_path`` /
@@ -53,13 +61,17 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         exactly that: same keys, same values, same failure message — only the
         return type changes.
         """
-        captured_layout = self._skills_manifest_builder.capture(bot=bot)
-        build_kwargs: dict[str, Any] = {"bot": bot, "version": version}
+        if request.version is None:
+            raise ValueError("ARCA snapshot build requires a publish version")
+        bot = dict(request.bot)
+        captured_layout = self._skills_manifest_builder.capture(
+            bot=bot,
+            layout_observation=request.layout_observation,
+        )
+        build_kwargs: dict[str, Any] = {"bot": bot, "version": request.version}
         if captured_layout is not None:
             build_kwargs["shared_corpora"] = captured_layout.shared_corpora
-            build_kwargs["active_runtime_path"] = (
-                captured_layout.active_runtime_path
-            )
+            build_kwargs["active_runtime_path"] = captured_layout.active_runtime_path
         result = self._build_service.build(**build_kwargs)
 
         success = bool(result.get("success"))
@@ -86,6 +98,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
             # service version. It augments — never replaces — build_target_path.
             ext["skills_manifest"] = self._skills_manifest_builder.finalize(
                 captured=captured_layout,
+                bot=bot,
             )
 
         return DeployArtifact(
@@ -153,11 +166,7 @@ class ArcaSnapshotProducer(DeployArtifactProducer):
         expected = {
             (
                 str(active_path / item["runtime_name"]),
-                str(
-                    center_root
-                    / item["skill_uuid"]
-                    / item["sc_version_number"]
-                ),
+                str(center_root / item["skill_uuid"] / item["sc_version_number"]),
             )
             for item in captured.center_skills
         }

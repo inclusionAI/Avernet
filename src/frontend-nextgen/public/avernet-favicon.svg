@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Avernet favicon：由方版 mark（src/assets/Images/avernet-label-logo.png）矢量重绘的简化变体。
+       仅用于 16/32px 场景；≥40px 场景请使用位图原稿。节点/描边比例按小尺寸可读性微调。 -->
+  <g stroke="#1a1a1a" stroke-width="5" stroke-linecap="round" fill="none">
+    <path d="M26 9 L7 52" />
+    <path d="M26 9 L42 52" />
+    <path d="M7 52 L24 41" />
+    <path d="M56 20 L44 52" />
+  </g>
+  <g fill="#3ed99c">
+    <circle cx="26" cy="9" r="7.5" />
+    <circle cx="44" cy="52" r="8" />
+  </g>
+  <g fill="#0b69ff">
+    <circle cx="7" cy="52" r="6" />
+    <circle cx="24" cy="41" r="5.5" />
+    <circle cx="56" cy="20" r="6" />
+  </g>
+</svg>

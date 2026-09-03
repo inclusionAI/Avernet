@@ -52,7 +52,6 @@ class TestInfraContainerStandalone:
             "bot_service_config",
             "baas_bot_service_config",
             "bot_wss_dispatcher",
-            "bot_binding_resolver",
             "claw_bot_service",
             "baas_bot_service",
         ]

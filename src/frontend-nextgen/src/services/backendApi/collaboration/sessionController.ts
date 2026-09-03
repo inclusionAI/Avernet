@@ -26,6 +26,10 @@ export interface SessionDetailData {
   updated_at: number;
   kind?: SessionKind;
   collected?: boolean;
+  /** 会话创建者 actor_id（bot_id 或 user_id）。 */
+  created_by?: string;
+  /** 发起调用的主体标识（区分身份维度）。 */
+  caller_principal?: string;
 }
 export interface SessionMessageData {
   id: string;
@@ -70,6 +74,7 @@ export interface SessionParticipantDeletedData {
 export async function getSession(session_id: string) {
   return backendRequest<BackendApiEnvelope<SessionDetailData>>(`/openapi/v1/collaboration/sessions/${session_id}`, {
     method: 'GET',
+    injectUserId: false,
   });
 }
 
@@ -78,6 +83,7 @@ export async function updateSession(session_id: string, body: { title?: string }
   return backendRequest<BackendApiEnvelope<SessionDetailData>>(`/openapi/v1/collaboration/sessions/${session_id}`, {
     method: 'PATCH',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -85,6 +91,7 @@ export async function updateSession(session_id: string, body: { title?: string }
 export async function deleteSession(session_id: string) {
   return backendRequest<BackendApiEnvelope<{ deleted: boolean }>>(`/openapi/v1/collaboration/sessions/${session_id}`, {
     method: 'DELETE',
+    injectUserId: false,
   });
 }
 
@@ -92,7 +99,7 @@ export async function deleteSession(session_id: string) {
 export async function collectSession(session_id: string, body: { participant?: string } = {}) {
   return backendRequest<BackendApiEnvelope<SessionCollectData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/collect`,
-    { method: 'POST', data: body },
+    { method: 'POST', data: body, injectUserId: false },
   );
 }
 
@@ -100,7 +107,7 @@ export async function collectSession(session_id: string, body: { participant?: s
 export async function uncollectSession(session_id: string, params: { participant?: string } = {}) {
   return backendRequest<BackendApiEnvelope<SessionCollectData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/collect`,
-    { method: 'DELETE', params: params as Record<string, unknown> },
+    { method: 'DELETE', params: params as Record<string, unknown>, injectUserId: false },
   );
 }
 
@@ -108,11 +115,11 @@ export async function uncollectSession(session_id: string, params: { participant
 // view_bot_id：当前身份对应的 bot/human 的 bot_id。
 export async function listSessionMessages(
   session_id: string,
-  params: { before?: string; limit?: number; view_bot_id?: string },
+  params: { before?: string; limit?: number; view_bot_id?: string; include_pending?: boolean },
 ) {
   return backendRequest<BackendApiEnvelope<SessionMessageData[]>>(
     `/openapi/v1/collaboration/sessions/${session_id}/messages`,
-    { method: 'GET', params: params as Record<string, unknown> },
+    { method: 'GET', params: params as Record<string, unknown>, injectUserId: false },
   );
 }
 
@@ -124,7 +131,7 @@ export async function updateSessionMemberMode(
 ) {
   return backendRequest<BackendApiEnvelope<SessionParticipantDto>>(
     `/openapi/v1/collaboration/sessions/${session_id}/participants/${actor_id}`,
-    { method: 'PATCH', data: body },
+    { method: 'PATCH', data: body, injectUserId: false },
   );
 }
 
@@ -132,7 +139,7 @@ export async function updateSessionMemberMode(
 export async function addSessionParticipant(session_id: string, bot_uuid: string) {
   return backendRequest<BackendApiEnvelope<SessionParticipantDto>>(
     `/openapi/v1/collaboration/sessions/${session_id}/participants`,
-    { method: 'POST', data: { bot_uuid } },
+    { method: 'POST', data: { bot_uuid }, injectUserId: false },
   );
 }
 
@@ -140,7 +147,7 @@ export async function addSessionParticipant(session_id: string, bot_uuid: string
 export async function deleteSessionParticipant(session_id: string, bot_uuid: string) {
   return backendRequest<BackendApiEnvelope<SessionParticipantDeletedData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/participants/${bot_uuid}`,
-    { method: 'DELETE' },
+    { method: 'DELETE', injectUserId: false },
   );
 }
 
@@ -148,7 +155,7 @@ export async function deleteSessionParticipant(session_id: string, bot_uuid: str
 export async function createSessionToken(session_id: string): Promise<BackendApiEnvelope<SessionTokenData>> {
   return backendRequest<BackendApiEnvelope<SessionTokenData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/token`,
-    { method: 'POST' },
+    { method: 'POST', injectUserId: false },
   );
 }
 
@@ -162,12 +169,21 @@ export async function listGroupSessions(
   >(`/openapi/v1/collaboration/groups/${group_id}/sessions`, {
     method: 'GET',
     params: params as Record<string, unknown>,
+    injectUserId: false,
   });
 }
 
-export async function createSession(group_id: string, body: { title?: string; input?: { query?: string } }) {
+export interface CreateSessionRequest {
+  title?: string;
+  kind?: SessionKind;
+  acting_bot_id?: string;
+  creator_role?: Exclude<SessionParticipantDto['role'], 'driver'>;
+  input?: { query?: string; [key: string]: unknown };
+}
+
+export async function createSession(group_id: string, body: CreateSessionRequest, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<SessionDetailData>>(
     `/openapi/v1/collaboration/groups/${group_id}/sessions`,
-    { method: 'POST', data: body },
+    { method: 'POST', data: body, injectUserId: false, ...(signal ? { signal } : {}) },
   );
 }

@@ -12,11 +12,12 @@ import { AvatarTile } from '../AvatarTile';
 interface FuseChatPanelProps {
   group: GroupView | null;
   sessionId: string | null;
+  viewerName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChatPanelProps) {
+export function FuseChatPanel({ group, sessionId, viewerName, open, onOpenChange }: FuseChatPanelProps) {
   const { messages, isFusing, submitQuestion, fusionBots, isLoadingFusionBots } = useFuse(
     open ? group : null,
     open ? sessionId : null,
@@ -48,19 +49,19 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
   return (
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent size="md" showClose={false} className="p-0">
-        <div className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <ModalHeader>
             <ModalTitle>融合模式</ModalTitle>
-            <p className="text-xs text-[var(--color-muted)]">选择协作群内公开画像的 Bot，融合回答你的问题</p>
+            <p className="text-xs text-muted-foreground">选择协作群内公开画像的 Bot，融合回答当前问题</p>
           </ModalHeader>
         </div>
 
         {/* 融合 Bot 选择 */}
-        <div className="border-b border-[var(--color-border)] px-4 py-3">
+        <div className="border-b border-border px-4 py-3">
           {isLoadingFusionBots ? (
-            <p className="text-xs text-[var(--color-muted)]">加载中…</p>
+            <p className="text-xs text-muted-foreground">加载中…</p>
           ) : availableBots.length === 0 ? (
-            <p className="text-xs text-[var(--color-muted)]">协作群内无 Bot 公开画像，融合模式暂不可用</p>
+            <p className="text-xs text-muted-foreground">协作群内无 Bot 公开画像，融合模式暂不可用</p>
           ) : (
             <div className="flex flex-wrap gap-3">
               {availableBots.map((bot: FusionBotInfo) => {
@@ -70,6 +71,8 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
                     key={bot.botUuid}
                     variant="ghost"
                     size="sm"
+                    aria-pressed={isSelected}
+                    aria-label={`${isSelected ? '取消选择' : '选择'} ${bot.name}`}
                     onClick={() => toggleBot(bot.botUuid)}
                     className="h-auto min-w-16 flex-col items-center gap-1 rounded-lg px-1 py-1"
                   >
@@ -78,16 +81,16 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
                       <div
                         className={cn(
                           'absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full transition-colors',
-                          isSelected ? 'bg-[var(--color-primary)]' : 'bg-[var(--color-border)]',
+                          isSelected ? 'bg-primary' : 'bg-border',
                         )}
                       >
-                        {isSelected && <Check className="h-2.5 w-2.5 text-white" />}
+                        {isSelected && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
                       </div>
                     </div>
                     <span
                       className={cn(
                         'max-w-[60px] truncate text-[10px]',
-                        isSelected ? 'font-medium text-[var(--color-primary)]' : 'text-[var(--color-muted)]',
+                        isSelected ? 'font-medium text-primary' : 'text-muted-foreground',
                       )}
                     >
                       {bot.name}
@@ -107,7 +110,12 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
             messages.map((m) => (
               <Bubble
                 key={m.id}
-                sender={{ role: m.role, name: m.role === 'user' ? '我' : '融合回答' }}
+                className="[--aix-markdown-font-size:12px] [--aix-font-size-base:12px]"
+                sender={{
+                  role: m.role,
+                  align: 'left',
+                  name: m.role === 'user' ? viewerName || '消息发送者' : '融合回答',
+                }}
                 blocks={[{ type: 'text', content: m.content } as TextBlock]}
                 isStreaming={m.isLoading}
               />
@@ -116,8 +124,9 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
         </div>
 
         {/* 输入区 */}
-        <div className="flex gap-2 border-t border-[var(--color-border)] p-3">
+        <div className="flex gap-2 border-t border-border p-3 sm:p-4">
           <Input
+            className="min-w-0 flex-1 rounded-2xl"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -129,7 +138,13 @@ export function FuseChatPanel({ group, sessionId, open, onOpenChange }: FuseChat
             placeholder="输入问题…"
             disabled={isFusing}
           />
-          <Button variant="primary" size="sm" disabled={!input.trim() || isFusing} onClick={handleSubmit}>
+          <Button
+            variant="default"
+            size="icon"
+            aria-label="发送融合问题"
+            disabled={!input.trim() || isFusing}
+            onClick={handleSubmit}
+          >
             <Send className="h-4 w-4" />
           </Button>
         </div>

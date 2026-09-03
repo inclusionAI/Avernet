@@ -28,6 +28,11 @@ class TokenVault:
     def __init__(self, master_key: str) -> None:
         self._master_key = master_key
 
+    @property
+    def has_master_key(self) -> bool:
+        """Whether writes can be persisted as ciphertext."""
+        return bool(self._master_key)
+
     def encrypt(self, plaintext_token: str) -> str:
         """加密 token，返回 ``enc:v1:<密文>``；master_key 空则原样返回明文。"""
         if not self._master_key:

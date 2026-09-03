@@ -1,4 +1,4 @@
-import { Button, Input, Segmented } from '@/components/ui';
+import { Button, Checkbox, Input, Segmented } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { ReactNode } from 'react';
 import { GroupLeaderSelect, type GroupLeaderOption } from './GroupLeaderSelect';
@@ -37,6 +37,9 @@ export interface GroupConfigFieldsProps {
   bindingSlot?: ReactNode;
   leaderOptions: GroupLeaderOption[];
   supportsStateMachine: boolean;
+  /** 是否以任务执行(走 task execute 建群链路):仅 自定义协作(task_dag) 出现的勾选框值。 */
+  viaExecute: boolean;
+  onViaExecuteChange: (viaExecute: boolean) => void;
   onKindChange: (kind: GroupStrategyKind) => void;
   onNameChange: (value: string) => void;
   onContextChange: (value: string) => void;
@@ -62,6 +65,8 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
     bindingSlot,
     leaderOptions,
     supportsStateMachine,
+    viaExecute,
+    onViaExecuteChange,
     onKindChange,
     onNameChange,
     onContextChange,
@@ -73,9 +78,9 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]" htmlFor="create-group-name">
+      <div className="grid min-w-0 grid-cols-2 gap-4">
+        <div className="min-w-0">
+          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-name">
             协作群名称
           </label>
           <Input
@@ -83,11 +88,11 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
             placeholder="例如：周会协同群"
-            className="h-10 rounded-xl"
+            className="h-9 rounded-md"
           />
         </div>
-        <div>
-          <label className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]" htmlFor="create-group-context">
+        <div className="min-w-0">
+          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-context">
             协作目标
           </label>
           <Input
@@ -95,16 +100,16 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             value={context}
             onChange={(event) => onContextChange(event.target.value)}
             placeholder="请输入协作目标"
-            className="h-10 rounded-xl"
+            className="h-9 rounded-md"
           />
         </div>
       </div>
 
       <div>
-        <span className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]" id="strategy-group-label">
+        <span className="mb-2 block text-xs font-semibold text-muted-foreground" id="strategy-group-label">
           协作群类型
         </span>
-        <div role="radiogroup" aria-labelledby="strategy-group-label" className="grid grid-cols-3 gap-3">
+        <div role="radiogroup" aria-labelledby="strategy-group-label" className="grid min-w-0 grid-cols-3 gap-3">
           {STRATEGY_OPTIONS.map((option) =>
             (() => {
               const disabled = option.value === 'task_dag' && !supportsStateMachine;
@@ -119,21 +124,21 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                   disabled={disabled}
                   onClick={() => onKindChange(option.value)}
                   className={cn(
-                    'h-auto flex-col items-start gap-1 rounded-xl border px-3 py-2.5 text-left',
+                    'h-auto min-w-0 flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left',
                     disabled
-                      ? 'cursor-not-allowed border-[var(--color-border)] bg-[var(--color-panel-muted)] opacity-60'
+                      ? 'cursor-not-allowed border-border bg-muted opacity-60'
                       : kind === option.value
-                      ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)] hover:bg-[var(--color-primary-soft)]'
-                      : 'border-[var(--color-border)] bg-white hover:border-[var(--color-primary)]/30 hover:bg-[var(--color-primary-soft)]',
+                      ? 'border-primary bg-primary/10 hover:bg-primary/10'
+                      : 'border-border bg-background hover:border-primary/30 hover:bg-primary/10',
                   )}
                 >
                   <span
                     className={
                       disabled
-                        ? 'text-xs font-bold text-[var(--color-muted)]'
+                        ? 'text-xs font-semibold text-muted-foreground'
                         : kind === option.value
-                        ? 'text-xs font-bold text-[var(--color-primary)]'
-                        : 'text-xs font-bold text-[var(--color-fg)]'
+                        ? 'text-xs font-semibold text-primary'
+                        : 'text-xs font-semibold text-foreground'
                     }
                   >
                     {option.label}
@@ -142,10 +147,10 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
                     className={cn(
                       'text-left text-[11px] leading-4',
                       disabled
-                        ? 'text-[var(--color-muted)]'
+                        ? 'text-muted-foreground'
                         : kind === option.value
-                        ? 'text-[var(--color-primary)]'
-                        : 'text-[var(--color-muted)]',
+                        ? 'text-primary'
+                        : 'text-muted-foreground',
                     )}
                   >
                     {disabled ? '用户视角暂不支持创建自定义协作群' : option.description}
@@ -157,20 +162,38 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
         </div>
       </div>
 
-      {kind === 'free_chat' && (
-        <div className="grid grid-cols-2 gap-4">
-          <GroupLeaderSelect
-            id="create-group-driver"
-            label="群主 Bot"
-            value={driverBotId}
-            options={leaderOptions}
-            placeholder="选择群主 Bot"
-            onChange={onDriverChange}
+      {kind === 'task_dag' && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="create-group-via-execute"
+            checked={viaExecute}
+            onCheckedChange={(checked) => onViaExecuteChange(checked)}
           />
-          <div>
-            <span className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]">自动回复</span>
+          <label
+            htmlFor="create-group-via-execute"
+            className="cursor-pointer select-none text-[13px] text-[var(--color-muted)]"
+          >
+            是否以任务执行
+          </label>
+        </div>
+      )}
+
+      {kind === 'free_chat' && (
+        <div className="grid min-w-0 grid-cols-2 gap-4">
+          <div className="min-w-0">
+            <GroupLeaderSelect
+              id="create-group-driver"
+              label="群主 Bot"
+              value={driverBotId}
+              options={leaderOptions}
+              placeholder="选择群主 Bot"
+              onChange={onDriverChange}
+            />
+          </div>
+          <div className="min-w-0">
+            <span className="mb-2 block text-xs font-semibold text-muted-foreground">自动回复</span>
             <Segmented<DeliveryPolicy> value={deliveryPolicy} onChange={onDeliveryChange} options={DELIVERY_OPTIONS} />
-            <p className="mt-2 text-[11px] leading-4 text-[var(--color-muted)]">
+            <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
               {deliveryPolicy === 'send_to_driver'
                 ? '群主 Bot 将默认回复每一条消息'
                 : '群主 Bot 仅在被 @ 时或上下文高度关联时答复'}
@@ -189,7 +212,7 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
             placeholder="选择 Manager Bot"
             onChange={onManagerChange}
           />
-          <p className="mt-2 text-[11px] leading-4 text-[var(--color-muted)]">
+          <p className="mt-2 text-[11px] leading-4 text-muted-foreground">
             主节点统一推进任务，其余成员作为 Worker 配合执行。
           </p>
         </div>
@@ -198,11 +221,11 @@ export function GroupConfigFields(props: GroupConfigFieldsProps) {
       {kind === 'task_dag' && !yamlValidated && (
         <div>
           {templateSlot}
-          <label className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]" htmlFor="create-group-yaml">
+          <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor="create-group-yaml">
             协作定义 YAML
           </label>
           <YamlCodeEditor value={definitionYaml} onChange={onYamlChange} className="text-sm" />
-          <div className="mt-2 min-h-5 text-xs text-[var(--color-muted)]">
+          <div className="mt-2 min-h-5 text-xs text-muted-foreground">
             {yamlSummary.length > 0 ? (
               <span>已识别顶层 key：{yamlSummary.join(' / ')}</span>
             ) : (

@@ -6,8 +6,24 @@ import { C } from './tokens';
 import { TruncatedText } from './TruncatedText';
 import type { TaskView } from './types';
 
-const LabelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: C.textSecondary, marginBottom: 4 };
-const ValueStyle: React.CSSProperties = { fontSize: 14, color: C.textPrimary, lineHeight: 1.6 };
+const LabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: C.textSecondary, marginBottom: 4 };
+const ValueStyle: React.CSSProperties = { fontSize: 11, color: C.textPrimary, lineHeight: 1.5 };
+
+export function formatRuntimeDuration(start?: string | null, end?: string | null, now = Date.now()): string {
+  if (!start) return '—';
+  const startMs = new Date(start).getTime();
+  const endMs = end ? new Date(end).getTime() : now;
+  if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs < startMs) return '—';
+
+  const totalSeconds = Math.max(1, Math.round((endMs - startMs) / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}秒`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return seconds ? `${minutes}分${seconds}秒` : `${minutes}分钟`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}小时${remainingMinutes}分钟` : `${hours}小时`;
+}
 
 const MetaItem: React.FC<{ label: string; value?: React.ReactNode }> = ({ label, value }) => (
   <div style={{ marginBottom: 20 }}>
@@ -19,16 +35,18 @@ const MetaItem: React.FC<{ label: string; value?: React.ReactNode }> = ({ label,
 );
 
 export const TaskInfoTab: React.FC<{ task: TaskView }> = ({ task }) => {
-  const meta: { label: string; value?: React.ReactNode }[] = [{ label: '任务类型', value: task.taskTypeLabel }];
+  const taskMeta: { label: string; value?: React.ReactNode }[] = [
+    { label: '任务类型', value: task.taskTypeLabel },
+    { label: '来源', value: task.sourceLabel },
+    { label: 'Owner Bot', value: task.ownerBotName },
+    { label: '创建时间', value: task.createdAt },
+    { label: '结束时间', value: task.finishedAt },
+    { label: '运行时长', value: formatRuntimeDuration(task.createdAt, task.finishedAt) },
+  ];
   if (task.taskType === 'workflow' && task.template) {
-    meta.push({ label: '关联模板', value: task.template });
+    taskMeta.push({ label: '关联模板', value: task.template });
   }
-  meta.push({ label: '来源', value: task.sourceLabel });
-  meta.push({ label: 'Owner Bot', value: task.ownerBotName });
-  meta.push({ label: '创建时间', value: task.createdAt });
-  if (task.finishedAt) meta.push({ label: '完成时间', value: task.finishedAt });
-  if (task.mainSessionName) meta.push({ label: '发起会话', value: task.mainSessionName });
-  if (task.parentTaskId) meta.push({ label: '父任务', value: task.parentTaskId });
+  if (task.parentTaskId) taskMeta.push({ label: '父任务', value: task.parentTaskId });
 
   return (
     <div style={{ padding: 16 }}>
@@ -36,7 +54,7 @@ export const TaskInfoTab: React.FC<{ task: TaskView }> = ({ task }) => {
         <TruncatedText
           value={task.name}
           maxLength={20}
-          style={{ fontSize: 16, fontWeight: 600, color: C.textPrimary }}
+          style={{ fontSize: 14, fontWeight: 600, color: C.textPrimary }}
         />
         <StatusTag status={task.status} />
       </div>
@@ -70,12 +88,10 @@ export const TaskInfoTab: React.FC<{ task: TaskView }> = ({ task }) => {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px' }}>
-        {meta
-          .filter((m) => m.value && m.value !== '—')
-          .map((m, i) => (
-            <MetaItem key={i} label={m.label} value={m.value} />
-          ))}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px', marginBottom: 4 }}>
+        {taskMeta.map((item) => (
+          <MetaItem key={item.label} label={item.label} value={item.value} />
+        ))}
       </div>
     </div>
   );

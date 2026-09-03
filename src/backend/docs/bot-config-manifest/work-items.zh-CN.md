@@ -345,11 +345,13 @@ identity 文件、MCP 配置和 shell 脚本的 manifest，不可接受。
 所以约束着其他所有创建路径的租户上限，在这里同样不起作用。哪怕是无辜的重试——
 用户点了三次创建、一次都没走完——也会让这张表无上限地长，而且没有回收路径。
 
-所以 #1698 是**把这个端点从特性开关后面放出来的前置条件**，不是可选的第二期
-收尾。两种机制都能封住它：过期（第一段的 manifest 超过 N 小时无人认领即删除），
-或终态清理（在 `AUTHORIZATION_REJECTED` 时删除）。要建的是过期那条，因为**放弃
-才是常态，拒绝是少数**。它留在 W13 之外，是因为它是一件独立的小活，不是因为它
-可以无限期地等。
+**已被 PR #1791 取代：没有特性开关，#1698 也不再卡这个端点。**上面对隐患的判断
+是对的，对「唯一可行解」的判断是错的。创建 job 自带一个可配置的 wall-clock
+deadline（默认 10 分钟），于是每一次创建都有一个终态时刻；创建以「没有 bot」告终
+时——拒绝和过期都算——job 会把 manifest **以及 A 阶段写下的 startup script 行**
+一起删掉。所以这个端点写下的行由它自己的 job 封顶，而这正是那个开关原本要顶替的
+事情。#1698 的通用清理对那些没有 job 能认领的行仍然值得做，但它不再是本项上线的
+前置条件。
 
 **一条固定约束，不是设计选择：创建永远需要人。**Passport 授权链接是 AgentPass
 的限制，不在我们控制范围内。所以「创建一个 bot」本质上是一次一个、人在环里的
@@ -1022,6 +1024,11 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 
 **Owner.** `totalfrank` · 0.5 天 · 第 3 天 · 设计（§7）
 
+> **设计已在 PR #1791 定稿** —— 见
+> `specs/2026-09-01-create-bot-with-manifest/`。下文有四处被它取代，已就地更正：
+> 这个端点**只服务 ARCA**（teclaw 的创建归 W8）；创建由**任务队列的一个 job**
+> 推进，而不是靠调用方轮询；**apply 本身也变成了任务**，在所有路径上取代 W4 的
+> daemon 线程；终态会说明**是哪一件事**失败了。没有特性开关。
 
 **目标。**一个公开的异步 API，用 manifest 加普通创建参数创建 bot，于是 bot 的
 **第一个**容器就带着它的配置（§2.11）。
@@ -1031,8 +1038,16 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 所以 W5/W6 缺席时，一个声明了 `identity`、`skills` 或 `resources` 的创建请求会通过
 预检、把用户带完 Passport 授权、把 bot 开出来，**然后**才 apply 失败——这是最糟糕的
 发现时机，因为 bot 已经存在了。要么 W5、W6 也是依赖，要么这个端点接受的词汇被收敛到
-已落地的范围（W1 的门禁规则）。绝不能让它接受一个物化器还不在的类目。·
+已落地的范围（W1 的门禁规则）。绝不能让它接受一个物化器还不在的类目。**已定：门禁
+从物化器注册表推导**，所以 W5/W6 落地就自动放宽这个端点，不需要在这里改一行。·
 **阻塞于。**—
+
+**引擎范围：只有 ARCA。**本项之所以要分「容器前 / 容器后」两段，是因为
+`BaasService._build_create_bot_payload` 在拼装启动命令时会读 startup script 那一行。
+teclaw 没有对应物——`TeclawProvisionService` 在开通时组装 config artifact——所以
+**teclaw 的创建归 W8**：W8 的范围里本来就写着「在 bot 创建时 apply……teclaw 在第一份
+artifact 组装之前」，它的第一条验收标准就是「第一份 artifact 已包含 manifest 的
+结果」。本端点拒绝 teclaw 引擎；**解除这条拒绝也归 W8**，与 teclaw 的创建机制一起做。
 
 **为什么它自成一项而不是 W1 的一部分。**W1 被刻意限定为绝不触碰 `create_flow`；
 那个耦合正是本计划最想避免的。本项才是那个耦合该在的地方，而且它自身就很有分量：
@@ -1042,8 +1057,9 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 **范围内。**创建端点（manifest + 引擎、名称、描述……）；第一段以已分配 `bot_id`
 为键的 manifest 落库；轮询/状态端点及其状态；把 apply 作为创建的一部分调用。
 
-**范围外。**孤儿 manifest 清理（#1698，按决策推迟到第二期——但见 §2.11：它
-是这个端点解除特性开关的前置条件，因为没有别的东西能给第一段的行封顶）与创建幂等
+**范围外。**#1698 的通用孤儿清理（仍然值得做，但**不再是本端点的前置条件**——创建
+job 的 deadline 给它写下的行封了顶，而且创建以「没有 bot」告终时，job 会自己把
+manifest 和 phase A 写下的 startup script 行一起删掉）与创建幂等
 （#1697 —— 一个既有缺口：`generate_bot_id` 在平台侧铸造 id 且没有幂等键，所以
 重试创建会产生第二个 bot，与 manifest 无关）。
 
@@ -1052,25 +1068,47 @@ engine_config）：找出目前住在 `openapi_v1` router 里的检查——归�
 ```text
 AWAITING_AUTHORIZATION   等待用户点开 Passport 链接
         │                （响应携带 iframe_url / redirect_url）
-        ├──► AUTHORIZATION_REJECTED    终态
+        ├──► AUTHORIZATION_REJECTED   终态——用户拒绝
+        ├──► AUTHORIZATION_EXPIRED    终态——Passport 过期，或 job 的 deadline
+        │                             在无人点击的情况下走完
         ▼
 CREATING                 已授权；bot 记录已写入，容器正在开通
+        ├──► CREATE_FAILED   终态——没有可用的 bot，与 manifest 无关
         ▼
-APPLYING                 manifest apply 进行中（fetch → 物化 → 下发）
-        ├──► READY       终态——成功；响应携带 apply 报告
-        └──► FAILED      终态——响应指明哪些条目失败
+APPLYING                 容器后那一段 apply 进行中
+        ├──► READY         终态——bot 起来了，manifest 也生效了
+        └──► APPLY_FAILED  终态——bot 起来了，manifest 有一部分没生效
 ```
 
+轮询**只按 `bot_id` 寻址**，不收 manifest，也不收创建参数，并且不发起任何外部调用。
+
 - **`PARTIAL` 意味着某个类目没有被覆盖**（§3.2 all-or-nothing），所以它汇报为
-  **`FAILED`** 而不是 `READY`。早先的修订把 `PARTIAL` 映射到 `READY`，理由是那些
-  跳过是作者授权的；那个理由建立在 `on_fetch_failure: skip` 之上，而它已不存在。
-  manifest 声明了、我们却没写进去的类目不算成功，逐条记录会说明是哪些。
-- `FAILED` 是一个 **manifest 层**的终态（§2.7）。bot 记录不被触碰——轮询到
-  `FAILED` 的调用方拿到的是一个正在运行、但 manifest 未完整生效的 bot，逐条记录
-  会准确说明哪些条目没有下发。
+  失败而不是 `READY`。早先的修订把 `PARTIAL` 映射到 `READY`，理由是那些跳过是
+  作者授权的；那个理由建立在 `on_fetch_failure: skip` 之上，而它已不存在。
+- **三种失败，三个不同的回答，不需要读文案就能分辨：**manifest 非法是提交时的
+  `422`，既没有 bot 也没有状态；bot 建不出来或压根没起来是 `CREATE_FAILED`；
+  bot 在跑但 manifest 没全生效是 `APPLY_FAILED`。用一个 `FAILED` 同时表示后两者，
+  才是「我到底有没有拿到 bot」这个歧义的真正来源。
+- `APPLY_FAILED` 是一个 **manifest 层**的终态（§2.7）。bot 记录不被触碰，而且
+  状态名本身就把这一点说清楚了，不必再靠响应体去辩解。apply 记录自己仍然是
+  `PARTIAL`——只有这个轮询的一词总结做了映射，`POST …/config-manifest/apply` 打在
+  运行中 bot 上的行为完全不变。
 - **`APPLYING` 把 D4 的临时代价变成一个可见状态。**启动后下发（§3.4）留下一个
   bot 已 ACTIVE 但未配置的窗口；等待 `READY` 的调用方永远观察不到它。这个窗口
   不再是一个隐形陷阱。
+- **不是本端点创建的 `bot_id` 返回 `404`，而不是某个状态。**用普通方式建出来、
+  事后 `PUT` 了一份 manifest 的 bot，既有 bot 记录也有 apply 记录，就是没有创建
+  job——而那正好是 `CREATING` 的形状，所以少了 job 这一问，轮询就会汇报一次从未
+  发生过的创建。job 用 `(tenant, entity_id, bot_id)` 推导出的幂等键找到，这同时
+  也保证一个 owner 拿另一个 owner 的 `bot_id` 去轮询只会一无所获，而不是拿到对方
+  待授权的链接。
+
+**部署前提（PR #1791）。**apply——因而「用 manifest 创建 bot」——只在
+`task_queue_worker.enabled=true` 且 `ac_task_queue` 已开好的部署里推进。这个开关
+在本项之前只是一个优化开关，从本项起它决定功能可不可用，而且失效方式不是「变慢」：
+worker 关着时，提交照常返回 `202`，轮询会一直停在 `AWAITING_AUTHORIZATION`，直到
+deadline 把它判为 `AUTHORIZATION_EXPIRED`；显式 apply 照常给出 `202`，报告则一直
+停在 `RUNNING`，直到 apply 锁的 TTL 到期。两者都永远不会完成。
 
 **验收标准。**
 
@@ -1095,6 +1133,17 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
 - [ ] **apply 分两阶段调用**（W4），而本项正是编排器需要那个形状的原因：
       **A 阶段**（`script`）在 `_build_create_bot_payload` 拼装启动命令之前运行，
       **B 阶段**（其余一切）在容器起来之后。
+- [ ] **已定：A 阶段在 bot 记录被创建之前就跑完**，而不是靠 `create_bot` 里的一个
+      钩子。它不需要 bot 记录里的任何东西——startup script 那一行的键是
+      `(entity_id, bot_id)`，两半在提交时都已知；占位符白名单也正好只有
+      `BOT_ENGINE_TYPE`、`BOT_ENV`、`BOT_TENANT`、`BOT_ARCH`（没有 `BOT_ID`，
+      也没有 `BOT_NAME`）。把它排在创建之前，这条保证就是**结构性成立**的，而且
+      `bot_service.py` 一行都不用动。
+- [ ] **已定：创建由任务队列上的一个持久 job 推进**，不是靠调用方轮询，并带一个
+      可配置的 deadline（默认 10 分钟）。job 等授权 → 跑 A 阶段 → 创建 bot →
+      等容器 → 启动 B 阶段 → 结束；它**不等 B 阶段跑完**，因为平台侧没有任何东西
+      卡在 B 阶段上。调用方中途不轮询了，bot 照样会被配置好；用户始终不授权，也会
+      在有界时间内落到一个终态。
 - [ ] **`script` 在构造创建 payload 之前写入**，不与 apply 的其余部分同时。它是
       唯一不需要容器的类目（§2.12），而 `_build_create_bot_payload` 在拼装启动
       命令时会读这一行——所以那一行必须在那之前就存在，首启才可能带上脚本。其余
@@ -1106,11 +1155,23 @@ APPLYING                 manifest apply 进行中（fetch → 物化 → 下发�
 | 机制 | 租户能活下来吗？ |
 | --- | --- |
 | 请求期间派生的线程 | **能——已经解决。**`threading.Thread(target=bind_current_avernet_tenant(fn), daemon=True)` 是既定模式：`bot_publish_service.py:1267`（`_do_restart`，它自己就是一个 apply 点）、`baas_publish_poller.py:57`（`_poll`，`CREATING → APPLYING` 的天然归宿）、`bot_service.py:1979`。包装器在**绑定**时（即在请求线程内）读取租户，并在新线程内重新建立它。照着模式写就什么都不用做 |
-| 任务队列 | **不能**——但**今天没有这个场景**，所以这是给以后的备注而非要求。`core/task_queue` 的模型带 `env` 和 `idempotency_key`，但没有任何租户形状的东西，整个模块也没有租户处理。任务现在入队、之后由 worker 执行，所以没有请求上下文可捕获，`bind_current_avernet_tenant` 帮不上忙；租户得搭在任务 `payload` 里，并在 handler 里重新建立作用域 |
+| 任务队列 | **不能，而且这已经是现在的场景。**`core/task_queue` 的模型带 `env`、`app` 和 `idempotency_key`，但没有任何租户形状的东西，整个模块也没有租户处理。任务现在入队、之后由 worker 执行，所以没有请求上下文可捕获，`bind_current_avernet_tenant` 帮不上忙。租户搭在任务 `payload` 里，handler 用 `avernet_tenant_scope(...)` 把整个函数体包住。**这一条要写测试，不能只写注释**，因为它的失败是无声的：`get_current_avernet_tenant()` 是个*全函数*，在请求之外返回**默认租户**而不是抛异常——所以 handler 忘了这件事不会崩，它只是悄悄在错误的租户下读写 manifest 表 |
 
-记在这里只是为了让*确实*会去用任务队列的人知道差别——`skills_pool` 已经在用它
-（`skills_pool.reconcile`、`skills_pool.quarantine.cleanup`），所以很容易顺手抓
-过来。**当前没有任何 apply 路径用它**，W13 也不需要解决它。
+**已被 PR #1791 取代：现在每一条 apply 路径都走任务队列。**写下这段备注时确实没有
+任何 apply 路径用它，也确实告诉过 W13 不必解决租户问题。它必须解决：W13 不但把创建
+放到一个 job 上，还把 **apply 的执行本身**从 W4 的 daemon 线程搬到了任务上——三种
+情况全部如此：容器前那一段、容器后那一段，以及打在运行中 bot 上的显式 apply。队列
+自己的 README 就把 daemon 线程这个模式点名为它要取代的对象（「重启即丢失、跨 pod
+重复执行」），而创建**依赖**某次 apply 跑完，所以线程一死，bot 就会带着空的启动
+脚本起来。在此之前 `skills_pool` 是唯一的使用者（`skills_pool.reconcile`、
+`skills_pool.quarantine.cleanup`）。
+
+有两条后果要一并带走。**worker 从此是关键路径**：apply、以及由它派生的 bot 创建，
+只有在 `task_queue_worker.enabled=true` 且 `ac_task_queue` 已开表的部署上才会推进
+——worker 关着的时候，创建不是变慢，而是永远完不成。以及**重跑之所以安全是因为
+收敛，绝不是因为「关掉了重试」**：at-least-once 是结构性的，worker 崩了以后租约
+过期，任务照样会被重新领走，handler 有没有返回过 `Retry` 都一样；安全性来自 apply
+对着当前状态重新 plan，加上 apply 锁。
 
 一个值得知道的小坑：`bind_current_avernet_tenant` *看起来*像装饰器（它用了
 `functools.wraps`），但它是在包装表达式被求值的那一刻捕获租户的。若真的当
@@ -1393,8 +1454,15 @@ manifest 概念。
   「摘标记」；§3.2 改为覆盖之后那个用途消失了。）
 - apply 报告的存储与 `GET .../config-manifest/last-apply`，形状按设计 §7。
 - `POST .../config-manifest/apply`，含 `dry_run=true`——返回计划但不动手。
-- 第一期两个免取源类目的物化器：`mcp`（注册表引用 → 既有的启用 + 配置服务）与
+- 第一期两个免取源类目的物化器：`mcp`（注册表引用 → 既有的 per-bot 启用服务
+  `DirectActivationService`，收敛「已启用 server 集合」这个 §3.2 定义的区域）与
   `script`（→ `BotStartupScriptService`）。
+  **`mcp[].config` 已从 schema v1 移除**（W4 评审结论，见 manifest-schema §3.1）：
+  它被定义成「per-bot 配置，形状同现有 MCP config API」，而那个 API 写的是
+  `ac_user_mcp_config`（键 `(user_id, server_code)`），写入路径调用
+  `sync_mcp_detail_to_all_bots` **扇出到该 owner 的所有 bot**；它装的又正是
+  `api_key` / `custom_headers`，design §4.5 明令不得进 manifest。账号级配置继续
+  走既有的 `/openapi/v1/bots/mcp/servers/{server_code}/config`。
 
 **范围外。**拉取。生命周期触发（W8）——本项唯一的入口是显式 apply。
 **`engine_config` 按 X2/T3 的决定排除在第一期之外**（§4）；它回来时，其物化器是
@@ -1513,6 +1581,8 @@ manifest 概念。
 
 #### W6 — `resources`：文件与目录 · #1474
 
+**已交付**（分支 `feat/bot-config-manifest-w6-arc`，PR 待提）。
+
 **Owner.** `lucas-xzp` · 0.75 天 · 第 4 天 · 实现（§7）
 
 
@@ -1579,6 +1649,26 @@ manifest 概念。
 #### W7 — 命名源与 git 源 · #1475
 
 **Owner.** `lucas-xzp` · 0.25 天 · 第 4 天 · 实现（§7）
+
+> **✅ 本项已完成（2026-09-02）。**命名源与 git 源已交付：subprocess git CLI
+> 浅层单 ref fetch（W2 同门拒绝语义与限额、包含性检查在 W11 之前）、
+> `from`/`sources` 解析进 `EntryFetcher.fetch_declared`、per-apply
+> `SourceSession`（一次 `{git, ref}` 拉取复用）、`SourceResolution` 进
+> apply 报告、strict 基线读上次 apply 报告。v1 收窄：git 源不支持
+> `digest`（以 SHA 形式的 ref 钉住）；`resources` 条目仍只认 URL 源——
+> W6 的物化器接上 git 路是后续工作（W6 先于 W7 合入，未携带 git 消费）。
+>
+> **🔧 评审修复（2026-09-02，`fix/w7-review-fixes`）。**#1829 的全量评审发现
+> 上述交付被闸门挡住，另有五个潜在缺陷，本 PR 全部修掉：admission 的
+> `SourceForm.GIT`/`NAMED` 从未翻转，整个运行时经 PUT 不可达（现翻转，
+> resources 收窄改由逐条目 schema 拒绝承载）；strict 解析只在过 strict 门后采纳、
+> 基线改为按报告历史有界回走——拒绝不再"一次后放行"、fetch 失败不再解除
+> strict/keep_last；git 失败文本报告安全（只留步骤+退出码，带 URL 回显的
+> stderr 全丢，对齐 W2 契约）；树字节护栏与类目限额按 `ls-tree -l` 声明尺寸在
+> checkout/读取**之前**裁决，树字节按 `(url, ref)` 一次性计入 apply 账本；
+> quotepath 转义名反转义（非 ASCII 文件名可读、非 UTF-8 名按引号形式拒绝）；
+> git 收据回归 `credential_name` 归因；子进程环境在组合根读取、剥离环境
+> `GIT_*`，凭证走 `GIT_CONFIG_*` env（仅 owner 可读）而非 ps 可见的 argv。
 
 
 **目标。**一次 `ref` 变更把整份配置解析到同一个 commit，且公司 git 服务上托管的内容是
@@ -1663,8 +1753,20 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 **验收标准。**
 
 - [ ] 在 teclaw 上，**第一份** artifact 就已包含 manifest 的结果。
-- [ ] 经 W13 创建的 bot 在创建流程内部完成 apply，所以本项覆盖的是*其他* apply
-      点——重新发布、重建式重启——外加按 §2.6 让 `PUT` 生效。
+- [ ] **teclaw 的创建归本项，包括解除 W13 的那条拒绝。**W13 交付的是
+      **只服务 ARCA** 的版本（PR #1791）：它分「容器前 / 容器后」是因为
+      `_build_create_bot_payload` 在拼装启动命令时会读 startup script 那一行，而
+      teclaw 没有对应物——它在开通时组装 config artifact，也就是上面第一条验收
+      标准。所以 W13 的创建端点拒绝 teclaw 引擎，**解除这条拒绝**、并给创建 job
+      一条 teclaw 形状的步骤序列，与 artifact 那部分工作一起归本项。到那时端点、
+      job 和轮询都已存在，缺的只是引擎门禁和一个不同的步骤顺序。不写下这一条，
+      这块就会掉在两个工作项之间——因为下面那条验收标准假设 W13 覆盖了两个引擎系
+      的创建。*值得早点确认：*teclaw 的 artifact 是平台状态的全量快照，所以只要
+      在 `provision()` **之前**把 manifest 物化进平台状态，第一份 artifact 就会
+      自然带上它，artifact 侧不用改；但今天 `ON_CONTAINER` 的物化器会解析 device
+      并在未绑定时抛异常，所以这件事可能落在 W5/W6 的物化器设计上而不是本项。
+- [ ] 经 W13 创建的 bot——**在 ARCA 上**——在创建流程内部完成 apply，所以本项覆盖
+      的是*其他* apply 点——重新发布、重建式重启——外加按 §2.6 让 `PUT` 生效。
 - [ ] **ACTIVE-but-unconfigured 窗口是被接受的，不做 gate。**本条早先的版本要求
       启动后下发在 bot 接流量之前完成。那条已撤销：§3.4 第一期接受这个窗口，§2.7
       撤销了 readiness gate，所以在这里要求一道流量门会同时与两者矛盾 —— 而且也没有
@@ -1874,7 +1976,8 @@ URL（§4, X3）；同时
 
 **W13 才是真正交付「bot 在它的第一次启动就已配置好」的那一项。**W8 覆盖其他所有
 apply 点；W13 覆盖创建，而创建正是业务要的那个。它需要 W1 和 W4，不需要任何外部
-条件。
+条件。**范围上有一条限定（PR #1791）：W13 只覆盖 ARCA 的创建；teclaw 的创建走
+artifact 组装那条路，归 W8。**
 
 **为什么生命周期接线放在最后。**显式的 `POST .../apply` 从 W4 起就能把整条引擎
 跑通，所以 W8 是在它所触发的东西被验证过之后才去碰创建与发布流程。这笔交易要直说：

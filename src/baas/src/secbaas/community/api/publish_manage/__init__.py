@@ -40,6 +40,7 @@ from ._models import (
     PublishResponse,
     StageConfig,
     StageProgress,
+    UpdateBotStatusResult,
     UpdateDeviceStatusResult,
     serialize_hook_result,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "ForceSuccessResult",
     "PublishAdminService",
     "PublishService",
+    "UpdateBotStatusResult",
     "UpdateDeviceStatusResult",
     "BatchDeviceProgress",
     "BatchResult",

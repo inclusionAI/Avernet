@@ -392,6 +392,7 @@ impl SessionLaunchApplication {
                     definition: None,
                     definition_ref: None,
                     participant_bindings: None,
+                    opening_message_override: None,
                     input: session.input.clone().unwrap_or(serde_json::Value::Null),
                     caller_id: Some(prepared.caller.actor_id().to_string()),
                     authenticated_human,

@@ -11,6 +11,7 @@ from injector import Binder, Module, inject, provider, singleton
 from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.identity import CallerIdentityRepositoryProtocol
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.core.devices.models import (
     DeviceConnectionInfo,
@@ -62,6 +63,7 @@ from agentclaw.community.plugin_api.device_connection_manager import (
 )
 from agentclaw.community.plugin_api.passport import PassportPlugin
 from agentclaw.community.plugin_api.sandbox_runtime import SandboxRuntimeClient
+from agentclaw.community.core.mcp.services.cli_passport_scope import CliPassportScopeReconciler
 from agentclaw.community.di.modules.infrastructure.singlebox.template_config import (
     SingleboxBaasTemplateConfigLifecycle,
 )
@@ -220,6 +222,7 @@ class SingleboxDevicesModule(Module):
         bot_publish_repo: BotPublishRepositoryProtocol,
         passport_plugin: PassportPlugin,
         sandbox_client: SandboxRuntimeClient,
+        caller_identity_repository: CallerIdentityRepositoryProtocol,
     ) -> DeviceService:
         bot_query = cast(BotQueryProtocol, bot_repository)
         providers: dict[str, DeviceService] = {
@@ -235,6 +238,10 @@ class SingleboxDevicesModule(Module):
             sandbox_client=sandbox_client,
             publish_repo=bot_publish_repo,
             bot_repo=bot_repository,
+            cli_scope_reconciler=CliPassportScopeReconciler(
+                passport_plugin=passport_plugin,
+                identity_repository=caller_identity_repository,
+            ),
         )
 
     @singleton

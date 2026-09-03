@@ -32,10 +32,12 @@ from agentclaw.community.api.collaborator_lock_service import (
     CollaboratorLockServiceProtocol,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.log import get_logger
 
 from .schemas import (
     CallerCallType,
     CallerContext,
+    CliCallTypeResult,
     McpCallTypeResult,
     McpCallTypeUpdate,
 )
@@ -46,6 +48,7 @@ router = APIRouter(
     tags=["Caller identity"],
     route_class=PublicAPIRoute,
 )
+logger = get_logger()
 
 
 def _validate_stage(stage: RuntimeStage, publish_id: int | None) -> None:
@@ -98,7 +101,7 @@ async def get_caller_context(
     ] = None,
     service: CallerIdentityServiceProtocol = Injected(CallerIdentityServiceProtocol),
 ) -> Envelope[CallerContext]:
-    """Return aggregate and per-MCP Caller identity for one Bot runtime."""
+    """Return aggregate and per-resource Caller overrides for one Bot runtime."""
     _validate_stage(stage, publish_id)
     result = await asyncio.to_thread(
         service.get_context,
@@ -107,6 +110,15 @@ async def get_caller_context(
         stage=CoreCallerIdentityStage(stage.value),
         publish_id=publish_id,
         entity_id=owner_id,
+    )
+    logger.info(
+        "openapi_caller_context_get_succeeded bot_id=%s stage=%s publish_id=%s "
+        "mcp_caller_override_count=%s cli_caller_override_count=%s",
+        bot_id,
+        stage.value,
+        publish_id,
+        len(result.mcp_call_types),
+        len(result.cli_call_types),
     )
     return envelope(
         CallerContext(
@@ -117,6 +129,10 @@ async def get_caller_context(
             mcp_call_types={
                 code: CallerCallType(call_type.value)
                 for code, call_type in result.mcp_call_types.items()
+            },
+            cli_call_types={
+                code: CallerCallType(call_type.value)
+                for code, call_type in result.cli_call_types.items()
             },
             editable=result.editable,
         ),
@@ -157,6 +173,46 @@ async def update_mcp_call_type(
     return envelope(
         McpCallTypeResult(
             server_code=result.server_code,
+            call_type=CallerCallType(result.call_type.value),
+            bot_call_type=CallerCallType(result.bot_call_type.value),
+        ),
+        request,
+    )
+
+
+@router.patch(
+    "/clis/{cli_code}/call-type",
+    response_model=Envelope[CliCallTypeResult],
+)
+@envelope_errors
+async def update_cli_call_type(
+    bot_id: BotIdPath,
+    cli_code: Annotated[str, Path(description="Opaque AgentPass CLI identifier.")],
+    body: McpCallTypeUpdate,
+    request: Request,
+    user_id: UserIdDep,
+    owner_id: OwnerIdDep,
+    service: CallerIdentityServiceProtocol = Injected(CallerIdentityServiceProtocol),
+    locks: CollaboratorLockServiceProtocol = Injected(CollaboratorLockServiceProtocol),
+) -> Envelope[CliCallTypeResult]:
+    """Update one authorized Default CLI's AgentPass identity mode."""
+    lock_epoch = await _current_lock_epoch(
+        locks,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    result = await service.update_cli_call_type(
+        bot_id=bot_id,
+        cli_code=cli_code,
+        call_type=CoreMcpCallType(body.call_type.value),
+        actor_id=user_id,
+        lock_epoch=lock_epoch,
+        entity_id=owner_id,
+    )
+    return envelope(
+        CliCallTypeResult(
+            cli_code=result.cli_code,
             call_type=CallerCallType(result.call_type.value),
             bot_call_type=CallerCallType(result.bot_call_type.value),
         ),

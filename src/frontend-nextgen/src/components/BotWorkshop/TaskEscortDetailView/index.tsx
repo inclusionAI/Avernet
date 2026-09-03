@@ -74,7 +74,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
       setRunNodes([]);
       setWorkflowSpec(null);
       setDetailError(null);
-      setActiveTab('nodes');
+setActiveTab('nodes');
       setIsLoadingDetail(true);
       try {
         const [detail, spec] = await Promise.all([

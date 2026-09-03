@@ -51,6 +51,9 @@ from agentclaw.community.api.bot_config_manifest_service import (
     ManifestTooLargeError,
     ManifestValidationError,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    ManifestApplyInProgressError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     BotEditLockCheckError,
@@ -69,6 +72,9 @@ from agentclaw.community.adapters.http.openapi_v1.errors import (
     UserIdMismatchError,
 )
 from agentclaw.community.adapters.http.openapi_v1.errors_bot_create import BOT_CREATE_HTTP_ERRORS
+from agentclaw.community.adapters.http.openapi_v1.errors_source_credentials import (
+    SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors_space import SpaceErrorCode, SpacePublicErrorMessage
 from agentclaw.community.adapters.http.openapi_v1.errors_space_skill import SPACE_SKILL_ERROR_CODES, SPACE_SKILL_HTTP_ERRORS
 from agentclaw.community.adapters.http.openapi_v1.errors_work_order import WorkOrderErrorCode, WorkOrderPublicErrorMessage
@@ -203,6 +209,7 @@ from agentclaw.community.core.mcp.errors import (
     McpSyncFailedError,
 )
 from agentclaw.community.core.resources.service import (
+    DirectoryTooLargeError,
     DuplicateResourceError,
     FileTooLargeError,
     InvalidResourcePathError,
@@ -592,10 +599,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # proxies and client retry layers the whole surface is out of rotation over
     # a per-Bot conflict. The internal /api/skillsets mapping in
     # ``adapters.http.app`` answers 409 for the same reason.
-    SkillSetControlPlaneLockUnavailableError: (
-        409,
-        "Another SkillSet mutation holds this Bot's fence",
-    ),
+    SkillSetControlPlaneLockUnavailableError: (409, "Another SkillSet mutation holds this Bot's fence"),
     SkillSetRuntimeReconcileError: (502, "Skill runtime synchronization failed"),
     LocalSkillOwnerAmbiguousError: (409, "Ambiguous Local Skill owner"),
     LocalSkillInvalidPackageError: (400, "Invalid Skill package"),
@@ -608,10 +612,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillRuntimeSyncError: (502, "Skill runtime synchronization failed"),
     LocalSkillEditBusyError: (409, "Another Skill update is in progress"),
     LocalSkillLayoutRollbackError: (409, "Skill layout rollback is in progress"),
-    LocalSkillEditLockUnavailableError: (
-        503,
-        "Skill update service is temporarily unavailable",
-    ),
+    LocalSkillEditLockUnavailableError: (503, "Skill update service is temporarily unavailable"),
     LocalSkillEditPausedError: (409, "Skill layout is being updated"),
     SkillRuntimeNameConflictError: (409, "Skill runtime name conflicts with an active Skill"),
     SkillEngineNotSupportedError: (409, "Skill is not supported by this bot type and engine"),
@@ -619,7 +620,10 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     RepositoryCatalogSyncInProgressError: (409, "Repository synchronization is already in progress"),
     RepositoryCatalogSyncFailedError: (502, "Repository synchronization failed"),
     **errors_skill_center.SKILL_CENTER_ENVELOPE_ERRORS,
+    **SOURCE_CREDENTIALS_ENVELOPE_ERRORS,
     FileTooLargeError: (413, "File too large for preview"),
+    # download-dir: one fixed message for all three caps (per-file / count / total).
+    DirectoryTooLargeError: (413, "Directory too large to download"),
     # Startup script (issue #926): the body is refused at write time so a
     # caller learns the limit instead of hitting it inside a container. The
     # limit is interpolated from the constant rather than typed as a literal so
@@ -651,6 +655,11 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
         f"Config manifest exceeds the {MAX_DOCUMENT_BYTES}-byte limit",
     ),
     ManifestNotEncodableError: (400, "Config manifest is not valid UTF-8"),
+    # Applies are serialized per bot, so a second one arriving while the first
+    # holds the lock is an ordinary, retryable state — not an internal error.
+    # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
+    # where the route's own documentation promises a 409.
+    ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -806,6 +815,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
+    ManifestApplyInProgressError: 409109,
     LocalSkillRuntimeSyncError: 502102,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,

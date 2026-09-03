@@ -30,44 +30,29 @@ export const botEditorService = {
       return 0;
     }
   },
-  async load(botId: string, serviceBot = false, spaceId?: string) {
-    const [
-      skills,
-      skillSets,
-      mcps,
-      mcpServers,
-      repositorySkills,
-      spaceSkills,
-      resources,
-      screens,
-      routines,
-      engineConfig,
-      engineStatus,
-      approval,
-    ] = await Promise.allSettled([
-      botEditorController.listSkills(botId),
-      botEditorController.listSkillSets(botId),
-      botEditorController.listBotMcps(botId),
-      botEditorController.listMcpServers(),
-      botEditorController.listRepositorySkills(),
-      spaceId ? botEditorController.listSpaceSkills(spaceId) : Promise.resolve({ data: { total: 0, items: [] } }),
-      botEditorService.listResources(botId),
-      botEditorController.listRenderScreens(botId),
-      botEditorController.listRoutines(botId),
-      botEditorController.getEngineConfig(botId),
-      botEditorController.getEngineStatus(botId),
-      serviceBot ? botEditorController.getApprovalConfig(botId) : Promise.resolve({ data: { should_approval: false } }),
-    ]);
+  async load(botId: string, serviceBot = false) {
+    const [skills, skillSetResources, resources, screens, routines, engineConfig, engineStatus, approval] =
+      await Promise.allSettled([
+        botEditorController.listSkills(botId),
+        botEditorController.listSkillSetResources(botId),
+        botEditorService.listResources(botId),
+        botEditorController.listRenderScreens(botId),
+        botEditorController.listRoutines(botId),
+        botEditorController.getEngineConfig(botId),
+        botEditorController.getEngineStatus(botId),
+        serviceBot
+          ? botEditorController.getApprovalConfig(botId)
+          : Promise.resolve({ data: { should_approval: false } }),
+      ]);
     const sets: BotCapabilitySet[] = [];
     let skillSetDetailErrors = 0;
-    if (skillSets.status === 'fulfilled') {
+    if (skillSetResources.status === 'fulfilled') {
       const details = await Promise.all(
-        (skillSets.value.data ?? []).map(async (set) => {
-          const [setSkills, setMcps] = await Promise.allSettled([
-            botEditorController.listSkillSetSkills(botId, set.id),
-            botEditorController.listSkillSetMcps(botId, set.id),
-          ]);
-          skillSetDetailErrors += Number(setSkills.status === 'rejected') + Number(setMcps.status === 'rejected');
+        (skillSetResources.value.data ?? []).map(async (set) => {
+          const setSkills = await Promise.allSettled([botEditorController.listSkillSetSkills(botId, set.id)]).then(
+            ([result]) => result,
+          );
+          skillSetDetailErrors += Number(setSkills.status === 'rejected');
           return {
             id: set.id,
             name: set.name,
@@ -80,12 +65,16 @@ export const botEditorService = {
               description: item.description,
               active: true,
             })),
-            mcps: (setMcps.status === 'fulfilled' ? setMcps.value.data ?? [] : []).map((item) => ({
+            mcps: (set.mcps ?? []).map((item) => ({
               serverCode: item.server_code,
-              name: item.name,
+              name: item.name || item.server_code,
               description: item.description,
               active: true,
             })),
+            clis: (set.clis ?? []).flatMap((item) => {
+              const code = item.cli_code ?? item.resource_code ?? item.code;
+              return code ? [{ code, name: item.name || code, description: item.description }] : [];
+            }),
           } satisfies BotCapabilitySet;
         }),
       );
@@ -94,60 +83,10 @@ export const botEditorService = {
     return {
       skills: skills.status === 'fulfilled' ? dataOr(skills.value.data?.items, []).map(mapSkill) : [],
       skillSets: sets,
-      mcps:
-        mcps.status === 'fulfilled'
-          ? dataOr(mcps.value.data, []).map((item): BotEditorMcp => {
-              const detail =
-                mcpServers.status === 'fulfilled'
-                  ? mcpServers.value.data?.items?.find((server) => server.server_code === item.server_code)
-                  : undefined;
-              return {
-                serverCode: item.server_code,
-                name: detail?.name || item.server_code,
-                description: detail?.description,
-                active: item.active,
-              };
-            })
-          : [],
-      availableMcps:
-        mcpServers.status === 'fulfilled'
-          ? dataOr(mcpServers.value.data?.items, []).map(
-              (item): BotEditorMcp => ({
-                serverCode: item.server_code,
-                name: item.name || item.server_code,
-                description: item.description,
-                active:
-                  mcps.status === 'fulfilled'
-                    ? Boolean(mcps.value.data?.some((bound) => bound.server_code === item.server_code && bound.active))
-                    : false,
-              }),
-            )
-          : [],
-      marketSkills:
-        repositorySkills.status === 'fulfilled'
-          ? dataOr(repositorySkills.value.data?.items, []).map(
-              (item): BotEditorSkill => ({
-                id: String(item.skill_id ?? item.id ?? ''),
-                name: item.name,
-                description: item.description,
-                version: item.latest_published_version ?? item.version,
-                source: 'market',
-                active: false,
-              }),
-            )
-          : [],
-      workshopSkills:
-        spaceSkills.status === 'fulfilled'
-          ? dataOr(spaceSkills.value.data?.items, []).map(
-              (item): BotEditorSkill => ({
-                id: item.skill_id,
-                name: item.name,
-                description: item.description,
-                source: 'workshop',
-                active: false,
-              }),
-            )
-          : [],
+      mcps: [],
+      availableMcps: [],
+      marketSkills: [],
+      workshopSkills: [],
       resources: resources.status === 'fulfilled' ? resources.value : [],
       screens: screens.status === 'fulfilled' ? dataOr(screens.value.data?.items, []).map(mapScreen) : [],
       routines: routines.status === 'fulfilled' ? dataOr(routines.value.data?.items, []).map(mapRoutine) : [],
@@ -162,20 +101,46 @@ export const botEditorService = {
           : undefined,
       approvalRequired: approval.status === 'fulfilled' ? Boolean(approval.value.data?.should_approval) : false,
       errors:
-        [
-          skills,
-          skillSets,
-          mcps,
-          mcpServers,
-          repositorySkills,
-          spaceSkills,
-          resources,
-          screens,
-          routines,
-          engineConfig,
-          engineStatus,
-          approval,
-        ].filter((item) => item.status === 'rejected').length + skillSetDetailErrors,
+        [skills, skillSetResources, resources, screens, routines, engineConfig, engineStatus, approval].filter(
+          (item) => item.status === 'rejected',
+        ).length + skillSetDetailErrors,
+    };
+  },
+  async loadCapabilityCandidates(botId: string, spaceId?: string) {
+    const [boundMcps, mcpServers, repositorySkills, spaceSkills] = await Promise.all([
+      botEditorController.listBotMcps(botId),
+      botEditorController.listMcpServers(),
+      botEditorController.listRepositorySkills(),
+      spaceId ? botEditorController.listSpaceSkills(spaceId) : Promise.resolve({ data: { total: 0, items: [] } }),
+    ]);
+    return {
+      availableMcps: dataOr(mcpServers.data?.items, []).map(
+        (item): BotEditorMcp => ({
+          serverCode: item.server_code,
+          name: item.name || item.server_code,
+          description: item.description,
+          active: Boolean(boundMcps.data?.some((bound) => bound.server_code === item.server_code && bound.active)),
+        }),
+      ),
+      marketSkills: dataOr(repositorySkills.data?.items, []).map(
+        (item): BotEditorSkill => ({
+          id: String(item.skill_id ?? item.id ?? ''),
+          name: item.name,
+          description: item.description,
+          version: item.latest_published_version ?? item.version,
+          source: 'market',
+          active: false,
+        }),
+      ),
+      workshopSkills: dataOr(spaceSkills.data?.items, []).map(
+        (item): BotEditorSkill => ({
+          id: item.skill_id,
+          name: item.name,
+          description: item.description,
+          source: 'workshop',
+          active: false,
+        }),
+      ),
     };
   },
   toggleSkill: (botId: string, skill: BotEditorSkill) =>

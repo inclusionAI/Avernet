@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from agentclaw.community.adapters.http.skill_center.schemas import (
     AddSkillsRequest,
+    ActivateSkillSetRequest,
     DeactivateSkillSetRequest,
     SearchRequest,
     UpdateSkillSetRequest,
@@ -23,6 +24,7 @@ from agentclaw.community.adapters.http.skill_center.skillsets import (
     update_skill_set,
 )
 from agentclaw.community.adapters.http.skill_center.skills import (
+    activate_skill_set,
     deactivate_skill_set,
     get_market_tree,
     list_local_market_skills,
@@ -117,6 +119,30 @@ class _LegacySetScopeControlPlane:
         assert kwargs["owner_id"] == "owner"
         return {"id": "set-1", "changed": True}
 
+    async def activate(self, **kwargs):
+        self.calls.append(("activate", kwargs))
+        assert kwargs["bot_id"] == "persisted-bot"
+        assert kwargs["owner_id"] == "owner"
+        return {
+            "id": "set-1",
+            "changed": True,
+            "runtime_projection": {
+                "status": "DEGRADED",
+                "components": {"skills": "DEGRADED"},
+                "pending_count": 0,
+                "degraded_count": 1,
+                "issues": [
+                    {
+                        "resource_type": "SKILL",
+                        "code": "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                        "reason": "Bot 生效目录中存在同名实体目录",
+                        "status": "DEGRADED",
+                        "retryable": False,
+                    }
+                ],
+            },
+        }
+
 
 @pytest.mark.asyncio
 async def test_legacy_mcp_read_recovers_non_default_bot_from_exact_set_id() -> None:
@@ -207,6 +233,42 @@ async def test_legacy_deactivate_recovers_non_default_bot_from_exact_set_id() ->
             "owner_id_hint": None,
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_legacy_activate_keeps_success_wire_and_adds_degraded_diagnostics() -> None:
+    control_plane = _LegacySetScopeControlPlane()
+
+    response = await activate_skill_set(
+        ActivateSkillSetRequest(skill_set_id="set-1"),
+        ctx=SimpleNamespace(user_id="owner", bot_id="default"),
+        bot_repo=_AddressedBots(),
+        control_plane=control_plane,
+    )
+
+    assert response.model_dump() == {
+        "success": True,
+        "message": "能力集状态已保存，但部分 Skill 未完成运行时收敛",
+        "data": {
+            "activated": ["set-1"],
+            "failed": [],
+            "runtime_projection": {
+                "status": "DEGRADED",
+                "components": {"skills": "DEGRADED"},
+                "pending_count": 0,
+                "degraded_count": 1,
+                "issues": [
+                    {
+                        "resource_type": "SKILL",
+                        "code": "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                        "reason": "Bot 生效目录中存在同名实体目录",
+                        "status": "DEGRADED",
+                        "retryable": False,
+                    }
+                ],
+            },
+        },
+    }
 
 
 @pytest.mark.asyncio
@@ -334,7 +396,55 @@ async def test_legacy_skill_set_batch_keeps_domain_partial_success() -> None:
 
     assert response.success is True
     assert response.data["success"] == []
-    assert response.data["failed"][0]["skill_id"] == "7"
+    assert response.data["failed"] == [
+        {
+            "skill_id": "7",
+            "error": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            "error_code": "RESOURCE_ALREADY_IN_ANOTHER_SKILL_SET",
+            "message": "该 Skill 已由其他能力集管理，不能重复添加。",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_skill_set_batch_keeps_direct_error_code_and_adds_message() -> None:
+    class _ControlPlane:
+        def get_set(self, **_kwargs):
+            return {"id": "set-1", "is_default": False}
+
+        def resolve_legacy_skill_id(self, **kwargs):
+            return kwargs["identifier"]
+
+        async def add_skills(self, **_kwargs):
+            return [
+                SkillSetSkillOutcome(
+                    skill_id="7",
+                    error=SkillSetControlPlaneConflictError(
+                        "RESOURCE_DIRECT_ACTIVE"
+                    ),
+                )
+            ]
+
+    response = await add_skills_to_set(
+        "set-1",
+        AddSkillsRequest(skill_ids=["7"], user_id="owner", bot_id="bot"),
+        entity_id=None,
+        entity_type=None,
+        bot_id=None,
+        engine_type=None,
+        ctx=SimpleNamespace(user_id="owner", bot_id="bot"),
+        bot_repo=_Bots(),
+        control_plane=_ControlPlane(),
+    )
+
+    assert response.data["failed"] == [
+        {
+            "skill_id": "7",
+            "error": "RESOURCE_DIRECT_ACTIVE",
+            "error_code": "RESOURCE_DIRECT_ACTIVE",
+            "message": "该 Skill 已单独激活，请先停用后再加入能力集。",
+        }
+    ]
 
 
 @pytest.mark.asyncio

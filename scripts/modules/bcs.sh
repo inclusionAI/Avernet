@@ -929,7 +929,14 @@ bcs_setup() {
 
     build_bcs_panel_asset || return 1
 
-    if bcs_binaries_stale; then
+    # The coverage stack (--with-bcs-coverage) builds and runs its own
+    # LLVM-instrumented bcs/bcs-cli under target/cov-e2e and exports
+    # BCS_BIN/BCS_CLI_BIN, so the target/debug binaries built here would go
+    # unused. Callers that only start that stack set BCS_SKIP_DEBUG_BUILD=1
+    # to save a full cargo build (~2 minutes in CI).
+    if [ "${BCS_SKIP_DEBUG_BUILD:-0}" = "1" ]; then
+        log_info "Skipping BCS debug build (BCS_SKIP_DEBUG_BUILD=1)"
+    elif bcs_binaries_stale; then
         log_info "BCS build needed: ${BCS_BUILD_REASON}"
         build_bcs || return 1
         build_bcs_panel_asset || return 1

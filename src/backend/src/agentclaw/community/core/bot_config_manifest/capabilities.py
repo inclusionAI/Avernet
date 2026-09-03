@@ -84,10 +84,9 @@ class ManifestSection(StrEnum):
 class SourceForm(StrEnum):
     """How an entry names its content.
 
-    Four forms, and the distinction is load-bearing for support: two of them
-    have no resolver in the first wave. ``GIT`` covers both spellings of a git
-    source — inline on an entry and declared under ``sources`` — because one
-    resolver would serve both and neither has it yet.
+    Four forms. ``GIT`` covers both spellings of a git source — inline on an
+    entry and declared under ``sources`` — because one resolver serves both
+    (W7's declared-source dispatch).
     """
 
     URL = "url"
@@ -147,14 +146,6 @@ _REASON_CLI_TOOLS = (
 )
 _REASON_ENGINE_CONFIG = (
     "engine_config was moved out of the first wave, so no materializer writes it"
-)
-_REASON_NAMED_SOURCE = (
-    "named sources (`from`) are resolved by the named-and-git source work item "
-    "(W7), which has not landed"
-)
-_REASON_GIT_SOURCE = (
-    "git sources are resolved by the named-and-git source work item (W7), which "
-    "has not landed"
 )
 _REASON_TECLAW_SCRIPT = (
     "teclaw bots are provisioned without a start sequence, so a script would "
@@ -284,19 +275,25 @@ def resolve_capabilities(
 
     blocked: dict[Construct, str | None] = {
         ManifestCategory.MCP: None,
-        # Accepted with no materializer *yet* (W6). An accepted document sits
-        # inert until then, which is what `GET …/capabilities` and the module
-        # README say out loud rather than leaving a caller to discover.
+        # Materialised since W6, through the one write chain
+        # (`ResourceFileService`'s dispatcher) with tree-replacement
+        # semantics for directory entries — see the resources materialiser.
         ManifestCategory.RESOURCES: None,
         ManifestCategory.SKILLS: None,
         ManifestCategory.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,
         ManifestCategory.IDENTITY: None,
         ManifestCategory.CLI_TOOLS: _REASON_CLI_TOOLS,
         ManifestSection.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
+        # Materialised since W5 (skills/identity) and renamed-since-W7: the
+        # declared-source dispatch in ``EntryFetcher.fetch_declared`` resolves
+        # both forms for the categories that fetch. The one (category, form)
+        # pair still undelivered — resources × git/named, the URL-only road
+        # W6 shipped — is refused per entry at schema validation, with a
+        # reason that names the category, because a blanket row here cannot.
         SourceForm.URL: None,
         SourceForm.CONTENT: None,
-        SourceForm.GIT: _REASON_GIT_SOURCE,
-        SourceForm.NAMED: _REASON_NAMED_SOURCE,
+        SourceForm.GIT: None,
+        SourceForm.NAMED: None,
     }
 
     return ManifestCapabilities(

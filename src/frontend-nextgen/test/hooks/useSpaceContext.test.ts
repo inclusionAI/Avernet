@@ -1,13 +1,9 @@
 // @jest/globals 必须先于被测模块导入：jest.mock 工厂在执行时会引用这里的 jest 绑定，
 // 若被测模块先加载会触发工厂求值，此时 jest 绑定尚未初始化（undefined.jest 报错）。
-import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import type { Space } from '@/domain/admin/models';
-import {
-  initSpaceContext,
-  refreshSpaceContext,
-  switchSpaceContext,
-} from '@/hooks/useSpaceContext';
+import { initSpaceContext, refreshSpaceContext, switchSpaceContext } from '@/hooks/useSpaceContext';
 import { useSpaceContextStore } from '@/stores/spaceContextStore';
+import { beforeEach, describe, expect, it } from '@jest/globals';
 
 // node jest 无 DOM：提供最小 localStorage global shim。
 class LS {
@@ -85,13 +81,14 @@ describe('useSpaceContextActions', () => {
     mockedEnsurePersonal.mockResolvedValue({ data: true });
   });
 
-  it('init：拉全集→过滤已加入→无 localStorage 时默认个人空间', async () => {
+  it('init：listSpaces 带 scope=accessible；不再前端过滤，后端返回什么用什么；默认个人空间', async () => {
     mockedListSpaces.mockResolvedValueOnce({
       data: { items: [personal, team, teamAvailable], total: 3, page: 1, pageSize: 100, hasMore: false, warnings: [] },
     });
     await initSpaceContext();
     const s = useSpaceContextStore.getState();
-    expect(s.spaces.map((x) => x.spaceId)).toEqual([10000, 10001]); // 10002 已排除
+    expect(mockedListSpaces).toHaveBeenCalledWith({ page: 1, pageSize: 100, scope: 'accessible' });
+    expect(s.spaces.map((x) => x.spaceId)).toEqual([10000, 10001, 10002]); // 不再前端过滤，NOT_JOINED 也保留
     expect(s.currentSpaceId).toBe(10000); // 默认个人空间
     expect(s.loading).toBe(false);
     expect(s.error).toBeUndefined();
@@ -108,10 +105,10 @@ describe('useSpaceContextActions', () => {
     expect(useSpaceContextStore.getState().currentSpaceId).toBe(10001);
   });
 
-  it('init：localStorage 中的 id 不在已加入子集（未加入/已失效）时回落个人空间', async () => {
-    ls.setItem('tc_space_context_current_id', '10002'); // AVAILABLE，已过滤掉
+  it('init：localStorage 中的 id 不在已加入列表（已退出/已失效）时回落个人空间', async () => {
+    ls.setItem('tc_space_context_current_id', '99999'); // 不在后端 scope=accessible 返回的列表中
     mockedListSpaces.mockResolvedValueOnce({
-      data: { items: [personal, team, teamAvailable], total: 3, page: 1, pageSize: 100, hasMore: false, warnings: [] },
+      data: { items: [personal, team], total: 2, page: 1, pageSize: 100, hasMore: false, warnings: [] },
     });
     await initSpaceContext();
     expect(useSpaceContextStore.getState().currentSpaceId).toBe(10000);

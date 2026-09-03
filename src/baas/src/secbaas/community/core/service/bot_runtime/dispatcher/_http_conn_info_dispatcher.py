@@ -90,6 +90,7 @@ class DefaultBotHttpConnInfoDispatcher(BotBaseDispatcher, BotHttpConnInfoDispatc
             port=port,
             path=path,
         )
+        conn_info.device_id = paas_device_id
 
         logger.info(f"Dispatched HTTP conn info: http_url={conn_info.http_url}")
 
@@ -176,6 +177,7 @@ class DefaultBotHttpConnInfoDispatcher(BotBaseDispatcher, BotHttpConnInfoDispatc
             port=port,
             path=path,
         )
+        conn_info.device_id = paas_device_id
 
         logger.info(
             f"Dispatched HTTP connection for specific device: "

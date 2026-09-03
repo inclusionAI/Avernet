@@ -33,6 +33,8 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 )
 from agentclaw.community.core.repository.implementations.skill_center.bot_skillset_installations import (
     BotSkillSetInstallations,
+    CENTER_MEMBERSHIP_IDENTITY_MISSING,
+    center_membership_skill_uuid,
     set_member_skill_ids,
 )
 from agentclaw.community.core.repository.implementations.skill_center.default_exclusion_commands import (
@@ -45,7 +47,7 @@ from agentclaw.community.core.repository.implementations.skill_center.mcp_skill_
     McpSkillSetControlPlaneCommands,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
-    skill_mcp_dependency_codes,
+    skill_projection_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.legacy_skill_set_scope import LegacySkillSetScopeQueries
 from agentclaw.community.core.repository.capability_desired_state_types import (
@@ -329,6 +331,7 @@ class CapabilityDesiredStateRepository(
             ):
                 raise SkillSetControlPlaneNotFoundError()
             require_skill_online(skill)
+            membership_skill_uuid = center_membership_skill_uuid(skill)
             old = self._snapshot(
                 session, bot_id, owner_id, engine_type=engine_type
             )
@@ -341,35 +344,57 @@ class CapabilityDesiredStateRepository(
                 .first()
             )
             if current is not None:
+                if (
+                    membership_skill_uuid is not None
+                    and current.skill_uuid != membership_skill_uuid
+                ):
+                    raise SkillSetControlPlaneConflictError(
+                        CENTER_MEMBERSHIP_IDENTITY_MISSING
+                    )
                 return DesiredStateMutation(_item(row), False, old)
             # R3 covers ANY of the Bot's Sets — the Default included, its
             # members excluded or not.
-            reachable_ids = {
-                int(candidate.id)
-                for candidate in self._bot_sets(
-                    session,
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    engine_type=engine_type,
-                    default_engine_types=default_engine_types,
-                )
-            } - {int(row.id)}
+            bot_sets = self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            )
+            reachable_ids = {int(candidate.id) for candidate in bot_sets} - {
+                int(row.id)
+            }
             identity = [SkillSetSkill.skill_id == skill.id]
             if skill.skill_uuid:
                 identity.append(SkillSetSkill.skill_uuid == skill.skill_uuid)
-            membership = (
+            memberships = (
                 self._scope(session.query(SkillSetSkill), SkillSetSkill)
                 .filter(
                     SkillSetSkill.skill_set_id.in_(reachable_ids),
                     or_(*identity),
                 )
-                .first()
+                .all()
                 if reachable_ids
-                else None
+                else []
+            )
+            # Installation is the effective-capability SSOT, not its
+            # provenance.  An active Default/ordinary Set legitimately
+            # materializes an Installation row, so row existence alone must
+            # not turn a Set-managed Skill into a Direct-active Skill.
+            active_set_claim = self._has_active_skill_set_claim(
+                session,
+                bot_sets=bot_sets,
+                membership_set_ids={int(item.skill_set_id) for item in memberships},
+                skill_id=int(skill.id),
+                bot_id=bot_id,
+                owner_id=owner_id,
             )
             require_can_join_set(
-                is_directly_active=skill.id in old.installations,
-                is_in_another_set=membership is not None,
+                is_directly_active=(
+                    skill.id in old.installations
+                    and not active_set_claim
+                ),
+                is_in_another_set=bool(memberships),
             )
             if row.is_active:
                 self._require_unique_runtime_names(
@@ -382,6 +407,7 @@ class CapabilityDesiredStateRepository(
                 SkillSetSkill(
                     skill_set_id=row.id,
                     skill_id=skill.id,
+                    skill_uuid=membership_skill_uuid,
                     user_id=row.user_id,
                     env=get_current_env(),
                     avernet_tenant=get_current_avernet_tenant(),
@@ -405,7 +431,11 @@ class CapabilityDesiredStateRepository(
                 _item(row),
                 True,
                 old,
-                mcp_codes=skill_mcp_dependency_codes(skill),
+                mcp_codes=skill_projection_mcp_dependency_codes(
+                    session,
+                    skill,
+                    allow_unresolvable_center=not bool(row.is_active),
+                ),
             )
 
     def remove_skill(
@@ -447,6 +477,7 @@ class CapabilityDesiredStateRepository(
             skill = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
+                .with_for_update()
                 .one_or_none()
             )
             # The difference is what this membership was providing.
@@ -470,7 +501,9 @@ class CapabilityDesiredStateRepository(
                 _item(row),
                 True,
                 old,
-                mcp_codes=skill_mcp_dependency_codes(skill),
+                mcp_codes=skill_projection_mcp_dependency_codes(
+                    session, skill, allow_unresolvable_center=True
+                ),
             )
 
     def set_skill_set_active(

@@ -10,7 +10,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 
 # 场景(动 LLM 自评 bid + 真执行;参考 test_writing_qc_state_machine_e2e.py 的 live 手法)
 
-任务 MISS→HUNG→升 BBS 后,引擎 ``_schedule_bbs_notify`` fire-and-forget ``run_bbs`` → ``bbs_runner.notify``:
+任务 MISS→HUNG→升 BBS 后,引擎 ``_schedule_bbs_notify`` fire-and-forget ``start_run`` → ``bbs_runner.notify``:
 
 1. **bid**:`list_bots_by_task_modes(dream=True)` 拉 dream-mode roster(本用例建**两个** dream bot 并开
    ``task_dream_mode``)→ 并发 ``send_and_wait_async`` 让每个 bot 自评 ``completion_rate``(真 LLM 出 JSON)。
@@ -38,7 +38,7 @@ staff_no,经 BCS ``authorize_bot_management`` 的 owner 匹配放行)PATCH
 
 # 已修的接缝
 
-``bbs_runner.notify``/``TaskRunner.run_bbs`` 取 ``execution_graph.task_id``,而 ``TaskExecutionGraph`` 原无该字段
+``bbs_runner.notify`` 经 BBS executor 取 ``execution_graph.task_id``,而 ``TaskExecutionGraph`` 原无该字段
 → live 触发即 ``AttributeError``(单测用 MagicMock.mask)。本仓已给 ``TaskExecutionGraph`` 加 ``task_id``
 (initialize / query_task_dashboard 子树投影透传),使真触发链可用。
 """

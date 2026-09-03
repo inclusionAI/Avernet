@@ -25,6 +25,7 @@ HTTP_METHODS = {
 ROUTING_ONLY_OPERATION_ID_PARTS = {"collaboration", "bcn", "openapi"}
 ENVELOPE_FIELDS = {"code", "message", "data", "request_id"}
 PUBLIC_COLLABORATION_PREFIX = "/openapi/v1/collaboration/"
+PUBLIC_AUTH_PREFIX = "/openapi/v1/auth/"
 INTERNAL_COLLABORATION_PREFIX = "/api/v1/collaboration/"
 
 
@@ -113,6 +114,12 @@ def load_contract(root: Path, entrypoint: str = "openapi.yaml") -> dict[str, Any
     return resolved
 
 
+def _allowed_path_prefixes(path_prefix: str) -> tuple[str, ...]:
+    if path_prefix == PUBLIC_COLLABORATION_PREFIX:
+        return (PUBLIC_COLLABORATION_PREFIX, PUBLIC_AUTH_PREFIX)
+    return (path_prefix,)
+
+
 def _iter_operations(contract: dict[str, Any]):
     for path, path_item in contract.get("paths", {}).items():
         for method, operation in path_item.items():
@@ -139,8 +146,10 @@ def validate_contract(
 
     for method, path, operation in _iter_operations(contract):
         location = f"{method.upper()} {path}"
-        if not path.startswith(path_prefix):
-            errors.append(f"{location}: path is outside {path_prefix}**")
+        allowed_prefixes = _allowed_path_prefixes(path_prefix)
+        if not any(path.startswith(prefix) for prefix in allowed_prefixes):
+            joined = " or ".join(f"{prefix}**" for prefix in allowed_prefixes)
+            errors.append(f"{location}: path is outside {joined}")
 
         operation_id = operation.get("operationId")
         if not operation_id:

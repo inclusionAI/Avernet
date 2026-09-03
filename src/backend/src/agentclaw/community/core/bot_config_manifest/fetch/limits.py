@@ -18,13 +18,32 @@ on the allowlist still goes through address validation.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Callable, Mapping
 
 #: Address resolution seam: host → resolved IP string list. Real DNS via
 #: socket in production; tests inject deterministic answers (including the
 #: check-public/connect-private rebinding pair).
 Resolver = Callable[[str], list[str]]
+
+class FetchCategory(StrEnum):
+    """The closed vocabulary a fetch's category lives in — the keys of
+    :data:`FETCH_ENTRY_LIMITS` and nothing else, bound by the module-level
+    assertion below so the two cannot drift apart (the W3
+    no-drift-assertion precedent). A misspelled category would otherwise
+    silently take the per-entry default's cap, which is the wrong quiet
+    answer for a width the schema states per category.
+    """
+
+    SKILLS = "skills"
+    RESOURCES_FILE = "resources_file"
+    IDENTITY = "identity"
+    CLI_TOOLS = "cli_tools"
+    RESOURCES_ARCHIVE = "resources_archive"
+    RESOURCES_UNPACKED = "resources_unpacked"
+
 
 #: ``schema §5`` — per-entry fetch caps, in bytes, by category.
 FETCH_ENTRY_LIMITS: Mapping[str, int] = {
@@ -36,11 +55,19 @@ FETCH_ENTRY_LIMITS: Mapping[str, int] = {
     "resources_unpacked": 500 * 1024 * 1024,
 }
 
+assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}, (
+    "FETCH_ENTRY_LIMITS and FetchCategory must name the same set of "
+    "categories — a drift between them silently mis-caps entries"
+)
+
 #: ``schema §5`` — one archive may not explode beyond this many members.
 ARCHIVE_MEMBER_LIMIT = 5000
 
-#: ``schema §5`` — totals for a single apply run (W4 threads one
-#: ``FetchBudget`` through every entry so these are shared).
+#: ``schema §5`` — totals for a single apply run, LEDGERED by W5's
+#: ``apply/budget.ApplyFetchBudget`` (carried on ``ApplyContext``,
+#: consulted before each entry's fetch and charged after): an apply that
+#: outruns these ends in bounded time rather than holding the per-bot apply
+#: lock past the TTL the stale-lock reaper trusts.
 APPLY_FETCH_TOTAL_LIMIT = 500 * 1024 * 1024
 APPLY_BUDGET_S = 300.0
 
@@ -53,8 +80,35 @@ FETCH_TIMEOUT_S = 60.0
 #: cap is both a robustness and a safety bound.
 MAX_REDIRECTS = 5
 
+#: W7 — a git checkout's budget. The wire cap above counts bytes in flight;
+#: a small pack can bloom into a giant tree on disk, so git content gets its
+#: own post-unpack caps, aligned with the archive vocabulary rather than a
+#: second dialect of numbers that drifts. Enforced by ``fetch/git_source.py``
+#: while the checkout is read, refused before any byte reaches the entry.
+GIT_CHECKOUT_UNPACKED_LIMIT = FETCH_ENTRY_LIMITS["resources_unpacked"]
+GIT_CHECKOUT_MEMBER_LIMIT = ARCHIVE_MEMBER_LIMIT
+GIT_SINGLE_FILE_LIMIT = FETCH_ENTRY_LIMITS["skills"]
+
+#: A git fetch is one network operation with disk work after it, so it gets
+#: more than a single HTTP hop's ``FETCH_TIMEOUT_S`` but stays inside the
+#: apply-level ``APPLY_BUDGET_S`` ledger that is charged around it.
+GIT_FETCH_TIMEOUT_S = 120.0
+
 #: Schemes accepted without a deployment exception (W2 验收: 仅 https)。
 SAFE_SCHEMES = frozenset({"https"})
+
+#: The digest vocabulary W2 fixed and every later wave shares: ``sha256:``
+#: followed by exactly 64 lowercase hex. The fetcher mints these addresses
+#: (declared-digest validation, FetchedObject.sha256) and the W11 content
+#: store uses them as its addressing scheme — one regex, one vocabulary, no
+#: per-module copies that drift.
+#:
+#: ``\A``/``\Z`` rather than ``^``/``$``: in Python ``$`` also matches
+#: immediately before a trailing newline, so a digest with a ``\n`` tail
+#: would pass and then fail downstream as a mismatch or a missing address —
+#: the wrong taxonomy for malformed config. A fixed-width vocabulary has no
+#: room for a newline.
+DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 
 #: Where the allowlist lives in the YAML tree, as one constant: the block
@@ -110,12 +164,14 @@ def transport_allowlist_from_config(
 
 @dataclass(frozen=True)
 class FetchBudget:
-    """Transport budget for one fetch request as the orchestrator issues it.
+    """Transport budget for ONE request, as the guarded fetcher issues it.
 
-    Per-entry attributes only: the *apply-scope* ledger (shared totals,
-    remaining wall clock) is the W4 orchestrator's own state — it decides
-    whether to spend the budget, W2 enforces what a single request may
-    cost.
+    Per-entry caps and the per-hop timeout — the vocabulary a
+    ``FetchRequest`` names. The *apply-scope* ledger (shared wall clock and
+    byte total) is a different object at a different layer:
+    ``apply/budget.ApplyFetchBudget``, consulted per entry by the entry
+    fetch pipeline (W5). The two share this module's numbers and nothing
+    else.
     """
 
     category: str = "resources_file"

@@ -13,7 +13,7 @@ import { TaskProgressTab } from './TaskProgressTab';
 import { TaskSubTaskPanel } from './TaskSubTaskPanel';
 import { GlobalKeyframes, Empty as StateEmpty } from './theme';
 import { C } from './tokens';
-import type { TaskNodeView } from './types';
+import type { TaskNodeView, TaskView } from './types';
 
 const TABS = [
   { key: 'info', label: '任务信息' },
@@ -42,6 +42,9 @@ export interface TaskPanelProps {
   bcsBaseUrl?: string;
   userId?: string;
   taskId: string;
+  taskInfoFallback?: Partial<
+    Pick<TaskView, 'taskTypeLabel' | 'sourceLabel' | 'ownerBotName' | 'createdAt' | 'finishedAt'>
+  >;
   initialTab?: TabKey;
   onOpenSubTask?: (subTaskId: string) => void;
   onTogglePanel?: () => void;
@@ -54,6 +57,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   bcsBaseUrl = '',
   userId,
   taskId,
+  taskInfoFallback,
   initialTab = 'progress',
   onOpenSubTask,
   onTogglePanel,
@@ -99,131 +103,153 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   return (
     <>
       <GlobalKeyframes />
-      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskId={taskId}>
-        {({ task, loading, error, retry }) => (
-          <div
-            className={className}
-            style={{
-              display: 'flex',
-              flexDirection: 'row',
-              height: '100%',
-              minHeight: 0,
-              overflow: 'hidden',
-              background: C.surface,
-              ...style,
-            }}
-          >
-            {activeGroupDrillId && groupDrillNodes.length > 0 ? (
-              <aside style={leftRailStyle}>
-                <GroupDrillDownPanel
-                  nodes={groupDrillNodes}
-                  activeNodeId={activeGroupDrillId}
-                  bcsBaseUrl={bcsBaseUrl}
-                  apiBaseUrl={apiBaseUrl}
-                  userId={userId}
-                  onSelect={setActiveGroupDrillId}
-                  onClose={closeGroupSession}
-                />
-              </aside>
-            ) : activeSubTaskId && subTaskIds.length > 0 ? (
-              <aside style={leftRailStyle}>
-                <TaskSubTaskPanel
-                  apiBaseUrl={apiBaseUrl}
-                  taskIds={subTaskIds}
-                  activeTaskId={activeSubTaskId}
-                  onSelect={setActiveSubTaskId}
-                  onClose={closeSubTask}
-                />
-              </aside>
-            ) : null}
-
+      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskId={taskId} userId={userId}>
+        {({ task, loading, error, retry }) => {
+          const resolvedTask = task
+            ? {
+                ...task,
+                taskTypeLabel: task.taskTypeLabel || taskInfoFallback?.taskTypeLabel || '—',
+                sourceLabel: task.sourceLabel || taskInfoFallback?.sourceLabel || '—',
+                ownerBotName: task.ownerBotName || taskInfoFallback?.ownerBotName || '—',
+                createdAt: task.createdAt || taskInfoFallback?.createdAt || '',
+                finishedAt: task.finishedAt || taskInfoFallback?.finishedAt || null,
+              }
+            : null;
+          return (
             <div
-              style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}
+              className={className}
+              style={{
+                display: 'flex',
+                flexDirection: 'row',
+                height: '100%',
+                minHeight: 0,
+                overflow: 'hidden',
+                background: C.surface,
+                ...style,
+              }}
             >
+              {activeGroupDrillId && groupDrillNodes.length > 0 ? (
+                <aside style={leftRailStyle}>
+                  <GroupDrillDownPanel
+                    nodes={groupDrillNodes}
+                    activeNodeId={activeGroupDrillId}
+                    bcsBaseUrl={bcsBaseUrl}
+                    apiBaseUrl={apiBaseUrl}
+                    userId={userId}
+                    onSelect={setActiveGroupDrillId}
+                    onClose={closeGroupSession}
+                  />
+                </aside>
+              ) : activeSubTaskId && subTaskIds.length > 0 ? (
+                <aside style={leftRailStyle}>
+                  <TaskSubTaskPanel
+                    apiBaseUrl={apiBaseUrl}
+                    taskIds={subTaskIds}
+                    activeTaskId={activeSubTaskId}
+                    onSelect={setActiveSubTaskId}
+                    onClose={closeSubTask}
+                  />
+                </aside>
+              ) : null}
+
               <div
-                style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}
+                style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}
               >
-                {TABS.map((t) => {
-                  const active = tab === t.key;
-                  return (
-                    <button
-                      key={t.key}
-                      type="button"
-                      onClick={() => setTab(t.key)}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    borderBottom: `1px solid ${C.border}`,
+                    flexShrink: 0,
+                  }}
+                >
+                  {TABS.map((t) => {
+                    const active = tab === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setTab(t.key)}
+                        style={{
+                          padding: '12px 20px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontSize: 14,
+                          fontWeight: active ? 600 : 400,
+                          color: active ? C.primary : C.textSecondary,
+                          borderBottom: active ? `2px solid ${C.primary}` : '2px solid transparent',
+                          transition: 'all 0.2s',
+                          marginBottom: -1,
+                        }}
+                      >
+                        {t.label}
+                      </button>
+                    );
+                  })}
+                  <div style={{ flex: 1 }} />
+                  {onTogglePanel && (
+                    <div
+                      onClick={onTogglePanel}
+                      title="折叠副屏"
                       style={{
-                        padding: '12px 20px',
-                        border: 'none',
-                        background: 'transparent',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 28,
+                        height: 28,
+                        marginRight: 8,
+                        borderRadius: 6,
                         cursor: 'pointer',
-                        fontSize: 14,
-                        fontWeight: active ? 600 : 400,
-                        color: active ? C.primary : C.textSecondary,
-                        borderBottom: active ? `2px solid ${C.primary}` : '2px solid transparent',
-                        transition: 'all 0.2s',
-                        marginBottom: -1,
+                        transition: 'background 0.15s',
                       }}
+                      onMouseEnter={(event) => (event.currentTarget.style.background = C.surfaceAlt)}
+                      onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
                     >
-                      {t.label}
-                    </button>
-                  );
-                })}
-                <div style={{ flex: 1 }} />
-                {onTogglePanel && (
-                  <div
-                    onClick={onTogglePanel}
-                    title="折叠副屏"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 28,
-                      height: 28,
-                      marginRight: 8,
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(event) => (event.currentTarget.style.background = C.surfaceAlt)}
-                    onMouseLeave={(event) => (event.currentTarget.style.background = 'transparent')}
-                  >
-                    <PanelToggle />
-                  </div>
-                )}
-              </div>
-              <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-                {loading && !task && <StateEmpty description="加载任务中…" />}
-                {error && !task && (
-                  <div style={{ padding: 24, textAlign: 'center' }}>
-                    <div style={{ color: C.danger, fontSize: 13, marginBottom: 12 }}>加载失败：{error}</div>
-                    <button
-                      type="button"
-                      onClick={retry}
-                      style={{
-                        padding: '6px 16px',
-                        border: `1px solid ${C.primary}`,
-                        borderRadius: 4,
-                        background: C.surface,
-                        color: C.primary,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      重试
-                    </button>
-                  </div>
-                )}
-                {task && (
-                  <>
-                    {tab === 'info' && <TaskInfoTab task={task} />}
-                    {tab === 'artifacts' && <TaskArtifactsTab task={task} />}
-                    {tab === 'progress' && (
-                      <TaskProgressTab task={task} onOpenSubTask={openSubTask} onOpenGroupSession={openGroupSession} />
-                    )}
-                  </>
-                )}
+                      <PanelToggle />
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                  {loading && !task && <StateEmpty description="加载任务中…" />}
+                  {error && !task && (
+                    <div style={{ padding: 24, textAlign: 'center' }}>
+                      <div style={{ color: C.danger, fontSize: 13, marginBottom: 12 }}>加载失败：{error}</div>
+                      <button
+                        type="button"
+                        onClick={retry}
+                        style={{
+                          padding: '6px 16px',
+                          border: `1px solid ${C.primary}`,
+                          borderRadius: 4,
+                          background: C.surface,
+                          color: C.primary,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        重试
+                      </button>
+                    </div>
+                  )}
+                  {resolvedTask && (
+                    <>
+                      {tab === 'info' && <TaskInfoTab task={resolvedTask} />}
+                      {tab === 'artifacts' && <TaskArtifactsTab task={resolvedTask} />}
+                      {tab === 'progress' && (
+                        <TaskProgressTab
+                          task={resolvedTask}
+                          userId={userId}
+                          onOpenSubTask={openSubTask}
+                          onOpenGroupSession={openGroupSession}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        }}
       </TaskPanelFetcher>
     </>
   );

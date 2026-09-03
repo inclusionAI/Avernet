@@ -6,8 +6,10 @@ import asyncio
 from typing import Any, cast
 
 import httpx
+import websockets.asyncio.client
 from fastapi import APIRouter, Request, WebSocket
 from fastapi.responses import JSONResponse
+from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from sandboxproxy.community.bootstrap import ApplicationContainer
 from sandboxproxy.community.config import Config
@@ -85,13 +87,15 @@ def build_router(container: ApplicationContainer, loaded: Config) -> APIRouter:
             return
         upstream = _upstream_url(resolved)
         ws_url = _to_ws_url(upstream, target_path)
-        client = container.forwarding().client
         try:
-            async with client.stream(
-                "GET", ws_url, headers=_extra_headers(resolved)
+            async with websockets.asyncio.client.connect(
+                ws_url,
+                additional_headers=_extra_headers(resolved),
+                max_size=None,
             ) as upstream_ws:
                 await _bridge(websocket, upstream_ws)
-        except httpx.HTTPError:
+        except (TimeoutError, OSError, InvalidHandshake):
+            logger.warning("upstream websocket %s failed", ws_url, exc_info=True)
             await websocket.close(code=1011)
 
     # -- relay endpoints (client → mng pairing) ---------------------------
@@ -225,23 +229,57 @@ def _to_streaming_response(upstream_resp: httpx.Response) -> Any:
     )
 
 
-async def _bridge(websocket: WebSocket, upstream_ws: httpx.Response) -> None:
-    """Stream raw bytes between an upstream connection and a client websocket."""
-
-    async def to_client() -> None:
-        async for chunk in upstream_ws.aiter_bytes():
-            await websocket.send_bytes(chunk)
+async def _bridge(
+    websocket: WebSocket,
+    upstream_ws: websockets.asyncio.client.ClientConnection,
+) -> None:
+    """Forward WebSocket frames bidirectionally between client and upstream."""
 
     async def to_upstream() -> None:
-        while True:
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
-                break
-            if "bytes" in message:
-                await upstream_ws.aclose()
-                break
+        try:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    break
+                if message["type"] == "websocket.receive":
+                    if "bytes" in message:
+                        await upstream_ws.send(message["bytes"])
+                    elif "text" in message:
+                        await upstream_ws.send(message["text"])
+        except ConnectionClosed:
+            pass
 
-    await asyncio.gather(to_client(), to_upstream())
+    async def to_client() -> None:
+        try:
+            while True:
+                data = await upstream_ws.recv()
+                if isinstance(data, str):
+                    await websocket.send_text(data)
+                else:
+                    await websocket.send_bytes(data)
+        except ConnectionClosed as exc:
+            code = exc.rcvd.code if exc.rcvd is not None else 1011
+            try:
+                await websocket.close(code=code)
+            except RuntimeError:
+                pass
+        except RuntimeError:
+            pass
+
+    done, pending = await asyncio.wait(
+        (
+            asyncio.create_task(to_upstream()),
+            asyncio.create_task(to_client()),
+        ),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    for task in pending:
+        task.cancel()
+    for task in pending:
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 async def _relay_bridge(a: WebSocket, b: WebSocket) -> None:

@@ -287,8 +287,8 @@ class BotRequestWorker:
 
     # ----------------------------- chat.abort 接入面 -----------------------------
 
-    async def abort_runs_by_session(self, session_id: str) -> AbortOutcome:
-        """按 session_id 取消所有未终结（PENDING/RUNNING）的 run。
+    async def abort_runs_by_session(self, session_id: str, bot_id: str) -> AbortOutcome:
+        """按 (bot_id, session_id) 维度取消目标 bot 的 RUNNING run。
 
         复用 ``_timeout_scan_once`` 的 cancel+force_done 模板，顺序：
         1. ``run_repository.update_error(run_id, ...)`` 标 FAILED（幂等：已终态时 no-op）；
@@ -296,19 +296,22 @@ class BotRequestWorker:
         3. 若 ``assigned_worker == 本 worker``，cancel 本机 ``_running_tasks[run_id]``；
         4. best-effort 通知 engine（``engine_abort_notifier``），失败仅记录日志。
 
-        非本机 RUNNING run 无法本机 cancel，由 force_done + engine 通知 + 对端
-        超时/心跳兜底（与 timeout 同构）。``update_error`` 与 ``force_done`` 均幂等，
-        abort 与 timeout 并发争抢同一 run 时靠幂等收敛到同一终态（R1）。
+        群聊多 bot 共享同一 ``session_id`` 时仅取消目标 bot 的 RUNNING run；PENDING
+        不命中（由 ``_timeout_scan_once`` 超时路径兜底）。非本机 RUNNING run 无法本机
+        cancel，由 force_done + engine 通知 + 对端超时/心跳兜底（与 timeout 同构）。
+        ``update_error`` 与 ``force_done`` 均幂等，abort 与 timeout 并发争抢同一 run
+        时靠幂等收敛到同一终态（R1）。
 
         Returns:
-            AbortOutcome: 被取消的 run_id 列表，以及 session 下是否存在已终结记录。
+            AbortOutcome: 被取消的 run_id 列表，以及目标 bot 在该 session 下是否存在
+            已终结记录（用于 410 vs 200 判定，维度收窄到该 bot）。
         """
-        if not session_id:
+        if not session_id or not bot_id:
             return AbortOutcome(aborted_run_ids=[], had_terminal=False)
 
-        records = self._queue.find_running_by_session(session_id)
+        records = self._queue.find_running_by_bot_session(session_id, bot_id)
         if not records:
-            terminals = self._queue.find_terminal_by_session(session_id)
+            terminals = self._queue.find_terminal_by_bot_session(session_id, bot_id)
             return AbortOutcome(aborted_run_ids=[], had_terminal=bool(terminals))
 
         aborted_run_ids: list[str] = []
@@ -339,22 +342,25 @@ class BotRequestWorker:
                     )
             aborted_run_ids.append(run_id)
             logger.info(
-                "[BotRequestWorker] abort run_id=%s session_id=%s status=%s "
-                "worker=%s marked failed+force_done",
+                "[BotRequestWorker] abort run_id=%s session_id=%s bot_id=%s "
+                "status=%s worker=%s marked failed+force_done",
                 run_id,
                 session_id,
+                bot_id,
                 record.status,
                 record.assigned_worker,
             )
 
-        # 4. best-effort 通知 engine（一次session 级通知，run_id 取首个）
+        # 4. best-effort 通知 engine（一次 维度通知，run_id 取首个）
         if self._engine_abort_notifier is not None and aborted_run_ids:
             try:
                 await self._engine_abort_notifier(session_id, aborted_run_ids[0])
             except Exception as e:
                 logger.warning(
-                    "[BotRequestWorker] abort engine notify failed session_id=%s: %s",
+                    "[BotRequestWorker] abort engine notify failed session_id=%s "
+                    "bot_id=%s: %s",
                     session_id,
+                    bot_id,
                     e,
                     exc_info=True,
                 )

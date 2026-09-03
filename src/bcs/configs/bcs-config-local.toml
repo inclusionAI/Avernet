@@ -40,7 +40,8 @@ api_keys = []
 allowed_switch_provider_ids = []
 
 [gateway_principal]
-issuer = "gateway"
+# Accept tokens minted by either the gateway or the backend (shared key).
+issuers = ["gateway", "backend"]
 audience = "bcs"
 key_id = "bare"
 # Local launchers inject an explicit test value; every other deployment must
@@ -180,6 +181,14 @@ use_remote_login_check = false
 # linked plugins can enable a provider and pass options under
 # [user_directory.providers.<provider>].
 enabled = false
+
+# Human mention notification: notify human participants when a message
+# @-mentions them. Select a linked backend; omit `provider` to disable.
+[human_notify]
+provider = "dummy"
+
+[human_notify.providers.dummy]
+enabled = true
 
 [auth]
 chain = ["local", "session"]

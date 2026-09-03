@@ -83,13 +83,19 @@ def test_the_categories_with_no_materializer_are_refused(category):
 
 
 @pytest.mark.parametrize("source", [SourceForm.GIT, SourceForm.NAMED])
-def test_the_source_forms_with_no_resolver_are_refused(source):
+def test_the_w7_source_forms_are_resolved(source):
     """The point of answering per *construct* rather than per category.
 
-    A source form with no resolver fails exactly the way an unsupported category
-    does, so it is refused the same way.
+    A source form with no resolver fails exactly the way an unsupported
+    category does, and W7 delivered resolvers for these two — the gate flip
+    this file pinned the other way around before the delivery was reachable.
+    The one (category, form) pair still undelivered — resources entries
+    naming git or named sources — is refused per entry by the schema, which
+    is where a category-aware reason can live.
     """
-    assert not _resolve().supports(source)
+    caps = _resolve()
+    assert caps.supports(source)
+    assert caps.reason_for(source) == ""
 
 
 def test_script_is_refused_for_a_teclaw_bot():

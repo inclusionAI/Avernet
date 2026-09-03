@@ -1,7 +1,8 @@
-"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ 旁路 poller 登记入口。
+"""TaskExecutor:三模态派发(single_bot/coop_group/bbs)+ poller 登记入口。
 
 dispatch(async):上游 start_run caller loop 上 gather+Semaphore await 端口 IO,拿到 run_id 即返回
-(不等待结果);bbs 仅记日志。form_coop_group(async):BCS 建群壳。poller 为独立 daemon sidecar(同 TaskHarness)。
+(不等待结果);BBS 也经统一 dispatch 入口启动。form_coop_group(async):BCS 建群壳。
+poller 为独立 daemon sidecar(同 TaskHarness)。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
 from agentclaw.community.core.task.domain.identity import compose_bot_identity
@@ -97,7 +99,7 @@ class TaskExecutor:
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._task_settings = task_settings
-        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 run_bbs→notify 走引擎收敛)
+        self._on_bbs_report = on_bbs_report  # 引擎 on_bbs_report 收口回调(供 BBS dispatch→notify 走引擎收敛)
         self._group_meta: dict[
             str, dict[str, Any]
         ] = {}  # group_id -> {collab_mode, gf, definition_ref, session_id}
@@ -114,12 +116,12 @@ class TaskExecutor:
             mode = node.run_info.run_mode
             if mode == "bbs":
                 logger.info(
-                    "[task][task_executor] bbs node dispatched (no-op): task=%s node=%s assignee=%s",
+                    "[task][task_executor] >>> 投递 bbs task=%s node=%s assignee=%s",
                     node.task_id,
                     node.node_id,
                     node.run_info.assignee,
                 )
-                return True
+                return await self._dispatch_bbs(node, sem)
             if mode == "single_bot":
                 logger.info(
                     "[task][task-executor] >>> 投递 single_bot task=%s node=%s bot=%s → send_message",
@@ -143,6 +145,47 @@ class TaskExecutor:
             return False
 
         return list(await asyncio.gather(*[_one(n) for n in toDoTaskList]))
+
+    async def _dispatch_bbs(
+        self, node: TaskNode, sem: asyncio.Semaphore
+    ) -> bool:
+        """Start a BBS relay through the modal executor using the latest graph snapshot."""
+        if self._graph is None:
+            logger.error(
+                "[task][bbs_mode] dispatch failed: graph missing task=%s node=%s",
+                node.task_id,
+                node.node_id,
+            )
+            return False
+        persisted_graph = self._graph.query_task_dashboard(node.task_id)
+        if not any(current.node_id == node.node_id for current in persisted_graph.tasks):
+            logger.error(
+                "[task][bbs_mode] dispatch failed: node missing task=%s node=%s",
+                node.task_id,
+                node.node_id,
+            )
+            return False
+        execution_graph = replace(
+            persisted_graph,
+            tasks=[
+                node if current.node_id == node.node_id else current
+                for current in persisted_graph.tasks
+            ],
+        )
+        async with sem:
+            from agentclaw.community.core.task.task_runner.modal_executor import bbs_modal_executor
+
+            await bbs_modal_executor.notify(
+                execution_graph=execution_graph,
+                bcn=self._bcn,
+                bot=self._bot,
+                graph=self._graph,
+                backend_url=self._api_base_url,
+                skill_name=bbs_modal_executor._BBS_SKILL_NAME,
+                on_bbs_report=self._on_bbs_report,
+                group_executor=self._bbs_execute_as_manager_worker_group,
+            )
+        return True
 
     def _skill_report_enabled(self) -> bool:
         """统一结果回收开关(默认 True=skill HTTP Push)。

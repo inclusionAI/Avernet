@@ -41,9 +41,10 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
     ) -> PreparedBotCreate:
         """Reject create-time engine properties this engine does not own.
 
-        A ``template`` key means application-coding intent (new public contract
-        or legacy normalization); the combination error keeps the historical
-        409 mapping for the legacy shape instead of turning it into a 422.
+        A ``template_config`` key (v3 public contract) or ``template`` key
+        (legacy normalization) means application-coding intent; the
+        combination error keeps the historical 409 mapping for both shapes
+        instead of turning it into a 422.
         Gates replicate the deleted ``prepare_bot_create`` ladder exactly:
         error messages name the *requested* engine (the shared fallback
         instance's own ``engine_type`` would say "default"), and the cloud-only
@@ -51,7 +52,7 @@ class DefaultProvisioningStrategy(EngineProvisioningStrategy):
         """
         if not engine_properties:
             return PreparedBotCreate()
-        if "template" in engine_properties:
+        if "template" in engine_properties or "template_config" in engine_properties:
             # Historical gate order: a local deployment reports "cloud-only"
             # before the engine gate gets to answer.
             if deployment_mode != "cloud":

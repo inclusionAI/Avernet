@@ -2,13 +2,24 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
-use bcs_protocol::{BcsFrame, RequestFrame};
+use bcs_protocol::{BcsFrame, ChatAbortParams, ChatAbortResult, RequestFrame, ResponseFrame};
 use bcs_service_api::{
-    BotConnectionControlPort, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, KickReason,
-    ServiceError, ServiceResult,
+    BotAbortDeliveryCommand, BotAbortDeliveryResult, BotConnectionControlPort, BotDeliveryCommand,
+    BotDeliveryPort, BotDeliveryResult, KickReason, ServiceError, ServiceResult,
 };
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::sync::{RwLock, mpsc, oneshot};
 use tracing::{debug, warn};
+
+fn is_unknown_method_code(code: &str) -> bool {
+    [
+        "not_found",
+        "unknown_method",
+        "method_not_found",
+        "not_implemented",
+    ]
+    .iter()
+    .any(|candidate| code.eq_ignore_ascii_case(candidate))
+}
 
 #[derive(Debug)]
 struct BotConnection {
@@ -20,6 +31,7 @@ struct BotConnection {
 pub struct BotConnectionRegistry {
     connections: RwLock<HashMap<String, BotConnection>>,
     pending_requests: RwLock<HashMap<String, oneshot::Sender<serde_json::Value>>>,
+    pending_abort_requests: RwLock<HashMap<String, oneshot::Sender<ResponseFrame>>>,
 }
 
 impl BotConnectionRegistry {
@@ -28,10 +40,13 @@ impl BotConnectionRegistry {
     }
 
     pub async fn connect(&self, bot_id: String, tx: mpsc::Sender<String>) {
-        self.connections.write().await.insert(bot_id, BotConnection {
-            tx,
-            token_expires_at: None,
-        });
+        self.connections.write().await.insert(
+            bot_id,
+            BotConnection {
+                tx,
+                token_expires_at: None,
+            },
+        );
     }
 
     pub async fn disconnect(&self, bot_id: &str) {
@@ -67,7 +82,12 @@ impl BotConnectionRegistry {
     }
 
     pub async fn send_frame_json(&self, bot_id: &str, frame_json: String) -> Result<(), ()> {
-        let maybe_tx = self.connections.read().await.get(bot_id).map(|c| c.tx.clone());
+        let maybe_tx = self
+            .connections
+            .read()
+            .await
+            .get(bot_id)
+            .map(|c| c.tx.clone());
         let Some(tx) = maybe_tx else {
             debug!(bot_id = %bot_id, "bot delivery skipped: not connected");
             return Err(());
@@ -105,16 +125,16 @@ impl BotConnectionRegistry {
             return Err(format!("Bot '{}' not connected", bot_id));
         }
 
-        match tokio::time::timeout(
-            std::time::Duration::from_millis(timeout_ms),
-            rx,
-        ).await {
+        match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
             Ok(Ok(payload)) => Ok(payload),
             Ok(Err(_)) => Err("Request channel closed".to_string()),
             Err(_) => {
                 let mut pending = self.pending_requests.write().await;
                 pending.remove(&request_id);
-                Err(format!("Request to bot '{}' timed out after {}ms", bot_id, timeout_ms))
+                Err(format!(
+                    "Request to bot '{}' timed out after {}ms",
+                    bot_id, timeout_ms
+                ))
             }
         }
     }
@@ -124,6 +144,19 @@ impl BotConnectionRegistry {
         if let Some(tx) = pending.remove(request_id) {
             let _ = tx.send(response);
         }
+    }
+
+    pub async fn resolve_pending_abort_request(
+        &self,
+        request_id: &str,
+        response: ResponseFrame,
+    ) -> bool {
+        let mut pending = self.pending_abort_requests.write().await;
+        let Some(tx) = pending.remove(request_id) else {
+            return false;
+        };
+        let _ = tx.send(response);
+        true
     }
 }
 
@@ -164,6 +197,110 @@ impl BotDeliveryPort for BotConnectionRegistry {
                 error: Some(ServiceError::BotNotConnected(bot_id.clone())),
             }),
         }
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        let BotDeliveryTarget::WebSocket { bot_id } = &cmd.target else {
+            return Err(ServiceError::InvalidOperation {
+                message: "websocket registry cannot abort an HTTP Provider target".to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        };
+        let run_id = cmd
+            .run_id
+            .as_deref()
+            .ok_or_else(|| ServiceError::InvalidOperation {
+                message: "Bot WebSocket chat.abort requires an exact run_id".to_string(),
+                request_id: Some(cmd.command_id.clone()),
+            })?;
+        let params = serde_json::to_value(ChatAbortParams {
+            session_key: cmd.session_id.clone(),
+            run_id: Some(run_id.to_string()),
+        })
+        .map_err(|error| ServiceError::InternalError(format!("serialize chat.abort: {error}")))?;
+        let frame = BcsFrame::Request(RequestFrame::new(
+            cmd.command_id.clone(),
+            "chat.abort",
+            Some(params),
+        ));
+        let frame_json = serde_json::to_string(&frame).map_err(|error| {
+            ServiceError::InternalError(format!("serialize chat.abort frame: {error}"))
+        })?;
+        let (tx, rx) = oneshot::channel();
+        self.pending_abort_requests
+            .write()
+            .await
+            .insert(cmd.command_id.clone(), tx);
+        if self.send_frame_json(bot_id, frame_json).await.is_err() {
+            self.pending_abort_requests
+                .write()
+                .await
+                .remove(&cmd.command_id);
+            return Err(ServiceError::BotNotConnected(bot_id.clone()));
+        }
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_millis(cmd.timeout_ms),
+            rx,
+        )
+        .await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(_)) => {
+                return Err(ServiceError::InternalError(
+                    "chat.abort response channel closed".to_string(),
+                ));
+            }
+            Err(_) => {
+                self.pending_abort_requests
+                    .write()
+                    .await
+                    .remove(&cmd.command_id);
+                return Err(ServiceError::InternalError(format!(
+                    "chat.abort request timed out after {}ms",
+                    cmd.timeout_ms
+                )));
+            }
+        };
+        if !response.ok {
+            if response
+                .error
+                .as_ref()
+                .is_some_and(|error| is_unknown_method_code(&error.code))
+            {
+                return Err(ServiceError::BotMethodUnsupported {
+                    bot_id: bot_id.clone(),
+                    method: "chat.abort".to_string(),
+                });
+            }
+            let error = response.error.map_or_else(
+                || "Bot rejected chat.abort".to_string(),
+                |error| format!("{}: {}", error.code, error.message),
+            );
+            return Err(ServiceError::InvalidOperation {
+                message: error,
+                request_id: Some(cmd.command_id),
+            });
+        }
+        let result: ChatAbortResult =
+            serde_json::from_value(response.payload.unwrap_or(serde_json::Value::Null)).map_err(
+                |error| ServiceError::InternalError(format!("decode chat.abort response: {error}")),
+            )?;
+        if result.aborted_run_ids.len() > 1
+            || result
+                .aborted_run_ids
+                .first()
+                .is_some_and(|aborted| aborted != run_id)
+        {
+            return Err(ServiceError::InvalidOperation {
+                message: "Bot chat.abort returned run ids outside the exact request scope"
+                    .to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        }
+        Ok(BotAbortDeliveryResult {
+            target_bot_id: bot_id.clone(),
+            aborted_run_ids: result.aborted_run_ids,
+        })
     }
 }
 

@@ -34,9 +34,9 @@ use crate::lifecycle::LifecycleOrchestrator;
 use crate::friend_connect_notification::HttpFriendConnectNotificationPort;
 use crate::plugins::{
     CachePluginKind, DbPluginKind, InfrastructurePlugins, LeaderElectionRegistration,
-    build_registered_channel_provider, build_registered_leader_election,
-    build_registered_llm_provider, build_registered_security_gateway,
-    build_registered_user_directory,
+    build_human_mention_notify_port, build_registered_channel_provider,
+    build_registered_leader_election, build_registered_llm_provider,
+    build_registered_security_gateway, build_registered_user_directory,
 };
 use bcs_api_http::v1::gateway_principal::{GatewayPrincipalTokenVerifier, GatewayPrincipalTrust};
 use bcs_api_http::v1::openapi::SessionFileUrlProjector;
@@ -1322,7 +1322,7 @@ fn build_gateway_principal_verifier(
     config.validate().map_err(crate::BcsError::InvalidConfig)?;
     let signing_key = gateway_principal_signing_key(material)?;
     let trust = GatewayPrincipalTrust::new(
-        config.issuer.clone(),
+        config.issuers.clone(),
         config.audience.clone(),
         config.key_id.clone(),
     )
@@ -1704,10 +1704,10 @@ mod gateway_principal_tests {
 
     #[test]
     fn blank_gateway_principal_trust_or_lookup_config_is_rejected() {
-        for field in ["issuer", "audience", "key_id", "signing_key_env"] {
+        for field in ["issuers", "audience", "key_id", "signing_key_env"] {
             let mut config = trust_config();
             match field {
-                "issuer" => config.issuer = " ".to_string(),
+                "issuers" => config.issuers = vec![" ".to_string()],
                 "audience" => config.audience = " ".to_string(),
                 "key_id" => config.key_id = " ".to_string(),
                 "signing_key_env" => config.signing_key_env = " ".to_string(),
@@ -1718,6 +1718,19 @@ mod gateway_principal_tests {
                 Err(crate::BcsError::InvalidConfig(_))
             ));
         }
+        // Empty issuer list and duplicate issuers are also rejected.
+        let mut empty = trust_config();
+        empty.issuers = vec![];
+        assert!(matches!(
+            build_gateway_principal_verifier(&empty, Some("explicit-test-key")),
+            Err(crate::BcsError::InvalidConfig(_))
+        ));
+        let mut duplicate = trust_config();
+        duplicate.issuers = vec!["gateway".to_string(), "gateway".to_string()];
+        assert!(matches!(
+            build_gateway_principal_verifier(&duplicate, Some("explicit-test-key")),
+            Err(crate::BcsError::InvalidConfig(_))
+        ));
     }
 
     #[tokio::test]
@@ -1978,6 +1991,7 @@ impl Default for BcsServerState {
             config.provider_chat_run_timeout_ms,
             config.eventing.enabled.then(|| group_event_factory.clone()),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort),
         );
         let pending_messages = message_flow_builder
             .pending_message_port()
@@ -2805,6 +2819,7 @@ fn create_message_flow_builder(
     provider_chat_run_timeout_ms: u64,
     event_record_factory: Option<Arc<dyn EventRecordFactoryPort>>,
     event_recorder: Arc<dyn EventRecorderPort>,
+    human_mention_notify: Arc<dyn bcs_service_api::port::HumanMentionNotifyPort>,
 ) -> BcsMessageFlow {
     let mut message_flow = BcsMessageFlow::new(
         group,
@@ -2820,7 +2835,8 @@ fn create_message_flow_builder(
     .with_provider_chat_run_timeout_ms(provider_chat_run_timeout_ms)
     .with_provider_stream_gray_list(provider_stream_gray_list)
     .with_bot_terminal_observer(bot_terminal_observer)
-    .with_event_recorder(event_recorder);
+    .with_event_recorder(event_recorder)
+    .with_human_mention_notify(human_mention_notify);
     if let Some(factory) = event_record_factory {
         message_flow = message_flow.with_event_record_factory(factory);
     }
@@ -3507,6 +3523,15 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
+        if config.human_notify.provider.is_some() {
+            // This synchronous construction path cannot await the notifier
+            // factory build; keep the configured backend from being silently
+            // ignored.
+            tracing::warn!(
+                "human_notify.provider is configured but ignored in this construction path; \
+                 use BcsServer::new_with_storage to enable human mention notifications"
+            );
+        }
         let message_flow_builder = create_message_flow_builder(
             bot_registry.clone(),
             sessions.clone(),
@@ -3523,6 +3548,7 @@ impl BcsServer {
             config.provider_chat_run_timeout_ms,
             config.eventing.enabled.then(|| group_event_factory.clone()),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            Arc::new(bcs_service_api::port::NoopHumanMentionNotifyPort),
         );
         let pending_messages = message_flow_builder
             .pending_message_port()
@@ -3897,7 +3923,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
         )
         .await?;
         info!(
-            issuer = %config.gateway_principal.issuer,
+            issuers = ?config.gateway_principal.issuers,
             audience = %config.gateway_principal.audience,
             key_id = %config.gateway_principal.key_id,
             "Gateway Principal verifier initialized"
@@ -4343,6 +4369,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 .enabled
                 .then(|| crate::eventing_wiring::event_record_factory(&config, event_repo.clone())),
             crate::eventing_wiring::event_recorder(&config, event_repo.clone()),
+            build_human_mention_notify_port(&config).await?,
         );
         let pending_messages = message_flow_builder
             .pending_message_port()
@@ -4724,24 +4751,8 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         Ok(Self { config, state })
     }
 
-    /// Build the `/auth/*` router.
-    ///
-    /// Two mounting paths:
-    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
-    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
-    ///    mounts the complete OAuth protocol routes with the auth chain
-    ///    injected as the `/auth/user` fallback.
-    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
-    ///    chain (e.g. the `local` mock plugin) is present: mounts just
-    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
-    ///    use `/auth/user` without configuring any OAuth provider.
-    ///
-    /// `jwt_secret` comes from the resolved `auth_config` (see
-    /// `auth_wiring::resolve_auth_config`). Currently only `google` is wired.
-    fn build_auth_router(&self) -> Option<Router> {
+    fn build_full_oauth_route_state(&self) -> Option<Arc<bcs_http::oauth::OAuthRouteState>> {
         let auth_chain = Arc::clone(&self.state.auth_chain);
-
-        // --- Case 1: full OAuth configuration ------------------------------
         // `auth_config.oauth` is the resolved form: present only when a
         // non-empty jwt_secret was configured (I6 gate lives in resolve).
         if let (Some(resolved), Some(raw)) = (
@@ -4786,9 +4797,9 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                                 providers = ?route_state.providers.keys().collect::<Vec<_>>(),
                                 cookie_secure = resolved.cookie_secure,
                                 env = %resolved.env,
-                                "Mounting OAuth /auth/* routes"
+                                "Mounting OAuth routes"
                             );
-                            return Some(bcs_http::oauth::routes(route_state));
+                            return Some(route_state);
                         }
                     } else {
                         warn!(
@@ -4807,10 +4818,43 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             }
         }
 
-        // --- Case 2: identity-only (chain-backed, no OAuth) -----------------
+        None
+    }
+
+    fn openapi_auth_public_base_url(&self) -> Option<String> {
+        self.state.auth_config.oauth.as_ref().map(|oauth| {
+            format!("{}/openapi/v1/auth", oauth.base_url.trim_end_matches('/'))
+        })
+    }
+
+    /// Build the `/auth/*` router.
+    ///
+    /// Two mounting paths:
+    /// 1. **Full OAuth** — when `[auth.oauth]` is configured with a non-empty
+    ///    `jwt_secret`, an `http(s)` `base_url`, and at least one provider:
+    ///    mounts the complete OAuth protocol routes with the auth chain
+    ///    injected as the `/auth/user` fallback.
+    /// 2. **Identity-only** — when no usable OAuth config exists but an auth
+    ///    chain (e.g. the `local` mock plugin) is present: mounts just
+    ///    `GET /auth/user`, resolved solely via the chain. This lets deployments
+    ///    use `/auth/user` without configuring any OAuth provider.
+    ///
+    /// `jwt_secret` comes from the resolved `auth_config` (see
+    /// `auth_wiring::resolve_auth_config`).
+    fn build_auth_router(
+        &self,
+        oauth_state: Option<Arc<bcs_http::oauth::OAuthRouteState>>,
+    ) -> Option<Router> {
+        if let Some(route_state) = oauth_state {
+            info!("Mounting OAuth /auth/* routes");
+            return Some(bcs_http::oauth::routes(route_state));
+        }
+
+        // Identity-only (chain-backed, no OAuth).
         if let Some(user_port) = self.state.user_identity_port.clone() {
             let route_state = Arc::new(bcs_http::oauth::OAuthRouteState::new_chain_only(
-                user_port, auth_chain,
+                user_port,
+                Arc::clone(&self.state.auth_chain),
             ));
             info!("Mounting identity-only /auth/user (no OAuth providers configured)");
             return Some(bcs_http::oauth::identity_routes(route_state));
@@ -4835,6 +4879,14 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             web_ws_dispatch_state(&self.state, Some(group_session_connections.clone())),
             ws_lifecycle_hook(&self.state),
         );
+        let oauth_state = self.build_full_oauth_route_state();
+        let mut openapi_v1 = self.state.openapi_v1.clone();
+        if let (Some(auth_service), Some(public_base_url)) = (
+            oauth_state.clone(),
+            self.openapi_auth_public_base_url(),
+        ) {
+            openapi_v1 = openapi_v1.with_auth_service(auth_service, public_base_url);
+        }
 
         let mut router = Router::new()
             // WebSocket endpoint for frontend clients (via gateway)
@@ -4849,14 +4901,14 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         let mut router = router
             .with_state(Arc::clone(&self.state))
             .merge(api_router)
-            .merge(bcs_api_http::router(self.state.openapi_v1.clone()))
+            .merge(bcs_api_http::router(openapi_v1))
             .merge(bcs_api_http::group_session_connection_router(
                 group_session_connections,
                 self.state.gateway_principal_verifier.clone(),
             ))
             .merge(group_session_websocket_router);
 
-        if let Some(oauth_router) = self.build_auth_router() {
+        if let Some(oauth_router) = self.build_auth_router(oauth_state) {
             router = router.merge(oauth_router);
         }
 

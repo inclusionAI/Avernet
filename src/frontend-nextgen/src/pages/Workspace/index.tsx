@@ -1,6 +1,5 @@
 import { ChatPanel } from '@/components/Workspace/ChatPanel';
 import { BotModelSelectorContainer } from '@/components/Workspace/ChatPanel/BotModelSelector';
-import { IdentityBar } from '@/components/Workspace/IdentityBar';
 import { ComposerCapabilitiesMenu } from '@/components/Workspace/TaskComposerMenu';
 import { IconButton } from '@/components/ui';
 import { useComposerSend } from '@/hooks/useComposerSend';
@@ -17,15 +16,18 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ResourceReference } from '@tc-chat/core';
 import { PanelLeft } from 'lucide-react';
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { GroupWorkspaceArea } from './GroupWorkspaceArea';
 import { useBotSessionFilesFeature } from './hooks/useBotSessionFilesFeature';
 import { useChatUrlSync } from './hooks/useChatUrlSync';
 import { useWorkspacePage } from './hooks/useWorkspacePage';
 const WorkspacePage: React.FC = () => {
-  const workspace = useWorkspace();
   const workspacePage = useWorkspacePage();
+  const workspace = useWorkspace();
   const { view, setView } = workspacePage;
   const { availableViews } = workspace;
+  const navigate = useNavigate();
+  const openCollaborationPermissions = () => navigate('/collaboration-privacy');
   // 聊天视图「+」打开的共享创建协作群弹窗；创建成功后切到协作群视图并选中该群。
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   // 添加好友（Bot 广场）弹窗状态，与创建协作群弹窗并列。
@@ -74,6 +76,8 @@ const WorkspacePage: React.FC = () => {
     panelRef: workspace.panelRef,
     context: taskComposerContext,
     submitPanelMessage: workspace.submitPanelMessage,
+    appendAssistantMessage: workspace.appendAssistantMessage,
+    streamAssistantMessage: workspace.streamAssistantMessage,
   });
   const taskComposerDisabledReason = !taskComposerContext && !workspace.isTestUser ? '请先选择一个 Bot 会话' : null;
   const handleSend = useComposerSend(taskExecution, {
@@ -127,9 +131,10 @@ const WorkspacePage: React.FC = () => {
   );
 
   const isChatView = view === 'chat';
+  const expandedBotId = Object.keys(workspace.expandedBotIds)[0];
   useChatUrlSync(
     isChatView,
-    workspace.botSessions.selectedSession?.botId,
+    workspace.botSessions.selectedSession?.botId ?? expandedBotId,
     workspace.botSessions.selectedSession?.sessionId,
   );
 
@@ -139,6 +144,8 @@ const WorkspacePage: React.FC = () => {
       return (
         <ChatPanel
           target={workspace.botChatTarget}
+          viewer={workspace.activeIdentity}
+          userAvatarUrl={workspace.currentUserAvatarUrl}
           messages={workspace.supportMessages}
           isRequesting={workspace.supportIsRequesting}
           isLoadingMessages={workspace.supportIsLoadingMessages}
@@ -172,9 +179,14 @@ const WorkspacePage: React.FC = () => {
           onMobileListClose={() => setMobileListOpen(false)}
           onOpenCreateGroup={() => setCreateGroupOpen(true)}
           onOpenAddFriend={() => setAddFriendOpen(true)}
+          onOpenPermissions={openCollaborationPermissions}
+          userAvatarUrl={workspace.currentUserAvatarUrl}
+          onManageBot={(bot) => navigate(`/bot-workshop/detail?type=view&id=${encodeURIComponent(bot.realBotId)}`)}
         />
         <ChatPanel
           target={workspace.botChatTarget}
+          viewer={workspace.activeIdentity}
+          userAvatarUrl={workspace.currentUserAvatarUrl}
           messages={botChat.chat.messages}
           isRequesting={botChat.chat.isRequesting}
           isLoadingMessages={botChat.chat.isDefaultMessagesRequesting}
@@ -213,19 +225,13 @@ const WorkspacePage: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <IdentityBar
-        identities={workspace.identities}
-        activeId={workspace.activeIdentityId}
-        onChange={workspace.setActiveIdentityId}
-        trailing={
-          <IconButton
-            className="lg:hidden"
-            label="打开会话列表"
-            icon={<PanelLeft className="h-5 w-5" />}
-            onClick={() => setMobileListOpen(true)}
-          />
-        }
-      />
+      <div className="flex h-10 shrink-0 items-center justify-end border-b border-border px-2 lg:hidden">
+        <IconButton
+          label="打开会话列表"
+          icon={<PanelLeft className="h-5 w-5" />}
+          onClick={() => setMobileListOpen(true)}
+        />
+      </div>
       <div className="flex min-h-0 flex-1">
         {isChatView ? (
           renderChatArea()
@@ -234,6 +240,12 @@ const WorkspacePage: React.FC = () => {
             view={view}
             onViewChange={setView}
             availableViews={availableViews}
+            identities={workspace.identities}
+            activeIdentityId={workspace.activeIdentityId}
+            onChangeIdentity={workspace.setActiveIdentityId}
+            onOpenPermissions={openCollaborationPermissions}
+            userAvatarUrl={workspace.currentUserAvatarUrl}
+            userIdentityId={workspace.activeIdentityId}
             onAddFriend={() => setAddFriendOpen(true)}
             mobileListOpen={mobileListOpen}
             onCloseMobileList={() => setMobileListOpen(false)}
@@ -244,10 +256,23 @@ const WorkspacePage: React.FC = () => {
         open={createGroupOpen}
         activeIdentity={activeIdentity}
         onClose={() => setCreateGroupOpen(false)}
-        onCreated={(groupId) => {
+        onCreated={(group) => {
           setCreateGroupOpen(false);
           setView('group');
-          useWorkspaceStore.getState().selectGroup(groupId);
+          if (group.initialSessionId && group.initialRun?.state === 'running') {
+            useWorkspaceStore.getState().setPendingGroupBootstrap({
+              groupId: group.groupId,
+              sessionId: group.initialSessionId,
+              run: group.initialRun,
+            });
+          }
+          useWorkspaceStore.getState().selectGroup(group.groupId);
+          if (group.initialSessionId) {
+            const store = useWorkspaceStore.getState();
+            if (!store.expandedGroupIds[group.groupId]) store.toggleGroupExpanded(group.groupId);
+            useWorkspaceStore.getState().selectSession(group.initialSessionId);
+            useWorkspaceStore.getState().bumpHistoryRefresh();
+          }
         }}
       />
       <AddFriendModal open={addFriendOpen} activeIdentity={activeIdentity} onClose={() => setAddFriendOpen(false)} />

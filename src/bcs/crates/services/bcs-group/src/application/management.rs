@@ -27,9 +27,10 @@ use bcs_service_api::{
     GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
     ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
     ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
-    DeliveryType, SystemMessageEvent, WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand,
-    WorkbenchConnectOutcome, WorkbenchParticipantView, WorkbenchSessionService,
-    WorkbenchUseCaseError, backfill_bot_names, generated_group_id, validate_sender_routes,
+    DeliveryType, SystemMessageEvent, WorkbenchChatAbortAuthorizationCommand,
+    WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
+    WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
+    generated_group_id, validate_sender_routes,
 };
 use tracing::warn;
 
@@ -964,11 +965,30 @@ impl GroupManagementService for GroupManagement {
             .ok_or_else(|| ServiceError::BotNotFound(bot_id.clone()))?;
             if bot.actor_kind == ActorKind::Bot {
                 if self.v1_openapi_create_policy {
-                    if bot_id != cmd.driver_bot_id {
-                        self.ensure_v1_reachable(&cmd.driver_bot_id, &bot).await?;
-                    }
-                    if bot_id != cmd.driver_bot_id && bot.capabilities.visibility == "public" {
-                        subscription_targets.push(bot.clone());
+                    // Originator-anchored (aligned with legacy): every Bot
+                    // participant except the originator itself — including the
+                    // driver when it differs from the originator — must be
+                    // reachable from the originator. A Human originator reaches
+                    // a bot via public visibility or ownership (`created_by`);
+                    // a Bot originator reaches it via public visibility or
+                    // friendship.
+                    if bot_id != originator {
+                        if is_human_originator {
+                            let staff_no = originator.trim_start_matches("human_");
+                            if bot.capabilities.visibility != "public"
+                                && bot.created_by.as_deref() != Some(staff_no)
+                            {
+                                return Err(GroupUseCaseError::Forbidden(format!(
+                                    "Bot '{}' is neither public nor owned by human '{}'",
+                                    bot_id, staff_no
+                                )));
+                            }
+                        } else {
+                            self.ensure_v1_reachable(&originator, &bot).await?;
+                        }
+                        if bot.capabilities.visibility == "public" {
+                            subscription_targets.push(bot.clone());
+                        }
                     }
                 } else if bot_id != originator {
                     if is_human_originator {
@@ -1169,23 +1189,28 @@ impl GroupManagementService for GroupManagement {
                         .await
                     {
                         Ok(dispatch) => {
-                            if requested_strategy == GroupStrategy::ManagerWorker
-                                && let Some(manager) = group
+                            let bootstrap_responder = match requested_strategy {
+                                GroupStrategy::Chat => Some(group.driver_bot.as_str()),
+                                GroupStrategy::ManagerWorker => group
                                     .participants
                                     .iter()
                                     .find(|participant| {
                                         participant.role == ParticipantRole::Manager
                                     })
+                                    .map(|participant| participant.bot_uuid.as_str()),
+                                GroupStrategy::StateMachine => None,
+                            };
+                            if let Some(bot_uuid) = bootstrap_responder
                                 && let Some(result) = dispatch.recipient_results.iter().find(
                                     |result| {
-                                        result.recipient_id == manager.bot_uuid
+                                        result.recipient_id == bot_uuid
                                             && result.delivery_type == DeliveryType::Send
                                     },
                                 )
                             {
                                 initial_run = Some(InitialGroupRun {
                                     run_id: result.run_id.clone(),
-                                    bot_uuid: manager.bot_uuid.clone(),
+                                    bot_uuid: bot_uuid.to_string(),
                                     activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
                                     state: if result.delivered {
                                         InitialGroupRunState::Running
@@ -2015,6 +2040,71 @@ impl WorkbenchSessionService for GroupManagement {
             Some(_) => Ok(()),
             None => Err(WorkbenchUseCaseError::SenderNotInGroup),
         }
+    }
+
+    async fn authorize_chat_abort(
+        &self,
+        command: WorkbenchChatAbortAuthorizationCommand,
+    ) -> Result<(), WorkbenchUseCaseError> {
+        let actor_id = command
+            .bound_actor_id
+            .as_deref()
+            .ok_or(WorkbenchUseCaseError::Unauthorized)?;
+        let staff_no = staff_no_from_bound_actor(Some(actor_id))?;
+        let session = self
+            .session_management
+            .get(&command.session_id)
+            .await
+            .map_err(|error| {
+                WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
+            })?
+            .filter(|session| session.group_id == command.group_id)
+            .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+
+        let direct_humans = session
+            .participants
+            .iter()
+            .filter(|participant| participant.is_human() && participant.bot_uuid == actor_id)
+            .collect::<Vec<_>>();
+        if direct_humans
+            .iter()
+            .any(|participant| participant.effective_mode() == ParticipantMode::Absent)
+        {
+            return Err(WorkbenchUseCaseError::ParticipantAbsent);
+        }
+
+        // COSEC: abort authorization is recalculated from the current Session
+        // on every request. A stale WebSocket subscription never grants access.
+        let mut may_operate_session = !direct_humans.is_empty();
+        if !may_operate_session {
+            for participant in session
+                .participants
+                .iter()
+                .filter(|participant| participant.is_bot())
+            {
+                let Some(bot) = self.registry.get(&participant.bot_uuid).await else {
+                    continue;
+                };
+                if bot_belongs_to_staff(&participant.bot_uuid, bot.created_by.as_deref(), staff_no)
+                {
+                    may_operate_session = true;
+                    break;
+                }
+            }
+        }
+        if !may_operate_session {
+            return Err(WorkbenchUseCaseError::ForbiddenGroupAccess);
+        }
+
+        let target = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == command.target_bot_id);
+        if !target.is_some_and(|participant| participant.is_bot()) {
+            return Err(WorkbenchUseCaseError::TargetBotNotInSession);
+        }
+
+        Ok(())
     }
 }
 

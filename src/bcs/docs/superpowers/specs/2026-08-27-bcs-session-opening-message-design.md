@@ -4,6 +4,10 @@
 **Date:** 2026-08-27
 **Scope:** BCS Chat and Manager-Worker collaboration sessions
 
+> 2026-09-01 extension: an explicit one-shot Run `opening_message` is defined by
+> `2026-09-01-bcs-one-shot-opening-message-design.md`. The default-panel rule in
+> this document continues to apply when the one-shot request omits that field.
+
 ## Problem
 
 BCS already supports a group-level custom `opening_message` for StateMachine

@@ -97,7 +97,7 @@ export function useGroupCollaborationPicker(
     };
   }, [actorId, enabled, retryNonce]);
 
-  // 用户身份可查看自己拥有的 Bot；切到「我的 Bot」Tab 时拉取第一页并本地搜索。
+  // 用户身份可查看已管理的 Bot；切到「已管理 Bot」Tab 时拉取第一页并本地搜索。
   useEffect(() => {
     if (!enabled || !showMineTab || tab !== 'mine') return;
     let cancelled = false;

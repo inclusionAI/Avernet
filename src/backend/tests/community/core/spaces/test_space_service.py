@@ -510,3 +510,65 @@ def test_existing_personal_space_does_not_query_creator_profile() -> None:
         user_id="owner-1"
     ) == (existing, False)
     staff_dept.get_profile_by_work_no.assert_not_called()
+
+
+def test_create_team_can_skip_sc_creation() -> None:
+    repository = _TransactionRepository(_space())
+    skill_center = MagicMock()
+    service = _make_service(repository, skill_center)
+
+    record = service.create_team(
+        name="Demo Team", creator_id="owner-1", create_sc_team=False
+    )
+
+    assert record == repository.record
+    assert record.sc_team_id is None
+    assert repository.committed is True
+    skill_center.create_team.assert_not_called()
+
+
+def test_initialize_personal_can_skip_sc_creation() -> None:
+    personal = _space(space_type=SpaceType.PERSONAL)
+    state = {"committed": False, "rolled_back": False}
+
+    @contextmanager
+    def create_transaction(*, user_id: str, creator_user_name: str | None, env: str):
+        try:
+            yield personal
+        except Exception:
+            state["rolled_back"] = True
+            raise
+        else:
+            state["committed"] = True
+
+    repository = MagicMock()
+    repository.get_personal_space.return_value = None
+    repository.create_personal_transaction.side_effect = create_transaction
+    skill_center = MagicMock()
+    service = _make_service(repository, skill_center)
+
+    record, created = service.initialize_personal(
+        user_id="owner-1", create_sc_team=False
+    )
+
+    assert (record, created) == (personal, True)
+    assert record.sc_team_id is None
+    assert state == {"committed": True, "rolled_back": False}
+    skill_center.create_team.assert_not_called()
+
+
+def test_initialize_personal_skip_does_not_repair_existing_binding() -> None:
+    existing = _space(space_type=SpaceType.PERSONAL)
+    repository = MagicMock()
+    repository.get_personal_space.return_value = existing
+    skill_center = MagicMock()
+    service = _make_service(repository, skill_center)
+
+    record, created = service.initialize_personal(
+        user_id="owner-1", create_sc_team=False
+    )
+
+    assert (record, created) == (existing, False)
+    repository.personal_sc_team_binding_transaction.assert_not_called()
+    skill_center.get_team_by_ref_source.assert_not_called()
+    skill_center.create_team.assert_not_called()

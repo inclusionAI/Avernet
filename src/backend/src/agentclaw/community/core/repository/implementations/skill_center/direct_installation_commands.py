@@ -17,7 +17,7 @@ from agentclaw.community.core.models.skill import (
     SkillSetSkill,
 )
 from agentclaw.community.core.repository.implementations.skill_center.skill_mcp_dependencies import (
-    skill_mcp_dependency_codes,
+    skill_projection_mcp_dependency_codes,
 )
 from agentclaw.community.core.repository.implementations.skill_center.tables import (
     skill_installations,
@@ -93,7 +93,10 @@ class DirectInstallationCommands:
             # without them. Read under the lock this transaction already
             # holds, as ``add_skill`` does.
             return DesiredStateMutation(
-                {}, True, old, mcp_codes=skill_mcp_dependency_codes(skill)
+                {},
+                True,
+                old,
+                mcp_codes=skill_projection_mcp_dependency_codes(session, skill),
             )
 
     def uninstall_skill(
@@ -112,6 +115,7 @@ class DirectInstallationCommands:
             skill = (
                 self._scope(session.query(Skill), Skill)
                 .filter(Skill.id == int(skill_id))
+                .with_for_update()
                 .one_or_none()
             )
             self._require_not_set_managed(
@@ -146,7 +150,11 @@ class DirectInstallationCommands:
                 changed,
                 old,
                 mcp_codes=(
-                    skill_mcp_dependency_codes(skill) if changed else frozenset()
+                    skill_projection_mcp_dependency_codes(
+                        session, skill, allow_unresolvable_center=True
+                    )
+                    if changed
+                    else frozenset()
                 ),
             )
 

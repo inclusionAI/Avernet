@@ -11,6 +11,8 @@ from __future__ import annotations
 from agentclaw.community.core.caller_identity.caller_identity_service_protocol import (
     CALLER_IDENTITY_CAPABILITY,
     CallerCallTypeInvalidError,
+    CallerCliNotFoundError,
+    CallerCliSyncError,
     CallerContext,
     CallerIamTokenContext,
     CallerIdentityAmbiguousError,
@@ -28,11 +30,14 @@ from agentclaw.community.core.caller_identity.caller_identity_service_protocol i
     CallerTokenProviderProtocol,
     McpCallType,
     McpCallTypeUpdateResult,
+    CliCallTypeUpdateResult,
 )
 
 __all__ = [
     "CALLER_IDENTITY_CAPABILITY",
     "CallerCallTypeInvalidError",
+    "CallerCliNotFoundError",
+    "CallerCliSyncError",
     "CallerContext",
     "CallerIamTokenContext",
     "CallerIdentityAmbiguousError",
@@ -45,6 +50,7 @@ __all__ = [
     "CallerLockEpochError",
     "CallerMcpNotFoundError",
     "CallerMcpSyncError",
+    "CliCallTypeUpdateResult",
     "CallerRuntimeUpdaterProtocol",
     "CallerToken",
     "CallerTokenProviderProtocol",

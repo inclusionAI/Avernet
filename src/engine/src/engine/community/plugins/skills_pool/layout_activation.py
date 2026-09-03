@@ -59,6 +59,49 @@ class MappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class MappingApplyMode(StrEnum):
+    """How one Mapping request handles per-entry runtime drift.
+
+    Pool layout transitions stay fail-closed by omitting this field.  Product
+    capability mutations explicitly opt into ``BEST_EFFORT`` so a user-owned
+    active-root entry cannot block unrelated, safe mapping updates.
+    """
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
+
+
+class MappingProjectionStatus(StrEnum):
+    CONVERGED = "CONVERGED"
+    PENDING = "PENDING"
+    DEGRADED = "DEGRADED"
+
+
+@dataclass(frozen=True, slots=True)
+class MappingItemResult:
+    """One mapping or retirement result emitted by the Engine contract."""
+
+    target: str
+    source: str | None
+    status: MappingProjectionStatus
+    code: str | None = None
+    retryable: bool = False
+    action: str = "APPLY"
+
+    def to_data(self) -> dict[str, object]:
+        data: dict[str, object] = {
+            "target": self.target,
+            "status": self.status.value,
+            "retryable": self.retryable,
+            "action": self.action,
+        }
+        if self.source is not None:
+            data["source"] = self.source
+        if self.code is not None:
+            data["code"] = self.code
+        return data
+
+
 class ActiveRepoRetirementError(RuntimeError):
     """A runtime-owned active-root corpus could not be safely retired."""
 
@@ -107,18 +150,41 @@ class PoolActivationResult:
 class MappingVerificationResult:
     valid: bool
     evidence: dict[str, object]
+    status: MappingProjectionStatus = MappingProjectionStatus.CONVERGED
+    items: tuple[MappingItemResult, ...] = ()
 
     def to_data(self) -> dict[str, object]:
-        return {"valid": self.valid, "evidence": self.evidence}
+        return {
+            "valid": self.valid,
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "evidence": self.evidence,
+        }
 
 
 @dataclass(frozen=True, slots=True)
 class MappingPublishResult:
     published: bool
     evidence: dict[str, object]
+    status: MappingProjectionStatus = MappingProjectionStatus.CONVERGED
+    items: tuple[MappingItemResult, ...] = ()
 
     def to_data(self) -> dict[str, object]:
-        return {"published": self.published, "evidence": self.evidence}
+        return {
+            "published": self.published,
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "evidence": self.evidence,
+        }
+
+    def item_for(self, *, target: Path) -> MappingItemResult:
+        """Return one exact target result for focused Engine conformance tests."""
+
+        normalized = str(Path(os.path.abspath(target)))
+        for item in self.items:
+            if item.target == normalized:
+                return item
+        raise KeyError(normalized)
 
 
 def mapping_sources_use_pool(
@@ -947,6 +1013,378 @@ def _mapping_source_outside_layout(
     return not any(
         normalized.is_relative_to(Path(os.path.abspath(root))) for root in roots
     )
+
+
+def _mapping_status(items: Sequence[MappingItemResult]) -> MappingProjectionStatus:
+    if any(item.status is MappingProjectionStatus.DEGRADED for item in items):
+        return MappingProjectionStatus.DEGRADED
+    if any(item.status is MappingProjectionStatus.PENDING for item in items):
+        return MappingProjectionStatus.PENDING
+    return MappingProjectionStatus.CONVERGED
+
+
+def _best_effort_desired(
+    *,
+    layout: _Layout,
+    mappings: Sequence[SkillMapping],
+    source_layout: MappingSourceLayout,
+) -> tuple[dict[Path, Path], list[MappingItemResult]]:
+    """Classify requested mappings without treating source availability as unsafe.
+
+    ``STRICT`` delegates this work to ``_mapping_plan`` and rejects every
+    failure before touching the filesystem.  Product projection needs the same
+    path-safety checks, but a missing/unreadable managed source is a temporary
+    availability condition: its lexical link remains a safe desired entry.
+    """
+
+    desired: dict[Path, Path] = {}
+    outcomes: list[MappingItemResult] = []
+    duplicate_targets: set[Path] = set()
+    for mapping in mappings:
+        source_input = Path(mapping.source)
+        source = Path(os.path.abspath(source_input))
+        target = Path(mapping.target)
+        if not source_input.is_absolute():
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code=(
+                        "SOURCE_OUTSIDE_LEGACY"
+                        if source_layout is MappingSourceLayout.LEGACY
+                        else "SOURCE_OUTSIDE_POOL"
+                    ),
+                )
+            )
+            continue
+        if _mapping_target_invalid(layout, target):
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="TARGET_INVALID",
+                )
+            )
+            continue
+        source_reason = _source_failure(
+            layout,
+            source,
+            source_layout=source_layout,
+        )
+        if source_reason not in {None, "source_missing", "source_unreadable"}:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code=source_reason.upper(),
+                )
+            )
+            continue
+        existing = desired.get(target)
+        if existing is not None and existing != source:
+            duplicate_targets.add(target)
+            continue
+        desired[target] = source
+
+    for target in duplicate_targets:
+        source = desired.pop(target, None)
+        if source is not None:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="MANAGED_SOURCE_CONFLICT",
+                )
+            )
+        for mapping in mappings:
+            if Path(mapping.target) == target and Path(mapping.source) != source:
+                outcomes.append(
+                    MappingItemResult(
+                        target=str(target),
+                        source=str(Path(os.path.abspath(mapping.source))),
+                        status=MappingProjectionStatus.DEGRADED,
+                        code="MANAGED_SOURCE_CONFLICT",
+                    )
+                )
+    return desired, outcomes
+
+
+def _best_effort_retire(
+    *,
+    layout: _Layout,
+    retired_mappings: Sequence[SkillMapping],
+    desired_targets: frozenset[Path],
+    source_layout: MappingSourceLayout,
+    additional_retirement_roots: Sequence[Path],
+    apply: bool,
+) -> tuple[list[MappingItemResult], list[str], list[str]]:
+    """Retire only exact managed links; preserve every unknown filesystem entry."""
+
+    outcomes: list[MappingItemResult] = []
+    removed: list[str] = []
+    absent: list[str] = []
+    for mapping in retired_mappings:
+        source_input = Path(mapping.source)
+        source = Path(os.path.abspath(source_input))
+        target = Path(mapping.target)
+        if target in desired_targets:
+            # A desired replacement owns this target and will update it below.
+            continue
+        if (
+            not source_input.is_absolute()
+            or _mapping_source_outside_layout(
+                layout,
+                source,
+                source_layout=source_layout,
+            )
+            or _mapping_target_invalid(
+                layout,
+                target,
+                additional_retirement_roots=additional_retirement_roots,
+            )
+        ):
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="RETIRED_MAPPING_INVALID",
+                    action="RETIRE",
+                )
+            )
+            continue
+        if not target.exists() and not target.is_symlink():
+            absent.append(str(target))
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.CONVERGED,
+                    action="RETIRE",
+                )
+            )
+            continue
+        if not target.is_symlink():
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                    action="RETIRE",
+                )
+            )
+            continue
+        current = _lexical_target(target)
+        if current != source:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code=(
+                        "EXTERNAL_ACTIVE_ENTRY_RETAINED"
+                        if _canonical_pool_source(layout, current) is None
+                        else "RETIRED_TARGET_IDENTITY_MISMATCH"
+                    ),
+                    action="RETIRE",
+                )
+            )
+            continue
+        if apply:
+            try:
+                target.unlink()
+            except OSError:
+                outcomes.append(
+                    MappingItemResult(
+                        target=str(target),
+                        source=str(source),
+                        status=MappingProjectionStatus.PENDING,
+                        code="MAPPING_PUBLISH_IO_ERROR",
+                        retryable=True,
+                        action="RETIRE",
+                    )
+                )
+                continue
+            removed.append(str(target))
+        elif target.exists() or target.is_symlink():
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="RETIRED_TARGET_STILL_PRESENT",
+                    action="RETIRE",
+                )
+            )
+            continue
+        outcomes.append(
+            MappingItemResult(
+                target=str(target),
+                source=str(source),
+                status=MappingProjectionStatus.CONVERGED,
+                action="RETIRE",
+            )
+        )
+    return outcomes, removed, absent
+
+
+def _best_effort_mapping_results(
+    *,
+    layout: _Layout,
+    mappings: Sequence[SkillMapping],
+    retired_mappings: Sequence[SkillMapping],
+    source_layout: MappingSourceLayout,
+    additional_retirement_roots: Sequence[Path],
+    apply: bool,
+) -> tuple[tuple[MappingItemResult, ...], dict[str, object]]:
+    """Apply or inspect one full desired mapping set without touching unknown data."""
+
+    desired, outcomes = _best_effort_desired(
+        layout=layout,
+        mappings=mappings,
+        source_layout=source_layout,
+    )
+    retired, removed, absent = _best_effort_retire(
+        layout=layout,
+        retired_mappings=retired_mappings,
+        desired_targets=frozenset(desired),
+        source_layout=source_layout,
+        additional_retirement_roots=additional_retirement_roots,
+        apply=apply,
+    )
+    outcomes.extend(retired)
+
+    discovered, external, occupied = _active_entry_inventory(layout)
+    external_targets = set(external)
+    occupied_targets = set(occupied)
+    created: list[str] = []
+    updated: list[str] = []
+    kept: list[str] = []
+    for target, source in desired.items():
+        if target in external_targets:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="EXTERNAL_ACTIVE_ENTRY_RETAINED",
+                )
+            )
+            continue
+        if target in occupied_targets:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.DEGRADED,
+                    code="UNMANAGED_ACTIVE_ENTRY_RETAINED",
+                )
+            )
+            continue
+        source_reason = _source_failure(
+            layout,
+            source,
+            source_layout=source_layout,
+        )
+        pending = source_reason in {"source_missing", "source_unreadable"}
+        if not apply:
+            if not target.is_symlink() or _lexical_target(target) != source:
+                outcomes.append(
+                    MappingItemResult(
+                        target=str(target),
+                        source=str(source),
+                        status=MappingProjectionStatus.DEGRADED,
+                        code="TARGET_NOT_SYMLINK" if not target.is_symlink() else "TARGET_MISMATCH",
+                    )
+                )
+            else:
+                outcomes.append(
+                    MappingItemResult(
+                        target=str(target),
+                        source=str(source),
+                        status=(
+                            MappingProjectionStatus.PENDING
+                            if pending
+                            else MappingProjectionStatus.CONVERGED
+                        ),
+                        code="MANAGED_SOURCE_MISSING" if pending else None,
+                        retryable=pending,
+                    )
+                )
+            continue
+        try:
+            if target.is_symlink():
+                if _lexical_target(target) == source:
+                    kept.append(str(target))
+                else:
+                    target.unlink()
+                    target.symlink_to(source, target_is_directory=True)
+                    updated.append(str(target))
+            else:
+                target.symlink_to(source, target_is_directory=True)
+                created.append(str(target))
+        except OSError:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.PENDING,
+                    code="MAPPING_PUBLISH_IO_ERROR",
+                    retryable=True,
+                )
+            )
+            continue
+        outcomes.append(
+            MappingItemResult(
+                target=str(target),
+                source=str(source),
+                status=(
+                    MappingProjectionStatus.PENDING
+                    if pending
+                    else MappingProjectionStatus.CONVERGED
+                ),
+                code="MANAGED_SOURCE_MISSING" if pending else None,
+                retryable=pending,
+            )
+        )
+
+    # A previously published managed link is preserved by the full-snapshot
+    # contract.  Report its missing source as pending so unrelated product
+    # mutations do not hide existing runtime drift.
+    for target, pool_source in discovered.items():
+        if target in desired or target in {Path(item.target) for item in retired_mappings}:
+            continue
+        source = _source_for_layout(
+            layout,
+            pool_source,
+            source_layout=source_layout,
+        )
+        reason = _source_failure(layout, source, source_layout=source_layout)
+        if reason in {"source_missing", "source_unreadable"}:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.PENDING,
+                    code="MANAGED_SOURCE_MISSING",
+                    retryable=True,
+                )
+            )
+
+    return tuple(outcomes), {
+        "total": len(desired),
+        "created": created,
+        "updated": updated,
+        "kept": kept,
+        "removed": removed,
+        "retired_absent": absent,
+        "external_ignored": [str(path) for path in external],
+    }
 
 
 def _retirement_plan(
@@ -2293,10 +2731,27 @@ def verify_skill_mappings(
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
 ) -> MappingVerificationResult:
     """验证受管激活入口精确解析到声明 layout 的 source。"""
 
     layout = _Layout.for_engine(engine, Path(home))
+    if apply_mode is MappingApplyMode.BEST_EFFORT:
+        items, evidence = _best_effort_mapping_results(
+            layout=layout,
+            mappings=mappings,
+            retired_mappings=retired_mappings,
+            source_layout=source_layout,
+            additional_retirement_roots=additional_retirement_roots,
+            apply=False,
+        )
+        status = _mapping_status(items)
+        return MappingVerificationResult(
+            valid=status is MappingProjectionStatus.CONVERGED,
+            evidence=evidence,
+            status=status,
+            items=items,
+        )
     retirement = _retirement_plan(
         layout=layout,
         mappings=mappings,
@@ -2350,10 +2805,27 @@ def publish_pool_mappings(
     engine: str = "openclaw",
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
     additional_retirement_roots: Sequence[Path] = (),
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
 ) -> MappingPublishResult:
     """按声明 layout 对齐全部受管 mapping，并保留外部入口。"""
 
     layout = _Layout.for_engine(engine, Path(home))
+    if apply_mode is MappingApplyMode.BEST_EFFORT:
+        items, evidence = _best_effort_mapping_results(
+            layout=layout,
+            mappings=mappings,
+            retired_mappings=retired_mappings,
+            source_layout=source_layout,
+            additional_retirement_roots=additional_retirement_roots,
+            apply=True,
+        )
+        status = _mapping_status(items)
+        return MappingPublishResult(
+            published=status is MappingProjectionStatus.CONVERGED,
+            evidence=evidence,
+            status=status,
+            items=items,
+        )
     retirement = _retirement_plan(
         layout=layout,
         mappings=mappings,
@@ -2447,6 +2919,9 @@ def publish_pool_mappings(
 __all__ = [
     "ActiveRepoRestorationError",
     "MappingPublishResult",
+    "MappingApplyMode",
+    "MappingItemResult",
+    "MappingProjectionStatus",
     "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",

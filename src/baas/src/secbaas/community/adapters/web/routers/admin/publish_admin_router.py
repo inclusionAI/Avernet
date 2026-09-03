@@ -6,6 +6,7 @@ These endpoints bypass normal state machine transitions — use with caution.
 Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
 - POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
+- POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
 """
 
 from typing import Annotated
@@ -19,6 +20,7 @@ from secbaas.community.api.publish_manage import (
     ForceSuccessResult,
     PublishAdminService,
     PublishNotFoundError,
+    UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
 from secbaas.community.bootstrap import ApplicationContainer, Provide
@@ -163,3 +165,73 @@ async def update_device_status_endpoint(
             detail=f"Device {device_uuid} not found",
         )
     return ApiResponse(data=_to_update_status_response(result))
+
+
+class UpdateBotStatusRequest(BaseModel):
+    status: str = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+        description="Target bot status (e.g. ACTIVE, STOPPED, PENDING, FAILED)",
+    )
+    operator: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="User performing the status update",
+    )
+
+
+class UpdateBotStatusResponse(BaseModel):
+    bot_id: int = Field(..., description="Bot ID that was updated")
+    bot_uuid: str = Field(..., description="Bot UUID of the updated bot")
+    previous_status: str = Field(..., description="Previous status of the bot")
+    new_status: str = Field(..., description="New status after the update")
+
+
+def _to_update_bot_status_response(
+    result: UpdateBotStatusResult,
+) -> UpdateBotStatusResponse:
+    return UpdateBotStatusResponse(
+        bot_id=result.bot_id,
+        bot_uuid=result.bot_uuid,
+        previous_status=result.previous_status,
+        new_status=result.new_status,
+    )
+
+
+@router.post(
+    "/bots/{bot_id}/status",
+    response_model=ApiResponse[UpdateBotStatusResponse],
+)
+@inject
+async def update_bot_status_endpoint(
+    bot_id: Annotated[
+        int,
+        Path(description="Bot ID (primary key) to update"),
+    ],
+    request: UpdateBotStatusRequest,
+    admin_service: PublishAdminService = Depends(
+        Provide[ApplicationContainer.services.publish_admin_service]
+    ),
+) -> ApiResponse[UpdateBotStatusResponse]:
+    """Update a bot's status directly, bypassing normal state machine transitions.
+
+    **WARNING**: This is a test/development tool. It intentionally bypasses
+    the normal state machine transitions and does not perform any real
+    publish workflow or PaaS operation. Use with caution. The bot is
+    resolved by its primary key (bot_id); tenant and env are sourced from
+    the fetched record, not from the request.
+    """
+    try:
+        result = await admin_service.update_bot_status(
+            bot_id=bot_id,
+            status=request.status,
+            operator=request.operator,
+        )
+    except PublishNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Bot {bot_id} not found",
+        )
+    return ApiResponse(data=_to_update_bot_status_response(result))

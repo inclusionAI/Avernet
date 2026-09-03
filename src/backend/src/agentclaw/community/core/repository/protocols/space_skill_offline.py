@@ -27,10 +27,6 @@ class SpaceSkillOfflineRepositoryProtocol(Protocol):
         space_id: int,
         skill_id: int,
         actor_id: str,
-        expected_version_id: int,
-        target_version: int,
-        new_locator: str,
-        new_description: str | None,
         env: str,
         guard: Callable[[OfflineInspection], None],
     ) -> OfflineCommit: ...

@@ -1059,7 +1059,7 @@ async def test_abort_runs_by_session_marks_failed_force_done_and_cancels_local_t
     worker = _worker(queue, repo, ex, run_repository=repo)
     worker._running_tasks[run_id] = task
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     await asyncio.sleep(0)  # let CancelledError propagate
     assert outcome.aborted_run_ids == [run_id]
@@ -1067,22 +1067,24 @@ async def test_abort_runs_by_session_marks_failed_force_done_and_cancels_local_t
     assert cancelled.is_set(), "local task must be cancelled"
     assert repo.get_by_run_id(run_id).status == "FAILED"
     assert queue.get_by_run_id(run_id).status == "DONE"
-    # idempotent: aborted run no longer in find_running_by_session
-    assert worker._queue.find_running_by_session("sess-abort") == []
+    # idempotent: aborted run no longer in find_running_by_bot_session
+    assert worker._queue.find_running_by_bot_session("sess-abort", "bot-1") == []
 
 
-async def test_abort_runs_by_session_pending_record_marked_failed(repo, queue):
-    """PENDING record (not yet claimed) is also aborted (mark FAILED + force_done)."""
+async def test_abort_runs_by_session_pending_record_left_untouched(repo, queue):
+    """PENDING record (not yet claimed) is NOT aborted; only RUNNING is cancelled."""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
 
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
     worker = _worker(queue, repo, ex, run_repository=repo)
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
-    assert outcome.aborted_run_ids == [run_id]
-    assert repo.get_by_run_id(run_id).status == "FAILED"
-    assert queue.get_by_run_id(run_id).status == "DONE"
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is False
+    # PENDING 不动，由超时扫描兜底
+    assert queue.get_by_run_id(run_id).status == "PENDING"
+    assert repo.get_by_run_id(run_id).status != "FAILED"
 
 
 async def test_abort_runs_by_session_no_run_record_returns_aborted_false(repo, queue):
@@ -1090,7 +1092,7 @@ async def test_abort_runs_by_session_no_run_record_returns_aborted_false(repo, q
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
     worker = _worker(queue, repo, ex, run_repository=repo)
 
-    outcome = await worker.abort_runs_by_session("no-such-session")
+    outcome = await worker.abort_runs_by_session("no-such-session", "bot-1")
 
     assert outcome.aborted_run_ids == []
     assert outcome.had_terminal is False
@@ -1106,26 +1108,28 @@ async def test_abort_runs_by_session_terminal_record_had_terminal_true(repo, que
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
     worker = _worker(queue, repo, ex, run_repository=repo)
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     assert outcome.aborted_run_ids == []
     assert outcome.had_terminal is True
 
 
-async def test_abort_runs_by_session_empty_session_returns_empty(repo, queue):
-    """Empty session_id short-circuits to empty outcome."""
+async def test_abort_runs_by_session_empty_session_or_bot_returns_empty(repo, queue):
+    """Empty session_id or bot_id short-circuits to empty outcome."""
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
     worker = _worker(queue, repo, ex, run_repository=repo)
 
-    outcome = await worker.abort_runs_by_session("")
-
-    assert outcome.aborted_run_ids == []
-    assert outcome.had_terminal is False
+    assert (await worker.abort_runs_by_session("", "bot-1")).aborted_run_ids == []
+    assert (await worker.abort_runs_by_session("sess", "")).aborted_run_ids == []
+    out = await worker.abort_runs_by_session("", "")
+    assert out.aborted_run_ids == [] and out.had_terminal is False
 
 
 async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
-    """engine_abort_notifier is awaited once per session; failure is logged, not raised."""
+    """engine_abort_notifier is awaited once per (bot,session); failure logged, not raised."""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
 
     notified = asyncio.Event()
 
@@ -1139,7 +1143,7 @@ async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
         queue, repo, ex, run_repository=repo, engine_abort_notifier=notifier
     )
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     assert outcome.aborted_run_ids == [run_id]
     assert notified.is_set()
@@ -1148,6 +1152,8 @@ async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
 async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue):
     """engine_abort_notifier raising must not fail the abort."""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
 
     async def notifier(session_id: str, rid: str | None) -> None:
         raise RuntimeError("engine notify boom")
@@ -1157,7 +1163,7 @@ async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue
         queue, repo, ex, run_repository=repo, engine_abort_notifier=notifier
     )
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     assert outcome.aborted_run_ids == [run_id]
     assert repo.get_by_run_id(run_id).status == "FAILED"
@@ -1189,9 +1195,113 @@ async def test_abort_runs_by_session_without_run_repo_skips_update_error(repo, q
     worker = _worker(queue, repo, ex)
     worker._running_tasks[run_id] = task
 
-    outcome = await worker.abort_runs_by_session("sess-abort")
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
 
     await asyncio.sleep(0)
     assert outcome.aborted_run_ids == [run_id]
     assert cancelled.is_set()
     assert queue.get_by_run_id(run_id).status == "DONE"
+
+
+# ── bot 维度收窄：群聊多 bot 共 session 不误杀 ──────────────────────
+
+
+async def test_abort_runs_by_session_group_chat_other_bot_running_not_killed(
+    repo, queue
+):
+    """群聊：abort bot-A，同 session 下 bot-B 的 RUNNING run 不被取消。"""
+    run_a = _insert_with_session(repo, queue, "bot-A", "sess-group")
+    run_b = _insert_with_session(repo, queue, "bot-B", "sess-group")
+    # 各自 claim -> RUNNING
+    claimed_a = queue.claim_pending_by_bot("bot-A", "wA", candidates=5)
+    claimed_b = queue.claim_pending_by_bot("bot-B", "wB", candidates=5)
+    assert claimed_a is not None and claimed_a.run_id == run_a
+    assert claimed_b is not None and claimed_b.run_id == run_b
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-group", "bot-A")
+
+    assert outcome.aborted_run_ids == [run_a]
+    # bot-B 的 RUNNING run 不受影响
+    assert queue.get_by_run_id(run_b).status == "RUNNING"
+    assert repo.get_by_run_id(run_b).status != "FAILED"
+
+
+async def test_abort_runs_by_session_group_chat_target_bot_no_running_410_dimension(
+    repo, queue
+):
+    """群聊：abort bot-A，bot-A 无 RUNNING 但 bot-B 有 -> 不影响任何 run，按 bot-A 维度判 410/200。"""
+    _run_a = _insert_with_session(repo, queue, "bot-A", "sess-group")
+    run_b = _insert_with_session(repo, queue, "bot-B", "sess-group")
+    # bot-B claim 成 RUNNING；bot-A 仍是 PENDING（不会命中 find_running_by_bot_session）
+    claimed_b = queue.claim_pending_by_bot("bot-B", "wB", candidates=5)
+    assert claimed_b is not None and claimed_b.run_id == run_b
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    outcome = await worker.abort_runs_by_session("sess-group", "bot-A")
+
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is False  # bot-A 自己在该 session 无终态记录
+    # bot-B RUNNING run 不受影响
+    assert queue.get_by_run_id(run_b).status == "RUNNING"
+    # bot-A PENDING 也不动
+    assert queue.get_by_run_id(_run_a).status == "PENDING"
+
+
+async def test_abort_runs_by_session_had_terminal_narrowed_to_target_bot(repo, queue):
+    """410 维度收窄到目标 bot：其它 bot 的终态记录不影响该 bot 的 410 判定。"""
+    # bot-B 在该 session 有一条 DONE 记录
+    run_b = _insert_with_session(repo, queue, "bot-B", "sess-group")
+    claimed_b = queue.claim_pending_by_bot("bot-B", "wB", candidates=5)
+    assert claimed_b is not None and claimed_b.run_id == run_b
+    assert queue.mark_done(run_b, "wB") == 1
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    # abort bot-A：bot-A 无任何记录 -> aborted=false, had_terminal=False（不被 bot-B 的 DONE 影响）
+    outcome = await worker.abort_runs_by_session("sess-group", "bot-A")
+    assert outcome.aborted_run_ids == []
+    assert outcome.had_terminal is False
+
+    # abort bot-B：bot-B 有 DONE 记录 -> had_terminal=True（410）
+    outcome_b = await worker.abort_runs_by_session("sess-group", "bot-B")
+    assert outcome_b.aborted_run_ids == []
+    assert outcome_b.had_terminal is True
+
+
+async def test_abort_runs_by_session_calls_repo_with_bot_session_args(repo, queue):
+    """repository 调用收窄到 (session_id, bot_id) 维度（spy 模式断言调用参数）。"""
+    run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(queue, repo, ex, run_repository=repo)
+
+    find_running_calls: list[tuple[str, str]] = []
+    find_terminal_calls: list[tuple[str, str]] = []
+    orig_running = worker._queue.find_running_by_bot_session
+    orig_terminal = worker._queue.find_terminal_by_bot_session
+
+    def spy_running(session_id: str, bot_id: str):
+        find_running_calls.append((session_id, bot_id))
+        return orig_running(session_id, bot_id)
+
+    def spy_terminal(session_id: str, bot_id: str):
+        find_terminal_calls.append((session_id, bot_id))
+        return orig_terminal(session_id, bot_id)
+
+    worker._queue.find_running_by_bot_session = spy_running  # type: ignore[assignment]
+    worker._queue.find_terminal_by_bot_session = spy_terminal  # type: ignore[assignment]
+
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert find_running_calls == [("sess-abort", "bot-1")]
+    # 有可取消 run 时不调用 find_terminal_by_bot_session
+    assert find_terminal_calls == []

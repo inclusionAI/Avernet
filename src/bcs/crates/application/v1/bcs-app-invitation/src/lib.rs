@@ -298,8 +298,6 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                     format!("Session '{}' was not found", command.session_id),
                 )
             })?;
-        // Manager of the parent group may mint a session invitation, mirroring
-        // the legacy `create_session_invite_token` authorization.
         let group = self
             .groups
             .try_get(&session.group_id)
@@ -311,11 +309,6 @@ impl InvitationService for InvitationFriendshipServiceImpl {
                     format!("Group '{}' was not found", session.group_id),
                 )
             })?;
-        if !self.can_manage_group(&principal, &group).await? {
-            return Err(ApplicationError::forbidden(
-                "Only the Group originator, driver, or manager may manage Sessions",
-            ));
-        }
         // Vcj6M: legacy `create_session_invite_token` L186-189 rejects DM parent
         // groups. Mirror it so session invitations on pairwise DM targets are
         // not minted. The legacy session path skips `session.status` (it never
@@ -332,6 +325,19 @@ impl InvitationService for InvitationFriendshipServiceImpl {
             return Err(ApplicationError::conflict(
                 "conflict",
                 "group is not active",
+            ));
+        }
+        // Minting is gated on session membership only: any participant of the
+        // session (any role) may create an invitation for it. Group-level
+        // roles (driver, originator, manager) are intentionally NOT required,
+        // mirroring the relaxed legacy `create_session_invite_token`.
+        if !session
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == principal.actor_id())
+        {
+            return Err(ApplicationError::forbidden(
+                "Only Session participants may create invitations for this Session",
             ));
         }
         Ok(self.mint_invitation(

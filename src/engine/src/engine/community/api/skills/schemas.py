@@ -75,6 +75,7 @@ class CenterEnsureFailureSchema(BaseModel):
     skill_uuid: str
     version: str
     reason: str
+    code: str | None = None
 
 
 class CenterEnsureResponseSchema(BaseModel):
@@ -100,12 +101,24 @@ class ResolvedFilesystemLayoutEvidence(BaseModel):
     pool_center: str
 
 
+class CenterMountEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["READY", "NOT_READY", "UNAVAILABLE"]
+    reason: str | None
+    restart_required: bool
+
+
 class RuntimeLayoutProbeEvidence(BaseModel):
     """Extensible probe evidence with a typed resolved-layout member."""
 
     model_config = ConfigDict(extra="allow")
 
     resolved_layout: ResolvedFilesystemLayoutEvidence | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    center_mount: CenterMountEvidence | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -173,6 +186,7 @@ class PoolMappingVerifyRequest(BaseModel):
         default_factory=list
     )
     source_layout: Literal["pool", "legacy"] = "pool"
+    apply_mode: Literal["STRICT", "BEST_EFFORT"] = "STRICT"
 
 
 __all__ = [

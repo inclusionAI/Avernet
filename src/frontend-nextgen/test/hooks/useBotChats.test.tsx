@@ -2,6 +2,7 @@
 import { useBotChats } from '@/hooks/useBotChats';
 import { botChatService } from '@/services/botWorkshop/botChatService';
 import { useBotChatStore } from '@/stores/botChatStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { renderHook, waitFor } from '@testing-library/react';
 import { history, useLocation } from '@umijs/max';
 
@@ -30,6 +31,11 @@ const mockedRelated = botChatService.related as jest.MockedFunction<typeof botCh
 beforeEach(() => {
   jest.clearAllMocks();
   useBotChatStore.getState().reset();
+  useWorkspaceStore.getState().reset();
+  useWorkspaceStore.getState().setIdentities(
+    [{ id: 'signed-in-user', kind: 'user', displayName: '当前用户', online: true }],
+    'signed-in-user',
+  );
   mockedList.mockResolvedValue({ items: [], total: 0, page: 1, limit: 20, hasMore: false });
 });
 
@@ -46,14 +52,14 @@ it('从独立页面参数初始化日志上下文并查询真实 Service', async
 
   await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
   expect(mockedList).toHaveBeenCalledWith(
-    { botId: 'default', botName: 'My Bot', ownerId: undefined, userId: 'user-demo' },
+    { botId: 'default', botName: 'My Bot', ownerId: undefined, userId: 'signed-in-user' },
     expect.objectContaining({ traceId: '', sessionKey: '' }),
   );
   expect(useBotChatStore.getState().context).toEqual({
     botId: 'default',
     botName: 'My Bot',
     ownerId: undefined,
-    userId: 'user-demo',
+    userId: 'signed-in-user',
   });
 
   unmount();
@@ -120,9 +126,66 @@ it('群模式打开其他 Bot Trace 时保留 Group 锚点且不重查关联列�
   await result.current.openDetail('other-trace');
 
   expect(mockedDetail).toHaveBeenCalledWith(
-    { botId: 'viewer-bot', botName: 'viewer-bot', userId: 'collaborator', ownerId: 'owner' },
+    { botId: 'viewer-bot', botName: 'viewer-bot', userId: 'signed-in-user', ownerId: 'owner' },
     'other-trace',
     'group-1',
+  );
+  expect(mockedRelated).not.toHaveBeenCalled();
+});
+
+it('从 session 关联列表打开 Trace 时直接请求详情，不重复查询 session 历史', async () => {
+  mockedUseLocation.mockReturnValue({
+    pathname: '/bot-workshop/logs',
+    search: '?bot_id=viewer-bot&user_id=owner',
+    hash: '',
+    state: null,
+    key: 'logs-session-related',
+  });
+  const detail = {
+    id: 'related-trace',
+    timestamp: '2026-08-24T00:00:00Z',
+    name: 'Related Trace',
+    sessionId: 'session-id-1',
+    sessionKey: 'session-key-1',
+    status: 'SUCCESS',
+    latencyMs: 0,
+    totalTokens: 0,
+    totalCost: 0,
+    observations: [],
+  };
+  mockedDetail.mockResolvedValue(detail);
+
+  const { result } = renderHook(() => useBotChats());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+  useBotChatStore.getState().setDetailState({
+    detail: { ...detail, id: 'current-trace' },
+  });
+  useBotChatStore.getState().setRelatedState({
+    relationScope: 'session',
+    related: {
+      items: [
+        {
+          ...detail,
+          id: 'related-trace',
+          botId: 'viewer-bot',
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 100,
+      hasMore: false,
+    },
+  });
+
+  await result.current.openDetail('related-trace');
+
+  expect(mockedDetail).toHaveBeenCalledWith(
+    { botId: 'viewer-bot', botName: 'viewer-bot', userId: 'signed-in-user', ownerId: undefined },
+    'related-trace',
+    undefined,
+    'viewer-bot',
+    undefined,
+    true,
   );
   expect(mockedRelated).not.toHaveBeenCalled();
 });
@@ -159,7 +222,7 @@ it('关联列表加载更多时请求下一页并使用追加模式', async () =
   await result.current.loadMoreRelated();
 
   expect(mockedRelated).toHaveBeenCalledWith(
-    { botId: 'viewer-bot', botName: 'viewer-bot', userId: 'owner', ownerId: undefined },
+    { botId: 'viewer-bot', botName: 'viewer-bot', userId: 'signed-in-user', ownerId: undefined },
     detail,
     'group',
     2,

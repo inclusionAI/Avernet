@@ -187,8 +187,8 @@ class TestCreateTask:
         assert call_args.owner_id == "owner-1"
         assert call_args.bot_id == "bot-1"
         assert call_args.payload["model"] == "gpt-4o"
-        assert call_args.payload["owner_id"] == "owner-1"
-        assert call_args.payload["bot_id"] == "bot-1"
+        assert "owner_id" not in call_args.payload
+        assert "bot_id" not in call_args.payload
         assert call_args.payload["timeout_secs"] == 120
         assert call_args.notify is not None
         assert call_args.notify.user_ids == ["u1", "u2"]
@@ -221,8 +221,8 @@ class TestCreateTask:
         call_args = mock_cron_api.add_job.call_args[0][0]
         assert call_args.owner_id == "owner-2"
         assert call_args.bot_id == "bot-2"
-        assert call_args.payload["owner_id"] == "owner-2"
-        assert call_args.payload["bot_id"] == "bot-2"
+        assert "owner_id" not in call_args.payload
+        assert "bot_id" not in call_args.payload
 
     def test_service_error_returns_500(self, client, mock_cron_api):
         mock_cron_api.add_job.side_effect = RuntimeError("storage error")

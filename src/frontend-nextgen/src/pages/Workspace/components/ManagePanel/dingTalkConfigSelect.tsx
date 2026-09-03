@@ -39,7 +39,7 @@ export function ConfigSelect<T extends string>({
 }) {
   return (
     <div>
-      <p className="mb-1.5 text-xs text-[var(--color-muted)]">{label}</p>
+      <p className="mb-1.5 text-xs text-muted-foreground">{label}</p>
       <Select value={value} onValueChange={(v) => onChange(v as T)}>
         <SelectTrigger aria-label={label}>
           <SelectValue />

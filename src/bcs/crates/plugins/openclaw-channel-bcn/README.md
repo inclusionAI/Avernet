@@ -6,7 +6,7 @@ BCS WebSocket channel plugin for OpenClaw.
 
 - Registers a `bcs` channel in OpenClaw
 - Connects to a configured BCS WebSocket endpoint with auto reconnect and heartbeat
-- Accepts `chat.send`, `chat.inject`, and `chat.history`
+- Accepts `chat.send`, `chat.inject`, `chat.abort`, and `chat.history`
 - Routes inbound group messages into the OpenClaw runtime and sends replies back to BCS
 - Persists BCS session state for reconnecting
 - Provides BCS group routing and manager-worker task tools:
@@ -17,6 +17,14 @@ BCS WebSocket channel plugin for OpenClaw.
 
 This plugin package intentionally does not include internal HITL, environment detection,
 or internal endpoint defaults.
+
+`chat.abort` is a request/response operation. The plugin registers an
+`AbortController` before acknowledging each `chat.send`, then cancels only the
+exact `(session_key, run_id)` requested by BCS. Repeated aborts of an already
+terminal run succeed with an empty `aborted_run_ids`; unknown or cross-session
+run IDs are rejected. The key is the exact value from the original
+`chat.send`: group-derived for protocol v2 and the canonical BCS Session ID
+for protocol v3.
 
 ## Install From npm
 

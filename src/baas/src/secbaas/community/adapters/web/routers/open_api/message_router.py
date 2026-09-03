@@ -55,7 +55,7 @@ from secbaas.community.api.sse import (
 )
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.eval_env import EvalSessionLogProtocol
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 logger = get_logger("router-open-api")
 
@@ -83,7 +83,7 @@ async def deliver_message(
     api_key_record: APIKeyRecord = Depends(validate_api_key),
     context: BotChatContext = Depends(get_bot_chat_context),
     bot_runner: BotRunner = Depends(Provide[ApplicationContainer.services.bot_runner]),
-    eval_session_log: EvalSessionLogProtocol = Depends(
+    eval_session_log: EvalSessionLog = Depends(
         Provide[ApplicationContainer.services.eval_session_log]
     ),
     x_eval_id: str | None = Header(None, alias="X-Eval-Id"),
@@ -225,7 +225,7 @@ async def deliver_message_stream(
     converter_factory: SseConverterFactory = Depends(
         Provide[ApplicationContainer.services.stream_converter_factory]
     ),
-    eval_session_log: EvalSessionLogProtocol = Depends(
+    eval_session_log: EvalSessionLog = Depends(
         Provide[ApplicationContainer.services.eval_session_log]
     ),
     x_eval_id: str | None = Header(None, alias="X-Eval-Id"),

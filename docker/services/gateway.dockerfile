@@ -44,6 +44,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
         procps \
         net-tools \
         iproute2 \
+        iputils-ping \
         vim \
         less \
         jq \
@@ -61,6 +62,10 @@ COPY src/gateway/configs /app/configs
 RUN mkdir -p /app/tmp /home/admin/logs \
     && chown -R admin:admin /app /home/admin
 
+# The service runs as admin (non-root). Root stays available for debugging —
+# it is merely password-locked, and container exec needs no password:
+#   kubectl exec -it <pod> -u 0 -- bash    (then apt-get install ...)
+# Root password stays unset on purpose: no secret ships in image layers.
 USER admin
 
 EXPOSE 8080

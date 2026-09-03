@@ -3,12 +3,11 @@ use std::collections::BTreeMap;
 use bcs_domain::{LedgerSummary, SenderType};
 use bcs_protocol::{BcsFrame, GroupContext, RequestFrame};
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryKind, ChatResponseMode, DeliveryType, Group, GroupStatus,
-    FrontendDeliveryCommand, FrontendDeliveryKind, FrontendDeliveryResult, FrontendDeliveryTarget,
-    GroupStrategy, Participant, ParticipantMode, ParticipantRole, ServiceError, ServiceResult,
-    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
-    MESSAGE_LOG_SCHEMA_VERSION,
-    Session, SessionKind, SessionStatus, SystemMessageEvent, TaskCompleteCommand,
+    BotDeliveryCommand, BotDeliveryKind, ChatResponseMode, DeliveryType, FrontendDeliveryCommand,
+    FrontendDeliveryKind, FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupStatus,
+    GroupStrategy, MESSAGE_LOG_SCHEMA_VERSION, MessageLogContent, MessageLogEventType,
+    MessageLogMode, MessageLogStatus, Participant, ParticipantMode, ParticipantRole, ServiceError,
+    ServiceResult, Session, SessionKind, SessionStatus, SystemMessageEvent, TaskCompleteCommand,
     TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskMessageCommand,
     TaskMessageOutcome,
     port::NewEvent,
@@ -89,7 +88,10 @@ pub(crate) async fn record_task_completed(
         .to_rfc3339_opts(SecondsFormat::Millis, true);
     let mut data = BTreeMap::from([
         ("task_id".to_string(), serde_json::json!(entry.task_id)),
-        ("manager_id".to_string(), serde_json::json!(entry.driver_bot)),
+        (
+            "manager_id".to_string(),
+            serde_json::json!(entry.driver_bot),
+        ),
         ("worker_id".to_string(), serde_json::json!(entry.target_bot)),
         (
             "result".to_string(),
@@ -100,10 +102,7 @@ pub(crate) async fn record_task_completed(
                 "truncated": false
             }),
         ),
-        (
-            "completed_at".to_string(),
-            serde_json::json!(completed_at),
-        ),
+        ("completed_at".to_string(), serde_json::json!(completed_at)),
     ]);
     if let Some(session_id) = entry.session_id.as_ref() {
         data.insert("session_id".to_string(), serde_json::json!(session_id));
@@ -326,7 +325,14 @@ pub async fn handle_task_dispatch(
                 Some("resolve_target"),
             );
             flow.task_store.mark_failed(&effective_task_id).await;
-            emit_task_ledger_status(flow, &group, &group_id, ledger_session_id, &cmd.driver_bot_id).await;
+            emit_task_ledger_status(
+                flow,
+                &group,
+                &group_id,
+                ledger_session_id,
+                &cmd.driver_bot_id,
+            )
+            .await;
             return Err(error);
         }
     };
@@ -348,6 +354,17 @@ pub async fn handle_task_dispatch(
         now,
     );
     let delivery_kind = BotDeliveryKind::TaskDispatch;
+    flow.register_send_context(
+        DeliveryType::Send,
+        &delivery_target,
+        &frame,
+        &effective_task_id,
+        &target_bot_id,
+        &group_id,
+        Some(&manager_session_id),
+        &[],
+    )
+    .await?;
     let result = match flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
@@ -372,15 +389,6 @@ pub async fn handle_task_dispatch(
                 result.error.as_ref().map(ToString::to_string).as_deref(),
                 None,
             );
-            flow.record_successful_send_context(
-                DeliveryType::Send,
-                &result,
-                &effective_task_id,
-                &target_bot_id,
-                &group_id,
-                Some(&manager_session_id),
-            )
-            .await;
             if group.group_strategy == GroupStrategy::ManagerWorker {
                 crate::group_flow::try_persist_group_message(
                     flow,
@@ -399,6 +407,7 @@ pub async fn handle_task_dispatch(
             result
         }
         Ok(result) => {
+            flow.discard_send_context(&effective_task_id).await?;
             log_manager_worker_deliver_result(
                 &group_id,
                 Some(&manager_session_id),
@@ -411,13 +420,21 @@ pub async fn handle_task_dispatch(
                 Some("deliver"),
             );
             flow.task_store.mark_failed(&effective_task_id).await;
-            emit_task_ledger_status(flow, &group, &group_id, ledger_session_id, &cmd.driver_bot_id).await;
+            emit_task_ledger_status(
+                flow,
+                &group,
+                &group_id,
+                ledger_session_id,
+                &cmd.driver_bot_id,
+            )
+            .await;
             return Err(ServiceError::InvalidOperation {
                 message: "target bot is not connected".to_string(),
                 request_id: Some(effective_task_id),
             });
         }
         Err(error) => {
+            flow.discard_send_context(&effective_task_id).await?;
             let error_text = error.to_string();
             log_manager_worker_deliver_result(
                 &group_id,
@@ -431,22 +448,26 @@ pub async fn handle_task_dispatch(
                 Some("deliver"),
             );
             flow.task_store.mark_failed(&effective_task_id).await;
-            emit_task_ledger_status(flow, &group, &group_id, ledger_session_id, &cmd.driver_bot_id).await;
+            emit_task_ledger_status(
+                flow,
+                &group,
+                &group_id,
+                ledger_session_id,
+                &cmd.driver_bot_id,
+            )
+            .await;
             return Err(error);
         }
     };
 
-    flow.record_successful_send_context(
-        DeliveryType::Send,
-        &result,
-        &effective_task_id,
-        &target_bot_id,
+    emit_task_ledger_status(
+        flow,
+        &group,
         &group_id,
-        Some(&manager_session_id),
+        ledger_session_id,
+        &cmd.driver_bot_id,
     )
     .await;
-
-    emit_task_ledger_status(flow, &group, &group_id, ledger_session_id, &cmd.driver_bot_id).await;
 
     Ok(TaskDispatchOutcome {
         task_id: effective_task_id,
@@ -527,7 +548,10 @@ pub(crate) async fn emit_task_ledger_status(
     else {
         return;
     };
-    let summary = flow.task_store.ledger_summary_at(group_id, session_id, now_ms()).await;
+    let summary = flow
+        .task_store
+        .ledger_summary_at(group_id, session_id, now_ms())
+        .await;
     let message = format_ledger_status_line(&summary);
     if message.is_empty() {
         return;
@@ -719,13 +743,17 @@ pub async fn handle_task_message(
         .participants
         .iter()
         .find(|participant| participant.bot_uuid == cmd.worker_bot_id)
-        .ok_or_else(|| ServiceError::Unauthorized(
-            "only worker bot can send task messages".to_string(),
-        ))?;
+        .ok_or_else(|| {
+            ServiceError::Unauthorized("only worker bot can send task messages".to_string())
+        })?;
     let worker_name = resolve_participant_name(flow, worker).await;
     let manager_name = resolve_participant_name(flow, &manager).await;
     let run_id = uuid::Uuid::new_v4().to_string();
-    let delivery_target = match flow.registry.resolve_delivery_target(&manager.bot_uuid).await {
+    let delivery_target = match flow
+        .registry
+        .resolve_delivery_target(&manager.bot_uuid)
+        .await
+    {
         Ok(target) => target,
         Err(error) => {
             let error_text = error.to_string();
@@ -760,7 +788,18 @@ pub async fn handle_task_message(
         provider_tags,
     );
     let delivery_kind = BotDeliveryKind::TaskMessage;
-    let result = flow
+    flow.register_send_context(
+        DeliveryType::Send,
+        &delivery_target,
+        &frame,
+        &run_id,
+        &manager.bot_uuid,
+        &group_id,
+        Some(&manager_session_id),
+        &[],
+    )
+    .await?;
+    let delivery = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
             target: delivery_target,
@@ -770,7 +809,14 @@ pub async fn handle_task_message(
             provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
-        .await?;
+        .await;
+    let result = match delivery {
+        Ok(result) => result,
+        Err(error) => {
+            flow.discard_send_context(&run_id).await?;
+            return Err(error);
+        }
+    };
 
     log_manager_worker_deliver_result(
         &group_id,
@@ -781,24 +827,20 @@ pub async fn handle_task_message(
         DeliveryType::Send,
         result.delivered,
         result.error.as_ref().map(ToString::to_string).as_deref(),
-        if result.delivered { None } else { Some("deliver") },
+        if result.delivered {
+            None
+        } else {
+            Some("deliver")
+        },
     );
 
     if !result.delivered {
+        flow.discard_send_context(&run_id).await?;
         return Err(ServiceError::InvalidOperation {
             message: "manager bot is not connected".to_string(),
             request_id: Some(run_id),
         });
     }
-    flow.record_successful_send_context(
-        DeliveryType::Send,
-        &result,
-        &run_id,
-        &manager.bot_uuid,
-        &group_id,
-        Some(&manager_session_id),
-    )
-    .await;
     crate::group_flow::try_persist_group_message(
         flow,
         &group_id,
@@ -910,7 +952,10 @@ async fn complete_service_session_if_needed(
         return Ok(None);
     };
     let target_session_id = match task_session_id(payload) {
-        Some(session_id) if session_belongs_to_group(session_management.as_ref(), session_id, group_id).await? => {
+        Some(session_id)
+            if session_belongs_to_group(session_management.as_ref(), session_id, group_id)
+                .await? =>
+        {
             Some(session_id.to_string())
         }
         _ => latest_running_service_session(session_management.as_ref(), group_id)
@@ -966,7 +1011,11 @@ async fn latest_running_service_session(
         .await
         .map_err(|error| ServiceError::InternalError(error.to_string()))?;
     sessions.retain(|session| session.session_kind == SessionKind::ServiceInvocation);
-    sessions.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then_with(|| b.created_at.cmp(&a.created_at)));
+    sessions.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| b.created_at.cmp(&a.created_at))
+    });
     Ok(sessions.into_iter().next())
 }
 
@@ -990,20 +1039,18 @@ fn ensure_task_dispatch_allowed(group: &Group) -> ServiceResult<()> {
 
 fn is_task_manager(group: &Group, bot_id: &str) -> bool {
     if group.group_strategy == GroupStrategy::ManagerWorker {
-        return group
-            .participants
-            .iter()
-            .any(|participant| participant.bot_uuid == bot_id && participant.role == group.group_strategy.lead_role());
+        return group.participants.iter().any(|participant| {
+            participant.bot_uuid == bot_id && participant.role == group.group_strategy.lead_role()
+        });
     }
     group.driver_bot == bot_id
 }
 
 fn is_task_worker(group: &Group, bot_id: &str) -> bool {
     group.group_strategy == GroupStrategy::ManagerWorker
-        && group
-            .participants
-            .iter()
-            .any(|participant| participant.bot_uuid == bot_id && participant.role == ParticipantRole::Worker)
+        && group.participants.iter().any(|participant| {
+            participant.bot_uuid == bot_id && participant.role == ParticipantRole::Worker
+        })
 }
 
 fn task_manager_error_message<'a>(group: &Group, action: &'a str) -> String {
@@ -1130,7 +1177,10 @@ pub(crate) async fn apply_session_participants(
         .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
     if session.group_id != group_id {
         return Err(ServiceError::InvalidOperation {
-            message: format!("session '{}' does not belong to group '{}'", session_id, group_id),
+            message: format!(
+                "session '{}' does not belong to group '{}'",
+                session_id, group_id
+            ),
             request_id: None,
         });
     }
@@ -1334,7 +1384,9 @@ fn delivery_slug(delivery_type: DeliveryType) -> &'static str {
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
-    session_id.filter(|value| !value.is_empty()).unwrap_or(group_id)
+    session_id
+        .filter(|value| !value.is_empty())
+        .unwrap_or(group_id)
 }
 
 fn log_task_dispatch_created(
@@ -1468,10 +1520,14 @@ mod tests {
     use super::ensure_task_dispatch_allowed;
 
     fn make_test_group() -> Group {
-        Group::new("g1", "driver_bot", vec![
-            Participant::bot("driver_bot", bcs_service_api::ParticipantRole::Driver),
-            Participant::bot("worker_bot", bcs_service_api::ParticipantRole::Worker),
-        ])
+        Group::new(
+            "g1",
+            "driver_bot",
+            vec![
+                Participant::bot("driver_bot", bcs_service_api::ParticipantRole::Driver),
+                Participant::bot("worker_bot", bcs_service_api::ParticipantRole::Worker),
+            ],
+        )
     }
 
     #[test]

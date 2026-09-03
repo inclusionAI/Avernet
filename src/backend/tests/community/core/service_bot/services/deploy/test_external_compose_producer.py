@@ -11,6 +11,9 @@ from typing import Any
 import pytest
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
@@ -84,14 +87,16 @@ def test_compose_request_maps_bot_row_fields() -> None:
     producer = ExternalComposeProducer(composer=composer)
 
     producer.produce_artifact(
-        {
-            "bot_id": "bot7",
-            "entity_id": "staff_u1",
-            "entity_type": "staff",
-            "owner_id": "u1",
-            "active_engine": "teclaw",
-        },
-        9,
+        ArtifactBuildRequest.create(
+            bot={
+                "bot_id": "bot7",
+                "entity_id": "staff_u1",
+                "entity_type": "staff",
+                "owner_id": "u1",
+                "active_engine": "teclaw",
+            },
+            version=9,
+        )
     )
 
     req = composer.calls[0]
@@ -121,7 +126,10 @@ def test_produce_artifact_pins_refs_only_artifact() -> None:
     )
 
     result = producer.produce_artifact(
-        {"bot_id": "b", "entity_id": "u", "owner_id": "u1"}, 4
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "b", "entity_id": "u", "owner_id": "u1"},
+            version=4,
+        )
     )
 
     assert result.success is True

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI
 from fastapi.routing import APIRoute
 
 from agentclaw.community.adapters.http.openapi_v1 import (
     _ENGINE_RUNTIME_GROUPS,
     PUBLIC_API_PREFIX,
-    build_public_router,
 )
+from tests.community.adapters.http.openapi_v1.conftest import public_document
 
 #: sessions 10 + session files 6 + engine 4 + models 2 + nodes 1 + approvals 3 + connection 1
 _EXPECTED_ROUTE_COUNT = 27
@@ -52,9 +51,7 @@ def _document() -> dict:
     the thing external callers actually receive, which makes it the better
     subject for a contract assertion.
     """
-    app = FastAPI()
-    app.include_router(build_public_router())
-    return app.openapi()
+    return public_document()
 
 
 def _schema_path(path: str) -> str:

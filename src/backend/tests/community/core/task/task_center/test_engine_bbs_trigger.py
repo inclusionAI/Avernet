@@ -24,6 +24,7 @@ from agentclaw.community.core.task.domain.models import (
     PlanResult,
     RuntimeInfo,
     Status,
+    TaskExecutionGraph,
     TaskInfo,
     TaskNode,
     TaskNodePatch,
@@ -31,6 +32,8 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
+from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.runner import TaskRunner
 
 
 # ===== domain helpers (mirrors test_engine.py minimal setup) =====
@@ -122,11 +125,16 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
     """BBS submission is independent of the caller's short-lived Harness loop."""
     engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
     engine._runner = MagicMock()
-    engine._runner.run_bbs = AsyncMock(return_value=None)
+    engine._runner.start_run = AsyncMock(return_value=[True])
     engine._bot = MagicMock()
     engine._bcs = MagicMock()
     fake_g = MagicMock()
     fake_g.task_id = "t1"
+    root = _child("t1", "t1")
+    root.run_info.run_mode = "single_bot"
+    root.run_info.assignee = "original-bot"
+    root.run_info.extend_props["business"] = {"version": 2}
+    fake_g.tasks = [root]
     durable_loop = MagicMock()
     durable_future = concurrent.futures.Future()
 
@@ -140,9 +148,43 @@ def test_engine_schedule_bbs_notify_submits_to_durable_loop():
         engine._schedule_bbs_notify("t1", fake_g)
         mock_submit.assert_called_once()
         assert len(engine._bg_tasks) == 1
+        submitted = engine._runner.start_run.call_args.args[0][0]
+        assert submitted is not root
+        assert submitted.run_info is not root.run_info
+        assert submitted.run_info.run_mode == "bbs"
+        assert submitted.run_info.assignee == "original-bot"
+        assert submitted.run_info.extend_props == {"business": {"version": 2}}
+        assert submitted.run_info.extend_props is not root.run_info.extend_props
+        assert root.run_info.run_mode == "single_bot"
         durable_future.set_result(None)
 
     assert engine._bg_tasks == set()
+
+
+def test_engine_schedule_bbs_notify_skips_when_root_missing(caplog):
+    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    engine._runner = MagicMock()
+    fake_g = MagicMock()
+    fake_g.tasks = [_child("child", "t1")]
+
+    engine._schedule_bbs_notify("t1", fake_g)
+
+    engine._runner.start_run.assert_not_called()
+    assert "root missing" in caplog.text
+
+
+def test_engine_background_false_result_is_visible(caplog):
+    engine = ExecutionEngine(graph=MagicMock(), api_base_url="http://x")
+    future = concurrent.futures.Future()
+    future._bbs_task_id = "t1"
+    engine._bg_tasks.add(future)
+    future.set_result([False])
+
+    with caplog.at_level("ERROR"):
+        engine._on_bg_done(future)
+
+    assert future not in engine._bg_tasks
+    assert "background start_run 投递失败" in caplog.text
 
 
 def test_engine_bbs_survives_caller_loop_shutdown():
@@ -151,17 +193,20 @@ def test_engine_bbs_survives_caller_loop_shutdown():
     started = threading.Event()
     finished = threading.Event()
 
-    async def run_bbs(_execution_graph):
+    async def start_run(nodes):
+        assert len(nodes) == 1
+        assert nodes[0].run_info.run_mode == "bbs"
         started.set()
         await asyncio.sleep(0)
         finished.set()
 
     engine._runner = MagicMock()
-    engine._runner.run_bbs = run_bbs
+    engine._runner.start_run = start_run
     engine._bot = MagicMock()
     engine._bcs = MagicMock()
     fake_g = MagicMock()
     fake_g.task_id = "t-harness-loop"
+    fake_g.tasks = [_child("t-harness-loop", "t-harness-loop")]
 
     async def schedule_from_short_lived_loop():
         engine._schedule_bbs_notify(fake_g.task_id, fake_g)
@@ -170,6 +215,45 @@ def test_engine_bbs_survives_caller_loop_shutdown():
 
     assert started.wait(1.0)
     assert finished.wait(1.0)
+
+
+def test_engine_bbs_schedule_reaches_notify_through_start_run():
+    root = _child("t1", "t1")
+    fake_g = TaskExecutionGraph(
+        run_id=1,
+        loop_round=1,
+        status=Status.HUNG,
+        tasks=[root],
+        task_id="t1",
+    )
+    graph = MagicMock()
+    graph.query_task_dashboard.return_value = fake_g
+    executor = TaskExecutor(
+        bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
+        formatter=None, context=None, sink=None, poller=None,
+        graph=graph, api_base_url="http://x",
+    )
+    engine = ExecutionEngine(graph=graph, api_base_url="http://x")
+    engine._runner = TaskRunner(graph, execution_backend=executor)
+    durable_future = concurrent.futures.Future()
+    submitted = {}
+
+    def submit(coro, _loop):
+        submitted["coro"] = coro
+        return durable_future
+
+    with patch.object(engine, "_ensure_bbs_loop", return_value=MagicMock()), \
+         patch("asyncio.run_coroutine_threadsafe", side_effect=submit), \
+         patch(
+             "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+             new_callable=AsyncMock,
+         ) as notify:
+        engine._schedule_bbs_notify("t1", fake_g)
+        result = _run(submitted["coro"])
+        durable_future.set_result(result)
+
+    assert result == [True]
+    notify.assert_awaited_once()
 
 
 def test_engine_schedule_bbs_notify_skips_when_no_runner():

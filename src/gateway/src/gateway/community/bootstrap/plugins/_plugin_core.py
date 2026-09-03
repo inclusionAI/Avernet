@@ -9,6 +9,7 @@ from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.dev_cookie import DevCookieUserStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.plugins.cache.in_memory import InMemoryCachePlugin
 from gateway.community.plugins.cache.redis import RedisCachePlugin
 from gateway.community.plugins.database.mariadb import MariaDbOrmPlugin
@@ -94,6 +95,13 @@ class PluginContainer(containers.DeclarativeContainer):
         ),
     )
     dev_cookie_strategy = providers.Singleton(DevCookieUserStrategy)
+    oauth_session_strategy = providers.Singleton(
+        OauthSessionStrategy,
+        secret_resolver=secret_resolver,
+        secret_name=providers.Callable(
+            _default, config.authn.oauth_session_secret_name, "bcs_session_jwt_secret"
+        ),
+    )
 
     bot_token_strategy = providers.Singleton(
         BotTokenStrategy,
@@ -129,6 +137,7 @@ class PluginContainer(containers.DeclarativeContainer):
     authn_strategies = providers.Dict(
         google=google_strategy,
         dev_cookie=dev_cookie_strategy,
+        oauth_session=oauth_session_strategy,
         bot_token=bot_token_strategy,
         app_token=app_token_strategy,
         access_key_token=access_key_token_strategy,

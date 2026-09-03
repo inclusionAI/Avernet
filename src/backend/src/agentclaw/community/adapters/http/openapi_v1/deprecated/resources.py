@@ -40,6 +40,11 @@ router: APIRouter = relocate(
     legacy_router("/openapi/v1/bots/resources", "resources"),
     bot_first_to_query("resources"),
     transform=_bot_to_query,
+    # download-dir is a *new* operation, not one that ever lived at the legacy
+    # address — there is no former address to keep answering, and a made-up
+    # retiring address is exactly what this surface must not grow
+    # (test_legacy_parity's count is pinned on that rule).
+    skip=lambda _method, path: path.endswith("/download-dir"),
 )
 
 __all__ = ["router"]

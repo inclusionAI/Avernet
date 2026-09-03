@@ -1,7 +1,6 @@
 """RealEvalBindingResolver — 评测绑定解析 Real 实现。
 
-从原 ``BotBindingResolver`` 内联逻辑迁移，现已通过
-``EvalBindingResolverProtocol`` Plugin 实现插拔式替换。
+基于 ``EvalBindingResolverProtocol`` Plugin 实现插拔式替换。
 """
 
 from __future__ import annotations
@@ -17,8 +16,7 @@ logger = get_logger("core-bot-run")
 class RealEvalBindingResolver(EvalBindingResolverProtocol):
     """评测绑定解析的 Real 实现。
 
-    从原 ``BotBindingResolver`` 内联逻辑迁移，现已通过
-    ``EvalBindingResolverProtocol`` Plugin 实现插拔式替换。
+    基于 ``EvalBindingResolverProtocol`` Plugin 实现插拔式替换。
     """
 
     def __init__(

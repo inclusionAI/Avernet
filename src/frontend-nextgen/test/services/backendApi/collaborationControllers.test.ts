@@ -1,7 +1,9 @@
 import * as chatController from '@/services/backendApi/chat/chatMessageController';
+import * as channelBindingController from '@/services/backendApi/collaboration/channelBindingController';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as groupController from '@/services/backendApi/collaboration/collaborationGroupController';
 import * as invitationController from '@/services/backendApi/collaboration/collaborationInvitationController';
+import * as publicationController from '@/services/backendApi/collaboration/collaborationPublicationController';
 import {
   discoverPublicBots,
   PublicBotCatalogError,
@@ -23,7 +25,7 @@ beforeEach(() => {
 });
 
 describe('collaboration group controller', () => {
-  it('listGroups passes view_bot_id and q and strategy', async () => {
+  it('listGroups passes view_bot_id and q and strategy without injecting user_id', async () => {
     backendRequest.mockResolvedValue({
       code: 20000,
       message: '',
@@ -34,6 +36,7 @@ describe('collaboration group controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups', {
       method: 'GET',
       params: { view_bot_id: 'bot-1', q: 'abc', strategy: 'chat', offset: 0, limit: 20 },
+      injectUserId: false,
     });
   });
 
@@ -46,9 +49,9 @@ describe('collaboration group controller', () => {
     });
     const signal = new AbortController().signal;
     await groupController.listPublicGroups({ q: 'agent', offset: 20, limit: 20 }, signal);
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups', {
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/public-groups', {
       method: 'GET',
-      params: { visibility: 'public', kind: 'normal', q: 'agent', offset: 20, limit: 20 },
+      params: { q: 'agent', offset: 20, limit: 20 },
       injectUserId: false,
       signal,
     });
@@ -73,6 +76,7 @@ describe('collaboration group controller', () => {
       name: 'n',
       collaboration: { strategy: 'chat', delivery_policy: { bot_final_delivery: 'send_to_driver' } },
       driver_bot_uuid: 'bot-1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'bot-1', role: 'driver' }],
     });
     const [, opts] = backendRequest.mock.calls[0];
@@ -87,13 +91,17 @@ describe('collaboration group controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1', {
       method: 'PATCH',
       data: { visibility: 'public' },
+      injectUserId: false,
     });
   });
 
   it('deleteGroup hits DELETE', async () => {
     backendRequest.mockResolvedValue({ code: 20000, message: '', data: { deleted: true }, request_id: 'r' });
     await groupController.deleteGroup('g1');
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1', { method: 'DELETE' });
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1', {
+      method: 'DELETE',
+      injectUserId: false,
+    });
   });
 
   it('addGroupParticipant posts actor_id to group participants', async () => {
@@ -102,6 +110,7 @@ describe('collaboration group controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1/participants', {
       method: 'POST',
       data: { actor_id: 'bot-1' },
+      injectUserId: false,
     });
   });
 
@@ -110,22 +119,82 @@ describe('collaboration group controller', () => {
     await groupController.deleteGroupParticipant('g1', 'bot-1');
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1/participants/bot-1', {
       method: 'DELETE',
+      injectUserId: false,
+    });
+  });
+});
+
+describe('collaboration channel binding controller', () => {
+  it('queries bindings by target without injecting display-only user_id', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, message: '', data: { items: [] }, request_id: 'r' });
+    await channelBindingController.listBindingsByTarget({
+      target_type: 'group',
+      target_id: 'group-1',
+      channel_type: 'dingtalk',
+    });
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/channels/bindings/by-target', {
+      method: 'GET',
+      params: { target_type: 'group', target_id: 'group-1', channel_type: 'dingtalk' },
+      injectUserId: false,
+    });
+  });
+
+  it('does not inject user_id for binding writes either', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, message: '', data: null, request_id: 'r' });
+    await channelBindingController.updateChannelBinding('binding-1', { active: false });
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/channels/bindings/binding-1', {
+      method: 'PATCH',
+      data: { active: false },
+      injectUserId: false,
     });
   });
 });
 
 describe('collaboration session controller', () => {
-  it('listSessionMessages takes before/limit', async () => {
+  it('creates a public group chat session with the authenticated human actor', async () => {
+    backendRequest.mockResolvedValue({
+      code: 20100,
+      message: 'Created',
+      data: { session_id: 'session-1', group_id: 'group-1', participants: [] },
+      request_id: 'r',
+    });
+    const signal = new AbortController().signal;
+    await sessionController.createSession('group-1', { kind: 'chat', acting_bot_id: 'human_327325' }, signal);
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/group-1/sessions', {
+      method: 'POST',
+      data: { kind: 'chat', acting_bot_id: 'human_327325' },
+      injectUserId: false,
+      signal,
+    });
+  });
+
+  it('does not add a user_id query to group session creation', async () => {
+    backendRequest.mockResolvedValue({
+      code: 20100,
+      message: 'Created',
+      data: { session_id: 'session-1', group_id: 'group-1', participants: [] },
+      request_id: 'r',
+    });
+    await sessionController.createSession('group-1', { kind: 'chat' });
+    expect(backendRequest.mock.calls[0][1]).toEqual({
+      method: 'POST',
+      data: { kind: 'chat' },
+      injectUserId: false,
+    });
+  });
+
+  it('listSessionMessages forwards pending-history opt-in', async () => {
     backendRequest.mockResolvedValue({
       code: 20000,
       message: '',
       data: { messages: [], next_cursor: null, has_more: false },
       request_id: 'r',
     });
-    await sessionController.listSessionMessages('s1', { before: 'abc', limit: 50 });
+    await sessionController.listSessionMessages('s1', { before: 'abc', limit: 50, include_pending: true });
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/messages', {
       method: 'GET',
-      params: { before: 'abc', limit: 50 },
+      params: { before: 'abc', limit: 50, include_pending: true },
+      injectUserId: false,
     });
   });
 
@@ -137,7 +206,10 @@ describe('collaboration session controller', () => {
       request_id: 'r',
     });
     const res = await sessionController.createSessionToken('s1');
-    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/token', { method: 'POST' });
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/token', {
+      method: 'POST',
+      injectUserId: false,
+    });
     expect(res.data!.token).toBe('t');
   });
 
@@ -147,6 +219,7 @@ describe('collaboration session controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/collect', {
       method: 'POST',
       data: { participant: 'bot-1' },
+      injectUserId: false,
     });
   });
 
@@ -156,6 +229,7 @@ describe('collaboration session controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/collect', {
       method: 'DELETE',
       params: { participant: 'bot-1' },
+      injectUserId: false,
     });
   });
 
@@ -165,6 +239,7 @@ describe('collaboration session controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/participants/bot-x', {
       method: 'PATCH',
       data: { mode: 'muted' },
+      injectUserId: false,
     });
   });
 
@@ -174,6 +249,7 @@ describe('collaboration session controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/participants', {
       method: 'POST',
       data: { bot_uuid: 'bot-x' },
+      injectUserId: false,
     });
   });
 
@@ -182,6 +258,7 @@ describe('collaboration session controller', () => {
     await sessionController.deleteSessionParticipant('s1', 'bot-x');
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/participants/bot-x', {
       method: 'DELETE',
+      injectUserId: false,
     });
   });
 });
@@ -198,6 +275,7 @@ describe('invitation controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/invitations/tk/accept', {
       method: 'POST',
       data: {},
+      injectUserId: false,
     });
   });
 
@@ -212,6 +290,7 @@ describe('invitation controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/groups/g1/invitations', {
       method: 'POST',
       data: { expires_in_seconds: 3600 },
+      injectUserId: false,
     });
   });
 
@@ -226,6 +305,7 @@ describe('invitation controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/invitations', {
       method: 'POST',
       data: { expires_in_seconds: 3600 },
+      injectUserId: false,
     });
   });
 });
@@ -304,6 +384,34 @@ describe('managed collaboration bot controller', () => {
     });
   });
 
+  it('patches the deployed friend approval attributes through the owner-scoped Bot endpoint', async () => {
+    backendRequest.mockResolvedValue({ code: 20000, message: '', data: { bot_id: 'bot-1' }, request_id: 'r' });
+    const signal = new AbortController().signal;
+    const friendExt = {
+      public_user_approval: { puid: 'p-user', status: 'AGREE' },
+      no_check_scope_friend_deps: ['A4195'],
+    };
+
+    await botController.patchCollaborationBot(
+      '20260715_vl4oht43:447147',
+      {
+        friend_ext: friendExt,
+        friend_check_in_strategy: 'DEPT_FREE',
+      },
+      signal,
+    );
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/20260715_vl4oht43:447147', {
+      method: 'PATCH',
+      data: {
+        friend_ext: friendExt,
+        friend_check_in_strategy: 'DEPT_FREE',
+      },
+      injectUserId: false,
+      signal,
+    });
+  });
+
   it('lists Human actor friendships without injecting a second user_id', async () => {
     backendRequest.mockResolvedValue({ code: 20000, data: { items: [], total: 0 }, request_id: 'r' });
     const signal = new AbortController().signal;
@@ -327,6 +435,41 @@ describe('managed collaboration bot controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/human_327325/friend-requests', {
       method: 'POST',
       data: { to_bot_uuid: 'bot-1' },
+      injectUserId: false,
+      signal,
+    });
+  });
+});
+
+describe('collaboration publication controller', () => {
+  it('publishes through collaboration public with the explicit user_id and cancellation signal', async () => {
+    backendRequest.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { success: true, state: 'PROCESSING', puid: 'puid-1' },
+      request_id: 'r',
+    });
+    const signal = new AbortController().signal;
+
+    await publicationController.publishBotPublic(
+      'bot-1',
+      '447147',
+      {
+        public_scope: 'user',
+        visibility: 'public',
+        view_depts: [{ deptNo: 'A4195', deptName: '示例集团-协作平台' }],
+      },
+      signal,
+    );
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/bots/bot-1/public', {
+      method: 'POST',
+      params: { user_id: '447147' },
+      data: {
+        public_scope: 'user',
+        visibility: 'public',
+        view_depts: [{ deptNo: 'A4195', deptName: '示例集团-协作平台' }],
+      },
       injectUserId: false,
       signal,
     });

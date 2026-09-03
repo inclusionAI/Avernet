@@ -83,7 +83,11 @@ class SkillActorPermissions(BaseModel):
         description="Actor may request creation of an upgrade Draft."
     )
     offline_skill: bool = Field(
-        description="Actor may request recoverable Skill Offline."
+        description="Actor may request terminal local Skill Offline."
+    )
+    copy_offline_skill: bool = Field(
+        default=False,
+        description="Actor may copy an Offline Skill's exact Published Version."
     )
     manage_grants: bool = Field(description="Actor may add or remove MANAGER Grants.")
     transfer_owner: bool = Field(description="Actor may request OWNER transfer.")
@@ -310,11 +314,26 @@ class PersonalSpaceInitialized(SpaceCreated):
     )
 
 
+class InitializePersonalSpaceRequest(BaseModel):
+    """Optional controls for initializing the current user's personal Space."""
+
+    skip_sc: bool = Field(
+        default=False,
+        alias="skipSC",
+        description="Whether to skip creating or binding the corresponding Skill Center Team.",
+    )
+
+
 class CreateSpaceRequest(BaseModel):
     """Request for creating a shared team Space."""
 
     space_name: str = Field(
         min_length=1, max_length=128, description="Display name for the new Space."
+    )
+    skip_sc: bool = Field(
+        default=False,
+        alias="skipSC",
+        description="Whether to skip creating the corresponding Skill Center Team.",
     )
 
 
@@ -364,7 +383,7 @@ class SkillLifecycleStatus(_DocumentedEnum):
     __descriptions__ = {
         "DRAFT_ONLY": "The Skill has a Draft but no Published Version.",
         "PUBLISHED": "The Skill has at least one Published Version and is online.",
-        "OFFLINE": "The Skill is recoverably offline but remains editable.",
+        "OFFLINE": "The Skill is offline, retains its Published history, and is not editable.",
     }
 
 
@@ -540,11 +559,11 @@ class SpaceSkillDetail(SpaceSkillSummary):
     draft: SkillDraftDetail | None = Field(
         default=None, description="Complete current Draft facts, or null."
     )
-    source: Literal["FOLDER", "GIT"] = Field(
+    source: Literal["FOLDER", "GIT", "COPY"] = Field(
         description="Original Space Skill creation source."
     )
     offline_at: datetime | None = Field(
-        default=None, description="UTC recoverable Offline time, or null."
+        default=None, description="UTC terminal local Offline time, or null."
     )
     offline_by: str | None = Field(
         default=None, description="Actor that placed the Skill Offline, or null."
@@ -552,7 +571,7 @@ class SpaceSkillDetail(SpaceSkillSummary):
 
 
 class SkillOfflineBlockerKind(_DocumentedEnum):
-    """Reason a Space Skill cannot safely enter recoverable Offline."""
+    """Category for an Offline blocker or a diagnostic warning."""
 
     DRAFT = "DRAFT"
     PUBLICATION = "PUBLICATION"
@@ -567,12 +586,15 @@ class SkillOfflineBlockerKind(_DocumentedEnum):
         "MEMBERSHIP": "An ordinary or Default SkillSet still contains the Skill.",
         "INSTALLATION": "A Bot still has an effective Skill Installation.",
         "SERVICE_ARTIFACT": "A live Service Bot can replay this exact Skill Version.",
-        "UNKNOWN_ARTIFACT": "Artifact lineage could not be proved complete and valid.",
+        "UNKNOWN_ARTIFACT": (
+            "Artifact lineage could not be proved complete and valid; "
+            "returned only as a non-blocking diagnostic warning."
+        ),
     }
 
 
 class SkillOfflineImpactItem(BaseModel):
-    """One live fact that prevents recoverable Offline."""
+    """One explicit blocker or diagnostic warning for recoverable Offline."""
 
     kind: SkillOfflineBlockerKind = Field(
         description="Category of the blocking reference or lifecycle fact."
@@ -582,20 +604,27 @@ class SkillOfflineImpactItem(BaseModel):
 
 
 class SkillOfflineImpact(BaseModel):
-    """Complete blocker counts plus one requested page of blocker details."""
+    """Complete explicit blockers plus diagnostic warnings for recoverable Offline."""
 
     blocked: bool = Field(description="Whether at least one blocker exists.")
-    total: int = Field(ge=0, description="Total blockers across all categories.")
+    total: int = Field(ge=0, description="Total explicit blockers across all categories.")
     counts: dict[str, int] = Field(
-        description="Non-zero blocker totals keyed by blocker category."
+        description="Non-zero explicit blocker totals keyed by blocker category."
     )
     items: list[SkillOfflineImpactItem] = Field(
         description="Requested page of blockers in deterministic order."
     )
+    warnings: list[SkillOfflineImpactItem] = Field(
+        default_factory=list,
+        description=(
+            "Diagnostic findings that did not prove a live reference and therefore "
+            "do not block Offline."
+        ),
+    )
 
 
 class SkillOfflineResult(BaseModel):
-    """Recoverable Offline state and the editable next-version Draft."""
+    """Terminal local Offline result for the existing Skill."""
 
     changed: bool = Field(
         description="Whether this request newly moved the Skill Offline."
@@ -603,8 +632,8 @@ class SkillOfflineResult(BaseModel):
     lifecycle_status: Literal["OFFLINE"] = Field(
         description="Current recoverable lifecycle state."
     )
-    draft: SkillDraftSummary = Field(
-        description="Editable Vn+1 Draft retained for recovery publication."
+    offline_at: datetime | None = Field(
+        default=None, description="UTC time at which Offline was recorded."
     )
 
 
@@ -709,8 +738,6 @@ SpaceSkillFolderUpload = create_model(
         ),
     ),
 )
-
-
 class AddSpaceMemberRequest(BaseModel):
     """Request for adding a user to a Space."""
 

@@ -11,9 +11,9 @@ use bcs_domain::{
     SystemMessageEvent, SystemMessageEventKind,
 };
 use bcs_service_api::{
-    ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
-    BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService,
-    BotRunContext, BotRunContextPort,
+    ActiveBotRunContext, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand,
+    BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope,
     EnsureHumanResult, ProviderRunTransport, ProviderStreamGrayList, RegisteredBot,
     ServiceError, ServiceResult, SystemMessageDispatcherService, SystemMessageProducerService,
 };
@@ -30,6 +30,7 @@ struct MockDeliveryPort {
     calls: Mutex<Vec<BotDeliveryCommand>>,
     delivered: bool,
     fail: bool,
+    assert_active: Option<Arc<RecordingRunContext>>,
 }
 
 impl Default for MockDeliveryPort {
@@ -38,6 +39,7 @@ impl Default for MockDeliveryPort {
             calls: Mutex::new(Vec::new()),
             delivered: true,
             fail: false,
+            assert_active: None,
         }
     }
 }
@@ -50,6 +52,12 @@ impl BotDeliveryPort for MockDeliveryPort {
 
     async fn deliver(&self, cmd: BotDeliveryCommand) -> ServiceResult<BotDeliveryResult> {
         let delivered = self.delivered;
+        if let Some(run_context) = self.assert_active.as_ref() {
+            let active = run_context
+                .active(&cmd.run_id)
+                .expect("active run must be registered before delivery starts");
+            assert_eq!(active.canonical_run_id, cmd.run_id);
+        }
         if self.fail {
             self.calls.lock().unwrap().push(cmd);
             return Err(ServiceError::InternalError("delivery failed".to_string()));
@@ -66,6 +74,7 @@ impl BotDeliveryPort for MockDeliveryPort {
 #[derive(Default)]
 struct RecordingRunContext {
     contexts: Mutex<HashMap<String, BotRunContext>>,
+    active: Mutex<HashMap<String, ActiveBotRunContext>>,
 }
 
 impl RecordingRunContext {
@@ -75,6 +84,14 @@ impl RecordingRunContext {
 
     fn len(&self) -> usize {
         self.contexts.lock().unwrap().len()
+    }
+
+    fn active(&self, run_id: &str) -> Option<ActiveBotRunContext> {
+        self.active.lock().unwrap().get(run_id).cloned()
+    }
+
+    fn active_len(&self) -> usize {
+        self.active.lock().unwrap().len()
     }
 }
 
@@ -95,7 +112,12 @@ impl BotRunContextPort for RecordingRunContext {
         true
     }
 
-    async fn mark_terminal(&self, _run_id: &str) -> bool {
+    async fn mark_terminal(&self, run_id: &str) -> bool {
+        let mut contexts = self.contexts.lock().unwrap();
+        let Some(context) = contexts.get_mut(run_id) else {
+            return false;
+        };
+        context.terminal = true;
         true
     }
 
@@ -120,6 +142,48 @@ impl BotRunContextPort for RecordingRunContext {
     async fn mark_provider_transport_terminal(&self, _run_id: &str) {}
 
     async fn clear_provider_transport(&self, _run_id: &str) {}
+
+    async fn register_active_run(&self, context: ActiveBotRunContext) -> ServiceResult<()> {
+        self.active
+            .lock()
+            .unwrap()
+            .insert(context.canonical_run_id.clone(), context);
+        Ok(())
+    }
+
+    async fn list_active_runs(
+        &self,
+        scope: &BotRunScope,
+    ) -> ServiceResult<Vec<ActiveBotRunContext>> {
+        Ok(self
+            .active
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|context| &context.scope == scope)
+            .cloned()
+            .collect())
+    }
+
+    async fn find_active_run(
+        &self,
+        run_id: &str,
+    ) -> ServiceResult<Option<ActiveBotRunContext>> {
+        Ok(self.active(run_id))
+    }
+
+    async fn remove_active_run(
+        &self,
+        _scope: &BotRunScope,
+        canonical_run_id: &str,
+    ) -> ServiceResult<bool> {
+        Ok(self
+            .active
+            .lock()
+            .unwrap()
+            .remove(canonical_run_id)
+            .is_some())
+    }
 }
 
 #[derive(Default, Clone)]
@@ -854,9 +918,12 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
         receivers: vec![],
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
-    let delivery = Arc::new(MockDeliveryPort::default());
     let frontend_delivery = Arc::new(NoopFrontendDeliveryPort);
     let run_context = Arc::new(RecordingRunContext::default());
+    let delivery = Arc::new(MockDeliveryPort {
+        assert_active: Some(run_context.clone()),
+        ..MockDeliveryPort::default()
+    });
 
     let dispatcher = SystemMessageDispatcherImpl::builder()
         .with_registry(registry)
@@ -879,6 +946,14 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
     let calls = delivery.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert!(calls[0].target.is_http_provider());
+    let downstream_session_key = match &calls[0].frame {
+        bcs_protocol::BcsFrame::Request(frame) => frame
+            .params
+            .as_ref()
+            .and_then(|params| params["session_key"].as_str())
+            .expect("chat.send session_key"),
+        other => panic!("expected request frame, got {other:?}"),
+    };
     let context = run_context
         .get(&calls[0].run_id)
         .expect("system chat.send run context");
@@ -887,6 +962,16 @@ async fn dispatch_send_system_message_records_run_context_for_provider_callback(
     assert_eq!(context.group_id, "group-provider");
     assert_eq!(context.bcs_session_id.as_deref(), Some("session-provider"));
     assert!(!context.terminal);
+    let active = run_context
+        .active(&calls[0].run_id)
+        .expect("active provider system chat.send run context");
+    assert_eq!(active.scope.group_id, "group-provider");
+    assert_eq!(active.scope.session_id, "session-provider");
+    assert_eq!(active.scope.bot_id, "bot-provider");
+    assert_eq!(
+        active.downstream_session_key.as_deref(),
+        Some(downstream_session_key)
+    );
     assert!(
         context.deadline_ms
             >= before_dispatch_ms.saturating_add(CONFIGURED_TIMEOUT_MS)
@@ -1003,9 +1088,12 @@ async fn dispatch_send_system_message_to_websocket_records_run_context_and_retur
         receivers: vec![],
     };
     let registry = Arc::new(ProviderTargetRegistry::default());
-    let delivery = Arc::new(MockDeliveryPort::default());
     let frontend_delivery = Arc::new(NoopFrontendDeliveryPort);
     let run_context = Arc::new(RecordingRunContext::default());
+    let delivery = Arc::new(MockDeliveryPort {
+        assert_active: Some(run_context.clone()),
+        ..MockDeliveryPort::default()
+    });
 
     let dispatcher = SystemMessageDispatcherImpl::builder()
         .with_registry(registry)
@@ -1025,6 +1113,14 @@ async fn dispatch_send_system_message_to_websocket_records_run_context_and_retur
     let calls = delivery.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     assert!(!calls[0].target.is_http_provider());
+    let downstream_session_key = match &calls[0].frame {
+        bcs_protocol::BcsFrame::Request(frame) => frame
+            .params
+            .as_ref()
+            .and_then(|params| params["session_key"].as_str())
+            .expect("chat.send session_key"),
+        other => panic!("expected request frame, got {other:?}"),
+    };
     assert_eq!(run_context.len(), 1);
     let result = outcome.recipient_results.first().expect("recipient result");
     assert_eq!(result.run_id, calls[0].run_id);
@@ -1035,10 +1131,20 @@ async fn dispatch_send_system_message_to_websocket_records_run_context_and_retur
     assert_eq!(context.bot_id, "bot-ws");
     assert_eq!(context.group_id, "group-ws");
     assert_eq!(context.bcs_session_id.as_deref(), Some("session-ws"));
+    let active = run_context
+        .active(&result.run_id)
+        .expect("active websocket system chat.send run context");
+    assert_eq!(active.scope.group_id, "group-ws");
+    assert_eq!(active.scope.session_id, "session-ws");
+    assert_eq!(active.scope.bot_id, "bot-ws");
+    assert_eq!(
+        active.downstream_session_key.as_deref(),
+        Some(downstream_session_key)
+    );
 }
 
 #[tokio::test]
-async fn dispatch_failed_send_system_message_does_not_record_run_context() {
+async fn dispatch_failed_send_system_message_does_not_leave_active_run_context() {
     let group = Group {
         id: "group-provider".into(),
         label: None,
@@ -1081,6 +1187,7 @@ async fn dispatch_failed_send_system_message_does_not_record_run_context() {
         calls: Mutex::new(Vec::new()),
         delivered: false,
         fail: false,
+        assert_active: None,
     });
     let frontend_delivery = Arc::new(NoopFrontendDeliveryPort);
     let run_context = Arc::new(RecordingRunContext::default());
@@ -1110,11 +1217,15 @@ async fn dispatch_failed_send_system_message_does_not_record_run_context() {
     };
     assert_eq!(params["bcs_group_id"], "group-provider");
     assert_eq!(params["bcs_session_id"], "session-provider");
-    assert_eq!(run_context.len(), 0);
+    assert_eq!(run_context.active_len(), 0);
+    let failed_context = run_context
+        .get(&calls[0].run_id)
+        .expect("failed send tombstone");
+    assert!(failed_context.terminal);
 }
 
 #[tokio::test]
-async fn dispatch_failed_provider_send_notifies_frontend_without_run_context() {
+async fn dispatch_failed_provider_send_notifies_frontend_without_active_run_context() {
     let group = Group {
         id: "group-provider".into(),
         label: None,
@@ -1157,6 +1268,7 @@ async fn dispatch_failed_provider_send_notifies_frontend_without_run_context() {
         calls: Mutex::new(Vec::new()),
         delivered: true,
         fail: true,
+        assert_active: None,
     });
     let frontend_delivery = Arc::new(RecordingFrontendDeliveryPort::default());
     let run_context = Arc::new(RecordingRunContext::default());
@@ -1186,7 +1298,11 @@ async fn dispatch_failed_provider_send_notifies_frontend_without_run_context() {
     };
     assert_eq!(params["bcs_group_id"], "group-provider");
     assert_eq!(params["bcs_session_id"], "session-provider");
-    assert_eq!(run_context.len(), 0);
+    assert_eq!(run_context.active_len(), 0);
+    let failed_context = run_context
+        .get(&calls[0].run_id)
+        .expect("failed provider send tombstone");
+    assert!(failed_context.terminal);
     let published = frontend_delivery.published.lock().unwrap();
     assert_eq!(published.len(), 1);
     let frame: serde_json::Value = serde_json::from_str(&published[0].event_json).unwrap();
@@ -1267,6 +1383,7 @@ async fn dispatch_inject_system_message_does_not_record_run_context() {
     assert_eq!(params["bcs_session_id"], session_id);
     assert_eq!(params["tags"], serde_json::json!(["draft", "tenant-a"]));
     assert_eq!(run_context.len(), 0);
+    assert_eq!(run_context.active_len(), 0);
 }
 
 async fn dispatch_session_context_with_provider_registry(

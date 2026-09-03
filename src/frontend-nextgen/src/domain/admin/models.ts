@@ -76,6 +76,8 @@ export interface WorkOrder {
   eventType: string;
   title: string;
   content: string;
+  /** 详情抽屉用的原始 JSON 文本（对象 content 经 JSON.stringify，列表/通知不填充）。 */
+  contentRaw?: string;
   status: WorkOrderStatus;
   /** 状态中文 label（mapper 填充，单一源 workOrderMeta） */
   statusLabel: string;
@@ -116,6 +118,8 @@ export interface SpaceListQuery {
   spaceType?: SpaceType;
   page?: number;
   pageSize?: number;
+  /** 仅返回当前账号可访问（已加入）的空间：透传为 query scope=accessible，由后端过滤（替代前端 filterJoinedSpaces）。 */
+  scope?: 'accessible';
 }
 
 /** 创建团队空间入参 */

@@ -1,15 +1,16 @@
 use bcs_message_flow::{BcsGroupMessageHistory, BcsMessageFlow, MemoryBotRunContextStore};
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, BotActor, BotDeliveryKind, BotDeliveryTarget, BotEventCommand,
-    BotRegistryCoreService, BotRunContextPort, CallerContext, ChannelSenderIdentity,
-    ChatAbortCommand, ChatEventState, FrontendDeliveryTarget, Group, GroupCallbackCommand,
-    GroupChatCommand, GroupCoreService, GroupHistoryBotRequestPort, GroupHistoryCommand, GroupKind,
-    GroupMessage, GroupMessageHistoryService, GroupMessageType, GroupStatus, GroupStrategy,
-    HumanActor, MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole,
-    PersistentGroupSendCommand, ProviderStreamGrayList, RedactedToken, ServiceError, ServiceResult,
-    Session, SessionHistoryCommand, SessionKind, SessionManagementService, SessionStatus,
-    SessionUseCaseError, SystemMessageEvent, SystemMessageService, WebSendCommand,
+    ActiveBotRunContext, ActorKind, BotActor, BotDeliveryKind, BotDeliveryTarget, BotEventCommand,
+    BotRegistryCoreService, BotRunContext, BotRunContextPort, BotRunScope, BotRunTransportOwner,
+    CallerContext, ChannelSenderIdentity, ChatAbortCommand, ChatEventState, FrontendDeliveryTarget,
+    Group, GroupCallbackCommand, GroupChatCommand, GroupCoreService, GroupHistoryBotRequestPort,
+    GroupHistoryCommand, GroupKind, GroupMessage, GroupMessageHistoryService, GroupMessageType,
+    GroupStatus, GroupStrategy, HumanActor, MessageFlowService, MessageRole, Participant,
+    ParticipantMode, ParticipantRole, PersistentGroupSendCommand, ProviderStreamGrayList,
+    RedactedToken, ServiceError, ServiceResult, Session, SessionHistoryCommand, SessionKind,
+    SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
+    SystemMessageService, WebSendCommand,
     interceptor::{BlockReason, InterceptorDecision, MessageInterceptor, OutboundMessage},
     port::{EventRecordFactoryPort, NewEvent},
 };
@@ -1432,6 +1433,27 @@ async fn accepted_chat_send_records_run_context_for_callback() {
     assert_eq!(context.bot_id, "bot-driver");
     assert_eq!(context.group_id, "group-1");
     assert_eq!(context.bcs_session_id.as_deref(), Some("group-1:abcdef12"));
+    let delivered_session_key = support
+        .bot_delivery
+        .frames()
+        .await
+        .into_iter()
+        .find_map(|frame| match frame {
+            BcsFrame::Request(request) if request.method == "chat.send" => request
+                .params
+                .and_then(|params| params.get("session_key").and_then(|value| value.as_str()).map(str::to_string)),
+            _ => None,
+        })
+        .expect("chat.send session_key");
+    let active = run_context
+        .find_active_run(&outcome.primary_run_id)
+        .await
+        .unwrap()
+        .expect("active run context");
+    assert_eq!(
+        active.downstream_session_key.as_deref(),
+        Some(delivered_session_key.as_str())
+    );
     assert!(!context.terminal);
     assert_eq!(
         flow.message_tracker
@@ -1791,6 +1813,60 @@ async fn install_provider_driver_group(support: &support::FlowTestSupport, creat
 }
 
 #[tokio::test]
+async fn provider_send_context_captures_bypass_headers_for_abort_routing() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    install_provider_driver_group(&support, "1").await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    let outcome = flow
+        .handle_web_send(WebSendCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-provider".to_string(),
+            session_id: None,
+            from_actor_id: "human_1".to_string(),
+            from_name: Some("Human One".to_string()),
+            message: "hello".to_string(),
+            mentions: vec![],
+            attachments: None,
+            thinking: None,
+            idempotency_key: None,
+            source_im_message_id: None,
+            channel_sender_identity: None,
+            sender_conn_id: None,
+            provider_bypass_headers: vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )],
+        })
+        .await
+        .unwrap();
+
+    let context = run_context
+        .find_active_run(&outcome.primary_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        context.provider_bypass_headers,
+        vec![(
+            "x-sandbox-bypass".to_string(),
+            "sandbox-route-1".to_string(),
+        )]
+    );
+}
+
+#[tokio::test]
 async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -2019,9 +2095,11 @@ async fn opted_in_channel_sender_identity_is_projected_to_bot_frame() -> Service
     .await?;
 
     let frames = support.bot_delivery.frames().await;
-    assert!(frames.iter().any(
-        |frame| matches!(frame, BcsFrame::Request(request) if request.method == "chat.send")
-    ));
+    assert!(
+        frames.iter().any(
+            |frame| matches!(frame, BcsFrame::Request(request) if request.method == "chat.send")
+        )
+    );
     assert!(frames.iter().any(
         |frame| matches!(frame, BcsFrame::Request(request) if request.method == "chat.inject")
     ));
@@ -3055,7 +3133,9 @@ async fn persistent_group_send_routes_stores_and_returns_legacy_fields() {
         outcome.routed_to,
         vec!["bot-driver".to_string(), "bot-observer".to_string()]
     );
-    assert_eq!(outcome.mentions, Vec::<String>::new());
+    // The fake router resolves text mentions like the production legacy
+    // `route()` does: "@Driver" resolves to the driver bot.
+    assert_eq!(outcome.mentions, vec!["bot-driver".to_string()]);
     assert_eq!(
         support.routing.route_calls().await,
         vec![(
@@ -3283,6 +3363,15 @@ async fn persistent_group_send_marks_group_inactive_when_legacy_message_cap_is_r
 async fn bot_final_event_routes_and_publishes_frontend_through_message_flow() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let run_context = Arc::new(MemoryBotRunContextStore::new());
+    register_active_run(
+        &run_context,
+        "run-1",
+        "group-1",
+        "group-1",
+        "bot-observer",
+        BotRunTransportOwner::WebSocket,
+    )
+    .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -3329,6 +3418,17 @@ async fn bot_final_event_routes_and_publishes_frontend_through_message_flow() {
         .expect("relay run context");
     assert_eq!(context.bot_id, "bot-driver");
     assert_eq!(context.group_id, "group-1");
+    assert!(
+        run_context
+            .list_active_runs(&BotRunScope {
+                group_id: "group-1".to_string(),
+                session_id: "group-1".to_string(),
+                bot_id: "bot-observer".to_string(),
+            })
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -3522,13 +3622,24 @@ async fn group_callback_all_mentions_use_routing_service() {
 #[tokio::test]
 async fn chat_abort_delivers_abort_frame_to_bot_participants() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    register_active_run(
+        &run_context,
+        "run-1",
+        "group-1",
+        "session-1",
+        "bot-driver",
+        BotRunTransportOwner::WebSocket,
+    )
+    .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    );
+    )
+    .with_bot_run_context(run_context);
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
@@ -3537,7 +3648,8 @@ async fn chat_abort_delivers_abort_frame_to_bot_participants() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
-            session_id: None,
+            session_id: "session-1".to_string(),
+            bot_id: "bot-driver".to_string(),
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -3545,34 +3657,91 @@ async fn chat_abort_delivers_abort_frame_to_bot_participants() {
 
     assert!(outcome.aborted);
     assert_eq!(outcome.aborted_run_ids, vec!["run-1".to_string()]);
-    assert!(
-        support
-            .bot_delivery
-            .kinds()
-            .await
-            .iter()
-            .all(|kind| *kind == BotDeliveryKind::Abort)
-    );
-    assert!(
-        support
-            .bot_delivery
-            .frames()
-            .await
-            .into_iter()
-            .all(|frame| matches!(frame, BcsFrame::Request(req) if req.method == "chat.abort"))
-    );
+    let aborts = support.bot_delivery.aborts().await;
+    assert_eq!(aborts.len(), 1);
+    assert_eq!(aborts[0].run_id.as_deref(), Some("run-1"));
+    assert_eq!(aborts[0].session_id, "session-1");
 }
 
 #[tokio::test]
-async fn chat_abort_publishes_frontend_event_through_port() {
+async fn chat_abort_reuses_the_session_key_from_the_original_plugin_delivery() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    run_context
+        .put_context(BotRunContext {
+            run_id: "run-wire-key".to_string(),
+            bot_id: "bot-driver".to_string(),
+            group_id: "group-1".to_string(),
+            bcs_session_id: Some("session-1".to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    run_context
+        .register_active_run(ActiveBotRunContext {
+            canonical_run_id: "run-wire-key".to_string(),
+            downstream_run_id: "run-wire-key".to_string(),
+            downstream_session_key: Some("group:legacy-wire-key".to_string()),
+            scope: BotRunScope {
+                group_id: "group-1".to_string(),
+                session_id: "session-1".to_string(),
+                bot_id: "bot-driver".to_string(),
+            },
+            transport_owner: BotRunTransportOwner::WebSocket,
+            provider_bypass_headers: Vec::new(),
+            deadline_ms: u64::MAX,
+        })
+        .await
+        .unwrap();
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
+
+    flow.handle_chat_abort(ChatAbortCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: "session-1".to_string(),
+        bot_id: "bot-driver".to_string(),
+        run_id: Some("run-wire-key".to_string()),
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(
+        support.bot_delivery.aborts().await[0].session_id,
+        "group:legacy-wire-key"
     );
+}
+
+#[tokio::test]
+async fn chat_abort_publishes_frontend_event_through_port() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    register_active_run(
+        &run_context,
+        "run-1",
+        "group-1",
+        "session-1",
+        "bot-driver",
+        BotRunTransportOwner::WebSocket,
+    )
+    .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context);
 
     let outcome = flow
         .handle_chat_abort(ChatAbortCommand {
@@ -3581,7 +3750,8 @@ async fn chat_abort_publishes_frontend_event_through_port() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
-            session_id: None,
+            session_id: "session-1".to_string(),
+            bot_id: "bot-driver".to_string(),
             run_id: Some("run-1".to_string()),
         })
         .await
@@ -3598,16 +3768,15 @@ async fn chat_abort_publishes_frontend_event_through_port() {
 async fn chat_abort_with_session_rejects_a_run_from_another_session() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let run_context = Arc::new(MemoryBotRunContextStore::new());
-    run_context
-        .put_context(bcs_service_api::BotRunContext {
-            run_id: "run-other-session".to_string(),
-            bot_id: "bot-driver".to_string(),
-            group_id: "group-1".to_string(),
-            bcs_session_id: Some("session-other".to_string()),
-            deadline_ms: u64::MAX,
-            terminal: false,
-        })
-        .await;
+    register_active_run(
+        &run_context,
+        "run-other-session",
+        "group-1",
+        "session-other",
+        "bot-driver",
+        BotRunTransportOwner::WebSocket,
+    )
+    .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -3624,7 +3793,8 @@ async fn chat_abort_with_session_rejects_a_run_from_another_session() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
-            session_id: Some("session-bound".to_string()),
+            session_id: "session-bound".to_string(),
+            bot_id: "bot-driver".to_string(),
             run_id: Some("run-other-session".to_string()),
         })
         .await
@@ -3632,7 +3802,7 @@ async fn chat_abort_with_session_rejects_a_run_from_another_session() {
 
     assert!(!outcome.aborted);
     assert!(outcome.aborted_run_ids.is_empty());
-    assert!(support.bot_delivery.frames().await.is_empty());
+    assert!(support.bot_delivery.aborts().await.is_empty());
     assert!(support.frontend_delivery.events().await.is_empty());
 }
 
@@ -3640,16 +3810,15 @@ async fn chat_abort_with_session_rejects_a_run_from_another_session() {
 async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let run_context = Arc::new(MemoryBotRunContextStore::new());
-    run_context
-        .put_context(bcs_service_api::BotRunContext {
-            run_id: "run-bound".to_string(),
-            bot_id: "bot-driver".to_string(),
-            group_id: "group-1".to_string(),
-            bcs_session_id: Some("session-bound".to_string()),
-            deadline_ms: u64::MAX,
-            terminal: false,
-        })
-        .await;
+    register_active_run(
+        &run_context,
+        "run-bound",
+        "group-1",
+        "session-bound",
+        "bot-driver",
+        BotRunTransportOwner::WebSocket,
+    )
+    .await;
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
@@ -3666,7 +3835,8 @@ async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
                 staff_no: "1".to_string(),
             }),
             group_id: "group-1".to_string(),
-            session_id: Some("session-bound".to_string()),
+            session_id: "session-bound".to_string(),
+            bot_id: "bot-driver".to_string(),
             run_id: Some("run-bound".to_string()),
         })
         .await
@@ -3674,19 +3844,32 @@ async fn chat_abort_with_session_accepts_a_run_from_the_same_session() {
 
     assert!(outcome.aborted);
     assert_eq!(outcome.aborted_run_ids, vec!["run-bound".to_string()]);
-    assert!(!support.bot_delivery.frames().await.is_empty());
+    assert_eq!(support.bot_delivery.aborts().await.len(), 1);
 }
 
 #[tokio::test]
 async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    for run_id in ["run-bound-1", "run-bound-2"] {
+        register_active_run(
+            &run_context,
+            run_id,
+            "group-1",
+            "session-bound",
+            "bot-driver",
+            BotRunTransportOwner::WebSocket,
+        )
+        .await;
+    }
     let flow = BcsMessageFlow::new(
         support.group.clone(),
         support.routing.clone(),
         support.registry.clone(),
         support.bot_delivery.clone(),
         support.frontend_delivery.clone(),
-    );
+    )
+    .with_bot_run_context(run_context);
 
     flow.handle_chat_abort(ChatAbortCommand {
         caller: CallerContext::Human(HumanActor {
@@ -3694,26 +3877,224 @@ async fn chat_abort_without_run_id_uses_only_the_bound_session_key() {
             staff_no: "1".to_string(),
         }),
         group_id: "group-1".to_string(),
-        session_id: Some("session-bound".to_string()),
+        session_id: "session-bound".to_string(),
+        bot_id: "bot-driver".to_string(),
         run_id: None,
     })
     .await
     .unwrap();
 
+    let aborts = support.bot_delivery.aborts().await;
+    assert_eq!(aborts.len(), 2);
     assert!(
-        support
-            .bot_delivery
-            .frames()
-            .await
-            .into_iter()
-            .all(|frame| matches!(
-                frame,
-                BcsFrame::Request(req)
-                    if req.params.as_ref().and_then(|params| params["session_key"].as_str())
-                        == Some("session-bound")
-                    && req.params.as_ref().and_then(|params| params.get("run_id")).is_none()
-            ))
+        aborts
+            .iter()
+            .all(|abort| abort.session_id == "session-bound")
     );
+    assert!(aborts.iter().all(|abort| abort.run_id.is_some()));
+}
+
+#[tokio::test]
+async fn chat_abort_provider_sends_one_scope_request_for_parallel_runs() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support
+        .bot_delivery
+        .set_provider_abort_run_ids(vec![
+            "provider-run-1".to_string(),
+            "provider-run-2".to_string(),
+        ])
+        .await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    for (canonical, downstream) in [
+        ("bcs-run-1", "provider-run-1"),
+        ("bcs-run-2", "provider-run-2"),
+    ] {
+        register_active_run_with_downstream(
+            &run_context,
+            canonical,
+            downstream,
+            "group-1",
+            "session-provider",
+            "bot-driver",
+            BotRunTransportOwner::HttpProvider {
+                provider_id: "provider-1".to_string(),
+                provider_bot_ref: "bot-driver".to_string(),
+            },
+        )
+        .await;
+        if canonical == "bcs-run-2" {
+            let mut context = run_context
+                .find_active_run(canonical)
+                .await
+                .unwrap()
+                .unwrap();
+            context.provider_bypass_headers = vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )];
+            run_context.register_active_run(context).await.unwrap();
+        }
+    }
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "session-provider".to_string(),
+            bot_id: "bot-driver".to_string(),
+            run_id: None,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(outcome.aborted_run_ids, ["bcs-run-1", "bcs-run-2"]);
+    assert!(outcome.failures.is_empty());
+    let aborts = support.bot_delivery.aborts().await;
+    assert_eq!(aborts.len(), 1);
+    assert!(aborts[0].run_id.is_none());
+    assert_eq!(aborts[0].session_id, "session-provider");
+    assert_eq!(
+        aborts[0].provider_bypass_headers,
+        vec![(
+            "x-sandbox-bypass".to_string(),
+            "sandbox-route-1".to_string(),
+        )]
+    );
+    assert!(run_context.get_context("bcs-run-1").await.unwrap().terminal);
+    assert!(run_context.get_context("bcs-run-2").await.unwrap().terminal);
+}
+
+#[tokio::test]
+async fn chat_abort_provider_rejects_ids_outside_the_requested_scope() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    support
+        .registry
+        .set_delivery_target(
+            "bot-driver",
+            support::FakeRegistryService::provider_target("bot-driver"),
+        )
+        .await;
+    support
+        .bot_delivery
+        .set_provider_abort_run_ids(vec!["outside-run".to_string()])
+        .await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    register_active_run_with_downstream(
+        &run_context,
+        "bcs-run-1",
+        "provider-run-1",
+        "group-1",
+        "session-provider",
+        "bot-driver",
+        BotRunTransportOwner::HttpProvider {
+            provider_id: "provider-1".to_string(),
+            provider_bot_ref: "bot-driver".to_string(),
+        },
+    )
+    .await;
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    let outcome = flow
+        .handle_chat_abort(ChatAbortCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-1".to_string(),
+            session_id: "session-provider".to_string(),
+            bot_id: "bot-driver".to_string(),
+            run_id: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(!outcome.aborted);
+    assert!(outcome.aborted_run_ids.is_empty());
+    assert_eq!(outcome.failures.len(), 1);
+    assert_eq!(outcome.failures[0].run_id, "outside-run");
+    assert!(!run_context.get_context("bcs-run-1").await.unwrap().terminal);
+}
+
+async fn register_active_run(
+    store: &Arc<MemoryBotRunContextStore>,
+    run_id: &str,
+    group_id: &str,
+    session_id: &str,
+    bot_id: &str,
+    transport_owner: BotRunTransportOwner,
+) {
+    register_active_run_with_downstream(
+        store,
+        run_id,
+        run_id,
+        group_id,
+        session_id,
+        bot_id,
+        transport_owner,
+    )
+    .await;
+}
+
+async fn register_active_run_with_downstream(
+    store: &Arc<MemoryBotRunContextStore>,
+    canonical_run_id: &str,
+    downstream_run_id: &str,
+    group_id: &str,
+    session_id: &str,
+    bot_id: &str,
+    transport_owner: BotRunTransportOwner,
+) {
+    store
+        .put_context(BotRunContext {
+            run_id: canonical_run_id.to_string(),
+            bot_id: bot_id.to_string(),
+            group_id: group_id.to_string(),
+            bcs_session_id: Some(session_id.to_string()),
+            deadline_ms: u64::MAX,
+            terminal: false,
+        })
+        .await;
+    store
+        .register_active_run(ActiveBotRunContext {
+            canonical_run_id: canonical_run_id.to_string(),
+            downstream_run_id: downstream_run_id.to_string(),
+            downstream_session_key: Some(session_id.to_string()),
+            scope: BotRunScope {
+                group_id: group_id.to_string(),
+                session_id: session_id.to_string(),
+                bot_id: bot_id.to_string(),
+            },
+            transport_owner,
+            provider_bypass_headers: Vec::new(),
+            deadline_ms: u64::MAX,
+        })
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -4137,4 +4518,398 @@ async fn web_send_persists_raw_mention_text_while_bots_receive_cleaned_text() {
         "@Driver please review"
     );
     assert_eq!(event["payload"]["message"]["mentions"][0], "bot-driver");
+}
+
+fn web_send_human_mentions(mention_actor_ids: Vec<String>) -> WebSendCommand {
+    WebSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        session_id: Some("group-1:s1".to_string()),
+        from_actor_id: "human_1".to_string(),
+        from_name: Some("Human One".to_string()),
+        message: "hello".to_string(),
+        mentions: mention_actor_ids,
+        attachments: None,
+        thinking: None,
+        idempotency_key: None,
+        source_im_message_id: None,
+        channel_sender_identity: None,
+        sender_conn_id: None,
+        provider_bypass_headers: Vec::new(),
+    }
+}
+
+async fn set_human_1_present(support: &support::FlowTestSupport) {
+    let mut group = support.group.get("group-1").await.unwrap();
+    let human = group
+        .participants
+        .iter_mut()
+        .find(|participant| participant.bot_uuid == "human_1")
+        .unwrap();
+    human.mode = Some(ParticipantMode::Present);
+    support.group.upsert(group).await.unwrap();
+}
+
+async fn add_present_human_2(support: &support::FlowTestSupport) {
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.participants.push(Participant {
+        bot_uuid: "human_2".to_string(),
+        bot_name: Some("Human Two".to_string()),
+        kind: None,
+        role: ParticipantRole::Observer,
+        actor_kind: ActorKind::Human,
+        mode: Some(ParticipantMode::Present),
+        tags: Vec::new(),
+    });
+    support.group.upsert(group).await.unwrap();
+}
+
+#[tokio::test]
+async fn web_send_notifies_explicitly_mentioned_human() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.participants.push(Participant {
+        bot_uuid: "human_2".to_string(),
+        bot_name: Some("Human Two".to_string()),
+        kind: None,
+        role: ParticipantRole::Observer,
+        actor_kind: ActorKind::Human,
+        mode: None,
+        tags: Vec::new(),
+    });
+    support.group.upsert(group).await.unwrap();
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["human_2".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for(1).await;
+    assert_eq!(notifications.len(), 1, "mentioned human must be notified");
+    assert_eq!(notifications[0].mentioned.len(), 1);
+    assert_eq!(notifications[0].mentioned[0].actor_id, "human_2");
+    assert_eq!(notifications[0].mentioned[0].display_name, "Human Two");
+    assert_eq!(notifications[0].sender_actor_id, "human_1");
+    assert_eq!(notifications[0].group_id, "group-1");
+    assert_eq!(notifications[0].session_id, "group-1:s1");
+}
+
+#[tokio::test]
+async fn web_send_skips_notification_for_self_mention() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["human_1".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(notifications.is_empty(), "self mention must not notify");
+}
+
+#[tokio::test]
+async fn web_send_skips_notification_for_bot_only_mentions() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["bot-driver".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(notifications.is_empty(), "bot-only mentions must not notify");
+}
+
+#[tokio::test]
+async fn web_send_skips_notification_when_port_unavailable() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.participants.push(Participant {
+        bot_uuid: "human_2".to_string(),
+        bot_name: Some("Human Two".to_string()),
+        kind: None,
+        role: ParticipantRole::Observer,
+        actor_kind: ActorKind::Human,
+        mode: None,
+        tags: Vec::new(),
+    });
+    support.group.upsert(group).await.unwrap();
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(false));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["human_2".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "unavailable port must block a would-be notification"
+    );
+}
+
+#[tokio::test]
+async fn web_send_text_mention_notifies_resolved_human() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    add_present_human_2(&support).await;
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    let mut cmd = web_send_human_mentions(Vec::new());
+    cmd.message = "@Human Two 你怎么看".to_string();
+    flow.handle_web_send(cmd).await.unwrap();
+
+    let notifications = recorder.wait_for(1).await;
+    assert_eq!(notifications.len(), 1, "text-mentioned human must be notified");
+    assert_eq!(notifications[0].mentioned.len(), 1);
+    assert_eq!(notifications[0].mentioned[0].actor_id, "human_2");
+    assert_eq!(notifications[0].mentioned[0].display_name, "Human Two");
+}
+
+#[tokio::test]
+async fn web_send_at_all_alone_does_not_notify() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    set_human_1_present(&support).await;
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    let mut cmd = web_send_human_mentions(Vec::new());
+    cmd.message = "@所有人 通知一下".to_string();
+    flow.handle_web_send(cmd).await.unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(notifications.is_empty(), "@all alone must not notify humans");
+}
+
+#[tokio::test]
+async fn web_send_at_all_with_explicit_human_notifies_that_human() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    add_present_human_2(&support).await;
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    let mut cmd = web_send_human_mentions(Vec::new());
+    cmd.message = "@所有人 @Human Two 请回复".to_string();
+    flow.handle_web_send(cmd).await.unwrap();
+
+    let notifications = recorder.wait_for(1).await;
+    assert_eq!(notifications.len(), 1, "explicit human next to @all must be notified");
+    assert_eq!(notifications[0].mentioned.len(), 1);
+    assert_eq!(notifications[0].mentioned[0].actor_id, "human_2");
+}
+
+#[tokio::test]
+async fn group_callback_never_triggers_human_notification() {
+    // Security boundary: the callback route carries no caller identity, so its
+    // request-controlled `mentions` must never reach the notification backend
+    // (an unauthenticated caller could otherwise DM arbitrary participants).
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.participants.push(Participant {
+        bot_uuid: "human_2".to_string(),
+        bot_name: Some("Human Two".to_string()),
+        kind: None,
+        role: ParticipantRole::Observer,
+        actor_kind: ActorKind::Human,
+        mode: None,
+        tags: Vec::new(),
+    });
+    support.group.upsert(group).await.unwrap();
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_group_callback(GroupCallbackCommand {
+        group_id: "group-1".to_string(),
+        message: "system callback".to_string(),
+        mentions: vec!["human_2".to_string()],
+        metadata: Some(json!({"source": "contract"})),
+        store_message: false,
+    })
+    .await
+    .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "unauthenticated callbacks must not trigger human notifications"
+    );
+}
+
+#[tokio::test]
+async fn web_send_dm_group_does_not_notify_mentioned_human() {
+    // DM groups carry no @-mention semantics, so even an explicit mention
+    // must not notify.
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    make_human_bot_dm(&support).await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.participants.push(Participant {
+        bot_uuid: "human_2".to_string(),
+        bot_name: Some("Human Two".to_string()),
+        kind: None,
+        role: ParticipantRole::Observer,
+        actor_kind: ActorKind::Human,
+        mode: Some(ParticipantMode::Present),
+        tags: Vec::new(),
+    });
+    support.group.upsert(group).await.unwrap();
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["human_2".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "DM groups must not trigger human notifications"
+    );
+}
+
+#[tokio::test]
+async fn web_send_policy_blocked_message_does_not_notify_humans() {
+    // The notification must go through the same outbound policy as bot
+    // deliveries: when the chain blocks the content, humans must not receive
+    // it out-of-band either.
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    add_present_human_2(&support).await;
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_interceptor(BlockingInterceptor)
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_web_send(web_send_human_mentions(vec!["human_2".to_string()]))
+        .await
+        .unwrap();
+
+    let notifications = recorder.wait_for_none().await;
+    assert!(
+        notifications.is_empty(),
+        "policy-blocked content must not reach humans via notifications"
+    );
+}
+
+#[tokio::test]
+async fn persistent_group_send_text_mention_notifies_human() {
+    // `POST /groups/{id}/messages` resolves text @-mentions through the same
+    // router and must notify mentioned humans like the workbench send path.
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    add_present_human_2(&support).await;
+
+    let recorder = Arc::new(support::RecordingHumanMentionNotify::available(true));
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_human_mention_notify(recorder.clone());
+
+    flow.handle_persistent_group_send(PersistentGroupSendCommand {
+        caller: CallerContext::Human(HumanActor {
+            actor_id: "human_1".to_string(),
+            staff_no: "1".to_string(),
+        }),
+        group_id: "group-1".to_string(),
+        sender: "human_1".to_string(),
+        content: "@Human Two 请查收".to_string(),
+        message_type: GroupMessageType::Bot,
+        role: MessageRole::User,
+        max_group_messages: 10,
+        store_messages: true,
+    })
+    .await
+    .unwrap();
+
+    let notifications = recorder.wait_for(1).await;
+    assert_eq!(notifications.len(), 1, "persistent send must notify");
+    assert_eq!(notifications[0].mentioned.len(), 1);
+    assert_eq!(notifications[0].mentioned[0].actor_id, "human_2");
+    assert_eq!(notifications[0].mentioned[0].display_name, "Human Two");
+    assert_eq!(notifications[0].sender_actor_id, "human_1");
+    assert_eq!(notifications[0].message_text, "Human Two 请查收");
 }

@@ -26,12 +26,13 @@ KEY_BOT_NAME = "bot_name"
 KEY_STAGE = "stage"
 
 #: ``PublishStage`` → the engine-facing ``engine_ext.stage`` string. The engine
-#: expects ``draft`` / ``canary`` / ``release`` — NOT the raw enum values
+#: expects ``draft`` / ``canary`` / ``release`` / ``eval`` — NOT the raw enum values
 #: (``verify`` / ``online``). This mapping is the deliberate translation.
 STAGE_VALUE: dict[PublishStage, str] = {
     PublishStage.DRAFT: "draft",
     PublishStage.VERIFY: "canary",
     PublishStage.ONLINE: "release",
+    PublishStage.EVAL: "eval",
 }
 
 

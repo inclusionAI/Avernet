@@ -1,7 +1,7 @@
 /** @jest-environment node */
 import { adminService } from '@/services/admin/adminService';
-import { BackendRequestError } from '@/services/backendApi/httpClient';
 import * as spaceController from '@/services/backendApi/admin/spaceController';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { identityService } from '@/services/workspace/identityService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -33,6 +33,25 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
       page_no: 2,
       page_size: 10,
       keyword: '风控',
+    });
+  });
+
+  it('listSpaces 透传 scope=accessible（未传时不带 scope 键）', async () => {
+    sc.listSpaces.mockResolvedValue({ success: true, data: { items: [], total: 0 } });
+    await adminService.listSpaces({ page: 1, pageSize: 100, scope: 'accessible' });
+    expect(sc.listSpaces).toHaveBeenCalledWith({
+      user_id: '327325',
+      page_no: 1,
+      page_size: 100,
+      scope: 'accessible',
+    });
+    // 未传 scope 时不带该键（不影响其它调用方）
+    sc.listSpaces.mockClear();
+    await adminService.listSpaces({ page: 1, pageSize: 20 });
+    expect(sc.listSpaces).toHaveBeenCalledWith({
+      user_id: '327325',
+      page_no: 1,
+      page_size: 20,
     });
   });
 

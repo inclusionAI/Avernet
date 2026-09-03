@@ -347,7 +347,7 @@ def _ws_info(target: str):
     """Build a BotWsConnectionInfoResponse with the given target field."""
     from agentclaw.community.core.service_bot.services.baas_service import BotWsConnectionInfoResponse
     return BotWsConnectionInfoResponse(
-        ws_url="wss://secbaas-pre.teamclaw.com/proxypass/foo/api/openclaw/ws",
+        ws_url=f"wss://secbaas-pre.teamclaw.com/proxypass/{target}/api/openclaw/ws",
         token="tok-xyz",
         target=target,
         expires_at="2026-01-01T00:00:00Z",
@@ -396,23 +396,38 @@ def test_build_for_http_arca_target_falls_back_to_proxypass():
     assert info["device_affinity"] == "100014"
 
 
-def test_build_for_http_arca_target_without_sandbox_client_raises():
-    """ARCA target 但没注入 sandbox_client → 立即 RuntimeError(不静默产坏 URL)。
-
-    生产链路(baas builder/plugin)总会注入 sandbox_client;此守卫保证误用
-    (能产出 ARCA target 的 caller 漏传 client)早炸而非一路炸到 transport。
-    """
-    import pytest as _pytest
+def test_build_for_http_arca_target_without_sandbox_client_uses_baas_url():
+    """BaaS owns its returned proxy URL even when the backing target is ARCA."""
     from agentclaw.community.core.devices.services.baas_conn_info import build_baas_conn_info_for_http
 
-    ws_info = _ws_info(target="ARCA_ARCA-SANDBOX-xxx@0:20003")
-    with _pytest.raises(RuntimeError, match="sandbox_client"):
-        build_baas_conn_info_for_http(
-            bind_id=1,
-            ws_info=ws_info,
-            engine_type="openclaw",
-            bot_type="service",
-        )
+    target = "ARCA_ARCA-SANDBOX-xxx@0:20003"
+    info = build_baas_conn_info_for_http(
+        bind_id=1,
+        ws_info=_ws_info(target=target),
+        engine_type="openclaw",
+        bot_type="service",
+    )
+
+    assert info["url"] == f"https://secbaas-pre.teamclaw.com/proxypass/{target}"
+    assert info["sandbox_id"] == target
+
+
+def test_build_for_http_arca_target_with_community_client_uses_baas_url():
+    """Regression: community client must not make a BaaS-backed session fail."""
+    from agentclaw.community.core.devices.services.baas_conn_info import build_baas_conn_info_for_http
+    from agentclaw.community.plugins.community.sandbox_client import CommunitySandboxClient
+
+    target = "ARCA_ARCA-SANDBOX-cloud@0:20003"
+    info = build_baas_conn_info_for_http(
+        bind_id=2,
+        ws_info=_ws_info(target=target),
+        engine_type="openclaw",
+        bot_type="service",
+        sandbox_client=CommunitySandboxClient(),
+    )
+
+    assert info["url"] == f"https://secbaas-pre.teamclaw.com/proxypass/{target}"
+    assert info["sandbox_id"] == target
 
 
 def test_build_for_http_non_arca_target_uses_invoke_http():

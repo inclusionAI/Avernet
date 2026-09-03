@@ -9,6 +9,9 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
     RuntimeLayoutProbeResult,
 )
 from agentclaw.community.core.skills_pool.models import (
+    MappingApplyMode,
+    MappingPublishResult,
+    MappingVerificationResult,
     PoolCutoverResult,
     PoolSkillMapping,
     SkillMappingSourceLayout,
@@ -68,7 +71,8 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
-    ) -> bool: ...
+        apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
+    ) -> MappingPublishResult: ...
 
     async def verify_mappings(
         self,
@@ -79,7 +83,8 @@ class SkillsPoolRuntimeProtocol(Protocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
         mapping_contract_version: str = "skills-pool-mapping-v2",
-    ) -> bool: ...
+        apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
+    ) -> MappingVerificationResult: ...
 
 
 __all__ = [

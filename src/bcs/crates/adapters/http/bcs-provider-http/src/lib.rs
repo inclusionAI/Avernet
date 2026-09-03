@@ -1,5 +1,5 @@
-use std::{net::IpAddr, sync::Arc};
 use std::time::{Duration, Instant};
+use std::{net::IpAddr, sync::Arc};
 
 use async_trait::async_trait;
 use bcs_domain::BotDeliveryTarget;
@@ -10,18 +10,18 @@ use bcs_protocol::stream::{
 use bcs_protocol::{
     AgentEventPayload, AgentStream, Attachment, BCN_MESSAGE_ID_HEADER, BCN_PROTOCOL_VERSION_HEADER,
     BCN_TIMESTAMP_HEADER, BCN_TRANSPORT_HEADER, BcsFrame, ChatEventPayload,
-    ChatEventState as WireChatState, ContentBlock, MessageContent, ProviderAckResponse,
-    ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest, ProviderWebhookSender,
-    RequestFrame,
+    ChatEventState as WireChatState, ContentBlock, MessageContent, ProviderAbortResponse,
+    ProviderAckResponse, ProviderHistoryResponse, ProviderWebhookBotRef, ProviderWebhookRequest,
+    ProviderWebhookSender, RequestFrame,
 };
 use bcs_route_security::{OutboundUrlError, OutboundUrlGuard};
 use bcs_service_api::{
-    BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult, BotEventCommand,
-    BotRunContext, BotRunContextPort, ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
-    GroupHistoryBotRequestPort, InteractionKind, InteractionProviderAck,
-    InteractionProviderCommand, InteractionProviderPort, InteractionService,
-    ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
-    ProviderEventIngestCommand, ProviderEventIngestService, ProviderEventSource,
+    BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
+    BotDeliveryPort, BotDeliveryResult, BotEventCommand, BotRunContext, BotRunContextPort,
+    ChatEventState, DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS, GroupHistoryBotRequestPort,
+    InteractionKind, InteractionProviderAck, InteractionProviderCommand, InteractionProviderPort,
+    InteractionService, ProviderEventIngestCommand, ProviderEventIngestService,
+    ProviderEventSource, ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
     ProviderRunTransport, ProviderTransportPreference, ServiceError, ServiceResult,
 };
 use opentelemetry::global;
@@ -163,10 +163,7 @@ impl HttpProviderTransport {
     }
 
     pub fn with_url_guard(url_guard: OutboundUrlGuard) -> Self {
-        Self::with_url_guard_and_sse_policy(
-            url_guard,
-            ProviderClientPolicy::for_request(true),
-        )
+        Self::with_url_guard_and_sse_policy(url_guard, ProviderClientPolicy::for_request(true))
     }
 
     fn with_url_guard_and_sse_policy(
@@ -204,8 +201,14 @@ impl HttpProviderTransport {
         event_ingest: Arc<dyn ProviderEventIngestService>,
         bot_run_context: Arc<dyn BotRunContextPort>,
     ) {
-        *self.event_ingest.write().expect("event_ingest lock poisoned") = Some(event_ingest);
-        *self.bot_run_context.write().expect("bot_run_context lock poisoned") = Some(bot_run_context);
+        *self
+            .event_ingest
+            .write()
+            .expect("event_ingest lock poisoned") = Some(event_ingest);
+        *self
+            .bot_run_context
+            .write()
+            .expect("bot_run_context lock poisoned") = Some(bot_run_context);
     }
 
     /// Inject the Application service that owns Provider 2.0 HITL state.
@@ -348,11 +351,7 @@ impl BotDeliveryPort for HttpProviderTransport {
                 });
             }
         }
-        let body = provider_request_from_frame(
-            &cmd.target,
-            &cmd.frame,
-            self.chat_run_timeout_ms,
-        )?;
+        let body = provider_request_from_frame(&cmd.target, &cmd.frame, self.chat_run_timeout_ms)?;
         let provider_id = body.to_bot.provider_id.clone();
         let provider_bot_ref = body.to_bot.provider_bot_ref.clone();
         let method = body.method.clone();
@@ -376,9 +375,13 @@ impl BotDeliveryPort for HttpProviderTransport {
         );
         if is_proto2 {
             let is_chat_send = method == "chat.send";
-            let wants_sse = is_chat_send
-                && cmd.provider_transport == ProviderTransportPreference::SseFirst;
-            let client = if wants_sse { &self.sse_client } else { &self.client };
+            let wants_sse =
+                is_chat_send && cmd.provider_transport == ProviderTransportPreference::SseFirst;
+            let client = if wants_sse {
+                &self.sse_client
+            } else {
+                &self.client
+            };
             let run_context = self
                 .bot_run_context
                 .read()
@@ -437,9 +440,16 @@ impl BotDeliveryPort for HttpProviderTransport {
                         });
                     }
                 }
-                let (Some(flow), Some(ctx)) =
-                    (self.event_ingest.read().expect("event_ingest lock poisoned").clone(), self.bot_run_context.read().expect("bot_run_context lock poisoned").clone())
-                else {
+                let (Some(flow), Some(ctx)) = (
+                    self.event_ingest
+                        .read()
+                        .expect("event_ingest lock poisoned")
+                        .clone(),
+                    self.bot_run_context
+                        .read()
+                        .expect("bot_run_context lock poisoned")
+                        .clone(),
+                ) else {
                     if let Some(context) = run_context.as_ref() {
                         context.clear_provider_transport(&run_id).await;
                     }
@@ -586,8 +596,14 @@ impl BotDeliveryPort for HttpProviderTransport {
         }
 
         let started = Instant::now();
-        let ack_result: ServiceResult<ProviderAckResponse> =
-            post_provider(&self.client, &self.url_guard, &cmd.target, &body, &cmd.provider_bypass_headers).await;
+        let ack_result: ServiceResult<ProviderAckResponse> = post_provider(
+            &self.client,
+            &self.url_guard,
+            &cmd.target,
+            &body,
+            &cmd.provider_bypass_headers,
+        )
+        .await;
         let elapsed_ms = started.elapsed().as_millis();
         let ack = match ack_result {
             Ok(ack) => ack,
@@ -632,6 +648,102 @@ impl BotDeliveryPort for HttpProviderTransport {
                     ack.error.unwrap_or_else(|| "provider rejected".to_string()),
                 )
             }),
+        })
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        let target_bot_id = cmd.target_bot_id().to_string();
+        let BotDeliveryTarget::HttpProvider {
+            provider_id,
+            provider_bot_ref,
+            ..
+        } = &cmd.target
+        else {
+            return Err(ServiceError::InvalidOperation {
+                message: "Provider chat.abort requires an HTTP Provider target".to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        };
+        if cmd.run_id.is_some() {
+            return Err(ServiceError::InvalidOperation {
+                message: "Provider chat.abort must use Bot/Session scope".to_string(),
+                request_id: Some(cmd.command_id),
+            });
+        }
+        let body = ProviderWebhookRequest {
+            frame_type: "req".to_string(),
+            id: cmd.command_id.clone(),
+            method: "chat.abort".to_string(),
+            params: None,
+            session_id: cmd.session_id,
+            bcn_group_id: cmd.group_id,
+            to_bot: ProviderWebhookBotRef {
+                provider_id: provider_id.clone(),
+                provider_bot_ref: provider_bot_ref.clone(),
+                tags: Vec::new(),
+            },
+            from: None,
+            message: None,
+            attachments: Vec::new(),
+            before: None,
+            after: None,
+            limit: None,
+            timeout_ms: cmd.timeout_ms,
+            extensions: None,
+        };
+        // COSEC: this reuses the guarded Provider request path (redirects
+        // disabled, URL policy enforced, DNS pinned, configured bearer only).
+        let response = send_provider_request(
+            &self.client,
+            &self.url_guard,
+            &cmd.target,
+            &body,
+            false,
+            &cmd.provider_bypass_headers,
+        )
+        .await?;
+        if response.status() == reqwest::StatusCode::GONE {
+            let body = response.json::<Value>().await.map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "decode Provider chat.abort 410 response: {error}"
+                ))
+            })?;
+            let error_code = body.get("error").and_then(|error| {
+                error
+                    .as_str()
+                    .or_else(|| error.get("code").and_then(Value::as_str))
+            });
+            if error_code != Some("run_terminated") {
+                return Err(ServiceError::InvalidOperation {
+                    message: "Provider returned an unexpected chat.abort 410 response".to_string(),
+                    request_id: Some(cmd.command_id),
+                });
+            }
+            return Ok(BotAbortDeliveryResult {
+                target_bot_id,
+                aborted_run_ids: Vec::new(),
+            });
+        }
+        let status = response.status();
+        let result = response
+            .json::<ProviderAbortResponse>()
+            .await
+            .map_err(|error| {
+                ServiceError::InternalError(format!(
+                    "decode Provider chat.abort response ({status}): {error}"
+                ))
+            })?;
+        if !result.ok {
+            return Err(ServiceError::InvalidOperation {
+                message: result
+                    .error
+                    .unwrap_or_else(|| "Provider rejected chat.abort".to_string()),
+                request_id: Some(cmd.command_id),
+            });
+        }
+        Ok(BotAbortDeliveryResult {
+            target_bot_id,
+            aborted_run_ids: result.aborted_run_ids,
         })
     }
 }
@@ -697,10 +809,7 @@ pub struct BotTransportMux {
 }
 
 impl BotTransportMux {
-    pub fn new(
-        websocket: Arc<dyn BotDeliveryPort>,
-        provider: Arc<HttpProviderTransport>,
-    ) -> Self {
+    pub fn new(websocket: Arc<dyn BotDeliveryPort>, provider: Arc<HttpProviderTransport>) -> Self {
         Self {
             websocket,
             provider,
@@ -721,6 +830,13 @@ impl BotDeliveryPort for BotTransportMux {
         match &cmd.target {
             BotDeliveryTarget::WebSocket { .. } => self.websocket.deliver(cmd).await,
             BotDeliveryTarget::HttpProvider { .. } => self.provider.deliver(cmd).await,
+        }
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        match &cmd.target {
+            BotDeliveryTarget::WebSocket { .. } => self.websocket.abort(cmd).await,
+            BotDeliveryTarget::HttpProvider { .. } => self.provider.abort(cmd).await,
         }
     }
 }
@@ -973,7 +1089,15 @@ async fn post_provider<T: DeserializeOwned>(
     body: &ProviderWebhookRequest,
     provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<T> {
-    let response = send_provider_request(client, url_guard, target, body, false, provider_bypass_headers).await?;
+    let response = send_provider_request(
+        client,
+        url_guard,
+        target,
+        body,
+        false,
+        provider_bypass_headers,
+    )
+    .await?;
     let status = response.status();
     let method = body.method.clone();
     let frame_id = body.id.clone();
@@ -1084,11 +1208,7 @@ async fn send_provider_request_with_policy(
     } else {
         "application/json"
     };
-    let transport = if accept_sse {
-        "sse"
-    } else {
-        "callback"
-    };
+    let transport = if accept_sse { "sse" } else { "callback" };
     let request_body = provider_body_log(body);
     info!(
         provider_id = %body.to_bot.provider_id,
@@ -1222,7 +1342,8 @@ async fn send_provider_request_with_policy(
         headers_elapsed_ms = request_started.elapsed().as_millis(),
         "provider downlink: response headers received"
     );
-    if !status.is_success() {
+    if !status.is_success() && !(body.method == "chat.abort" && status == reqwest::StatusCode::GONE)
+    {
         warn!(
             provider_id = %body.to_bot.provider_id,
             method = %body.method,
@@ -1300,9 +1421,8 @@ fn provider_body_log(body: &ProviderWebhookRequest) -> String {
             }
         }
     }
-    serde_json::to_string(&redacted).unwrap_or_else(|error| {
-        format!("{{\"serialize_error\":\"{}\"}}", error)
-    })
+    serde_json::to_string(&redacted)
+        .unwrap_or_else(|error| format!("{{\"serialize_error\":\"{}\"}}", error))
 }
 
 fn sse_data_log(_event: &str, data: &str) -> String {
@@ -1310,9 +1430,8 @@ fn sse_data_log(_event: &str, data: &str) -> String {
 }
 
 fn provider_history_log(response: &ProviderHistoryResponse) -> String {
-    serde_json::to_string(response).unwrap_or_else(|error| {
-        format!("{{\"serialize_error\":\"{}\"}}", error)
-    })
+    serde_json::to_string(response)
+        .unwrap_or_else(|error| format!("{{\"serialize_error\":\"{}\"}}", error))
 }
 
 // ---------------------------------------------------------------------------
@@ -1788,7 +1907,12 @@ async fn drive_sse_frame(
                 "approval/HITL received but resolve is out of scope; closing run as unsupported"
             );
             let payload = build_chat_error_payload(bcn_run_id, group_id);
-            ("chat.event".to_string(), ChatEventState::Error, payload, true)
+            (
+                "chat.event".to_string(),
+                ChatEventState::Error,
+                payload,
+                true,
+            )
         }
         IngestKind::Pipeline { event_type, state } => {
             // #4: dedupe off the parsed StreamEvent's seq, never the SSE id.
@@ -1827,7 +1951,17 @@ async fn drive_sse_frame(
         return None;
     }
 
-    ingest(bcn_run_id, group_id, bot_id, bcs_session_id, event_type, state, payload, flow).await;
+    ingest(
+        bcn_run_id,
+        group_id,
+        bot_id,
+        bcs_session_id,
+        event_type,
+        state,
+        payload,
+        flow,
+    )
+    .await;
     Some(terminal)
 }
 
@@ -1890,11 +2024,18 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
                 // (the closest "model output" stream) and WARN so the choice is
                 // visible. Approval is handled upstream as CloseUnsupported.
                 bcs_protocol::stream::AgentData::Phase(_) => {
-                    warn!(run_id, "agent phase stream has no AgentStream variant; using assistant");
+                    warn!(
+                        run_id,
+                        "agent phase stream has no AgentStream variant; using assistant"
+                    );
                     AgentStream::Assistant
                 }
                 other => {
-                    warn!(run_id, ?other, "unexpected agent data in payload build; using assistant");
+                    warn!(
+                        run_id,
+                        ?other,
+                        "unexpected agent data in payload build; using assistant"
+                    );
                     AgentStream::Assistant
                 }
             };
@@ -1977,10 +2118,12 @@ fn build_event_payload(event: &StreamEvent, run_id: &str, group_id: &str) -> Val
 
 fn message_has_text(message: &Option<MessageContent>) -> bool {
     message.as_ref().is_some_and(|message| {
-        message
-            .content
-            .iter()
-            .any(|block| block.text.as_deref().is_some_and(|text| !text.trim().is_empty()))
+        message.content.iter().any(|block| {
+            block
+                .text
+                .as_deref()
+                .is_some_and(|text| !text.trim().is_empty())
+        })
     })
 }
 
@@ -2138,7 +2281,10 @@ mod client_policy_tests {
             "channel": { "user_id": "410025", "actor_name": "张三" },
             "message": { "text": "hello" }
         });
-        assert_eq!(provider_message_from_params(&legacy), legacy.get("message").cloned());
+        assert_eq!(
+            provider_message_from_params(&legacy),
+            legacy.get("message").cloned()
+        );
 
         let opted_in = serde_json::json!({
             "channel": {
@@ -2305,9 +2451,11 @@ Connection: keep-alive\r\n\
         .await
         .unwrap_err();
 
-        assert!(error.to_string().contains(
-            "provider response header timeout after 10ms"
-        ));
+        assert!(
+            error
+                .to_string()
+                .contains("provider response header timeout after 10ms")
+        );
     }
 
     #[tokio::test]
@@ -2459,10 +2607,11 @@ mod sse_loop_tests {
     use bcs_service_api::{
         BotEventOutcome, ChatAbortCommand, ChatAbortOutcome, GroupCallbackCommand,
         GroupCallbackOutcome, InteractionFrontendEvent, InteractionRequestedOutcome,
-        InteractionService, InteractionServiceError, ProviderInteractionRequestedCommand,
-        ProviderInteractionResolvedCommand, ResolveInteractionCommand, ResolveInteractionResult,
-        MessageFlowService, TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand,
-        TaskDispatchOutcome, TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
+        InteractionService, InteractionServiceError, MessageFlowService,
+        ProviderInteractionRequestedCommand, ProviderInteractionResolvedCommand,
+        ResolveInteractionCommand, ResolveInteractionResult, TaskCompleteCommand,
+        TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
+        WebSendCommand, WebSendOutcome,
     };
     use std::sync::Mutex;
 
@@ -2543,10 +2692,7 @@ mod sse_loop_tests {
         async fn handle_web_send(&self, _cmd: WebSendCommand) -> ServiceResult<WebSendOutcome> {
             unimplemented!("not used in sse loop tests")
         }
-        async fn handle_bot_event(
-            &self,
-            cmd: BotEventCommand,
-        ) -> ServiceResult<BotEventOutcome> {
+        async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
             self.events.lock().unwrap().push((
                 cmd.event_type.clone(),
                 cmd.state.clone(),
@@ -2876,8 +3022,18 @@ event: agent\ndata: {\"runId\":\"e\",\"seq\":2,\"stream\":\"thinking\",\"delta\"
             "event: agent\nid: 1\ndata: {\"runId\":\"e\",\"seq\":1,\"stream\":\"thinking\",\"delta\":\"a\"}\n\n",
         )
         .await;
-        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx { deadline_ms: u64::MAX });
-        stream_and_drive(resp, "bcn-run-1".into(), "bot-1".into(), flow.clone(), ctx, None).await;
+        let ctx: Arc<dyn BotRunContextPort> = Arc::new(FixedCtx {
+            deadline_ms: u64::MAX,
+        });
+        stream_and_drive(
+            resp,
+            "bcn-run-1".into(),
+            "bot-1".into(),
+            flow.clone(),
+            ctx,
+            None,
+        )
+        .await;
         let pairs = recording.pairs();
         // thinking delta, then a synthesized chat error terminal.
         assert_eq!(
@@ -2922,10 +3078,9 @@ event: chat\nid: 2\ndata: {\"runId\":\"e\",\"seq\":2,\"state\":\"final\",\"messa
         // Sanity: the very same stream with a fresh deadline ingests normally.
         let recording_ok = Arc::new(RecordingFlow::default());
         let flow_ok: Arc<dyn ProviderEventIngestService> = recording_ok.clone();
-        let terminal_ok = run_sse_text_with_deadline(
-            sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok,
-        )
-        .await;
+        let terminal_ok =
+            run_sse_text_with_deadline(sse, "bcn-run-1", "grp-1", "bot-1", u64::MAX, &flow_ok)
+                .await;
         assert!(terminal_ok, "fresh-deadline run should close on the final");
         assert_eq!(
             recording_ok.pairs(),

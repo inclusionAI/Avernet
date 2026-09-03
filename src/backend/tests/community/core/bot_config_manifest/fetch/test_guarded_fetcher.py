@@ -346,6 +346,19 @@ def test_a_malformed_declared_digest_is_refused():
     assert transport.seen == []
 
 
+def test_a_digest_with_a_trailing_newline_is_refused_as_malformed():
+    # `$` also matches immediately before a trailing newline, so this value
+    # previously passed the vocabulary check and failed downstream as a
+    # FETCH failure ("digest mismatch") — the wrong taxonomy for malformed
+    # config, leaked a '\n' into a mismatch message, and on the store side
+    # masqueraded as a missing address. \Z closes all three.
+    transport = _Requests(_ok_handler())
+    pinned = "sha256:" + "a" * 64 + "\n"
+    with pytest.raises(FetchRefusedError):
+        _fetch(HTTPS_URL, transport=transport, digest=pinned)
+    assert transport.seen == []
+
+
 # --- credential injection (Protocol declared; W3 binds) ------------------------
 
 
@@ -422,3 +435,19 @@ def test_a_default_port_stays_out_of_the_host_header():
     transport = _Requests(_ok_handler())
     _fetch(f"https://{HOST}:443/team/content.bin", transport=transport)
     assert transport.seen[0].headers["host"] == HOST
+
+
+def test_a_misnamed_category_taking_the_default_cap_is_structurally_impossible():
+    """The category vocabulary is bound to the cap table by construction: a
+    misspelled category would otherwise silently take the per-entry default's
+    cap, and no test would ever notice the quiet wrong answer."""
+    from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+        FETCH_ENTRY_LIMITS,
+        FetchCategory,
+    )
+
+    assert set(FETCH_ENTRY_LIMITS) == {c.value for c in FetchCategory}
+    # And the str value of the enum keys the table — spelling and lookup
+    # meet in the same place.
+    assert FETCH_ENTRY_LIMITS[FetchCategory.IDENTITY] == 1024 * 1024
+    assert FETCH_ENTRY_LIMITS[FetchCategory.SKILLS] == 100 * 1024 * 1024

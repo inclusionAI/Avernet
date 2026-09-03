@@ -486,6 +486,14 @@ def test_shipped_config_admits_anonymous_registration() -> None:
     assert len(req) == 0
 
 
+def test_shipped_config_exposes_auth_routes_as_anonymous() -> None:
+    raw = yaml.safe_load(_CONFIG.read_text())
+    rs = RouteSecurity.from_table(raw["user_config"]["route_security"])
+    req = rs.resolve("GET", "/openapi/v1/auth/user")
+    assert req is not None
+    assert len(req) == 0
+
+
 def test_register_security_overrides_must_be_method_scoped() -> None:
     """The register overrides are deliberately method-qualified.
 

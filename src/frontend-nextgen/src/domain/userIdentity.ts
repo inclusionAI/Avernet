@@ -10,3 +10,10 @@ export function resolveOpenApiUserId(identityId: string): string {
 export function isResolvableUserId(identityId?: string | null): identityId is string {
   return Boolean(identityId && resolveOpenApiUserId(identityId).trim());
 }
+
+/** `me` 仅是前端展示占位身份，绝不能作为真实 OpenAPI user_id。 */
+export function normalizeOpenApiUserId(identityId?: string | null): string {
+  if (!identityId) return '';
+  const normalized = resolveOpenApiUserId(identityId).trim();
+  return normalized.toLowerCase() === 'me' ? '' : normalized;
+}

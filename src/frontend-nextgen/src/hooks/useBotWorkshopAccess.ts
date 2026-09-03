@@ -1,4 +1,5 @@
 import type { BotDomain } from '@/services/botWorkshop';
+import { getBotCollaborationMode } from '@/services/botWorkshop';
 import {
   botManagementService,
   type BotCollaborator,
@@ -12,6 +13,7 @@ interface AccessState {
   bot?: BotDomain;
   spaces: BotSpaceOption[];
   loading: boolean;
+  operation?: string;
 }
 
 export function useBotWorkshopAccess(currentUserId: string | undefined, reload: () => Promise<void>) {
@@ -37,14 +39,21 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
     [currentUserId],
   );
   const isOwner = (bot: BotDomain) => Boolean(currentUserId && bot.ownerId === currentUserId);
+  const collaborationModeFor = (bot: BotDomain) => {
+    return getBotCollaborationMode(bot, isOwner(bot));
+  };
 
   return {
     access,
     collaborators,
     closeAccess: () => setAccess({ spaces: [], loading: false }),
+    canChangeSpace: isOwner,
     openSpaceChange: (bot: BotDomain) => void openAccess('space', bot),
-    collaborationModeFor: (bot: BotDomain) => (isOwner(bot) ? ('authorize' as const) : ('request' as const)),
-    openAuthorize: (bot: BotDomain) => void openAccess(isOwner(bot) ? 'authorize' : 'request', bot),
+    collaborationModeFor,
+    openAuthorize: (bot: BotDomain) => {
+      const mode = collaborationModeFor(bot);
+      if (mode) void openAccess(mode, bot);
+    },
     changeSpace: async (spaceId: number) => {
       if (!access.bot || !currentUserId) {
         toast.error('缺少当前用户身份');
@@ -61,22 +70,63 @@ export function useBotWorkshopAccess(currentUserId: string | undefined, reload: 
         setAccess((value) => ({ ...value, loading: false }));
       }
     },
-    addCollaborator: async (userId: string, role: BotCollaborator['role']) => {
-      if (!access.bot) return;
-      await botManagementService.addCollaborator(access.bot.id, userId, role);
-      setCollaborators(await botManagementService.listCollaborators(access.bot.id));
-      toast.success('已添加协作者');
+    createTeamAndChangeSpace: async (name: string) => {
+      if (!access.bot || !currentUserId) {
+        toast.error('缺少当前用户身份');
+        return;
+      }
+      setAccess((value) => ({ ...value, loading: true }));
+      try {
+        const space = await botManagementService.createTeamSpace(name, currentUserId);
+        await botManagementService.changeSpace(access.bot, space.id, currentUserId);
+        toast.success(`已创建「${space.name}」并变更 Bot 归属`);
+        setAccess({ spaces: [], loading: false });
+        await reload();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '创建团队并变更空间失败');
+        setAccess((value) => ({ ...value, loading: false }));
+      }
+    },
+    addCollaborator: async (userId: string, name: string | undefined, role: BotCollaborator['role']) => {
+      if (!access.bot) return false;
+      setAccess((value) => ({ ...value, operation: 'add' }));
+      try {
+        const added = await botManagementService.addCollaborator(access.bot.id, userId, name, role);
+        setCollaborators((items) => [...items, added]);
+        toast.success('已添加协作者');
+        return true;
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '添加协作者失败');
+        return false;
+      } finally {
+        setAccess((value) => ({ ...value, operation: undefined }));
+      }
     },
     updateCollaborator: async (id: number, role: BotCollaborator['role']) => {
       if (!access.bot) return;
-      await botManagementService.updateCollaborator(access.bot.id, id, role);
-      setCollaborators(await botManagementService.listCollaborators(access.bot.id));
+      setAccess((value) => ({ ...value, operation: `update:${id}` }));
+      try {
+        const updated = await botManagementService.updateCollaborator(access.bot.id, id, role);
+        setCollaborators((items) => items.map((item) => (item.id === id ? updated : item)));
+        toast.success('成员角色已更新');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '成员角色更新失败');
+      } finally {
+        setAccess((value) => ({ ...value, operation: undefined }));
+      }
     },
     removeCollaborator: async (id: number) => {
       if (!access.bot) return;
-      await botManagementService.removeCollaborator(access.bot.id, id);
-      setCollaborators((items) => items.filter((item) => item.id !== id));
-      toast.success('已移除协作者');
+      setAccess((value) => ({ ...value, operation: `remove:${id}` }));
+      try {
+        await botManagementService.removeCollaborator(access.bot.id, id);
+        setCollaborators((items) => items.filter((item) => item.id !== id));
+        toast.success('已移除协作者');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '移除协作者失败');
+      } finally {
+        setAccess((value) => ({ ...value, operation: undefined }));
+      }
     },
     requestAccess: async (reason: string) => {
       if (!access.bot) return;

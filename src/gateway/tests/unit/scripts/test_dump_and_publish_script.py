@@ -39,10 +39,14 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stdout + result.stderr
     document = json.loads((tmp_path / "bcn.openapi.json").read_text(encoding="utf-8"))
-    # 55 pre-existing operations + the two register operations (token issue +
-    # anonymous registration) — contract PR: register token and bot
-    # registration on the collaboration surface.
-    assert sum(len(path_item) for path_item in document["paths"].values()) == 59
+    # 59 pre-existing collaboration operations + the five public auth operations
+    # exposed by the new authentication facade.
+    assert sum(len(path_item) for path_item in document["paths"].values()) == 64
+    assert "get" in document["paths"]["/openapi/v1/auth/url"]
+    assert "get" in document["paths"]["/openapi/v1/auth/callback/{provider}"]
+    assert "get" in document["paths"]["/openapi/v1/auth/user"]
+    assert "post" in document["paths"]["/openapi/v1/auth/refresh"]
+    assert "post" in document["paths"]["/openapi/v1/auth/logout"]
     assert "get" in document["paths"]["/openapi/v1/collaboration/register/token"]
     assert "post" in document["paths"]["/openapi/v1/collaboration/register"]
     assert (
@@ -90,6 +94,7 @@ def test_bcn_dump_uses_the_gateway_managed_python_environment(tmp_path: Path) ->
         in internal["paths"]["/api/v1/collaboration/state-machine-runs/{run_id}/reruns"]
     )
     assert [tag["name"] for tag in document["tags"]] == [
+        "Authentication",
         "Collaboration / Bots",
         "Collaboration / Friendships",
         "Collaboration / Groups",

@@ -12,11 +12,15 @@
  * 说明：GROUP_CREATE_VIA_EXECUTE 开关由 useCreateGroup 控制，仅 state_machine 自定义协作群
  * 进入 execute 链路；chat / manager_worker 仍走 groupService.createGroup。
  */
-import type { GroupView, ParticipantRole } from '@/domain/collaboration';
+import type { GroupSessionPage, GroupView, ParticipantRole } from '@/domain/collaboration';
+import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
+import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { executeTask } from '@/services/backendApi/tasks/taskController';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
 import type { Envelope, ExecuteTaskResponse } from '@/services/tasks/taskModel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { CreateGroupInput } from './groupCreateRequest';
+import type { SessionPageOpts } from './groupService';
 import { buildExecuteRequestFromGroup } from './groupTaskAdapter';
 import type { DomainError, DomainResult } from './identityService';
 import { mapBcsSessionItem, type BcsParticipantRaw, type BcsSessionRaw } from './mappers';
@@ -32,6 +36,8 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   worker: 'member',
   observer: 'member',
 };
+
+const groupSessionRequestsInFlight = new Map<string, Promise<DomainResult<GroupSessionPage>>>();
 
 /** execute 建群后的群详情字段兼容类型，支持预发 OpenAPI 和历史 BCS raw 字段。 */
 export interface BcsGroupDetailRaw {
@@ -54,6 +60,57 @@ export interface BcsGroupDetailRaw {
 }
 
 /**
+ * BCS 群会话列表（sessions-only）：仅 GET /groups/{id}/sessions，不拉群详情。
+ * 供 useSessionMap 选中/展开群填充会话——选中群不再触发 GET /groups/{id} 详情请求，
+ * 群详情仅在管理面板（查看/编辑）时按需拉取（见 loadBcsGroupDetail）。兼容历史 BCS raw 字段。
+ */
+export async function loadBcsGroupSessions(
+  groupId: string,
+  pageOpts: SessionPageOpts = {},
+): Promise<DomainResult<GroupSessionPage>> {
+  try {
+    const base = '/openapi/v1/collaboration';
+    const offset = pageOpts.offset ?? 0;
+    const limit = pageOpts.limit ?? 10;
+    const sResp = await fetch(
+      `${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=${offset}&limit=${limit}`,
+      {
+        credentials: 'include',
+      },
+    );
+    const sessionJson = await sResp.json().catch(() => null);
+    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(绕过 httpClient),登记单飞跳转后返回空列表。
+    if (isAceLoginResponse(sessionJson)) {
+      const loginUrl = extractLoginUrl(sessionJson);
+      triggerAceLoginRedirect(loginUrl);
+      return {
+        ok: true,
+        data: { items: [], offset, limit, total: 0, hasMore: false },
+      };
+    }
+    const sJson = (sessionJson?.data ?? sessionJson) as
+      | { items?: BcsSessionRaw[]; offset?: number; limit?: number; total?: number; hasMore?: boolean }
+      | BcsSessionRaw[]
+      | null;
+    const sessionItems = Array.isArray(sJson) ? sJson : sJson?.items ?? [];
+    const items = sessionItems.map((s) => mapBcsSessionItem(s, groupId));
+    const total = Array.isArray(sJson) ? offset + items.length : sJson?.total ?? offset + items.length;
+    return {
+      ok: true,
+      data: {
+        items,
+        offset: Array.isArray(sJson) ? offset : sJson?.offset ?? offset,
+        limit: Array.isArray(sJson) ? limit : sJson?.limit ?? limit,
+        total,
+        hasMore: Array.isArray(sJson) ? items.length >= limit : sJson?.hasMore ?? offset + items.length < total,
+      },
+    };
+  } catch {
+    return { ok: false, error: toDomainError('GROUP_LOAD_FAILED', '加载会话列表失败，请稍后重试。') };
+  }
+}
+
+/**
  * execute 建群后的群详情：走预发 OpenAPI /openapi/v1/collaboration/groups/{id}，解析为 GroupView。
  *
  * 兼容历史 BCS raw 字段，同时接受 OpenAPI envelope.data，避免 execute 链路依赖本地服务。
@@ -69,6 +126,12 @@ export async function loadBcsGroupDetail(groupId: string): Promise<DomainResult<
       return { ok: false, error: toDomainError('GROUP_MISSING', '该协作群不存在或已被删除。') };
     }
     const detailJson = await dResp.json();
+    // raw-fetch 旁路:群详情未登录时网关放回 ACE 登录体,登记单飞跳转后返回失败(跳转在即)。
+    if (isAceLoginResponse(detailJson)) {
+      const loginUrl = extractLoginUrl(detailJson);
+      triggerAceLoginRedirect(loginUrl);
+      return { ok: false, error: toDomainError('GROUP_LOAD_FAILED', '登录状态已失效，请重新登录后重试') };
+    }
     const g = (detailJson?.data ?? detailJson) as BcsGroupDetailRaw;
     const sessionJson = await sResp.json().catch(() => null);
     const sJson = (sessionJson?.data ?? sessionJson) as { items?: BcsSessionRaw[] } | BcsSessionRaw[] | null;
@@ -117,10 +180,34 @@ export async function loadGroupDetailOrBcs(
     : loadGroupDetail(groupId, viewBotId);
 }
 
+/** 选中/展开群填充会话列表的统一入口：BCS 群走 loadBcsGroupSessions，
+ *  预发群走通用 loadGroupSessions（由调用方注入，避免循环依赖）。仅调 /groups/{id}/sessions，
+ *  不调 /groups/{id} 详情（详情仅管理面板按需拉，见 loadGroupDetailOrBcs）。判断收敛于此。 */
+export async function loadGroupSessionsOrBcs(
+  groupId: string,
+  viewBotId: string | undefined,
+  pageOpts: SessionPageOpts | undefined,
+  loadGroupSessions: (id: string, vid?: string, opts?: SessionPageOpts) => Promise<DomainResult<GroupSessionPage>>,
+): Promise<DomainResult<GroupSessionPage>> {
+  const isBcsGroup = Boolean(useWorkspaceStore.getState().bcsGroupIds[groupId]);
+  const requestKey = JSON.stringify([isBcsGroup, groupId, viewBotId ?? null, pageOpts ?? {}]);
+  const existingRequest = groupSessionRequestsInFlight.get(requestKey);
+  if (existingRequest) return existingRequest;
+  const request = (
+    isBcsGroup ? loadBcsGroupSessions(groupId, pageOpts) : loadGroupSessions(groupId, viewBotId, pageOpts)
+  ).finally(() => {
+    if (groupSessionRequestsInFlight.get(requestKey) === request) {
+      groupSessionRequestsInFlight.delete(requestKey);
+    }
+  });
+  groupSessionRequestsInFlight.set(requestKey, request);
+  return request;
+}
+
 /**
  * 走 task execute 创建自定义协作群(state_machine)。
  * - 非自定义协作群(非 state_machine) → 调用方注入的 fallbackCreateGroup 回落原链路。
- * - execute 以 Envelope{code,message,data,request_id} 统一封装：code=200000 为协议成功，
+ * - execute 以 Envelope{code,message,data,request_id} 统一封装：code 落在 2xx 成功段(200000-299999)为协议成功，
  *   其余 code（含 YAML 校验等业务错误）直接取 message 作 friendlyMessage 内联展示；
  *   HTTP 4xx/5xx/网络失败经 catch 映射。
  * - 建群成功依据 data.success && data.extend_props?.group_id（group_id 由后端 execute 同步回带），
@@ -149,7 +236,7 @@ export async function createGroupViaExecute(
     return { ok: false, error: toDomainError('GROUP_CREATE_FAILED', '创建协作群失败，请稍后重试。') };
   }
 
-  if (resp.code !== 200000) {
+  if (isEnvelopeFailure(resp)) {
     return {
       ok: false,
       error: toDomainError('GROUP_CREATE_INVALID', resp.message || '建群任务执行失败，请稍后重试。'),

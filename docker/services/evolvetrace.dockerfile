@@ -30,6 +30,12 @@ ENV NODE_ENV=production \
 # Create non-root runtime user.
 RUN groupadd -r appuser && useradd -r -g appuser -s /bin/bash appuser
 
+# Network diagnostics (ping) for in-container troubleshooting; the slim base
+# ships without it.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy only production artifacts and runtime files.
@@ -43,6 +49,10 @@ COPY --from=builder --chown=appuser:appuser /build/package-lock.json ./package-l
 # Install production dependencies only (mysql2 etc.).
 RUN npm ci --omit=dev && rm -rf ~/.npm
 
+# The service runs as appuser (non-root). Root stays available for debugging —
+# it is merely password-locked, and container exec needs no password:
+#   kubectl exec -it <pod> -u 0 -- bash    (then apt-get install ...)
+# Root password stays unset on purpose: no secret ships in image layers.
 USER appuser
 
 EXPOSE 3001

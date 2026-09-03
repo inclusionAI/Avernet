@@ -8,12 +8,192 @@ from engine.community.plugins.claude_code.layout_pool import (
     claude_code_retirement_active_roots,
 )
 from engine.community.plugins.skills_pool.layout_activation import (
+    MappingApplyMode,
     MappingSourceLayout,
     SkillMapping,
     _Layout,
     publish_pool_mappings,
     verify_skill_mappings,
 )
+
+
+def test_best_effort_mapping_keeps_unmanaged_entry_and_publishes_safe_entries(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("aicoding", home)
+    layout.active_root.mkdir(parents=True)
+
+    ready_source = layout.pool_local / "ready"
+    missing_source = layout.pool_local / "missing"
+    ready_source.mkdir(parents=True)
+    (ready_source / "SKILL.md").write_text("ready")
+
+    ready_target = layout.active_root / "ready"
+    missing_target = layout.active_root / "missing"
+    occupied_target = layout.active_root / "occupied"
+    occupied_target.mkdir()
+    (occupied_target / "SKILL.md").write_text("image-owned")
+
+    result = publish_pool_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(ready_target)),
+            SkillMapping(str(missing_source), str(missing_target)),
+            SkillMapping(str(layout.pool_local / "occupied"), str(occupied_target)),
+        ],
+        home=home,
+        engine="aicoding",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert not result.published
+    assert result.status == "DEGRADED"
+    assert ready_target.readlink() == ready_source
+    assert missing_target.is_symlink()
+    assert missing_target.readlink() == missing_source
+    assert occupied_target.is_dir()
+    assert (occupied_target / "SKILL.md").read_text() == "image-owned"
+    assert result.item_for(target=missing_target).status == "PENDING"
+    assert result.item_for(target=missing_target).code == "MANAGED_SOURCE_MISSING"
+    assert result.item_for(target=occupied_target).status == "DEGRADED"
+    assert result.item_for(target=occupied_target).code == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+    assert result.to_data()["items"] == [
+        item.to_data() for item in result.items
+    ]
+
+    verified = verify_skill_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(ready_target)),
+            SkillMapping(str(missing_source), str(missing_target)),
+            SkillMapping(str(layout.pool_local / "occupied"), str(occupied_target)),
+        ],
+        home=home,
+        engine="aicoding",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert not verified.valid
+    assert verified.status == "DEGRADED"
+    by_target = {item.target: item for item in verified.items}
+    assert by_target[str(occupied_target)].status == "DEGRADED"
+    assert by_target[str(missing_target)].status == "PENDING"
+    assert verified.to_data()["items"] == [
+        item.to_data() for item in verified.items
+    ]
+
+
+def test_best_effort_reports_invalid_requested_mappings_without_touching_safe_ones(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("openclaw", home)
+    layout.active_root.mkdir(parents=True)
+    first = layout.pool_local / "first"
+    second = layout.pool_local / "second"
+    outside = tmp_path / "outside"
+    for source in (first, second, outside):
+        source.mkdir(parents=True)
+
+    result = publish_pool_mappings(
+        mappings=[
+            SkillMapping("relative", str(layout.active_root / "relative")),
+            SkillMapping(str(first), str(tmp_path / "wrong-root")),
+            SkillMapping(str(outside), str(layout.active_root / "outside")),
+            SkillMapping(str(first), str(layout.active_root / "duplicate")),
+            SkillMapping(str(second), str(layout.active_root / "duplicate")),
+        ],
+        home=home,
+        engine="openclaw",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert result.status == "DEGRADED"
+    assert {
+        item.code for item in result.items
+    } >= {"SOURCE_OUTSIDE_POOL", "TARGET_INVALID", "MANAGED_SOURCE_CONFLICT"}
+    assert not (layout.active_root / "relative").exists()
+    assert not (layout.active_root / "duplicate").exists()
+
+
+def test_best_effort_verify_and_retire_preserve_unmanaged_and_report_pending(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("claude_code", home)
+    layout.active_root.mkdir(parents=True)
+    ready_source = layout.pool_local / "ready"
+    old_source = layout.pool_local / "old"
+    missing_source = layout.pool_local / "missing"
+    other_source = layout.pool_local / "other"
+    for source in (ready_source, old_source, other_source):
+        source.mkdir(parents=True)
+
+    missing_target = layout.active_root / "missing"
+    missing_target.symlink_to(missing_source, target_is_directory=True)
+    mismatch_target = layout.active_root / "mismatch"
+    mismatch_target.symlink_to(other_source, target_is_directory=True)
+    occupied_target = layout.active_root / "occupied"
+    occupied_target.mkdir()
+    external_source = tmp_path / "external"
+    external_source.mkdir()
+    external_target = layout.active_root / "external"
+    external_target.symlink_to(external_source, target_is_directory=True)
+    retired_directory = layout.active_root / "retired-directory"
+    retired_directory.mkdir()
+
+    verified = verify_skill_mappings(
+        mappings=[
+            SkillMapping(str(ready_source), str(layout.active_root / "not-link")),
+            SkillMapping(str(ready_source), str(mismatch_target)),
+            SkillMapping(str(missing_source), str(missing_target)),
+            SkillMapping(str(ready_source), str(occupied_target)),
+            SkillMapping(str(ready_source), str(external_target)),
+        ],
+        retired_mappings=[SkillMapping(str(old_source), str(retired_directory))],
+        home=home,
+        engine="claude_code",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert verified.status == "DEGRADED"
+    assert {item.code for item in verified.items} >= {
+        "TARGET_NOT_SYMLINK",
+        "TARGET_MISMATCH",
+        "MANAGED_SOURCE_MISSING",
+        "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+        "EXTERNAL_ACTIVE_ENTRY_RETAINED",
+    }
+    assert next(
+        item for item in verified.items if item.target == str(missing_target)
+    ).retryable is True
+    assert retired_directory.is_dir()
+
+
+def test_best_effort_updates_managed_link_and_surfaces_unrelated_missing_source(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home" / "admin"
+    layout = _Layout.for_engine("hermes", home)
+    layout.active_root.mkdir(parents=True)
+    old_source = layout.pool_local / "old"
+    new_source = layout.pool_local / "new"
+    for source in (old_source, new_source):
+        source.mkdir(parents=True)
+    target = layout.active_root / "replaced"
+    target.symlink_to(old_source, target_is_directory=True)
+    stale_target = layout.active_root / "stale"
+    stale_target.symlink_to(layout.pool_local / "stale", target_is_directory=True)
+
+    result = publish_pool_mappings(
+        mappings=[SkillMapping(str(new_source), str(target))],
+        home=home,
+        engine="hermes",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert target.readlink() == new_source
+    assert result.status == "PENDING"
+    assert result.item_for(target=stale_target).code == "MANAGED_SOURCE_MISSING"
 
 
 @pytest.mark.parametrize("engine", ["openclaw", "claude_code", "aicoding", "hermes"])

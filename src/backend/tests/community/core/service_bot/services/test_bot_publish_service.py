@@ -24,6 +24,8 @@ from agentclaw.community.core.service_bot.repository.models import (
     PublishOperationState,
     PublishStatus,
 )
+from agentclaw.community.core.devices.models import DeviceBindingStatus
+from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 from agentclaw.community.core.service_bot.services.deploy.provider_resolver import (
     TECLAW_DEVICE_PROVIDER,
     resolve_device_provider,
@@ -649,10 +651,8 @@ class TestOfflinePublish:
         mock_repo.update_status.assert_called_once_with(
             1, PublishStatus.DRAFT, PublishStatus.VALIDATING
         )
-        # 取消预发既回退状态，也用持久任务销毁 verify 运行时。
-        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
-            publish_id=1, stage=PublishStage.VERIFY, operator="system"
-        )
+        # 回退草稿只更新发布单状态，不销毁现有 verify 运行时。
+        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):
@@ -2492,6 +2492,7 @@ class TestGetBotStageBindingInfo:
         }
 
     def test_service_bot_eval_success(self):
+        """stage=eval-{task_uuid} 走 Quality Task 路径一，通过 task_uuid 查到 bot_uuid。"""
         mock_repo = Mock()
         bot_repo = Mock()
         bot_repo.get_by_id_and_owner.return_value = {
@@ -2510,7 +2511,7 @@ class TestGetBotStageBindingInfo:
             quality_task_service=quality_task_service,
         )
 
-        result = service.get_bot_stage_binding_info("bot_001", "user_001", PublishStage.EVAL.value)
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "eval-task-uuid-eval")
 
         assert result == {
             "bot_id": "bot_001",
@@ -2525,9 +2526,10 @@ class TestGetBotStageBindingInfo:
             "device_provider": "baas",
             "device_id": "BOT-UUID-EVAL",
         }
-        quality_task_service.get_task_by_uuid.assert_called_once_with("eval")
+        quality_task_service.get_task_by_uuid.assert_called_once_with("task-uuid-eval")
 
-    def test_service_bot_eval_task_not_found(self):
+    def test_service_bot_eval_task_not_found_binding_fallback(self):
+        """stage=eval 且 Quality Task 不存在时，降级到 binding 表查询。"""
         mock_repo = Mock()
         bot_repo = Mock()
         bot_repo.get_by_id_and_owner.return_value = {
@@ -2537,16 +2539,20 @@ class TestGetBotStageBindingInfo:
         }
         quality_task_service = Mock()
         quality_task_service.get_task_by_uuid.return_value = None
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (0, [])
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
             quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="Quality task not found for eval stage"):
+        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", PublishStage.EVAL.value)
 
-    def test_service_bot_eval_task_missing_bot_uuid(self):
+    def test_service_bot_eval_task_missing_bot_uuid_binding_fallback(self):
+        """Quality Task 存在但缺少 bot_uuid 时，降级到 binding 表查询。"""
         mock_repo = Mock()
         bot_repo = Mock()
         bot_repo.get_by_id_and_owner.return_value = {
@@ -2556,14 +2562,17 @@ class TestGetBotStageBindingInfo:
         }
         quality_task_service = Mock()
         quality_task_service.get_task_by_uuid.return_value = Mock(ext={})
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (0, [])
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
             quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="Quality task missing bot_uuid in ext"):
-            service.get_bot_stage_binding_info("bot_001", "user_001", PublishStage.EVAL.value)
+        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
+            service.get_bot_stage_binding_info("bot_001", "user_001", "eval-task-uuid-001")
 
     def test_service_bot_online_success(self):
         mock_repo = Mock()
@@ -2747,7 +2756,8 @@ class TestGetBotStageBindingInfo:
         with pytest.raises(BotPublishServiceError, match="Binding record missing sandbox_id in device_props: binding_id=702"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "online")
 
-    def test_service_bot_eval_prefixed_stage_normalized_then_unsupported(self):
+    def test_service_bot_eval_prefixed_stage_binding_fallback(self):
+        """stage=eval-biz-001 且 Quality Task 不存在时，降级到 binding 表按 default_tag=biz-001 查询。"""
         mock_repo = Mock()
         bot_repo = Mock()
         bot_repo.get_by_id_and_owner.return_value = {
@@ -2757,16 +2767,20 @@ class TestGetBotStageBindingInfo:
         }
         quality_task_service = Mock()
         quality_task_service.get_task_by_uuid.return_value = None
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (0, [])
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
             quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="Quality task not found for eval stage"):
+        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "eval-biz-001")
 
-    def test_service_bot_unsupported_stage(self):
+    def test_service_bot_eval_stage_no_binding_found(self):
+        """stage=eval 无 Quality Task 且 binding 表也无记录时，报错。"""
         mock_repo = Mock()
         bot_repo = Mock()
         bot_repo.get_by_id_and_owner.return_value = {
@@ -2776,16 +2790,160 @@ class TestGetBotStageBindingInfo:
         }
         quality_task_service = Mock()
         quality_task_service.get_task_by_uuid.return_value = None
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (0, [])
         service = _make_service(
             bot_publish_repo=mock_repo,
             bot_repo=bot_repo,
             quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
         )
 
-        with pytest.raises(BotPublishServiceError, match="Quality task not found for eval stage"):
+        with pytest.raises(BotPublishServiceError, match="未找到 bot_id=bot_001 的评测环境绑定信息"):
             service.get_bot_stage_binding_info("bot_001", "user_001", "eval")
 
-    def test_service_bot_verify_binding_not_found(self):
+    def test_service_bot_eval_binding_path_success(self):
+        """stage=eval 无 Quality Task 时，从 binding 表按 default_tag=eval 找到 binding 后返回。"""
+        mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "baas",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = None
+        binding_record = Mock(
+            spec=DeviceBindingRecord,
+            id=3001,
+            device_id="eval-bot-uuid-001",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_001"},
+        )
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (1, [binding_record])
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "eval")
+
+        assert result["device_id"] == "eval-bot-uuid-001"
+        assert result["binding_id"] == 3001
+        assert result["device_provider"] == "baas"
+
+    def test_service_bot_eval_quality_task_path_success(self):
+        """stage=eval-{task_uuid} 且 Quality Task 有 bot_uuid 时，走路径一直接返回。"""
+        mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "teclaw",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = Mock(
+            ext={"bot_uuid": "task-bot-uuid-999"},
+        )
+        device_binding_repo = Mock()
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "eval-task-uuid-999")
+
+        assert result["device_id"] == "task-bot-uuid-999"
+        assert result["binding_id"] is None  # Quality Task 路径不返回 binding_id
+        assert result["device_provider"] == "baas"
+
+    def test_service_bot_eval_binding_path_filters_released(self):
+        """stage=eval 查 binding 表时，过滤 RELEASED 状态的记录。"""
+        mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "baas",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = None
+        released_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=3002,
+            device_id="released-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.RELEASED.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_001"},
+        )
+        active_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=3003,
+            device_id="active-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_001"},
+        )
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (2, [released_binding, active_binding])
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "eval")
+
+        assert result["device_id"] == "active-bot-uuid"
+        assert result["binding_id"] == 3003
+
+    def test_service_bot_eval_binding_path_filters_wrong_bot_id(self):
+        """stage=eval 查 binding 表时，过滤 bot_id 不匹配的记录。"""
+        mock_repo = Mock()
+        bot_repo = Mock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "bot_id": "bot_001",
+            "bot_type": "service",
+            "active_engine": "baas",
+        }
+        quality_task_service = Mock()
+        quality_task_service.get_task_by_uuid.return_value = None
+        wrong_bot_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=3004,
+            device_id="other-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_002"},
+        )
+        correct_binding = Mock(
+            spec=DeviceBindingRecord,
+            id=3005,
+            device_id="correct-bot-uuid",
+            device_provider="baas",
+            status=DeviceBindingStatus.ACTIVE.value,
+            device_props={"AGENTCLAW_DEFAULT_TAG": "eval", "bot_id": "bot_001"},
+        )
+        device_binding_repo = Mock()
+        device_binding_repo.list_bindings.return_value = (2, [wrong_bot_binding, correct_binding])
+        service = _make_service(
+            bot_publish_repo=mock_repo,
+            bot_repo=bot_repo,
+            quality_task_service=quality_task_service,
+            device_binding_repo=device_binding_repo,
+        )
+
+        result = service.get_bot_stage_binding_info("bot_001", "user_001", "eval")
+
+        assert result["device_id"] == "correct-bot-uuid"
+        assert result["binding_id"] == 3005
         mock_repo = Mock()
         mock_repo.get_latest_by_source_bot_id_and_owner_and_status.return_value = _create_mock_record(
             record_id=17,

@@ -19,6 +19,8 @@ export function normalizeTaskStatus(status: unknown): ProductTaskStatus {
     case 'FAILED':
     case 'CANCELLED':
       return value;
+    case 'SUCCESS':
+      return 'DONE';
     case 'HUNG':
       return 'REVIEWING';
     case 'PENDING':

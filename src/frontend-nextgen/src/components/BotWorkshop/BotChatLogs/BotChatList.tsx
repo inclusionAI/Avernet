@@ -2,12 +2,13 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import type { BotChatPage } from '@/domain/botChats';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import type { BotChatDetailSelection, BotChatPage } from '@/domain/botChats';
 import { ChevronLeft, ChevronRight, Eye, Target } from 'lucide-react';
 
 interface Props {
   page?: BotChatPage;
-  onOpen: (traceId: string) => void;
+  onOpen: (selection: BotChatDetailSelection) => void;
   onPage: (page: number) => void;
   onPageSize: (limit: number) => void;
 }
@@ -16,20 +17,75 @@ const text = (value: unknown) => {
   if (value === undefined || value === null || value === '') return '-';
   return typeof value === 'string' ? value : JSON.stringify(value);
 };
-const short = (value: unknown, length = 36) => {
+const preview = (value: unknown, length = 96) => {
   const rendered = text(value);
   return rendered.length > length ? `${rendered.slice(0, length)}…` : rendered;
 };
 const cost = (value: number) => (value > 0 ? `$${value.toFixed(6)}` : '-');
 const statusTone = (status: string) => (status === 'SUCCESS' ? 'success' : status === 'RUNNING' ? 'primary' : 'error');
 
+function Identifier({ value }: { value?: string }) {
+  const rendered = value || '-';
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="block max-w-full truncate font-mono text-xs text-[var(--color-fg)]">{rendered}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-sm break-all font-mono text-[11px]">
+          {rendered}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function Preview({ value, accent }: { value: unknown; accent?: boolean }) {
+  const rendered = text(value);
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            className={`block max-w-full overflow-hidden text-ellipsis [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] break-words leading-5 ${
+              accent ? 'text-[var(--color-fg)]' : 'text-[var(--color-muted)]'
+            }`}
+          >
+            {preview(value)}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-lg whitespace-pre-wrap break-words text-left leading-5">
+          {rendered}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 export function BotChatList({ page, onOpen, onPage, onPageSize }: Props) {
   if (!page?.items.length) return <Empty compact title="暂无日志" description="调整筛选条件后重试。" />;
   const pageCount = Math.max(1, Math.ceil(page.total / page.limit));
   return (
     <>
-      <div className="app-scrollbar overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-card)]">
-        <table className="w-full min-w-[1540px] border-collapse text-left text-sm">
+      <div className="app-scrollbar overflow-x-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] shadow-sm">
+        <table className="w-full min-w-[1280px] table-fixed border-collapse text-left text-sm">
+          <colgroup>
+            <col className="w-[170px]" />
+            <col className="w-[104px]" />
+            <col className="w-[110px]" />
+            <col className="w-[170px]" />
+            <col className="w-[170px]" />
+            <col className="w-[230px]" />
+            <col className="w-[230px]" />
+            <col className="w-[230px]" />
+            <col className="w-[120px]" />
+            <col className="w-[110px]" />
+            <col className="w-[86px]" />
+            <col className="w-[150px]" />
+            <col className="w-[90px]" />
+          </colgroup>
           <thead className="bg-[var(--color-panel-muted)] text-[var(--color-muted)]">
             <tr>
               {[
@@ -64,43 +120,49 @@ export function BotChatList({ page, onOpen, onPage, onPageSize }: Props) {
                 key={item.id}
                 className="group border-b border-[var(--color-border)] last:border-0 hover:bg-[var(--color-panel-muted)]"
               >
-                <td className="whitespace-nowrap px-4 py-4 font-mono text-xs" title={item.id}>
-                  {item.id}
+                <td className="px-4 py-3 align-top">
+                  <Identifier value={item.id} />
                 </td>
-                <td className="px-4 py-4">{item.bizScene ?? '-'}</td>
-                <td className="whitespace-nowrap px-4 py-4 font-mono text-xs">{item.bizTaskId ?? '-'}</td>
-                <td className="whitespace-nowrap px-4 py-4 font-mono text-xs">{item.groupId ?? '-'}</td>
-                <td className="whitespace-nowrap px-4 py-4 font-mono text-xs">{item.sessionId ?? '-'}</td>
-                <td className="max-w-64 break-all px-4 py-4 font-mono text-xs" title={item.sessionKey}>
-                  {item.sessionKey ?? '-'}
+                <td className="truncate px-4 py-3 align-top">{item.bizScene ?? '-'}</td>
+                <td className="px-4 py-3 align-top">
+                  <Identifier value={item.bizTaskId} />
                 </td>
-                <td className="max-w-64 px-4 py-4" title={text(item.input)}>
-                  <span className="flex items-start gap-1">
+                <td className="px-4 py-3 align-top">
+                  <Identifier value={item.groupId} />
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <Identifier value={item.sessionId} />
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <Identifier value={item.sessionKey} />
+                </td>
+                <td className="px-4 py-3 align-top">
+                  <span className="flex min-w-0 items-start gap-1">
                     <Target className="mt-0.5 size-3.5 shrink-0 text-[var(--color-error)]" />
-                    {short(item.input)}
+                    <Preview value={item.input} accent />
                   </span>
                 </td>
-                <td className="max-w-56 px-4 py-4" title={item.outputPreview}>
-                  {short(item.outputPreview)}
+                <td className="px-4 py-3 align-top">
+                  <Preview value={item.outputPreview} />
                 </td>
-                <td className="whitespace-nowrap px-4 py-4">{item.model ?? '-'}</td>
-                <td className="whitespace-nowrap px-4 py-4 font-mono text-xs">
+                <td className="truncate px-4 py-3 align-top">{item.model ?? '-'}</td>
+                <td className="px-4 py-3 align-top font-mono text-xs">
                   {cost(item.totalCost)}
                   <div className="mt-1 text-[var(--color-muted)]">{item.totalTokens} tokens</div>
                 </td>
-                <td className="whitespace-nowrap px-4 py-4">
+                <td className="px-4 py-3 align-top">
                   <Badge tone={statusTone(item.status)}>{item.status}</Badge>
                 </td>
-                <td className="whitespace-nowrap px-4 py-4">
+                <td className="whitespace-nowrap px-4 py-3 align-top text-xs text-[var(--color-muted)]">
                   {item.timestamp ? new Date(item.timestamp).toLocaleString() : '-'}
                 </td>
-                <td className="sticky right-0 border-l border-[var(--color-border)] bg-[var(--color-card)] px-4 py-4 group-hover:bg-[var(--color-panel-muted)]">
+                <td className="sticky right-0 border-l border-[var(--color-border)] bg-[var(--color-card)] px-3 py-3 align-top group-hover:bg-[var(--color-panel-muted)]">
                   <Button
                     variant="ghost"
                     size="sm"
                     className="text-[var(--color-primary)]"
                     leftIcon={<Eye className="size-4" />}
-                    onClick={() => onOpen(item.id)}
+                    onClick={() => onOpen({ traceId: item.id, sessionId: item.sessionId, botId: item.botId })}
                   >
                     详情
                   </Button>

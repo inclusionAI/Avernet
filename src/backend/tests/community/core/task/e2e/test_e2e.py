@@ -263,10 +263,6 @@ class _TestRunner:
         self._groups.append(gf)
         return gid
 
-    async def run_bbs(self, execution_graph) -> None:
-        # BBS relay is exercised explicitly through claim/attach/report in these tests.
-        return None
-
     def query_status(self, task_id): return self._graph.query_task_dashboard(task_id).status
     def query_detail(self, node): return node
     def query_result(self, node): return node

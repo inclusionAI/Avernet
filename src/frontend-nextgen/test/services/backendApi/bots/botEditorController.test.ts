@@ -101,6 +101,12 @@ describe('botEditorController', () => {
     ],
     ['skill sets', () => botEditorController.listSkillSets('bot-1'), '/openapi/v1/bots/bot-1/skill-sets', 'GET'],
     [
+      'skill set resources',
+      () => botEditorController.listSkillSetResources('bot-1'),
+      '/openapi/v1/bots/bot-1/skill-sets/resources',
+      'GET',
+    ],
+    [
       'skill set members',
       () => botEditorController.listSkillSetSkills('bot-1', '7'),
       '/openapi/v1/bots/bot-1/skill-sets/7/skills',

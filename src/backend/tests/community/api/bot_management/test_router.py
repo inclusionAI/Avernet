@@ -1982,7 +1982,53 @@ class TestGetBotClassification:
                 "bot_type": "service",
             },
         }
-        svc.get_bot_classification.assert_called_once_with("other-service-bot")
+        svc.get_bot_classification.assert_called_once_with(
+            "other-service-bot", entity_id=None
+        )
+
+    def test_entity_id_disambiguates_legacy_bot_id(self, client):
+        tc, svc, _passport = client
+        tc.app.dependency_overrides[get_current_user] = _authenticated_user
+        svc.get_bot_classification.return_value = {
+            "bot_id": "default",
+            "bot_type": "service",
+        }
+
+        response = tc.get(
+            "/api/bots/default/classification?entity_id=service-owner"
+        )
+
+        assert response.json() == {
+            "success": True,
+            "message": "OK",
+            "error_code": 200,
+            "data": {
+                "bot_id": "default",
+                "bot_type": "service",
+            },
+        }
+        svc.get_bot_classification.assert_called_once_with(
+            "default", entity_id="service-owner"
+        )
+
+    def test_unknown_entity_returns_404_envelope(self, client):
+        tc, svc, _passport = client
+        tc.app.dependency_overrides[get_current_user] = _authenticated_user
+        svc.get_bot_classification.return_value = None
+
+        response = tc.get(
+            "/api/bots/default/classification?entity_id=missing-owner"
+        )
+
+        assert response.json() == {
+            "success": False,
+            "message": "Bot不存在: default",
+            "error_code": 404,
+            "data": None,
+        }
+        svc.get_bot_classification.assert_called_once_with(
+            "default", entity_id="missing-owner"
+        )
 
     def test_missing_bot_returns_404_envelope(self, client):
         tc, svc, _passport = client

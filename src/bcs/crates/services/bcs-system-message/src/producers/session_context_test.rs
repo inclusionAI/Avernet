@@ -349,6 +349,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         manager_id,
         CoordinationSurface {
             mode: CoordinationMode::McporterMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: Some("mcporter".to_string()),
             tool_name_mapping: Default::default(),
@@ -358,6 +359,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         mcporter_worker_id,
         CoordinationSurface {
             mode: CoordinationMode::McporterMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: Some("mcporter".to_string()),
             tool_name_mapping: Default::default(),
@@ -367,6 +369,7 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
         native_mcp_worker_id,
         CoordinationSurface {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: Default::default(),
@@ -412,6 +415,79 @@ async fn manager_worker_context_uses_recipient_coordination_surface() {
     for bot_id in [native_mcp_worker_id, native_tool_worker_id, legacy_worker_id] {
         assert!(!message_for(bot_id).contains("必须保留并回传完整原始输出"));
     }
+}
+
+#[tokio::test]
+async fn manager_worker_worker_context_omits_optional_send_message_tool_when_disabled() {
+    let manager_id = "provider-manager";
+    let worker_id = "provider-worker";
+
+    let mut manager = Participant::bot(manager_id, ParticipantRole::Manager);
+    manager.bot_name = Some("Provider Manager".to_string());
+    let mut worker = Participant::bot(worker_id, ParticipantRole::Worker);
+    worker.bot_name = Some("Provider Worker".to_string());
+
+    let mut group = Group::new(
+        "group-provider-surface",
+        manager_id,
+        vec![manager.clone(), worker.clone()],
+    );
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    let participants = group.participants.clone();
+    let registry = NamedRegistry::new(&[
+        (manager_id, "Provider Manager", Some("manager")),
+        (worker_id, "Provider Worker", None),
+    ])
+    .with_surface(
+        manager_id,
+        CoordinationSurface {
+            mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
+            mcp_server: Some("bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: Default::default(),
+        },
+    )
+    .with_surface(
+        worker_id,
+        CoordinationSurface {
+            mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: false,
+            mcp_server: Some("bcs".to_string()),
+            mcporter_command: None,
+            tool_name_mapping: Default::default(),
+        },
+    );
+    let event = SystemMessageEvent::SessionContext {
+        group_id: group.id.clone(),
+        session_id: "group-provider-surface:7c18e4be".to_string(),
+        reason: "协作任务".to_string(),
+        session_input: None,
+        task_ledger: None,
+        driver_delivery: None,
+    };
+
+    let (messages, _) = SessionContextMessageProducer
+        .produce(&event, &group, &registry, &participants)
+        .await;
+
+    let message_for = |bot_id: &str| {
+        messages
+            .iter()
+            .find(|message| message.recipients == vec![bot_id.to_string()])
+            .expect("recipient message")
+            .message
+            .as_str()
+    };
+    let manager_message = message_for(manager_id);
+    assert!(manager_message.contains("bcs_assign_task"));
+    assert!(manager_message.contains("bcs_task_complete"));
+    assert!(!manager_message.contains("bcs_send_task_message"));
+
+    let worker_message = message_for(worker_id);
+    assert!(worker_message.contains("本群为任务群，你是子 Bot。"));
+    assert!(worker_message.contains("收到 manager 派发的任务后直接处理。"));
+    assert!(!worker_message.contains("bcs_send_task_message"));
 }
 
 #[tokio::test]

@@ -15,6 +15,7 @@ import pytest
 from secbaas.community.api.bot_runtime import BotChatContext
 from secbaas.community.core.service.bot_run import BotRunner, BotServiceSelector
 from secbaas.community.core.service.bot_run._internal_protocols import MessageDispatcher
+from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import (
     BotBindingData,
     BotServicePlugin,
@@ -111,6 +112,8 @@ def _make_runner(
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
         dispatchers=[dispatcher],
+        system_config_service=MagicMock(),
+        eval_session_log=NoopEvalSessionLog(),
     )
 
 

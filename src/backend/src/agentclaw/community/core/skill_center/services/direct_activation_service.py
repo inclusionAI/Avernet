@@ -148,7 +148,12 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id,
             action="skill_direct_activate" if active else "skill_direct_deactivate",
         )
-        return {**skill, "active": active, "changed": result["changed"]}
+        return {
+            **skill,
+            "active": active,
+            "changed": result["changed"],
+            "runtime_projection": result["runtime_projection"],
+        }
 
     def _resolve_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
@@ -257,6 +262,18 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 bot_id=bot_id, owner_id=str(bot["owner_id"]), bot=bot
             )
         )
+
+    def platform_default_mcp_codes(
+        self, *, bot_id: str, owner_id: str, actor_id: str
+    ) -> frozenset[str]:
+        """``server_codes_for``, behind the same Bot resolution as the commands.
+
+        Deliberately the policy object the commands already hold rather than a
+        second construction: a caller asking "would activate_mcp refuse this?"
+        must get the answer activate_mcp will actually give.
+        """
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
+        return self._platform_default_mcp_policy.server_codes_for(bot)
 
     # ── Shared ──────────────────────────────────────────────────────
 

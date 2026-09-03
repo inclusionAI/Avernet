@@ -2115,7 +2115,7 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                 f"[HEARTBEAT_ORPHAN_DELETED] Successfully deleted orphan: {triple_id}"
             )
         except Exception as e:
-            logger.error(
+            logger.warning(
                 f"[HEARTBEAT_ORPHAN_DELETE_FAILED] Failed to delete orphan {triple_id}: "
                 f"{type(e).__name__}: {e}",
                 exc_info=True,

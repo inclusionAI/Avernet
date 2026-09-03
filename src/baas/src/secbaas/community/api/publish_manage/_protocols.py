@@ -17,6 +17,7 @@ from ._models import (
     PublishConfig,
     PublishProgressResponse,
     PublishResponse,
+    UpdateBotStatusResult,
     UpdateDeviceStatusResult,
 )
 
@@ -41,6 +42,14 @@ class PublishAdminService(Protocol):
         status: str,
         operator: str,
     ) -> UpdateDeviceStatusResult: ...
+
+    async def update_bot_status(
+        self,
+        *,
+        bot_id: int,
+        status: str,
+        operator: str,
+    ) -> UpdateBotStatusResult: ...
 
 
 @runtime_checkable

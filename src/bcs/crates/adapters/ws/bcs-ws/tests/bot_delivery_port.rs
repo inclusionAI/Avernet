@@ -1,7 +1,10 @@
 use std::time::Duration;
 
-use bcs_protocol::{BcsFrame, RequestFrame};
-use bcs_service_api::{BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryTarget};
+use bcs_protocol::{BcsFrame, RequestFrame, ResponseFrame};
+use bcs_service_api::{
+    BotAbortDeliveryCommand, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort,
+    BotDeliveryTarget, ServiceError,
+};
 use bcs_ws::bot::BotConnectionRegistry;
 use tokio::sync::mpsc;
 
@@ -89,10 +92,121 @@ async fn bot_registry_sends_request_and_resolves_response() {
     };
 
     let payload = serde_json::json!({"messages": []});
-    registry.resolve_pending_request(&request_id, payload.clone()).await;
+    registry
+        .resolve_pending_request(&request_id, payload.clone())
+        .await;
 
     let response = response_handle.await.unwrap().unwrap();
     assert_eq!(response, payload);
+}
+
+#[tokio::test]
+async fn bot_registry_abort_waits_for_matching_response_and_validates_exact_run() {
+    let registry = std::sync::Arc::new(BotConnectionRegistry::new());
+    let (tx, mut rx) = mpsc::channel(1);
+    registry.connect("bot-1".to_string(), tx).await;
+
+    let abort_registry = registry.clone();
+    let abort_handle = tokio::spawn(async move {
+        abort_registry
+            .abort(BotAbortDeliveryCommand {
+                target: BotDeliveryTarget::WebSocket {
+                    bot_id: "bot-1".to_string(),
+                },
+                command_id: "abort-command".to_string(),
+                group_id: "group-1".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: Some("plugin-run-1".to_string()),
+                provider_bypass_headers: Vec::new(),
+                timeout_ms: 1_000,
+            })
+            .await
+    });
+
+    let delivered = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let frame: BcsFrame = serde_json::from_str(&delivered).unwrap();
+    match frame {
+        BcsFrame::Request(request) => {
+            assert_eq!(request.id, "abort-command");
+            assert_eq!(request.method, "chat.abort");
+            assert_eq!(request.params.as_ref().unwrap()["session_key"], "session-1");
+            assert_eq!(request.params.as_ref().unwrap()["run_id"], "plugin-run-1");
+        }
+        _ => panic!("expected chat.abort RequestFrame"),
+    }
+    tokio::task::yield_now().await;
+    assert!(
+        !abort_handle.is_finished(),
+        "mpsc write is not an abort acknowledgement"
+    );
+
+    assert!(
+        registry
+            .resolve_pending_abort_request(
+                "abort-command",
+                ResponseFrame::ok(
+                    "abort-command",
+                    serde_json::json!({
+                        "aborted": true,
+                        "aborted_run_ids": ["plugin-run-1"]
+                    }),
+                ),
+            )
+            .await
+    );
+    let result = abort_handle.await.unwrap().unwrap();
+    assert_eq!(result.aborted_run_ids, ["plugin-run-1"]);
+}
+
+#[tokio::test]
+async fn bot_registry_abort_maps_legacy_unknown_method_to_capability_error() {
+    let registry = std::sync::Arc::new(BotConnectionRegistry::new());
+    let (tx, mut rx) = mpsc::channel(1);
+    registry.connect("legacy-bot".to_string(), tx).await;
+
+    let abort_registry = registry.clone();
+    let abort_handle = tokio::spawn(async move {
+        abort_registry
+            .abort(BotAbortDeliveryCommand {
+                target: BotDeliveryTarget::WebSocket {
+                    bot_id: "legacy-bot".to_string(),
+                },
+                command_id: "abort-legacy".to_string(),
+                group_id: "group-1".to_string(),
+                session_id: "session-1".to_string(),
+                run_id: Some("plugin-run-1".to_string()),
+                provider_bypass_headers: Vec::new(),
+                timeout_ms: 1_000,
+            })
+            .await
+    });
+
+    let _ = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .expect("chat.abort request")
+        .expect("bot channel");
+    assert!(
+        registry
+            .resolve_pending_abort_request(
+                "abort-legacy",
+                ResponseFrame::error(
+                    "abort-legacy",
+                    "NOT_FOUND",
+                    "Unknown method: chat.abort",
+                ),
+            )
+            .await
+    );
+
+    let error = abort_handle.await.unwrap().unwrap_err();
+    assert!(matches!(
+        error,
+        ServiceError::BotMethodUnsupported { bot_id, method }
+            if bot_id == "legacy-bot" && method == "chat.abort"
+    ));
 }
 
 #[tokio::test]

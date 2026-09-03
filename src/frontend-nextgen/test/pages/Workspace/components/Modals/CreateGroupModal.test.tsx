@@ -50,6 +50,15 @@ const bots = [
   },
 ];
 
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  configurable: true,
+  value: class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  },
+});
+
 function renderModal(overrides: Record<string, unknown> = {}) {
   return render(
     <CreateGroupModal open activeIdentity={identity} onClose={jest.fn()} onCreated={jest.fn()} {...overrides} />,
@@ -73,6 +82,10 @@ beforeEach(() => {
     ok: true,
     data: { items: [], total: 0, offset: 0, limit: 50, hasMore: false },
   });
+  cs.listMine.mockResolvedValue({
+    ok: true,
+    data: { items: bots, total: bots.length, offset: 0, limit: 50, hasMore: false },
+  });
   jest.spyOn(collaborationDefinitionService, 'validate').mockResolvedValue({
     ok: true,
     data: {
@@ -85,7 +98,7 @@ beforeEach(() => {
 });
 
 it('free_chat strategy posts delivery_policy on confirm', async () => {
-  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9', initialSessionId: 's-initial' } });
   const onCreated = jest.fn();
   renderModal({ onCreated });
 
@@ -100,11 +113,12 @@ it('free_chat strategy posts delivery_policy on confirm', async () => {
         strategy: 'chat',
         name: '我的群',
         driverBotUuid: 'b1',
+        originator: 'actor-1',
         participants: [{ actor_id: 'actor-1' }, { actor_id: 'b1' }],
       }),
     ),
   );
-  expect(onCreated).toHaveBeenCalledWith('g9');
+  expect(onCreated).toHaveBeenCalledWith({ groupId: 'g9', initialSessionId: 's-initial' });
 });
 
 it('task_master_slave uses the selected manager as driver_bot_uuid', async () => {
@@ -164,9 +178,49 @@ it('state_machine submits definitionYaml as content_yaml body', async () => {
       expect.objectContaining({
         strategy: 'state_machine',
         definitionYaml: 'participants:\n  - alpha\nroles:\n  - driver',
+        originator: 'actor-bot',
       }),
     ),
   );
+});
+
+it('shows the collaboration flow preview aside after YAML validation', async () => {
+  const validate = collaborationDefinitionService.validate as jest.Mock;
+  validate.mockResolvedValueOnce({
+    ok: true,
+    data: {
+      valid: true,
+      summary: { initial_nodes: ['node-1'] },
+      participants: [{ binding: 'role-1', display_name: 'Alpha', required: true }],
+      errors: [],
+      graph: {
+        graph_mode: 'acyclic',
+        nodes: [
+          {
+            node_id: 'node-1',
+            kind: 'bot_task',
+            display_name: '处理任务',
+            assignee: { type: 'bot_binding', binding: 'role-1' },
+            final_output: true,
+            judge: false,
+          },
+        ],
+        edges: [],
+      },
+    },
+  });
+  renderModal({ activeIdentity: botIdentity });
+
+  fireEvent.click(screen.getByRole('radio', { name: '自定义协作' }));
+  fireEvent.change(screen.getByLabelText('协作定义 YAML'), {
+    target: { value: 'participants:\n  - alpha\nroles:\n  - driver' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /校验 YAML/ }));
+
+  await waitFor(() => {
+    expect(screen.getByRole('complementary', { name: '协作流程侧栏', hidden: true })).toBeInTheDocument();
+  });
+  expect(screen.getByRole('region', { name: '协作流程预览' })).toBeInTheDocument();
 });
 
 it('backend 400 shows YAML error inline without closing', async () => {
@@ -202,10 +256,24 @@ it('user identity cannot choose custom collaboration', async () => {
   expect(screen.getByRole('radio', { name: '自定义协作' })).toBeDisabled();
 });
 
-it('user identity shows the 我的 Bot tab', async () => {
+it('user identity shows the 已管理 Bot tab', async () => {
   renderModal();
   await screen.findByRole('button', { name: /Alpha/ });
-  expect(screen.getByRole('button', { name: '我的 Bot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '已管理 Bot' })).toBeInTheDocument();
+});
+
+it('keeps the managed Bot picker within the modal width', async () => {
+  renderModal();
+  await screen.findByRole('button', { name: /Alpha/ });
+
+  const dialog = screen.getByRole('dialog');
+  expect(dialog).toHaveClass('min-w-0');
+  expect(screen.getByTestId('create-group-modal-body')).toHaveClass('min-w-0', 'max-w-full', 'overflow-x-hidden');
+  expect(screen.getByTestId('group-participant-picker')).toHaveClass('w-full', 'min-w-0', 'max-w-full');
+  const managedTab = screen.getByRole('button', { name: '已管理 Bot' });
+  expect(managedTab.parentElement).toHaveClass('w-full', 'min-w-0');
+  fireEvent.click(managedTab);
+  expect(await screen.findByRole('button', { name: /Beta/ })).toBeInTheDocument();
 });
 
 it('clears previous form state when reopened', async () => {

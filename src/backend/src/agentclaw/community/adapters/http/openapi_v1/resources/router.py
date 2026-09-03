@@ -40,10 +40,14 @@ API" is not "files have no record".
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -83,6 +87,7 @@ from agentclaw.community.di import Injected
 from agentclaw.community.log import get_logger
 
 from .schemas import FileEntry, Preview, ResourceType
+from .zip_build import build_directory_zip
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 logger = get_logger()
@@ -102,6 +107,17 @@ _TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
         "description": "File exceeds the size the provider will serve, or the "
         "1 MB preview cap.",
         **error_example(413, "File too large for preview"),
+    },
+}
+# download-dir's 413 is a different message (directory caps, not the preview
+# cap), so it gets its own table — merging them would document a message this
+# route never emits.
+_DIR_TOO_LARGE_RESPONSE: dict[int | str, dict[str, object]] = {
+    413: {
+        "model": ErrorEnvelope,
+        "description": "The directory exceeds the download caps: 100 MB per "
+        "file, 5000 files, 500 MB in total.",
+        **error_example(413, "Directory too large to download"),
     },
 }
 # The group is already user-scoped, so it carries ``USER_SCOPED_403`` from
@@ -215,6 +231,18 @@ FilePathQuery = Annotated[
     ),
 ]
 
+#: download-dir's variant: the same addressing, but *optional* — the workspace
+#: root is a meaningful thing to download, unlike a file address.
+DirPathQuery = Annotated[
+    str,
+    Query(
+        description="Workspace-relative path of the folder to download, e.g. "
+        "'docs/spec' — exactly as returned in a listing entry's `path`. "
+        "Omit it to download the entire workspace. A leading slash is "
+        "tolerated; '..' segments are refused (400)."
+    ),
+]
+
 
 @router.get("", response_model=Envelope[Page[FileEntry]])
 @envelope_errors
@@ -235,7 +263,7 @@ async def list_resources(
     ] = None,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[Page[FileEntry]]:
+) -> Envelope[Page[FileEntry]] | Response:
     """List a directory of the bot's workspace.
 
     Entries come from the **workspace**, never from records. That is what makes
@@ -252,6 +280,20 @@ async def list_resources(
     response, not the work. Requesting a later page costs exactly what the
     first one costs.
     """
+    # A deployed pre-contract client still sends ``action=preview`` to this
+    # list URL. Keep that request shape as an adapter-only compatibility shim:
+    # it is not part of the public schema, and must never reach ``list_dir`` on
+    # a file path. Returning a concrete response deliberately leaves the
+    # documented list response model intact.
+    if request.query_params.get("action") == "preview":
+        preview = envelope(
+            await _preview_resource(
+                file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+            ),
+            request,
+        )
+        return JSONResponse(content=preview.model_dump(mode="json"))
+
     safe = _safe_path(path)
     listed = await _list_dir_or_empty(
         file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe
@@ -558,6 +600,31 @@ async def _read_file_or_404(
     return content
 
 
+async def _preview_resource(
+    file_svc: ResourceFileService,
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_repo: BotRepository,
+    path: str,
+) -> Preview:
+    """Build one text preview for either public preview route."""
+    content = await _read_file_or_404(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+    )
+    if len(content) > _PREVIEW_MAX_BYTES:
+        raise FileTooLargeError(
+            f"File too large for preview (max {_PREVIEW_MAX_BYTES} bytes)"
+        )
+    return Preview(
+        path=_safe_path(path),
+        content_type="application/octet-stream",
+        # ``replace`` rather than raising: a preview of a mostly-text file
+        # with a stray byte is useful; a 500 is not.
+        content=content.decode("utf-8", errors="replace"),
+    )
+
+
 @router.get(
     "/download",
     responses={
@@ -589,6 +656,67 @@ async def download_file(
 
 
 @router.get(
+    "/download-dir",
+    responses={
+        200: {"content": {"application/zip": {}}},
+        **_DIR_TOO_LARGE_RESPONSE,
+    },
+)
+@envelope_errors
+async def download_directory(
+    owner_id: UserIdDep,
+    request: Request,
+    bot_id: BotIdPath,
+    path: DirPathQuery = "",
+    bot_repo: BotRepository = Injected(BotRepository),
+    file_svc: ResourceFileService = Injected(ResourceFileService),
+) -> Response:
+    """Download a whole directory as a zip archive, addressed by path.
+
+    The path may name any directory; omit it to download the entire
+    workspace. Raw bytes, not an envelope — the body is the archive.
+
+    The archive is built on disk before the response starts, so a walk
+    failure mid-way is still a clean error envelope, never a 200 with a
+    partial zip. Exceeding the directory download caps is answered with
+    a 413.
+    """
+    safe = _safe_path(path)
+    coords = _file_coords(bot_id, owner_id, bot_repo)
+    root_name = safe.rsplit("/", 1)[-1] if safe else "workspace"
+    try:
+        zip_path = await build_directory_zip(
+            file_svc.iter_directory_files(
+                entity_type=coords.entity_type,
+                entity_id=coords.entity_id,
+                bot_id=coords.bot_id,
+                engine_type=coords.engine_type,
+                path=safe,
+            ),
+            root_name,
+        )
+    except httpx.HTTPStatusError as exc:
+        # The generator walks lazily inside the build, so the provider's verdict
+        # on a missing directory surfaces here, not at the call site above. The
+        # baas providers re-raise the upstream 404 for it rather than answering
+        # ``None`` (same loudness ``_read_file_or_404`` relies on), and — same
+        # rule as there — only *here* does that 404 stop being an upstream fault
+        # and become this route's documented "not found"; a missing directory is
+        # an ordinary answer, an empty walk is not. Every other status still
+        # surfaces as a 500, which is what an upstream fault is.
+        if exc.response.status_code != 404:
+            raise
+        raise HTTPException(status_code=404, detail="Resource not found") from exc
+    filename = quote(f"{root_name}.zip")
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        background=BackgroundTask(os.unlink, zip_path),
+    )
+
+
+@router.get(
     "/preview",
     response_model=Envelope[Preview],
     responses=_TOO_LARGE_RESPONSE,
@@ -607,20 +735,13 @@ async def preview_file(
     Capped at 1 MB (legacy parity) — over that is a 413, not a truncated preview,
     so a caller is never handed a prefix it might mistake for the whole file.
     """
-    content = await _read_file_or_404(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
-    )
-    if len(content) > _PREVIEW_MAX_BYTES:
-        raise FileTooLargeError(
-            f"File too large for preview (max {_PREVIEW_MAX_BYTES} bytes)"
-        )
     return envelope(
-        Preview(
-            path=_safe_path(path),
-            content_type="application/octet-stream",
-            # ``replace`` rather than raising: a preview of a mostly-text file
-            # with a stray byte is useful; a 500 is not.
-            content=content.decode("utf-8", errors="replace"),
+        await _preview_resource(
+            file_svc,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_repo=bot_repo,
+            path=path,
         ),
         request,
     )

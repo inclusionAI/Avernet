@@ -1,5 +1,6 @@
 // @asset-migrated: teamclaw 自研资产
 /** 节点视图：垂直执行时间线 + 可点击节点卡片 + 子任务下钻入口。 */
+import { getCollaborationBotConversationUrl, getCollaborationGroupConversationUrl } from '@/utils/collaborationSquare';
 import React from 'react';
 import { ChevronRight, ExternalLink, Info, NodeStatusIcon } from './icons';
 import { Empty } from './theme';
@@ -16,6 +17,12 @@ const groupBadgeStyle: React.CSSProperties = {
   fontWeight: 650,
   whiteSpace: 'nowrap',
   flexShrink: 0,
+};
+
+const RUN_MODE_LABELS: Record<string, string> = {
+  single_bot: '单Bot',
+  coop_group: '协作群',
+  bbs: 'BBS接力',
 };
 
 const subTaskBadgeStyle: React.CSSProperties = {
@@ -49,22 +56,49 @@ const iconButtonStyle: React.CSSProperties = {
 
 export const NodeListView: React.FC<{
   nodes: TaskView['nodes'];
+  ownerBotId?: string | null;
+  userId?: string;
   onViewNodeDetail: (node: TaskNodeView) => void;
   onOpenSubTask?: (subTaskId: string) => void;
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ nodes, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ nodes, ownerBotId, userId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
   if (!nodes.length) {
     return <Empty description="暂无执行节点" />;
   }
 
+  // dashboard 通常已排序；视图层再次按 sequence 排序，确保所有入口都按执行顺序展示。
+  const orderedNodes = nodes.slice().sort((left, right) => left.sequence - right.sequence);
+
+  const getConversationBotId = (node: TaskNodeView): string | null => {
+    const botId = node.assignee?.trim() || ownerBotId?.trim();
+    if (!botId) return null;
+    return botId.includes(':') || !userId ? botId : `${botId}:${userId}`;
+  };
+
   return (
     <div style={{ padding: '14px 12px 24px' }}>
-      {nodes.map((node, idx) => {
-        const isLast = idx === nodes.length - 1;
+      {orderedNodes.map((node, idx) => {
+        const isLast = idx === orderedNodes.length - 1;
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
         const canDrillSession = Boolean(node.sessionId) && Boolean(onOpenGroupSession);
-        const executorLabel =
-          node.runMode === 'coop_group' || node.groupId ? node.groupName ?? 'BCS协作群' : node.executor;
+        const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
+        // 根节点的执行者可能只由 graph 级 owner_bot_id 兜底到 assignee，名称字段仍为空；
+        // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
+        // 只有明确的 coop_group 才按群名称展示，避免 BBS 节点携带 groupId 时误走群展示分支。
+        const isGroupNode = node.runMode === 'coop_group' || (!node.runMode && Boolean(node.groupId));
+        const executorLabel = isGroupNode
+          ? node.groupName ?? node.executor ?? node.assignee ?? ownerBotId ?? 'BCS协作群'
+          : node.executor ?? node.assignee ?? ownerBotId;
+        // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
+        // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
+        // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
+        const conversationHref = node.sessionId
+          ? isGroupNode
+            ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
+            : getConversationBotId(node)
+            ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
+            : null
+          : null;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {
@@ -167,7 +201,7 @@ export const NodeListView: React.FC<{
                         whiteSpace: 'nowrap',
                       }}
                     />
-                    {canDrillSession && <span style={groupBadgeStyle}>{node.groupId ? '协作群' : '会话'}</span>}
+                    {runModeLabel && <span style={groupBadgeStyle}>{runModeLabel}</span>}
                     {canOpenSub && <span style={subTaskBadgeStyle}>子任务</span>}
                   </div>
                   <div
@@ -180,10 +214,23 @@ export const NodeListView: React.FC<{
                       fontSize: 10,
                     }}
                   >
-                    <span>{node.startedAt ?? '尚未开始'}</span>
+                    <span>{node.startedAt ?? (node.status === 'pending' ? '尚未开始' : '—')}</span>
                     {node.timeConsuming && <span>· 耗时 {node.timeConsuming}</span>}
                   </div>
                 </div>
+                {conversationHref && (
+                  <a
+                    href={conversationHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`新开会话 ${node.name}`}
+                    title="新开页面查看会话"
+                    onClick={(event) => event.stopPropagation()}
+                    className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <ExternalLink size={14} />
+                  </a>
+                )}
                 <button
                   type="button"
                   aria-label={`查看 ${node.name} 详情`}

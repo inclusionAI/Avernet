@@ -15,14 +15,19 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
     SourceForm,
 )
+from agentclaw.community.core.bot_config_manifest.schema.limits import (
+    MAX_SOURCE_URL_CHARS,
+)
 from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
     unknown_placeholders,
 )
 from agentclaw.community.core.bot_config_manifest.schema.violations import Violation
 
 #: ``sha256:`` + 64 lowercase hex. One form, because a digest that can be
-#: written two ways is a digest two comparisons can disagree about.
-_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+#: written two ways is a digest two comparisons can disagree about. The
+#: ``\A``/``\Z`` form for the same reason the shared fetch-side
+#: ``DIGEST_RE`` states: ``$`` also matches before a trailing newline.
+_DIGEST_RE = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
 
 #: Conservative on purpose: letters, digits, and the four separators a real
 #: workspace path needs. Everything a shell, a URL or a filesystem would have to
@@ -96,7 +101,8 @@ def check_placeholders(ctx: Context, location: str, value: Any) -> None:
 
 
 def check_https_url(ctx: Context, location: str, value: Any) -> None:
-    """Refuse a source URL that is not an absolute https URL, or carries a token.
+    """Refuse a source URL that is not an absolute https URL, carries a token,
+    or exceeds the admission length cap.
 
     **Userinfo is the rule with teeth.** ``https://user:token@host/path`` puts a
     secret in a document that is stored as written, read back verbatim by
@@ -105,6 +111,15 @@ def check_https_url(ctx: Context, location: str, value: Any) -> None:
     credential store (schema §2.1) exists to avoid, so an inline credential is
     refused rather than accepted-and-redacted — redaction cannot un-store what
     was already accepted somewhere else.
+
+    **Length is an admission concern, not a post-fetch surprise.** The
+    provenance column this URL eventually lands in is 2048 chars; without a
+    check here, a 3000-char source would be accepted, fetched in full (the
+    per-entry byte cap is 100–200 MiB), and refused only at the store — the
+    expensive order, and a document every apply point rejects, which is the
+    shape this surface's one rule exists to forbid. The store keeps its own
+    check as the last line of defence for the lengths admission cannot see
+    (a redirect location); a declared URL's length, admission sees.
 
     https-only for the same reason the credential store's ``allowed_prefixes``
     are: a fetched skill or identity file is content the bot will run on, and
@@ -123,6 +138,15 @@ def check_https_url(ctx: Context, location: str, value: Any) -> None:
             location,
             "invalid_source",
             "source URL must be an absolute https:// URL",
+        )
+        return
+    if len(value) > MAX_SOURCE_URL_CHARS:
+        ctx.add(
+            location,
+            "source_url_too_long",
+            f"source URL is {len(value)} chars, over the "
+            f"{MAX_SOURCE_URL_CHARS}-char limit (the width the platform's "
+            "provenance stores it as)",
         )
         return
     if "@" in parts.netloc:
@@ -145,41 +169,54 @@ def check_digest(ctx: Context, location: str, value: Any) -> None:
         )
 
 
-def check_relative_path(
-    ctx: Context, location: str, value: Any, *, what: str
-) -> bool:
-    """Refuse an absolute path, a ``..`` segment, or exotic characters.
+def relative_path_refusal(
+    value: Any, *, what: str = "path"
+) -> tuple[str, str] | None:
+    """The workspace-relative path rule, pure (no ``Context``, no I/O).
 
-    Returns True when the value is usable by later rules (nesting, basenames).
+    Returns ``(code, message)`` for a value the workspace cannot accept, or
+    ``None`` when it is usable by later rules (nesting, basenames). Re-asked
+    from outside the PUT layer — the apply-time belt (a stored document can
+    predate the validator) — as *the* rule rather than a re-derivation, so
+    the two sides cannot drift.
 
     ``..`` is checked **per segment**, not as a substring: a directory named
     ``..config`` is legitimate and contains the two characters. A substring test
     would refuse it while still admitting nothing more.
     """
     if not isinstance(value, str) or not value:
-        ctx.add(location, "invalid_path", f"{what} must be a non-empty string")
-        return False
+        return "invalid_path", f"{what} must be a non-empty string"
     if value.startswith("/") or (len(value) > 1 and value[1] == ":"):
-        ctx.add(location, "absolute_path", f"{what} must be workspace-relative, not absolute")
-        return False
+        return (
+            "absolute_path",
+            f"{what} must be workspace-relative, not absolute",
+        )
     if value.startswith("~"):
-        ctx.add(location, "absolute_path", f"{what} must not start with '~'")
-        return False
+        return "absolute_path", f"{what} must not start with '~'"
     segments = value.split("/")
     if any(segment == ".." for segment in segments):
-        ctx.add(
-            location,
-            "path_traversal",
-            f"{what} must not contain a '..' segment",
-        )
-        return False
+        return "path_traversal", f"{what} must not contain a '..' segment"
     if not _PATH_CHARS_RE.match(value):
-        ctx.add(
-            location,
+        return (
             "invalid_path",
             f"{what} may only contain letters, digits, '.', '_', '-', '/' and "
             "${...} placeholders",
         )
+    return None
+
+
+def check_relative_path(
+    ctx: Context, location: str, value: Any, *, what: str
+) -> bool:
+    """Refuse an absolute path, a ``..`` segment, or exotic characters.
+
+    Returns True when the value is usable by later rules (nesting, basenames).
+    The rule itself lives in :func:`relative_path_refusal` — pure, shared —
+    so this wrapper only contributes the ``Context`` reporting.
+    """
+    refusal = relative_path_refusal(value, what=what)
+    if refusal is not None:
+        ctx.add(location, refusal[0], refusal[1])
         return False
     # Placeholders inside the value are *not* checked here. Every string this
     # function sees is also swept by the walker that scans a whole entry (or a

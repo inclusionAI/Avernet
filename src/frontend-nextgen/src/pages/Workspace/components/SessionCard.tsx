@@ -1,5 +1,6 @@
+import { Button } from '@/components/ui';
 import { cn } from '@/utils/cn';
-import { MessageCircle } from 'lucide-react';
+import { MessageSquare } from 'lucide-react';
 import React from 'react';
 
 function parseDate(input: number | string | undefined): Date | null {
@@ -37,11 +38,15 @@ interface SessionCardProps {
   dateText?: string;
   selected: boolean;
   onSelect: () => void;
-  /** 右侧操作区(收藏等),由调用方决定可见性。 */
+  /** 右侧操作区（如更多菜单），由调用方决定可见性。 */
   trailing?: React.ReactNode;
+  /** 无副行内容时使用更紧凑的单行布局。 */
+  compact?: boolean;
+  /** 调用方可按列表场景补充尺寸；不改变卡片的交互语义。 */
+  className?: string;
 }
 
-/** 会话协作卡片:左侧「会话」角标 + 标题/副行 + 日期;选中态浅蓝底、蓝边与左侧蓝色指示条。 */
+/** 二级会话列表项:无卡片容器、缩进排列、轻量图标 + 标题/副行 + 日期；选中态只用浅底色，不复用一级资源指示条。 */
 export const SessionCard = React.memo(function SessionCard({
   title,
   subtitle = '暂无会话预览',
@@ -49,68 +54,56 @@ export const SessionCard = React.memo(function SessionCard({
   selected,
   onSelect,
   trailing,
+  compact = false,
+  className,
 }: SessionCardProps) {
-  const handleClick = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    onSelect();
-  };
-
   return (
     <div
-      role="button"
-      tabIndex={0}
-      aria-pressed={selected}
-      onClick={handleClick}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelect();
-        }
-      }}
       className={cn(
-        'group relative flex cursor-pointer items-center gap-2.5 rounded-xl border bg-[var(--color-card)] px-3 py-2.5 text-sm transition-colors',
-        selected
-          ? 'border-transparent bg-[var(--color-primary-soft)]'
-          : 'border-[var(--color-border)] hover:border-[var(--color-primary-weak)]',
+        'group relative flex items-stretch border-t border-border/70 text-sm transition-colors',
+        compact ? 'min-h-[56px]' : 'min-h-[70px]',
+        selected ? 'bg-primary/5' : 'bg-background hover:bg-accent/30',
+        className,
       )}
     >
-      {selected && (
-        <span
-          aria-hidden="true"
-          className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-[var(--color-primary)]"
-        />
-      )}
-      <span
-        aria-hidden="true"
+      <Button
+        variant="ghost"
+        aria-pressed={selected}
+        onClick={onSelect}
         className={cn(
-          'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
-          selected
-            ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-            : 'bg-[var(--color-panel-strong)] text-[var(--color-muted)]',
+          'flex h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2.5 text-left hover:bg-transparent focus-visible:z-10',
+          compact ? 'items-center' : 'items-start',
+          compact ? 'min-h-[56px] py-2' : 'min-h-[70px] py-3',
         )}
       >
-        <MessageCircle className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        {/* 第一行：标题 + 横点操作 */}
-        <div className="flex items-center gap-1">
-          <span
-            className={cn(
-              'truncate text-[13px] font-medium',
-              selected ? 'text-[var(--color-primary)]' : 'text-[var(--color-fg)]',
-            )}
-          >
-            {title}
-          </span>
-          {trailing && <div className="ml-auto flex shrink-0 items-center">{trailing}</div>}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'flex h-4 w-4 shrink-0 items-center justify-center',
+            !compact && 'mt-0.5',
+            selected ? 'text-primary/70' : 'text-muted-foreground',
+          )}
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-[13px] font-normal leading-5 text-foreground">{title}</span>
+          {subtitle && (
+            <span className="mt-0.5 block truncate text-xs leading-5 text-muted-foreground">{subtitle}</span>
+          )}
         </div>
-        {/* 第二行：消息数/成员数 + 时间右对齐 */}
-        <div className="mt-0.5 flex items-center gap-1">
-          {subtitle && <span className="truncate text-xs leading-5 text-[var(--color-muted)]">{subtitle}</span>}
-          {dateText && <span className="ml-auto shrink-0 text-xs leading-5 text-[var(--color-muted)]">{dateText}</span>}
+      </Button>
+      {(dateText || trailing) && (
+        <div
+          className={cn(
+            'flex shrink-0 gap-2 pr-3 text-xs text-muted-foreground',
+            compact ? 'items-center' : 'items-start pt-3',
+          )}
+        >
+          {dateText && <span className="whitespace-nowrap leading-5">{dateText}</span>}
+          {trailing}
         </div>
-      </div>
+      )}
     </div>
   );
 });

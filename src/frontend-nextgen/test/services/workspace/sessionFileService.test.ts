@@ -1,11 +1,14 @@
+import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import * as controller from '@/services/backendApi/collaboration/sessionFileController';
 import { resolveGroupGatewayOrigin } from '@/services/workspace/groupChatProviderHelpers';
 import { sessionFileService } from '@/services/workspace/sessionFileService';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/collaboration/sessionFileController');
+jest.mock('@/services/backendApi/collaboration/collaborationBotController');
 jest.mock('@/services/workspace/groupChatProviderHelpers');
 const c = controller as unknown as Record<string, jest.Mock<any>>;
+const bc = botController as unknown as Record<string, jest.Mock<any>>;
 const gatewayOrigin = resolveGroupGatewayOrigin as jest.Mock<any>;
 
 beforeEach(() => {
@@ -40,6 +43,34 @@ it('loadFiles falls back to cleaned actor_id when no participant matches', async
   const res = await sessionFileService.loadFiles('s1', []);
   const item = res.ok ? res.data.items[0] : null;
   expect(item?.ownerName).toBe('2088');
+});
+
+it('resolveActorNames maps bot_id→name via bots/query, tolerating non-1:1 responses', async () => {
+  bc.queryCollaborationBots.mockResolvedValue({
+    data: {
+      items: [
+        { bot_id: 'human_2088', name: '张三' },
+        { bot_id: 'bot:1', name: '小 Bot' },
+      ],
+    },
+  });
+  const map = await sessionFileService.resolveActorNames(['human_2088', 'bot:1', 'unknown_id']);
+  expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['human_2088', 'bot:1', 'unknown_id'] });
+  expect(map).toEqual({ human_2088: '张三', 'bot:1': '小 Bot' });
+  // 未返回的 id 不在映射中（调用方回退 actor_id）。
+  expect(map.unknown_id).toBeUndefined();
+});
+
+it('resolveActorNames skips the request for empty input', async () => {
+  const map = await sessionFileService.resolveActorNames([]);
+  expect(map).toEqual({});
+  expect(bc.queryCollaborationBots).not.toHaveBeenCalled();
+});
+
+it('resolveActorNames returns empty map on backend error (caller falls back to actor_id)', async () => {
+  bc.queryCollaborationBots.mockRejectedValue(new Error('network'));
+  const map = await sessionFileService.resolveActorNames(['human_2088']);
+  expect(map).toEqual({});
 });
 
 it('buildContentUrl keeps same-origin relative path without deployed gateway', () => {

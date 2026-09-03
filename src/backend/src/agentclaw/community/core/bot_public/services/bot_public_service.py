@@ -397,7 +397,7 @@ class BotPublicService(BotPublicServiceProtocol):
             return
 
         runtime_state = "online" if public == "1" else "offline"
-        url = f"{base_url}/api/v1/workers/{bot_id}/{runtime_state}"
+        url = f"{base_url}/v1/workers/{bot_id}/{runtime_state}"
         request = Request(url, data=b"", method="PUT")
         request.add_header("Content-Type", "application/json")
 

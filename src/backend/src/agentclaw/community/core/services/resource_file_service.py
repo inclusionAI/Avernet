@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from injector import inject
 
@@ -50,10 +50,16 @@ from agentclaw.community.core.devices.services.device_context import (
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
+from agentclaw.community.core.devices.services.device_filesystem import (
+    FileTooLargeError as DeviceFileTooLargeError,
+)
+from agentclaw.community.core.resources.service import (
+    DirectoryTooLargeError,
+    ResourceNotFoundError,
+)
 from agentclaw.community.core.resources.services.file_service import (
-    ALLOWED_EXTENSIONS,
-    MAX_FILE_SIZE,
     FileNode,
+    admission_refusal,
 )
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
@@ -97,6 +103,16 @@ def is_readonly(path: str) -> bool:
     if "/" not in path and basename in _HIDDEN_BASENAMES:
         return True
     return False
+
+
+# ── Directory-download caps (the openapi download-dir endpoint) ──────────────
+#: Enforced from the listing's sizes *before* a single byte is read, then
+#: re-counted against the bytes actually streamed — a stale or lying listing
+#: cannot widen them. The per-file number matches the guard
+#: ``ArcaDeviceFileSystem`` enforces under ``enforce_download_limit=True``.
+DIRECTORY_DOWNLOAD_MAX_FILES = 5000
+DIRECTORY_DOWNLOAD_MAX_TOTAL_BYTES = 500 * 1024 * 1024
+DIRECTORY_DOWNLOAD_MAX_FILE_BYTES = 100 * 1024 * 1024
 
 
 def safe_workspace_path(path: str) -> str:
@@ -222,7 +238,6 @@ def resource_coords_from_spec(
         entity_id=owner_id,
         engine_type=engine_type,
     )
-
 
 
 class ResourceFileService:
@@ -472,6 +487,114 @@ class ResourceFileService:
             self._logical(path), enforce_download_limit=enforce_download_limit
         )
 
+    async def iter_directory_files(
+        self,
+        *,
+        entity_type: str = "staff",
+        entity_id: str,
+        bot_id: str,
+        engine_type: str,
+        path: str,
+    ) -> AsyncIterator[tuple[str, bytes]]:
+        """Walk a directory, yielding ``(name, content)`` for every regular file.
+
+        ``name`` is relative to the *requested* directory — downloading
+        ``docs`` yields ``a.txt``, not ``docs/a.txt`` — so the caller prefixes
+        it with whatever archive root it likes. One device-context resolution
+        serves the whole walk (unlike ``read_file`` per entry); listing is
+        level-by-level because no engine's ``recursive`` flag is trusted
+        anywhere in the repo.
+
+        Filtering mirrors ``list_dir``: dotfiles skipped at every level, the
+        hidden system names only at the workspace root — a root download
+        contains what the file browser shows, no more. The ``skills-local``
+        injection is *not* reproduced: it is a listing-level synthetic, and a
+        download must contain what the device actually holds.
+
+        Caps are enforced twice — from the listing's sizes before any byte is
+        read, then against the bytes actually streamed — and both raise
+        ``DirectoryTooLargeError``; a stale or lying listing cannot widen them.
+        A missing root raises ``ResourceNotFoundError``; an *empty* directory
+        yields nothing and is not an error — the two answers are different and
+        this walk can tell them apart.
+
+        Race rule: an entry that *vanishes* mid-walk (a listing or a read
+        answering ``None``) is skipped — a live workspace is allowed to change
+        under the walk. An entry that *errors* aborts the whole download: the
+        alternative is a 200 archive silently missing files, which a public
+        API may not serve.
+        """
+        ctx = self._resolve_ctx(bot_id=bot_id, entity_id=entity_id)
+        device_fs = self._device_fs(
+            ctx, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, engine_type=engine_type,
+        )
+
+        root = await device_fs.list_dir(self._logical(path))
+        if root is None:
+            raise ResourceNotFoundError(f"no such directory: {path!r}")
+
+        count = 0
+        listed_total = 0
+        streamed_total = 0
+        queue: list[tuple[str, list[dict[str, Any]]]] = [(path, root)]
+        while queue:
+            current, entries = queue.pop(0)
+            for entry in sorted(entries, key=lambda e: e.get("name", "")):
+                name = entry.get("name", "")
+                if name.startswith("."):
+                    continue
+                is_dir = bool(entry.get("is_dir", False))
+                # The hidden system names are a *workspace-root* rule in
+                # ``list_dir`` — the first level of a root walk is exactly
+                # that listing; deeper levels and sub-directory walks keep
+                # everything non-dot.
+                if not current and not path:
+                    if is_dir and name in _HIDDEN_DIRNAMES:
+                        continue
+                    if name in _HIDDEN_BASENAMES:
+                        continue
+                rel = self._rel_path(current, entry)
+                if is_dir:
+                    sub = await device_fs.list_dir(self._logical(rel))
+                    if sub is None:
+                        continue  # vanished mid-walk — the race rule
+                    queue.append((rel, sub))
+                    continue
+
+                count += 1
+                listed_size = entry.get("size") or 0
+                listed_total += listed_size
+                if (
+                    count > DIRECTORY_DOWNLOAD_MAX_FILES
+                    or listed_size > DIRECTORY_DOWNLOAD_MAX_FILE_BYTES
+                    or listed_total > DIRECTORY_DOWNLOAD_MAX_TOTAL_BYTES
+                ):
+                    raise DirectoryTooLargeError(
+                        f"listing exceeds the directory-download caps at {rel!r}"
+                    )
+                try:
+                    content = await device_fs.read_file(
+                        self._logical(rel), enforce_download_limit=True
+                    )
+                except DeviceFileTooLargeError as exc:
+                    raise DirectoryTooLargeError(
+                        f"file exceeds the per-file cap: {rel!r}"
+                    ) from exc
+                if content is None:
+                    continue  # vanished mid-walk — the race rule
+                streamed_total += len(content)
+                if (
+                    len(content) > DIRECTORY_DOWNLOAD_MAX_FILE_BYTES
+                    or streamed_total > DIRECTORY_DOWNLOAD_MAX_TOTAL_BYTES
+                ):
+                    raise DirectoryTooLargeError(
+                        f"streamed bytes exceed the directory-download caps at {rel!r}"
+                    )
+                # Relative to the requested directory, so the archive root is
+                # the caller's choice (console: ``_download_arcname``).
+                yield (rel[len(path) + 1:] if path else rel), content
+
     async def exists(
         self,
         *,
@@ -593,12 +716,13 @@ class ResourceFileService:
             raise ValueError("Filename is required")
 
         basename = filename.rsplit("/", 1)[-1]
-        if Path(basename).suffix.lower() not in ALLOWED_EXTENSIONS:
-            raise ValueError(
-                f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
-            )
-        if len(data) > MAX_FILE_SIZE:
-            raise ValueError(f"File too large. Max size: {MAX_FILE_SIZE / 1024 / 1024}MB")
+        # The admission rule is the one predicate beside the constants
+        # (``core/resources/services/file_service.admission_refusal``) — the
+        # same question the manifest apply flow asks in its resolve stage,
+        # so the two surfaces cannot drift from each other.
+        refusal = admission_refusal(basename, data)
+        if refusal is not None:
+            raise ValueError(refusal)
 
         if preserve_structure and "/" in filename:
             safe = "/".join(

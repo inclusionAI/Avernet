@@ -130,7 +130,7 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
           {/* DAG view */}
           {viewMode === 'dag' && <WorkflowDagView spec={spec} />}
 
-          {/* YAML view */}
+{/* YAML view */}
           {viewMode === 'yaml' && (
             <div className="overflow-hidden rounded-lg border border-[var(--color-border)]">
               <div className="border-b border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-1.5 text-xs font-medium">

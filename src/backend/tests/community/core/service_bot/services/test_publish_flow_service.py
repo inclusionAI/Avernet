@@ -122,6 +122,23 @@ def _pf(*args, **kw):
     kw.setdefault("device_binding_repo", Mock())
     kw.setdefault("publish_operation_repo", _real_ledger())
     kw.setdefault("runtime_projector", AsyncMock())
+    if "runtime_layout_probe" not in kw:
+        from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+            RuntimeLayoutProbeResult,
+            RuntimeLayoutProbeStatus,
+        )
+
+        probe = Mock()
+        probe.probe_bot = AsyncMock(
+            side_effect=lambda *, engine, **_: RuntimeLayoutProbeResult(
+                status=RuntimeLayoutProbeStatus.NOT_CAPABLE,
+                engine=engine,
+                layout_contract_version="skills-pool-p3-v1",
+                preparation_id=None,
+                evidence={"reason": "test_runtime_without_probe"},
+            )
+        )
+        kw["runtime_layout_probe"] = probe
     # The operation runner queries baas_service.list_bot_publishes for adopt-by-
     # query; a bare Mock returns a non-iterable Mock. Default it to "no prior
     # workflows" so upgrade/existing-bot flow tests issue normally.
@@ -1025,10 +1042,10 @@ from agentclaw.community.core.service_bot.services.deploy.producer import (  # n
 class _StubProducer(DeployArtifactProducer):
     def __init__(self, ext: dict) -> None:
         self.ext = ext
-        self.calls: list[tuple[dict, int]] = []
+        self.calls = []
 
-    def produce_artifact(self, bot, version) -> DeployArtifact:
-        self.calls.append((bot, version))
+    def produce_artifact(self, request) -> DeployArtifact:
+        self.calls.append(request)
         return DeployArtifact(success=True, ext=self.ext)
 
 
@@ -1087,7 +1104,9 @@ async def test_build_phase_routes_arca_and_merges_mount_ext():
     await svc.execute_build_phase(record, "op")
 
     # openclaw → baas → ARCA producer; teclaw stub untouched.
-    assert arca.calls == [(bot, 3)]
+    assert len(arca.calls) == 1
+    assert dict(arca.calls[0].bot) == bot
+    assert arca.calls[0].version == 3
     assert teclaw.calls == []
     # ARCA ext carries the mount chain unchanged (the durable record).
     ext_written = svc._ext_state.update_status.call_args.kwargs["ext"]
@@ -1122,11 +1141,13 @@ async def test_build_phase_projects_everything_before_artifact_build():
         owner_id="owner-1",
         scope=ProjectionScope.everything(),
     )
-    assert arca.calls == [(bot, 3)]
+    assert len(arca.calls) == 1
+    assert dict(arca.calls[0].bot) == bot
+    assert arca.calls[0].version == 3
 
 
 @pytest.mark.asyncio
-async def test_build_phase_fails_without_artifact_when_full_projection_fails():
+async def test_build_phase_continues_when_runtime_projection_is_unavailable():
     arca = _StubProducer({"migration_path": "/m/3"})
     router = DeployArtifactProducerRouter(
         providers={"baas": arca}, default_provider_key="baas"
@@ -1149,8 +1170,12 @@ async def test_build_phase_fails_without_artifact_when_full_projection_fails():
     record = _make_publish_record(status=PublishStatus.DRAFT.value, version=3)
     result = await svc.execute_build_phase(record, "op")
 
-    assert result.status == PublishStatus.FAILED
-    assert arca.calls == []
+    # Service Artifact is a frozen published deliverable; it must not be
+    # blocked by transient current-runtime projection drift.
+    assert result.status == PublishStatus.BUILT
+    assert len(arca.calls) == 1
+    assert arca.calls[0].bot["bot_id"] == "b1"
+    assert arca.calls[0].version == 3
 
 
 @pytest.mark.asyncio
@@ -1174,7 +1199,9 @@ async def test_build_phase_routes_external_and_merges_artifact_ext():
     await svc.execute_build_phase(record, "op")
 
     # baas reports a TECLAW container → teclaw producer.
-    assert teclaw.calls == [(bot, 2)]
+    assert len(teclaw.calls) == 1
+    assert dict(teclaw.calls[0].bot) == bot
+    assert teclaw.calls[0].version == 2
     assert arca.calls == []
     # external pins the refs-only artifact onto ext (no mount chain). The teclaw
     # file-promotion gather merges its (here empty) snapshot into the artifact,
@@ -1237,7 +1264,7 @@ async def test_build_commit_fences_exact_center_skills_before_built_status():
 @pytest.mark.asyncio
 async def test_build_phase_failed_artifact_returns_failed_result():
     class _Fail(DeployArtifactProducer):
-        def produce_artifact(self, bot, version):
+        def produce_artifact(self, request):
             return DeployArtifact(success=False, message="boom")
 
     router = DeployArtifactProducerRouter(

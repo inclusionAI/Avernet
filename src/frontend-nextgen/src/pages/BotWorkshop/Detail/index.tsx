@@ -72,6 +72,7 @@ const BotWorkshopDetailPage: React.FC = () => {
   const advanced = useBotAdvancedConfig(id, requestIdentity.ready);
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
+  const [moreOpen, setMoreOpen] = useState(false);
   if (!id)
     return (
       <Empty
@@ -112,7 +113,7 @@ const BotWorkshopDetailPage: React.FC = () => {
         <BotAvatar name={bot.name} />
         <div className="min-w-0 flex-1">
           <h1 className="m-0 truncate text-base font-semibold">{bot.name}</h1>
-          <p className="m-0 mt-0.5 text-xs text-[var(--color-muted)]">
+          <p className="m-0 mt-0.5 text-xs text-muted-foreground">
             {bot.runtime.engine} · {bot.deployment === 'local' ? '本地' : '云端'}
           </p>
         </div>
@@ -125,7 +126,7 @@ const BotWorkshopDetailPage: React.FC = () => {
         <TooltipProvider delayDuration={300}>
           <nav
             aria-label="Bot 编辑模块"
-            className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border bg-[var(--color-surface-subtle)] py-4"
+            className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border bg-muted/30 py-4"
           >
             {mainTabs.map((item) => (
               <Tooltip key={item.key}>
@@ -144,7 +145,7 @@ const BotWorkshopDetailPage: React.FC = () => {
                 <TooltipContent side="right">{item.label}</TooltipContent>
               </Tooltip>
             ))}
-            <Popover>
+            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant={more ? 'secondary' : 'ghost'}
@@ -161,7 +162,10 @@ const BotWorkshopDetailPage: React.FC = () => {
                     size="sm"
                     className="w-full justify-start"
                     leftIcon={item.icon}
-                    onClick={() => setMore(item.key)}
+                    onClick={() => {
+                      setMore(item.key);
+                      setMoreOpen(false);
+                    }}
                   >
                     {item.label}
                   </Button>
@@ -170,7 +174,7 @@ const BotWorkshopDetailPage: React.FC = () => {
             </Popover>
           </nav>
         </TooltipProvider>
-        <section className="app-scrollbar min-w-0 flex-1 overflow-y-auto lg:w-[38%] lg:flex-none">
+        <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[42%] lg:max-w-[720px] lg:flex-none">
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
           ) : more === 'md' ? (
@@ -220,6 +224,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               onActive={editor.setSkillSetActive}
               onSkill={editor.setSkillSetSkill}
               onUploadSkillFolder={editor.uploadSkillFolder}
+              onLoadCandidates={editor.loadCapabilityCandidates}
               onMcp={editor.setSkillSetMcp}
             />
           ) : tab === 'resource' ? (

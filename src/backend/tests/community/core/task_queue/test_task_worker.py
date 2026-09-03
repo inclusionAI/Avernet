@@ -490,28 +490,46 @@ def test_enqueue_survives_a_wakeup_that_has_no_loop_bound():
     assert w.status_of(record.id) == TaskStatus.SUCCEEDED
 
 
-def test_idle_worker_loop_wakes_on_an_opted_in_enqueue():
+def test_idle_worker_loop_wakes_on_an_opted_in_enqueue(monkeypatch):
     """The whole feature, end to end through the real loop: with a poll interval
     far longer than the test could tolerate, an enqueue still gets claimed
     promptly because it cuts the idle wait short."""
     w = _world(poll_interval_seconds=30.0, poll_jitter_seconds=0.0)
-    w.registry.register(NoopTaskHandler("urgent"), wake_on_enqueue=True)
 
     async def drive():
+        idle_wait_entered = asyncio.Event()
+        task_claimed = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        original_wait = w.wakeup.wait
+
+        async def wait(timeout):
+            idle_wait_entered.set()
+            return await original_wait(timeout)
+
+        class SignallingHandler:
+            task_type = "urgent"
+
+            def handle(self, payload):
+                loop.call_soon_threadsafe(task_claimed.set)
+                return Complete()
+
+        monkeypatch.setattr(w.wakeup, "wait", wait)
+        w.registry.register(SignallingHandler(), wake_on_enqueue=True)
         await w.worker.startup()
         try:
-            # First tick finds nothing and settles into the 30s idle wait.
-            await asyncio.sleep(0.1)
-            record = await asyncio.to_thread(w.enqueue, "urgent")
+            # Wait until the initial empty tick is interruptibly idle rather
+            # than racing it with a fixed sleep.
+            await asyncio.wait_for(idle_wait_entered.wait(), timeout=1.0)
+            # The cross-thread notify behavior is covered in
+            # test_worker_wakeup.py. Keeping this SQLite-backed integration
+            # test on one thread avoids concurrent use of its StaticPool
+            # connection while still exercising the real worker loop.
+            w.enqueue("urgent")
             started = time.monotonic()
-            while time.monotonic() - started < 5.0:
-                if w.status_of(record.id) == TaskStatus.SUCCEEDED:
-                    return time.monotonic() - started
-                await asyncio.sleep(0.02)
-            return None
+            await asyncio.wait_for(task_claimed.wait(), timeout=1.0)
+            return time.monotonic() - started
         finally:
             await w.worker.shutdown()
 
     elapsed = asyncio.run(drive())
-    assert elapsed is not None, "task was not claimed — the wake never landed"
-    assert elapsed < 5.0
+    assert elapsed < 1.0

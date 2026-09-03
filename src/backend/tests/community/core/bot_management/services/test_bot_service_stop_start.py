@@ -64,7 +64,7 @@ def _make_service() -> BotService:
     # Restart idempotency lock repo. Default: acquire() returns a truthy mock
     # so restart_bot treats the lock as acquired and proceeds to stop+start.
     svc._restart_lock_repo = MagicMock()
-    # DRM reader: default "unset" (None) so BCN-register reads as disabled;
+    # DRM reader: default "unset" (None) so BCN-register falls back to enabled;
     # tests that exercise the flag override ``_drm_reader.read.return_value``.
     svc._drm_reader = MagicMock()
     svc._drm_reader.read.return_value = None
@@ -578,27 +578,46 @@ class TestStartBotBcnRegister:
         svc._bcn_service.register_provider_bot.assert_not_called()
         mock_ext.assert_not_called()
 
-    def test_drm_default_off_skips_register_when_drm_unreachable(self):
-        # DRM 读取异常 → 默认关闭, 不注册
+    def test_drm_unset_registers_provider_bot_by_default(self):
+        """DRM 未配置时，Claude Code Bot 仍自动注册 BCN Provider。"""
         svc = _make_service()
         svc._bcn_service = MagicMock()
+        svc._bcn_service.register_provider_bot.return_value = {"skipped": True}
         bot = _make_bot()
         bot["active_engine"] = "claude_code"
         bot["template_type"] = "normalCC"
         svc._repository.get_by_id_and_owner.side_effect = [bot, bot]
 
         # 不打 patch _is_claude_code_bcn_register_enabled, 让真实方法跑.
-        # 单测 DRM seam 默认 reader 返回 None → enabled False → 不注册.
+        # 单测 DRM seam 默认 reader 返回 None → enabled True → 注册.
         with patch.object(svc, "_allocate_device_async"):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="bot001",
+            owner_workno="user001",
+            name="TestBot",
+            summary="",
+        )
 
-    def test_drm_helper_unset_returns_false(self):
-        # DRM 未配置 / 不可用 (reader 返回 None) → False.
+    @pytest.mark.parametrize("raw_value", [None, "", "   "])
+    def test_drm_helper_empty_config_returns_true(self, raw_value):
+        # DRM 未配置 (None 或空白值) → 自动注册.
         svc = _make_service()
-        svc._drm_reader.read.return_value = None
-        assert svc._is_claude_code_bcn_register_enabled() is False
+        svc._drm_reader.read.return_value = raw_value
+        assert svc._is_claude_code_bcn_register_enabled() is True
+
+    def test_drm_helper_returns_true_when_reader_is_missing(self):
+        # 组合根未注入 DRM reader 时，不阻塞自动注册。
+        svc = _make_service()
+        del svc._drm_reader
+        assert svc._is_claude_code_bcn_register_enabled() is True
+
+    def test_drm_helper_returns_true_when_reader_raises(self):
+        # DRM 读取异常时，不阻塞自动注册。
+        svc = _make_service()
+        svc._drm_reader.read.side_effect = RuntimeError("DRM unavailable")
+        assert svc._is_claude_code_bcn_register_enabled() is True
 
     def test_drm_helper_returns_true_when_value_explicitly_on(self):
         # 覆盖正常 enabled 路径 (raw_value 非空且匹配 truthy 集合).

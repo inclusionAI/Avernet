@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use bcs_config_api::ManifestConfig;
 use bcs_service_api::application::v1::{
-    BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService,
-    RegisterService,
+    AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, RegisterService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
@@ -19,6 +18,8 @@ pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct ApiState {
+    pub auth_service: Option<Arc<dyn ApplicationAuthService>>,
+    pub auth_public_base_url: String,
     pub bot_service: Option<Arc<dyn BotService>>,
     pub event_subscription_service: Option<Arc<dyn EventSubscriptionService>>,
     pub group_service: Arc<dyn GroupService>,
@@ -50,6 +51,8 @@ impl ApiState {
         principal_verifier: Arc<dyn PrincipalVerifier>,
     ) -> Self {
         Self {
+            auth_service: None,
+            auth_public_base_url: "http://127.0.0.1/openapi/v1/auth".to_string(),
             bot_service: None,
             event_subscription_service: None,
             group_service,
@@ -69,6 +72,16 @@ impl ApiState {
             manifest_env: "local".to_string(),
             principal_verifier,
         }
+    }
+
+    pub fn with_auth_service(
+        mut self,
+        service: Arc<dyn ApplicationAuthService>,
+        public_base_url: String,
+    ) -> Self {
+        self.auth_service = Some(service);
+        self.auth_public_base_url = public_base_url;
+        self
     }
 
     /// Add the Bot control-plane V1 slice.

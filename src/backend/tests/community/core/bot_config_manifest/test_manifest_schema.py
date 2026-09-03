@@ -66,8 +66,6 @@ def test_a_full_first_wave_document_is_accepted():
 manifest:
   mcp:
     - server_code: github
-      config:
-        scope: repo
   identity:
     - type: SOUL.md
       content: |
@@ -167,22 +165,22 @@ manifest:
     assert ("manifest.identity[0].from", "undeclared_source") in _reject(document)
 
 
-def test_a_named_source_reference_is_refused_while_nothing_resolves_one():
-    document = """schema_version: 1
+def test_named_and_git_sources_are_accepted_for_the_w7_categories():
+    """The flip this fix delivers: a ``from`` reference and an inline git
+    source validate for the categories whose entries consume them (skills
+    and identity) — the admission gate was the one thing the W7 delivery
+    left closed, leaving the whole delivered runtime unreachable."""
+    _accept("""schema_version: 1
 sources:
   content:
-    url: https://cdn.example.com/content/
+    git: https://code.example.com/team/content.git
+    ref: v1.2.0
 manifest:
   identity:
     - type: SOUL.md
       from: content
-      subpath: soul.md
-"""
-    assert ("manifest.identity[0].from", "unsupported_source") in _reject(document)
-
-
-def test_a_git_source_is_refused_while_nothing_resolves_one():
-    document = """schema_version: 1
+""")
+    _accept("""schema_version: 1
 manifest:
   identity:
     - type: SOUL.md
@@ -190,8 +188,35 @@ manifest:
         git: https://code.example.com/team/content.git
         ref: v1.2.0
         subpath: soul.md
+""")
+
+
+def test_named_and_git_sources_are_refused_for_resources_entries():
+    """The v1 (category, form) narrowing, at PUT: the resources materialiser
+    is still on the URL road W6 shipped, so a resources entry naming a named
+    or git source is refused with a reason that names the category — never
+    a runtime accident the follow-up would have met as a misleading error."""
+    document = """schema_version: 1
+sources:
+  content:
+    git: https://code.example.com/team/content.git
+    ref: v1.2.0
+manifest:
+  resources:
+    - path: assets/logo.png
+      from: content
 """
-    assert ("manifest.identity[0].source", "unsupported_source") in _reject(document)
+    assert ("manifest.resources[0]", "unsupported_source") in _reject(document)
+
+    inline = """schema_version: 1
+manifest:
+  resources:
+    - path: assets/logo.png
+      source:
+        git: https://code.example.com/team/content.git
+        ref: v1.2.0
+"""
+    assert ("manifest.resources[0]", "unsupported_source") in _reject(inline)
 
 
 def test_a_declared_but_unreferenced_source_is_a_warning_not_a_refusal():
@@ -296,6 +321,32 @@ manifest:
       source: https://cdn.example.com/qc.zip
 """
     assert ("manifest.skills[0]", "missing_digest") in _reject(document)
+
+
+def test_inline_content_is_accepted_for_identity_but_not_for_skills():
+    """Both categories reach the validator through the same source machinery,
+    and only identity can mean something by inline text: an identity file IS
+    one text body, while a skill is a package — SKILL.md plus the scripts it
+    names. Accepting a content-form skill would violate W1's rule (the
+    surface never accepts a construct nothing can apply) with W5 the wave
+    that has to catch it: nothing materialises a package from inline text."""
+    identity = """schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      content: |
+        # Who I am
+"""
+    assert _accept(identity).schema_version == 1
+
+    skill = """schema_version: 1
+manifest:
+  skills:
+    - name: qc
+      content: |
+        # not a package
+"""
+    assert ("manifest.skills[0].content", "content_not_a_skill_package") in _reject(skill)
 
 
 def test_the_dropped_on_fetch_failure_value_is_refused():
@@ -749,7 +800,102 @@ manifest:
     } <= codes
 
 
+def test_the_retired_mcp_config_field_is_refused_rather_than_ignored():
+    """``mcp[].config`` was defined as per-bot configuration "the same shape as
+    the existing MCP config API" — but that API writes ``ac_user_mcp_config``,
+    keyed ``(user_id, server_code)``, and its write fans out via
+    ``sync_mcp_detail_to_all_bots``. Applying one bot's manifest would have
+    changed MCP configuration for every bot its owner has; its payload is also
+    api_key and custom_headers, which design §4.5 keeps out of a manifest
+    entirely. A v1 entry is a bare ``server_code``, and the field is refused by
+    name rather than silently ignored — same treatment as the retired
+    ``cli_tools.entrypoints`` above, for the same reason."""
+    document = """schema_version: 1
+manifest:
+  mcp:
+    - server_code: github
+      config:
+        endpoint_env: PROD
+"""
+    assert (
+        "manifest.mcp[0].config",
+        "unknown_field",
+    ) in _reject(document)
+
+
+def test_an_mcp_entry_is_accepted_as_a_bare_server_code():
+    """The narrowing removed a field; it did not narrow the category itself."""
+    assert _accept("schema_version: 1\nmanifest:\n  mcp:\n    - server_code: github\n")
+
+
 def test_a_refusal_always_names_a_location():
     document = "schema_version: 1\nmanifest:\n  identity:\n    - type: NOPE.md\n"
     for location, _ in _reject(document):
         assert location
+
+
+def test_an_oversized_source_url_is_refused_at_put_not_after_a_fetch():
+    """The admission-side length cap (schema §5, 2048 chars — the width the
+    provenance column stores). Without it a 3000-char source would be
+    accepted, fetched in full up to the per-entry cap, and refused only at
+    the store: the expensive order, and a document every apply point rejects
+    — the exact shape "this surface never accepts something it cannot apply"
+    forbids."""
+    long_url = "https://content.example/" + "a" * 3000 + ".bin"
+    document = f"""schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: "{long_url}"
+"""
+    assert ("manifest.identity[0].source", "source_url_too_long") in _reject(
+        document
+    )
+
+
+def test_a_source_url_at_just_under_the_limit_is_accepted():
+    prefix, suffix = "https://content.example/", ".bin"
+    boundary = prefix + "b" * (2048 - len(prefix) - len(suffix)) + suffix
+    assert len(boundary) == 2048
+    _accept(
+        f"""schema_version: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      source: "{boundary}"
+"""
+    )
+
+
+def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
+    """The PUT-time predicate, pure, exposed for the apply-time belt.
+
+    The resources materialiser re-asks this rule at apply time (a stored
+    document can predate the validator); sharing one function is what
+    keeps the belt from being a weaker copy of the schema's rule.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema._support import (
+        relative_path_refusal,
+    )
+
+    refused = [
+        ("/etc/passwd", "absolute_path"),
+        ("~/.ssh/id", "absolute_path"),
+        ("C:evil.md", "absolute_path"),
+        ("../../etc/passwd", "path_traversal"),
+        ("data/../../etc", "path_traversal"),
+        ("a\\b.md", "invalid_path"),
+        ("a b.md", "invalid_path"),
+        ("", "invalid_path"),
+    ]
+    for value, code in refused:
+        refusal = relative_path_refusal(value)
+        assert refusal is not None, value
+        assert refusal[0] == code, (value, refusal)
+        assert refusal[1]
+    # A non-string is the belt's own business (declared by the index) — the
+    # predicate refuses it as invalid rather than assuming str.
+    assert relative_path_refusal(123)[0] == "invalid_path"
+    # The legitimate shapes, including the per-segment '..' reading.
+    for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
+        assert relative_path_refusal(value) is None, value

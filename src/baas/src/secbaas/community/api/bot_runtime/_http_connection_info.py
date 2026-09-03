@@ -15,8 +15,12 @@ class HttpConnectionInfo:
         target: Target identifier for the connection
             (e.g., "antclaw-a1b2c3.inc.example.net:9999:12345").
             Empty string for platforms that don't populate it.
+        device_id: PaaS device id of the selected device
+            (e.g., "antclaw-a1b2c3"). Empty string until the dispatcher
+            backfills it on the success path.
     """
 
     http_url: str
     token: str
     target: str = ""
+    device_id: str = ""

@@ -241,6 +241,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.cache import (
             CommunityCacheModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.caller_identity import (
+            CommunityCallerIdentityModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.database import (
             CommunityDatabaseModule,
         )
@@ -299,6 +302,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         column: list[Module] = [
             # Decomposed per-concern community infrastructure modules.
             CommunityCacheModule(),
+            # Public OAuth authenticates the caller, but community runtimes do
+            # not support Caller-mode credential installation yet.
+            CommunityCallerIdentityModule(),
             CommunitySecretModule(),
             CommunityDatabaseModule(),
             CommunityObjectStorageModule(),

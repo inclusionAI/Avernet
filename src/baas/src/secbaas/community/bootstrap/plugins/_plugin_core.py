@@ -174,7 +174,6 @@ class PluginContainer(containers.DeclarativeContainer):
         stub=providers.Singleton(NoopFileTransferBackend),
     )
 
-    # 评测环境 Plugin（stub=空操作, real=由 OCB 企业层通过 register_plugin_option 注入）
     eval_binding_resolver = providers.Selector(
         config.plugins.eval_env,
         stub=providers.Singleton(NoopEvalBindingResolver),

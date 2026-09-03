@@ -15,6 +15,11 @@ RUN npm run build
 ########## Runtime ##########
 FROM nginx:1.27-alpine
 
+# Network diagnostics (ping) for in-container troubleshooting. Alpine's
+# BusyBox ping lacks options the full iputils build has; iputils is the
+# distro's full-featured package.
+RUN apk add --no-cache iputils
+
 COPY src/frontend-nextgen/deploy/nginx/default.conf.template /etc/nginx/templates/default.conf.template
 COPY src/frontend-nextgen/deploy/docker-entrypoint.sh /docker-entrypoint.d/20-validate-teamclaw-env.sh
 COPY --from=build /app/dist /usr/share/nginx/html

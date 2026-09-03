@@ -1,6 +1,5 @@
 import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
 import BotCard from '@/components/BotWorkshop/BotCard';
-import BotHealthCheckDrawer from '@/components/BotWorkshop/BotHealthCheckDrawer';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
@@ -19,21 +18,30 @@ const BotWorkshopPage: React.FC = () => {
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
   return (
     <main className="app-scrollbar h-full overflow-y-auto">
-      <div className="w-full space-y-6 p-4 sm:p-6 2xl:p-8">
-        <PageHeader title="Bot 工坊" />
-        <BotWorkshopToolbar
-          keyword={workshop.keyword}
-          engine={workshop.engine}
-          deployment={workshop.deployment}
-          serviceMode={workshop.serviceMode}
-          onKeywordChange={workshop.setKeyword}
-          onEngineChange={workshop.setEngine}
-          onDeploymentChange={workshop.setDeployment}
-          onServiceModeChange={workshop.setServiceMode}
-          onCreateCloud={workshop.openCreateCloud}
-        />
+      <div className="mx-auto w-full max-w-[1600px] space-y-5 p-4 sm:p-6 2xl:p-8">
+        <PageHeader title="Bot 工坊" description="创建、配置和运维当前空间内的 Bot。" />
+        <div className="border-y border-border bg-background py-3">
+          <BotWorkshopToolbar
+            keyword={workshop.keyword}
+            engine={workshop.engine}
+            deployment={workshop.deployment}
+            serviceMode={workshop.serviceMode}
+            onKeywordChange={workshop.setKeyword}
+            onEngineChange={workshop.setEngine}
+            onDeploymentChange={workshop.setDeployment}
+            onServiceModeChange={workshop.setServiceMode}
+            onCreateCloud={workshop.openCreateCloud}
+            total={workshop.total}
+            onReset={() => {
+              workshop.setKeyword('');
+              workshop.setEngine('');
+              workshop.setDeployment(undefined);
+              workshop.setServiceMode(undefined);
+            }}
+          />
+        </div>
         {workshop.loading ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:gap-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {[1, 2, 3, 4, 5, 6].map((item) => (
               <Card key={item}>
                 <Skeleton.Card />
@@ -62,10 +70,7 @@ const BotWorkshopPage: React.FC = () => {
           />
         ) : (
           <>
-            <div
-              data-testid="bot-workshop-grid"
-              className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:gap-5"
-            >
+            <div data-testid="bot-workshop-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {workshop.items.map((bot) => (
                 <BotCard
                   key={bot.entityKey}
@@ -79,10 +84,15 @@ const BotWorkshopPage: React.FC = () => {
                   onClaimLock={workshop.claimLock}
                   logAction={workshop.logActionFor(bot)}
                   onOpenLogs={workshop.openLogs}
-                  onChangeSpace={workshop.openSpaceChange}
-                  onAuthorize={workshop.openAuthorize}
+                  onChangeSpace={workshop.canChangeSpace(bot) ? workshop.openSpaceChange : undefined}
+                  onAuthorize={workshop.collaborationModeFor(bot) ? workshop.openAuthorize : undefined}
                   collaborationMode={workshop.collaborationModeFor(bot)}
                   onManagePublication={setPublicationBot}
+                  inventoryActions={{
+                    view: workshop.inventoryActionFor(bot, 'view'),
+                    chat: workshop.inventoryActionFor(bot, 'chat'),
+                    edit: workshop.inventoryActionFor(bot, 'edit'),
+                  }}
                 />
               ))}
             </div>
@@ -104,32 +114,25 @@ const BotWorkshopPage: React.FC = () => {
           authorization={workshop.createAuthorization}
           onClose={workshop.closeCreate}
           onSubmit={workshop.submitCreate}
+          agentCodingTemplates={workshop.agentCodingTemplates}
+          agentCodingTemplatesLoading={workshop.agentCodingTemplatesLoading}
+          agentCodingTemplatesError={workshop.agentCodingTemplatesError}
+          onRetryAgentCodingTemplates={workshop.retryAgentCodingTemplates}
         />
         <BotAccessModal
           mode={workshop.access.mode}
           bot={workshop.access.bot}
           spaces={workshop.access.spaces}
           loading={workshop.access.loading}
+          operation={workshop.access.operation}
           collaborators={workshop.collaborators}
           onClose={workshop.closeAccess}
           onChangeSpace={workshop.changeSpace}
+          onCreateTeamAndChangeSpace={workshop.createTeamAndChangeSpace}
           onAddCollaborator={workshop.addCollaborator}
           onUpdateCollaborator={workshop.updateCollaborator}
           onRemoveCollaborator={workshop.removeCollaborator}
           onRequestAccess={workshop.requestAccess}
-        />
-        <BotHealthCheckDrawer
-          open={workshop.healthCheck.open}
-          botName={workshop.healthCheck.target?.botName}
-          summary={workshop.healthCheck.summary}
-          loading={workshop.healthCheck.loading}
-          checking={workshop.healthCheck.checking}
-          error={workshop.healthCheck.error}
-          onOpenChange={(open) => {
-            if (!open) workshop.healthCheck.closeHealthCheck();
-          }}
-          onRefresh={workshop.healthCheck.refresh}
-          onRunDiagnose={workshop.healthCheck.runDiagnose}
         />
         <ServicePublicationDrawer
           bot={publicationBot}

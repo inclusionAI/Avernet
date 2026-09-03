@@ -2015,6 +2015,38 @@ async def test_openclaw_port_resolves_logical_mapping_and_returns_evidence(
 
 
 @pytest.mark.asyncio
+async def test_openclaw_port_forwards_best_effort_apply_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from engine.community.plugins.openclaw import _skills
+
+    received: list[dict] = []
+
+    def publish(**kwargs):
+        received.append(kwargs)
+        return MappingPublishResult(True, {"total": 1})
+
+    def verify(**kwargs):
+        received.append(kwargs)
+        return MappingVerificationResult(True, {"checked": 1})
+
+    monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
+    monkeypatch.setattr(_skills, "verify_skill_mappings", verify)
+    params = {
+        "apply_mode": "BEST_EFFORT",
+        "mappings": [{"source": "/pool/a", "target": "/skills/a"}],
+    }
+
+    await OpenClawPluginImpl().publish_pool_mappings(params)
+    await OpenClawPluginImpl().verify_pool_mappings(params)
+
+    assert [kwargs["apply_mode"].value for kwargs in received] == [
+        "BEST_EFFORT",
+        "BEST_EFFORT",
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "mappings",
     [

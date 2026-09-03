@@ -4,7 +4,7 @@
 ``_build_*`` 内部 new 引擎自带策略(TaskPlanner/TaskDispatcher/TaskRunner)+ 接线 TaskExecutor(三模态投递+poller)。
 引擎自身实现 ResultSink(poller 终态回投直接调 on_report)与 TaskContextBuilder(执行上下文派生),
 消除"先建 stub 再外部注入真实 body/接线点"的后填,无引擎子类化、无 reach-in setter。验收 100% 走 on_report
-回投(gap 计算即验收,无主动 verify dispatch);BBS 投递归 runner BBS 模态(无 BbsMarketPort,升 BBS 只翻图态 bbs_mode)。
+回投(gap 计算即验收,无主动 verify dispatch);BBS 与其它模态统一经 runner.start_run 投递。
 零 case 知识:engine 不含任何节点名字面量。测试可经 facade/engine 子类覆写 ``_build_*`` 注入 stub 策略/投递(测试 seam)。
 
 Step2 改造(状态机解耦 + PlanResult + 显式 target + harness 执行报错区分):
@@ -30,7 +30,7 @@ import os
 import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from agentclaw.community.core.bot_management.services.bcn_service import BcnService
@@ -272,7 +272,7 @@ class ExecutionEngine:
         if self._bot is None or self._bcs is None:
             logger.warning(
                 "[task][engine] execution_backend 不装配(bot=%s bcs=%s)→ form_coop_group/start_run/"
-                "trigger_workflow/run_bbs 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
+                "trigger_workflow/BBS start_run 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
                 "corp 排查: 确认 DEPLOY_PROFILE=corp + grep [task][corp-task] not configured 看哪个端口空。",
                 "None" if self._bot is None else type(self._bot).__name__,
                 "None" if self._bcs is None else type(self._bcs).__name__,
@@ -1204,7 +1204,8 @@ class ExecutionEngine:
                 task_id, node_id, node.status.value if node is not None else None,
             )
             return
-        # ① assignee 先置安全架构师(供 start_run 定位)+ 记录 bbs_owner(阶段① 已置,这里幂等再写)。
+        # ① 图中保留 bbs 来源语义；实际交接给胜出的研发 bot 时，构造 single_bot
+        #    执行视图并走统一 start_run，避免把已 claim 的任务再次投回 BBS 广场。
         node.run_info.assignee = rnd_bot_id
         node.run_info.run_mode = "bbs"
         with self._lock_for(task_id):
@@ -1215,12 +1216,21 @@ class ExecutionEngine:
                     extend_props_patch={"bbs_owner": rnd_bot_id, "bbs_handed_to": rnd_bot_id},
                 )
             )
-        # ② 安全架构师 真实接单:临时切 single_bot 模态 start_run,真实发消息并落 session_id/run_id 进
-        #    extend_props(dashboard 可点开安全架构师 会话);run_mode 维持 bbs(bbs 路径语义 + 是否真派发由本处控制)。
+        delivery_node = replace(
+            node,
+            run_info=replace(
+                node.run_info,
+                run_mode="single_bot",
+                output=dict(node.run_info.output),
+                extend_props=dict(node.run_info.extend_props),
+                action_log=list(node.run_info.action_log),
+            ),
+        )
+        # ② start_run([delivery_node]) 真实投递给研发 bot；持久化节点保持 bbs 语义。
         ok = False
         node.run_info.run_mode = "single_bot"
         try:
-            results = await self._runner.start_run([node])
+            results = await self._runner.start_run([delivery_node])
             ok = bool(results[0]) if results else False
         except Exception as ex:  # noqa: BLE101
             logger.warning(
@@ -1843,9 +1853,10 @@ class ExecutionEngine:
     async def _on_fail_collect(
         self, task_id: str, node_id: str, side: list[tuple]
     ) -> None:
-        """兼容旧调用入口。验收未通过是业务结果,状态已由图服务置为 DONE,不升级、不重派。"""
+        """兼容旧调用入口。验收失败已在 ``on_report`` 中原子折叠为 HUNG 并升级 BBS；
+        此处不重复改变节点状态或安排重试。"""
         logger.info(
-            "[task][on_fail] task=%s node=%s acceptance_not_passed, status=DONE",
+            "[task][on_fail] task=%s node=%s acceptance_not_passed already handled by on_report",
             task_id,
             node_id,
         )
@@ -2101,7 +2112,7 @@ class ExecutionEngine:
         """传播节点 HUNG 的影响,但不在节点级消耗根 BBS 轮次。
 
         ``_maybe_propagate_hung`` 负责判断阻塞是否已扩散到根;只有根节点确认进入
-        BBS 的分支才设置 ``bbs_mode``、递增 ``loop_round`` 并调度 ``run_bbs``。
+        BBS 的分支才设置 ``bbs_mode``、递增 ``loop_round`` 并经 ``start_run`` 调度。
         **不置节点态**——调用方须保证节点已 HUNG。乙' a+R1:验收 FAIL 节点已由
         on_report 折叠直驱 HUNG,故 _on_fail_collect 直接调用本方法;其余 HUNG
         (miss/harness/plan_round/gap_no_progress)经 _hung_and_escalate 写 HUNG 后复用本方法。
@@ -2155,6 +2166,14 @@ class ExecutionEngine:
         exc = getattr(bg, "exception", lambda: None)()
         if exc is not None:
             logger.error("[task][engine] background task 异常: %s", exc, exc_info=exc)
+            return
+        result = getattr(bg, "result", lambda: None)()
+        if isinstance(result, list) and any(item is not True for item in result):
+            logger.error(
+                "[task][engine] background start_run 投递失败 task=%s results=%s",
+                getattr(bg, "_bbs_task_id", ""),
+                result,
+            )
 
     def _ensure_bbs_loop(self) -> asyncio.AbstractEventLoop:
         """Return an engine-owned loop that outlives Harness' temporary loop.
@@ -2218,17 +2237,39 @@ class ExecutionEngine:
         )
 
     def _schedule_bbs_notify(self, task_id: str, execution_graph) -> None:
-        """可恢复拦截点(spec §5):fire-and-forget ``runner.run_bbs(execution_graph)``。
+        """可恢复拦截点(spec §5):fire-and-forget ``runner.start_run([bbs_node])``。
 
         命中根 BBS 可恢复态(bbs_mode + 未 claim)时调用——主动 bid→select→claim→
-        dispatch 给 claim-enabled bot。不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
+        dispatch 给 claim-enabled bot。上层只使用统一 start_run seam，不感知 BBS 专用方法。
+        不持锁、不阻塞 ``on_*``/``_maybe_propagate_hung`` 汇报路径:``asyncio.create_task``
         调度后台协程,异常经 ``_on_bg_done`` 记 log。端口不全(无 runner/bot/bcs,如单测 stub)→ 静默跳过。"""
         logger.info("[task][bbs_mode], begin schedule bbs notify, task_id=%s", task_id)
         if not self._runner:
             logger.info("[task][bbs_mode], _runner is none, skip, task_id=%s", task_id)
             return
+        root = next(
+            (node for node in execution_graph.tasks if node.node_id == task_id),
+            None,
+        )
+        if root is None:
+            logger.error(
+                "[task][bbs_mode] root missing, skip start_run task_id=%s", task_id
+            )
+            return
+        # BBS 是本次执行请求的目标模态，不改写图中根节点原有 run_mode/assignee。
+        # 具体 BBS 语义由执行 adapter 隐藏，Runner 只接收普通 TaskNode。
+        bbs_node = replace(
+            root,
+            run_info=replace(
+                root.run_info,
+                run_mode="bbs",
+                output=dict(root.run_info.output),
+                extend_props=dict(root.run_info.extend_props),
+                action_log=list(root.run_info.action_log),
+            ),
+        )
         loop = self._ensure_bbs_loop()
-        coroutine = self._runner.run_bbs(execution_graph)
+        coroutine = self._runner.start_run([bbs_node])
         try:
             bg = asyncio.run_coroutine_threadsafe(coroutine, loop)
         except Exception:
@@ -2277,7 +2318,7 @@ class ExecutionEngine:
         **BBS 可恢复态(spec §10.5,调度优化)**:只要阻塞已经传播到根节点(任一 ``hung_reason``:
         ``miss_depth_exhausted``/``root_gap_no_decompose``/``gap_no_progress``/
         ``plan_round_exhausted``/``exec_stuck``/``child_hung`` 等),且根未被 claim,即进入根级 BBS
-        可恢复态(派发 ``run_bbs``);``loop_exhausted`` 由 ``_bump_loop_round`` 置根/图 HUNG,
+        可恢复态(经 ``start_run`` 派发 BBS);``loop_exhausted`` 由 ``_bump_loop_round`` 置根/图 HUNG,
         被上方 ``g.status==HUNG`` 短路拦截、不再调度,保留反失控兜底。在途 BBS(``bbs_owner``
         非空)亦跳过,不重复派发。``loop_round`` 只在根确认进入 BBS 时递增。
         """

@@ -15,10 +15,10 @@ pub fn router() -> Router<ApiState> {
     Router::new().route("/register/token", get(get_register_token))
 }
 
-/// Mounted OUTSIDE the `verify_principal` boundary: POST /register is
+/// Mounted OUTSIDE the `verify_principal` boundary: POST /openapi/v1/collaboration/register is
 /// anonymous and the register token is its only credential.
 pub fn public_router() -> Router<ApiState> {
-    Router::new().route("/register", post(register_bot))
+    Router::new().route("/openapi/v1/collaboration/register", post(register_bot))
 }
 
 #[derive(Debug, Deserialize)]

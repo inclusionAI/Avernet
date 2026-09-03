@@ -7,8 +7,8 @@ the raw request body and maps the public response.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from uuid import uuid4
 
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
@@ -31,7 +31,6 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillInvalidPackageError,
     LocalSkillLayoutRollbackError,
     LocalSkillNotReadyError,
-    LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
 )
@@ -41,6 +40,7 @@ from agentclaw.community.core.skill_center.factories import (
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
@@ -90,6 +90,59 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
         self._device_context_resolver_provider = device_context_resolver_provider
         self._runtime_reconciler = runtime_reconciler
         self._package_validator = package_validator
+
+    async def installed_package_digest(
+        self,
+        *,
+        bot: Mapping[str, Any],
+        bot_id: str,
+        owner_id: str,
+        name: str,
+    ) -> Optional[str]:
+        """The installed package's canonical digest, or ``None`` if absent.
+
+        Reads the bytes actually published under the skill's stable
+        layout-owned locator — the same storage read ``verify``/``copy_to``
+        perform, no locator knowledge of the caller's own — and answers the
+        sha256 of their canonical repack, so a caller holding the same
+        package can ask "is what is installed *this* content?".
+
+        Unreadable is *unknown* (``None``), not *equal*: storage that cannot
+        be read back must not license an unchanged verdict — the caller
+        classes the entry for a full write and the write path restores the
+        package while it is in hand.
+        """
+        import hashlib
+
+        try:
+            _, storage = self._skill_service_factory.local_skill_package_storage(
+                entity_id=str(bot["entity_id"]),
+                owner_id=owner_id,
+                bot_id=bot_id,
+                engine_type=bot.get("active_engine"),
+                entity_type=str(bot.get("entity_type") or "staff"),
+                is_desktop=bot.get("bot_type") == "desktop",
+                is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id),
+                name=name,
+            )
+            if not await storage.exists():
+                return None
+            files = await storage.read_package_files()
+        except (LocalSkillStorageError, OSError):
+            # A locator that cannot be reached, or a package that cannot be
+            # walked — ``_is_teclaw`` resolves the device context, so its
+            # failure is the same class here: unknown, per the docstring —
+            # never a crash of the caller's apply, and never a silent
+            # "unchanged" either.
+            return None
+        try:
+            canonical = self._package_validator.pack_directory(list(files))
+        except (SkillPackageInvalidError, SkillPackageTooLargeError):
+            # Bytes on disk that no longer form a valid package: the installed
+            # state has drifted from anything this service would publish.
+            # Unknown, not equal — the write path replaces it.
+            return None
+        return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
     async def upload_local_skill(
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
@@ -363,8 +416,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 raise RuntimeError("Local Skill metadata switch failed")
             switched = True
             runtime_sync_attempted = True
-            if not await self._sync_runtime(owner_id, bot_id):
-                raise LocalSkillRuntimeSyncError()
+            runtime_projection = await self._sync_runtime(owner_id, bot_id)
             self._audit_log_repo.insert(
                 {
                     "bot_id": bot_id,
@@ -375,20 +427,6 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                     ),
                 }
             )
-        except LocalSkillRuntimeSyncError:
-            await self._restore_replacement(
-                skill=skill,
-                old_metadata=old_metadata,
-                owner_id=owner_id,
-                bot_id=bot_id,
-                staged=staged,
-                canonical=canonical,
-                backup=backup,
-                canonical_published=canonical_published,
-                switched=switched,
-                runtime_sync_attempted=runtime_sync_attempted,
-            )
-            raise
         except Exception as exc:
             if switched or canonical_published:
                 await self._restore_replacement(
@@ -440,6 +478,7 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 "user_id": owner_id,
             },
             "actor_id": actor_id,
+            "runtime_projection": runtime_projection.to_dict(),
         }
 
     async def _restore_replacement(
@@ -467,10 +506,8 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             restored = self._skill_repo.update(skill["id"], old_metadata)
             if restored is None:
                 raise LocalSkillStorageError()
-            if runtime_sync_attempted and not await self._sync_runtime(
-                owner_id, bot_id
-            ):
-                raise LocalSkillRuntimeSyncError()
+            if runtime_sync_attempted:
+                await self._sync_runtime(owner_id, bot_id)
         if backup is not None:
             await self._discard(backup)
         await self._discard(staged)
@@ -521,7 +558,9 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             matches.append({**row, "active": bool(current["active"])})
         return matches
 
-    async def _sync_runtime(self, owner_id: str, bot_id: str) -> bool:
+    async def _sync_runtime(
+        self, owner_id: str, bot_id: str
+    ) -> RuntimeProjectionResult:
         try:
             # Skills only. Both callers are the Local Skill *replace* flow
             # (and its compensating restore), and a replace cannot move the
@@ -531,14 +570,17 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
             # here rescans them either. The projected MCP codes are therefore
             # identical before and after, so claiming or releasing anything
             # would be a device write to restate what is already true.
-            await self._runtime_reconciler.project(
+            result = await self._runtime_reconciler.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 scope=ProjectionScope(skills=True),
             )
-            return True
+            return result or RuntimeProjectionResult.converged()
         except Exception:
-            return False
+            return RuntimeProjectionResult.pending(
+                code="SKILL_RUNTIME_UNAVAILABLE",
+                reason="Skill 运行环境当前不可连接，内容已更新但尚未同步",
+            )
 
     @staticmethod
     def _scope_for(bot: dict[str, Any], bot_id: str) -> BotSkillLayoutScope:

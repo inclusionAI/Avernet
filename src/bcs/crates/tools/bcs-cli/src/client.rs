@@ -78,6 +78,7 @@ pub struct RunSessionCollaborationOptions {
     pub participant_bindings: BTreeMap<String, ParticipantBindingInfo>,
     pub definition_yaml: String,
     pub input: serde_json::Value,
+    pub opening_message: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1496,12 +1497,16 @@ impl BcsClient {
             "{}/sessions/{}/state-machine-runs",
             self.base_url, options.session_id
         );
+        let mut payload = serde_json::json!({
+            "definition_yaml": options.definition_yaml,
+            "participant_bindings": options.participant_bindings,
+            "input": options.input,
+        });
+        if let Some(opening_message) = options.opening_message {
+            payload["opening_message"] = opening_message;
+        }
         let response = self
-            .add_auth(self.http_client.post(&url).json(&serde_json::json!({
-                "definition_yaml": options.definition_yaml,
-                "participant_bindings": options.participant_bindings,
-                "input": options.input,
-            })))
+            .add_auth(self.http_client.post(&url).json(&payload))
             .send()
             .await
             .context("Failed to start session state-machine run")?;

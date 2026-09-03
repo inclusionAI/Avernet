@@ -76,9 +76,7 @@ class TestProxypassAuth:
         assert resp.status_code == 401
 
     def test_invalid_token(self, client) -> None:
-        resp = client.get(
-            "/proxypass/ARCA_123", headers={"X-PROXYPASS-TOKEN": "bad"}
-        )
+        resp = client.get("/proxypass/ARCA_123", headers={"X-PROXYPASS-TOKEN": "bad"})
         assert resp.status_code == 401
 
     def test_valid_token(self, client, jwt_secret: str) -> None:

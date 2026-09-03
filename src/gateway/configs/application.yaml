@@ -182,7 +182,7 @@ user_config:
   # credential wins (design §5). Flavor-specific verification backends are wired
   # by PluginAccessor in the composition root.
   identity_strategies:
-    user: [google]
+    user: [oauth_session]
     bot: [bot_token]
     app: [app_token]
     access_key: [access_key_token]
@@ -270,6 +270,23 @@ user_config:
     "/openapi/v1/bots/logs/**":
       user: required
       app: required
+
+    # Source credentials (W3 #1471): tenant-level secret management — an
+    # application surface. The app identity is what the operations are
+    # scoped by: registering a free name makes the calling application its
+    # owner, rotation and delete are the owner's alone (checked at the
+    # backend, against the row), and any app of the tenant may read the
+    # masked inventory — the name is the shared reference namespace
+    # manifests cite. A user may ride along for audit attribution but
+    # cannot act alone. The same shape as /openapi/v1/bots/authorized.
+    "/openapi/v1/bots/source-credentials/**":
+      user: optional
+      app: required
+
+    # Public OAuth/session facade. These endpoints must stay anonymous at the
+    # gateway edge: they issue/refresh/logout auth state rather than requiring
+    # the caller to present one.
+    "/openapi/v1/auth/**": {}
 
     "/openapi/v1/collaboration/**":
       user: optional
@@ -399,6 +416,10 @@ user_config:
           source: file
           path: schemas/bots.openapi.json
           refresh_seconds: 300
+      auth:
+        server: bcs
+        protocols: [http]
+        schema: {}
       collaboration:
         server: bcs
         protocols: [http, websocket]

@@ -51,7 +51,6 @@ from agentclaw.community.api.space_skill_version_query_service import (
 )
 from agentclaw.community.api.space_skill_offline_service import (
     OfflineBlockerKind,
-    OfflineDraft,
     OfflineImpact,
     OfflineImpactItem,
     SpaceSkillOfflineResult,
@@ -366,9 +365,10 @@ def test_grant_endpoints_publish_stable_wire_and_delegate_actor(
                 "edit_draft": False,
                 "publish_draft": False,
                 "delete_draft": False,
-                "create_upgrade_draft": False,
-                "offline_skill": False,
-                "manage_grants": False,
+                            "create_upgrade_draft": False,
+                            "offline_skill": False,
+                            "copy_offline_skill": False,
+                            "manage_grants": False,
                 "transfer_owner": False,
                 "request_edit_access": True,
                 "takeover_lease": False,
@@ -625,6 +625,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "delete_draft": False,
                         "create_upgrade_draft": False,
                         "offline_skill": False,
+                        "copy_offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
@@ -676,6 +677,7 @@ def test_list_space_skills_maps_page_and_forwards_search(client, skill_query_ser
                         "delete_draft": False,
                         "create_upgrade_draft": False,
                         "offline_skill": False,
+                        "copy_offline_skill": False,
                         "manage_grants": False,
                         "transfer_owner": False,
                         "request_edit_access": True,
@@ -1264,16 +1266,19 @@ def test_offline_impact_and_command_publish_stable_contracts(
                 display_name="基础能力集",
             ),
         ),
+        warnings=(
+            OfflineImpactItem(
+                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
+                resource_id="artifact-scan",
+                display_name="Service Artifact lineage is unreadable",
+            ),
+        ),
     )
     skill_offline_service.impact.return_value = impact
     skill_offline_service.offline.return_value = SpaceSkillOfflineResult(
         changed=True,
         lifecycle_status="OFFLINE",
-        draft=OfflineDraft(
-            target_version=3,
-            status="EDITING",
-            revision_id="33333333-3333-4333-8333-333333333333",
-        ),
+        offline_at=datetime(2026, 9, 2),
     )
 
     preview = client.get(
@@ -1294,10 +1299,17 @@ def test_offline_impact_and_command_publish_stable_contracts(
                 "display_name": "基础能力集",
             }
         ],
+        "warnings": [
+            {
+                "kind": "UNKNOWN_ARTIFACT",
+                "resource_id": "artifact-scan",
+                "display_name": "Service Artifact lineage is unreadable",
+            }
+        ],
     }
     assert executed.status_code == 200
     assert executed.json()["data"]["changed"] is True
-    assert executed.json()["data"]["draft"]["target_version"] == 3
+    assert executed.json()["data"]["offline_at"] == "2026-09-02T00:00:00"
     skill_offline_service.impact.assert_called_once_with(
         space_id=7,
         skill_id=51,
@@ -1310,18 +1322,18 @@ def test_offline_impact_and_command_publish_stable_contracts(
     )
 
 
-def test_offline_blocked_returns_latest_impact_in_409_data(
+def test_offline_blocked_returns_latest_explicit_impact_in_409_data(
     client, skill_offline_service
 ):
     impact = OfflineImpact(
         blocked=True,
         total=1,
-        counts={"UNKNOWN_ARTIFACT": 1},
+        counts={"SERVICE_ARTIFACT": 1},
         items=(
             OfflineImpactItem(
-                kind=OfflineBlockerKind.UNKNOWN_ARTIFACT,
-                resource_id="artifact-scan",
-                display_name="scan incomplete",
+                kind=OfflineBlockerKind.SERVICE_ARTIFACT,
+                resource_id="123",
+                display_name="Service 123 V1 (Skill 1.0.0)",
             ),
         ),
     )
@@ -1331,7 +1343,7 @@ def test_offline_blocked_returns_latest_impact_in_409_data(
 
     assert response.status_code == 409
     assert response.json()["code"] == 409313
-    assert response.json()["data"]["counts"] == {"UNKNOWN_ARTIFACT": 1}
+    assert response.json()["data"]["counts"] == {"SERVICE_ARTIFACT": 1}
 
 
 def test_upgrade_maps_exact_source_failure_to_sc_unavailable(
@@ -1582,7 +1594,9 @@ def test_initialize_personal_space_exposes_created_state(
     assert data["space_type"] == "PERSONAL"
     assert data["created"] is was_created
     assert data["current_user_role"] == "ADMIN"
-    space_service.initialize_personal.assert_called_once_with(user_id="owner-1")
+    space_service.initialize_personal.assert_called_once_with(
+        user_id="owner-1", create_sc_team=True
+    )
 
 
 def test_create_team_space_returns_owner_metadata(client, space_service):
@@ -1597,7 +1611,9 @@ def test_create_team_space_returns_owner_metadata(client, space_service):
     assert data["space_id"] == 7
     assert data["is_creator"] is True
     assert data["member_count"] == data["owner_count"] == 1
-    space_service.create_team.assert_called_once_with(name="Team", creator_id="owner-1")
+    space_service.create_team.assert_called_once_with(
+        name="Team", creator_id="owner-1", create_sc_team=True
+    )
 
 
 def test_member_list_delete_and_role_update(client, member_service):

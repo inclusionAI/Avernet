@@ -61,8 +61,14 @@ from agentclaw.community.api.bot_inventory_service import BotInventoryServicePro
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
+)
+from agentclaw.community.api.source_credential_service import (
+    SourceCredentialServiceProtocol,
 )
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
@@ -169,8 +175,14 @@ from agentclaw.community.core.bot_management.services.bot_space_service import (
 from agentclaw.community.core.bot_startup_script.services.startup_script_service import (
     BotStartupScriptService,
 )
+from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
+    BotConfigManifestApplyService,
+)
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_service import (
     BotConfigManifestService,
+)
+from agentclaw.community.core.bot_config_manifest.credentials.service import (
+    SourceCredentialService,
 )
 from agentclaw.community.core.desktop_bot.services.desktop_bot_service import (
     DesktopBotService,
@@ -262,6 +274,8 @@ _PAIRS = [
     (BotInventoryServiceProtocol, BotInventoryService),
     (BotStartupScriptServiceProtocol, BotStartupScriptService),
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
+    (SourceCredentialServiceProtocol, SourceCredentialService),
+    (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
     (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),

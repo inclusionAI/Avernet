@@ -161,6 +161,7 @@ def test_modules_for_community_is_isolated():
     # Community installs only its own column — never the prod infra modules.
     assert _names(modules_for(DeployProfile.COMMUNITY)) == {
         "CommunityCacheModule",
+        "CommunityCallerIdentityModule",
         "CommunitySecretModule",
         "CommunityDatabaseModule",
         "CommunityObjectStorageModule",
@@ -264,6 +265,30 @@ async def test_singlebox_profile_returns_mock_iam_token_without_cookie():
 
     assert result.error is None
     assert result.iam_token == "mock_iam_token"
+
+
+@pytest.mark.asyncio
+async def test_community_profile_returns_placeholder_iam_token_without_cookie():
+    injector = build_injector(profile=DeployProfile.COMMUNITY)
+
+    result = await injector.get(CallerIamTokenServiceProtocol).get_iam_token(
+        iam_token="",
+        auth_request=AuthRequestContext(
+            {"bcs_session": "oauth-session-must-not-be-returned"},
+            {},
+            {},
+            "http://test/",
+        ),
+        bot_id="bot-1",
+        stage=CallerIdentityStage.ONLINE,
+        publish_id=None,
+        entity_id="user-1",
+        is_test_exchange=False,
+    )
+
+    assert result.error is None
+    assert result.iam_token == "caller_mode_unsupported"
+    assert result.iam_token != "oauth-session-must-not-be-returned"
 
 
 def test_singlebox_profile_resolves_baas_only_device_runtime():

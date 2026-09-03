@@ -86,17 +86,25 @@ provides:
   # bot
   - BotAppGrantRepositoryProtocol
   - BotCollabLockRepositoryProtocol
+  - SourceCredentialRepositoryProtocol
   - BotCollabLogRepositoryProtocol
   - BotConfigManifestRepositoryProtocol
   - BotConfigManifestRepository
+  - BotConfigManifestApplyRepositoryProtocol
+  - BotConfigManifestApplyRepository
+  - BotConfigManifestApplyLockRepositoryProtocol
+  - BotConfigManifestApplyLockRepository
   - BotFriendRepositoryProtocol
   - BotRepository
   - BotRestartLockRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
+  - ManifestContentRepositoryProtocol
+  - ManifestContentRepository
   - RenderScreenRepository
   - TemplateRepository
   - UserMCPConfigRepository
+  - SourceCredentialRepository
   - CapabilityDesiredStateRepositoryProtocol
   - CapabilityDesiredStateRepository
   - SkillEditorRequestRepositoryProtocol
@@ -244,6 +252,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_public
   - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.bot_startup_script
+  - agentclaw.community.core.bot_config_manifest
   - agentclaw.community.core.caller_identity
   - agentclaw.community.core.channel
   - agentclaw.community.core.common_config

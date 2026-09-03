@@ -28,28 +28,28 @@ const NODE_THEME: Record<
   { default: string; highlighted: string; badge: string; bot: string; role: string; unbound: string }
 > = {
   blue: {
-    default: 'border border-blue-300/70 bg-blue-50/60 hover:border-blue-400',
-    highlighted: 'border border-blue-400 bg-blue-50 ring-2 ring-blue-100/80',
-    badge: 'border-blue-200 bg-blue-500 text-white',
-    bot: 'text-blue-700',
-    role: 'border-blue-200 bg-white/90 text-blue-700',
-    unbound: 'text-amber-600',
+    default: 'border border-primary/30 bg-primary/5 hover:border-primary/60',
+    highlighted: 'border border-primary bg-primary/10 ring-2 ring-primary/20',
+    badge: 'border-primary/40 bg-primary text-primary-foreground',
+    bot: 'text-primary',
+    role: 'border-primary/30 bg-background/90 text-primary',
+    unbound: 'text-warning',
   },
   green: {
-    default: 'border border-emerald-300/70 bg-emerald-50/60 hover:border-emerald-400',
-    highlighted: 'border border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100/80',
-    badge: 'border-emerald-200 bg-emerald-500 text-white',
-    bot: 'text-emerald-700',
-    role: 'border-emerald-200 bg-white/90 text-emerald-700',
-    unbound: 'text-amber-600',
+    default: 'border border-success/30 bg-success/5 hover:border-success/60',
+    highlighted: 'border border-success bg-success/10 ring-2 ring-success/20',
+    badge: 'border-success/40 bg-success text-primary-foreground',
+    bot: 'text-success',
+    role: 'border-success/30 bg-background/90 text-success',
+    unbound: 'text-warning',
   },
   neutral: {
-    default: 'border border-[var(--color-border)] bg-[var(--color-panel-muted)] hover:border-[var(--color-muted)]',
-    highlighted: 'border border-[var(--color-muted)] bg-[var(--color-panel-muted)] ring-2 ring-[var(--color-border)]',
-    badge: 'border-[var(--color-border)] bg-[var(--color-muted)] text-white',
-    bot: 'text-[var(--color-fg)]',
-    role: 'border-[var(--color-border)] bg-white/90 text-[var(--color-fg)]',
-    unbound: 'text-amber-600',
+    default: 'border border-border bg-muted hover:border-muted-foreground',
+    highlighted: 'border border-muted-foreground bg-muted ring-2 ring-border',
+    badge: 'border-border bg-muted text-foreground',
+    bot: 'text-foreground',
+    role: 'border-border bg-background/90 text-foreground',
+    unbound: 'text-warning',
   },
 };
 
@@ -69,7 +69,7 @@ function CollaborationNode({ data }: { data: FlowNodeData }) {
   return (
     <div
       className={cn(
-        'nodrag nopan relative flex min-h-[84px] w-[210px] cursor-default flex-col justify-center rounded-[18px] px-4 py-3 shadow-sm transition-all',
+        'nodrag nopan relative flex min-h-[84px] w-[210px] cursor-default flex-col justify-center rounded-xl px-4 py-3 shadow-sm transition-all',
         data.highlighted ? theme.highlighted : theme.default,
       )}
     >
@@ -82,7 +82,7 @@ function CollaborationNode({ data }: { data: FlowNodeData }) {
         {kindLabel}
       </span>
       <Handle type="target" position={Position.Top} className="pointer-events-none opacity-0" />
-      <div className="truncate text-center text-sm font-semibold text-[var(--color-fg)]">{data.title}</div>
+      <div className="truncate text-center text-sm font-semibold text-foreground">{data.title}</div>
       <div className="mt-3 flex min-w-0 items-center justify-between gap-3">
         <span className={cn('min-w-0 flex-1 truncate text-xs font-medium', isUnbound ? theme.unbound : theme.bot)}>
           {botName}
@@ -138,20 +138,16 @@ export function CollaborationFlowPreview({
   const edges: Record<string, unknown>[] = result.layout.edges.map((edge) => ({
     ...edge,
     type: 'default',
-    markerEnd: { type: ARROW_CLOSED, color: '#3b82f6' },
-    style: { stroke: '#3b82f6', strokeWidth: 2 },
-    labelStyle: { fill: '#2563eb', fontSize: 11, fontWeight: 700 },
-    labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
+    markerEnd: { type: ARROW_CLOSED, color: 'hsl(var(--primary))' },
+    style: { stroke: 'hsl(var(--primary))', strokeWidth: 2 },
+    labelStyle: { fill: 'hsl(var(--primary))', fontSize: 11, fontWeight: 600 },
+    labelBgStyle: { fill: 'hsl(var(--background))', fillOpacity: 0.92 },
     labelBgPadding: [5, 3] as [number, number],
-    labelBgBorderRadius: 5,
+    labelBgBorderRadius: 4,
   }));
 
   return (
-    <div
-      role="region"
-      aria-label="协作流程预览"
-      className="h-[400px] w-full overflow-hidden rounded-xl bg-[var(--color-panel-muted)]"
-    >
+    <div role="region" aria-label="协作流程预览" className="h-[400px] w-full overflow-hidden rounded-xl bg-muted">
       <ReactFlow
         nodes={nodes as never}
         edges={edges as never}

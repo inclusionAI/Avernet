@@ -64,6 +64,19 @@ def test_list_sessions(client, relay):
     assert relay.paths == ["/api/sessions"]
 
 
+def test_list_sessions_hides_openclaw_internal_title_suffix(client, relay):
+    canonical_id = f"agent:main:{SESSION_ID}"
+    relay.results = [EngineResult(data=[{
+        **ENGINE_SESSION,
+        "id": canonical_id,
+        "title": "Quarterly_report_2d20edc1-2f84-4524-8486-15bbd7078d42",
+    }])]
+
+    item = ok(client.get(_base()))["items"][0]
+
+    assert item["title"] == "Quarterly_report"
+
+
 @pytest.mark.parametrize("filter_name", ["agent_id", "session_key"])
 def test_list_filters_are_forwarded_to_the_engine(client, relay, filter_name):
     """Both filters are applied upstream *before* pagination, so they must
@@ -132,10 +145,60 @@ def test_set_favorite_is_idempotent_and_encodes_only_the_upstream_path(
 
 
 def test_create_session_fills_user_id_from_the_principal(client, relay):
-    relay.results = [EngineResult(data=ENGINE_SESSION)]
+    canonical = {
+        **ENGINE_SESSION,
+        "id": f"agent:main:{SESSION_ID}",
+        "title": "T_2d20edc1-2f84-4524-8486-15bbd7078d42",
+        "model": "openai/gpt-5.4",
+        "gmt_created": "2026-07-30T09:00:01+00:00",
+        "gmt_modified": "2026-07-30T09:00:01+00:00",
+    }
+    relay.results = [
+        EngineResult(data={**ENGINE_SESSION, "title": "T_suffix"}),
+        EngineResult(data=[canonical]),
+    ]
     resp = client.post(_base(), json={"title": "T"})
     assert resp.status_code == 201, resp.json()
     assert relay.calls[0]["body"]["user_id"] == OWNER
+    data = resp.json()["data"]
+    assert data["session_id"] == canonical["id"]
+    assert data["model"] == "openai/gpt-5.4"
+    assert data["title"] == "T"
+    assert data["gmt_create"] == ENGINE_SESSION["gmt_created"]
+    assert data["gmt_modified"] == ENGINE_SESSION["gmt_modified"]
+    assert relay.calls[1]["method"] == "GET"
+    assert relay.calls[1]["path"] == "/api/sessions"
+
+
+def test_create_session_other_engine_does_not_add_reconciliation_call(client, relay):
+    relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
+        bot_id=BOT, bot_type="personal", active_engine="claude_code", owner_id=OWNER,
+    )
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+
+    resp = client.post(_base(), json={"title": "T"})
+
+    assert resp.status_code == 201, resp.json()
+    assert relay.paths == ["/api/sessions"]
+
+
+def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
+    client, relay
+):
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+    original_call = relay.call
+
+    async def fail_only_list(**kwargs):
+        if kwargs["method"] == "GET":
+            raise EngineUpstreamError("list temporarily unavailable")
+        return await original_call(**kwargs)
+
+    relay.call = fail_only_list
+
+    resp = client.post(_base(), json={"title": "T"})
+
+    assert resp.status_code == 201, resp.json()
+    assert resp.json()["data"]["session_id"] == SESSION_ID
 
 
 def test_create_rejects_an_agent_one_engine_would_silently_drop(client, relay):

@@ -125,11 +125,38 @@ def test_non_first_service_bot_uses_regular_passport():
     bot_service.is_first_personal_bot.assert_not_called()
 
 
-def test_non_default_tenant_keeps_apply_first_behavior():
+def test_a_non_default_tenant_no_longer_forces_apply_first():
+    """The tenant does not get a vote any more — only eligibility does.
+
+    This used to assert the opposite: any non-default tenant took applyFirst
+    unconditionally (#556, "approval does not apply to external tenants").
+    That made ``use_first_passport=False`` a request ``_apply_passport`` could
+    silently decline, which W13 cannot survive — submission passes ``False``
+    to get an authorization URL, and on a non-default tenant got a bare token
+    and two empty URL fields instead.
+
+    Kept rather than deleted, and inverted, because the old rule is exactly the
+    thing a future change could restore without noticing: an owner who is not
+    on their first Bot now goes through approval on **every** tenant.
+    """
     with avernet_tenant_scope("acme"):
         passport, _, _ = _run(
             is_first_bot=False, is_first_personal_bot=False
         )
+
+    passport.apply_agent_passport.assert_called_once()
+    passport.apply_first_agent_passport.assert_not_called()
+
+
+def test_a_non_default_tenants_first_bot_still_skips_approval():
+    """The other half: eligibility still decides, and it decides the same way.
+
+    Removing the tenant branch must not have turned into "everyone goes
+    through approval" — a first Bot skips it, on a non-default tenant exactly
+    as on the default one.
+    """
+    with avernet_tenant_scope("acme"):
+        passport, _, _ = _run(is_first_bot=True, is_first_personal_bot=True)
 
     passport.apply_first_agent_passport.assert_called_once()
     passport.apply_agent_passport.assert_not_called()

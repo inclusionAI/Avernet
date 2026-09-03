@@ -110,8 +110,10 @@ def test_provision_produces_creates_approves_and_binds() -> None:
     #    owner_id spliced into the bot row for the producer's compose request.
     router.resolve.assert_called_once_with("teclaw")
     pa = router.resolve.return_value.produce_artifact.call_args
-    assert pa.args[0]["bot_id"] == "b1" and pa.args[0]["owner_id"] == "u1"
-    assert pa.kwargs["version"] is None
+    request = pa.args[0]
+    assert request.bot["bot_id"] == "b1" and request.bot["owner_id"] == "u1"
+    assert request.version is None
+    assert request.layout_observation is None
 
     # 2. created with the produced artifact + teclaw template; token 由创建发布单
     #    轮询任务在容器启动后写入 outbound rule，不混入 create payload。

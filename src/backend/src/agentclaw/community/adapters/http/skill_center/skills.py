@@ -168,6 +168,20 @@ logger = get_logger()
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
+
+def _legacy_runtime_projection(item: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """Keep the BFF wire stable and only surface non-converged diagnostics."""
+
+    projection = item.get("runtime_projection")
+    if not isinstance(projection, dict):
+        return "", None
+    status = projection.get("status")
+    if status == "PENDING":
+        return "能力集状态已保存，运行环境暂未完成同步", projection
+    if status == "DEGRADED":
+        return "能力集状态已保存，但部分 Skill 未完成运行时收敛", projection
+    return "", None
+
 BOT_RUNTIME_UNAVAILABLE_MESSAGE = "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
 _BOT_RUNTIME_UNAVAILABLE_MARKERS = (
     "404 not found",
@@ -1145,10 +1159,14 @@ async def activate_skill_set(
         set_id=request.skill_set_id,
     )
 
+    runtime_message, runtime_projection = _legacy_runtime_projection(item)
+    data = {"activated": [item["id"]] if item.get("changed") else [], "failed": []}
+    if runtime_projection is not None:
+        data["runtime_projection"] = runtime_projection
     return ActivateSkillSetResponse(
         success=True,
-        message="Skill set activated",
-        data={"activated": [item["id"]] if item.get("changed") else [], "failed": []},
+        message=runtime_message or "Skill set activated",
+        data=data,
     )
 
 
@@ -1201,10 +1219,14 @@ async def deactivate_skill_set(
         set_id=request.skill_set_id,
     )
 
+    runtime_message, runtime_projection = _legacy_runtime_projection(item)
+    data = {"deactivated": [item["id"]] if item.get("changed") else [], "failed": []}
+    if runtime_projection is not None:
+        data["runtime_projection"] = runtime_projection
     return DeactivateSkillSetResponse(
         success=True,
-        message="Skill set deactivated",
-        data={"deactivated": [item["id"]] if item.get("changed") else [], "failed": []},
+        message=runtime_message or "Skill set deactivated",
+        data=data,
     )
 
 
@@ -1288,14 +1310,15 @@ async def get_skill_readme(
     skill_service_factory: SkillServiceFactoryProtocol = Injected(
         SkillServiceFactoryProtocol
     ),
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
     skill_center_client: SkillCenterClient = Injected(SkillCenterClient),
     resolver: DeviceContextResolver = Injected(DeviceContextResolver),
 ) -> SkillReadmeResponse:
     """Get skill README content.
 
-    Looks up the skill in DB by id/link_name first. If git_path is center://,
-    fetch from SkillCenter file-content API; otherwise delegate to
-    SkillService.get_skill_readme (handles local://, git://, etc.).
+    Looks up the skill in DB by id/link_name first. Center content comes from
+    SkillCenter, Git market content from SkillQueryService, and local content
+    from the owning Bot's workspace.
     """
     logger.info(
         "[skills.get_skill_readme] Request: user_id=%s, ctx_bot_id=%s, "
@@ -1378,6 +1401,23 @@ async def get_skill_readme(
                 f"[skills.get_skill_readme] SkillCenter file-content failed: {e}"
             )
         raise HTTPException(status_code=404, detail="Skill or README not found")
+
+    # Git market content is shared. Its query seam resolves it from the global
+    # skills-repo, without treating a historical ``bolt_id`` as content owner.
+    if skill and (skill.get("git_path") or "").startswith("git://"):
+        try:
+            readme = await query_service.get_readme_by_skill(
+                skill_id=str(skill.get("id") or skill_id),
+                actor_id=ctx.user_id,
+            )
+        except LocalSkillNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="Skill or README not found"
+            ) from exc
+        if not readme:
+            raise HTTPException(status_code=404, detail="Skill or README not found")
+        logger.info(f"[skills.get_skill_readme] Found in Git market: skill_id={skill_id}")
+        return SkillReadmeResponse(success=True, data={"content": readme})
 
     # A Skill may be read while the caller is operating another Bot.  Its DB
     # ``bolt_id`` is the authoritative target; derive owner, entity type and

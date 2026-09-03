@@ -2,31 +2,29 @@ use bcs_domain::{CoordinationMode, CoordinationSurface, SenderType};
 use bcs_protocol::{
     BcsFrame, CoordinationCall, DirectiveAction, EventFrame, GroupContext, RequestFrame,
     RequestSource, ResponseDirective, ResponseMode as WireResponseMode, TOOL_ASSIGN_TASK,
-    TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE,
-    build_recipient_group_context, build_session_key,
+    TOOL_SEND_TASK_MESSAGE, TOOL_TASK_COMPLETE, build_recipient_group_context, build_session_key,
 };
 use bcs_service_api::application::channel::OutboundMessage;
 use bcs_service_api::{
     ActorStatus, BotDeliveryCommand, BotDeliveryKind, BotDeliveryResult, BotDeliveryTarget,
-    BotEventCommand, BotEventOutcome, BotTerminalEvent, BotTerminalState,
-    ChannelOutboundEventKind, ChannelOutboundPurpose, ChannelRenderHint,
-    ChatEventRouting, ChatEventState, ChatResponseMode,
+    BotEventCommand, BotEventOutcome, BotTerminalEvent, BotTerminalState, ChannelOutboundEventKind,
+    ChannelOutboundPurpose, ChannelRenderHint, ChatEventRouting, ChatEventState, ChatResponseMode,
     DefaultDelivery, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryKind,
-    FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy, MessageDeliveryResult,
-    MessageLogContent, MessageLogEventType, MessageLogMode, MessageLogStatus,
-    MessageLogTargetSummary, MESSAGE_LOG_SCHEMA_VERSION, message_log_json,
-    RouteParticipantOverlay, ResponseMode, RoutingDecision, RoutingMode, RoutingTarget,
-    RunFallbackDelivery, ServiceError, ServiceResult, SystemMessageEvent, TaskCompleteCommand,
-    TaskDispatchCommand, TaskMessageCommand, backfill_bot_names, backfill_participant_names,
+    FrontendDeliveryResult, FrontendDeliveryTarget, Group, GroupKind, GroupStatus, GroupStrategy,
+    MESSAGE_LOG_SCHEMA_VERSION, MessageDeliveryResult, MessageLogContent, MessageLogEventType,
+    MessageLogMode, MessageLogStatus, MessageLogTargetSummary, ResponseMode,
+    RouteParticipantOverlay, RoutingDecision, RoutingMode, RoutingTarget, RunFallbackDelivery,
+    ServiceError, ServiceResult, SystemMessageEvent, TaskCompleteCommand, TaskDispatchCommand,
+    TaskMessageCommand, backfill_bot_names, backfill_participant_names, message_log_json,
 };
 use serde_json::Value;
 use tracing::{info, warn};
 
 use crate::BcsMessageFlow;
+use crate::MSG_LOG_TARGET;
 use crate::group_flow::apply_overlay_to_decision;
 use crate::protocol_context::{group_context_delivery_type, group_context_input, group_type_wire};
 use crate::task_store::{TaskEntry, TaskLedgerStatus, TaskStore};
-use crate::MSG_LOG_TARGET;
 
 const COORDINATION_PROCESSED_TTL_MS: u64 = 10 * 60 * 1000;
 
@@ -54,7 +52,11 @@ pub async fn handle_bot_event(
     // segment-cumulative `message.content` the frontend SDK renders from — the
     // raw SSE delta frame only carries `delta_text` and no `message`.
     if cmd.event_type == "agent" {
-        match cmd.event_payload.get("stream").and_then(|value| value.as_str()) {
+        match cmd
+            .event_payload
+            .get("stream")
+            .and_then(|value| value.as_str())
+        {
             Some("thinking") if cmd.state == ChatEventState::Delta => {
                 normalize_thinking_delta(flow, &mut cmd).await;
             }
@@ -127,6 +129,9 @@ pub async fn handle_bot_event(
         flush_chat_segment(flow, &cmd, None).await?;
     }
     if is_terminal_state(&cmd.state) {
+        if matches!(cmd.event_type.as_str(), "chat" | "chat.event") {
+            flow.complete_send_context(&cmd.run_id).await?;
+        }
         flow.frontend_delivery.unregister_run(&cmd.run_id).await?;
     }
 
@@ -173,8 +178,14 @@ pub async fn handle_bot_event(
             frontend_deliveries,
             unregistered_run_ids: final_run_ids(&cmd),
             mentions: relay_mentions,
-            delivered_count: relay_delivery_results.iter().filter(|result| result.success).count(),
-            failed_count: relay_delivery_results.iter().filter(|result| !result.success).count(),
+            delivered_count: relay_delivery_results
+                .iter()
+                .filter(|result| result.success)
+                .count(),
+            failed_count: relay_delivery_results
+                .iter()
+                .filter(|result| !result.success)
+                .count(),
             delivery_results: relay_delivery_results,
         });
     }
@@ -279,11 +290,7 @@ async fn resolve_channel_sender(
     flow: &BcsMessageFlow,
     cmd: &BotEventCommand,
 ) -> (bcs_domain::ParticipantRole, String) {
-    if let Some(info) = flow
-        .message_tracker
-        .channel_sender_info(&cmd.run_id)
-        .await
-    {
+    if let Some(info) = flow.message_tracker.channel_sender_info(&cmd.run_id).await {
         return info;
     }
 
@@ -303,8 +310,7 @@ async fn resolve_channel_sender(
                             std::slice::from_mut(&mut participant),
                         )
                         .await;
-                        participant_display_name(&participant)
-                            .unwrap_or_else(|| cmd.bot_id.clone())
+                        participant_display_name(&participant).unwrap_or_else(|| cmd.bot_id.clone())
                     }
                 };
                 (sender_role, label)
@@ -520,7 +526,9 @@ async fn relay_final_chat_event(
     } else {
         match path {
             RoutingPath::Structured => {
-                let meta = routing_meta.as_ref().expect("structured path requires metadata");
+                let meta = routing_meta
+                    .as_ref()
+                    .expect("structured path requires metadata");
                 let decision = flow
                     .routing
                     .route_structured(&group, meta, &cmd.bot_id, &*flow.registry)
@@ -595,6 +603,35 @@ async fn relay_final_chat_event(
     // no buffered deltas just insert the final text.)
     persist_final_chat(flow, &cmd, cleaned.clone()).await?;
 
+    // Notify @-mentioned humans only after the message is persisted, and only
+    // if the content passes the outbound policy that governs bot deliveries
+    // of the same message.
+    if routing_source == RequestSource::LegacyMention && group.group_kind != GroupKind::Dm {
+        if let Some(notify_text) = crate::group_flow::apply_notify_outbound_policy(
+            flow,
+            &cmd.group_id,
+            &cmd.bot_id,
+            &decision.cleaned_message,
+            &decision.targets,
+        )
+        .await
+        {
+            crate::human_notify_hook::spawn_human_mention_notify(
+                &flow.human_mention_notify,
+                Some(decision.mentions.as_slice()),
+                &overlay,
+                crate::human_notify_hook::MentionNotifyContext {
+                    session_id: cmd.bcs_session_id.clone().unwrap_or_default(),
+                    group_id: cmd.group_id.clone(),
+                    sender_actor_id: cmd.bot_id.clone(),
+                    sender_label: sender_display_name.clone(),
+                    message_text: notify_text,
+                    timestamp_ms: now_ms(),
+                },
+            );
+        }
+    }
+
     for target in &decision.targets {
         let directive = build_response_directive(
             target,
@@ -665,7 +702,11 @@ async fn relay_final_chat_event(
             }
         };
 
-        let delivery_target = match flow.registry.resolve_delivery_target(&target.bot_uuid).await {
+        let delivery_target = match flow
+            .registry
+            .resolve_delivery_target(&target.bot_uuid)
+            .await
+        {
             Ok(target) => target,
             Err(error) => {
                 let error_text = error.to_string();
@@ -697,8 +738,8 @@ async fn relay_final_chat_event(
             flow.registry.get_protocol_version(&target.bot_uuid).await,
             &delivery_target,
         );
-        let is_provider_send = delivery_target.is_http_provider()
-            && target.delivery_type == DeliveryType::Send;
+        let is_provider_send =
+            delivery_target.is_http_provider() && target.delivery_type == DeliveryType::Send;
         let provider_tags = if delivery_target.is_http_provider() {
             group
                 .participants
@@ -745,6 +786,17 @@ async fn relay_final_chat_event(
         // build_send_frame / build_inject_frame signatures. Tracked in the
         // Phase-5 follow-up list (Modify semantics completeness).
         let delivery_kind = bot_delivery_kind(target.delivery_type);
+        flow.register_send_context(
+            target.delivery_type,
+            &delivery_target,
+            &frame,
+            &run_id,
+            &target.bot_uuid,
+            &cmd.group_id,
+            cmd.bcs_session_id.as_deref(),
+            &[],
+        )
+        .await?;
         let delivery = flow
             .bot_delivery
             .deliver(BotDeliveryCommand {
@@ -761,6 +813,9 @@ async fn relay_final_chat_event(
                 if is_provider_send && !result.delivered {
                     provider_send_failed = true;
                 }
+                if !result.delivered {
+                    flow.discard_send_context(&run_id).await?;
+                }
                 log_relay_deliver_result(
                     cmd,
                     &run_id,
@@ -771,15 +826,6 @@ async fn relay_final_chat_event(
                     None,
                     &routing_source,
                 );
-                flow.record_successful_send_context(
-                    target.delivery_type,
-                    &result,
-                    &run_id,
-                    &target.bot_uuid,
-                    &cmd.group_id,
-                    cmd.bcs_session_id.as_deref(),
-                )
-                .await;
                 delivery_results.push(MessageDeliveryResult {
                     bot_uuid: target.bot_uuid.clone(),
                     delivery_type: target.delivery_type,
@@ -789,6 +835,7 @@ async fn relay_final_chat_event(
                 bot_deliveries.push(result);
             }
             Err(error) => {
+                flow.discard_send_context(&run_id).await?;
                 if is_provider_send {
                     provider_send_failed = true;
                 }
@@ -885,13 +932,8 @@ async fn handle_task_bot_event(
     let response_text = preview_task_response_text(flow, &entry, cmd).await;
     let mut group = flow.group.get(&entry.group_id).await;
     if let (Some(group), Some(session_id)) = (group.as_mut(), entry.session_id.as_deref()) {
-        crate::task_flow::apply_session_participants(
-            flow,
-            group,
-            &entry.group_id,
-            session_id,
-        )
-        .await?;
+        crate::task_flow::apply_session_participants(flow, group, &entry.group_id, session_id)
+            .await?;
     }
 
     let target_bot_name = entry
@@ -930,7 +972,18 @@ async fn handle_task_bot_event(
         provider_tags,
     );
     let delivery_kind = BotDeliveryKind::TaskResult;
-    let result = flow
+    flow.register_send_context(
+        DeliveryType::Send,
+        &delivery_target,
+        &frame,
+        &manager_result_run_id,
+        &entry.driver_bot,
+        &entry.group_id,
+        entry.session_id.as_deref(),
+        &[],
+    )
+    .await?;
+    let delivery = flow
         .bot_delivery
         .deliver(BotDeliveryCommand {
             target: delivery_target,
@@ -940,20 +993,18 @@ async fn handle_task_bot_event(
             provider_transport: Default::default(),
             provider_bypass_headers: Vec::new(),
         })
-        .await?;
+        .await;
+    let result = match delivery {
+        Ok(result) => result,
+        Err(error) => {
+            flow.discard_send_context(&manager_result_run_id).await?;
+            return Err(error);
+        }
+    };
     if !result.delivered {
+        flow.discard_send_context(&manager_result_run_id).await?;
         return Ok(vec![result]);
     }
-
-    flow.record_successful_send_context(
-        DeliveryType::Send,
-        &result,
-        &manager_result_run_id,
-        &entry.driver_bot,
-        &entry.group_id,
-        entry.session_id.as_deref(),
-    )
-    .await;
 
     record_task_response_event(flow, task_id, cmd).await;
 
@@ -1012,7 +1063,10 @@ async fn preview_task_response_text(
     scratch.register(entry.clone()).await;
     let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
     record_task_response_event_in_store(&scratch, &entry.task_id, cmd, is_delta_mode).await;
-    let attempted_entry = scratch.get(&entry.task_id).await.unwrap_or_else(|| entry.clone());
+    let attempted_entry = scratch
+        .get(&entry.task_id)
+        .await
+        .unwrap_or_else(|| entry.clone());
     task_response_text(&attempted_entry, cmd)
 }
 
@@ -1033,13 +1087,8 @@ fn task_response_text(entry: &TaskEntry, cmd: &BotEventCommand) -> String {
 
 async fn record_task_response_event(flow: &BcsMessageFlow, task_id: &str, cmd: &BotEventCommand) {
     let is_delta_mode = flow.message_tracker.is_chat_delta_mode(&cmd.run_id).await;
-    record_task_response_event_in_store(
-        flow.task_store.as_ref(),
-        task_id,
-        cmd,
-        is_delta_mode,
-    )
-    .await;
+    record_task_response_event_in_store(flow.task_store.as_ref(), task_id, cmd, is_delta_mode)
+        .await;
 }
 
 async fn record_task_response_event_in_store(
@@ -1049,7 +1098,11 @@ async fn record_task_response_event_in_store(
     is_delta_mode: bool,
 ) {
     if cmd.event_type == "agent"
-        && cmd.event_payload.get("stream").and_then(|value| value.as_str()) == Some("tool")
+        && cmd
+            .event_payload
+            .get("stream")
+            .and_then(|value| value.as_str())
+            == Some("tool")
     {
         task_store.record_response_tool_call(task_id).await;
         return;
@@ -1173,10 +1226,7 @@ async fn publish_system_event(
         .await
 }
 
-async fn build_route_overlay(
-    flow: &BcsMessageFlow,
-    group: &Group,
-) -> Vec<RouteParticipantOverlay> {
+async fn build_route_overlay(flow: &BcsMessageFlow, group: &Group) -> Vec<RouteParticipantOverlay> {
     let mut overlay = Vec::with_capacity(group.participants.len());
     for participant in &group.participants {
         let status = flow
@@ -1209,7 +1259,10 @@ async fn from_bot_owner(flow: &BcsMessageFlow, bot_id: &str) -> Option<String> {
     if bot_id.starts_with("human_") {
         None
     } else {
-        flow.registry.get(bot_id).await.and_then(|bot| bot.created_by)
+        flow.registry
+            .get(bot_id)
+            .await
+            .and_then(|bot| bot.created_by)
     }
 }
 
@@ -1257,7 +1310,12 @@ fn extract_delta_text(event: &Value) -> Option<&str> {
 }
 
 async fn normalize_thinking_delta(flow: &BcsMessageFlow, cmd: &mut BotEventCommand) {
-    if cmd.event_payload.get("stream").and_then(|value| value.as_str()) != Some("thinking") {
+    if cmd
+        .event_payload
+        .get("stream")
+        .and_then(|value| value.as_str())
+        != Some("thinking")
+    {
         return;
     }
     let Some(delta) = extract_thinking_delta(&cmd.event_payload) else {
@@ -1278,8 +1336,14 @@ fn extract_thinking_delta(event: &Value) -> Option<&str> {
 }
 
 fn inject_thinking_text(event: &mut Value, accumulated_text: &str) {
-    if let Some(data) = event.get_mut("data").and_then(|value| value.as_object_mut()) {
-        data.insert("text".to_string(), Value::String(accumulated_text.to_string()));
+    if let Some(data) = event
+        .get_mut("data")
+        .and_then(|value| value.as_object_mut())
+    {
+        data.insert(
+            "text".to_string(),
+            Value::String(accumulated_text.to_string()),
+        );
     }
 }
 
@@ -1326,8 +1390,15 @@ async fn cache_tool_start(flow: &BcsMessageFlow, cmd: &BotEventCommand, data: &V
     if cmd.group_id.is_empty() {
         return;
     }
-    let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
-    let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let tool_call_id = data
+        .get("toolCallId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let name = data
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let args = data.get("args").cloned().unwrap_or(Value::Null);
     let session_id = cmd.bcs_session_id.clone().unwrap_or_default();
 
@@ -1359,8 +1430,14 @@ async fn persist_tool_result(
     // → (next) chat, matching the BCN plugin path.
     flush_chat_segment(flow, cmd, None).await?;
 
-    let tool_call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
-    let is_error = data.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+    let tool_call_id = data
+        .get("toolCallId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let is_error = data
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let result = data.get("result").cloned().unwrap_or(Value::Null);
 
     let start_info = flow.message_tracker.get_tool_call_start(tool_call_id).await;
@@ -1396,7 +1473,11 @@ async fn persist_tool_result(
     crate::group_flow::try_persist_group_message(
         flow,
         &cmd.group_id,
-        if session_id.is_empty() { None } else { Some(&session_id) },
+        if session_id.is_empty() {
+            None
+        } else {
+            Some(&session_id)
+        },
         &cmd.bot_id,
         SenderType::Bot,
         "tool_call",
@@ -1692,7 +1773,11 @@ async fn coordination_surface_for_run(
         return cached;
     }
 
-    let resolved = match flow.registry.resolve_coordination_surface(&cmd.bot_id).await {
+    let resolved = match flow
+        .registry
+        .resolve_coordination_surface(&cmd.bot_id)
+        .await
+    {
         Ok(surface) => Some(surface),
         Err(error) => {
             warn!(
@@ -1773,10 +1858,7 @@ fn tool_result_text(data: &Value) -> Option<String> {
     found_text.then_some(text)
 }
 
-fn coordination_argument_str<'a>(
-    call: &'a CoordinationCall,
-    key: &str,
-) -> Option<&'a str> {
+fn coordination_argument_str<'a>(call: &'a CoordinationCall, key: &str) -> Option<&'a str> {
     call.arguments
         .get(key)
         .and_then(|value| value.as_str())
@@ -1807,8 +1889,8 @@ async fn flush_chat_segment(
 ) -> ServiceResult<()> {
     let buffered = flow.message_tracker.take_chat_buf(&cmd.run_id).await;
     let text = match (final_text, buffered) {
-        (Some(t), _) => t,      // final frame wins
-        (None, Some(t)) => t,   // flush buffered delta text
+        (Some(t), _) => t,             // final frame wins
+        (None, Some(t)) => t,          // flush buffered delta text
         (None, None) => return Ok(()), // nothing streamed in this segment
     };
     if text.is_empty() || cmd.group_id.is_empty() {
@@ -1976,7 +2058,11 @@ fn build_response_directive(
         } else {
             DirectiveAction::Observe
         },
-        mode: if should_respond { Some(to_wire_response_mode(mode)) } else { None },
+        mode: if should_respond {
+            Some(to_wire_response_mode(mode))
+        } else {
+            None
+        },
         reason: reason.map(str::to_string),
         request_source: source.clone(),
         matched_by: None,
@@ -2088,7 +2174,11 @@ fn build_bot_relay_frame(
 ) -> BcsFrame {
     let prefixed = format!("[from:{}]{}", from_bot_name, message);
     let text = if protocol_version >= 2 {
-        format!("{}\n\n[消息内容]\n{}", group_context.format_header(), prefixed)
+        format!(
+            "{}\n\n[消息内容]\n{}",
+            group_context.format_header(),
+            prefixed
+        )
     } else {
         prefixed
     };
@@ -2263,9 +2353,11 @@ fn log_route_digest(
     let targets_summary: Vec<MessageLogTargetSummary> = decision
         .targets
         .iter()
-        .map(|target| MessageLogTargetSummary::new(&target.bot_uuid)
-            .with_delivery_type(delivery_type_slug(target.delivery_type))
-            .with_route_source(route_source))
+        .map(|target| {
+            MessageLogTargetSummary::new(&target.bot_uuid)
+                .with_delivery_type(delivery_type_slug(target.delivery_type))
+                .with_route_source(route_source)
+        })
         .collect();
 
     info!(
@@ -2296,7 +2388,9 @@ fn log_route_digest(
 }
 
 fn effective_message_log_session_id<'a>(group_id: &'a str, session_id: Option<&'a str>) -> &'a str {
-    session_id.filter(|value| !value.is_empty()).unwrap_or(group_id)
+    session_id
+        .filter(|value| !value.is_empty())
+        .unwrap_or(group_id)
 }
 
 fn delivery_type_slug(delivery_type: DeliveryType) -> &'static str {

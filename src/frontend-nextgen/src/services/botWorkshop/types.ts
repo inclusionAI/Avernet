@@ -1,5 +1,7 @@
 // Bot 工坊领域类型统一定义在 Domain 层；这里保留 Service 侧兼容出口。
 export type {
+  AgentCodingDraft,
+  AgentCodingTemplateDraft,
   AvernetBotCreateRequest,
   BotAction,
   BotActionAvailability,
@@ -13,6 +15,7 @@ export type {
   BotDeployment,
   BotDomain,
   BotHarnessContext,
+  BotInventoryAction,
   BotLifecycle,
   BotListQuery,
   BotListResult,

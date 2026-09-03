@@ -16,12 +16,16 @@ from gateway.community.plugins.authn.access_key_token import AccessKeyTokenStrat
 from gateway.community.plugins.authn.app_token import AppTokenStrategy
 from gateway.community.plugins.authn.bot_token import BotTokenStrategy
 from gateway.community.plugins.authn.google_token import GoogleUserStrategy
+from gateway.community.plugins.authn.oauth_session import OauthSessionStrategy
 from gateway.community.spi.authn import PrincipalType
+
+_TEST_BCS_SECRET = "test-bcs-session-secret-32-bytes!!"
 
 
 def _pool():
     return {
         "google": GoogleUserStrategy(token_header="x-google-token"),
+        "oauth_session": OauthSessionStrategy(jwt_secret=_TEST_BCS_SECRET),
         "bot_token": BotTokenStrategy(registry=None),
         "app_token": AppTokenStrategy(registry=None),
         "access_key_token": AccessKeyTokenStrategy(registry=None),
@@ -177,3 +181,12 @@ def test_dev_mock_cannot_be_declared_in_config(tmp_path, monkeypatch):
     monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
     with pytest.raises(KeyError, match="unknown strategy 'dev_header'"):
         _strategy_chains(_pool(), user_config=_user_config())
+
+
+def test_oauth_session_strategy_can_be_declared_in_user_chain(tmp_path, monkeypatch):
+    (tmp_path / "application.yaml").write_text(
+        "user_config:\n  identity_strategies:\n    user: [oauth_session]\n"
+    )
+    monkeypatch.setenv("GATEWAY_CONFIG_PATH", str(tmp_path))
+    chains = _strategy_chains(_pool(), user_config=_user_config())
+    assert _user_chain_names(chains) == ["oauth_session"]

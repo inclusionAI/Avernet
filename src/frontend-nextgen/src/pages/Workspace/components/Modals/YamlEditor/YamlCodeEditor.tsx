@@ -29,18 +29,15 @@ export function YamlCodeEditor({
   height = 320,
 }: YamlCodeEditorProps) {
   return (
-    <div
-      className={cn('overflow-hidden rounded-lg border border-[var(--color-border)] bg-white', className)}
-      style={{ height }}
-    >
+    <div className={cn('overflow-hidden rounded-lg border border-border bg-background', className)} style={{ height }}>
       {loading ? (
-        <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
+        <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
           <span>加载模板内容...</span>
         </div>
       ) : (
         <Suspense
           fallback={
-            <div className="flex h-full items-center justify-center gap-2 text-sm text-[var(--color-muted)]">
+            <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
               <span>加载编辑器...</span>
             </div>
           }

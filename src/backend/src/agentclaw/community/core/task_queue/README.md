@@ -228,8 +228,12 @@ The BaaS and Teclaw lifecycle components register production handlers during
 provisioned before enabling the worker; local and test SQLite schema bootstrap
 creates it from the shared ORM metadata.
 
-Enqueue idempotency is available but **not yet adopted by any call site** — the
-mechanism landed first so adoption can be reviewed per call site.
+Enqueue idempotency landed ahead of any adopter so adoption could be reviewed per
+call site. Its **first call site is `config_manifest.create_bot`** (W13, #1696),
+which keys a creation by `create_with_manifest:<tenant>:<entity_id>:<bot_id>` —
+the same three parts the manifest's own storage key has, because the dedup scope
+is `(env, app, task_type)` and anything left out of the key is something the
+lookup does not scope by.
 
 **Adoption must ship in a strictly later release than this mechanism, and that
 is a correctness requirement rather than a review preference.** Key release

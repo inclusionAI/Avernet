@@ -509,6 +509,7 @@ impl BcsChannelService {
                 definition: None,
                 definition_ref: None,
                 participant_bindings: None,
+                opening_message_override: None,
                 input,
                 caller_id: Some(actor_id.to_string()),
                 authenticated_human: Some(AuthenticatedHumanCaller {
@@ -6726,6 +6727,7 @@ mod tests {
                     created_by: cmd.caller_id,
                     status: StateMachineRunStatus::Running,
                     input: cmd.input,
+                    opening_message_override: None,
                     output: None,
                     error: None,
                     created_at: 1,
@@ -6808,6 +6810,7 @@ mod tests {
                     created_by: None,
                     status: StateMachineRunStatus::Running,
                     input: serde_json::Value::Null,
+                    opening_message_override: None,
                     output: None,
                     error: None,
                     created_at: 1,

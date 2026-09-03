@@ -21,6 +21,31 @@ from secbaas.community.core.service.scheduler import (
 from secbaas.community.core.utils.env_utils import get_current_env
 
 
+def _assert_threshold_consistent(thr, ttl) -> int:
+    """Coerce renew_threshold_hours and fail fast on EG-4 drift.
+
+    None-tolerant for the threshold itself: when the YAML key is absent
+    (None/empty), the 12-hour default is returned without asserting —
+    minimal test containers carry only the engine key, and odd half-TTL
+    deployments must omit the key and rely on the derived value. Whenever
+    the threshold IS explicitly present, it is asserted against the
+    effective TTL period — arca.default_ttl_minutes when set, otherwise the
+    1440-minute fallback — so a tuned threshold can never revert silently
+    (WR-02). A threshold that is not half the effective TTL period raises
+    ValueError at assembly (startup failure instead of a silently drifted
+    safety margin).
+    """
+    coerced = int(thr) if thr else 12
+    effective_ttl = int(ttl) if ttl else 1440
+    if thr and coerced * 60 != effective_ttl // 2:
+        raise ValueError(
+            f"renew_threshold_hours={thr!r} conflicts with "
+            f"arca.default_ttl_minutes={ttl!r} (effective {effective_ttl}) — "
+            "threshold must equal half the TTL period (EG-4)"
+        )
+    return coerced
+
+
 class CoreTaskContainer(containers.DeclarativeContainer):
     config = providers.Configuration()
 
@@ -114,7 +139,13 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         cron_interval_seconds=config.renewal_scheduler.cron_interval_seconds,
         batch_size=config.renewal_scheduler.batch_size,
         max_concurrency=config.renewal_scheduler.max_concurrency,
-        renew_threshold_hours=config.renewal_scheduler.renew_threshold_hours,
+        # EG-4 fail-fast: the explicit threshold must equal half the TTL
+        # period (None-tolerant — a missing key returns 12, no assertion).
+        renew_threshold_hours=providers.Callable(
+            _assert_threshold_consistent,
+            config.renewal_scheduler.renew_threshold_hours,
+            config.arca.default_ttl_minutes,
+        ),
         # Rule 14 (configuration-driven wiring): the TTL period comes from
         # the arca config section, not hardcoded task constants. The
         # fallback keeps overlays without an arca section (minimal test
@@ -125,6 +156,26 @@ class CoreTaskContainer(containers.DeclarativeContainer):
         default_ttl_minutes=providers.Callable(
             lambda v: int(v) if v else 1440,
             config.arca.default_ttl_minutes,
+        ),
+        # D-01 tolerance knob wired symmetrically with default_ttl_minutes:
+        # the renewal_scheduler schema allows undeclared keys
+        # (SettingsConfigDict(extra="allow")), so a YAML-set
+        # post_extend_consistency_tol_minutes passes validation and must
+        # reach the watermark comparison — otherwise the operator believes
+        # the tolerance tightened while it silently stays 5 (WR-01).
+        post_extend_consistency_tol_minutes=providers.Callable(
+            lambda v: int(v) if v is not None else 5,
+            config.renewal_scheduler.post_extend_consistency_tol_minutes,
+        ),
+        # WR-02 (86-REVIEW, option 1 — grace-margin knob): unlike the D-01
+        # tol above, this key IS declared on the renewal_scheduler schema
+        # (default 5, ge=0), so an absent YAML key derives 5 through the
+        # schema-seeded container defaults; the Callable + int() coerce
+        # mirrors the D-01 pattern so a quoted YAML number ("5") still
+        # reaches the verdict comparison.
+        clock_tol_minutes=providers.Callable(
+            lambda v: int(v) if v is not None else 5,
+            config.renewal_scheduler.clock_tol_minutes,
         ),
         retry_delay_minutes=config.renewal_scheduler.retry_delay_minutes,
         max_fail_count=config.renewal_scheduler.max_fail_count,

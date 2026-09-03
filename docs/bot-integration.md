@@ -392,16 +392,41 @@ The engine only needs to ACK:
 
 ```json
 {
-  "type": "event",
-  "event": "chat.abort",
-  "payload": {
+  "type": "req",
+  "id": "abort-001",
+  "method": "chat.abort",
+  "params": {
     "session_key": "sess-123",
     "run_id": "run-unique-001"
   }
 }
 ```
 
-The engine should cancel processing for the corresponding `run_id`.
+The engine must cancel only the exact `run_id`, respond after the cancellation
+has been acknowledged locally, and suppress late delta/final/error events for
+that run:
+
+```json
+{
+  "type": "res",
+  "id": "abort-001",
+  "ok": true,
+  "payload": {
+    "aborted": true,
+    "aborted_run_ids": ["run-unique-001"]
+  }
+}
+```
+
+For an already-terminal run, return idempotent success with an empty
+`aborted_run_ids`. An unknown run or a run owned by another `session_key` is a
+protocol error. A single response may contain zero or one aborted run ID.
+
+`chat.abort.session_key` must exactly match the original
+`chat.send.session_key` for that run. Protocol v2 uses its group-derived
+compatibility key; protocol v3 uses the canonical BCS Session ID. In both
+versions BCS authorizes the caller and selects active runs with the canonical
+`group_id + session_id + bot_id` scope.
 
 ### 5.4 Responding to `chat.history`
 

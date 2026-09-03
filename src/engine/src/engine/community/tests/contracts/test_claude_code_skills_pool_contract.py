@@ -9,6 +9,8 @@ from engine.community.core.adapters.claude_code.skills import (
     _serialize_pool_mapping,
 )
 from engine.community.core.skills.models import (
+    PoolMappingApplyMode,
+    PoolMappingProjectionStatus,
     PoolLayoutActivateRequest,
     PoolLayoutActivationStatus,
     PoolLayoutProbeRequest,
@@ -58,6 +60,43 @@ def _port() -> SimpleNamespace:
             return_value={"valid": True, "evidence": {"checked": 1}}
         ),
     )
+
+
+@pytest.mark.asyncio
+async def test_claude_code_adapter_preserves_best_effort_item_diagnostics() -> None:
+    port = _port()
+    item = {
+        "target": "/skills/author-owned",
+        "source": "/pool/author-owned",
+        "status": "DEGRADED",
+        "code": "UNMANAGED_ACTIVE_ENTRY_RETAINED",
+        "retryable": False,
+    }
+    port.publish_pool_mappings.return_value = {
+        "published": False,
+        "status": "DEGRADED",
+        "items": [item],
+    }
+    port.verify_pool_mappings.return_value = {
+        "valid": False,
+        "status": "DEGRADED",
+        "items": [item],
+    }
+    adapter = ClaudeCodeSkillsAdapter(port)
+    mapping = SymlinkItem(source="/pool/author-owned", target="/skills/author-owned")
+
+    published = await adapter.publish_pool_mappings(
+        [mapping], apply_mode=PoolMappingApplyMode.BEST_EFFORT
+    )
+    verified = await adapter.verify_pool_mappings(
+        [mapping], apply_mode=PoolMappingApplyMode.BEST_EFFORT
+    )
+
+    assert published.status is PoolMappingProjectionStatus.DEGRADED
+    assert published.items[0].code == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+    assert verified.items[0].target == "/skills/author-owned"
+    assert port.publish_pool_mappings.await_args.args[0]["apply_mode"] == "BEST_EFFORT"
+    assert port.verify_pool_mappings.await_args.args[0]["apply_mode"] == "BEST_EFFORT"
 
 
 @pytest.mark.asyncio

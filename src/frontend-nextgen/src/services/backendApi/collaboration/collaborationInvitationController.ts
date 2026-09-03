@@ -23,7 +23,7 @@ export interface AcceptInvitationData {
 export async function createGroupInvitation(group_id: string, body: CreateInvitationBody) {
   return backendRequest<BackendApiEnvelope<CollaborationInvitationData>>(
     `/openapi/v1/collaboration/groups/${group_id}/invitations`,
-    { method: 'POST', data: body },
+    { method: 'POST', data: body, injectUserId: false },
   );
 }
 
@@ -31,7 +31,7 @@ export async function createGroupInvitation(group_id: string, body: CreateInvita
 export async function createSessionInvitation(session_id: string, body: CreateInvitationBody) {
   return backendRequest<BackendApiEnvelope<CollaborationInvitationData>>(
     `/openapi/v1/collaboration/sessions/${session_id}/invitations`,
-    { method: 'POST', data: body },
+    { method: 'POST', data: body, injectUserId: false },
   );
 }
 
@@ -39,6 +39,6 @@ export async function createSessionInvitation(session_id: string, body: CreateIn
 export async function acceptInvitation(token: string) {
   return backendRequest<BackendApiEnvelope<AcceptInvitationData>>(
     `/openapi/v1/collaboration/invitations/${token}/accept`,
-    { method: 'POST', data: {} },
+    { method: 'POST', data: {}, injectUserId: false },
   );
 }

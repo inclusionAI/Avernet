@@ -22,6 +22,9 @@ capabilities such as cache or database access.
 - `bcs-db-api` is a driver-level SQL execution contract. It abstracts driver,
   connection, transaction, health, and row conversion concerns, but does not
   promise SQL dialect portability.
+- `bcs-human-notify-api` owns the human mention notification contract:
+  `HumanMentionNotifier` backends deliver per-message notifications to
+  @-mentioned human participants; selection via `human_notify.provider`.
 - `bcs-user-directory-api` owns user-directory lookup primitives such as
   `staff_no -> nick_name`; business fallbacks and actor writes belong to the
   consuming service.
