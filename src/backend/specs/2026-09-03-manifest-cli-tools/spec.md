@@ -117,6 +117,27 @@ the filesystem.**
   state a runtime must be *told about* and reconciled against. A tool is
   installed or it is not.
 
+### Why the ELF header is checked
+
+ELF — Executable and Linkable Format — is the binary format Linux executables
+use. Every ELF file opens with a fixed header whose first two fields are all
+this needs: the magic bytes `\x7fELF` at offset 0, and `e_machine` at offset 18
+(`0x3E` = x86-64, `0xB7` = arm64). Two field reads, no parsing library.
+
+It is checked **in addition to** the mandatory `sha256` because the two answer
+different questions. `digest` answers *"are these the bytes you asked for"* —
+the supply chain. The ELF check answers *"can this machine run them"* — the
+architecture. An arm64 build, a mislabelled `.zip`, or an HTML error page a CDN
+served with a 200 all have perfectly valid digests.
+
+Without it the failure lands at the worst moment: the apply reports success, the
+tool sits in the container looking installed, and the model discovers
+`cannot execute binary file: Exec format error` mid-task. With it, the apply
+report says which architecture was found and which the fleet runs, at install
+time, while the owner is still there to fix the URL. It also pairs with
+`${BOT_ARCH}`: a manifest may write `…/mycli-linux-${BOT_ARCH}`, and this is
+what verifies the URL served what the substitution asked for.
+
 ### The teclaw arm and service-bot promotion
 
 teclaw is an external engine and the backend does not know where its tools live
@@ -181,7 +202,8 @@ never appears in its resources listing.
       it; neither reimplements any part of it.
 - [ ] `install` fetches under the `cli_tools` width, enforces the declared
       `sha256` over the fetched source object, unpacks an archive under W2's
-      guards, selects the one `subpath` member, verifies the ELF header, computes
+      guards, selects the one `subpath` member, verifies the ELF header (below),
+      computes
       the `md5`, calls the engine, and writes the metadata row — in that order,
       recording nothing for a step that failed.
 - [ ] `replace_all` implements full override: the given set becomes the installed
