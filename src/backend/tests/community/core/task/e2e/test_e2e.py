@@ -480,7 +480,7 @@ class TestDashboardTerminal:
         facade, svc, *_ = _wire_facade()
         _exec(facade, _task_info_request("t_case"))
         _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
-        from agentclaw.community.core.task.task_runner.runner import TaskRunner
+        from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
         r = TaskRunner(svc)
         detail = r.query_detail(_node("N_overview", "t_case"))
         assert detail.run_info.output.get("output") == "行业全貌"

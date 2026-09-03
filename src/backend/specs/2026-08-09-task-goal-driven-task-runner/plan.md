@@ -426,7 +426,7 @@ def test_dispatch_returns_one_bool_per_node():
 
 def test_runner_falls_back_to_stub_without_backend():
     from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-    from agentclaw.community.core.task.task_runner.runner import TaskRunner
+    from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
     g = TaskGraphService()
     r = TaskRunner(g)  # 无 execution_backend
     res = _run(r.start_run([_node()]))
@@ -561,7 +561,7 @@ Expected: PASS（新 4 + 既有 121 不破）
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/agentclaw/community/core/task/task_runner/integration/task_executor.py src/agentclaw/community/core/task/task_runner/runner.py tests/community/core/task/task_runner/integration/test_task_executor_skeleton.py
+git add src/agentclaw/community/core/task/task_runner/integration/task_executor.py src/agentclaw/community/core/task/task_runner/task_runner.py tests/community/core/task/task_runner/integration/test_task_executor_skeleton.py
 git commit -m "feat(task-runner-integration): TaskExecutor skeleton + TaskRunner execution_backend injection (bbs no-op)
 
 Co-Authored-By: Claude <noreply@anthropic.com>"

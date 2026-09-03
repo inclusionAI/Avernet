@@ -356,7 +356,7 @@ class ExecutionEngine:
         return TaskDispatcher(self._graph, pool=pool)
 
     def _build_runner(self):
-        from agentclaw.community.core.task.task_runner.runner import TaskRunner
+        from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
         return TaskRunner(self._graph, execution_backend=self._executor)
 

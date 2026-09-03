@@ -318,7 +318,7 @@ class TestZeroCase:
         assert hits == [], f"callback_adapter 出现写死节点名: {hits}"
 
     def test_no_node_name_literals_runner(self):
-        import agentclaw.community.core.task.task_runner.runner as m
+        import agentclaw.community.core.task.task_runner.task_runner as m
         src = open(m.__file__).read()
         forbidden = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
         hits = [f for f in forbidden if f in src]

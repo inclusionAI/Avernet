@@ -274,15 +274,19 @@ from agentclaw.community.core.task.task_runner.integration.task_executor import 
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
-from agentclaw.community.core.task.task_runner.runner import TaskRunner
+from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 
 class _FakeBot:
     async def ensure_grant(self, bot_id): return None
+
     async def send_message(self, *, bot_id, message, metadata):
         return BotSendResult(run_id="r", session_id="ws-session")
+
     async def get_run(self, run_id): return {}
+
     async def cancel_run(self, run_id): return None
+
     async def send_and_wait_async(self, **kw): return {}
 
 
@@ -389,7 +393,7 @@ Expected: PASS (4 tests).
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/backend/src/agentclaw/community/core/task/task_runner/runner.py \
+git add src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py \
         src/backend/src/agentclaw/community/core/task/task_runner/integration/task_executor.py \
         src/backend/tests/community/core/task/task_runner/integration/test_runner_workflow_session.py
 git commit -m "feat(task): add TaskRunner.trigger_workflow + get_group_session
@@ -856,7 +860,7 @@ cd src/backend && .venv/bin/python -m flake8 \
   src/agentclaw/community/core/task/task_runner/integration/open_api_bot_adapter.py \
   src/agentclaw/community/core/task/task_runner/integration/task_executor.py \
   src/agentclaw/community/core/task/task_runner/integration/task_executor_result_poller.py \
-  src/agentclaw/community/core/task/task_runner/runner.py \
+  src/agentclaw/community/core/task/task_runner/task_runner.py \
   src/agentclaw/community/core/task/task_center/engine.py \
   src/agentclaw/community/core/task/task_center/task_service.py \
   src/agentclaw/community/di/modules/task_module.py 2>/dev/null || echo "flake8 not available — antflake deferred to pre-push/CI"

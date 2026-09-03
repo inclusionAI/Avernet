@@ -5,7 +5,7 @@ from agentclaw.community.core.task.task_runner.integration.task_executor import 
 from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
-from agentclaw.community.core.task.task_runner.runner import TaskRunner
+from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 
 class _FakeBot:
