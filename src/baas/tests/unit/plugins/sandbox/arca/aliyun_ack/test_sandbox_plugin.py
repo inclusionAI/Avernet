@@ -198,6 +198,102 @@ class TestCreateSyncSandbox:
                 )
         assert result == "avernet-agent-uid"
 
+    def test_create_with_config_envs(self) -> None:
+        """Config envs from default_images should be rendered into the Deployment."""
+        default_images = {
+            TEMPLATE_ID: {
+                "avernet-agent": "agent:latest",
+                "avernet-sidecar": "sidecar:latest",
+                "init": "init:latest",
+                "nas-server": "nas.example.com",
+                "env": "BCS_URL=ws://bcs.example.com/ws/bot;FOO=bar",
+            }
+        }
+        with _CoreHarness() as h:
+            _plugin(default_images=default_images).create_sync_sandbox(
+                template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
+            )
+        deployment = next(
+            d for d in self._rendered_docs(h) if d.get("kind") == "Deployment"
+        )
+        envs = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        env_map = {e["name"]: e["value"] for e in envs}
+        assert env_map["BCS_URL"] == "ws://bcs.example.com/ws/bot"
+        assert env_map["FOO"] == "bar"
+
+    def test_create_with_runtime_envs_override_config(self) -> None:
+        """Runtime envs should override config envs with the same key."""
+        default_images = {
+            TEMPLATE_ID: {
+                "avernet-agent": "agent:latest",
+                "avernet-sidecar": "sidecar:latest",
+                "init": "init:latest",
+                "nas-server": "nas.example.com",
+                "env": "BCS_URL=ws://config.example.com/ws/bot",
+            }
+        }
+        with _CoreHarness() as h:
+            _plugin(default_images=default_images).create_sync_sandbox(
+                template_id=TEMPLATE_ID,
+                envs={"BCS_URL": "ws://runtime.example.com/ws/bot"},
+                ready_timeout_in_seconds=1,
+            )
+        deployment = next(
+            d for d in self._rendered_docs(h) if d.get("kind") == "Deployment"
+        )
+        envs = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+        env_map = {e["name"]: e["value"] for e in envs}
+        assert env_map["BCS_URL"] == "ws://runtime.example.com/ws/bot"
+
+    def test_create_without_envs_no_env_section(self) -> None:
+        """When no envs are provided, the Deployment should have no env section."""
+        default_images = {
+            TEMPLATE_ID: {
+                "avernet-agent": "agent:latest",
+                "avernet-sidecar": "sidecar:latest",
+                "init": "init:latest",
+                "nas-server": "nas.example.com",
+                "env": "",
+            }
+        }
+        with _CoreHarness() as h:
+            _plugin(default_images=default_images).create_sync_sandbox(
+                template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
+            )
+        deployment = next(
+            d for d in self._rendered_docs(h) if d.get("kind") == "Deployment"
+        )
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        assert "env" not in container
+
+    def test_config_envs_not_mutated_across_calls(self) -> None:
+        """default_images config should not be mutated by repeated calls."""
+        default_images = {
+            TEMPLATE_ID: {
+                "avernet-agent": "agent:latest",
+                "avernet-sidecar": "sidecar:latest",
+                "init": "init:latest",
+                "nas-server": "nas.example.com",
+                "env": "BCS_URL=ws://bcs.example.com/ws/bot",
+            }
+        }
+        plugin = _plugin(default_images=default_images)
+        with _CoreHarness() as h:
+            plugin.create_sync_sandbox(
+                template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
+            )
+            # Second call should still see the same config envs
+            plugin.create_sync_sandbox(
+                template_id=TEMPLATE_ID, ready_timeout_in_seconds=1
+            )
+        # Both calls should have rendered envs
+        for call in h.create_from_yaml.call_args_list:
+            docs = call.kwargs["yaml_objects"]
+            deployment = next(d for d in docs if d.get("kind") == "Deployment")
+            envs = deployment["spec"]["template"]["spec"]["containers"][0]["env"]
+            env_map = {e["name"]: e["value"] for e in envs}
+            assert env_map["BCS_URL"] == "ws://bcs.example.com/ws/bot"
+
 
 class TestConnect:
     def test_connect_success(self) -> None:
