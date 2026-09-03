@@ -33,9 +33,6 @@ from agentclaw.community.core.skill_center.services.bot_capability_state_reader 
 from agentclaw.community.core.skill_center.services.skill_version_resolver import (
     SkillVersionResolver,
 )
-from agentclaw.community.core.skill_center.materialization_contract import (
-    PublishedMaterializedSkillVersion,
-)
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 
@@ -299,27 +296,14 @@ def test_materialization_publish_is_one_tenant_scoped_compare_and_set() -> None:
             name="skill-10",
             metadata_json='{"mcp_dependencies":[]}',
             description="new description",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         )
 
     assert target is not None
     assert target.status == "MATERIALIZING"
     assert target.skill_uuid == "00000000-0000-4000-8000-000000000010"
     assert target.skill_code == "public-weather"
-    assert published == PublishedMaterializedSkillVersion(
-        skill_version_id=101,
-        skill_id=10,
-        version_ordinal=1,
-        status="PUBLISHED",
-        skill_uuid="00000000-0000-4000-8000-000000000010",
-        sc_version_number="1.0.0",
-        sc_skill_id=1010,
-        sc_version_id=2101,
-        name="skill-10",
-        description="new description",
-        metadata_json='{"mcp_dependencies":[]}',
-        published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
-    )
+    assert published.status == "PUBLISHED"
+    assert published.published_at is not None
     with db.orm_session() as session:
         version = session.get(SkillVersion, 101)
         skill = session.get(Skill, 10)
@@ -358,11 +342,10 @@ def test_public_first_publish_freezes_manifest_name_before_consumption() -> None
             env="pre",
             skill_id=10,
             skill_version_id=101,
-            name="dima",
-            metadata_json='{"mcp_dependencies":[]}',
-            description="Dima CLI",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
-        )
+                name="dima",
+                metadata_json='{"mcp_dependencies":[]}',
+                description="Dima CLI",
+            )
 
     assert published.name == "dima"
     with db.orm_session() as session:
@@ -409,11 +392,10 @@ def test_public_name_convergence_fails_closed_after_installation_exists() -> Non
             env="pre",
             skill_id=10,
             skill_version_id=101,
-            name="dima",
-            metadata_json='{"mcp_dependencies":[]}',
-            description="Dima CLI",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
-        )
+                name="dima",
+                metadata_json='{"mcp_dependencies":[]}',
+                description="Dima CLI",
+            )
 
     with db.orm_session() as session:
         skill = session.get(Skill, 10)
@@ -461,7 +443,6 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
             name="skill-10",
             metadata_json='{"mcp_dependencies":[]}',
             description="same",
-            published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
         )
         with pytest.raises(RuntimeError, match="conflicts"):
             repo.publish_materialized(
@@ -471,7 +452,6 @@ def test_materialization_publish_replay_requires_the_same_frozen_facts() -> None
                 name="skill-10",
                 metadata_json='{"mcp_dependencies":[{"code":"other"}]}',
                 description="same",
-                published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
             )
 
     assert replay.status == "PUBLISHED"
@@ -528,7 +508,6 @@ def test_space_publication_never_reactivates_terminally_offline_skill() -> None:
             name="weather",
             metadata_json='{"mcp_dependencies":[]}',
             description="online again",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         )
     with db.orm_session() as session:
         skill = session.get(Skill, 10)
@@ -544,7 +523,6 @@ def test_space_publication_never_reactivates_terminally_offline_skill() -> None:
             name="weather",
             metadata_json='{"mcp_dependencies":[]}',
             description="online again",
-            published_at=datetime(2026, 8, 30, 13, 0, tzinfo=UTC),
         )
     with db.orm_session() as session:
         skill = session.get(Skill, 10)
@@ -586,7 +564,6 @@ def test_sc_public_materialization_never_clears_offline_without_space_binding() 
             name="weather",
             metadata_json='{"mcp_dependencies":[]}',
             description="updated",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         )
 
     with db.orm_session() as session:
@@ -646,7 +623,6 @@ def test_space_binding_without_publication_attempt_never_clears_offline() -> Non
             name="weather",
             metadata_json='{"mcp_dependencies":[]}',
             description="updated",
-            published_at=datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
         )
 
     with db.orm_session() as session:

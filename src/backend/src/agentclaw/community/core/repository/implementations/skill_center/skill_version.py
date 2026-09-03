@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from injector import inject
 from sqlalchemy import and_, func
 
@@ -157,7 +155,6 @@ class SkillVersionRepository(
         name: str,
         metadata_json: str,
         description: str,
-        published_at: datetime,
     ) -> PublishedMaterializedSkillVersion:
         with self._db.orm_session() as session:
             locked = lock_skill_then_exact_version(
@@ -189,11 +186,12 @@ class SkillVersionRepository(
                 )
                 version.metadata_json = metadata_json
                 version.description = description
-                version.published_at = published_at
+                version.published_at = func.now()
                 version.status = "PUBLISHED"
                 skill.description = description
                 skill.status = "PUBLISHED"
                 session.flush()
+                session.refresh(version)
             else:
                 raise RuntimeError("Skill Version is not MATERIALIZING")
             skill_uuid = skill.skill_uuid

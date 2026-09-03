@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 import hashlib
 import logging
 import re
@@ -150,7 +149,6 @@ class SpaceSkillPublicationTaskHandler:
         materializer: SkillVersionMaterializerProtocol,
         tenant_provider: Callable[[], str],
         env_provider: Callable[[], str],
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         auto_retry_seconds: int = SPACE_SKILL_PUBLICATION_AUTO_RETRY_SECONDS,
         poll_seconds: int = SPACE_SKILL_PUBLICATION_POLL_SECONDS,
     ) -> None:
@@ -161,7 +159,6 @@ class SpaceSkillPublicationTaskHandler:
         self._materializer = materializer
         self._tenant_provider = tenant_provider
         self._env_provider = env_provider
-        self._clock = clock
         self._auto_retry_seconds = auto_retry_seconds
         self._poll_seconds = poll_seconds
 
@@ -186,9 +183,7 @@ class SpaceSkillPublicationTaskHandler:
             prepared = self._prepare(work, env=env)
             if not isinstance(prepared, PublicationWork):
                 return prepared
-            claim = self._repository.claim_sc_submission(
-                attempt_id=attempt_id, started_at=self._clock(), env=env
-            )
+            claim = self._repository.claim_sc_submission(attempt_id=attempt_id, env=env)
             work = claim.work
             if claim.may_submit:
                 submitted = self._submit(work, env=env)
@@ -234,7 +229,6 @@ class SpaceSkillPublicationTaskHandler:
                     attempt_id=work.attempt.attempt_id,
                     error_code="SKILL_NAME_CHANGED",
                     error_message="Frozen Draft name differs from the Skill identity",
-                    completed_at=self._clock(),
                     env=env,
                 )
                 return Complete()
@@ -299,15 +293,12 @@ class SpaceSkillPublicationTaskHandler:
                     attempt_id=work.attempt.attempt_id,
                     error_code="SC_PUBLISH_REJECTED",
                     error_message="Skill Center rejected publication",
-                    completed_at=self._clock(),
                     env=env,
                 )
                 return Complete()
             return self._unknown_or_available(work, env=env)
         self._repository.mark_waiting_sc(
-            attempt_id=work.attempt.attempt_id,
-            accepted_at=self._clock(),
-            env=env,
+            attempt_id=work.attempt.attempt_id, env=env
         )
         return None
 
@@ -347,7 +338,6 @@ class SpaceSkillPublicationTaskHandler:
                 attempt_id=work.attempt.attempt_id,
                 error_code="SC_PUBLISH_REJECTED",
                 error_message="Skill Center rejected publication",
-                completed_at=self._clock(),
                 env=env,
             )
             return Complete()
@@ -357,9 +347,7 @@ class SpaceSkillPublicationTaskHandler:
         # eventual-consistency lag stays WAITING_SC rather than being presented
         # as an uncertain external publish outcome.
         self._repository.mark_waiting_sc(
-            attempt_id=work.attempt.attempt_id,
-            accepted_at=self._clock(),
-            env=env,
+            attempt_id=work.attempt.attempt_id, env=env
         )
         work = self._repository.get_work(attempt_id=work.attempt.attempt_id, env=env)
         try:
@@ -450,7 +438,6 @@ class SpaceSkillPublicationTaskHandler:
                 self._repository.complete_success(
                     attempt_id=work.attempt.attempt_id,
                     skill_version_id=published.skill_version_id,
-                    completed_at=self._clock(),
                     env=env,
                 )
                 self._delete_frozen_draft_best_effort(work, env=env)
@@ -583,11 +570,11 @@ class SpaceSkillPublicationTaskHandler:
             else work.attempt.gmt_created
         )
         start = start or work.attempt.gmt_modified or work.attempt.gmt_created
-        now = self._clock()
+        now = work.database_now
         if start.tzinfo is None and now.tzinfo is not None:
-            start = start.replace(tzinfo=UTC)
+            now = now.replace(tzinfo=None)
         elif start.tzinfo is not None and now.tzinfo is None:
-            now = now.replace(tzinfo=UTC)
+            start = start.replace(tzinfo=None)
         return (now - start).total_seconds() >= self._auto_retry_seconds
 
     @staticmethod

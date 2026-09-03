@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from datetime import datetime
 from typing import Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
@@ -67,12 +66,12 @@ class SpaceSkillPublicationRepositoryProtocol(Protocol):
 
     @abstractmethod
     def claim_sc_submission(
-        self, *, attempt_id: int, started_at: datetime, env: str
+        self, *, attempt_id: int, env: str
     ) -> PublicationSubmissionClaim: ...
 
     @abstractmethod
     def mark_waiting_sc(
-        self, *, attempt_id: int, accepted_at: datetime, env: str
+        self, *, attempt_id: int, env: str
     ) -> PublicationAttemptRecord: ...
 
     @abstractmethod
@@ -93,7 +92,6 @@ class SpaceSkillPublicationRepositoryProtocol(Protocol):
         attempt_id: int,
         error_code: str,
         error_message: str,
-        completed_at: datetime,
         env: str,
     ) -> PublicationAttemptRecord: ...
 
@@ -114,7 +112,6 @@ class SpaceSkillPublicationRepositoryProtocol(Protocol):
         *,
         attempt_id: int,
         skill_version_id: int,
-        completed_at: datetime,
         env: str,
     ) -> PublicationAttemptRecord: ...
 
