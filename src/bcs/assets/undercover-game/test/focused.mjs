@@ -86,4 +86,61 @@ assert.throws(() => normalizePanelParams({
   runId: 'r', groupId: 'g', sessionId: 's', phase: 'speaking', round: 1,
   host: { actorId: 'h', displayName: 'H' }, seatOrder: ['a', 'a'], players: [{ actorId: 'a', displayName: 'A' }], nodeActorMap: {},
 }), /duplicate actor IDs/);
+function playerStateOf(viewModel, actorId) {
+  return viewModel.actors.find((actor) => actor.actor.actorId === actorId)?.state;
+}
+
+const speakingParams = { ...params, phase: 'speaking' };
+const runningSpeech = normalizeUndercoverGameViewModel(speakingParams, {
+  run: { run_id: 'run-example', status: 'running' },
+  nodes: [{ node_id: 'node-a', status: 'running', attempt: 1, started_at: 100 }],
+});
+assert.equal(playerStateOf(runningSpeech, 'a'), 'active_speech');
+
+const completedSpeech = normalizeUndercoverGameViewModel(speakingParams, {
+  run: { run_id: 'run-example', status: 'running' },
+  nodes: [{ node_id: 'node-a', status: 'completed', attempt: 1, completed_at: 200 }],
+});
+assert.equal(playerStateOf(completedSpeech, 'a'), 'completed_speech');
+
+const pendingSpeech = normalizeUndercoverGameViewModel(speakingParams, {
+  run: { run_id: 'run-example', status: 'running' },
+  nodes: [{ node_id: 'node-a', status: 'ready', attempt: 1 }],
+}, [{ node_id: 'node-a', instruction: 'speak now' }]);
+assert.equal(playerStateOf(pendingSpeech, 'a'), 'waiting');
+assert.equal(pendingSpeech.pendingHumanActorId, 'a');
+
+const pendingVote = normalizeUndercoverGameViewModel(params, {
+  run: { run_id: 'run-example', status: 'running' },
+  nodes: [{ node_id: 'node-a', status: 'ready', attempt: 1 }],
+}, [{ node_id: 'node-a', instruction: 'vote now' }]);
+assert.equal(playerStateOf(pendingVote, 'a'), 'waiting_for_vote');
+assert.equal(pendingVote.pendingHumanActorId, 'a');
+
+const orderedParams = {
+  ...params,
+  nodeActorMap: {
+    ...params.nodeActorMap,
+    'node-a-old': 'a',
+    'node-a-latest': 'a',
+  },
+};
+const completedVote = normalizeUndercoverGameViewModel(orderedParams, {
+  run: { run_id: 'run-example', status: 'running' },
+  nodes: [
+    { node_id: 'node-a-latest', status: 'completed', attempt: 2, completed_at: 300 },
+    { node_id: 'node-a-old', status: 'running', attempt: 1, started_at: 100 },
+  ],
+});
+const voteActor = completedVote.actors.find((actor) => actor.actor.actorId === 'a');
+assert.equal(voteActor?.node?.node_id, 'node-a-latest');
+assert.equal(voteActor?.state, 'voted');
+
+const terminalProjection = normalizeUndercoverGameViewModel(params, {
+  run: { run_id: 'run-example', status: 'completed', updated_at: 4 },
+  nodes: [{ node_id: 'node-a', status: 'completed', attempt: 2, completed_at: 400 }],
+});
+assert.equal(terminalProjection.terminal, true);
+assert.equal(playerStateOf(terminalProjection, 'a'), 'voted');
+
 console.log('Focused undercover-game behavior tests passed.');

@@ -213,13 +213,16 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
   const [actionError, setActionError] = useState<string | null>(null);
   const [staleAction, setStaleAction] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
+  const pollingRequestRef = useRef<AbortController | null>(null);
+  const autoRefreshEnabledRef = useRef(params.autoRefresh);
   const detailRequestRef = useRef<AbortController | null>(null);
-  const snapshotRef = useRef<UndercoverGameViewModel | null>(null);
+  const snapshotRef = useRef<{ runId: string; viewModel: UndercoverGameViewModel } | null>(null);
 
-  const refresh = useCallback(async (initial = false) => {
+  const refresh = useCallback(async (initial = false, fromPolling = false) => {
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
+    if (fromPolling) pollingRequestRef.current = controller;
     setError(null);
     if (initial) setLoading(true); else setRefreshing(true);
     try {
@@ -229,6 +232,10 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
         fetchSessionMessages(params.apiBaseUrl ?? '', params.sessionId, controller.signal),
       ]);
       if (requestRef.current !== controller) return;
+      snapshotRef.current = {
+        runId: params.runId,
+        viewModel: normalizeUndercoverGameViewModel(params, nextGraph, nextPending, nextMessages),
+      };
       setGraph(nextGraph);
       setPendingNodes(nextPending);
       setMessages(nextMessages);
@@ -237,12 +244,13 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
       if (requestError instanceof Error && requestError.name === 'AbortError') return;
       if (requestRef.current === controller) setError(requestErrorMessage(requestError));
     } finally {
+      if (pollingRequestRef.current === controller) pollingRequestRef.current = null;
       if (requestRef.current === controller) {
         setLoading(false);
         setRefreshing(false);
       }
     }
-  }, [params.apiBaseUrl, params.runId, params.sessionId]);
+  }, [params, params.apiBaseUrl, params.runId, params.sessionId]);
 
   useEffect(() => {
     void refresh(true);
@@ -253,18 +261,25 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
   }, [refresh]);
 
   const viewModel = useMemo(() => normalizeUndercoverGameViewModel(params, graph, pendingNodes, messages), [params, graph, pendingNodes, messages]);
-  useEffect(() => { snapshotRef.current = viewModel; }, [viewModel]);
 
   useEffect(() => {
-    if (!params.autoRefresh || viewModel.terminal) return undefined;
-    const timer = window.setTimeout(() => { void refresh(false); }, params.pollingInterval);
+    const autoRefreshWasDisabled = autoRefreshEnabledRef.current && !params.autoRefresh;
+    autoRefreshEnabledRef.current = params.autoRefresh;
+    if (!params.autoRefresh || viewModel.terminal) {
+      pollingRequestRef.current?.abort();
+      if (viewModel.terminal || autoRefreshWasDisabled) requestRef.current?.abort();
+      return undefined;
+    }
+    const timer = window.setTimeout(() => { void refresh(false, true); }, params.pollingInterval);
     return () => window.clearTimeout(timer);
-  }, [params.autoRefresh, params.pollingInterval, refresh, viewModel.terminal, viewModel.lastUpdatedAt, messages.length, pendingNodes.length]);
+  }, [params.autoRefresh, params.pollingInterval, refresh, viewModel.terminal]);
 
-  const selectedActor = useMemo(() => viewModel.actors.find((actor) => actor.actor.actorId === selectedActorId), [selectedActorId, viewModel.actors]);
+  const fallbackSnapshot = snapshotRef.current?.runId === params.runId ? snapshotRef.current.viewModel : null;
+  const displaySnapshot = error ? fallbackSnapshot ?? viewModel : viewModel;
+  const selectedActor = useMemo(() => displaySnapshot.actors.find((actor) => actor.actor.actorId === selectedActorId), [displaySnapshot.actors, selectedActorId]);
   const isDetailOpen = Boolean(selectedActor);
   const selectedNodeId = selectedActor?.node?.node_id;
-  const currentViewerAction = viewModel.pendingHumanActorId === params.currentViewerActorId && viewModel.pendingHumanNode;
+  const currentViewerAction = displaySnapshot.pendingHumanActorId === params.currentViewerActorId && displaySnapshot.pendingHumanNode;
   const voteMode = params.phase.toLowerCase().includes('vot');
   const candidates = useMemo(() => eligibleVoteCandidates(params.voteCandidates), [params.voteCandidates]);
   const compactLayout = typeof window !== 'undefined' && window.innerWidth <= 620;
@@ -339,11 +354,10 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
     }
   }, [candidates, currentViewerAction, onInteraction, params.apiBaseUrl, params.currentViewerActorId, params.maxResponseBytes, params.runId, refresh, speechText, staleAction, submitting, voteConfirmed, voteMode, voteTarget]);
 
-  if (loading && !snapshotRef.current) {
+  if (loading && !fallbackSnapshot) {
     return <Container className={className} style={style}><Notice>正在加载本阶段公开状态…</Notice></Container>;
   }
 
-  const displaySnapshot = snapshotRef.current ?? viewModel;
   const statusText = displaySnapshot.terminal ? `阶段已${displaySnapshot.status === 'completed' ? '完成' : displaySnapshot.status === 'aborted' ? '中止' : '结束'}` : (refreshing ? '刷新中…' : '进行中');
   const host = displaySnapshot.actors.find((actor) => actor.kind === 'host');
   const playerActors = displaySnapshot.actors.filter((actor) => actor.kind === 'player');
@@ -434,7 +448,7 @@ function GamePanel({ params, className, style, onInteraction }: { params: Underc
                 <ActionButton type="submit" disabled={submitting || staleAction || (voteMode && !candidates.length)}>{submitting ? '提交中…' : voteMode ? '确认并投票' : '提交发言'}</ActionButton>
               </Form>
             )}
-            {viewModel.pendingHumanActorId && viewModel.pendingHumanActorId !== params.currentViewerActorId && <Notice>当前待处理输入属于另一位公开参与者；本面板不会替其提交操作。</Notice>}
+            {displaySnapshot.pendingHumanActorId && displaySnapshot.pendingHumanActorId !== params.currentViewerActorId && <Notice>当前待处理输入属于另一位公开参与者；本面板不会替其提交操作。</Notice>}
           </Modal>
         </ModalBackdrop>
       )}

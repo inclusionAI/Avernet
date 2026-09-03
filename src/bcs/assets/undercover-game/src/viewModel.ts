@@ -94,6 +94,19 @@ function nodesForActor(nodes: StateMachineNode[], params: UndercoverGamePanelPar
   return nodes.filter((node) => params.nodeActorMap[node.node_id] === actorId);
 }
 
+function latestNode(nodes: StateMachineNode[], params: UndercoverGamePanelParams, actorId: string): StateMachineNode | undefined {
+  return nodesForActor(nodes, params, actorId).reduce<StateMachineNode | undefined>((latest, node) => {
+    if (!latest) return node;
+    const latestTime = latest.completed_at ?? latest.started_at ?? Number.NEGATIVE_INFINITY;
+    const nodeTime = node.completed_at ?? node.started_at ?? Number.NEGATIVE_INFINITY;
+    if (nodeTime !== latestTime) return nodeTime > latestTime ? node : latest;
+    const latestAttempt = latest.attempt ?? 0;
+    const nodeAttempt = node.attempt ?? 0;
+    if (nodeAttempt !== latestAttempt) return nodeAttempt > latestAttempt ? node : latest;
+    return node.node_id.localeCompare(latest.node_id) > 0 ? node : latest;
+  }, undefined);
+}
+
 function playerState(
   player: PlayerActor,
   nodes: StateMachineNode[],
@@ -103,24 +116,17 @@ function playerState(
   if (player.eliminated === true || player.alive === false || player.state === 'eliminated') return 'eliminated';
   if (player.state) return player.state;
   if (player.voted === true) return 'voted';
-  const actorNodes = nodesForActor(nodes, params, player.actorId);
   if (pendingHumanNode && params.nodeActorMap[pendingHumanNode.node_id] === player.actorId) {
     return params.phase.toLowerCase().includes('vot') ? 'waiting_for_vote' : 'waiting';
   }
-  const latest = actorNodes[actorNodes.length - 1];
+  const latest = latestNode(nodes, params, player.actorId);
   if (latest?.status === 'running') return 'active_speech';
   if (latest?.status === 'retry_scheduled') return 'retrying';
   if (latest?.status === 'failed') return 'error';
-  if (latest?.status === 'completed') return 'completed_speech';
+  if (latest?.status === 'completed') {
+    return params.phase.toLowerCase().includes('vot') ? 'voted' : 'completed_speech';
+  }
   return 'waiting';
-}
-
-function latestNode(nodes: StateMachineNode[], params: UndercoverGamePanelParams, actorId: string): StateMachineNode | undefined {
-  return nodesForActor(nodes, params, actorId).sort((left, right) => {
-    const leftTime = left.completed_at ?? left.started_at ?? 0;
-    const rightTime = right.completed_at ?? right.started_at ?? 0;
-    return rightTime - leftTime || (right.attempt ?? 0) - (left.attempt ?? 0);
-  })[0];
 }
 
 export function normalizeUndercoverGameViewModel(
