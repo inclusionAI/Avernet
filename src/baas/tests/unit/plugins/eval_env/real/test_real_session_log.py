@@ -48,7 +48,7 @@ class TestRealEvalSessionLog:
             x_default_tag=None,
         )
         assert result["eval_id"] == "eval-123"
-        assert result["session_id"] == "eval-123"
+        assert "session_id" not in result
 
     def test_extract_eval_headers_with_x_eval_id_format_warning(self):
         """x_eval_id 不以 'eval' 开头时应记录 warning 但依然注入。"""
@@ -60,7 +60,7 @@ class TestRealEvalSessionLog:
             x_default_tag=None,
         )
         assert result["eval_id"] == "bad-format-id"
-        assert result["session_id"] == "bad-format-id"
+        assert "session_id" not in result
 
     def test_extract_eval_headers_with_x_default_tag(self):
         log = RealEvalSessionLog()
@@ -82,7 +82,7 @@ class TestRealEvalSessionLog:
             x_default_tag="production",
         )
         assert result["eval_id"] == "eval-456"
-        assert result["session_id"] == "eval-456"
+        assert "session_id" not in result
         assert result["default_tag"] == "production"
         assert result["bot_options"]["lifecycle_stage"] == "production"
 

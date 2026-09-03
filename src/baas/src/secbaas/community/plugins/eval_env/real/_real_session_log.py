@@ -65,7 +65,6 @@ class RealEvalSessionLog(EvalSessionLog):
         """从 HTTP Header 提取评测标识并注入 metadata。"""
         if x_eval_id:
             metadata["eval_id"] = x_eval_id
-            metadata.setdefault("session_id", x_eval_id)
             if not x_eval_id.startswith("eval"):
                 logger.warning(
                     "[EvalSessionLog] x-eval-id format mismatch: %s, "
