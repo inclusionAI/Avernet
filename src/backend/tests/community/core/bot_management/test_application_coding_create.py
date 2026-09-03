@@ -188,7 +188,6 @@ def test_prepare_plain_bot_has_no_hosting_requirement() -> None:
         ({"engine_properties": {"template": {}}}, BotTemplateInvalidError),
         ({"engine_type": "aicoding"}, BotCombinationUnsupportedError),
         ({"bot_type": "service"}, BotCombinationUnsupportedError),
-        ({"space_kind": "team"}, BotCombinationUnsupportedError),
         ({"deployment_mode": "local"}, BotCombinationUnsupportedError),
     ],
 )
@@ -205,6 +204,20 @@ def test_prepare_rejects_invalid_application_coding_combinations(
     params.update(overrides)
     with pytest.raises(error):
         _strategy_prepare(**params)
+
+
+def test_prepare_application_coding_allows_any_business_space() -> None:
+    # No space-kind gate: a coding bot may be created in any business space
+    # the caller is a member of, not just their personal one.
+    for space_kind in ("personal", "team"):
+        prepared = _strategy_prepare(
+            engine_type="claude_code",
+            engine_properties={"template": {"devflow_workflow": "x"}},
+            space_kind=space_kind,
+        )
+        assert prepared.template_type == "applicationCoding"
+        assert prepared.template_config == {"devflow_workflow": "x"}
+        assert prepared.requires_workspace_hosting is True
 
 
 def test_prepare_application_coding_without_config_preserves_legacy_default() -> None:

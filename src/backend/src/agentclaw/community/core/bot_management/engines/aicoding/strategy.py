@@ -199,10 +199,10 @@ class AicodingProvisioningStrategy(EngineProvisioningStrategy):
             raise BotCombinationUnsupportedError(
                 "application coding bot must be personal"
             )
-        if space_kind != "personal":
-            raise BotCombinationUnsupportedError(
-                "application coding is personal-space only"
-            )
+        # No space-kind gate: coding bots may be created in any business space
+        # the caller is a member of (personal or team). ``space_kind`` stays in
+        # the signature so the strategy-interface contract and the
+        # ``combo_policy`` mirror keep matching.
 
         template = engine_properties["template"]
         if template is None:
