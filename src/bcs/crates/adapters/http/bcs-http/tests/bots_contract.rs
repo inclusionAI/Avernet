@@ -1424,6 +1424,57 @@ async fn search_bots_route_uses_explicit_viewer_for_is_friend_filter() {
 }
 
 #[tokio::test]
+async fn search_bots_route_normalizes_explicit_human_viewer_id() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let build_app = || {
+        let services = Services::builder()
+            .bot_query(query.clone())
+            .build_for_test();
+        build_router(HttpAppState::new(services))
+    };
+
+    // Bare human staff id → canonical `human_<id>`, matching edge_grants.from_id and the
+    // legacy bcs_friendships keys. This is the reported `/bots/search` is_friend=false bug:
+    // the lookup key must be `human_152819`, not the bare `152819` supplied by the caller.
+    let response = build_app()
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?viewer_actor_type=human&viewer_actor_id=152819")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Idempotency: an already-canonical human id passes through unchanged.
+    let response = build_app()
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?viewer_actor_type=human&viewer_actor_id=human_alice")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 2);
+    assert_eq!(
+        commands[0].viewer_actor_id.as_deref(),
+        Some("human_152819")
+    );
+    assert_eq!(
+        commands[1].viewer_actor_id.as_deref(),
+        Some("human_alice")
+    );
+}
+
+#[tokio::test]
 async fn search_bots_route_rejects_friendship_filter_without_explicit_viewer() {
     let query = Arc::new(RecordingBotQueryService {
         search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
