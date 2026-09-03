@@ -49,3 +49,4 @@ user_config:
     bcs_server_url: "${BCS_SERVER_URL:-https://bcs.avernet.com}"
     engine_proxy_server_url: "${ENGINE_PROXY_SERVER_URL:-https://engineproxy.avernet.com}"
     bcsfuse_server_url: "${BCSFUSE_SERVER_URL:-https://bcsfuse.avernet.com}"
+    clawweb_server_url: "${CLAWWEB_SERVER_URL:-http://evolvetrace.inner.avernet.com}"
