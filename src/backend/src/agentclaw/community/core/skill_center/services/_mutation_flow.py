@@ -1,11 +1,8 @@
-"""Mutate-project-compensate: the one orchestration under every activation
-command.
+"""Commit Desired State, then best-effort project the Runtime.
 
-Internal to the command services (the Set service and the direct-activation
-service) — not a public layer. Both promise the same synchronous contract:
-success means the runtime converged on the new desired state, failure means
-desired state was compensated back. This class is that promise, extracted so
-the two services cannot drift.
+Runtime files and device availability are observed state, not Installation
+truth. Product commands therefore keep a successfully committed Desired State
+and report a structured projection outcome instead of compensating it back.
 """
 
 from __future__ import annotations
@@ -20,13 +17,10 @@ from agentclaw.community.core.repository.protocols.capability_desired_state impo
 from agentclaw.community.core.repository.capability_desired_state_types import (
     DesiredStateMutation,
 )
-from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotReadyError,
-    SkillSetRuntimeReconcileError,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol,
     ProjectionScope,
+    RuntimeProjectionResult,
 )
 from agentclaw.community.core.skills_pool.mapping_intent import (
     retired_logical_skill_mappings,
@@ -87,12 +81,7 @@ def mcp_release_scope(result: DesiredStateMutation) -> ProjectionScope:
 
 
 class MutationProjectionFlow:
-    """Apply one desired-state mutation and synchronously project the runtime.
-
-    On projection failure the mutation is compensated: desired state is
-    restored from the mutation's snapshot and the runtime is counter-projected
-    before ``SkillSetRuntimeReconcileError`` surfaces.
-    """
+    """Apply one Desired State mutation and report Runtime convergence."""
 
     def __init__(
         self,
@@ -119,10 +108,11 @@ class MutationProjectionFlow:
     ) -> dict:
         """Run the command; return ``{**item, "changed": ..., **details}``.
 
-        ``runtime_required=False`` skips readiness and projection entirely —
-        an inactive-set membership change has no runtime projection to apply,
-        preserving the legacy inactive draft contract. ``engine_type`` scopes
-        a compensation's restore to the Sets the mutation could have touched.
+        ``runtime_required=False`` skips projection entirely — an inactive-set
+        membership change has no runtime projection to apply, preserving the
+        legacy inactive draft contract. ``engine_type`` remains a compatibility
+        parameter for callers that previously supplied it; Runtime failure no
+        longer restores a prior desired snapshot.
 
         ``scope`` is what this mutation changed, declared by the command that
         knows it. Exactly one of ``scope`` / ``scope_from_result`` must be
@@ -142,9 +132,25 @@ class MutationProjectionFlow:
             raise ValueError("exactly one of scope / scope_from_result is required")
         if not runtime_required:
             result = mutation()
-            return {**result.item, "changed": result.changed, **result.details}
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": RuntimeProjectionResult.skipped(
+                    reason="RUNTIME_NOT_REQUIRED"
+                ).to_dict(),
+            }
         if not is_bot_ready(bot):
-            raise LocalSkillNotReadyError()
+            result = mutation()
+            return {
+                **result.item,
+                "changed": result.changed,
+                **result.details,
+                "runtime_projection": RuntimeProjectionResult.pending(
+                    code="BOT_RUNTIME_NOT_READY",
+                    reason="Bot 运行环境尚未就绪，能力状态已保存但尚未同步",
+                ).to_dict(),
+            }
         owner_id = str(bot["owner_id"])
         snapshot_started_at = time.perf_counter()
         try:
@@ -153,98 +159,99 @@ class MutationProjectionFlow:
                 owner_id=owner_id,
             )
         except Exception:
+            previous_mappings = ()
+            previous_snapshot_failed = True
+        else:
+            previous_snapshot_failed = False
             self._log_timing(
                 stage="snapshot_before",
                 bot_id=bot_id,
                 engine_type=engine_type,
                 started_at=snapshot_started_at,
-                outcome="error",
+                mapping_count=len(previous_mappings),
             )
-            raise
-        self._log_timing(
-            stage="snapshot_before",
-            bot_id=bot_id,
-            engine_type=engine_type,
-            started_at=snapshot_started_at,
-            outcome="success",
-            mapping_count=len(previous_mappings),
-        )
-
         mutation_started_at = time.perf_counter()
-        try:
-            result = mutation()
-        except Exception:
-            self._log_timing(
-                stage="mutation_tx",
-                bot_id=bot_id,
-                engine_type=engine_type,
-                started_at=mutation_started_at,
-                outcome="error",
-            )
-            raise
+        result = mutation()
         self._log_timing(
-            stage="mutation_tx",
+            stage="desired_state_mutation",
             bot_id=bot_id,
             engine_type=engine_type,
             started_at=mutation_started_at,
-            outcome="success",
             changed=result.changed,
             mcp_delta_count=len(result.mcp_codes),
         )
         if skip_projection_when_unchanged and not result.changed:
-            return {**result.item, "changed": False, **result.details}
+            return {
+                **result.item,
+                "changed": False,
+                **result.details,
+                "runtime_projection": RuntimeProjectionResult.skipped(
+                    reason="DESIRED_STATE_UNCHANGED"
+                ).to_dict(),
+            }
         effective_scope = (
             scope_from_result(result) if scope_from_result is not None else scope
         )
         assert effective_scope is not None  # guaranteed by the check above
-        await self._project_or_compensate(
+        projection_started_at = time.perf_counter()
+        runtime_result = await self._project_best_effort(
             bot_id=bot_id,
             owner_id=owner_id,
             engine_type=engine_type,
-            mutation=result,
             previous_mappings=previous_mappings,
             scope=effective_scope,
+            previous_snapshot_failed=previous_snapshot_failed,
         )
-        return {**result.item, "changed": result.changed, **result.details}
+        self._log_timing(
+            stage="runtime_projection",
+            bot_id=bot_id,
+            engine_type=engine_type,
+            started_at=projection_started_at,
+            scope=effective_scope,
+        )
+        return {
+            **result.item,
+            "changed": result.changed,
+            **result.details,
+            "runtime_projection": runtime_result.to_dict(),
+        }
 
-    async def _project_or_compensate(
+    async def _project_best_effort(
         self,
         *,
         bot_id: str,
         owner_id: str,
         engine_type: str | None,
-        mutation: DesiredStateMutation,
         previous_mappings: Sequence[PoolSkillMapping],
         scope: ProjectionScope,
-    ) -> None:
-        current_mappings: Sequence[PoolSkillMapping] = ()
+        previous_snapshot_failed: bool,
+    ) -> RuntimeProjectionResult:
+        if previous_snapshot_failed:
+            return RuntimeProjectionResult.pending(
+                code="RUNTIME_SNAPSHOT_UNAVAILABLE",
+                reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
         try:
             snapshot_started_at = time.perf_counter()
-            try:
-                current_mappings = await self._runtime.snapshot_skill_mappings(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                )
-            except Exception:
-                self._log_timing(
-                    stage="snapshot_after",
-                    bot_id=bot_id,
-                    engine_type=engine_type,
-                    started_at=snapshot_started_at,
-                    outcome="error",
-                    scope=scope,
-                )
-                raise
-            self._log_timing(
-                stage="snapshot_after",
+            current_mappings = await self._runtime.snapshot_skill_mappings(
                 bot_id=bot_id,
-                engine_type=engine_type,
-                started_at=snapshot_started_at,
-                outcome="success",
-                mapping_count=len(current_mappings),
-                scope=scope,
+                owner_id=owner_id,
             )
-            await self._runtime.project(
+        except Exception:
+            return RuntimeProjectionResult.pending(
+                code="RUNTIME_SNAPSHOT_UNAVAILABLE",
+                reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
+            )
+        self._log_timing(
+            stage="snapshot_after",
+            bot_id=bot_id,
+            engine_type=engine_type,
+            started_at=snapshot_started_at,
+            mapping_count=len(current_mappings),
+            scope=scope,
+        )
+        try:
+            projected = await self._runtime.project(
                 bot_id=bot_id,
                 owner_id=owner_id,
                 retired_mappings=retired_logical_skill_mappings(
@@ -253,28 +260,18 @@ class MutationProjectionFlow:
                 ),
                 scope=scope,
             )
-        except Exception as exc:
-            self._repository.restore_desired_state(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                state=mutation.previous_state,
-                engine_type=engine_type,
+            # Existing in-process fakes and pre-change Runtime adapters return
+            # ``None`` for a successful projection. Treat that compatibility
+            # shape as the old all-converged success while new adapters return
+            # the structured contract.
+            if projected is None:
+                return RuntimeProjectionResult.converged()
+            return projected
+        except Exception:
+            return RuntimeProjectionResult.pending(
+                code="RUNTIME_PROJECTION_UNAVAILABLE",
+                reason="Bot 运行环境当前不可连接，能力状态已保存但尚未同步",
             )
-            try:
-                await self._runtime.project(
-                    bot_id=bot_id,
-                    owner_id=owner_id,
-                    retired_mappings=retired_logical_skill_mappings(
-                        list(current_mappings),
-                        list(previous_mappings),
-                    ),
-                    # Same swap as the mappings above: what the forward
-                    # projection claimed is what this one releases.
-                    scope=scope.inverted(),
-                )
-            except Exception as restore_error:
-                raise SkillSetRuntimeReconcileError() from restore_error
-            raise SkillSetRuntimeReconcileError() from exc
 
     @staticmethod
     def _log_timing(
@@ -283,21 +280,19 @@ class MutationProjectionFlow:
         bot_id: str,
         engine_type: str | None,
         started_at: float,
-        outcome: str,
         mapping_count: int | None = None,
         changed: bool | None = None,
         mcp_delta_count: int | None = None,
         scope: ProjectionScope | None = None,
     ) -> None:
         logger.info(
-            "[MutationProjectionFlow] timing stage=%s bot_id=%s "
-            "engine_type=%s duration_ms=%.3f outcome=%s mapping_count=%s "
-            "changed=%s mcp_delta_count=%s scope_skills=%s scope_mcp=%s",
+            "[MutationProjectionFlow] timing stage=%s bot_id=%s engine_type=%s "
+            "duration_ms=%s mapping_count=%s changed=%s mcp_delta_count=%s "
+            "scope_skills=%s scope_mcp=%s",
             stage,
             bot_id,
             engine_type,
-            (time.perf_counter() - started_at) * 1000,
-            outcome,
+            round((time.perf_counter() - started_at) * 1000),
             mapping_count,
             changed,
             mcp_delta_count,

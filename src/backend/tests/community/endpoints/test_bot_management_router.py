@@ -181,6 +181,27 @@ def _seed_classification_requester(world):
     make_staff_user(world, user_id="u_requester")
 
 
+def _seed_ambiguous_default_bots(world):
+    """Seed two live default Bots whose entity IDs disambiguate them."""
+    make_staff_user(world, user_id="u_requester")
+    make_staff_user(world, user_id="personal-owner")
+    make_staff_user(world, user_id="service-owner")
+    make_bot(
+        world,
+        bot_id="default",
+        owner_id="personal-owner",
+        bot_type="personal",
+        status="ACTIVE",
+    )
+    make_bot(
+        world,
+        bot_id="default",
+        owner_id="service-owner",
+        bot_type="service",
+        status="ACTIVE",
+    )
+
+
 @endpoint_test(
     method="GET",
     path="/api/bots/{bot_id}/classification",
@@ -205,6 +226,56 @@ def _seed_classification_requester(world):
 )
 def get_bot_classification_cross_owner():
     """Any authenticated user can read only a Bot's public classification."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/classification",
+    scenario="ok_legacy_bot_id_with_entity_id",
+    input=CaseInput(
+        path_params={"bot_id": "default"},
+        query_params={"entity_id": "service-owner"},
+        headers={"x-user-id": "u_requester"},
+    ),
+    seed=_seed_ambiguous_default_bots,
+    expect=ExpectSuccess(
+        status=200,
+        json_equals={
+            "success": True,
+            "message": "OK",
+            "error_code": 200,
+            "data": {
+                "bot_id": "default",
+                "bot_type": "service",
+            },
+        },
+    ),
+)
+def get_bot_classification_legacy_id_with_entity_id():
+    """entity_id selects the intended Bot when bot_id is shared."""
+
+
+@endpoint_test(
+    method="GET",
+    path="/api/bots/{bot_id}/classification",
+    scenario="error_legacy_bot_id_without_entity_id",
+    input=CaseInput(
+        path_params={"bot_id": "default"},
+        headers={"x-user-id": "u_requester"},
+    ),
+    seed=_seed_ambiguous_default_bots,
+    expect=ExpectError(
+        status=200,
+        json_contains={
+            "success": False,
+            "message": "Bot ID 无法唯一定位: default",
+            "error_code": 409,
+            "data": None,
+        },
+    ),
+)
+def get_bot_classification_legacy_id_without_entity_id():
+    """Omitting entity_id preserves the fail-closed ambiguity response."""
 
 
 @endpoint_test(

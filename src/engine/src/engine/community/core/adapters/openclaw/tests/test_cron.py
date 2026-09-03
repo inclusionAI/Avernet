@@ -293,8 +293,8 @@ async def test_add_job_serialises_request_and_returns_cron_job():
     params = call["params"]
     assert params["name"] == "hourly"
     assert params["schedule"] == {"kind": "cron", "expr": "0 * * * *"}
-    assert params["owner_id"] == "owner-1"
-    assert params["bot_id"] == "bot-1"
+    assert "owner_id" not in params
+    assert "bot_id" not in params
     # delivery should be present (no notify → mode none, no accountId)
     assert params["delivery"]["mode"] == "none"
     assert "accountId" not in params["delivery"]

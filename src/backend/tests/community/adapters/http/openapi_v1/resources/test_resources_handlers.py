@@ -7,14 +7,18 @@ contract they were testing — ``stat`` answers the existence question those ask
 against the workspace rather than the record table.
 """
 
+import io
 import json
 import logging
+import os
+import zipfile
 from types import SimpleNamespace
 from typing import List
 
 import httpx
 import pytest
 from fastapi import HTTPException, Request, Response
+from fastapi.responses import FileResponse
 
 from tests.community.adapters.http.openapi_v1.conftest import public_router
 from agentclaw.community.adapters.http.openapi_v1.errors import MissingPrincipalError
@@ -28,6 +32,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
 from agentclaw.community.adapters.http.openapi_v1.resources.router import (
     create_directory,
     delete_file,
+    download_directory,
     download_file,
     list_resources,
     preview_file,
@@ -39,6 +44,10 @@ from agentclaw.community.adapters.http.openapi_v1.resources.schemas import (
     ResourceType as OpenapiType,
 )
 from agentclaw.community.core.resources.factory import ResourceServiceFactory
+from agentclaw.community.core.resources.service import (
+    DirectoryTooLargeError,
+    ResourceNotFoundError,
+)
 from agentclaw.community.core.devices.services.device_filesystem import (
     FileTooLargeError as DeviceFileTooLargeError,
 )
@@ -710,10 +719,10 @@ async def test_no_handler_can_fall_back_to_a_bot_derived_owner():
         for route in _api_routes(public_router())
         if route.path.startswith("/openapi/v1/bots/{bot_id}/resources")
     ]
-    # 7 routes. The count is a tripwire — a resources route added without the
-    # shared user_id dependency is exactly the silent owner fallback this guard
-    # exists to prevent.
-    assert len(mounted) == 7, [r.path for r in mounted]
+    # 8 routes (download-dir included). The count is a tripwire — a resources
+    # route added without the shared user_id dependency is exactly the silent
+    # owner fallback this guard exists to prevent.
+    assert len(mounted) == 8, [r.path for r in mounted]
     # The only path parameter is the bot the operation addresses. This used to
     # read "no path parameters at all", which stopped being sayable when the
     # group moved from /bots/resources?bot_id= to /bots/{bot_id}/resources — but
@@ -1926,3 +1935,253 @@ async def test_upload_409_takes_precedence_over_the_502_path():
     assert resp.status_code == 409
     assert json.loads(resp.body)["message"] == "Resource already exists"
     assert len(repo._rows) == rows_before
+
+
+# ── directory download: a zip of the subtree, addressed by workspace path ────
+
+
+class _StubTreeFileService(_StubReadFileService):
+    """Adds the directory walk the download-dir handler consumes.
+
+    ``files`` keys are workspace-relative paths; the walk yields the entries
+    under the requested prefix with names relative to it — the same contract
+    ``ResourceFileService.iter_directory_files`` documents. ``tree_raises``
+    fails the walk; ``missing`` prefixes answer ``ResourceNotFoundError``.
+    """
+
+    def __init__(
+        self,
+        files: dict[str, bytes] | None = None,
+        *,
+        tree_raises: Exception | None = None,
+        missing: set[str] | None = None,
+    ):
+        super().__init__(files)
+        self.tree_raises = tree_raises
+        self.missing = set(missing or ())
+        self.tree_paths: List[str] = []
+
+    async def iter_directory_files(self, *, path, **_kw):
+        self.tree_paths.append(path)
+        if self.tree_raises is not None:
+            raise self.tree_raises
+        if path in self.missing:
+            raise ResourceNotFoundError(f"no such directory: {path!r}")
+        prefix = f"{path}/" if path else ""
+        for name in sorted(self._files):
+            if path and not name.startswith(prefix):
+                continue
+            yield name[len(prefix):], self._files[name]
+
+
+def _zip_of(response: FileResponse) -> zipfile.ZipFile:
+    with open(response.path, "rb") as fh:
+        return zipfile.ZipFile(io.BytesIO(fh.read()))
+
+
+async def _cleanup(response: FileResponse) -> None:
+    """Run the background cleanup the server would, and prove it worked."""
+    path = response.path
+    assert os.path.exists(path)
+    await response.background()
+    assert not os.path.exists(path)
+
+
+@pytest.mark.asyncio
+async def test_download_dir_returns_a_zip_of_the_subtree():
+    file_svc = _StubTreeFileService(
+        {
+            "docs/a.txt": b"aa",
+            "docs/deep/b.txt": b"bb",
+            "other.txt": b"o",
+        }
+    )
+
+    response = await download_directory(
+        path="docs",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert isinstance(response, FileResponse)
+    assert response.media_type == "application/zip"
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''docs.zip"
+    )
+    with _zip_of(response) as zf:
+        # Flat under the requested folder; "other.txt" is outside it.
+        assert zf.namelist() == ["docs/", "docs/a.txt", "docs/deep/b.txt"]
+        assert zf.read("docs/a.txt") == b"aa"
+        assert zf.read("docs/deep/b.txt") == b"bb"
+    assert file_svc.tree_paths == ["docs"]
+    await _cleanup(response)
+
+
+@pytest.mark.asyncio
+async def test_download_dir_of_the_root_zips_the_whole_workspace():
+    file_svc = _StubTreeFileService({"docs/a.txt": b"aa", "top.txt": b"t"})
+
+    response = await download_directory(
+        path="",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''workspace.zip"
+    )
+    with _zip_of(response) as zf:
+        assert zf.namelist() == [
+            "workspace/",
+            "workspace/docs/a.txt",
+            "workspace/top.txt",
+        ]
+    await _cleanup(response)
+
+
+@pytest.mark.asyncio
+async def test_download_dir_rejects_a_path_escaping_the_workspace():
+    file_svc = _StubTreeFileService({})
+
+    resp = await download_directory(
+        path="../secrets",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 400
+    assert file_svc.tree_paths == []  # nothing was walked
+
+
+@pytest.mark.asyncio
+async def test_download_dir_404_when_the_directory_is_absent():
+    resp = await download_directory(
+        path="nope",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubTreeFileService({}, missing={"nope"}),
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_dir_404s_when_the_provider_raises_the_upstream_404():
+    """The baas shape of "directory absent" — an upstream 404, not a ``None``.
+
+    ``baas_device_filesystem.list_dir`` re-raises the upstream status rather
+    than answering ``None``, so on the live baas stack the walk surfaces the
+    missing directory as an ``httpx.HTTPStatusError``. A missing directory is
+    this route's documented 404, same as the ``None``-provider shape the test
+    above covers — not a 500.
+    """
+    with pytest.raises(HTTPException) as exc:
+        await download_directory(
+            path="nope",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubTreeFileService({}, tree_raises=_http_status(404)),
+            request=_request_without_trace(),
+        )
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_download_dir_surfaces_an_upstream_fault():
+    """Only 404 is an ordinary answer; an upstream fault must still surface."""
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await download_directory(
+            path="docs",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubTreeFileService({}, tree_raises=_http_status(503)),
+            request=_request_without_trace(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_download_dir_empty_directory_is_a_valid_root_only_archive():
+    """Empty is not missing: an existing empty directory downloads as an
+    archive holding just its root entry — the walk can tell the two apart."""
+    response = await download_directory(
+        path="empty",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubTreeFileService({"docs/a.txt": b"aa"}),
+        request=_request_without_trace(),
+    )
+
+    with _zip_of(response) as zf:
+        assert zf.namelist() == ["empty/"]
+    await _cleanup(response)
+
+
+@pytest.mark.asyncio
+async def test_download_dir_413_when_a_cap_is_exceeded():
+    resp = await download_directory(
+        path="docs",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubTreeFileService(
+            {"docs/a.txt": b"aa"},
+            tree_raises=DirectoryTooLargeError("over the cap"),
+        ),
+        request=_request_without_trace(),
+    )
+
+    assert resp.status_code == 413
+    assert json.loads(resp.body)["message"] == "Directory too large to download"
+
+
+@pytest.mark.asyncio
+async def test_download_dir_propagates_a_mid_walk_failure():
+    """An unmapped failure re-raises (envelope_errors hands it to the app
+    500 handler) — and the partial archive is deleted by ``build_directory_zip``
+    (pinned in test_zip_build.py), so no half zip is ever served."""
+    with pytest.raises(RuntimeError):
+        await download_directory(
+            path="docs",
+            owner_id="u1",
+            bot_id="bot-x",
+            bot_repo=_StubBotRepo(),
+            file_svc=_StubTreeFileService(
+                {"docs/a.txt": b"aa"}, tree_raises=RuntimeError("walk blew up")
+            ),
+            request=_request_without_trace(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_download_dir_utf8_folder_name_in_the_disposition():
+    response = await download_directory(
+        path="文档",
+        owner_id="u1",
+        bot_id="bot-x",
+        bot_repo=_StubBotRepo(),
+        file_svc=_StubTreeFileService({"文档/a.txt": b"aa"}),
+        request=_request_without_trace(),
+    )
+
+    assert response.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''%E6%96%87%E6%A1%A3.zip"
+    )
+    with _zip_of(response) as zf:
+        assert zf.namelist() == ["文档/", "文档/a.txt"]
+    await _cleanup(response)

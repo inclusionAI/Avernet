@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-import threading
+import time
 
 from agentclaw.community.core.repository.protocols.skill_center_reference import (
     SkillCenterReferenceRepositoryProtocol,
@@ -68,6 +68,7 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         cache: CachePlugin,
         env_provider: Callable[[], str] = get_current_env,
         interval_seconds: int = 30 * 60,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if interval_seconds < 1:
             raise ValueError("interval_seconds must be positive")
@@ -78,6 +79,7 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
         self._cache = cache
         self._env_provider = env_provider
         self._interval_seconds = interval_seconds
+        self._monotonic = monotonic
         self._periodic_task: asyncio.Task | None = None
 
     async def startup(self) -> None:
@@ -90,6 +92,10 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
     def sync(self) -> SkillCenterSyncSummary:
         env = self._env_provider()
         lock_key = f"skill-center-public-sync:{env}"
+        # Start the local budget before SET NX EX. The cache TTL starts while
+        # acquiring the lock, so this may shorten a batch but cannot extend it
+        # beyond the actual cross-worker lease.
+        lease_started = self._monotonic()
         try:
             lock_value = self._cache.acquire_lock_strict(
                 lock_key, ttl=_SYNC_LOCK_TTL_SECONDS
@@ -98,108 +104,54 @@ class SkillCenterSyncService(LifecycleBase, SkillCenterSyncServiceProtocol):
             raise SkillCenterSyncUnavailableError("SYNC_COORDINATOR_UNAVAILABLE") from exc
         if lock_value is None:
             raise SkillCenterSyncInProgressError("SYNC_IN_PROGRESS")
-        stop_renewal = threading.Event()
-        lease_error: list[Exception] = []
-
-        def renew_lease() -> None:
-            while not stop_renewal.wait(_SYNC_LOCK_TTL_SECONDS / 3):
-                try:
-                    if not self._cache.renew_lock_strict(
-                        lock_key,
-                        lock_value,
-                        ttl=_SYNC_LOCK_TTL_SECONDS,
-                    ):
-                        lease_error.append(
-                            SkillCenterSyncInProgressError("SYNC_LOCK_LOST")
-                        )
-                        return
-                except Exception as exc:
-                    lease_error.append(exc)
-                    return
-
-        renewal = threading.Thread(
-            target=renew_lease,
-            name="skill-center-public-sync-lock-renewal",
-            daemon=True,
-        )
-        renewal.start()
-        try:
-            assets = self._assets.list_materialized_public_assets(env=env)
-            updated = 0
-            unchanged = 0
-            failures: list[SkillCenterSyncFailure] = []
-            for asset in assets:
-                # This is a best-effort batch boundary, not transactional
-                # fencing. If renewal fails while _sync_asset is running, that
-                # exact/idempotent item may finish; the next boundary stops
-                # subsequent items and reports the coordinator failure.
-                self._renew_or_raise(
-                    lock_key=lock_key,
-                    lock_value=lock_value,
-                    lease_error=lease_error,
+        lease_deadline = lease_started + _SYNC_LOCK_TTL_SECONDS
+        # This cache adapter has no atomic compare-and-delete, so this fixed
+        # lease is not released early. Its TTL is the only safe cross-worker
+        # handoff point.
+        assets = self._assets.list_materialized_public_assets(env=env)
+        scanned = 0
+        updated = 0
+        unchanged = 0
+        failures: list[SkillCenterSyncFailure] = []
+        for asset in assets:
+            # The cache adapter supports fixed-TTL acquisition but not
+            # token-checked renewal, so this coordinator deliberately follows
+            # GitSync's fixed-TTL lease pattern. Exact materialization is
+            # idempotent at an asset boundary; stop before beginning a new
+            # asset once the lease has expired.
+            if self._monotonic() >= lease_deadline:
+                logger.warning(
+                    "[SkillCenterSync] lease budget exhausted; deferring "
+                    "remaining public assets to the next reconciliation"
                 )
-                try:
-                    changed = self._sync_asset(env=env, asset=asset)
-                    if changed:
-                        updated += 1
-                    else:
-                        unchanged += 1
-                except (
-                    SkillCenterGatewayError,
-                    SkillVersionMaterializationError,
-                    _SkillCenterSyncAssetError,
-                    ValueError,
-                ) as exc:
-                    failures.append(
-                        SkillCenterSyncFailure(
-                            skill_id=str(asset.skill_id),
-                            skill_code=asset.skill_code,
-                            error_code=_sync_error_code(exc),
-                        )
+                break
+            scanned += 1
+            try:
+                changed = self._sync_asset(env=env, asset=asset)
+                if changed:
+                    updated += 1
+                else:
+                    unchanged += 1
+            except (
+                SkillCenterGatewayError,
+                SkillVersionMaterializationError,
+                _SkillCenterSyncAssetError,
+                ValueError,
+            ) as exc:
+                failures.append(
+                    SkillCenterSyncFailure(
+                        skill_id=str(asset.skill_id),
+                        skill_code=asset.skill_code,
+                        error_code=_sync_error_code(exc),
                     )
-            if lease_error:
-                self._raise_lease_error(lease_error[0])
-            return SkillCenterSyncSummary(
-                scanned=len(assets),
-                updated=updated,
-                unchanged=unchanged,
-                failed=len(failures),
-                failures=tuple(failures),
-            )
-        finally:
-            stop_renewal.set()
-            renewal.join(timeout=1)
-            self._cache.release_lock(lock_key, lock_value)
-
-    def _renew_or_raise(
-        self,
-        *,
-        lock_key: str,
-        lock_value: str,
-        lease_error: list[Exception],
-    ) -> None:
-        if lease_error:
-            self._raise_lease_error(lease_error[0])
-        try:
-            renewed = self._cache.renew_lock_strict(
-                lock_key,
-                lock_value,
-                ttl=_SYNC_LOCK_TTL_SECONDS,
-            )
-        except CacheLockInfrastructureError as exc:
-            raise SkillCenterSyncUnavailableError(
-                "SYNC_COORDINATOR_UNAVAILABLE"
-            ) from exc
-        if not renewed:
-            raise SkillCenterSyncInProgressError("SYNC_LOCK_LOST")
-
-    @staticmethod
-    def _raise_lease_error(error: Exception) -> None:
-        if isinstance(error, SkillCenterSyncInProgressError):
-            raise error
-        raise SkillCenterSyncUnavailableError(
-            "SYNC_COORDINATOR_UNAVAILABLE"
-        ) from error
+                )
+        return SkillCenterSyncSummary(
+            scanned=scanned,
+            updated=updated,
+            unchanged=unchanged,
+            failed=len(failures),
+            failures=tuple(failures),
+        )
 
     async def sync_bootstrap(self) -> SkillCenterSyncSummary:
         try:

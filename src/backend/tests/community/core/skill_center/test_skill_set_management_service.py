@@ -24,7 +24,6 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
 from agentclaw.community.core.skill_center.errors import (
-    LocalSkillNotReadyError,
     SkillSetControlPlaneConflictError,
     SkillSetControlPlaneNotFoundError,
     SkillSetRuntimeReconcileError,
@@ -705,20 +704,22 @@ class _RuntimeSkills:
 
 
 class _RuntimePool:
-    def __init__(self) -> None:
+    def __init__(self, *, published=True, verified=True) -> None:
         self.publish_calls: list[dict] = []
         self.verify_calls: list[dict] = []
+        self._published = published
+        self._verified = verified
 
     async def probe(self, **_kwargs):
         raise AssertionError("non-Center projection must keep the legacy adapter")
 
     async def publish_mappings(self, **kwargs):
         self.publish_calls.append(kwargs)
-        return True
+        return self._published
 
     async def verify_mappings(self, **kwargs):
         self.verify_calls.append(kwargs)
-        return True
+        return self._verified
 
 
 class _CenterRuntimePool(_RuntimePool):
@@ -824,7 +825,7 @@ class _FailingRuntimePassport(_RuntimePassport):
 
 
 @pytest.mark.asyncio
-async def test_collaborator_command_restores_desired_state_and_uses_true_owner():
+async def test_collaborator_command_keeps_desired_state_and_uses_true_owner():
     repository = _Repository()
     runtime = _Runtime()
     service = SkillSetManagementService(
@@ -840,48 +841,33 @@ async def test_collaborator_command_restores_desired_state_and_uses_true_owner()
         ext_info_provider=lambda _bot_id: None,
     )
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await service.activate(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="collaborator",
-            set_id="set-1",
-        )
+    result = await service.activate(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="set-1",
+    )
 
     # The hook that recorded (bot, true-owner, actor) is gone: the seam
     # adjudicates before the handler runs, against the same OwnerIdDep the
     # handler acts on. What is still this service's to prove is that the *true*
     # owner — not the caller — reaches the runtime, which the next lines do.
-    assert runtime.owners == ["true-owner", "true-owner"]
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert runtime.owners == ["true-owner"]
     assert runtime.snapshot_calls == [
         {"bot_id": "bot-1", "owner_id": "true-owner"},
         {"bot_id": "bot-1", "owner_id": "true-owner"},
     ]
-    # Two projections: the forward one, then the compensating one after the
-    # runtime failed. deactivate declares its scope rather than reconciling,
-    # and the compensating call carries scope.inverted() — released and
-    # claimed swap, exactly as retired_mappings swap alongside them.
-    _deactivate_scope = ProjectionScope(skills=True, mcp=True, released_mcp=frozenset())
+    _activate_scope = ProjectionScope(skills=True, mcp=True, claimed_mcp=frozenset())
     assert runtime.reconcile_calls == [
         {
             "bot_id": "bot-1",
             "owner_id": "true-owner",
             "retired_mappings": (),
-            "scope": _deactivate_scope,
-        },
-        {
-            "bot_id": "bot-1",
-            "owner_id": "true-owner",
-            "retired_mappings": (
-                PoolSkillMapping(corpus="local", relative_path="qa", link_name="qa"),
-                PoolSkillMapping(
-                    corpus="repo", relative_path="business/eva", link_name="eva"
-                ),
-            ),
-            "scope": _deactivate_scope.inverted(),
+            "scope": _activate_scope,
         },
     ]
-    assert len(repository.restore_calls) == 1
+    assert repository.restore_calls == []
 
 
 @pytest.mark.asyncio
@@ -1224,7 +1210,7 @@ async def test_inactive_set_membership_does_not_require_runtime_readiness(
 
 
 @pytest.mark.asyncio
-async def test_active_set_membership_still_requires_runtime_readiness() -> None:
+async def test_active_set_membership_commits_when_runtime_is_not_ready() -> None:
     repository = _ActiveMembershipRepository()
     service = SkillSetManagementService(
         repository=repository,
@@ -1239,16 +1225,16 @@ async def test_active_set_membership_still_requires_runtime_readiness() -> None:
         ext_info_provider=lambda _bot_id: None,
     )
 
-    with pytest.raises(LocalSkillNotReadyError):
-        await service.add_skills(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-            skill_ids=["skill-1"],
-        )
+    outcomes = await service.add_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["skill-1"],
+    )
 
-    assert repository.membership_calls == []
+    assert outcomes[0].changed is True
+    assert len(repository.membership_calls) == 1
 
 
 def test_default_read_rejects_missing_bot():
@@ -2230,13 +2216,14 @@ async def test_projection_logs_agentpass_snapshot_failure_without_secret(caplog)
     )
 
     with caplog.at_level("INFO", logger="start"):
-        with pytest.raises(SkillSetRuntimeReconcileError):
-            await runtime.project(
-                bot_id="bot-1",
-                owner_id="true-owner",
-                scope=ProjectionScope.everything(),
-            )
+        result = await runtime.project(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope.everything(),
+        )
 
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "PASSPORT_RUNTIME_UNAVAILABLE"
     logged = caplog.text
     assert "agentpass_runtime_scope_update_requested" in logged
     assert "agentpass_runtime_scope_update_failed" in logged
@@ -2265,13 +2252,14 @@ async def test_projection_logs_agentpass_update_failure_without_secret(caplog):
     )
 
     with caplog.at_level("INFO", logger="start"):
-        with pytest.raises(SkillSetRuntimeReconcileError):
-            await runtime.project(
-                bot_id="bot-1",
-                owner_id="true-owner",
-                scope=ProjectionScope.everything(),
-            )
+        result = await runtime.project(
+            bot_id="bot-1",
+            owner_id="true-owner",
+            scope=ProjectionScope.everything(),
+        )
 
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "PASSPORT_RUNTIME_UNAVAILABLE"
     assert "agentpass_runtime_scope_update_requested" in caplog.text
     assert "agentpass_runtime_scope_update_failed" in caplog.text
     assert "stage=update" in caplog.text
@@ -2390,15 +2378,7 @@ async def test_projection_fails_closed_without_a_bot_primary_key():
 
 
 @pytest.mark.asyncio
-async def test_compensation_inverts_the_declared_mcp_delta():
-    """A failed projection must withdraw what the forward one delivered.
-
-    The forward projection pushed configuration for the claimed MCP; the
-    mutation is then rolled back, so the compensating projection has to
-    release exactly that code — otherwise the DB says the MCP is gone while
-    its endpoint and api_key stay on the device. This is why the scope is a
-    value the flow can invert rather than behaviour it cannot see into.
-    """
+async def test_failed_mcp_projection_keeps_the_declared_mcp_delta():
     repository = _Repository()
     runtime = _Runtime()
     service = SkillSetManagementService(
@@ -2414,21 +2394,18 @@ async def test_compensation_inverts_the_declared_mcp_delta():
         ext_info_provider=lambda _bot_id: None,
     )
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await service.add_mcp(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-            server_code="mcp.new",
-        )
+    result = await service.add_mcp(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        server_code="mcp.new",
+    )
 
-    forward, compensating = runtime.reconcile_calls
-    assert forward["scope"].claimed_mcp == frozenset({"mcp.new"})
-    assert forward["scope"].released_mcp == frozenset()
-    # Inverted: what was claimed going forward is released coming back.
-    assert compensating["scope"].claimed_mcp == frozenset()
-    assert compensating["scope"].released_mcp == frozenset({"mcp.new"})
+    assert result["runtime_projection"]["status"] == "PENDING"
+    assert len(runtime.reconcile_calls) == 1
+    assert runtime.reconcile_calls[0]["scope"].claimed_mcp == frozenset({"mcp.new"})
+    assert runtime.reconcile_calls[0]["scope"].released_mcp == frozenset()
 
 
 @pytest.mark.asyncio
@@ -2634,6 +2611,12 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
 
     assert factory.service.mcp_codes is not None
     assert len(pool.publish_calls) == len(pool.verify_calls) == 1
+    # A product capability mutation uses the tolerant contract.  Pool
+    # cutover/recovery remains STRICT at its own call sites; this assertion
+    # protects the public Runtime Projector seam from accidentally turning a
+    # normal SkillSet operation back into an all-or-nothing filesystem gate.
+    assert pool.publish_calls[0]["apply_mode"].value == "BEST_EFFORT"
+    assert pool.verify_calls[0]["apply_mode"].value == "BEST_EFFORT"
     assert pool.publish_calls[0]["mapping_contract_version"] == (
         "skills-pool-mapping-v3"
     )
@@ -2643,6 +2626,63 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
             "skill_uuid": "00000000-0000-4000-8000-000000000007",
         "sc_version_number": "3.0.0",
     }
+
+
+@pytest.mark.asyncio
+async def test_transient_mapping_publish_failure_stays_pending_after_verify():
+    """A failed link write must remain retryable, not become a false conflict."""
+    from agentclaw.community.core.skills_pool.models import (
+        MappingItemResult,
+        MappingProjectionStatus,
+        MappingPublishResult,
+        MappingVerificationResult,
+    )
+
+    target = "/home/admin/.claude/skills/center-skill"
+    source = "/home/admin/.claude_code/workspace/skills-pool/skill-center/00000000-0000-4000-8000-000000000007/3.0.0"
+    pool = _CenterRuntimePool()
+    pool._published = MappingPublishResult(
+        published=False,
+        status=MappingProjectionStatus.PENDING,
+        items=(
+            MappingItemResult(
+                target=target,
+                source=source,
+                status=MappingProjectionStatus.PENDING,
+                code="MAPPING_PUBLISH_IO_ERROR",
+                retryable=True,
+            ),
+        ),
+    )
+    pool._verified = MappingVerificationResult(
+        valid=False,
+        status=MappingProjectionStatus.DEGRADED,
+        items=(
+            MappingItemResult(
+                target=target,
+                source=source,
+                status=MappingProjectionStatus.DEGRADED,
+                code="TARGET_NOT_SYMLINK",
+            ),
+        ),
+    )
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_CenterRuntimeSkills()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    result = await runtime.project(
+        bot_id="bot-1", owner_id="true-owner", scope=ProjectionScope(skills=True)
+    )
+
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "MAPPING_PUBLISH_IO_ERROR"
+    assert result.issues[0].retryable is True
 
 
 @pytest.mark.asyncio
@@ -3018,12 +3058,7 @@ async def test_teclaw_empty_scope_delivers_nothing():
 
 
 @pytest.mark.asyncio
-async def test_teclaw_failed_delivery_raises_reconcile_error():
-    """A refused delivery still fails closed, so the mutation compensates.
-
-    Teclaw converts compose and transport errors into a falsy result rather
-    than an exception, so the falsy return is the only signal there is.
-    """
+async def test_teclaw_failed_delivery_returns_pending_and_keeps_other_domains():
     passport = _RuntimePassport()
     factory = _RuntimeFactory()
     async def _refuse(**_):
@@ -3032,13 +3067,14 @@ async def test_teclaw_failed_delivery_raises_reconcile_error():
     factory.service.project_whole_artifact = _refuse
     runtime = _teclaw_runtime(factory, passport=passport)
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await runtime.project(
-            bot_id="bot-1", owner_id="true-owner",
-            scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
-        )
+    result = await runtime.project(
+        bot_id="bot-1", owner_id="true-owner",
+        scope=ProjectionScope(mcp=True, claimed_mcp=frozenset({"mcp.a"})),
+    )
 
-    assert passport.calls == []
+    assert result.status == "PENDING"
+    assert result.issues[0].code == "ARTIFACT_APPLY_FAILED"
+    assert passport.calls
 
 
 @pytest.mark.asyncio
@@ -3456,22 +3492,22 @@ async def test_batch_add_keeps_legacy_partial_success_and_projects_once():
 
 
 @pytest.mark.asyncio
-async def test_batch_add_runtime_failure_restores_the_whole_batch_once():
+async def test_batch_add_runtime_failure_keeps_the_whole_committed_batch_once():
     repository = _SkillRepository({"mcp.weather"})
     runtime = _Runtime()
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await _skill_service(repository, runtime).add_skills(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-            skill_ids=["7", "8"],
-        )
+    outcomes = await _skill_service(repository, runtime).add_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["7", "8"],
+    )
 
+    assert [outcome.changed for outcome in outcomes] == [True, True]
     assert [call["skill_id"] for call in repository.skill_calls] == ["7", "8"]
-    assert len(repository.restore_calls) == 1
-    assert len(runtime.reconcile_calls) == 2
+    assert repository.restore_calls == []
+    assert len(runtime.reconcile_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -3526,23 +3562,22 @@ async def test_batch_remove_from_an_active_set_projects_the_final_state_once():
 
 
 @pytest.mark.asyncio
-async def test_batch_remove_runtime_failure_restores_the_whole_batch_once():
+async def test_batch_remove_runtime_failure_keeps_the_whole_committed_batch_once():
     repository = _SkillRepository({"mcp.weather"})
     runtime = _Runtime()
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await _skill_service(repository, runtime).remove_skills(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-            skill_ids=["7", "8"],
-        )
+    outcomes = await _skill_service(repository, runtime).remove_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["7", "8"],
+    )
 
-    assert len(repository.restore_calls) == 1
-    forward, compensating = runtime.reconcile_calls
+    assert [outcome.changed for outcome in outcomes] == [True, True]
+    assert repository.restore_calls == []
+    (forward,) = runtime.reconcile_calls
     assert forward["scope"].released_mcp == frozenset({"mcp.weather"})
-    assert compensating["scope"].claimed_mcp == frozenset({"mcp.weather"})
 
 
 @pytest.mark.asyncio
@@ -3564,28 +3599,21 @@ async def test_remove_skill_releases_the_skill_s_mcp_dependencies():
 
 
 @pytest.mark.asyncio
-async def test_a_failed_skill_projection_withdraws_the_dependencies_it_claimed():
-    """Same invariant as the MCP commands: the undo releases what was claimed.
-
-    Otherwise a rolled-back Skill add leaves its dependency's endpoint and
-    api_key on the device with nothing in the database accounting for them.
-    """
+async def test_a_failed_skill_projection_keeps_the_dependencies_it_claimed():
     repository = _SkillRepository({"mcp.weather"})
     runtime = _Runtime()
 
-    with pytest.raises(SkillSetRuntimeReconcileError):
-        await _skill_service(repository, runtime).add_skills(
-            bot_id="bot-1",
-            owner_id="true-owner",
-            user_id="true-owner",
-            set_id="set-1",
-            skill_ids=["7"],
-        )
+    outcomes = await _skill_service(repository, runtime).add_skills(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="set-1",
+        skill_ids=["7"],
+    )
 
-    forward, compensating = runtime.reconcile_calls
+    assert outcomes == [SkillSetSkillOutcome(skill_id="7", changed=True)]
+    (forward,) = runtime.reconcile_calls
     assert forward["scope"].claimed_mcp == frozenset({"mcp.weather"})
-    assert compensating["scope"].released_mcp == frozenset({"mcp.weather"})
-    assert compensating["scope"].claimed_mcp == frozenset()
 
 
 @pytest.mark.asyncio

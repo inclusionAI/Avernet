@@ -325,13 +325,16 @@ skills-local / skills-repo / skill-center / MCP/CLI projection
    `BotCapabilityStateReader` 读取；Asset、Draft、Version 和历史 Artifact 读取不触发 flush。
 2. Mutation 前校验 ACL、Bot ready、Ownership Policy、MCP 权限和 runtime name 冲突。
 3. Runtime name 统一使用 `ac_skill.name`，由单一 `RuntimeNamePolicy` 规范化。
-4. Command Service 使用共享 `mutate → project → compensate` 流程；Runtime 明确失败时以第二个
-   补偿事务恢复旧 Desired State，再重新投影旧状态。Projector 不拥有业务事务。
+4. Command Service 使用共享 `mutate → project` 流程。Installation 提交后 Runtime 投影采用
+   best-effort：设备不可达、源文件缺失或不可安全覆盖的容器侧实体返回 `PENDING` / `DEGRADED`，
+   不补偿已经提交的 Desired State；DB/ACL/Ownership/Offline/路径安全等写前校验仍 fail closed。
+   Projector 不拥有业务事务。
 5. Projection 默认按受影响 Domain 选择 Scope；启动/重新 ACTIVE、Service Draft build 和需要
    全量自愈时使用 `ProjectionScope.everything()`。Teclaw 仍一次 compose/deliver whole Artifact。
 6. activate/deactivate 即使 `changed=false` 仍允许投影，作为显式自愈入口。
 7. 不建设无限期 Runtime observed-state 对账和逐 Bot actual-version 表。Track Latest 与首次
-   Device ACTIVE 失败允许 deadline 有界的 `ac_task_queue` 持久重试；普通命令仍同步投影并补偿。
+   Device ACTIVE 失败允许 deadline 有界的 `ac_task_queue` 持久重试；普通命令同步投影并返回
+   可重试的 `PENDING` 或需人工处理的 `DEGRADED`。
 8. Device ACTIVE 首次完整投影失败时入队唯一
    `BOT_RUNTIME_BOOTSTRAP_RETRY(binding_id)`；执行前必须确认 binding 仍是当前 Draft binding，
    替换/释放或 Published Service binding 均 no-op。
@@ -719,8 +722,9 @@ Center       → 单次批量查询各 skill_id 的最高 version_ordinal PUBLIS
 
 禁止使用 `ac_skill.version/status`、SC latest/current、字符串版本排序或 MATERIALIZING Version。
 Center 缺 `skill_uuid`、PUBLISHED Version、`sc_version_number` 或合法 dependency metadata 时，
-整批 Runtime 解析 fail closed；不能跳过后投影半套运行时。一次 Runtime projection 只能消费
-Reader/Resolver 返回的同一份不可变 assets tuple，避免 Skill mapping 与 MCP dependency 跨版本。
+属于 Runtime 计划解析错误：命令保留已提交 Desired State 并返回 `PENDING`，不能用不完整资产
+投影半套运行时。一次 Runtime projection 只能消费 Reader/Resolver 返回的同一份不可变 assets
+tuple，避免 Skill mapping 与 MCP dependency 跨版本。
 
 Space 发布产生的 `ac_skill_version.publication_attempt_id` 非空；SC Public 懒物化没有
 TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Attempt。Published Service
@@ -1097,8 +1101,9 @@ personalCoding/applicationCoding 使用 AICoding physical paths，纯 Claude Cod
 
 文件型 Engine 的 home/path 编码集中在 Engine Adapter；Backend 只传结构化
 Local/Repo/Center dependency。Teclaw 只接收 Artifact Store/Path。Mapping v3 未广告、真实
-Consumer 未识别 Center Store、OSS/Mount/Device 不可用属于发布门禁或真实 Projection 失败，
-沿用统一 fail-closed/补偿，不转化为产品“不支持”错误。
+Consumer 未识别 Center Store、OSS/Mount 不可用属于发布门禁；Device 不可用属于真实
+Projection 的 `PENDING` / `DEGRADED` 观察结果，不转化为产品“不支持”错误，也不补偿已提交
+Desired State。
 
 ### 16. Principal、幂等、错误
 
@@ -1157,7 +1162,8 @@ Phase 1 是 Phase 2 的控制面基础，但允许 Phase 2 的纯内部模块在
 4. **Phase 2 Producer**：再部署 Backend Publication、SC Public Reference、Track Latest、
    Artifact Producer；协议不建设长期 feature flag、双版本或 Bot Type 静态支持矩阵。
 5. **Phase 2 Enable**：最后发布新增 Gateway OpenAPI 和产品入口。软件协议兼容由发布门禁证明；
-   每次真实 OSS/Device/Projection 仍按执行结果 fail closed/补偿。
+   资产/DDL/权限写前校验 fail closed，已提交能力的 Device Projection 返回 `PENDING` /
+   `DEGRADED` 而不补偿。
 
 Phase 1 回滚可以恢复旧 Adapter/Resolver，但不得丢失已经写入的 Installation；
 回滚版本必须继续理解新表或先停止新写并验证等价投影。Phase 2 一旦生成 Space Skill、
@@ -1190,8 +1196,8 @@ Phase 1 必测：
   active Set 增删成员和三类冲突错误。
 - Repo list/search/tree/sync 以及同步互斥；Legacy market Adapter 等价。
 - MCP Catalog/permission/config 兼容与新 Bot MCP Direct 语义。
-- Runtime 明确失败的方案 A 补偿、进程崩溃窗口、下一次 mutation 和 Bot restart
-  全量自愈。
+- Runtime `PENDING` / `DEGRADED` 不改变 Installation、进程崩溃窗口、下一次 mutation 和
+  Bot restart 的全量自愈。
 - Reader 对普通/Default Skill/MCP membership 与 exclusion 做一次幂等 flush，随后全部消费者只读
   Installation；Engine/Template Policy MCP 仍由统一 Effective MCP Collector 合并。
 - Legacy Local/Repo/Bot-local 不转换，System Default Skill/MCP/CLI 仍然生效。

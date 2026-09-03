@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from engine.community.plugins.skills_pool.layout_activation import (
+    MappingApplyMode,
     MappingPublishResult,
     MappingSourceLayout,
     MappingVerificationResult,
@@ -51,6 +52,7 @@ def publish_hermes_pool_mappings(
     mappings: list[SkillMapping],
     retired_mappings: Sequence[SkillMapping] = (),
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
     home: str | Path = "/home/admin",
 ) -> MappingPublishResult:
     return _publish_pool_mappings(
@@ -59,6 +61,7 @@ def publish_hermes_pool_mappings(
         home=home,
         engine="hermes",
         source_layout=source_layout,
+        apply_mode=apply_mode,
     )
 
 
@@ -67,6 +70,7 @@ def verify_hermes_pool_mappings(
     mappings: list[SkillMapping],
     retired_mappings: Sequence[SkillMapping] = (),
     source_layout: MappingSourceLayout = MappingSourceLayout.POOL,
+    apply_mode: MappingApplyMode = MappingApplyMode.STRICT,
     home: str | Path = "/home/admin",
 ) -> MappingVerificationResult:
     return _verify_skill_mappings(
@@ -75,12 +79,14 @@ def verify_hermes_pool_mappings(
         home=home,
         engine="hermes",
         source_layout=source_layout,
+        apply_mode=apply_mode,
     )
 
 
 __all__ = [
     "LAYOUT_CONTRACT_VERSION",
     "MappingPublishResult",
+    "MappingApplyMode",
     "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",

@@ -11,6 +11,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agentclaw.community.core.devices.services.device_filesystem import (
+    FileTooLargeError as DeviceFileTooLargeError,
+)
+from agentclaw.community.core.resources.service import (
+    DirectoryTooLargeError,
+    ResourceNotFoundError,
+)
+from agentclaw.community.core.services import resource_file_service
 from agentclaw.community.core.services.resource_file_service import (
     ResourceFileService,
     is_readonly,
@@ -612,3 +620,236 @@ def test_resolves_from_di(test_injector):
     assert isinstance(svc, ResourceFileService)
     # same singleton instance both times
     assert test_injector.get(ResourceFileService) is svc
+
+
+# ── iter_directory_files: the recursive walk behind download-dir ────────────
+#
+# The tree is stubbed at the device seam in *logical* space ("workspace/<rel>"),
+# which is also what pins the addressing: the walk must never leak a container
+# path upward. ``None`` from list_dir means "missing", per the DeviceFileSystem
+# protocol.
+
+
+def _tree_fs(tree: dict[str, list[dict] | None], files: dict[str, bytes | None]):
+    """A device_fs stub: ``tree`` maps a logical dir to its listing (None =
+    missing), ``files`` maps a logical file to its bytes (None = vanished)."""
+    device_fs = MagicMock()
+
+    async def _list(logical: str):
+        return tree.get(logical)
+
+    async def _read(logical: str, *, enforce_download_limit: bool = False):
+        return files.get(logical)
+
+    device_fs.list_dir = AsyncMock(side_effect=_list)
+    device_fs.read_file = AsyncMock(side_effect=_read)
+    return device_fs
+
+
+def _walk_tree() -> tuple[dict, dict]:
+    """A small workspace: docs/ nested, a dotfile, a hidden root file, a
+    hidden root dir, and an identity-looking file *inside* docs (only the
+    root level filters it)."""
+    tree = {
+        "workspace": [
+            {"name": "MEMORY.md", "is_dir": False, "size": 5},
+            {"name": ".env", "is_dir": False, "size": 3},
+            {"name": "skills", "is_dir": True},
+            {"name": "docs", "is_dir": True},
+        ],
+        "workspace/skills": [
+            {"name": "x.md", "is_dir": False, "size": 1},
+        ],
+        "workspace/docs": [
+            {"name": "a.txt", "is_dir": False, "size": 2},
+            {"name": "MEMORY.md", "is_dir": False, "size": 4},
+            {"name": "deep", "is_dir": True},
+        ],
+        "workspace/docs/deep": [
+            {"name": ".secret", "is_dir": False, "size": 1},
+            {"name": "b.txt", "is_dir": False, "size": 3},
+        ],
+    }
+    files = {
+        "workspace/MEMORY.md": b"root-m",
+        "workspace/.env": b"env",
+        "workspace/skills/x.md": b"x",
+        "workspace/docs/a.txt": b"aa",
+        "workspace/docs/MEMORY.md": b"mem4",
+        "workspace/docs/deep/.secret": b"s",
+        "workspace/docs/deep/b.txt": b"bbb",
+    }
+    return tree, files
+
+
+async def _collect(svc: ResourceFileService, path: str) -> list[tuple[str, bytes]]:
+    return [item async for item in svc.iter_directory_files(**_COORDS, path=path)]
+
+
+@pytest.mark.asyncio
+async def test_walk_yields_names_relative_to_the_requested_directory():
+    tree, files = _walk_tree()
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    got = await _collect(svc, "docs")
+
+    assert got == [
+        ("MEMORY.md", b"mem4"),
+        ("a.txt", b"aa"),
+        ("deep/b.txt", b"bbb"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_walk_resolves_the_device_context_once_for_the_whole_tree():
+    tree, files = _walk_tree()
+    device_fs = _tree_fs(tree, files)
+    ctx = MagicMock()
+    ctx.provider = "arca"
+    resolver = MagicMock()
+    resolver.resolve_for_bot.return_value = ctx
+    dispatcher = MagicMock()
+    dispatcher.dispatch_addressed.return_value = device_fs
+    svc = ResourceFileService(
+        publish_repo=MagicMock(), bot_repo=MagicMock(),
+        resolver=resolver, device_fs_dispatcher=dispatcher,
+    )
+
+    await _collect(svc, "docs")
+
+    assert resolver.resolve_for_bot.call_count == 1
+    assert dispatcher.dispatch_addressed.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_root_walk_filters_like_the_browser_but_only_at_the_root():
+    tree, files = _walk_tree()
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    got = await _collect(svc, "")
+
+    names = [name for name, _ in got]
+    # Root-level hidden names are filtered: MEMORY.md (basename), .env
+    # (dotfile), skills/ (hidden dir, never descended into)…
+    assert "MEMORY.md" not in names
+    assert ".env" not in names
+    assert not any(n.startswith("skills/") for n in names)
+    # …while the *contents* of a regular directory keep everything non-dot:
+    # docs/MEMORY.md is just a file there.
+    assert "docs/MEMORY.md" in names
+    assert "docs/a.txt" in names
+    assert "docs/deep/b.txt" in names
+    assert "docs/deep/.secret" not in names
+
+
+@pytest.mark.asyncio
+async def test_walk_missing_directory_is_not_found():
+    tree, files = _walk_tree()
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    with pytest.raises(ResourceNotFoundError):
+        await _collect(svc, "nope")
+
+
+@pytest.mark.asyncio
+async def test_walk_empty_directory_yields_nothing_and_is_not_an_error():
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs({"workspace/empty": []}, {}))
+
+    assert await _collect(svc, "empty") == []
+
+
+@pytest.mark.asyncio
+async def test_walk_per_file_cap_is_preflighted_from_the_listing(monkeypatch):
+    """A file whose *listed* size is over the cap is refused before a single
+    byte is read — the cheap refusal is the whole point of the preflight."""
+    monkeypatch.setattr(
+        resource_file_service, "DIRECTORY_DOWNLOAD_MAX_FILE_BYTES", 5
+    )
+    tree = {"workspace": [{"name": "big.bin", "is_dir": False, "size": 10}]}
+    device_fs = _tree_fs(tree, {})
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    with pytest.raises(DirectoryTooLargeError):
+        await _collect(svc, "")
+
+    device_fs.read_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_walk_file_count_cap(monkeypatch):
+    monkeypatch.setattr(resource_file_service, "DIRECTORY_DOWNLOAD_MAX_FILES", 2)
+    tree, files = _walk_tree()
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    with pytest.raises(DirectoryTooLargeError):
+        await _collect(svc, "docs")
+
+
+@pytest.mark.asyncio
+async def test_walk_listed_total_cap(monkeypatch):
+    monkeypatch.setattr(
+        resource_file_service, "DIRECTORY_DOWNLOAD_MAX_TOTAL_BYTES", 5
+    )
+    tree, files = _walk_tree()
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    with pytest.raises(DirectoryTooLargeError):
+        await _collect(svc, "docs")
+
+
+@pytest.mark.asyncio
+async def test_walk_streamed_total_recount_catches_a_lying_listing(monkeypatch):
+    """The listing claimed tiny sizes; the bytes say otherwise."""
+    monkeypatch.setattr(
+        resource_file_service, "DIRECTORY_DOWNLOAD_MAX_TOTAL_BYTES", 3
+    )
+    tree = {"workspace": [{"name": "a.txt", "is_dir": False, "size": 1}]}
+    files = {"workspace/a.txt": b"way-more-than-listed"}
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    with pytest.raises(DirectoryTooLargeError):
+        await _collect(svc, "")
+
+
+@pytest.mark.asyncio
+async def test_walk_device_size_guard_maps_to_the_directory_error():
+    tree = {"workspace": [{"name": "big.bin", "is_dir": False, "size": 1}]}
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=lambda logical: tree.get(logical))
+    device_fs.read_file = AsyncMock(
+        side_effect=DeviceFileTooLargeError("file exceeds 100 MB")
+    )
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    with pytest.raises(DirectoryTooLargeError):
+        await _collect(svc, "")
+
+
+@pytest.mark.asyncio
+async def test_walk_skips_entries_that_vanish_mid_walk():
+    """The race rule: a workspace may change under the walk; gone is skipped."""
+    tree = {
+        "workspace": [
+            {"name": "a.txt", "is_dir": False, "size": 2},
+            {"name": "gone", "is_dir": True},
+        ],
+        "workspace/gone": None,  # listed, then deleted before the descent
+    }
+    files = {"workspace/a.txt": b"aa"}
+    svc, _ = _svc(provider="arca", device_fs=_tree_fs(tree, files))
+
+    assert await _collect(svc, "") == [("a.txt", b"aa")]
+
+
+@pytest.mark.asyncio
+async def test_walk_aborts_on_a_read_error():
+    """…but an *error* aborts: a 200 archive silently missing files is worse
+    than no archive."""
+    tree = {"workspace": [{"name": "a.txt", "is_dir": False, "size": 2}]}
+    device_fs = MagicMock()
+    device_fs.list_dir = AsyncMock(side_effect=lambda logical: tree.get(logical))
+    device_fs.read_file = AsyncMock(side_effect=RuntimeError("device blew up"))
+    svc, _ = _svc(provider="arca", device_fs=device_fs)
+
+    with pytest.raises(RuntimeError):
+        await _collect(svc, "")

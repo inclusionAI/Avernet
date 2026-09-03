@@ -144,7 +144,18 @@ def test_membership_and_activation_are_bot_scoped():
     active = client.post("/openapi/v1/bots/bot-1/skill-sets/2/activate")
 
     assert member.status_code == 200
-    assert member.json()["data"] == {"changed": True}
+    assert member.json()["data"] == {
+        "changed": True,
+        "desired_state": {"changed": True, "status": "COMMITTED"},
+        "runtime_projection": {
+            "status": "SKIPPED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+            "reason": "RUNTIME_RESULT_NOT_AVAILABLE",
+        },
+    }
     assert control.added == {
         "bot_id": "bot-1",
         "owner_id": "actor",
@@ -154,7 +165,18 @@ def test_membership_and_activation_are_bot_scoped():
     }
     removed = client.delete("/openapi/v1/bots/bot-1/skill-sets/2/skills/9")
     assert removed.status_code == 200
-    assert removed.json()["data"] == {"changed": False}
+    assert removed.json()["data"] == {
+        "changed": False,
+        "desired_state": {"changed": False, "status": "UNCHANGED"},
+        "runtime_projection": {
+            "status": "SKIPPED",
+            "components": {},
+            "pending_count": 0,
+            "degraded_count": 0,
+            "issues": [],
+            "reason": "RUNTIME_RESULT_NOT_AVAILABLE",
+        },
+    }
     assert control.removed == {
         "bot_id": "bot-1",
         "owner_id": "actor",

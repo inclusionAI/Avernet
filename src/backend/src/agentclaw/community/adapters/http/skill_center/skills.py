@@ -168,6 +168,20 @@ logger = get_logger()
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
+
+def _legacy_runtime_projection(item: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+    """Keep the BFF wire stable and only surface non-converged diagnostics."""
+
+    projection = item.get("runtime_projection")
+    if not isinstance(projection, dict):
+        return "", None
+    status = projection.get("status")
+    if status == "PENDING":
+        return "能力集状态已保存，运行环境暂未完成同步", projection
+    if status == "DEGRADED":
+        return "能力集状态已保存，但部分 Skill 未完成运行时收敛", projection
+    return "", None
+
 BOT_RUNTIME_UNAVAILABLE_MESSAGE = "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
 _BOT_RUNTIME_UNAVAILABLE_MARKERS = (
     "404 not found",
@@ -1145,10 +1159,14 @@ async def activate_skill_set(
         set_id=request.skill_set_id,
     )
 
+    runtime_message, runtime_projection = _legacy_runtime_projection(item)
+    data = {"activated": [item["id"]] if item.get("changed") else [], "failed": []}
+    if runtime_projection is not None:
+        data["runtime_projection"] = runtime_projection
     return ActivateSkillSetResponse(
         success=True,
-        message="Skill set activated",
-        data={"activated": [item["id"]] if item.get("changed") else [], "failed": []},
+        message=runtime_message or "Skill set activated",
+        data=data,
     )
 
 
@@ -1201,10 +1219,14 @@ async def deactivate_skill_set(
         set_id=request.skill_set_id,
     )
 
+    runtime_message, runtime_projection = _legacy_runtime_projection(item)
+    data = {"deactivated": [item["id"]] if item.get("changed") else [], "failed": []}
+    if runtime_projection is not None:
+        data["runtime_projection"] = runtime_projection
     return DeactivateSkillSetResponse(
         success=True,
-        message="Skill set deactivated",
-        data={"deactivated": [item["id"]] if item.get("changed") else [], "failed": []},
+        message=runtime_message or "Skill set deactivated",
+        data=data,
     )
 
 

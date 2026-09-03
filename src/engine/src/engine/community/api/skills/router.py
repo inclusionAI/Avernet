@@ -53,6 +53,7 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
+    PoolMappingApplyMode,
     PoolMappingSourceLayout,
     PoolSkillMappingIntent,
     SymlinkItem,
@@ -273,6 +274,8 @@ async def verify_runtime_skill_mappings(
         layout_kwargs["retired_mappings"] = [
             _mapping_command(item) for item in body.retired_mappings
         ]
+    if body.apply_mode != PoolMappingApplyMode.STRICT.value:
+        layout_kwargs["apply_mode"] = PoolMappingApplyMode(body.apply_mode)
     try:
         result = await plugin.verify_pool_mappings(
             [_mapping_command(item) for item in body.mappings],
@@ -307,6 +310,8 @@ async def publish_runtime_skill_mappings(
         layout_kwargs["retired_mappings"] = [
             _mapping_command(item) for item in body.retired_mappings
         ]
+    if body.apply_mode != PoolMappingApplyMode.STRICT.value:
+        layout_kwargs["apply_mode"] = PoolMappingApplyMode(body.apply_mode)
     try:
         result = await plugin.publish_pool_mappings(
             [_mapping_command(item) for item in body.mappings],

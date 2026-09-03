@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from agentclaw.community.core.skill_center.errors import (
-    SkillSetRuntimeReconcileError,
-)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     EngineRuntimeProjection,
     ProjectionScope,
     ResolvedCapabilityPlan,
     ResolvedSkillPlan,
+    RuntimeProjectionResult,
+    RuntimeProjectionStatus,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillProjection
 from agentclaw.community.core.skills_pool.models import (
@@ -51,7 +50,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
         *,
         skill_assets: Sequence[RegisteredSkillAsset],
         retired_mappings: Sequence[PoolSkillMapping] = (),
-    ) -> None:
+    ) -> RuntimeProjectionResult:
         """Accept Resolver-complete Local/Repo/Center desired state.
 
         Center is delivered as an additive v4 ``skill-center`` Store/SkillRef;
@@ -79,7 +78,7 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
                 "declares no change: bot_id=%s, engine=%s",
                 plan.bot_id, plan.engine,
             )
-            return
+            return RuntimeProjectionResult.skipped(reason="RUNTIME_SCOPE_UNCHANGED")
 
         # Defence in depth: plan shape is checked again next to the write.
         self.validate_plan(
@@ -132,7 +131,16 @@ class WholeArtifactRuntimeProjection(EngineRuntimeProjection):
             desired_skills=self._desired_skills(plan.projection),
             effective_mcps=effective_mcps,
         ):
-            raise SkillSetRuntimeReconcileError()
+            return RuntimeProjectionResult.pending(
+                code="ARTIFACT_APPLY_FAILED",
+                reason="Bot 运行配置未完成同步",
+            )
+        return RuntimeProjectionResult.converged(
+            components={
+                "skills": RuntimeProjectionStatus.CONVERGED,
+                "mcp": RuntimeProjectionStatus.CONVERGED,
+            }
+        )
 
     @staticmethod
     def _desired_skills(

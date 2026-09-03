@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from agentclaw.community.core.workspace.skill_layout import (
@@ -73,6 +73,62 @@ class SkillMappingSourceLayout(StrEnum):
     LEGACY = "legacy"
 
 
+class MappingApplyMode(StrEnum):
+    """The Engine handling policy for one full Mapping request."""
+
+    STRICT = "STRICT"
+    BEST_EFFORT = "BEST_EFFORT"
+
+
+class MappingProjectionStatus(StrEnum):
+    CONVERGED = "CONVERGED"
+    PENDING = "PENDING"
+    DEGRADED = "DEGRADED"
+
+
+@dataclass(frozen=True, slots=True)
+class MappingItemResult:
+    """Engine evidence for one logical mapping target.
+
+    Paths remain infrastructure evidence at this seam.  The Runtime Projector
+    translates them to user-safe Skill details before any HTTP adapter sees
+    them.
+    """
+
+    target: str
+    source: str | None
+    status: MappingProjectionStatus
+    code: str | None = None
+    retryable: bool = False
+    action: str = "APPLY"
+
+
+@dataclass(frozen=True, slots=True)
+class MappingPublishResult:
+    published: bool
+    status: MappingProjectionStatus
+    items: tuple[MappingItemResult, ...] = ()
+    evidence: dict[str, object] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        """Keep existing strict Pool callers source-compatible."""
+
+        return self.published
+
+
+@dataclass(frozen=True, slots=True)
+class MappingVerificationResult:
+    valid: bool
+    status: MappingProjectionStatus
+    items: tuple[MappingItemResult, ...] = ()
+    evidence: dict[str, object] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        """Keep existing strict Pool callers source-compatible."""
+
+        return self.valid
+
+
 class PoolCutoverStatus(StrEnum):
     """Backend 与 Engine 激活端点之间的稳定状态契约。"""
 
@@ -112,6 +168,11 @@ __all__ = [
     "PoolPaths",
     "PoolCutoverResult",
     "PoolCutoverStatus",
+    "MappingApplyMode",
+    "MappingItemResult",
+    "MappingProjectionStatus",
+    "MappingPublishResult",
+    "MappingVerificationResult",
     "PoolSkillMapping",
     "RegisteredSkillAsset",
     "SkillMappingSourceLayout",

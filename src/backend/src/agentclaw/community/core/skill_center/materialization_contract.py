@@ -19,6 +19,10 @@ from agentclaw.community.plugin_api.skill_center_gateway import (
 class SkillVersionMaterializationError(RuntimeError):
     """An exact Version failed a Ready Gate and remains non-consumable."""
 
+    def __init__(self, message: str, *, stage: str | None = None) -> None:
+        super().__init__(message)
+        self.stage = stage
+
 
 @dataclass(frozen=True, slots=True)
 class SkillVersionMaterializationRequest:

@@ -448,7 +448,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: rest (154 → 155); ``POST …/bots/with-manifest`` names no bot because it is
 #: the request that allocates one, so it joins ``none`` (101 → 102) beside
 #: ``POST /openapi/v1/bots`` itself.
-_BOT_ID_PLACEMENT = {"path": 155, "query": 1, "none": 102}
+#: Directory download adds one more bot-path-addressed resource operation.
+_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 102}
 
 
 def _schema() -> dict:
@@ -594,7 +595,8 @@ def test_the_pinned_number_of_operations_take_it():
     # and its status poll: 226 → 228. Both name the end user for the same
     # reason the ordinary create does: they spend that user's quota and read
     # that user's rows, and neither is admissible to an application caller.
-    assert len(taking) == 228
+    # Directory download adds one more user-scoped resource operation.
+    assert len(taking) == 229
 
 
 def test_the_exempt_operations_take_none():

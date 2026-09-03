@@ -45,6 +45,7 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeRequest,
     PoolLayoutProbeResult,
     PoolLayoutRollbackRequest,
+    PoolMappingApplyMode,
     PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
@@ -242,6 +243,7 @@ class SkillsService(Protocol):
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         auth: AuthContext | None = None,
     ) -> PoolMappingPublishResult:
         """Publish a complete mapping set.
@@ -262,6 +264,7 @@ class SkillsService(Protocol):
         retired_mappings: Sequence[PoolSkillMappingIntent | SymlinkItem] = (),
         source_layout: PoolMappingSourceLayout = PoolMappingSourceLayout.POOL,
         mapping_contract_version: str | None = None,
+        apply_mode: PoolMappingApplyMode = PoolMappingApplyMode.STRICT,
         auth: AuthContext | None = None,
     ) -> PoolMappingVerificationResult:
         """Verify mappings using the same versioned contract as publication.
