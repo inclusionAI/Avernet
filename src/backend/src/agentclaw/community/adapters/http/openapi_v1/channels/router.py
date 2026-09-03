@@ -57,6 +57,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.core.channel.errors import (
     ChannelEditLockedError,
+    ChannelModeViolationError,
     ChannelNotFoundError,
     ChannelSyncError,
 )
@@ -72,6 +73,7 @@ from .schemas import (
     ChannelType,
     ChannelUpdate,
     DingTalkChannelConfig,
+    validate_mode_matrix,
 )
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
@@ -102,7 +104,14 @@ CHANNEL_WRITE_RESPONSES = {
             "A Bot with collaborators requires the caller to hold its edit lock."
         ),
         **error_example(423, "Edit lock required"),
-    }
+    },
+    409: {
+        "model": ErrorEnvelope,
+        "description": (
+            "BCS rejected the binding because it conflicts with an existing binding."
+        ),
+        **error_example(409, "Channel binding conflict"),
+    },
 }
 
 
@@ -130,6 +139,8 @@ def _safe_config(raw: dict[str, Any]) -> DingTalkChannelConfig:
         robot_code=str(raw.get("robot_code") or ""),
         aix_enable=bool(raw.get("aix_enable", True)),
         include_sender_name=bool(raw.get("include_sender_name", True)),
+        group_chat_scope=raw.get("group_chat_scope"),
+        outbound_visibility=raw.get("outbound_visibility"),
     )
 
 
@@ -137,6 +148,7 @@ def _project(record: ChannelRecord) -> Channel:
     return Channel(
         id=record.id,
         type=cast(ChannelType, record.type),
+        binding_mode=record.config.get("binding_mode", "plugin"),
         description=record.description,
         bot_id=record.bind_bot_id,
         owner_id=record.identity_id,
@@ -299,6 +311,13 @@ async def create_channel(
         user_id=user_id,
     )
     config = body.config.model_dump()
+    for bcn_key in ("group_chat_scope", "outbound_visibility"):
+        if config.get(bcn_key) is None:
+            config.pop(bcn_key, None)
+    config["binding_mode"] = body.binding_mode
+    if body.binding_mode == "bcn_gateway":
+        config.setdefault("group_chat_scope", "per_sender")
+        config.setdefault("outbound_visibility", "full_transcript")
     config["aix_preview_url"] = aix_config.preview_url
     channel_id = service.create_channel(
         type=body.type,
@@ -391,12 +410,26 @@ async def update_channel(
         bot_id=bot_id,
         owner_id=resolved_owner,
     )
+    stored_mode = record.config.get("binding_mode", "plugin")
+    if body.binding_mode is not None and body.binding_mode != stored_mode:
+        raise ChannelModeViolationError(
+            "binding_mode is immutable; delete and recreate the Channel to switch"
+        )
     config = dict(record.config)
+    patch: dict[str, Any] = {}
     if body.config is not None:
         patch = body.config.model_dump(exclude_unset=True)
         if patch.get("client_secret") is None:
             patch.pop("client_secret", None)
         config.update(patch)
+    try:
+        validate_mode_matrix(
+            stored_mode,
+            robot_code=config.get("robot_code"),
+            fields_set=set(patch),
+        )
+    except ValueError as exc:
+        raise ChannelModeViolationError(str(exc)) from exc
     config.setdefault("aix_preview_url", aix_config.preview_url)
     description = (
         body.description
