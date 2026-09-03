@@ -163,21 +163,47 @@ class CliToolStore:
     and verified the bytes (spec D-4).
     """
 
-    def put(self, ctx: CliToolContext, *, name: str, data: bytes) -> str:
-        """Write the bytes; return the OSS key recorded on the row."""
+    def put(self, scope, *, name: str, data: bytes) -> StoredCliTool:
+        """Write the bytes to the live prefix; return the key and ref path."""
 
-    def copy_to_stage(self, ctx, *, name: str, stage: str) -> str:
-        """Server-side copy to a stage-scoped prefix. What promotion calls."""
+    def copy_to_stage(
+        self, scope, *, name: str, source_key: str, publish_id: int, stage: str
+    ) -> StoredCliTool:
+        """Copy to a stage-scoped prefix. What promotion calls."""
 
-    def delete(self, ctx: CliToolContext, *, name: str) -> None: ...
+    def delete(self, *, key: str) -> None: ...
 ```
+
+Two key layouts, mirroring W8's managed-files store:
+
+    live     {base}/{entity_type}_{entity_id}/{bot_id}_cli/{name}
+    staged   {base}/{entity_type}_{entity_id}/{bot_id}_{publish_id}_{stage}/teclaw/cli/{name}
+
+The staged one is the layout `TeclawFilePromotion` already builds, with `cli`
+in the namespace slot beside `workspace` and `identity` — an *object key*
+segment, not a container path: the engine resolves a `cliToolRef` and decides
+placement itself.
+
+`delete` and `copy_to_stage` take the **recorded** `oss_key` rather than
+recomputing one, because the store base can change between deploys and a row
+written under an earlier base must still be removable and promotable.
+
+**`copy_to_stage` needs a copy the plugin surface did not have.** No
+`ObjectStoragePlugin` method copies an object, and adding one would break every
+corp overlay that implements only the long-standing surface. So
+`ObjectCopyCapability` joins `ImmutableObjectStorageCapability` as an *optional*
+structural capability (`plugin_api/object_storage.py`), implemented by both
+community impls and the local mock. Unlike the immutable one it does **not**
+fail closed: a store without it is read-through-copied instead, because an
+overlay that has not shipped `copy_object` must still be able to promote a bot.
+It is an efficiency capability — a tool can be 200 MiB and a promotion copies
+every one of a bot's.
 
 ## The delivery ports
 
 ```python
 # core/bot_config_manifest/cli_tools/delivery_port.py (new)
-@runtime_checkable
-class CliToolDeliveryPort(Protocol):
+class CliToolDeliveryPort(ABC):
     """How a family gets a tool into a bot. Name-addressed; no path crosses.
 
     There is deliberately **no `get`**: the platform holds the bytes, so nothing
@@ -185,14 +211,26 @@ class CliToolDeliveryPort(Protocol):
     drift read only.
     """
 
+    @abstractmethod
     async def install(self, ctx: CliToolContext, *, name: str, data: bytes) -> None: ...
+    @abstractmethod
     async def delete(self, ctx: CliToolContext, *, name: str) -> None: ...
+    @abstractmethod
     async def list(self, ctx: CliToolContext) -> list[str]: ...
+
     async def replace_all(
         self, ctx: CliToolContext, *, install: Sequence[tuple[str, bytes]],
         remove: Sequence[str],
-    ) -> None: ...
+    ) -> None:
+        """Removals first, then installs: a name in both lists is a
+        replacement, and the other order would delete what was just placed."""
 ```
+
+A base class rather than a bare `Protocol`, for the two reasons the repository
+protocols are (Rule 8): a family that forgets a method fails at construction
+rather than mid-apply, and `replace_all` has one implementation instead of one
+per family. `CliToolContext` — bot, owner, actor, entity coordinates, env,
+engine — lives in `cli_tools/context.py`.
 
 ### ARCA delivery — one call to the engine's install endpoint
 
@@ -217,6 +255,40 @@ class ArcaCliToolPort(CliToolDeliveryPort):
         engine could not install is never recorded."""
 ```
 
+**The channel is `DeviceAdapterTransport`**, the one engine channel `core` can
+reach — the same one the runtime-layout probe, the cron relay and the
+session-resources service use. Its `invoke` takes a JSON body, so the bytes ride
+base64-encoded: about a third again in memory over an already-buffered binary,
+since the fetch pipeline hands the service `bytes` rather than a stream.
+
+Both alternatives were worse. The multipart channel the per-file writes use
+(`BaasTransport.post_multipart`) is reached by constructing a device
+*filesystem*, and that path's ARCA branch is corp-only —
+`DefaultDeviceFileSystemResolver._resolve_arca` raises, and the corp resolver
+overrides it with a module the community distribution does not ship — so a
+multipart install could not be built, bound or tested from this repository.
+Handing the engine a presigned object-store URL assumes a container egress path
+to the bucket that nothing here demonstrates. The adapter transport has a
+community implementation and an in-memory one, so this port runs and is
+exercised outside the corp profile. If the engine later grows a pull-from-URL
+install it is an additive field on the same endpoint, and only `arca_port.py`
+changes.
+
+The port is provider-agnostic: engine family is not device provider (an
+ARCA-family engine may be bound through `baas` or `arca`), and nothing in it
+needs to know which.
+
+The three endpoints, name-addressed: `POST /api/cli/install`,
+`POST /api/cli/delete`, `GET /api/cli/list`. A `DELETE` carrying a body is
+refused or silently stripped by enough proxies not to be worth the elegance.
+The port checks the envelope as well as the status — an engine answering 200
+with `{"success": false}` has refused, and reading that as success is exactly
+how a tool the bot does not have gets recorded as installed. It also depends on
+a narrow `BotDeviceContextPort` naming `resolve_for_bot` rather than importing
+`DeviceContextResolver`, which pulls `core.devices.services.__init__` and closes
+an import cycle back into this package — the move `apply/resource_port.py`
+already records.
+
 Rev 6 had the platform doing a device write followed by a
 `chmod` through `execute_baas_shell_command`. Withdrawn in review: once the
 engine has a dedicated `install`, the executable bit is part of what install
@@ -237,6 +309,14 @@ class TeclawCliToolPort(CliToolDeliveryPort):
     strategy's existing closing redeliver (W8) is what pushes it.
     """
 ```
+
+`list` **raises** `CliToolDriftUnobservableError` here rather than answering.
+Drift means "the table and the bot disagree", and on teclaw the artifact is
+composed *from* the table, so there is no independent observation to make:
+returning the table back would be a tautology dressed as an observation, and
+returning `[]` would read as "this bot has no tools" — the more dangerous of
+the two, since a removal set is computed from exactly that. `CliToolService.drift`
+catches it and reports the family as unobservable.
 
 ```diff
 # core/service_bot/services/deploy/teclaw_file_promotion.py

@@ -37,6 +37,14 @@ filesystem implementation stages conditional creates under a reserved internal
 root on the same filesystem, outside every logical object-key tree; staging
 residue is neither addressable nor returned by `list_objects`.
 
+`ObjectCopyCapability` is the second optional capability beside
+`ObjectStoragePlugin`, for consumers that duplicate an object within the store
+(a CLI tool's bytes copied to a publish stage's prefix, W9). It is an
+efficiency capability, not a correctness one: a consumer that finds it absent
+reads the source and writes it back, so composition does **not** fail closed.
+It exists because the objects it copies can be hundreds of megabytes, and a
+copy performed by the store moves none of those bytes through the backend.
+
 The Interface belongs here because Avernet-owned consumers include Space Team
 binding today and the governed Publication/Reference flows in the Phase 2
 contract. This does **not** make Skill Center a community implementation:

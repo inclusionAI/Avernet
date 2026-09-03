@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 from agentclaw.community.plugin_api.object_storage import (
+    ObjectCopyCapability,
     ObjectCreateResult,
     ObjectReadResult,
     ObjectReadStatus,
@@ -46,7 +47,7 @@ def _default_sign_url(key: str, expires: int = 7200) -> str:
     rationale="MagicMock-backed responses",
 )
 class MockObjectStoragePlugin(
-    MockSeam, ObjectStoragePlugin, ImmutableObjectStorageCapability
+    MockSeam, ObjectStoragePlugin, ImmutableObjectStorageCapability, ObjectCopyCapability
 ):
     """Reconfigurable mock satisfying :class:`ObjectStoragePlugin`."""
 
@@ -60,6 +61,7 @@ class MockObjectStoragePlugin(
         self.read_object: MagicMock = MagicMock(
             return_value=ObjectReadResult(ObjectReadStatus.NOT_FOUND)
         )
+        self.copy_object: MagicMock = MagicMock(return_value=True)
         self.delete_object: MagicMock = MagicMock(return_value=True)
         self.list_objects: MagicMock = MagicMock(return_value=[])
         self.sign_url: MagicMock = MagicMock(side_effect=_default_sign_url)
@@ -94,6 +96,10 @@ class MockObjectStoragePlugin(
         self.read_object.reset_mock()
         self.read_object.return_value = ObjectReadResult(ObjectReadStatus.NOT_FOUND)
         self.read_object.side_effect = None
+
+        self.copy_object.reset_mock()
+        self.copy_object.return_value = True
+        self.copy_object.side_effect = None
 
         self.delete_object.reset_mock()
         self.delete_object.return_value = True

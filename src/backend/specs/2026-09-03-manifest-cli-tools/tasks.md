@@ -18,38 +18,38 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
   - [x] The repository covers: upsert by `(bot_id, name)`, delete by name, list by bot, delete-all by bot.
 - **Depends on:** —
 
-## Task 2: Build the OSS tool store
+## Task 2: Build the OSS tool store  `[x]`
 - **Goal:** Keep the platform's own copy of every tool's bytes.
-- **Files:** `core/bot_config_manifest/cli_tools/store.py` (new)
+- **Files:** `core/bot_config_manifest/cli_tools/store.py` (new), `plugin_api/object_storage.py`, `plugins/{community/object_storage,local/oss_storage}.py`
 - **Done when:**
-  - [ ] `put` writes the bytes under a per-bot key and returns the key recorded on the row.
-  - [ ] `copy_to_stage` performs a **server-side copy** to a stage-scoped prefix, the layout `TeclawFilePromotion` already builds.
-  - [ ] `delete` removes an object, and is called whenever a row is removed.
-  - [ ] The module docstring states why the copy exists: a teclaw artifact composed for a live update or a manifest apply has to reference the tool now, and gathering from the engine then would be circular.
+  - [x] `put` writes the bytes under a per-bot key and returns the key recorded on the row.
+  - [x] `copy_to_stage` performs a **server-side copy** to a stage-scoped prefix, the layout `TeclawFilePromotion` already builds — through the new optional `ObjectCopyCapability`, read-through where a store lacks it, since an overlay that has not shipped `copy_object` must still promote a bot.
+  - [x] `delete` removes an object, and is called whenever a row is removed. It and `copy_to_stage` address the **recorded** `oss_key`, so a row written under an earlier store base is still removable and promotable.
+  - [x] The module docstring states why the copy exists: a teclaw artifact composed for a live update or a manifest apply has to reference the tool now, and gathering from the engine then would be circular.
 
 - **Depends on:** —
 
-## Task 3: Define the delivery port and build the ARCA implementation
+## Task 3: Define the delivery port and build the ARCA implementation  `[x]`
 - **Goal:** A name-addressed delivery protocol, and the ARCA side of it.
-- **Files:** `core/bot_config_manifest/cli_tools/delivery_port.py` (new), `.../arca_port.py` (new)
+- **Files:** `core/bot_config_manifest/cli_tools/{context,delivery_port,arca_port}.py` (new)
 - **Done when:**
-  - [ ] `CliToolDeliveryPort` declares `install` / `delete` / `list` / `replace_all`, and **every signature takes a name, never a path** — a test asserts it.
-  - [ ] There is **no `get`** — the platform holds the bytes, so nothing reads them back out of a container; a test asserts its absence.
-  - [ ] `replace_all` has a default implementation that loops.
-  - [ ] `ArcaCliToolPort.install` is **one call to the engine's install endpoint**, which owns placement, the executable bit and exposure to the agent.
-  - [ ] A non-2xx **raises** with the engine's error, so a tool the engine could not install is never recorded.
-  - [ ] **The platform issues no `chmod` and runs no shell command** — a test asserts the port invokes no shell channel.
-  - [ ] The tools directory appears nowhere in platform code; it is the engine's (proposed `/home/admin/.openclaw/cli`).
+  - [x] `CliToolDeliveryPort` declares `install` / `delete` / `list` / `replace_all`, and **every signature takes a name, never a path** — a test asserts it.
+  - [x] There is **no `get`** — the platform holds the bytes, so nothing reads them back out of a container; a test asserts its absence.
+  - [x] `replace_all` has a default implementation that loops — removals first, so a name in both lists is a replacement rather than a deletion of what was just placed.
+  - [x] `ArcaCliToolPort.install` is **one call to the engine's install endpoint**, which owns placement, the executable bit and exposure to the agent.
+  - [x] A non-2xx **raises** with the engine's error, so a tool the engine could not install is never recorded — and so does a 200 whose envelope reports failure.
+  - [x] **The platform issues no `chmod` and runs no shell command** — a test asserts the port's *code* (comments and strings stripped) invokes no shell channel.
+  - [x] The tools directory appears nowhere in platform code; it is the engine's, recorded only in `engine-requirements.zh-CN.md`.
 - **Depends on:** —
 
-## Task 4: Build the teclaw delivery port
+## Task 4: Build the teclaw delivery port  `[x]`
 - **Goal:** The artifact is the delivery; no engine upload call.
 - **Files:** `core/bot_config_manifest/cli_tools/teclaw_port.py` (new)
 - **Done when:**
-  - [ ] `install` / `delete` do not call the engine: the row-and-store write stands, and the next compose carries the new set, the way `mcp` is delivered.
-  - [ ] A test asserts **no engine upload call is made** on teclaw.
-  - [ ] `list` remains available for the drift read.
-  - [ ] Nothing in the module composes or parses a container path.
+  - [x] `install` / `delete` do not call the engine: the row-and-store write stands, and the next compose carries the new set, the way `mcp` is delivered.
+  - [x] A test asserts **no engine upload call is made** on teclaw — the port takes no collaborator at all.
+  - [x] `list` is present and **refuses**, with `CliToolDriftUnobservableError`: the artifact is composed from the table, so returning the table back would be a tautology and returning `[]` would read as "no tools" — which is what a removal set is computed from.
+  - [x] Nothing in the module composes or parses a container path.
 - **Depends on:** Task 3
 
 ## Task 5: Build `CliToolService`

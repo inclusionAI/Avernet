@@ -171,6 +171,29 @@ def test_fs_delete_is_idempotent(tmp_path):
     assert "d.txt" not in store.list_objects("")
 
 
+def test_fs_copy_object_duplicates_within_the_root(tmp_path):
+    store = _fs(tmp_path)
+    store.put_object("a/live/mycli", b"binary")
+    assert store.copy_object("a/live/mycli", "a/stage/mycli") is True
+    assert store.get_object("a/stage/mycli") == b"binary"
+    # The source survives — a copy, not a move.
+    assert store.get_object("a/live/mycli") == b"binary"
+
+
+def test_fs_copy_object_missing_source_is_a_failure_not_an_empty_object(tmp_path):
+    store = _fs(tmp_path)
+    assert store.copy_object("absent", "dest") is False
+    assert store.get_object("dest") is None
+
+
+def test_fs_copy_object_rejects_a_key_escaping_the_root(tmp_path):
+    store = _fs(tmp_path)
+    store.put_object("src.bin", b"x")
+    assert store.copy_object("src.bin", "../escape.bin") is False
+    assert store.copy_object("../escape.bin", "dest.bin") is False
+    assert not (tmp_path / "escape.bin").exists()
+
+
 def test_fs_ensure_directory(tmp_path):
     store = _fs(tmp_path)
     assert store.ensure_directory("some/dir") is True
@@ -287,6 +310,19 @@ def test_s3_put_list_delete(s3_store):
     assert sorted(s3_store.list_objects("")) == ["k1", "k2"]
     assert s3_store.delete_object("k1") is True
     assert s3_store.list_objects("") == ["k2"]
+
+
+def test_s3_copy_object_duplicates_within_the_bucket(s3_store):
+    s3_store.put_object("live/mycli", b"binary")
+    assert s3_store.copy_object("live/mycli", "stage/mycli") is True
+    assert s3_store.get_object("stage/mycli") == b"binary"
+    assert s3_store.get_object("live/mycli") == b"binary"
+
+
+def test_s3_copy_object_missing_source_swallows_to_false(s3_store):
+    # A swallowed NoSuchKey ClientError → False, not a raise.
+    assert s3_store.copy_object("absent", "dest") is False
+    assert s3_store.get_object("dest") is None
 
 
 def test_s3_delete_absent_is_success(s3_store):
