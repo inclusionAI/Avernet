@@ -7,20 +7,47 @@
 #   docker build -f docker/evolvetrace.Dockerfile -t evolvetrace:local .
 
 # --- Build stage: install deps, build Vite frontend, compile TS server ---
-FROM node:20-bookworm AS builder
+FROM node:22-bookworm AS builder
+
+# Install build tools for native modules (e.g. better-sqlite3).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3 \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Use python3 for node-gyp.
+ENV npm_config_python=/usr/bin/python3
+
+# Allow optional npm registry mirror (e.g. China CI builds).
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+# Allow optional Node headers mirror for node-gyp native builds.
+ARG NODEJS_DIST_URL=https://nodejs.org/dist
+ENV npm_config_disturl=${NODEJS_DIST_URL}
 
 WORKDIR /build
 
 # Copy package metadata first for layer caching.
 COPY src/evolverun/evolvetrace/package.json src/evolverun/evolvetrace/package-lock.json ./
-RUN npm ci
+RUN npm config set registry "${npm_config_registry}" \
+    && npm config set legacy-peer-deps true \
+    && npm ci --no-audit --no-fund
 
 # Copy source and build both frontend and server.
 COPY src/evolverun/evolvetrace/ ./
-RUN npm run build && npm run build:server
+RUN npm run build && npm run build:server \
+    && npm prune --production
 
 # --- Runtime stage ---
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
+
+# Allow optional npm registry mirror (must match builder stage).
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
+ENV npm_config_registry=${NPM_CONFIG_REGISTRY}
+# Allow optional Node headers mirror for node-gyp native builds.
+ARG NODEJS_DIST_URL=https://nodejs.org/dist
+ENV npm_config_disturl=${NODEJS_DIST_URL}
 
 ENV NODE_ENV=production \
     EVOLVETRACE_ENV=prod \
@@ -46,8 +73,8 @@ COPY --from=builder --chown=appuser:appuser /build/scripts ./scripts
 COPY --from=builder --chown=appuser:appuser /build/package.json ./package.json
 COPY --from=builder --chown=appuser:appuser /build/package-lock.json ./package-lock.json
 
-# Install production dependencies only (mysql2 etc.).
-RUN npm ci --omit=dev && rm -rf ~/.npm
+# Copy production node_modules from builder (avoids re-install and native rebuild).
+COPY --from=builder --chown=appuser:appuser /build/node_modules ./node_modules
 
 # The service runs as appuser (non-root). Root stays available for debugging —
 # it is merely password-locked, and container exec needs no password:
