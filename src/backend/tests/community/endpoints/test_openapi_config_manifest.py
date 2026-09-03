@@ -288,10 +288,16 @@ def put_config_manifest_ok():
         query_params=_QUERY,
         headers=_HEADERS,
         json_body={
+            # Two reasons at once, from two different categories. W9
+            # materialised ``cli_tools``, so the unsupported-category half moved
+            # to ``engine_config`` — the last construct the surface can express
+            # and nothing can apply.
             "document": (
                 "schema_version: 1\n"
                 "manifest:\n"
-                "  cli_tools: []\n"
+                "  engine_config:\n"
+                "    config:\n"
+                "      model: m\n"
                 "  identity:\n"
                 "    - type: MEMORY.md\n"
                 "      content: \"hi\"\n"
@@ -307,7 +313,7 @@ def put_config_manifest_ok():
             "data": {
                 "violations": [
                     {
-                        "location": "manifest.cli_tools",
+                        "location": "manifest.engine_config",
                         "code": "unsupported_category",
                     },
                     {
