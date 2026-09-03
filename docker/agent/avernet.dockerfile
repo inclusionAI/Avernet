@@ -243,6 +243,15 @@ COPY docker/agent/openclaw.json /opt/openclaw.json.template
 # with a different provider scenario mounts its own file at the final path.
 COPY docker/agent/claude-settings.json /opt/claude-settings.json.template
 
+# HEARTBEAT.md template — staged in /opt like the templates above, but with
+# opposite runtime semantics. openclaw appends its own tasks to
+# workspace/HEARTBEAT.md while running, and /home/admin is NAS-mounted, so
+# the runtime copy persists across pod restarts. start_openclaw.sh copies
+# this template over it on EVERY startup (template-wins, unlike the
+# mount-wins claude-settings.json above), so each run starts from the
+# pristine empty heartbeat shipped in the image.
+COPY docker/agent/HEARTBEAT.md /opt/config/HEARTBEAT.md
+
 # Shared utility functions (logging, helpers).
 COPY docker/agent/util.sh /usr/local/bin/util.sh
 

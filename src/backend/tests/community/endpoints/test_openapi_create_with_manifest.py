@@ -168,10 +168,37 @@ def invalid_manifest_is_422_and_costs_no_passport_application():
     and no authorization is applied for — the stand-in raises if it is."""
 
 
+#: A document teclaw can carry: identity, not script (``unsupported_script``).
+_TECLAW_DOCUMENT = (
+    "schema_version: 1\nmanifest:\n  identity:\n"
+    "    - type: RULES.md\n      content: '# be kind'\n"
+)
+
+
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/with-manifest",
-    scenario="teclaw_is_refused",
+    scenario="teclaw_is_accepted",
+    input=CaseInput(
+        json_body=_body(_TECLAW_DOCUMENT, engine="teclaw", cluster="ANDC"),
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=lambda world: (_seed_verifier(world), _stand_in_for_provisioning(world)),
+    expect=ExpectSuccess(status=202, json_contains={"code": 202000}),
+)
+def teclaw_creation_is_accepted_at_submission():
+    """W8 (#1476): every engine family creates here.
+
+    The refusal that named W8 is gone: a teclaw bot is created from its
+    manifest like any other, and which order the creation runs in is the
+    delivery strategy's — not the endpoint's — to decide."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/with-manifest",
+    scenario="script_on_teclaw_is_still_refused",
     input=CaseInput(
         json_body=_body(engine="teclaw", cluster="ANDC"),
         query_params=_QUERY,
@@ -180,13 +207,9 @@ def invalid_manifest_is_422_and_costs_no_passport_application():
     seed=_seed_refusing_passport,
     expect=ExpectError(status=422),
 )
-def teclaw_creation_is_refused_at_submission():
-    """ARCA only, and the refusal names W8 (#1476).
-
-    Not a missing materialiser: a teclaw bot is configured by the artifact
-    composed when its container is provisioned, which is a different mechanism
-    from this endpoint's pre/post-container delivery. A bot created here would
-    get semantics that change under it when W8 lands."""
+def script_on_teclaw_is_the_validators_refusal():
+    """What a family cannot deliver is refused per construct, by the validator,
+    before Passport — the document above declares a startup script."""
 
 
 # ── the poll ───────────────────────────────────────────────────────────────
@@ -769,6 +792,17 @@ def test_the_old_two_call_path_still_works_unchanged(client, world):
         json={"document": _FLOW_DOCUMENT},
     )
     assert stored.status_code in (200, 201), stored.text
+    # W8 (§2.6): the PUT itself started an apply of what it stored. It runs on
+    # the same queue and reports under its own trigger; the explicit apply
+    # below still works exactly as it did once that one has run.
+    assert stored.json()["data"]["apply"]["result"] == "RUNNING"
+    _Worker(world).turn()
+    put_report = client.get(
+        f"/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
+        params=_QUERY,
+        headers=_HEADERS,
+    ).json()["data"]
+    assert put_report["trigger"] == "put" and put_report["result"] == "SUCCEEDED", put_report
 
     accepted = client.post(
         f"/openapi/v1/bots/{bot_id}/config-manifest/apply",
@@ -827,3 +861,142 @@ def submitting_a_creation_answers_202_with_an_id():
     """Submission never waits and never creates: it validates the manifest,
     stores it against the allocated id, applies for the authorization and stops.
     The bot is created later, by the job, once the user has authorized."""
+
+
+# ── teclaw, platform-managed: the record, one phase, then the container (W8) ──
+
+
+def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
+    """Deferred creation and provisioning stood in, the strategy switched on.
+
+    ``create_bot(provision=False)`` writes the record with no binding, and
+    ``provision_bot`` binds it and reports the container up. The apply service
+    itself stays real, with its strategy factory rebound so teclaw runs the
+    platform-managed sequence over the store-backed ports the DI graph already
+    binds — the mock object store and the in-memory index.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+        DeliveryStrategyFactory,
+        TeclawPlatformBindings,
+    )
+    from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
+        BotConfigManifestApplyService,
+    )
+
+    order: list[str] = []
+    bot_repo = world.get(BotRepository)
+
+    def create_bot(_self, **kwargs):
+        existing = bot_repo.get_by_id_and_entity(
+            kwargs["bot_id"], kwargs.get("entity_id") or kwargs["user_id"]
+        )
+        if existing is not None:
+            return existing
+        order.append("record" if kwargs.get("provision") is False else "create")
+        return bot_repo.insert(
+            {
+                "bot_id": kwargs["bot_id"],
+                "bot_name": kwargs.get("bot_name") or kwargs["bot_id"],
+                "owner_id": kwargs["user_id"],
+                "owner_name": kwargs["user_id"],
+                "entity_id": kwargs.get("entity_id") or kwargs["user_id"],
+                "entity_type": kwargs.get("entity_type") or "staff",
+                "creator_id": kwargs["user_id"],
+                "bot_type": kwargs.get("bot_type") or "personal",
+                "status": "PENDING",
+                "binding_id": None,
+                "active_engine": kwargs.get("engine_type") or "teclaw",
+            }
+        )
+
+    def provision_bot(_self, bot_id, user_id, nick_name, **_kw):
+        order.append("provision")
+        bot_repo.update_by_owner(bot_id, user_id, {"binding_id": 9, "device_id": "BOT-9", "status": "ACTIVE"})
+        return bot_repo.get_by_id_and_owner(bot_id, user_id)
+
+    bind_overrides(
+        world,
+        BotServiceProtocol,
+        {"create_bot": create_bot, "provision_bot": provision_bot},
+        also_bind=(BotService,),
+    )
+
+    applies = bind_overrides(
+        world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
+    )
+    # The managed-files store keeps no index: the object store's listing is
+    # the record, so the mock plugin has to remember what was put into it.
+    from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+
+    objects: dict[str, bytes] = {}
+    oss = world.get(ObjectStoragePlugin)
+    oss.put_object.side_effect = lambda key, content: (
+        objects.__setitem__(key, content if isinstance(content, bytes) else content.encode()) or True
+    )
+    oss.get_object.side_effect = objects.get
+    oss.delete_object.side_effect = lambda key: objects.pop(key, None) is not None or True
+    oss.list_objects.side_effect = lambda prefix, max_keys=1000: sorted(
+        k for k in objects if k.startswith(prefix)
+    )[:max_keys]
+    bindings = world.get(TeclawPlatformBindings)
+    applies._strategies = DeliveryStrategyFactory(
+        is_teclaw=lambda engine: engine == "teclaw",
+        teclaw_platform_managed=True,
+        arca_ports=applies._arca_ports,
+        teclaw_platform_ports=bindings.platform_ports,
+        redeliver=bindings.redeliver,
+    )
+    return order
+
+
+def test_a_teclaw_creation_walks_record_phase_container_ready(client, world):
+    """`AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`, with
+    the report from the single phase, and the phase's files in the platform's
+    store before the container was provisioned."""
+    from agentclaw.community.core.bot_config_manifest.managed_files import (
+        CATEGORY_IDENTITY,
+        ManagedFileScope,
+        ManagedFilesStore,
+    )
+
+    _seed_verifier(world)
+    order = _stand_in_for_teclaw_platform_managed(world)
+    worker = _Worker(world)
+
+    submitted = client.post(
+        "/openapi/v1/bots/with-manifest",
+        params=_QUERY,
+        headers=_HEADERS,
+        json=_body(_TECLAW_DOCUMENT, engine="teclaw", cluster="ANDC"),
+    )
+    assert submitted.status_code == 202, submitted.text
+    bot_id = submitted.json()["data"]["bot_id"]
+    assert _poll(client, bot_id).json()["data"]["state"] == "AWAITING_AUTHORIZATION"
+
+    states: list[str] = []
+    seen_at_provision: dict[str, list[str]] = {}
+    store = world.get(ManagedFilesStore)
+    scope = ManagedFileScope(entity_type="staff", entity_id=_OWNER, bot_id=bot_id)
+
+    outcome = None
+    for _ in range(8):
+        turned = worker.turn()
+        if "provision" in order and "identity" not in seen_at_provision:
+            seen_at_provision["identity"] = [r.rel_path for r in store.list(scope, category=CATEGORY_IDENTITY)]
+        state = _poll(client, bot_id).json()["data"]["state"]
+        if not states or states[-1] != state:
+            states.append(state)
+        outcome = next((o for o in turned if isinstance(o, (Complete, Fail))), None)
+        if outcome is not None:
+            break
+    assert isinstance(outcome, Complete), (outcome, states, order)
+
+    assert order == ["record", "provision"], order
+    assert states == ["CREATING", "APPLYING", "CREATING", "READY"], states
+    assert seen_at_provision["identity"] == ["identity/RULES.md"], (
+        "the platform's copy must exist when provisioning composes the first artifact"
+    )
+    ready = _poll(client, bot_id).json()["data"]
+    assert ready["bot"]["bot_id"] == bot_id and ready["bot"]["status"] == "ACTIVE"
+    assert ready["apply"]["result"] == "SUCCEEDED"
+    assert [e["category"] for e in ready["apply"]["entries"]] == ["identity"]

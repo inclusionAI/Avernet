@@ -633,3 +633,92 @@ async def test_deactivating_a_skill_releases_the_mcps_it_depended_on():
     assert scope.skills is True
     assert scope.released_mcp == frozenset({"mcp.weather"})
     assert scope.claimed_mcp == frozenset()
+
+
+# ── record-only activation (W8) ─────────────────────────────────────────────
+
+
+class _NeverProjects(_SuccessfulRuntime):
+    """A runtime that must not be reached: record-only skips projection."""
+
+    async def snapshot_skill_mappings(self, **_kwargs):
+        raise AssertionError("record-only activation must not snapshot the runtime")
+
+    async def project(self, **_kwargs) -> None:
+        raise AssertionError("record-only activation must not project")
+
+
+class _PendingBotsForRecordOnly(_Bots):
+    def get_by_id_and_owner(self, bot_id: str, owner_id: str) -> dict | None:
+        bot = super().get_by_id_and_owner(bot_id, owner_id)
+        return {**bot, "status": "PENDING"} if bot else None
+
+
+@pytest.mark.asyncio
+async def test_record_only_mcp_activation_writes_desired_state_on_a_pending_bot():
+    repository = _Repository()
+    audit = _Audit()
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), audit, _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(),
+    )
+    result = await service.activate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner", project=False,
+    )
+    assert result["changed"] is True
+    assert [c["server_code"] for c in repository.install_mcp_calls] == ["github"]
+    assert audit.actions  # the audit row is still written
+    await service.deactivate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner", project=False,
+    )
+    assert [c["server_code"] for c in repository.uninstall_mcp_calls] == ["github"]
+
+
+@pytest.mark.asyncio
+async def test_record_only_skill_activation_writes_desired_state_on_a_pending_bot():
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(),
+    )
+    await service.activate_skill(
+        skill_id="7", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+        project=False,
+    )
+    assert len(repository.install_skill_calls) == 1
+    await service.deactivate_skill(
+        skill_id="7", bot_id="bot-1", owner_id="true-owner", actor_id="true-owner",
+        project=False,
+    )
+    assert len(repository.uninstall_skill_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_record_only_skips_the_runtime_where_the_default_reports_it_pending():
+    """On a bot that is not ready the default commits desired state and
+    reports the projection *pending* (the runtime is not consulted either
+    way); record-only says the runtime was not required at all, which is
+    what the teclaw strategy means: the artifact is the projection."""
+    repository = _Repository()
+    service = DirectActivationService(
+        repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
+        _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
+        _PlatformDefaultMcpPolicy(),
+    )
+    by_default = await service.activate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
+    assert by_default["runtime_projection"]["status"] == "PENDING"
+    assert by_default["runtime_projection"]["issues"][0]["code"] == "BOT_RUNTIME_NOT_READY"
+    record_only = await service.activate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner", project=False,
+    )
+    assert record_only["runtime_projection"]["status"] == "SKIPPED"
+    assert record_only["runtime_projection"]["reason"] == "RUNTIME_NOT_REQUIRED"
+    assert [c["server_code"] for c in repository.install_mcp_calls] == ["github", "github"]

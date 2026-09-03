@@ -78,6 +78,8 @@ def _select_aliyun_ack(bootstrap_init: ApplicationContainer) -> PaasServiceFacto
             "aliyun_ack_cluster": ack_cluster,
         }
     )
+    bootstrap_init.services.paas_sandbox_plugins.reset()
+    bootstrap_init.services.paas_service_factory.reset()
     return bootstrap_init.services.paas_service_factory()
 
 

@@ -4,9 +4,9 @@
  * 写法规范见 docs/specs/capabilities-system.md（§3 规范 3：跨模块契约升到 app/extension.ts）。
  */
 import { defineExt } from '@/capabilities';
-import * as BcnController from '@/services/backend-api/BcnController';
 import BotProfilePublicToggle from '@/pages/GroupChat/components/BotProfilePublicToggle';
 import FuseChat from '@/pages/GroupChat/components/FuseChat';
+import * as BcnController from '@/services/backend-api/BcnController';
 import { Bell, Bot, Clock, Globe, User } from 'lucide-react';
 import type { ServerConfigMap } from '../../config/servers.config';
 import { SERVERS } from '../../config/servers.config';
@@ -163,7 +163,7 @@ export const AppExt = defineExt('App', {
     // 答疑机器人入口（移动端导航等）：开源默认 null（入口不渲染）；
     // 内部 src/internal/resources.ts 注入钉钉 scheme 链接（含 token）。
     customerServiceRobotUrl: null,
-    // 开源默认：产品首页双接入方式的公共指令模板（含 {token} 占位，运行时注入注册 token）；
+    // 开源默认：产品首页接入方式的公共指令模板（含 {token} 占位，运行时注入注册 token）；
     // 内部 src/internal/resources.ts 可覆盖为含私有 registry 的内网指令。
     // 方式1：用户自助接入
     bcnConnectCmdTemplate:
@@ -171,6 +171,10 @@ export const AppExt = defineExt('App', {
     // 方式2：Bot 自动接入
     bcnAutoConnectCmdTemplate:
       'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/docs/install-instructions/install.md to join BCN (Bot Coordination Network), your token is {token}',
+    // DeepSeek Harness 本地一键接入：install-dsh.sh 会先检查 dsh CLI，
+    // 再安装插件、写入 web profile 并启动；endpoint 由运行时 BCN 配置注入。
+    dshConnectCmdTemplate:
+      "curl -fsSL https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/deepseek-harness-channel-bcn/install-dsh.sh | BCN_ONBOARDING_TOKEN={token} bash -s -- --endpoint {endpoint} --profile web --bot-name 'DeepSeek Harness Bot'",
     productLinks: { tui: null, mobile: null, desktop: null },
   } as Resources,
 

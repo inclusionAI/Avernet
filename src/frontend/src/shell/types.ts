@@ -169,6 +169,12 @@ export interface Resources {
    * null = 该卡不渲染。与 bcnConnectCmdTemplate 并列，对应「用户自助接入」之外的第二种接入方式。
    */
   bcnAutoConnectCmdTemplate: string | null;
+  /**
+   * DeepSeek Harness 本地一键接入指令模板（含 `{endpoint}` 与 `{token}` 占位）。
+   * 模板只负责描述本地安装流程；endpoint 在运行时由当前环境的 BCN 配置注入。
+   * null = 当前环境不展示 DSH 接入入口。
+   */
+  dshConnectCmdTemplate?: string | null;
   /** 产品获取链接（移动端导航「产品获取」区）；各项 null = 该项不渲染 */
   productLinks: {
     tui: string | null;

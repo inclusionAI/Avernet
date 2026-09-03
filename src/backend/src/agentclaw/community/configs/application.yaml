@@ -226,7 +226,20 @@ user_config:
   # 一律不删，理由与机件见 sql/2026_08_31_manifest_content.sql 头注释。
   # 读取方：core/bot_config_manifest/content/settings.py 的
   # content_store_root_from_config（W4 组合根在装配存储服务时调用）。
+  #
+  # teclaw_platform_managed（W8 #1476）：teclaw 系 bot 的 manifest 走「平台管理」
+  # 投递——每个类目物化进平台状态（数据库行 + bot-data 对象存储里的托管文件，
+  # 键布局即记录，没有索引表），artifact 带 ownership 映射，容器起来前就能
+  # apply，运行中的容器整包重投一次。默认 false：在 teclaw 引擎实现 artifact 的
+  # ownership 语义（engine-convergence-contract §9，R-O1/R-O2/R-O3）之前保持关闭，
+  # 此时 teclaw 与 W8 之前一样按容器后逐文件写投递。翻开之前，先对每个已有
+  # manifest 的 teclaw bot 显式 apply 一次（POST …/config-manifest/apply），让对象
+  # 存储落上文件——否则第一份 artifact 会对声明的类目断言 platform 而列表为空。
+  # 只接受布尔（true/false/yes/no/on/off/0/1），其他值启动时报错。
+  # 读取方：core/bot_config_manifest/apply/delivery.py 的
+  # teclaw_platform_managed_from_config（manifest_fetch_module 在装配时调用）。
   bot_config_manifest:
     fetch_transport_allowlist: []
     content_store_dir: "./data/manifest_content"
+    teclaw_platform_managed: false
 

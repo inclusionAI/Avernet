@@ -39,6 +39,9 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
     envelope_errors,
 )
+from agentclaw.community.api.bot_config_manifest_apply_service import (
+    BotConfigManifestApplyServiceProtocol,
+)
 from agentclaw.community.api.bot_config_manifest_service import (
     BotConfigManifestServiceProtocol,
 )
@@ -46,6 +49,9 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.di import Injected
 
 from .config_manifest_support import (
+    delivery_or_none,
+    put_warnings,
+    start_put_apply,
     audit_actor,
     capabilities_payload,
     manifest_payload,
@@ -110,8 +116,11 @@ async def update_bot_config_manifest(
     manifest_service: BotConfigManifestServiceProtocol = Injected(
         BotConfigManifestServiceProtocol
     ),
+    apply_service: BotConfigManifestApplyServiceProtocol = Injected(
+        BotConfigManifestApplyServiceProtocol
+    ),
 ) -> Envelope[ConfigManifest]:
-    """Set or replace a bot's configuration manifest.
+    """Set or replace a bot's configuration manifest, and apply it.
 
     **All-or-nothing.** A document is stored only if every part of it is valid
     and supported for this bot: one unsupported category refuses the whole
@@ -125,22 +134,47 @@ async def update_bot_config_manifest(
     reasonably read as success. `GET …/config-manifest/capabilities` answers
     from the same rules, so it can never promise what this refuses.
 
-    Storing a manifest applies nothing yet.
+    **Storing starts an apply.** Once the document is stored, an apply of it is
+    started — the same apply `POST …/config-manifest/apply` starts — and the
+    response's `apply` says whether it started: `RUNNING` with the id to poll,
+    or `NOT_STARTED` with `apply_in_progress` (another apply holds the bot;
+    poll it, then apply) or `not_started`. The document is stored either way,
+    and the response is `200` either way.
+
+    `warnings` carries two notes this surface adds: a declared `script` is
+    recorded now but takes effect on the bot's next start; and on a bot that
+    is not `ACTIVE`, the categories that need a running container will be
+    recorded as failed — re-apply once it is up. A teclaw bot on the
+    platform-managed path needs no container, so it gets no such note.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # addressed owner/tenant guard
     entity_id = manifest_target(bot)
+    audit = audit_actor(caller, actor_id)
     result = manifest_service.put(
         entity_id=entity_id,
         bot_id=bot_id,
         document=body.document,
         # From the verified caller, never the body — and naming the application
         # when one is acting, not the user it acted for.
-        modifier=audit_actor(caller, actor_id),
+        modifier=audit,
         active_engine=bot.get("active_engine"),
         bot_type=bot.get("bot_type"),
     )
+    started = start_put_apply(
+        apply_service,
+        entity_id=entity_id,
+        bot_id=bot_id,
+        bot=bot,
+        owner_id=owner_id,
+        actor_id=actor_id,
+        audit=audit,
+    )
+    warnings = put_warnings(
+        result, strategy=delivery_or_none(apply_service, bot), bot=bot
+    )
     return envelope(
-        manifest_payload(bot_id, result.record, warnings=result.warnings), request
+        manifest_payload(bot_id, result.record, warnings=warnings, apply=started),
+        request,
     )
 
 

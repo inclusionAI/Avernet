@@ -538,6 +538,9 @@ class FakeActivationService:
         self.installed_skills: set[int] = set()
         self.skill_activations: list[int] = []
         self.skill_deactivations: list[int] = []
+        # The ``project`` flag of every write (W8): the real service projects
+        # by default; the record-only wrapper passes ``False``.
+        self.projections: list[bool] = []
 
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, actor_id: str
@@ -550,32 +553,40 @@ class FakeActivationService:
         return frozenset(self.platform_defaults)
 
     async def activate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
+        self.projections.append(project)
         self._refuse_if_platform_owned(server_code)
         self.activated.append(server_code)
         self.installed.add(server_code)
         return {}
 
     async def deactivate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
+        self.projections.append(project)
         self._refuse_if_platform_owned(server_code)
         self.deactivated.append(server_code)
         self.installed.discard(server_code)
         return {}
 
     async def activate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
+        self.projections.append(project)
         self._refuse_if_governed(skill_id)
         self.installed_skills.add(int(skill_id))
         self.skill_activations.append(int(skill_id))
         return {"id": skill_id, "changed": True}
 
     async def deactivate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
+        self.projections.append(project)
         self._refuse_if_governed(skill_id)
         self.installed_skills.discard(int(skill_id))
         self.skill_deactivations.append(int(skill_id))

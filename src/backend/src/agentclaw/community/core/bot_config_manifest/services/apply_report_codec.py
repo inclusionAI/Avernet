@@ -90,6 +90,7 @@ def report_from_payload(
             )
             for source in payload.get("sources") or []
         ),
+        notes=tuple(str(note) for note in payload.get("notes") or ()),
     )
 
 

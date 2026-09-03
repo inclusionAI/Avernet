@@ -11,7 +11,7 @@ with a fake collector.
 """
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Collection, Protocol, runtime_checkable
 
 from agentclaw.community.core.config_compose.models import (
     CollectedFile,
@@ -21,7 +21,52 @@ from agentclaw.community.core.config_compose.models import (
 )
 
 
-__all__ = ["ComposeInputCollector"]
+__all__ = [
+    "ComposeInputCollector",
+    "ManagedFilesReader",
+    "PlatformOwnershipReader",
+]
+
+
+@runtime_checkable
+class PlatformOwnershipReader(Protocol):
+    """Whether the platform is the source of truth for a compose's categories (W8).
+
+    Ownership follows the *operation*, not the bot's declarations: it is the
+    platform's for the closing redeliver of a manifest apply and for the
+    first artifact of a bot that carries a manifest, and the engine's for
+    every runtime edit — a skill or resource upload, an MCP edit, a publish
+    build. The reader also answers ``False`` for an engine family it does not
+    serve and while the platform-managed switch is off. The composer turns the
+    answer into the artifact's ``ownership`` map and into which source the
+    file categories are read from. The engine decision is the reader's: the
+    collector asks without knowing the engine.
+    """
+
+    def platform_owns(self, req: ComposeRequest) -> bool: ...
+
+
+@runtime_checkable
+class ManagedFilesReader(Protocol):
+    """The platform's own copy of a teclaw bot's manifest-delivered files (W8).
+
+    Store-relative refs, in the shape the collector already yields, read from
+    the managed-files store rather than from the running container. The
+    composer consults it only when the platform owns the compose.
+    """
+
+    def identity_files(self, req: ComposeRequest) -> list[CollectedFile]: ...
+
+    def resources(self, req: ComposeRequest) -> list[CollectedFile]: ...
+
+    def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
+        """Every local package the platform holds — the collector keeps only
+        the active ones."""
+        ...
+
+    def skill_files(self, req: ComposeRequest, names: Collection[str]) -> list[CollectedFile]:
+        """The named packages' files, as resources refs."""
+        ...
 
 
 @runtime_checkable

@@ -34,6 +34,7 @@ from agentclaw.community.adapters.http.openapi_v1.principal import (
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
+    BOT_COULD_NOT_BE_PROVISIONED,
     _CONTAINER_FAILED_STATUSES,
     _CONTAINER_READY_STATUSES,
 )
@@ -453,3 +454,96 @@ def _annotations(fn) -> set[str]:
         str(parameter.annotation)
         for parameter in inspect.signature(fn).parameters.values()
     }
+
+
+# ── RECORD_APPLY_PROVISION: the pre-container record is the terminal one (W8) ──
+
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
+    CreationSequence,
+)
+
+_RECORD_FIRST = CreationSequence.RECORD_APPLY_PROVISION
+
+
+def _record_first_state(*, bot, report=None, job=None):
+    return create_with_manifest._creation_state(
+        bot=bot, report=report, job=lambda: job, sequence=_RECORD_FIRST
+    )
+
+
+def test_record_first_the_phase_running_against_the_record_is_applying():
+    state, _ = _record_first_state(
+        bot={"status": "PENDING"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.RUNNING)
+    )
+    assert state is CreationState.APPLYING
+
+
+def test_record_first_a_finished_phase_with_the_container_still_coming_is_creating():
+    state, _ = _record_first_state(
+        bot={"status": "PENDING"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.PENDING),
+    )
+    assert state is CreationState.CREATING
+
+
+def test_record_first_a_running_bot_reads_the_phase_as_the_outcome():
+    ready, _ = _record_first_state(
+        bot={"status": "ACTIVE"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    )
+    assert ready is CreationState.READY
+    failed, _ = _record_first_state(
+        bot={"status": "ACTIVE"}, report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.PARTIAL)
+    )
+    assert failed is CreationState.APPLY_FAILED
+
+
+def test_record_first_a_bot_that_never_came_up_is_create_failed():
+    state, _ = _record_first_state(
+        bot={"status": "FAILED"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.FAILED, "the bot could not be provisioned: FAILED"),
+    )
+    assert state is CreationState.CREATE_FAILED
+
+
+def test_record_first_shows_the_pre_container_report_and_create_between_phases_does_not():
+    report = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    assert create_with_manifest._report_is_shown(CreationState.READY, report, _RECORD_FIRST)
+    assert not create_with_manifest._report_is_shown(CreationState.READY, report)
+    assert not create_with_manifest._report_is_shown(
+        CreationState.READY, _Report(CREATE_ON_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED), _RECORD_FIRST
+    )
+
+
+def test_create_between_phases_still_ignores_the_pre_container_record():
+    """Under today's sequence phase A's record is written before the bot and
+    never the outcome — a bot with only that record and a live job is CREATING."""
+    (state, _), _ = _state(
+        bot={"status": "ACTIVE"},
+        report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+        job=_Job(TaskStatus.PENDING),
+    )
+    assert state is CreationState.CREATING
+
+
+def test_record_first_a_retired_job_with_the_container_never_up_is_create_failed():
+    """The phase finished, the bot never reached ACTIVE, the queue retired the
+    job: not CREATING forever — the job's row says it is over."""
+    for status in (TaskStatus.TIMED_OUT, TaskStatus.FAILED):
+        state, _ = _record_first_state(
+            bot={"status": "PENDING"},
+            report=_Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED),
+            job=_Job(status, "the bot could not be provisioned: PENDING"),
+        )
+        assert state is CreationState.CREATE_FAILED, status
+
+
+def test_a_provisioning_failure_that_soft_deleted_the_record_is_create_failed():
+    """W8: under RECORD_APPLY_PROVISION the service soft-deletes the record on an
+    allocation failure, so the poll sees no bot beside a terminal job — the
+    shape of a decline, which it is not."""
+    (state, _), _ = _state(job=_Job(TaskStatus.FAILED, f"{BOT_COULD_NOT_BE_PROVISIONED}: no capacity"))
+    assert state is CreationState.CREATE_FAILED
+    (state, _), _ = _state(job=_Job(TaskStatus.FAILED, "authorization did not complete: REJECTED"))
+    assert state is CreationState.AUTHORIZATION_REJECTED

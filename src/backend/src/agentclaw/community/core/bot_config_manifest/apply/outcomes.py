@@ -197,8 +197,10 @@ class ApplyReport:
 
     apply_id: str
     bot_id: str
-    #: ``explicit`` here. W8 and W13 add ``republish`` / ``restart`` / ``create``
-    #: without this type changing.
+    #: What started the apply. The vocabulary lives in ``apply/triggers.py``:
+    #: ``explicit``, ``put`` (W8), and W13's ``create:pre_container`` /
+    #: ``create:on_container``. Restart and republish are not triggers in
+    #: iteration 1 (spec D-1).
     trigger: str
     status: ApplyStatus
     started_at: datetime
@@ -206,6 +208,10 @@ class ApplyReport:
     categories: tuple[CategoryResult, ...] = ()
     #: Resolved named sources. Empty in v1's URL wave; W7 fills it.
     sources: tuple[SourceResolution, ...] = field(default=())
+    #: Apply-level notes that belong to no category — today only the delivery
+    #: strategy's closing step (W8): a teclaw redeliver that failed after every
+    #: category was written is recorded here rather than raised (§2.7).
+    notes: tuple[str, ...] = field(default=())
 
     @property
     def entries(self) -> tuple[EntryResult, ...]:
@@ -234,6 +240,7 @@ class ApplyReport:
             "sources": [source.as_dict() for source in self.sources],
             "categories": [category.as_dict() for category in self.categories],
             "entries": [entry.as_dict() for entry in self.entries],
+            "notes": list(self.notes),
         }
 
 

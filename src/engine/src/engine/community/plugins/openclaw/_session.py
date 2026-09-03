@@ -10,6 +10,10 @@ import re
 from typing import Any
 
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
+from engine.community.shared.utils import (
+    managed_session_keys_equal,
+    normalize_managed_session_lookup_key,
+)
 
 log = logging.getLogger("openclaw-port")
 
@@ -153,12 +157,17 @@ class _SessionPortMixin:
         requested_session_key = (
             session_key if session_key and session_key.strip() else None
         )
+        lookup_session_key = (
+            normalize_managed_session_lookup_key(requested_session_key)
+            if requested_session_key is not None
+            else None
+        )
 
         # Push the lookup into the gateway before its default result cap is
         # applied. Keep the exact local filter because gateway search is fuzzy.
         list_params = (
-            {"search": requested_session_key}
-            if requested_session_key is not None
+            {"search": lookup_session_key}
+            if lookup_session_key is not None
             else {}
         )
 
@@ -197,7 +206,12 @@ class _SessionPortMixin:
 
         if requested_session_key is not None:
             # Filter before pagination so a copied key can be found beyond the current page.
-            raw_sessions = [s for s in raw_sessions if s.get("key") == requested_session_key]
+            raw_sessions = [
+                s
+                for s in raw_sessions
+                if isinstance(s.get("key"), str)
+                and managed_session_keys_equal(s["key"], requested_session_key)
+            ]
 
         # Step 5: Paginate BEFORE history fetch (legacy ordering).
         page = raw_sessions[offset: offset + limit]

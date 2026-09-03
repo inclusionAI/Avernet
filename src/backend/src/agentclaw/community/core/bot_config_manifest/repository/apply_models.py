@@ -59,7 +59,7 @@ class BotConfigManifestApplyRecord(BaseModel):
     env: str = Field(default="dev", description="Environment")
     entity_id: str = Field(..., description="Entity id (the bot's entity_id)")
     bot_id: str = Field(..., description="Bot ID")
-    trigger: str = Field(..., description="What started it: explicit/create/republish/restart")
+    trigger: str = Field(..., description="What started it: explicit/put/create:pre_container/create:on_container")
     status: str = Field(..., description="RUNNING, or one of the three terminal statuses")
     report: str = Field(..., description="The per-entry report (JSON)")
     actor: str = Field(..., description="Audit: who started it")
@@ -116,11 +116,11 @@ class BotConfigManifestApplyModel(Base):
     )
     bot_id = Column(String(256), nullable=False, comment="Bot ID")
 
-    # ``explicit`` is the only value this wave writes — W4's single entry point
-    # is the explicit POST. W8 adds republish/restart and W13 adds create, and
-    # neither needs a migration to do it.
+    # The vocabulary is ``apply/triggers.py``: ``explicit`` (W4), W13's two
+    # ``create:*`` phases, and ``put`` (W8). Restart and republish were deferred
+    # (W8 spec D-1). None of them needed a migration; every value fits.
     trigger = Column(
-        String(32), nullable=False, comment="What started it: explicit/create/republish/restart"
+        String(32), nullable=False, comment="What started it: explicit/put/create:pre_container/create:on_container"
     )
     # RUNNING on insert, terminal on completion — the two-write lifecycle apply's
     # async shape requires. Denormalised out of ``report`` so "show me failed

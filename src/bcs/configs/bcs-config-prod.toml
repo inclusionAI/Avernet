@@ -211,9 +211,9 @@ private_key = "${BCS_ALIPAY_PRIVATE_KEY}"
 alipay_public_key = "${BCS_ALIPAY_ALIPAY_PUBLIC_KEY}"
 
 [bcsfuse]
-enabled = false
+enabled = true
 url = "${FUSE_ENDPOINT}"
-fusion_timeout_ms = 120000
+fusion_timeout_ms = 300000
 sync_timeout_ms = 10000
 profile_id = "default"
 recommend_top_k = 10

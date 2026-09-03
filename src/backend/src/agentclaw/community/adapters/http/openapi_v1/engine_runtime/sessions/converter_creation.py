@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
@@ -15,11 +16,32 @@ logger = get_logger()
 # Direct Engine consumers keep OpenClaw's historical relative id. Only the
 # public OpenAPI response is reconciled with its canonical list row.
 _LIMIT = 20
-_DELAYS = (0.0, 0.05, 0.15)
+# OpenClaw acknowledges ``sessions.patch`` before a newly-created empty
+# session is necessarily visible through ``sessions.list``.  Cloud runtimes
+# can take longer to publish that read model than an in-process/internal
+# deployment, so keep the same three-attempt bound but allow up to two seconds
+# for convergence.
+_DELAYS = (0.0, 0.5, 1.5)
+_MANAGED_SESSION_KEY = re.compile(
+    r"^(?:agent:([^:]+):)?(session:[^:]+:user:[^:]+)$",
+    re.IGNORECASE,
+)
 
 
 def _matches(candidate_id: str, created_id: str) -> bool:
-    return candidate_id == created_id or candidate_id.endswith(f":{created_id}")
+    if candidate_id == created_id:
+        return True
+
+    candidate_match = _MANAGED_SESSION_KEY.fullmatch(candidate_id)
+    created_match = _MANAGED_SESSION_KEY.fullmatch(created_id)
+    if candidate_match is None or created_match is None:
+        return False
+
+    candidate_agent, candidate_relative = candidate_match.groups()
+    created_agent, created_relative = created_match.groups()
+    if (candidate_agent is None) == (created_agent is None):
+        return False
+    return candidate_relative.lower() == created_relative.lower()
 
 
 async def reconcile_created_session(
@@ -45,12 +67,13 @@ async def reconcile_created_session(
             )
         except Exception as error:
             # The write already succeeded. Do not invite a retry that creates
-            # another empty session because this best-effort read failed.
+            # another empty session because this best-effort read failed. A
+            # transient list failure must not consume all remaining attempts.
             logger.warning(
                 "[openapi.sessions.create] canonical reconciliation failed: %s",
                 type(error).__name__,
             )
-            return created_item
+            continue
 
         match = next((
             item for item in _as_list(listed.data)

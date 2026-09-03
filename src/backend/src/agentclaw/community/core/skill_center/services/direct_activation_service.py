@@ -91,24 +91,26 @@ class DirectActivationService(DirectActivationServiceProtocol):
     # ── Skills ──────────────────────────────────────────────────────
 
     async def activate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
         return await self._set_skill_active(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
-            actor_id=actor_id, active=True,
+            actor_id=actor_id, active=True, project=project,
         )
 
     async def deactivate_skill(
-        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
         return await self._set_skill_active(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
-            actor_id=actor_id, active=False,
+            actor_id=actor_id, active=False, project=project,
         )
 
     async def _set_skill_active(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
-        active: bool,
+        active: bool, project: bool = True,
     ) -> dict[str, Any]:
         skill, bot = self._resolve_skill(
             skill_id=skill_id, bot_id=bot_id, owner_id=owner_id,
@@ -123,6 +125,11 @@ class DirectActivationService(DirectActivationServiceProtocol):
                 bot=bot,
                 bot_id=bot_id,
                 engine_type=bot_engine_type(bot),
+                # ``project=False`` records the desired state and skips both
+                # the readiness check and the runtime projection (W8): the
+                # teclaw strategy delivers the whole artifact itself, before
+                # the container exists, so there is nothing to project onto.
+                runtime_required=project,
                 mutation=lambda: command(
                     bot_id=bot_id,
                     owner_id=owner_id,
@@ -203,7 +210,8 @@ class DirectActivationService(DirectActivationServiceProtocol):
     # ── MCPs ────────────────────────────────────────────────────────
 
     async def activate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         platform_default_codes = self._platform_default_codes(bot, server_code)
@@ -212,6 +220,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot=bot,
             bot_id=bot_id,
             engine_type=bot_engine_type(bot),
+            runtime_required=project,  # W8: see ``_set_skill_active``
             mutation=lambda: self._repository.install_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),
@@ -229,7 +238,8 @@ class DirectActivationService(DirectActivationServiceProtocol):
         return result
 
     async def deactivate_mcp(
-        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str
+        self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
+        project: bool = True,
     ) -> dict[str, Any]:
         bot = self._bot(bot_id=bot_id, owner_id=owner_id, actor_id=actor_id)
         platform_default_codes = self._platform_default_codes(bot, server_code)
@@ -237,6 +247,7 @@ class DirectActivationService(DirectActivationServiceProtocol):
             bot=bot,
             bot_id=bot_id,
             engine_type=bot_engine_type(bot),
+            runtime_required=project,  # W8: see ``_set_skill_active``
             mutation=lambda: self._repository.uninstall_mcp(
                 bot_id=bot_id,
                 owner_id=str(bot["owner_id"]),

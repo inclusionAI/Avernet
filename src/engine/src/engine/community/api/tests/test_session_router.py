@@ -226,6 +226,20 @@ class TestGetSession:
         request = mock_session_api.list.call_args.args[0]
         assert request.session_key == "sess-101"
 
+    def test_found_accepts_openclaw_canonical_form_of_relative_create_id(
+        self, client, mock_session_api
+    ):
+        relative = "session:ABC-123:user:CloudUser"
+        canonical = "agent:main:session:abc-123:user:clouduser"
+        mock_session_api.list.return_value = [_make_session(canonical)]
+
+        resp = client.get(f"/api/sessions/{relative}")
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["id"] == canonical
+        request = mock_session_api.list.call_args.args[0]
+        assert request.session_key == relative
+
     def test_not_found_returns_404(self, client, mock_session_api):
         mock_session_api.list.return_value = []
         resp = client.get("/api/sessions/missing")
