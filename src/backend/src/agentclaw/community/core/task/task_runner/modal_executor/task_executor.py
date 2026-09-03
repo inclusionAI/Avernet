@@ -955,6 +955,10 @@ class TaskExecutor:
             "[task][bbs_mode] manager_worker 群建群成功 task=%s group=%s session=%s → 阻塞轮询至终态",
             task_id, gid, session_id,
         )
+
+        return {"session_id": session_id, "success": True}
+
+        """
         # 阻塞轮询:终态判据 + output 来源**对齐** TaskExecutorResultPoller._poll_terminal(session 模)
         # 与 BcsSessionTranslator.adapt(sess.output → 末条 assistant content)。BBS 要的是**原始产出**
         # (root 上 plan 据此自验收),非 translator 内部解析出的 acceptance data,故照搬 output 取数而
@@ -988,6 +992,7 @@ class TaskExecutor:
         raise asyncio.TimeoutError(
             f"bbs manager_worker 群轮询超时未达终态 task={task_id} group={gid}"
         )
+        """
 
     async def run_bbs(self, execution_graph) -> None:
         """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。

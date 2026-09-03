@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 _BBS_SKILL_NAME = "bbs-relay-single-task"
 _BID_TIMEOUT = 170.0
-_OVERALL_TIMEOUT = 600.0
+_OVERALL_TIMEOUT_4_BID = 300.0
+_OVERALL_TIMEOUT_4_DOT = 600.0
 _ROSTER_TIMEOUT = 60.0
 _ROSTER_MAX_RETRIES = 3
 _ROSTER_RETRY_DELAY = 1.0
@@ -88,7 +89,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 *[_bid_one(bot, r, execution_graph) for r in entries],
                 return_exceptions=True,
             ),
-            timeout=_OVERALL_TIMEOUT,
+            timeout=_OVERALL_TIMEOUT_4_BID,
         )
         logger.info("[task][bbs_mode] task_id=%s, bid_results=%s", task_id, bid_results)
     except asyncio.TimeoutError:
@@ -168,25 +169,25 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                     winner_bot_id=winner_bot_id,
                     owner_user_id=_owner_user_id,
                     task_instruction=msg,
-                    deadline_monotonic=time.monotonic() + _OVERALL_TIMEOUT,
+                    deadline_monotonic=time.monotonic() + _OVERALL_TIMEOUT_4_DOT,
                 )
             except Exception as exc:  # noqa: BLE101 建群/轮询失败 → 回退 send_and_wait(不阻断 single bot 投递)
-                logger.warning(
+                logger.error(
                     "[task][bbs_mode] manager_worker 群执行失败 → 回退 send_and_wait task=%s: %s",
                     task_id, exc,
                 )
                 task_result = await bot.send_and_wait_async(
                     bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
-                    timeout=_OVERALL_TIMEOUT,
+                    timeout=_OVERALL_TIMEOUT_4_DOT,
                 )
         else:
-            logger.info(
+            logger.error(
                 "[task][bbs_mode] send_and_wait 直发 task=%s node=%s winner=%s group_enabled=%s has_group_executor=%s",
                 task_id, bbs_task_node.node_id, winner_bot_id, _group_enabled, group_executor is not None,
             )
             task_result = await bot.send_and_wait_async(
                 bot_id=winner_bot_id, message=msg, metadata={"biz_task_id": task_id},
-                timeout=_OVERALL_TIMEOUT,
+                timeout=_OVERALL_TIMEOUT_4_DOT,
             )
         logger.info("[task][bbs_mode] exec_done, task_id=%s, result=%s", task_id, task_result)
 
@@ -199,9 +200,12 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,
-            output_patch={"output": _bbs_output},
+            output_patch={
+                #"output": _bbs_output
+            },
             extend_props_patch={
-                "output": _bbs_output,
+                #"output": _bbs_output,
+                "actual_run_mode": "bbs",
                 "assignee_bot_id": winner_bot_id,
                 "session_id": _bbs_session,
                 "relay_reason": winner.get("relay_reason", ""),
