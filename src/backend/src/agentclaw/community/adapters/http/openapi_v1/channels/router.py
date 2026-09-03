@@ -542,5 +542,5 @@ async def delete_channel(
     )
     if record.status == "1":
         await _set_status(service, channel_id, "inactive")
-    service.delete(channel_id=channel_id)
+    await service.remove_channel(channel_id)
     return deleted(request)

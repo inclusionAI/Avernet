@@ -14,9 +14,13 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotService,
 )
+from agentclaw.community.core.channel.errors import ChannelError
 from agentclaw.community.core.channel.json_config_utils import JsonConfigFile
 from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.core.channel.models import ChannelRecord
+from agentclaw.community.core.channel.services.bcs_binding_client import (
+    BcsChannelBindingClientProtocol,
+)
 from agentclaw.community.core.devices.services.device_context_resolver import (
     DeviceContextResolver,
 )
@@ -48,12 +52,14 @@ class ChannelService:
         device_fs_dispatcher: DeviceFilesystemDispatcher,
         bot_service: BotService,
         device_sync_dispatcher: DeviceSyncDispatcher,
+        bcs_client: BcsChannelBindingClientProtocol,
     ) -> None:
         self._repository = repository
         self._resolver = resolver
         self._device_fs_dispatcher = device_fs_dispatcher
         self._bot_service = bot_service
         self._device_sync_dispatcher = device_sync_dispatcher
+        self._bcs_client = bcs_client
 
     def list_channels(
         self,
@@ -109,6 +115,30 @@ class ChannelService:
     def delete(self, channel_id: int) -> None:
         self._repository.delete_by_id(channel_id=channel_id)
 
+    async def remove_channel(self, channel_id: int) -> None:
+        """Delete the row; bcn_gateway rows also best-effort delete their BCS binding.
+
+        Ordering (spec §4.3): the router deactivates an active channel first
+        (fail-closed), then this deletes the local row, then the BCS binding —
+        a binding-delete failure only logs, so a transient BCS miss can never
+        block removing the configuration row.
+        """
+        record = self._repository.get_by_id(channel_id)
+        binding_id = ""
+        if record is not None and self._is_bcn_channel(record):
+            binding_id = str(record.config.get("bcs_binding_id") or "")
+        self._repository.delete_by_id(channel_id=channel_id)
+        if binding_id:
+            try:
+                await self._bcs_client.delete_binding(binding_id)
+            except ChannelError as exc:
+                logger.warning(
+                    "[ChannelService] best-effort BCS binding delete failed "
+                    "for binding_id=%s: %s",
+                    binding_id,
+                    exc,
+                )
+
     def update_channel(
         self,
         *,
@@ -138,6 +168,29 @@ class ChannelService:
         return self._repository.get_by_id(channel_id)
 
     # ── provider dispatch (teclaw vs openclaw) ──────────────────────────────
+    @staticmethod
+    def _is_bcn_channel(record: ChannelRecord) -> bool:
+        """Whether the row routes through the BCS binding orchestration."""
+        return record.config.get("binding_mode") == "bcn_gateway"
+
+    def _store_bcs_binding_id(self, record: ChannelRecord, binding_id: str) -> None:
+        """Persist the server-managed ``bcs_binding_id`` into the row's config."""
+        if record.config.get("bcs_binding_id") == binding_id:
+            return
+        config = dict(record.config)
+        config["bcs_binding_id"] = binding_id
+        self._repository.update_by_id(
+            channel_id=record.id,
+            type=record.type,
+            description=record.description,
+            identity_id=record.identity_id,
+            bind_bot_id=record.bind_bot_id,
+            config=config,
+            status=record.status,
+            stage=record.stage,
+        )
+        record.config = config
+
     def _is_teclaw_bot(self, bot_id: str, user_id: str) -> bool:
         """Whether ``bot_id`` runs on the teclaw engine.
 
@@ -199,19 +252,39 @@ class ChannelService:
     async def _dispatch_channel_sync(self, channel: ChannelRecord, *, action: str) -> None:
         """Route a channel sync to the bot's container path.
 
-        teclaw → recompose + deliver (best-effort); everything else → the existing
-        direct ``openclaw.json`` write (may raise; preserved verbatim).
+        bcn_gateway → BCS binding orchestration; teclaw → recompose + deliver
+        (best-effort); everything else → the existing direct ``openclaw.json``
+        write (may raise; preserved verbatim).
         """
+        if self._is_bcn_channel(channel):
+            await self._sync_bcn_binding(channel, action=action)
+            return
         if self._is_teclaw_bot(channel.bind_bot_id, channel.identity_id):
             await self._deliver_teclaw_channel(channel)
         else:
             await self.sync_channel_to_openclaw(channel.id, action=action)
+
+    async def _sync_bcn_binding(self, channel: ChannelRecord, *, action: str) -> None:
+        """apply → ensure active + push config; remove → deactivate. Fail-closed."""
+        if action == "apply":
+            binding_id = await self._bcs_client.ensure_active(channel)
+            self._store_bcs_binding_id(channel, binding_id)
+            await self._bcs_client.push_config(channel, binding_id=binding_id)
+        elif action == "remove":
+            binding_id = str(channel.config.get("bcs_binding_id") or "")
+            if binding_id:
+                await self._bcs_client.set_active(binding_id, active=False)
+        else:
+            raise ValueError(f"Invalid action: {action}")
 
     async def set_channel_status(self, channel_id: int, status: str) -> None:
         """Enable/disable a channel and reflect it on the running bot.
 
         Ordering is provider-dependent, and intentionally so:
 
+        * **bcn_gateway** — BCS **first** (may raise), then persist — same
+          fail-closed ordering as openclaw: activate = ensure_active + store the
+          returned ``bcs_binding_id``; deactivate = patch the binding inactive.
         * **teclaw** — persist the status **first**, then deliver (best-effort).
           The teclaw runtime is updated by recomposing the whole artifact, which
           reads the freshly-persisted status from the DB, so the write must
@@ -225,6 +298,18 @@ class ChannelService:
         channel = self._repository.get_by_id(channel_id)
         if not channel:
             raise ValueError(f"Channel not found: {channel_id}")
+
+        if self._is_bcn_channel(channel):
+            # 与 openclaw 路径同序：先 BCS（可能抛，fail-closed）再落库。
+            if status == "1":
+                binding_id = await self._bcs_client.ensure_active(channel)
+                self._store_bcs_binding_id(channel, binding_id)
+            else:
+                binding_id = str(channel.config.get("bcs_binding_id") or "")
+                if binding_id:
+                    await self._bcs_client.set_active(binding_id, active=False)
+            self.update_status(channel_id, status)
+            return
 
         if self._is_teclaw_bot(channel.bind_bot_id, channel.identity_id):
             self.update_status(channel_id, status)

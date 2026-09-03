@@ -164,6 +164,10 @@ class _Channels:
         self.calls.append(("delete", channel_id))
         self.records[channel_id].deleted = 1
 
+    async def remove_channel(self, channel_id: int):
+        self.calls.append(("remove", channel_id))
+        self.delete(channel_id)
+
 
 class _MissingBotChannels(_Channels):
     async def set_channel_status(self, channel_id: int, status: str):
@@ -387,7 +391,7 @@ async def test_delete_deactivates_active_channel_before_deleting():
         locks=_Locks(),
     )
 
-    assert service.calls[-2:] == [("status", "0"), ("delete", 1)]
+    assert service.calls == [("status", "0"), ("remove", 1), ("delete", 1)]
     assert result.code == 200000
     assert result.data.deleted is True
 
