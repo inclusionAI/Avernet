@@ -130,7 +130,9 @@ _STATIC_MOCK_SUMMARY: dict[str, str] = {
         "利润核算表(自持成本):体验券单次成本25/售价48达标;护理套餐成本180/售价398达标;某引流款低于毛利底线标红。授权清单:体验券分批投放可自主、护理套餐放量需店主审批、扩产能(临时技师)需店主审批。待取舍:低价引流款是否保留、临时技师成本是否接受。交投放实施。"
     ),
     "launch": (
-        "投放实施记录:发券/传单/展位/推送已执行。能力缺口:到店核销靠人工登记,同一手机号/微信号重复领防不住,需轻量核销工具(小程序/公众号核销),店方无开发能力。(BBS旁路不在此链路)"
+        "投放实施阶段发现:周年活动券当前通过公众号和门店渠道发放,"
+        "现有发券与核销工具无法可靠判断同一用户是否已领取过同类活动券,"
+        "重复领取拦截能力无法确认,需要补齐后再继续放量。"
     ),
 }
 
@@ -1047,6 +1049,11 @@ class ExecutionEngine:
             for v in definition.output.values()
         ):
             mock_result["approved"] = True
+        if definition is not None and any(
+            isinstance(v, str) and v.startswith("$.result.bbs_needed")
+            for v in definition.output.values()
+        ):
+            mock_result["bbs_needed"] = True
         # 造不可实现任务列表(仅当节点 output 含 $.result.unhandled_tasks,如 risk_assessment 群):
         # 大促剧本兜底=舆情监控方案缺失(内部无舆情监控 bot,转 BBS 安全架构师)。
         if definition is not None and any(
