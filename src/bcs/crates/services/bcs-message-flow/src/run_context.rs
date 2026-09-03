@@ -329,6 +329,7 @@ mod tests {
                     bot_id: bot_id.to_string(),
                 },
                 transport_owner: bcs_service_api::BotRunTransportOwner::WebSocket,
+                provider_bypass_headers: Vec::new(),
                 deadline_ms: u64::MAX,
             })
             .await

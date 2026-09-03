@@ -362,6 +362,7 @@ pub async fn handle_task_dispatch(
         &target_bot_id,
         &group_id,
         Some(&manager_session_id),
+        &[],
     )
     .await?;
     let result = match flow
@@ -795,6 +796,7 @@ pub async fn handle_task_message(
         &manager.bot_uuid,
         &group_id,
         Some(&manager_session_id),
+        &[],
     )
     .await?;
     let delivery = flow

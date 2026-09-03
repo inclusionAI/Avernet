@@ -225,6 +225,10 @@ async fn provider_abort_sends_one_bot_session_scope_request_and_returns_actual_i
             group_id: "group-1".to_string(),
             session_id: "session-1".to_string(),
             run_id: None,
+            provider_bypass_headers: vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )],
             timeout_ms: 60_000,
         })
         .await
@@ -234,6 +238,7 @@ async fn provider_abort_sends_one_bot_session_scope_request_and_returns_actual_i
     assert_eq!(result.aborted_run_ids, ["run-1", "run-2"]);
     let request = captured.lock().await.clone().unwrap();
     assert_eq!(request.authorization.as_deref(), Some("Bearer secret-b2p"));
+    assert_eq!(request.sandbox_bypass.as_deref(), Some("sandbox-route-1"));
     assert_eq!(request.body["type"], "req");
     assert_eq!(request.body["id"], "abort-command-1");
     assert_eq!(request.body["method"], "chat.abort");
@@ -258,6 +263,7 @@ async fn provider_abort_treats_run_terminated_gone_as_idempotent_noop() {
             group_id: "group-1".to_string(),
             session_id: "session-1".to_string(),
             run_id: None,
+            provider_bypass_headers: Vec::new(),
             timeout_ms: 60_000,
         })
         .await
@@ -279,6 +285,7 @@ async fn provider_abort_rejects_unrelated_gone_response() {
             group_id: "group-1".to_string(),
             session_id: "session-1".to_string(),
             run_id: None,
+            provider_bypass_headers: Vec::new(),
             timeout_ms: 60_000,
         })
         .await

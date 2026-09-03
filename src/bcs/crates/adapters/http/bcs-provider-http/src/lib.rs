@@ -699,7 +699,7 @@ impl BotDeliveryPort for HttpProviderTransport {
             &cmd.target,
             &body,
             false,
-            &[],
+            &cmd.provider_bypass_headers,
         )
         .await?;
         if response.status() == reqwest::StatusCode::GONE {

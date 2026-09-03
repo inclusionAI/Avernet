@@ -1675,6 +1675,48 @@ async fn session_bound_connect_projects_v1_participants_into_workbench_shape() {
 }
 
 #[tokio::test]
+async fn user_bound_connect_can_subscribe_multiple_sessions() {
+    let state = new_state();
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let auth = WorkbenchConnectionAuth::UserBound {
+        actor_id: Some("human_100001".to_string()),
+    };
+
+    for (request_id, session_id) in [
+        ("connect-session-1", "session-user-1"),
+        ("connect-session-2", "session-user-2"),
+    ] {
+        let connect = BcsFrame::Request(RequestFrame::new(
+            request_id,
+            "connect",
+            Some(serde_json::json!({
+                "group_id": "group-web-1",
+                "session_id": session_id
+            })),
+        ));
+        let outcome = dispatch_client_frame(
+            &state.dispatch_state,
+            &serde_json::to_string(&connect).unwrap(),
+            &tx,
+            &mut connection_state,
+            &auth,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome, WebDispatchOutcome::ClientConnect { subscribed: true });
+        assert!(recv_response(&mut rx).await.ok);
+    }
+
+    let connects = state.workbench_sessions.connects.lock().await;
+    assert_eq!(connects.len(), 2);
+    assert_eq!(connects[0].session_id.as_deref(), Some("session-user-1"));
+    assert_eq!(connects[1].session_id.as_deref(), Some("session-user-2"));
+    assert_eq!(connection_state.subscribed_sessions.len(), 2);
+}
+
+#[tokio::test]
 async fn session_bound_connect_authorizes_once_with_immutable_binding() {
     let state = new_state();
     let (tx, mut rx) = mpsc::channel(8);

@@ -394,6 +394,7 @@ impl SystemMessageDispatcherService for SystemMessageDispatcherImpl {
                                 bot_id: recipient.clone(),
                             },
                             transport_owner,
+                            provider_bypass_headers: cmd.cmd.provider_bypass_headers.clone(),
                             deadline_ms,
                         };
                         if let Err(error) = run_context.register_active_run(context.clone()).await {

@@ -57,6 +57,10 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
         downstream_session_key: Some(format!("{namespace}-wire-session")),
         scope: scope.clone(),
         transport_owner: BotRunTransportOwner::WebSocket,
+        provider_bypass_headers: vec![(
+            "x-sandbox-bypass".to_string(),
+            format!("{namespace}-route"),
+        )],
         deadline_ms: u64::MAX,
     })
     .await
@@ -68,6 +72,13 @@ pub async fn bot_run_context_port_contract_tests<T: BotRunContextPort + ?Sized>(
         .expect("list active runs");
     assert_eq!(active.len(), 1, "scope contains exactly the registered run");
     assert_eq!(active[0].canonical_run_id, canonical_run_id);
+    assert_eq!(
+        active[0].provider_bypass_headers,
+        vec![(
+            "x-sandbox-bypass".to_string(),
+            format!("{namespace}-route"),
+        )]
+    );
     assert_eq!(
         port.find_active_run(&initial_downstream_run_id)
             .await

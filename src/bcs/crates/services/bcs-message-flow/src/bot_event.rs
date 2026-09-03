@@ -794,6 +794,7 @@ async fn relay_final_chat_event(
             &target.bot_uuid,
             &cmd.group_id,
             cmd.bcs_session_id.as_deref(),
+            &[],
         )
         .await?;
         let delivery = flow
@@ -979,6 +980,7 @@ async fn handle_task_bot_event(
         &entry.driver_bot,
         &entry.group_id,
         entry.session_id.as_deref(),
+        &[],
     )
     .await?;
     let delivery = flow

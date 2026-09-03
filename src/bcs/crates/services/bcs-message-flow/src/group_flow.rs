@@ -220,6 +220,7 @@ impl BcsMessageFlow {
         bot_id: &str,
         group_id: &str,
         bcs_session_id: Option<&str>,
+        provider_bypass_headers: &[(String, String)],
     ) -> ServiceResult<()> {
         if delivery_type != DeliveryType::Send {
             return Ok(());
@@ -237,16 +238,21 @@ impl BcsMessageFlow {
                     terminal: false,
                 })
                 .await;
-            let transport_owner = match delivery_target {
-                BotDeliveryTarget::WebSocket { .. } => BotRunTransportOwner::WebSocket,
+            let (transport_owner, provider_bypass_headers) = match delivery_target {
+                BotDeliveryTarget::WebSocket { .. } => {
+                    (BotRunTransportOwner::WebSocket, Vec::new())
+                }
                 BotDeliveryTarget::HttpProvider {
                     provider_id,
                     provider_bot_ref,
                     ..
-                } => BotRunTransportOwner::HttpProvider {
-                    provider_id: provider_id.clone(),
-                    provider_bot_ref: provider_bot_ref.clone(),
-                },
+                } => (
+                    BotRunTransportOwner::HttpProvider {
+                        provider_id: provider_id.clone(),
+                        provider_bot_ref: provider_bot_ref.clone(),
+                    },
+                    provider_bypass_headers.to_vec(),
+                ),
             };
             run_context
                 .register_active_run(ActiveBotRunContext {
@@ -259,6 +265,7 @@ impl BcsMessageFlow {
                         bot_id: bot_id.to_string(),
                     },
                     transport_owner,
+                    provider_bypass_headers,
                     deadline_ms,
                 })
                 .await?;
@@ -1013,6 +1020,7 @@ pub async fn handle_web_send(
             &target_bot_id,
             &cmd.group_id,
             cmd.session_id.as_deref(),
+            &cmd.provider_bypass_headers,
         )
         .await?;
         let delivery = flow
@@ -1511,6 +1519,7 @@ pub async fn handle_persistent_group_send(
             &target.bot_uuid,
             &cmd.group_id,
             None,
+            &[],
         )
         .await?;
         let result = flow
@@ -1981,6 +1990,7 @@ pub async fn handle_group_callback(
             &target_bot_id,
             &cmd.group_id,
             None,
+            &[],
         )
         .await?;
         let delivery = flow
@@ -2096,6 +2106,7 @@ pub async fn handle_chat_abort(
                     .clone()
                     .unwrap_or(scope.session_id),
                 run_id: Some(context.downstream_run_id.clone()),
+                provider_bypass_headers: Vec::new(),
                 timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
             };
             (context, delivery.abort(command).await)
@@ -2140,6 +2151,19 @@ pub async fn handle_chat_abort(
     }
 
     if !provider_runs.is_empty() {
+        // Empty snapshots remain valid for runs created before routing headers
+        // were persisted. Any non-empty snapshots must agree for one scoped
+        // Provider abort request to have an unambiguous route.
+        let mut header_sets = provider_runs.iter().filter_map(|context| {
+            if context.provider_bypass_headers.is_empty() {
+                return None;
+            }
+            let mut headers = context.provider_bypass_headers.clone();
+            headers.sort();
+            Some(headers)
+        });
+        let provider_bypass_headers = header_sets.next().unwrap_or_default();
+        let provider_headers_match = header_sets.all(|headers| headers == provider_bypass_headers);
         let expected_by_downstream: HashMap<String, ActiveBotRunContext> = provider_runs
             .iter()
             .cloned()
@@ -2150,8 +2174,12 @@ pub async fn handle_chat_abort(
             .map(|context| context.transport_owner.clone())
             .collect();
         let current_target = flow.registry.resolve_delivery_target(&cmd.bot_id).await;
-        let delivery = match (owners.len(), current_target) {
-            (1, Ok(target))
+        let delivery = match (provider_headers_match, owners.len(), current_target) {
+            (false, _, _) => Err(ServiceError::InvalidOperation {
+                message: "active Provider runs have conflicting routing headers".to_string(),
+                request_id: cmd.run_id.clone(),
+            }),
+            (true, 1, Ok(target))
                 if provider_owner_matches_target(
                     owners.iter().next().expect("one owner"),
                     &target,
@@ -2164,19 +2192,20 @@ pub async fn handle_chat_abort(
                         group_id: cmd.group_id.clone(),
                         session_id: cmd.session_id.clone(),
                         run_id: None,
+                        provider_bypass_headers,
                         timeout_ms: ABORT_DELIVERY_TIMEOUT_MS,
                     })
                     .await
             }
-            (1, Ok(_)) => Err(ServiceError::InvalidOperation {
+            (true, 1, Ok(_)) => Err(ServiceError::InvalidOperation {
                 message: "Provider transport ownership changed after run creation".to_string(),
                 request_id: cmd.run_id.clone(),
             }),
-            (_, Ok(_)) => Err(ServiceError::InvalidOperation {
+            (true, _, Ok(_)) => Err(ServiceError::InvalidOperation {
                 message: "active Provider runs have conflicting transport ownership".to_string(),
                 request_id: cmd.run_id.clone(),
             }),
-            (_, Err(error)) => Err(error),
+            (true, _, Err(error)) => Err(error),
         };
         match delivery {
             Ok(result) => {

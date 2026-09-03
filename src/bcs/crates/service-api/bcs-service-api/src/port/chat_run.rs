@@ -30,7 +30,8 @@ pub enum BotRunTransportOwner {
 }
 
 /// Abort-routing snapshot captured before `chat.send` delivery begins.
-/// Secrets and callback URLs deliberately remain owned by delivery adapters.
+/// Provider credentials and callback URLs deliberately remain owned by
+/// delivery adapters; only pre-authorized routing headers are retained.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ActiveBotRunContext {
     pub canonical_run_id: String,
@@ -41,6 +42,10 @@ pub struct ActiveBotRunContext {
     pub downstream_session_key: Option<String>,
     pub scope: BotRunScope,
     pub transport_owner: BotRunTransportOwner,
+    /// Opaque inbound HTTP headers explicitly allowlisted by BCS configuration
+    /// and captured from the original Provider `chat.send`.
+    #[serde(default)]
+    pub provider_bypass_headers: Vec<(String, String)>,
     pub deadline_ms: u64,
 }
 

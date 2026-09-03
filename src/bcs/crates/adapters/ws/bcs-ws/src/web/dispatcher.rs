@@ -219,7 +219,9 @@ async fn handle_connect(
         WebWsDispatchError::InvalidFrameFormat(format!("Invalid connect params: {}", e))
     })?;
 
-    if connection_state.phase == WebConnectionPhase::Connected {
+    if connection_state.phase == WebConnectionPhase::Connected
+        && matches!(auth, WorkbenchConnectionAuth::SessionBound { .. })
+    {
         send_error(
             tx,
             &req.id,

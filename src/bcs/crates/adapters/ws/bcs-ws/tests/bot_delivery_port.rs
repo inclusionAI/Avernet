@@ -117,6 +117,7 @@ async fn bot_registry_abort_waits_for_matching_response_and_validates_exact_run(
                 group_id: "group-1".to_string(),
                 session_id: "session-1".to_string(),
                 run_id: Some("plugin-run-1".to_string()),
+                provider_bypass_headers: Vec::new(),
                 timeout_ms: 1_000,
             })
             .await
@@ -177,6 +178,7 @@ async fn bot_registry_abort_maps_legacy_unknown_method_to_capability_error() {
                 group_id: "group-1".to_string(),
                 session_id: "session-1".to_string(),
                 run_id: Some("plugin-run-1".to_string()),
+                provider_bypass_headers: Vec::new(),
                 timeout_ms: 1_000,
             })
             .await

@@ -49,6 +49,9 @@ pub struct BotAbortDeliveryCommand {
     /// Exact downstream run id for Bot WebSocket/plugin delivery. `None`
     /// denotes one Provider Bot/Session scope request.
     pub run_id: Option<String>,
+    /// Routing headers captured from the original Provider `chat.send`.
+    /// Non-Provider transports ignore this field.
+    pub provider_bypass_headers: Vec<(String, String)>,
     pub timeout_ms: u64,
 }
 

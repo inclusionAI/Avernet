@@ -1813,6 +1813,60 @@ async fn install_provider_driver_group(support: &support::FlowTestSupport, creat
 }
 
 #[tokio::test]
+async fn provider_send_context_captures_bypass_headers_for_abort_routing() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    install_provider_driver_group(&support, "1").await;
+    let run_context = Arc::new(MemoryBotRunContextStore::new());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_bot_run_context(run_context.clone());
+
+    let outcome = flow
+        .handle_web_send(WebSendCommand {
+            caller: CallerContext::Human(HumanActor {
+                actor_id: "human_1".to_string(),
+                staff_no: "1".to_string(),
+            }),
+            group_id: "group-provider".to_string(),
+            session_id: None,
+            from_actor_id: "human_1".to_string(),
+            from_name: Some("Human One".to_string()),
+            message: "hello".to_string(),
+            mentions: vec![],
+            attachments: None,
+            thinking: None,
+            idempotency_key: None,
+            source_im_message_id: None,
+            channel_sender_identity: None,
+            sender_conn_id: None,
+            provider_bypass_headers: vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )],
+        })
+        .await
+        .unwrap();
+
+    let context = run_context
+        .find_active_run(&outcome.primary_run_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        context.provider_bypass_headers,
+        vec![(
+            "x-sandbox-bypass".to_string(),
+            "sandbox-route-1".to_string(),
+        )]
+    );
+}
+
+#[tokio::test]
 async fn web_send_explicit_mentions_do_not_inject_manager_worker_workers() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
@@ -3634,6 +3688,7 @@ async fn chat_abort_reuses_the_session_key_from_the_original_plugin_delivery() {
                 bot_id: "bot-driver".to_string(),
             },
             transport_owner: BotRunTransportOwner::WebSocket,
+            provider_bypass_headers: Vec::new(),
             deadline_ms: u64::MAX,
         })
         .await
@@ -3874,6 +3929,18 @@ async fn chat_abort_provider_sends_one_scope_request_for_parallel_runs() {
             },
         )
         .await;
+        if canonical == "bcs-run-2" {
+            let mut context = run_context
+                .find_active_run(canonical)
+                .await
+                .unwrap()
+                .unwrap();
+            context.provider_bypass_headers = vec![(
+                "x-sandbox-bypass".to_string(),
+                "sandbox-route-1".to_string(),
+            )];
+            run_context.register_active_run(context).await.unwrap();
+        }
     }
     let flow = BcsMessageFlow::new(
         support.group.clone(),
@@ -3904,6 +3971,13 @@ async fn chat_abort_provider_sends_one_scope_request_for_parallel_runs() {
     assert_eq!(aborts.len(), 1);
     assert!(aborts[0].run_id.is_none());
     assert_eq!(aborts[0].session_id, "session-provider");
+    assert_eq!(
+        aborts[0].provider_bypass_headers,
+        vec![(
+            "x-sandbox-bypass".to_string(),
+            "sandbox-route-1".to_string(),
+        )]
+    );
     assert!(run_context.get_context("bcs-run-1").await.unwrap().terminal);
     assert!(run_context.get_context("bcs-run-2").await.unwrap().terminal);
 }
@@ -4016,6 +4090,7 @@ async fn register_active_run_with_downstream(
                 bot_id: bot_id.to_string(),
             },
             transport_owner,
+            provider_bypass_headers: Vec::new(),
             deadline_ms: u64::MAX,
         })
         .await

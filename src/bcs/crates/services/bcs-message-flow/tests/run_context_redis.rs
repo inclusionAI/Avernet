@@ -144,6 +144,7 @@ async fn active_scope_index_is_visible_across_instances_and_cleans_aliases() {
             downstream_session_key: Some("wire-session-1".to_string()),
             scope: scope.clone(),
             transport_owner: BotRunTransportOwner::WebSocket,
+            provider_bypass_headers: Vec::new(),
             deadline_ms: u64::MAX,
         })
         .await
