@@ -296,6 +296,23 @@ for _method, _path, _input, _status, _body in _HAPPY_CASES:
     )(lambda: None)
 
 
+endpoint_test(
+    method="GET",
+    path=_BASE_PATH,
+    scenario="legacy_preview_action",
+    input=CaseInput(
+        path_params=_PATH_PARAMS,
+        query_params=_query(path=_EXISTING_PATH, action="preview"),
+        headers=_HEADERS,
+    ),
+    seed=_seed_happy_services,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"data": {"path": _EXISTING_PATH, "content": "hello world"}},
+    ),
+)(lambda: None)
+
+
 # The refusal every user-scoped operation on this surface owes: ``user_id``
 # names someone other than the caller the principal authenticated.
 # ``require_user_id`` raises ahead of the handler, so no workspace is seeded —

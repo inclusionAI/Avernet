@@ -46,7 +46,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
 from agentclaw.community.api.resource_service import ResourceServiceFactoryProtocol
@@ -263,7 +263,7 @@ async def list_resources(
     ] = None,
     bot_repo: BotRepository = Injected(BotRepository),
     file_svc: ResourceFileService = Injected(ResourceFileService),
-) -> Envelope[Page[FileEntry]]:
+) -> Envelope[Page[FileEntry]] | Response:
     """List a directory of the bot's workspace.
 
     Entries come from the **workspace**, never from records. That is what makes
@@ -280,6 +280,20 @@ async def list_resources(
     response, not the work. Requesting a later page costs exactly what the
     first one costs.
     """
+    # A deployed pre-contract client still sends ``action=preview`` to this
+    # list URL. Keep that request shape as an adapter-only compatibility shim:
+    # it is not part of the public schema, and must never reach ``list_dir`` on
+    # a file path. Returning a concrete response deliberately leaves the
+    # documented list response model intact.
+    if request.query_params.get("action") == "preview":
+        preview = envelope(
+            await _preview_resource(
+                file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+            ),
+            request,
+        )
+        return JSONResponse(content=preview.model_dump(mode="json"))
+
     safe = _safe_path(path)
     listed = await _list_dir_or_empty(
         file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=safe
@@ -586,6 +600,31 @@ async def _read_file_or_404(
     return content
 
 
+async def _preview_resource(
+    file_svc: ResourceFileService,
+    *,
+    bot_id: str,
+    owner_id: str,
+    bot_repo: BotRepository,
+    path: str,
+) -> Preview:
+    """Build one text preview for either public preview route."""
+    content = await _read_file_or_404(
+        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
+    )
+    if len(content) > _PREVIEW_MAX_BYTES:
+        raise FileTooLargeError(
+            f"File too large for preview (max {_PREVIEW_MAX_BYTES} bytes)"
+        )
+    return Preview(
+        path=_safe_path(path),
+        content_type="application/octet-stream",
+        # ``replace`` rather than raising: a preview of a mostly-text file
+        # with a stray byte is useful; a 500 is not.
+        content=content.decode("utf-8", errors="replace"),
+    )
+
+
 @router.get(
     "/download",
     responses={
@@ -696,20 +735,13 @@ async def preview_file(
     Capped at 1 MB (legacy parity) — over that is a 413, not a truncated preview,
     so a caller is never handed a prefix it might mistake for the whole file.
     """
-    content = await _read_file_or_404(
-        file_svc, bot_id=bot_id, owner_id=owner_id, bot_repo=bot_repo, path=path
-    )
-    if len(content) > _PREVIEW_MAX_BYTES:
-        raise FileTooLargeError(
-            f"File too large for preview (max {_PREVIEW_MAX_BYTES} bytes)"
-        )
     return envelope(
-        Preview(
-            path=_safe_path(path),
-            content_type="application/octet-stream",
-            # ``replace`` rather than raising: a preview of a mostly-text file
-            # with a stray byte is useful; a 500 is not.
-            content=content.decode("utf-8", errors="replace"),
+        await _preview_resource(
+            file_svc,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            bot_repo=bot_repo,
+            path=path,
         ),
         request,
     )

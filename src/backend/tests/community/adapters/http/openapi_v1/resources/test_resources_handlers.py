@@ -64,7 +64,7 @@ def _request_scope() -> dict:
     }
 
 
-def _request_without_trace() -> Request:
+def _request_without_trace(query_string: bytes = b"") -> Request:
     """A request whose tracer middleware did not run — ``state.trace_id`` unset.
 
     ``responses._trace_id`` reads ``request.state.trace_id`` and falls back to
@@ -73,7 +73,9 @@ def _request_without_trace() -> Request:
     ``fastapi.Request`` (not a ``SimpleNamespace``) so ``@envelope_errors``'
     ``_find_request`` recognises it on the error path.
     """
-    return Request(_request_scope())
+    scope = _request_scope()
+    scope["query_string"] = query_string
+    return Request(scope)
 
 
 def _request_with_trace(trace_id: str) -> Request:
@@ -354,6 +356,33 @@ async def test_list_returns_workspace_entries():
     assert by_name["docs"].type == OpenapiType.FOLDER
     # A folder has no size to report, whatever the listing carried.
     assert by_name["docs"].size is None
+
+
+@pytest.mark.asyncio
+async def test_legacy_list_preview_action_reads_the_file_instead_of_listing_it():
+    """``action=preview`` is a file operation, not a list on a file path."""
+
+    class _PreviewOnlyFileService(_StubReadFileService):
+        async def list_dir(self, **_kw) -> List[dict]:
+            raise AssertionError("preview must not call list_dir")
+
+    file_svc = _PreviewOnlyFileService({"test.txt": b"hello"})
+    response = await list_resources(
+        page=PageParams(),
+        owner_id="u1",
+        bot_id="bot-x",
+        path="test.txt",
+        type=None,
+        bot_repo=_StubBotRepo(),
+        file_svc=file_svc,
+        request=_request_without_trace(b"action=preview"),
+    )
+
+    assert isinstance(response, Response)
+    body = json.loads(response.body)
+    assert body["data"]["path"] == "test.txt"
+    assert body["data"]["content"] == "hello"
+    assert file_svc.read_paths == ["test.txt"]
 
 
 @pytest.mark.asyncio
