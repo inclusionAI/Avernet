@@ -8,15 +8,16 @@ A table, an OSS tool store, a service, and per-family delivery.
 `ac_bot_cli_tool` records what a bot has; the OSS store holds the bytes.
 `CliToolService` is the only code that fetches, verifies, stores, records and
 delivers — the HTTP routes and the manifest materialiser both call it. ARCA
-installs into the live container by name (device write plus `chmod`); on teclaw
-the composed artifact's `cli_tools` refs point at the OSS objects and *are* the
-delivery. Promotion copies those objects to the new stage prefix.
+installs into the live container with one call to the engine's `install`
+endpoint, which owns placement and the executable bit; on teclaw the composed
+artifact's `cli_tools` refs point at the OSS objects and *are* the delivery. Promotion copies those objects to the new stage prefix.
 
 > **Revision 6** (PR #1870 review, fourth round). Rev 5 produced the artifact
 > refs by gathering from the engine at promotion time, which left a live CLI
 > update or a manifest apply on teclaw with nothing to reference. The platform
 > now stores the bytes at install time, which also removes the protocol's `get`,
-> turns promotion into a copy, and settles the phase per family.
+> turns promotion into a copy, and settles the phase per family. **Rev 7**: the
+> platform no longer chmods — the engine's `install` carries that semantics.
 
 ## Affected Components
 
@@ -193,37 +194,35 @@ class CliToolDeliveryPort(Protocol):
     ) -> None: ...
 ```
 
-### ARCA delivery — write, then chmod
+### ARCA delivery — one call to the engine's install endpoint
 
 ```python
 # core/bot_config_manifest/cli_tools/arca_port.py (new)
 class ArcaCliToolPort(CliToolDeliveryPort):
-    """Device write through the existing file chain, then the executable bit.
+    """Calls the ARCA engine's CLI endpoints. Nothing else.
 
-    The chmod uses ``execute_baas_shell_command`` — the channel
-    ``baas_container_init`` already uses for bootstrap, engine install and
-    service start. A non-zero exit raises with the command's stderr, so a file
-    the model cannot run is never recorded as installed.
+    ``install`` carries the semantics — "make this a CLI tool for this bot" —
+    so placement, the executable bit and exposing it to the agent are all the
+    engine's, done inside that one call. The platform does not write the file
+    itself and does not chmod it: there is no device write, no shell command
+    and therefore no shell quoting to get right.
 
-    The directory is this module's own constant and appears in no signature,
-    no table column and no API response (spec D-3). Proposed value:
-    ``/home/admin/.openclaw/cli``.
+    The directory never appears here either; it is the engine's. Proposed value
+    on the engine side: ``/home/admin/.openclaw/cli``.
     """
+
+    async def install(self, ctx, *, name: str, data: bytes) -> None:
+        """POST the bytes under ``name``. A non-2xx raises
+        ``CliToolPlacementError`` carrying the engine's error, so a tool the
+        engine could not install is never recorded."""
 ```
 
-```python
-# the chmod, sketched — quoting matters because `name` is user-supplied
-result = execute_baas_shell_command(
-    baas_service=self._baas, device=device,
-    shell_cmd=f"chmod 0755 {shlex.quote(self._abs(name))}",
-    timeout_seconds=30,
-)
-if result.exit_code != 0:
-    raise CliToolPlacementError(f"chmod failed for {name!r}: {result.stderr}")
-```
-
-`name` is validated by W1 (no path separators, unique per bot) *and* quoted
-here: the schema rule is the contract, the quoting is the defence.
+Rev 6 had the platform doing a device write followed by a
+`chmod` through `execute_baas_shell_command`. Withdrawn in review: once the
+engine has a dedicated `install`, the executable bit is part of what install
+*means*, and doing it from the platform would be a second implementation of the
+engine's own job — reached through a general shell channel, with a
+user-supplied name to quote.
 
 ### teclaw delivery — the artifact is the delivery
 
@@ -352,7 +351,7 @@ resources listing — without any code existing to make it true.
 
 ## Dependencies
 
-None. `hashlib` for the md5, `shlex` for the chmod quoting.
+None. `hashlib` for the md5.
 
 ## Risks & Mitigations
 
@@ -364,9 +363,11 @@ None. `hashlib` for the md5, `shlex` for the chmod quoting.
   **Mitigation:** the default-skillset skill (spec D-8, out of scope here) is
   the v1 answer, and the cost is written into the user manual rather than left
   to be discovered. Schema §3.7's `PATH` promise is corrected in the same pass.
-- **Risk:** `name` reaches a shell.
-  **Mitigation:** W1 forbids path separators and enforces per-bot uniqueness,
-  and the command is `shlex.quote`d regardless. A test passes a hostile name.
+- **Risk:** a tool is recorded as installed when the engine could not install it.
+  **Mitigation:** a non-2xx from `install` raises, and the row is written only
+  after the call returns; a test covers the failure path. (The platform no
+  longer runs a shell command at all, so the class of quoting bugs a
+  user-supplied `name` used to invite is gone with it.)
 - **Risk:** the OSS copy and the container drift apart — the store has a tool
   the container lost, or vice versa.
   **Mitigation:** `drift()` compares the table against the family's `list`, and
@@ -439,8 +440,8 @@ def test_archive_selects_only_the_declared_subpath(): ...
 def test_subpath_must_be_a_regular_file_inside_the_tree_after_symlinks(): ...
 def test_non_amd64_elf_fails_with_the_architecture_found(): ...
 def test_nothing_is_recorded_when_placement_fails(): ...
-def test_chmod_failure_fails_the_entry_with_stderr(): ...
-def test_hostile_tool_name_is_quoted_into_the_chmod(): ...
+def test_engine_install_failure_fails_the_entry_with_the_engine_error(): ...
+def test_platform_runs_no_shell_command_when_installing(): ...
 def test_replace_all_removes_tools_absent_from_the_declaration(): ...
 def test_replace_all_computes_removals_from_the_table_not_the_engine(): ...
 def test_no_delivery_port_signature_takes_a_path(): ...

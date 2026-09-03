@@ -3,7 +3,11 @@
 Work item W9 of `docs/bot-config-manifest/work-items.zh-CN.md` §5, issue #1477.
 Plan: `plan.md` in this directory.
 
-> **Revision 6 (2026-09-03).** The platform **stores every tool's bytes in OSS
+> **Revision 7 (2026-09-03).** The engine's `install` owns the executable bit —
+> the platform issues no `chmod` and runs no shell command. Rev 6's summary
+> follows, unchanged otherwise.
+>
+> **Revision 6.** The platform **stores every tool's bytes in OSS
 > at install time**. Without that copy there is nothing for a teclaw artifact to
 > reference on a live update or a manifest apply — the gap rev 5 missed. That
 > makes the artifact teclaw's delivery (no separate engine upload), makes
@@ -60,15 +64,19 @@ longer there.
    **stage-scoped OSS key**, and return `{store, path}` refs to embed in the
    composed `BotConfigArtifact` for the new stage". It sweeps two namespaces
    today, `workspace` and `identity`, through `DeviceFileSystem`.
-5. **The platform already runs commands in live ARCA containers, as routine
-   business.** `BaasService.exec_command_on_bot` drives
-   `baas_container_init.py` (bootstrap, engine install, supervisor setup,
-   service start, watchdog) and `baas_codefuse_writer.py`, through
-   `execute_baas_shell_command(...)` which returns a `CommandResult` with an
-   exit code and stderr. The executable bit costs no new channel.
-6. **`write_file` cannot set a mode** on any transport: the BaaS device uploads
-   through `POST /api/file/upload` with a `target_path` and no mode field, and
-   `DeviceFileSystem` exposes no `chmod`.
+5. **The executable bit belongs to the engine's `install`, not to the
+   platform.** Once ARCA engines expose a dedicated CLI `install` endpoint, that
+   call carries the semantics "make this a CLI tool for this bot" — placement,
+   the executable bit and exposure to the agent are all inside it. The platform
+   issuing a `chmod` of its own would be a second implementation of the engine's
+   job, reached through a general shell channel with a user-supplied name to
+   quote. (`BaasService.exec_command_on_bot` exists and is used for container
+   bootstrap; this feature does not need it.)
+6. **The generic file-write path could not have done this anyway**: the BaaS
+   device uploads through `POST /api/file/upload` with a `target_path` and no
+   mode field, and `DeviceFileSystem` exposes no `chmod`. A CLI tool needs an
+   endpoint that knows it is installing a tool — which is what the engine's
+   `install` is.
 7. **The table pattern is established.** `ac_bot_startup_script` is the model:
    ORM plus a pydantic record, `env` column, tenant guard, `UniqueConstraint`,
    registered by a side-effect import in `core/schema.py`, protocol and
@@ -112,9 +120,10 @@ owns the filesystem.**
   `version`, the OSS key, size and audit stamps. It answers "what does this bot
   have", and it makes replacement and removal decidable.
 - **Delivery differs by family, and only there.**
-  - **ARCA** — the tool is installed into the live container by name: the
-    existing device file write, then `chmod` through the existing exec channel.
-    Needs the container, so `ON_CONTAINER`.
+  - **ARCA** — the tool is installed into the live container by name, in one
+    call to the engine's `install` endpoint, which owns placement, the
+    executable bit and exposure to the agent. Needs the container, so
+    `ON_CONTAINER`.
   - **teclaw** — the artifact *is* the delivery. The platform updates the row,
     writes the bytes to OSS, composes the `cli_tools` refs and delivers, exactly
     as `mcp` is composed and delivered. No separate engine upload call.
@@ -242,9 +251,11 @@ re-fetching a source URL that may have rotated or gone away, which is worth it
 on its own.
 
 **D-5 — Delivery is per family, and that is the only thing that differs.** ARCA
-installs by name into the live container; teclaw's artifact *is* the delivery, so
-there is no separate engine upload. The engine protocol needs no `get`, because
-the platform never reads bytes back out of a container.
+installs by name into the live container through the engine's `install`
+endpoint, which owns placement, the executable bit and exposure — the platform
+issues no `chmod` and runs no shell command. teclaw's artifact *is* the
+delivery, so there is no separate engine upload. The protocol needs no `get`,
+because the platform never reads bytes back out of a container.
 
 **D-6 — `cli_tools` is `ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw**,
 under either switch position, because a teclaw creation has no phase B and its
@@ -289,8 +300,8 @@ than reopen "do we trust an archive's mode bits", v1 states the limit.
 - The `ac_bot_cli_tool` table, its record, protocol and implementation.
 - `CliToolService`: install, delete, list, `replace_all`, drift.
 - The OSS tool store: the bytes the platform keeps per bot.
-- The ARCA delivery: name-addressed install / delete / list / batch, file write
-  plus `chmod` through the existing helper.
+- The ARCA delivery: name-addressed install / delete / list / batch, each one
+  call to the engine.
 - The teclaw delivery: `cli_tools` refs on the composed artifact, and promotion
   as a stage-scoped **copy** of the OSS objects.
 - The `/cli-tools` management API and its `api/` contract.
@@ -332,3 +343,4 @@ which no platform code depends on:
 | **rev 4** | Platform-managed on the owner's decision: metadata table, one core service every caller delegates to, engine CRUD plus batch, a management API, no projection. |
 | **rev 5** | The engine owns the directory and the protocol is **name-addressed** (D-3), so the `tools/` namespace and every isolation mechanism are dropped (D-5). `cli_tools` is always platform-managed, independent of the teclaw switch, like `mcp` (D-6). The teclaw arm gains the **promotion gather** — GET from the engine, stage-scoped OSS, artifact refs — which is why the protocol needs `get`. `PATH` is replaced by a default-skillset skill for v1, with the cost and the §3.7 correction written down (D-8). |
 | **rev 6** | **The platform stores the bytes in OSS at install time** (D-4) — rev 5 had no answer for what a teclaw artifact references on a live update or a manifest apply. The artifact becomes teclaw's delivery with no separate engine upload (D-5); promotion becomes a stage-scoped copy rather than a download, so the protocol's `get` is no longer needed; and the phase settles as ARCA `ON_CONTAINER` / teclaw `PRE_CONTAINER` under either switch position (D-6), correcting rev 5's claim that no category-specific code was required. |
+| **rev 7** | The engine's `install` owns the executable bit (D-5). Rev 6 had the platform do a device write then a `chmod` through the general shell channel; withdrawn in review — once `install` carries the semantics, a platform-side `chmod` is a second implementation of the engine's own job, and it took a user-supplied name through a shell. No `chmod`, no shell command, no quoting. |

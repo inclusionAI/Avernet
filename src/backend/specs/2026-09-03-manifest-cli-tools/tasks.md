@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 6.
+Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
 
 ## Task 1: Add the `ac_bot_cli_tool` table, record and repository
 - **Goal:** Give the platform its own record of what a bot has installed.
@@ -36,10 +36,10 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 6.
   - [ ] `CliToolDeliveryPort` declares `install` / `delete` / `list` / `replace_all`, and **every signature takes a name, never a path** — a test asserts it.
   - [ ] There is **no `get`** — the platform holds the bytes, so nothing reads them back out of a container; a test asserts its absence.
   - [ ] `replace_all` has a default implementation that loops.
-  - [ ] `ArcaCliToolPort.install` writes through the existing device file chain, then `chmod 0755` via `execute_baas_shell_command`.
-  - [ ] A non-zero `chmod` exit **raises** with the command's stderr, so the tool is never recorded as installed.
-  - [ ] The directory is a constant private to the ARCA port — proposed `/home/admin/.openclaw/cli` — appearing in no signature, table column or API response.
-  - [ ] The tool name is `shlex.quote`d into the command, and a test passes a hostile name.
+  - [ ] `ArcaCliToolPort.install` is **one call to the engine's install endpoint**, which owns placement, the executable bit and exposure to the agent.
+  - [ ] A non-2xx **raises** with the engine's error, so a tool the engine could not install is never recorded.
+  - [ ] **The platform issues no `chmod` and runs no shell command** — a test asserts the port invokes no shell channel.
+  - [ ] The tools directory appears nowhere in platform code; it is the engine's (proposed `/home/admin/.openclaw/cli`).
 - **Depends on:** —
 
 ## Task 4: Build the teclaw delivery port
@@ -71,7 +71,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 6.
 - **Files:** `tests/community/core/bot_config_manifest/cli_tools/test_service.py` (new)
 - **Done when:**
   - [ ] The eleven cases named in `plan.md`'s service test strategy pass.
-  - [ ] `nothing_is_recorded_when_placement_fails` and `chmod_failure_fails_the_entry_with_stderr` both hold.
+  - [ ] `nothing_is_recorded_when_placement_fails` and `engine_install_failure_fails_the_entry_with_the_engine_error` both hold.
   - [ ] `replace_all_computes_removals_from_the_table_not_the_engine` holds.
 - **Depends on:** Task 5
 
@@ -194,7 +194,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 6.
 - **Group A — The record:** Task 1
   - Theme: The platform gets its own table for what a bot has installed. Nothing user-reachable yet.
 - **Group B — Bytes and delivery:** Tasks 2, 3, 4
-  - Theme: The platform's own copy of the bytes, plus both delivery ports behind one name-addressed protocol — device write plus `chmod` on ARCA, the artifact itself on teclaw.
+  - Theme: The platform's own copy of the bytes, plus both delivery ports behind one name-addressed protocol — one engine `install` call on ARCA, the artifact itself on teclaw.
 - **Group C — The service:** Tasks 5, 6
   - Theme: The one component that fetches, verifies, records, delegates and replaces, with its failure modes pinned.
 - **Group D — The API:** Tasks 7, 8, 9
