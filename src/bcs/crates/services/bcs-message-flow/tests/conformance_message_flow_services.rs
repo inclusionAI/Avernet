@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use bcs_message_flow::a2a_chat::ChatRunStore;
-use bcs_message_flow::{A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow};
+use bcs_message_flow::{
+    A2aChat, BcsGroupFusion, BcsGroupMessageHistory, BcsMessageFlow, MemoryBotRunContextStore,
+};
 use bcs_test_support::{
     NoopBotDeliveryPort, NoopBotRegistryCoreService, NoopFriendCoreService,
     NoopFrontendDeliveryPort, NoopFusionCoreService, NoopGroupCoreService,
@@ -56,4 +58,14 @@ async fn group_message_history_passes_application_contract() {
 
     bcs_test_support::contract::application::group_message_history_service_contract_tests(&svc)
         .await;
+}
+
+#[tokio::test]
+async fn memory_bot_run_context_passes_port_contract() {
+    let store = MemoryBotRunContextStore::new();
+    bcs_test_support::contract::port::bot_run_context_port_contract_tests(
+        &store,
+        "memory-contract",
+    )
+    .await;
 }

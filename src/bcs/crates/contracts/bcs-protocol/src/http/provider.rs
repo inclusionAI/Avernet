@@ -289,6 +289,19 @@ pub struct ProviderAckResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderAbortResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub aborted: bool,
+    #[serde(default, alias = "run_ids")]
+    pub aborted_run_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderHistoryResponse {
     pub ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -205,6 +205,16 @@ export interface ChatSendParams {
   attachments?: Attachment[];
 }
 
+export interface ChatAbortParams {
+  session_key: string;
+  run_id: string;
+}
+
+export interface ChatAbortResult {
+  aborted: boolean;
+  aborted_run_ids: string[];
+}
+
 /** Parameters for chat.inject - incoming message that bot should observe silently.
  *
  * BCS sends chat.inject to bots that should observe but NOT respond.

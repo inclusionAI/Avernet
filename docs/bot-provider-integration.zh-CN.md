@@ -188,6 +188,7 @@ Provider 无法接受下行请求时，应返回对应的 HTTP 4xx / 5xx，并�
 | `provider_id_mismatch` | 403 | false | Provider ID 不匹配。 |
 | `bot_not_found` | 404 | false | Bot 未注册或无法路由。 |
 | `conflict` | 409 | false | 幂等键相同但请求体不同。 |
+| `run_terminated` | 410 | false | `chat.abort` 对应 run 已终态；BCS 将其视为幂等无操作。 |
 | `rate_limited` | 429 | true | Provider 主动反压。 |
 | `unsupported_method` | 501 | false | 不支持的 `method`。 |
 | `unavailable` | 503 | true | Provider 暂不可用。 |
@@ -205,6 +206,21 @@ BCS 下行请求可能重试，Provider 必须避免重复执行同一任务。
 | `/bot/events` | `X-BCN-Event-Id`，Provider 重试同一事件时应保持不变 |
 
 Provider 需要按 `(provider_bot_ref, session_id)` 维护会话上下文。`chat.inject` 必须写入上下文，但不能触发 bot 推理。
+
+### `chat.abort` 响应
+
+BCS 对一个 `(provider_bot_ref, session_id)` 只发送一次 `chat.abort`，不会接收或
+透传客户端 `env`。Provider 结合服务端环境，原子终止状态为 `RUNNING` 的 run；
+`PENDING` 保持不变。
+
+| Session 状态 | HTTP | Body |
+| --- | --- | --- |
+| 存在 RUNNING run | 200 | `{"ok": true, "aborted": true, "aborted_run_ids": ["..."]}` |
+| 不存在 RUNNING run（包括仅有 PENDING 或无记录） | 200 | `{"ok": true, "aborted": false, "aborted_run_ids": []}` |
+| run 已终态 | 410 | `{"ok": false, "error": {"code": "run_terminated", "message": "...", "retryable": false}}` |
+
+响应中的 ID 必须是本次实际更新的 run ID。BCS 会校验它们属于请求的
+Bot/Session Scope；越权 ID 不会产生 BCS `Aborted` 终态。
 
 ## 接入检查清单
 

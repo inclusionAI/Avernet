@@ -97,7 +97,11 @@ impl ResponseFrame {
     }
 
     /// Create an error response with code and message.
-    pub fn error(id: impl Into<String>, code: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn error(
+        id: impl Into<String>,
+        code: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             frame_type: "res".into(),
             id: id.into(),
@@ -254,7 +258,9 @@ pub struct ProtocolDeprecation {
     pub sunset_date: Option<String>,
 }
 
-fn default_protocol_version() -> u32 { BCS_PROTOCOL_VERSION }
+fn default_protocol_version() -> u32 {
+    BCS_PROTOCOL_VERSION
+}
 
 /// Response for bot.connect request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -536,7 +542,10 @@ impl GroupContext {
                 "inject" => "静默观察，不要主动回复",
                 _ => "遵循 session_context.response_directive",
             };
-            lines.push(format!("- 当前投递: chat.{} ({})", delivery_type, directive));
+            lines.push(format!(
+                "- 当前投递: chat.{} ({})",
+                delivery_type, directive
+            ));
         }
         lines.push(format!("- 发起方(driver): {}", self.originator));
         lines.push(format!("- 消息来自: {}", self.from));
@@ -551,7 +560,9 @@ impl GroupContext {
 
     fn format_recipient_identity(&self) -> Option<String> {
         match (&self.recipient_name, &self.recipient) {
-            (Some(name), Some(recipient)) if name != recipient => Some(format!("{}({})", name, recipient)),
+            (Some(name), Some(recipient)) if name != recipient => {
+                Some(format!("{}({})", name, recipient))
+            }
             (Some(name), _) => Some(name.clone()),
             (None, Some(recipient)) => Some(recipient.clone()),
             (None, None) => None,
@@ -622,6 +633,14 @@ pub struct ChatAbortParams {
     /// Specific run ID to abort (optional, aborts all if not provided).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+}
+
+/// Acknowledgement for a `chat.abort` RequestFrame.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatAbortResult {
+    pub aborted: bool,
+    #[serde(default, alias = "run_ids")]
+    pub aborted_run_ids: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1480,10 +1499,7 @@ mod tests {
     fn build_session_key_legacy_unprefixed_unchanged() {
         // Existing groups have a bare legacy id; must keep producing the exact
         // same `group:<first 8>` as the old truncation did.
-        assert_eq!(
-            build_session_key("legacy-group-alpha"),
-            "group:legacy-g"
-        );
+        assert_eq!(build_session_key("legacy-group-alpha"), "group:legacy-g");
     }
 
     #[test]
@@ -1533,9 +1549,7 @@ mod tests {
     #[test]
     fn build_session_key_namespaced_session_form_ignores_session_suffix() {
         assert_eq!(
-            build_session_key(
-                "bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6:abcdef12"
-            ),
+            build_session_key("bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6:abcdef12"),
             "group:bcs_grp_dingtalk_dm_bc7d52974947474da2f1cdea1c5642b6"
         );
     }
@@ -1549,7 +1563,11 @@ mod tests {
 
     #[test]
     fn test_request_frame_serialization() {
-        let req = RequestFrame::new("req-001", "bot.connect", Some(serde_json::json!({"token": null})));
+        let req = RequestFrame::new(
+            "req-001",
+            "bot.connect",
+            Some(serde_json::json!({"token": null})),
+        );
         let frame = BcsFrame::Request(req);
         let json = serde_json::to_string(&frame).unwrap();
         assert!(json.contains(r#""type":"req""#));
@@ -1581,15 +1599,32 @@ mod tests {
 
     #[test]
     fn test_response_frame_error() {
-        let res = ResponseFrame::err("r1", ErrorShape {
-            code: "bot_not_found".to_string(),
-            message: "Bot not found".to_string(),
-            details: None,
-            retryable: false,
-            retry_after_ms: None,
-        });
+        let res = ResponseFrame::err(
+            "r1",
+            ErrorShape {
+                code: "bot_not_found".to_string(),
+                message: "Bot not found".to_string(),
+                details: None,
+                retryable: false,
+                retry_after_ms: None,
+            },
+        );
         assert!(!res.ok);
         assert!(res.error.is_some());
+    }
+
+    #[test]
+    fn chat_abort_result_accepts_legacy_run_ids_alias() {
+        let result: ChatAbortResult = serde_json::from_value(serde_json::json!({
+            "aborted": true,
+            "run_ids": ["run-1"]
+        }))
+        .unwrap();
+
+        assert_eq!(result.aborted_run_ids, ["run-1"]);
+        let serialized = serde_json::to_value(result).unwrap();
+        assert_eq!(serialized["aborted_run_ids"], serde_json::json!(["run-1"]));
+        assert!(serialized.get("run_ids").is_none());
     }
 
     #[test]
@@ -1619,19 +1654,46 @@ mod tests {
 
     #[test]
     fn test_channel_source_serialization() {
-        assert_eq!(serde_json::to_string(&ChannelSource::WebUi).unwrap(), r#""webui""#);
-        assert_eq!(serde_json::to_string(&ChannelSource::DingTalk).unwrap(), r#""dingtalk""#);
-        assert_eq!(serde_json::to_string(&ChannelSource::Api).unwrap(), r#""api""#);
+        assert_eq!(
+            serde_json::to_string(&ChannelSource::WebUi).unwrap(),
+            r#""webui""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChannelSource::DingTalk).unwrap(),
+            r#""dingtalk""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChannelSource::Api).unwrap(),
+            r#""api""#
+        );
     }
 
     #[test]
     fn test_chat_event_state_serialization() {
-        assert_eq!(serde_json::to_string(&ChatEventState::Delta).unwrap(), r#""delta""#);
-        assert_eq!(serde_json::to_string(&ChatEventState::Final).unwrap(), r#""final""#);
-        assert_eq!(serde_json::to_string(&ChatEventState::Aborted).unwrap(), r#""aborted""#);
-        assert_eq!(serde_json::to_string(&ChatEventState::Error).unwrap(), r#""error""#);
-        assert_eq!(serde_json::to_string(&ChatEventState::ToolCallStart).unwrap(), r#""tool_call_start""#);
-        assert_eq!(serde_json::to_string(&ChatEventState::ToolCallEnd).unwrap(), r#""tool_call_end""#);
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::Delta).unwrap(),
+            r#""delta""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::Final).unwrap(),
+            r#""final""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::Aborted).unwrap(),
+            r#""aborted""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::Error).unwrap(),
+            r#""error""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::ToolCallStart).unwrap(),
+            r#""tool_call_start""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ChatEventState::ToolCallEnd).unwrap(),
+            r#""tool_call_end""#
+        );
     }
 
     #[test]
@@ -1705,9 +1767,18 @@ mod tests {
 
     #[test]
     fn test_bot_status_serialization() {
-        assert_eq!(serde_json::to_string(&BotStatus::Idle).unwrap(), r#""idle""#);
-        assert_eq!(serde_json::to_string(&BotStatus::Busy).unwrap(), r#""busy""#);
-        assert_eq!(serde_json::to_string(&BotStatus::Error).unwrap(), r#""error""#);
+        assert_eq!(
+            serde_json::to_string(&BotStatus::Idle).unwrap(),
+            r#""idle""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BotStatus::Busy).unwrap(),
+            r#""busy""#
+        );
+        assert_eq!(
+            serde_json::to_string(&BotStatus::Error).unwrap(),
+            r#""error""#
+        );
     }
 
     #[test]
@@ -1716,9 +1787,18 @@ mod tests {
         let res_json = r#"{"type":"res","id":"1","ok":true}"#;
         let event_json = r#"{"type":"event","event":"test","payload":{},"seq":1}"#;
 
-        assert!(matches!(serde_json::from_str::<BcsFrame>(req_json).unwrap(), BcsFrame::Request(_)));
-        assert!(matches!(serde_json::from_str::<BcsFrame>(res_json).unwrap(), BcsFrame::Response(_)));
-        assert!(matches!(serde_json::from_str::<BcsFrame>(event_json).unwrap(), BcsFrame::Event(_)));
+        assert!(matches!(
+            serde_json::from_str::<BcsFrame>(req_json).unwrap(),
+            BcsFrame::Request(_)
+        ));
+        assert!(matches!(
+            serde_json::from_str::<BcsFrame>(res_json).unwrap(),
+            BcsFrame::Response(_)
+        ));
+        assert!(matches!(
+            serde_json::from_str::<BcsFrame>(event_json).unwrap(),
+            BcsFrame::Event(_)
+        ));
     }
 
     // =========================================================================
@@ -1811,9 +1891,9 @@ mod tests {
             participants: vec!["zhangsan".to_string(), "dba".to_string()],
             originator: "zhangsan".to_string(),
             from: "user".to_string(),
-            you_are_mentioned: false,  // Not mentioned - broadcast
+            you_are_mentioned: false, // Not mentioned - broadcast
             is_sender: false,
-            mentions: vec![],  // No mentions
+            mentions: vec![], // No mentions
             response_directive: None,
             message: "进度怎么样了？".to_string(),
             recipient: None,
@@ -1840,7 +1920,7 @@ mod tests {
             participants: vec!["zhangsan".to_string(), "dba".to_string()],
             originator: "zhangsan".to_string(),
             from: "zhangsan".to_string(),
-            you_are_mentioned: true,  // Mentioned - must respond
+            you_are_mentioned: true, // Mentioned - must respond
             is_sender: false,
             mentions: vec!["dba".to_string()],
             response_directive: None,
@@ -1870,7 +1950,7 @@ mod tests {
             originator: "zhangsan".to_string(),
             from: "dba".to_string(),
             you_are_mentioned: false,
-            is_sender: true,  // This is my own message
+            is_sender: true, // This is my own message
             mentions: vec![],
             response_directive: None,
             message: "排查结果：根因是...".to_string(),
@@ -2074,14 +2154,12 @@ mod tests {
             session_id: "grp-test".to_string(),
             driver_bot: "driver".to_string(),
             originator: "driver".to_string(),
-            participants: vec![
-                GroupContextParticipant {
-                    id: "driver".to_string(),
-                    name: Some("Driver".to_string()),
-                    role: Some("driver".to_string()),
-                    is_bot: true,
-                },
-            ],
+            participants: vec![GroupContextParticipant {
+                id: "driver".to_string(),
+                name: Some("Driver".to_string()),
+                role: Some("driver".to_string()),
+                is_bot: true,
+            }],
             bcs_session_id: None,
         }
     }
@@ -2092,8 +2170,22 @@ mod tests {
         let tags = vec!["tenant-a".to_string(), "scene-review".to_string()];
         let session_id = "grp-test:channel_dingtalk_abc12345";
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &tags,
-            &None, &None, false, 3, None, None, Some(session_id),
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &tags,
+            &None,
+            &None,
+            false,
+            3,
+            None,
+            None,
+            Some(session_id),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2116,8 +2208,22 @@ mod tests {
     fn build_chat_send_frame_with_bcs_session_id_and_low_version() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 2, None, None, Some("grp-test:abc12345"),
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &[],
+            &None,
+            &None,
+            false,
+            2,
+            None,
+            None,
+            Some("grp-test:abc12345"),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2136,8 +2242,22 @@ mod tests {
     fn build_chat_send_frame_with_legacy_session_id_and_low_version_keeps_group_id() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 2, None, None, Some("grp-test:00000000"),
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &[],
+            &None,
+            &None,
+            false,
+            2,
+            None,
+            None,
+            Some("grp-test:00000000"),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2154,8 +2274,22 @@ mod tests {
     fn build_chat_send_frame_without_bcs_session_id() {
         let ctx = test_group_context_input();
         let frame = build_chat_send_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target", &[],
-            &None, &None, false, 3, None, None, None,
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &[],
+            &None,
+            &None,
+            false,
+            3,
+            None,
+            None,
+            None,
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2171,8 +2305,21 @@ mod tests {
     fn build_chat_inject_frame_with_legacy_session_id_and_low_version_keeps_group_id() {
         let ctx = test_group_context_input();
         let frame = build_chat_inject_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &[], &None, false, 2, None, None, Some("grp-test:00000000"),
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &[],
+            &None,
+            false,
+            2,
+            None,
+            None,
+            Some("grp-test:00000000"),
         );
         match frame {
             BcsFrame::Request(req) => {
@@ -2190,8 +2337,21 @@ mod tests {
         let session_id = "grp-test:channel_dingtalk_abc12345";
         let tags = vec!["draft".to_string(), "tenant-a".to_string()];
         let frame = build_chat_inject_frame(
-            "r1", "grp-test", &ctx, "hello", "b1", "Bot1", &[], "target",
-            &tags, &None, false, 3, None, None, Some(session_id),
+            "r1",
+            "grp-test",
+            &ctx,
+            "hello",
+            "b1",
+            "Bot1",
+            &[],
+            "target",
+            &tags,
+            &None,
+            false,
+            3,
+            None,
+            None,
+            Some(session_id),
         );
         match frame {
             BcsFrame::Request(req) => {

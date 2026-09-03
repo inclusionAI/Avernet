@@ -6,13 +6,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_protocol::BcsFrame;
 use bcs_service_api::{
-    ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDeliveryCommand, BotDeliveryKind,
-    BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotDynamicStatus,
-    BotRegistryCoreService, CoordinationSurface, FrontendDeliveryCommand, FrontendDeliveryPort,
-    FrontendDeliveryResult, Group, GroupCoreService, GroupMessage, GroupStatus, Participant,
-    ParticipantMode, ParticipantRole, ProviderTransportPreference, RedactedToken, RegisteredBot,
-    RouteAndSendResult, RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError,
-    ServiceResult, StructuredRoutingError, Workspace,
+    ActorKind, ActorStatus, AgentCredentials, BotAbortDeliveryCommand, BotAbortDeliveryResult,
+    BotCapabilities, BotDeliveryCommand, BotDeliveryKind, BotDeliveryPort, BotDeliveryResult,
+    BotDeliveryTarget, BotDynamicStatus, BotRegistryCoreService, CoordinationSurface,
+    FrontendDeliveryCommand, FrontendDeliveryPort, FrontendDeliveryResult, Group, GroupCoreService,
+    GroupMessage, GroupStatus, Participant, ParticipantMode, ParticipantRole,
+    ProviderTransportPreference, RedactedToken, RegisteredBot, RouteAndSendResult,
+    RoutingCoreService, RoutingDecision, RoutingTarget, ServiceError, ServiceResult,
+    StructuredRoutingError, Workspace,
     core::{GroupMutationCommand, GroupMutationKind},
 };
 use tokio::sync::RwLock;
@@ -312,7 +313,6 @@ impl GroupCoreService for FakeGroupCoreService {
             "dm group creation is not supported by FakeGroupCoreService".to_string(),
         ))
     }
-
 }
 
 #[derive(Default)]
@@ -909,6 +909,8 @@ pub struct RecordingBotDelivery {
     provider_transports: RwLock<Vec<ProviderTransportPreference>>,
     fail_for: RwLock<Vec<String>>,
     not_delivered_for: RwLock<Vec<String>>,
+    aborts: RwLock<Vec<BotAbortDeliveryCommand>>,
+    provider_abort_run_ids: RwLock<Vec<String>>,
 }
 
 impl RecordingBotDelivery {
@@ -933,7 +935,18 @@ impl RecordingBotDelivery {
     }
 
     pub async fn not_delivered_for(&self, bot_id: &str) {
-        self.not_delivered_for.write().await.push(bot_id.to_string());
+        self.not_delivered_for
+            .write()
+            .await
+            .push(bot_id.to_string());
+    }
+
+    pub async fn aborts(&self) -> Vec<BotAbortDeliveryCommand> {
+        self.aborts.read().await.clone()
+    }
+
+    pub async fn set_provider_abort_run_ids(&self, run_ids: Vec<String>) {
+        *self.provider_abort_run_ids.write().await = run_ids;
     }
 }
 
@@ -966,6 +979,22 @@ impl BotDeliveryPort for RecordingBotDelivery {
             target_bot_id,
             delivered: true,
             error: None,
+        })
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        let target_bot_id = cmd.target_bot_id().to_string();
+        self.aborts.write().await.push(cmd.clone());
+        if self.fail_for.read().await.contains(&target_bot_id) {
+            return Err(ServiceError::BotNotConnected(target_bot_id));
+        }
+        let aborted_run_ids = match cmd.run_id {
+            Some(run_id) => vec![run_id],
+            None => self.provider_abort_run_ids.read().await.clone(),
+        };
+        Ok(BotAbortDeliveryResult {
+            target_bot_id,
+            aborted_run_ids,
         })
     }
 }
