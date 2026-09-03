@@ -33,6 +33,11 @@ from agentclaw.community.core.bot_inventory.types import (
     ServiceLifecycleCard,
 )
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
+from agentclaw.community.core.workspace.runtime_identity import (
+    AICODING_ENGINE_FORM,
+    normalize_runtime_engine,
+    uses_aicoding_runtime,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.bot_inventory.bot_inventory_service_protocol import BotInventoryServiceProtocol
 
@@ -253,6 +258,54 @@ class BotInventoryService(BotInventoryServiceProtocol):
         engine: str | None,
         bot_ids: list[str] | None = None,
     ) -> list[Mapping[str, Any]]:
+        engines = _cloud_fetch_engines(engine)
+        rows: list[Mapping[str, Any]] = []
+        for eng in engines:
+            rows.extend(
+                self._fetch_cloud_pages(
+                    engine=eng,
+                    owner_id=owner_id,
+                    space=space,
+                    keyword=keyword,
+                    bot_ids=bot_ids,
+                )
+            )
+        # aicoding is claude_code's internal runtime form (PR #1719 engine/form
+        # vocabulary split): engine=aicoding fetches aicoding + claude_code
+        # batches, then collapses them to the aicoding runtime read model here.
+        if len(engines) > 1:
+            rows = _select_aicoding_runtime_rows(rows)
+        visible: list[Mapping[str, Any]] = []
+        for row in rows:
+            if row.get("bot_type") not in (None, "", "personal", "service"):
+                continue
+            try:
+                self._business_space.assert_bot_visible_in_current_space(
+                    bot=row,
+                    owner_id=str(row.get("owner_id") or owner_id),
+                    current_space=space,
+                )
+            except BotInventoryPermissionError:
+                continue
+            visible.append(row)
+        return visible
+
+    def _fetch_cloud_pages(
+        self,
+        *,
+        engine: str | None,
+        owner_id: str,
+        space: BusinessSpaceRef,
+        keyword: str | None,
+        bot_ids: list[str] | None,
+    ) -> list[Mapping[str, Any]]:
+        """Page through one engine's matching bots until exhausted.
+
+        ``attach_templates=False`` is load-bearing: inventory cards never read
+        ``template_config`` at fetch time (the page-slice template attach in
+        ``_attach_page_templates`` is the single, bounded entry point), so each
+        pulled page skips the batched template read.
+        """
         rows: list[Mapping[str, Any]] = []
         fetch_size = 200
         page = 1
@@ -265,9 +318,6 @@ class BotInventoryService(BotInventoryServiceProtocol):
                 engine=engine,
                 status=None,
                 bot_ids=bot_ids,
-                # Inventory cards carry no template_config (verified: neither
-                # BotInventoryItem nor the router mapping reads it), so skip
-                # the batched template read on every pulled page.
                 attach_templates=False,
                 page=page,
                 page_size=fetch_size,
@@ -284,20 +334,7 @@ class BotInventoryService(BotInventoryServiceProtocol):
             if len(page_items) < fetch_size:
                 break
             page += 1
-        visible: list[Mapping[str, Any]] = []
-        for row in rows:
-            if row.get("bot_type") not in (None, "", "personal", "service"):
-                continue
-            try:
-                self._business_space.assert_bot_visible_in_current_space(
-                    bot=row,
-                    owner_id=str(row.get("owner_id") or owner_id),
-                    current_space=space,
-                )
-            except BotInventoryPermissionError:
-                continue
-            visible.append(row)
-        return visible
+        return rows
 
     def _list_local_rows(
         self,
@@ -533,3 +570,47 @@ def _passport_id(ext: Mapping[str, Any]) -> str | None:
 def _raise_if_desktop_service_error(exc: Exception) -> None:
     if exc.__class__.__name__ in {"DesktopBotServiceError", "DesktopBotOrphanError"}:
         raise BotInventoryUpstreamError("desktop service failed") from exc
+
+
+def _cloud_fetch_engines(engine: str | None) -> list[str | None]:
+    """Resolve a list engine filter into the fetch batches the SQL layer needs.
+
+    ``aicoding`` is ``claude_code``'s internal runtime form (PR #1719 engine/form
+    vocabulary split): querying ``engine=aicoding`` must match both legacy rows
+    with a literal ``active_engine='aicoding'`` and post-split rows whose
+    ``active_engine='claude_code'`` carries the form on its template. Other
+    engine values pass through as a single batch unchanged.
+    """
+    if normalize_runtime_engine(engine) == AICODING_ENGINE_FORM:
+        return [AICODING_ENGINE_FORM, "claude_code"]
+    return [engine]
+
+
+def _select_aicoding_runtime_rows(
+    rows: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    """Collapse the expanded aicoding batches into the aicoding runtime read model.
+
+    ``template_config`` is None: inventory rows are fetched with
+    ``attach_templates=False`` and carry no form marker, but an aicoding form
+    always travels with a coding ``template_type`` (applicationCoding /
+    personalCoding), so ``uses_aicoding_runtime``'s template_type arm is
+    authoritative; legacy ``active_engine='aicoding'`` rows short-circuit on
+    the engine arm. The two batches are disjoint by ``active_engine``; the
+    bot_id dedup is a defensive guard against upstream duplication only.
+    """
+    seen: set[str] = set()
+    out: list[Mapping[str, Any]] = []
+    for row in rows:
+        bot_id = str(row.get("bot_id") or "")
+        if bot_id in seen:
+            continue
+        if not uses_aicoding_runtime(
+            active_engine=row.get("active_engine"),
+            template_type=row.get("template_type"),
+            template_config=None,
+        ):
+            continue
+        seen.add(bot_id)
+        out.append(row)
+    return out
