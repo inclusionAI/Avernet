@@ -17,11 +17,27 @@ pub struct OAuthConfig {
     /// (`(auth_source, external_user_id, env)`). Must be consistent between
     /// identity creation and session verification. Default: "default".
     pub env: String,
+    /// Path to redirect to after a successful login. Empty falls back to `/`
+    /// via [`OAuthConfig::success_redirect_location`].
+    pub success_redirect_path: String,
 }
 
 impl OAuthConfig {
     pub fn idle_timeout_secs(&self) -> u64 {
         self.idle_timeout_minutes * 60
+    }
+
+    /// The `Location` to redirect the browser to after a successful login.
+    /// Empty/whitespace falls back to `/`, so a default-constructed
+    /// [`OAuthConfig`] (e.g. in tests) behaves the same as the configured
+    /// default rather than emitting an empty `Location`.
+    pub fn success_redirect_location(&self) -> &str {
+        let path = self.success_redirect_path.trim();
+        if path.is_empty() {
+            "/"
+        } else {
+            path
+        }
     }
 
     /// Default `cookie_secure` derived from the `base_url` scheme: HTTPS
@@ -52,4 +68,29 @@ pub struct LocalAuthConfig {
     pub mock_user_id: Option<String>,
     pub mock_user_name: Option<String>,
     pub allow_mock_headers: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::OAuthConfig;
+
+    #[test]
+    fn success_redirect_location_defaults_to_root_when_empty() {
+        // A default-constructed config (e.g. tests) emits `/`, never an empty
+        // `Location` (which a browser treats as "stay on the current URL").
+        let config = OAuthConfig {
+            success_redirect_path: String::new(),
+            ..OAuthConfig::default()
+        };
+        assert_eq!(config.success_redirect_location(), "/");
+    }
+
+    #[test]
+    fn success_redirect_location_uses_configured_path() {
+        let config = OAuthConfig {
+            success_redirect_path: "/dashboard?login=success".to_string(),
+            ..OAuthConfig::default()
+        };
+        assert_eq!(config.success_redirect_location(), "/dashboard?login=success");
+    }
 }
