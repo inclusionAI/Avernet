@@ -57,7 +57,7 @@ from ..apply._fakes import (
     FakeStartupScriptService,
     real_validator,
 )
-from ..managed_files._fakes import FakeObjectStorage, sqlite_repository
+from ..managed_files._fakes import FakeObjectStorage
 from .test_creation_ordering import _Db, _InlineQueue, _IssuedPassport, _RecordedRelationship
 
 _ENTITY = "u_owner"
@@ -68,7 +68,7 @@ _PAYLOAD = {
     "document_owner": _ENTITY, "spec": {"engine_type": "teclaw", "bot_type": "personal"},
     "iframe_url": None, "redirect_url": None, "submitted_at": None,
 }
-_SCOPE = ManagedFileScope(env="dev", entity_type="staff", entity_id=_ENTITY, bot_id=_BOT)
+_SCOPE = ManagedFileScope(entity_type="staff", entity_id=_ENTITY, bot_id=_BOT)
 
 
 class _Manifests:
@@ -118,7 +118,7 @@ def world():
 def _build(db):
     scripts = FakeStartupScriptService()
     store = ManagedFilesStore(
-        object_storage=FakeObjectStorage(), repository=sqlite_repository(), store_base=lambda: "teclaw/dev/bolt_data"
+        object_storage=FakeObjectStorage(), store_base=lambda: "teclaw/dev/bolt_data"
     )
     queue = _InlineQueue()
     bots = _Bots()
@@ -129,7 +129,7 @@ def _build(db):
             script_service=scripts,
             activation_service=FakeActivationService(),
             mcp_auth_service=FakeMcpAuth(),
-            identity_service=StoreIdentityPort(store, env=lambda: "dev"),
+            identity_service=StoreIdentityPort(store),
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),
@@ -237,6 +237,6 @@ def test_the_record_then_the_phase_then_provisioning_in_that_order(world):
 def test_a_creation_that_ends_without_a_bot_purges_the_store(world, monkeypatch):
     monkeypatch.setattr("agentclaw.community.utils.env_utils.get_current_env", lambda: "dev")
     _handler, _applies, seam, _order, _seen, store = _build(world)
-    store.put(_SCOPE, category=CATEGORY_IDENTITY, name="RULES.md", rel_path="identity/RULES.md", content=b"x", apply_id=None)
+    store.put(_SCOPE, category=CATEGORY_IDENTITY, name="RULES.md", rel_path="identity/RULES.md", content=b"x")
     assert seam.discard(entity_id=_ENTITY, bot_id=_BOT, owner_id=_ENTITY) is True
     assert store.list(_SCOPE, category=CATEGORY_IDENTITY) == []

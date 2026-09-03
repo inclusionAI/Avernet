@@ -2,7 +2,7 @@
 
 Spec: `spec.md` in this directory. Work item W8, issue #1476.
 
-> **Revision 3 (2026-09-02).** The delivery-strategy seam, the ownership map,
+> **Revision 4 (2026-09-03).** The managed-files index table is dropped in review: the object key layout is the record. Otherwise revision 3 — The delivery-strategy seam, the ownership map,
 > the teclaw platform-managed path behind a switch, and the deferred-provision
 > creation sequence. Revision history at the end.
 
@@ -17,7 +17,7 @@ Spec: `spec.md` in this directory. Work item W8, issue #1476.
 | `TeclawFilePromotion.stage_files` — writes files to OSS under `teclaw/{env}/bolt_data/{entity_type}_{entity_id}/<segment>/teclaw/{ns}/{rel}` and returns `{name, store, path}` refs; `ObjectStoragePlugin` (`put_object`, `delete_object`, `list_objects`) | `deploy/teclaw_file_promotion.py`, `plugin_api/object_storage.py` | The key layout and the client the managed-files store reuses |
 | `ConfigComposer.compose` builds skills / mcp / resources / identity from `ConfigComposerInputCollector`; the teclaw branches return `[]` for resources and identity | `core/config_compose/services/{config_composer,collector}.py` | The one place the ownership map and the managed refs enter |
 | `TeclawDeviceSyncService._compose_and_deliver` — recompose through the composer, POST to the container, record the draft | `devices/services/teclaw_device_sync.py` | The closing redeliver, reached through `DeviceSyncDispatcher.dispatch(ctx).sync_symlinks([])` |
-| `TeclawProvisionService.provision(bot, owner_id)` — compose via the producer router, `create_teclaw_bot`, approve, insert binding, enqueue poll | `bot_management/services/teclaw_provision_service.py` | Called *after* the single phase; the composer already reads the index by then |
+| `TeclawProvisionService.provision(bot, owner_id)` — compose via the producer router, `create_teclaw_bot`, approve, insert binding, enqueue poll | `bot_management/services/teclaw_provision_service.py` | Called *after* the single phase; the composer already reads the store by then |
 | `BotService.create_bot` — step 1 record, step 2 device / teclaw provision, shared tail | `bot_management/services/bot_service.py` | Split at the step-2 boundary by a `provision` option |
 | `BotCreateWithManifestHandler` step machine; `_creation_state` in the poll | `bot_config_manifest/create_job.py`, `adapters/.../create_with_manifest.py` | Both ask the strategy for the sequence |
 | `BotConfigArtifact.to_dict` omitting `cli_tools` when `None`; schema `additionalProperties: false` | `kernel/bot_config/artifact.py`, `artifact.schema.json` | The pattern the ownership map follows |
@@ -39,11 +39,11 @@ apply service ── strategy_for(bot) ──► build_materialisers(**strategy.
                                                                                 └─► strategy.finish(ctx, report)
 
 teclaw store path (switch on)
-  materialiser.write ──► ManagedFilesStore.put(bot, category, rel, bytes) ──► OSS object + ac_bot_config_managed_files row
+  materialiser.write ──► ManagedFilesStore.put(bot, category, rel, bytes) ──► OSS object under the bot's `_manifest` prefix
   composer(teclaw)   ──► collector.identity_files/resources/skills ──► ManagedFilesReader.refs(bot, category) when ownership==platform
                      ──► artifact.ownership = {mcp: platform, identity_files|resources|skills: platform|engine}
 
-creation (teclaw, switch on)   record ─► apply(PRE, all) ─► provision(composes from index) ─► wait ACTIVE ─► READY
+creation (teclaw, switch on)   record ─► apply(PRE, all) ─► provision(composes from the store's listing) ─► wait ACTIVE ─► READY
 creation (ARCA)                apply(PRE=script) ─► create+provision ─► wait ACTIVE ─► apply(ON) ─► READY     (unchanged)
 
 PUT ─► manifest_service.put ─► start_apply(trigger=put, ALL_PHASES) ─► response.apply
@@ -84,9 +84,9 @@ The teclaw-on strategy hands `build_materialisers` these ports:
 
 | Port | Implementation | Backing |
 | --- | --- | --- |
-| identity | `StoreIdentityPort` | index rows for `identity`; `update_bot_file` puts the object and upserts the row; empty content deletes both |
-| resources | `StoreResourcePort` | index rows for `resources`; `upload_file` / `delete` / `exists` over object + row |
-| upload | `StoreSkillPackagePort` | `upload_local_skill` unpacks the validated package into the store under the local-skills layout, indexes every file under category `skills` with the skill name, creates the skill row with a `local://` locator, and returns the record; `installed_package_digest` answers from the index |
+| identity | `StoreIdentityPort` | objects under `identity/`; `update_bot_file` puts the object; empty content deletes it |
+| resources | `StoreResourcePort` | objects under `workspace/`; `upload_file` / `delete` / `exists` over the store's listing |
+| upload | `StoreSkillPackagePort` | `upload_local_skill` unpacks the validated package into the store under the local-skills layout, stores every file under `workspace/skills-local/<name>/`, creates the skill row with a `local://` locator, and returns the record; `installed_package_digest` recomputes the package digest from the stored members |
 | activation | `RecordOnlyActivation` wrapper | delegates to `DirectActivationService` with `project=False` |
 | script | unchanged (never reached: unsupported) | |
 
@@ -100,9 +100,12 @@ collects. The object key is
 — the promotion layout with a `_manifest` segment instead of a publish stage,
 so the `bot-data` store's base resolves it unchanged.
 
-Index: `ac_bot_config_managed_files` — `(avernet_tenant, env, entity_id, bot_id, category, rel_path)` unique; columns `name`, `store_key`, `digest`, `size_bytes`, `apply_id`, timestamps. Repository protocol under
-`core/repository/protocols/bot/`, implementation beside it, tenant guard
-registered, DDL under the package's `sql/`.
+No index table (rev 4). The key layout is the record: `list_objects` over the
+bot's `_manifest` prefix recovers the file set, and each key's path says its
+category (`identity/<type>`, `workspace/skills-local/<name>/…`, other
+`workspace/…`) and name. A write whose path would read back as another
+category is refused. Digests are computed from bytes in hand (`put`, `get`)
+and never stored; `unchanged` planning reads content, as it already did.
 
 ### K-3 Record-only activation is a parameter, not a bypass
 
@@ -126,7 +129,7 @@ service fill it through one injected `PlatformManagedCategoriesReader`
 (protocol in `core/config_compose/protocols.py`, implemented in the manifest
 package: the categories the stored manifest declares, when the switch is on).
 The composer writes the map for teclaw requests only; the collector's teclaw
-branches for identity, resources and skills read the index through a
+branches for identity, resources and skills read the store through a
 `ManagedFilesReader` when the category is `platform`, and return today's
 answer otherwise.
 
@@ -192,7 +195,7 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | `core/bot_config_manifest/apply/triggers.py` | Trigger constants |
 | `core/bot_config_manifest/managed_files/{store.py,ports.py,reader.py}` | `ManagedFilesStore`; `StoreIdentityPort`, `StoreResourcePort`, `StoreSkillPackagePort`; the composer-facing reader |
 | `core/bot_config_manifest/managed_files/README.md` | Context boundary |
-| `core/bot_config_manifest/repository/managed_files_models.py`, `core/repository/protocols/bot/managed_files.py`, `core/repository/implementations/bot/managed_files.py`, `core/bot_config_manifest/sql/2026_09_02_bot_config_managed_files.sql` | The index |
+| ~~the index table, its repository, protocol and DDL~~ | Dropped in rev 4 |
 | `core/bot_config_manifest/schema/splice.py` | The `script` splice |
 | `core/config_compose/protocols.py` additions | `PlatformManagedCategoriesReader`, `ManagedFilesReader` |
 | `tests/…` | Listed per task |
@@ -202,7 +205,7 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | File | Change |
 | --- | --- |
 | `kernel/bot_config/artifact.py`, `artifact.schema.json` | `ownership`; omission; schema |
-| `core/config_compose/models.py`, `services/config_composer.py`, `services/collector.py` | `platform_managed` on the request; the map; index-backed teclaw branches |
+| `core/config_compose/models.py`, `services/config_composer.py`, `services/collector.py` | `platform_managed` on the request; the map; store-backed teclaw branches |
 | `core/service_bot/services/deploy/external_compose_producer.py`, `devices/services/teclaw_device_sync.py` | Fill `platform_managed` through the reader |
 | `core/skill_center/services/direct_activation_service.py`, its protocol in `api/` | `project` parameter |
 | `core/bot_management/services/bot_service.py`, `create_flow.py` | `provision` option; `provision_bot`; `complete_manifest_creation(provision=)` |
@@ -211,7 +214,7 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | `core/bot_config_manifest/create_job.py`, `creation.py`, `adapters/.../create_with_manifest.py` | Sequence-aware job and poll; refusal removed |
 | `core/bot_config_manifest/services/config_manifest_service.py`, protocol, `api/` | `write_through_script`, `script_body`, `declares_script` |
 | `adapters/http/openapi_v1/bots/{config_manifest.py,config_manifest_support.py,schemas.py,router.py,startup_script_support.py}` | `PUT` apply + `apply` field + warnings; write-through arms |
-| `di/modules/{bot_management_module,manifest_fetch_module,service_bot_module,skill_center_module}.py` | Strategy factory; store + index; reader bindings; switch |
+| `di/modules/{bot_management_module,manifest_fetch_module,service_bot_module,skill_center_module}.py` | Strategy factory; store; reader bindings; switch |
 | `docs/bot-config-manifest/engine-convergence-contract.zh-CN.md` | The addendum (§9) |
 | `docs/bot-config-manifest/{user-manual,work-items,work-items.zh-CN}.md`, `core/bot_config_manifest/README.md`, `docs/arch` config reference | Docs |
 
@@ -230,12 +233,12 @@ constructs — `write_through_script`, `script_body`, the splice helper).
    record, which exists after the deferred create; `_require_mcp_permission`
    and the audit row behave as today. Pinned by a test that the projector is
    never called and the desired-state repository is.
-4. **Two readers of the index (materialisers and composer) racing an
+4. **Two readers of the store (materialisers and composer) racing an
    apply.** The apply lock serialises applies; a compose during an apply may
    see a half-written category. Under §3.2 that is the same window a device
    write has today, and the closing redeliver after the apply converges it.
 5. **Store key layout must match the `bot-data` store base.** Pinned by a
-   test that composes an artifact from index rows and resolves each ref
+   test that composes an artifact from the store's listing and resolves each ref
    against the configured store the way the promotion test does.
 6. **`router.py` size.** Write-through logic goes into the support module.
 
@@ -247,13 +250,13 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 - **Managed-files store and ports** — put/delete/list/purge against a fake
   object store and in-memory SQLite; object-before-row ordering; identity and
   resource ports drive the real materialisers to `created` / `updated` /
-  `unchanged` / removal purely from the index; the skill port unpacks, indexes
+  `unchanged` / removal purely from the store; the skill port unpacks, stores
   under the local-skills layout, creates the skill row, answers the digest.
 - **Record-only activation** — `project=False` records and never projects;
   `project=True` unchanged.
 - **Ownership map and composer** — `to_dict` omits when unset; schema accepts;
   teclaw compose emits `platform` / `engine` per declared category and reads
-  the index; ARCA compose carries no map; a bot without a manifest gets
+  the store; ARCA compose carries no map; a bot without a manifest gets
   `engine` for the file categories.
 - **Closing redeliver** — one dispatch call after a teclaw-on apply with a
   binding; none without; none with the switch off; a failing redeliver is a
@@ -276,3 +279,4 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | **rev 1** | Four apply points on the ARCA shape. |
 | **rev 2** | Restart and republish deferred; teclaw creation as "the same job". |
 | **rev 3** | The delivery-strategy seam; teclaw as store + index + artifact behind a switch; the ownership map; record, apply, provision. |
+| **rev 4** | Review: the index table is dropped; the object key layout is the record, listed by prefix. |

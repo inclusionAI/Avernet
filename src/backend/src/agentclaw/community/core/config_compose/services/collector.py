@@ -176,7 +176,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         read once per compose from the managed-files reader; empty for ARCA,
         for a bot without a manifest, and while the platform-managed switch is
         off. The composer turns it into the artifact's ``ownership`` map; the
-        three file-category branches below read the index for a category in
+        three file-category branches below read the store for a category in
         it and answer as before for one that is not.
         """
         if req.engine_type != "teclaw" or self._managed_files is None:
@@ -265,7 +265,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         managed = self._managed(req, "skills")
         if managed is not None:
             # The platform's copies of the bot's local packages: a ``SkillRef``
-            # per package the index holds *and* the bot has active. The index
+            # per package the store holds *and* the bot has active. The store
             # keeps a package the manifest stopped declaring, the way an
             # ARCA host keeps a deactivated skill's files; the active set is
             # what decides delivery, here as everywhere.

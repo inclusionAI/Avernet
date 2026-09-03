@@ -38,10 +38,10 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
     real_validator,
 )
 
-from ._fakes import FakeObjectStorage, sqlite_repository
+from ._fakes import FakeObjectStorage
 
 _BASE = "teclaw/dev/bolt_data"
-_SCOPE = ManagedFileScope(env="dev", entity_type="staff", entity_id="u_owner", bot_id="b_1")
+_SCOPE = ManagedFileScope(entity_type="staff", entity_id="u_owner", bot_id="b_1")
 QC_URL = "https://example.test/skills/quality-check.zip"
 QZ = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo ok\n")])
 QZ_V2 = build_skill_zip("quality-check", extra=[("scripts/run.sh", b"echo v2\n")])
@@ -110,14 +110,12 @@ class LiveCapabilityReader:
 def _rig(packages: dict[str, bytes]):
     oss = FakeObjectStorage()
     store = ManagedFilesStore(
-        object_storage=oss, repository=sqlite_repository(), store_base=lambda: _BASE
+        object_storage=oss, store_base=lambda: _BASE
     )
     skills = FakeSkillRepository()
     activation = FakeActivationService()
     port = StoreSkillPackagePort(
         store,
-        env=lambda: "dev",
-        apply_id=lambda: "ap_1",
         validator=real_validator(),
         skill_repository=skills,
     )
@@ -143,7 +141,7 @@ async def _apply(materialiser, ctx, entries):
 
 
 def _ctx():
-    return make_context(engine_type="teclaw", owner_id="u_owner", apply_id="ap_1")
+    return make_context(engine_type="teclaw", owner_id="u_owner")
 
 
 def _declared(url: str = QC_URL, body: bytes = QZ):
@@ -157,7 +155,7 @@ def _indexed(store) -> list[tuple[str, str]]:
 # ── first apply: unpacked, indexed, recorded, activated ────────────────────
 
 
-def test_a_declared_skill_is_unpacked_into_the_index_and_recorded() -> None:
+def test_a_declared_skill_is_unpacked_into_the_store_and_recorded() -> None:
     materialiser, store, oss, skills, activation, _ = _rig({QC_URL: QZ})
 
     plan, written = _run(_apply(materialiser, _ctx(), [_declared()]))
@@ -185,7 +183,7 @@ def test_a_declared_skill_is_unpacked_into_the_index_and_recorded() -> None:
     assert activation.skill_activations == [created["id"]]
 
 
-# ── convergence from the index ─────────────────────────────────────────────
+# ── convergence from the store ─────────────────────────────────────────────
 
 
 def test_the_second_apply_is_unchanged_and_writes_nothing() -> None:
@@ -219,10 +217,10 @@ def test_a_changed_package_is_replaced_in_place() -> None:
     assert activation.skill_activations == [created_id]
 
 
-def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_index() -> None:
+def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> None:
     _, store, oss, skills, _, _ = _rig({})
     port = StoreSkillPackagePort(
-        store, env=lambda: "dev", validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills
     )
     with_extra = build_skill_zip("quality-check", extra=[("old/gone.txt", b"x")])
     _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=with_extra))
@@ -251,10 +249,10 @@ def test_removal_deactivates_record_only() -> None:
 # ── the port's own answers ─────────────────────────────────────────────────
 
 
-def test_installed_digest_answers_from_the_index() -> None:
+def test_installed_digest_answers_from_the_store() -> None:
     _, store, oss, skills, _, _ = _rig({})
     port = StoreSkillPackagePort(
-        store, env=lambda: "dev", validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills
     )
 
     def digest(name="quality-check"):
@@ -262,7 +260,7 @@ def test_installed_digest_answers_from_the_index() -> None:
             port.installed_package_digest(bot={}, bot_id="b_1", owner_id="u_owner", name=name)
         )
 
-    # Nothing indexed: unknown, never equal.
+    # Nothing stored: unknown, never equal.
     assert digest() is None
 
     _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))
@@ -270,10 +268,13 @@ def test_installed_digest_answers_from_the_index() -> None:
     assert digest() == _digest_of(real_validator().validate_zip(QZ).canonical_zip)
     assert digest("other") is None
 
-    # A row whose object is gone: unknown again.
+    # A member whose object is gone: the listing is the record, so the
+    # package is now a different package — never equal to the declared one,
+    # and the next apply writes it again.
+    full = digest()
     row = next(r for r in store.list(_SCOPE, category=CATEGORY_SKILLS) if r.rel_path.endswith("SKILL.md"))
     del oss.objects[row.store_key]
-    assert digest() is None
+    assert digest() != full
 
 
 def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
@@ -283,7 +284,7 @@ def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
     # A collaborator's row, and a legacy row with no owner at all.
     skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": "u_other", "bolt_id": "b_1"})
     port = StoreSkillPackagePort(
-        store, env=lambda: "dev", validator=real_validator(), skill_repository=skills
+        store, validator=real_validator(), skill_repository=skills
     )
     with pytest.raises(ManagedSkillOwnerConflict):
         _run(port.upload_local_skill(bot_id="b_1", owner_id="u_owner", actor_id="u_actor", package=QZ))

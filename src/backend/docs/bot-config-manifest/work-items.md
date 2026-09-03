@@ -2264,9 +2264,9 @@ delivery seam. Per criterion:
 - **The first teclaw artifact carries the manifest** — yes, on the
   platform-managed path: the creation job records the bot, runs the single
   pre-container phase against the record (every construct writes platform
-  state — the store-backed ports write bytes to the bot-data store and an
-  index row to `ac_bot_config_managed_files`; activation records without
-  projecting), then provisions; the composer reads the index and emits the
+  state — the store-backed ports write bytes to the bot-data store under a
+  key layout that is the record, no index table; activation records without
+  projecting), then provisions; the composer lists the store and emits the
   `ownership` map (engine contract §9).
 - **teclaw creation, the refusal lifted** — done; the poll walks
   `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`.
@@ -2282,7 +2282,7 @@ delivery seam. Per criterion:
 - **The switch** — `user_config.bot_config_manifest.teclaw_platform_managed`,
   default **off**; flip once the teclaw engine implements `ownership`
   (R-O1/R-O2/R-O3), after explicitly applying each existing teclaw bot's
-  manifest so the index is populated.
+  manifest so the store is populated.
 - **Deferred** (spec D-1 and *Follow-ups*): restart and republish as apply
   points; the publish gather for platform-managed teclaw files; a health
   surface for a failed closing redeliver beyond the report's `notes`; an ARCA

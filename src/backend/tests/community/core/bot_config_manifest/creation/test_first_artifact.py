@@ -74,7 +74,7 @@ from ..apply._fakes import (
     fetched_object,
     real_validator,
 )
-from ..managed_files._fakes import FakeObjectStorage, sqlite_repository
+from ..managed_files._fakes import FakeObjectStorage
 from ..managed_files.test_skill_port import FakeSkillRepository, LiveCapabilityReader
 from tests.community.core.config_compose.test_collector import _reader_over, _registry_over
 
@@ -172,7 +172,7 @@ def world(monkeypatch):
 
 
 def _build(db):
-    store = ManagedFilesStore(object_storage=FakeObjectStorage(), repository=sqlite_repository(), store_base=lambda: _BASE)
+    store = ManagedFilesStore(object_storage=FakeObjectStorage(), store_base=lambda: _BASE)
     skills = FakeSkillRepository()
     activation = FakeActivationService()
     reader_of_active = LiveCapabilityReader(skills, activation)
@@ -191,12 +191,12 @@ def _build(db):
             script_service=scripts,
             activation_service=RecordOnlyActivation(activation),
             mcp_auth_service=FakeMcpAuth(),
-            identity_service=StoreIdentityPort(store, env=lambda: "dev"),
-            upload_service=StoreSkillPackagePort(store, env=lambda: "dev", validator=validator, skill_repository=skills),
+            identity_service=StoreIdentityPort(store),
+            upload_service=StoreSkillPackagePort(store, validator=validator, skill_repository=skills),
             capability_reader=reader_of_active,
             package_validator=validator,
             entry_fetcher=fetcher(),
-            resource_service=StoreResourcePort(store, env=lambda: "dev"),
+            resource_service=StoreResourcePort(store),
         )
 
     queue = _InlineQueue()

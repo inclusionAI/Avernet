@@ -62,16 +62,9 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     ManagedFilesComposeReader,
     ManagedFilesStore,
 )
-from agentclaw.community.core.repository.implementations.bot.managed_files import (
-    BotConfigManagedFilesRepository,
-)
-from agentclaw.community.core.repository.protocols.bot import (
-    BotConfigManagedFilesRepositoryProtocol,
-)
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.apply.context import current_apply_id
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     MaterialiserPorts,
     TeclawPlatformBindings,
@@ -94,7 +87,6 @@ from agentclaw.community.core.bot_startup_script.bot_startup_script_service_prot
     BotStartupScriptServiceProtocol,
 )
 from agentclaw.community.di.modules.config_module import read_user_config
-from agentclaw.community.plugin_api.database import DatabasePlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 
@@ -141,34 +133,20 @@ class ManifestFetchModule(Module):
     @singleton
     @provider
     @inject
-    def manifest_managed_files_repository(
-        self, db: DatabasePlugin
-    ) -> BotConfigManagedFilesRepositoryProtocol:
-        """W8: the index behind the managed-files store — bound here, beside
-        the store that is its only writer, rather than in the bot-management
-        module with the other manifest tables (which is at its size cap)."""
-        return BotConfigManagedFilesRepository(db)
-
-    @singleton
-    @provider
-    @inject
     def manifest_managed_files_store(
-        self,
-        object_storage: ObjectStoragePlugin,
-        repository: BotConfigManagedFilesRepositoryProtocol,
+        self, object_storage: ObjectStoragePlugin
     ) -> ManagedFilesStore:
         """W8: the platform's own copy of a teclaw bot's manifest-delivered files.
 
         Bytes in the same OSS bucket the teclaw promotion stages into, under the
         same ``bot-data`` base, so the composer's store coordinates resolve a
-        manifest-delivered ref exactly as they resolve a promoted one.
+        manifest-delivered ref exactly as they resolve a promoted one. The key
+        layout is the record; there is no index table beside it.
         """
         from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
 
         return ManagedFilesStore(
-            object_storage=object_storage,
-            repository=repository,
-            store_base=get_teclaw_bolt_data_prefix,
+            object_storage=object_storage, store_base=get_teclaw_bolt_data_prefix
         )
 
     @singleton
@@ -430,30 +408,22 @@ class ManifestFetchModule(Module):
         the reason the resource factory above records: it reaches the device
         dispatcher graph at import time.
         """
-        from agentclaw.community.utils.env_utils import get_current_env
-
         def platform_ports() -> MaterialiserPorts:
             validator = package_validator_provider()
             return MaterialiserPorts(
                 script_service=script_service_provider(),
                 activation_service=RecordOnlyActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
-                identity_service=StoreIdentityPort(
-                    store, env=get_current_env, apply_id=current_apply_id.get
-                ),
+                identity_service=StoreIdentityPort(store),
                 upload_service=StoreSkillPackagePort(
                     store,
-                    env=get_current_env,
-                    apply_id=current_apply_id.get,
                     validator=validator,
                     skill_repository=injector.get(SkillRepository),
                 ),
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,
                 entry_fetcher=entry_fetcher_provider(),
-                resource_service=StoreResourcePort(
-                    store, env=get_current_env, apply_id=current_apply_id.get
-                ),
+                resource_service=StoreResourcePort(store),
             )
 
         def resolve(bot_id: str, owner_id: str):

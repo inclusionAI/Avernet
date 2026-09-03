@@ -418,8 +418,8 @@ family.
 families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
 the delivery, so the platform holds its own copy of every manifest-delivered
 file: bytes in the bot-data object store under the promotion key layout with a
-`_manifest` segment, one index row per file in `ac_bot_config_managed_files`
-(`managed_files/`, see its README). The teclaw composer reads that index for
+`_manifest` segment, no index table beside them — the key layout is the record
+(`managed_files/`, see its README). The teclaw composer lists that prefix for
 every category the platform asserts and writes the artifact's **`ownership`**
 map (`platform` / `engine` per category; `mcp` always `platform`; ARCA
 artifacts carry no map) — the engine contract's §9. A local skill the manifest
@@ -434,8 +434,8 @@ else, strict about booleans. It stays off until the teclaw engine implements
 the `ownership` map (R-O1/R-O2/R-O3); off, teclaw runs the shape it ran before
 W8 and the only artifact change is an all-`engine` map. **Before flipping it on
 an existing deployment, explicitly apply each teclaw bot's manifest once** so
-the index carries its files: the composer asserts `platform` from the stored
-manifest, and an empty index under an asserted category means "remove the
+the store carries its files: the composer asserts `platform` from the stored
+manifest, and an empty prefix under an asserted category means "remove the
 area" to an engine that honours the map.
 
 **`PUT` starts an apply** (§2.6): the document is stored and validated exactly

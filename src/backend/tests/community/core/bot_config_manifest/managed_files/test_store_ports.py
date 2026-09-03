@@ -1,7 +1,7 @@
 """The store-backed identity and resource ports drive the real materialisers (W8).
 
 No device anywhere: ``resolve`` / ``plan`` / ``write`` run against the store,
-and convergence is observed from the index alone.
+and convergence is observed from the store alone.
 """
 from __future__ import annotations
 
@@ -32,11 +32,11 @@ from tests.community.core.bot_config_manifest.apply._fakes import (
     make_context,
 )
 
-from ._fakes import FakeObjectStorage, sqlite_repository
+from ._fakes import FakeObjectStorage
 
 _BASE = "teclaw/dev/bolt_data"
 # The identity and resources materialisers address the bot at ("staff", owner).
-_SCOPE = ManagedFileScope(env="dev", entity_type="staff", entity_id="u_owner", bot_id="b_1")
+_SCOPE = ManagedFileScope(entity_type="staff", entity_id="u_owner", bot_id="b_1")
 
 
 def _run(coro):
@@ -45,7 +45,7 @@ def _run(coro):
 
 def _store():
     oss = FakeObjectStorage()
-    return ManagedFilesStore(object_storage=oss, repository=sqlite_repository(), store_base=lambda: _BASE), oss
+    return ManagedFilesStore(object_storage=oss, store_base=lambda: _BASE), oss
 
 
 def _fetcher():
@@ -61,15 +61,15 @@ async def _apply(materialiser, ctx, entries):
 
 
 def _ctx():
-    return make_context(engine_type="teclaw", owner_id="u_owner", apply_id="ap_1")
+    return make_context(engine_type="teclaw", owner_id="u_owner")
 
 
 # ── identity ──────────────────────────────────────────────────────────────
 
 
-def test_identity_converges_from_the_index_only() -> None:
+def test_identity_converges_from_the_store_only() -> None:
     store, oss = _store()
-    port = StoreIdentityPort(store, env=lambda: "dev", apply_id=lambda: "ap_1")
+    port = StoreIdentityPort(store)
     materialiser = IdentityMaterialiser(port, _fetcher())
 
     plan, written = _run(_apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "# rules"}]))
@@ -101,7 +101,7 @@ def test_identity_converges_from_the_index_only() -> None:
 
 def test_identity_declared_empty_removes_everything_but_reserved_names() -> None:
     store, _ = _store()
-    port = StoreIdentityPort(store, env=lambda: "dev")
+    port = StoreIdentityPort(store)
     materialiser = IdentityMaterialiser(port, _fetcher())
     _run(_apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "# rules"}]))
     plan, written = _run(_apply(materialiser, _ctx(), []))
@@ -114,7 +114,7 @@ def test_identity_declared_empty_removes_everything_but_reserved_names() -> None
 
 def test_resources_write_rows_under_the_workspace_namespace() -> None:
     store, oss = _store()
-    port = StoreResourcePort(store, env=lambda: "dev", apply_id=lambda: "ap_1")
+    port = StoreResourcePort(store)
     materialiser = ResourcesMaterialiser(port, _fetcher())
     plan, written = _run(_apply(materialiser, _ctx(), [
         {"path": "kb/faq.md", "content": "q&a"},
@@ -130,9 +130,9 @@ def test_resources_write_rows_under_the_workspace_namespace() -> None:
     assert oss.objects[rows[0].store_key] == b"q&a 2"
 
 
-def test_resource_tree_delete_is_a_prefix_delete_over_the_index() -> None:
+def test_resource_tree_delete_is_a_prefix_delete_over_the_store() -> None:
     store, oss = _store()
-    port = StoreResourcePort(store, env=lambda: "dev")
+    port = StoreResourcePort(store)
     args = dict(entity_type="staff", entity_id="u_owner", bot_id="b_1", engine_type="teclaw")
     _run(port.upload_file(**args, target_dir="kb", filename="a.md", data=b"a"))
     _run(port.upload_file(**args, target_dir="kb/deep", filename="b.md", data=b"b"))

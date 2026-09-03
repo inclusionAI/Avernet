@@ -8,28 +8,28 @@ signatures, but every read and write goes to the managed-files store — the
 platform's own copy — and never to a container. The materialisers do not know
 which they were handed (spec D-7).
 
-**Convergence is observed from the index.** ``list_bot_files`` /
-``read_identity_file`` / ``exists`` answer from rows, so an unchanged digest
-plans ``unchanged`` and writes nothing, exactly as the device-backed ports
-make the materialisers behave.
+**Convergence is observed from the store.** ``list_bot_files`` /
+``read_identity_file`` / ``exists`` answer from what the store holds, so an
+unchanged file plans ``unchanged`` and writes nothing, exactly as the
+device-backed ports make the materialisers behave.
 
 **Paths.** Identity files live under the ``identity`` namespace by their
 file type (``identity/RULES.md``); resources under ``workspace`` by their
 declared path (``workspace/kb/faq.md``); a local skill package's files under
 ``workspace/skills-local/<name>/`` (``StoreSkillPackagePort``, the ``skills``
-materialiser's upload road). A resource "directory" is the set of rows under
+materialiser's upload road). A resource "directory" is the set of files under
 its prefix — there is no directory object — so a tree delete is a prefix
-delete over the index.
+delete over the store's listing.
 
 Every method is ``async`` because the port protocols are; the store itself is
-synchronous (an object-store client plus a repository), so the work runs in a
-thread, the way the promotion step drives its object writes.
+synchronous (an object-store client), so the work runs in a thread, the way
+the promotion step drives its object writes.
 """
 from __future__ import annotations
 
 import asyncio
 import hashlib
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     CATEGORY_IDENTITY,
@@ -52,27 +52,16 @@ from agentclaw.community.core.skill_center.skill_package import (
 
 
 class _StorePort:
-    def __init__(
-        self,
-        store: ManagedFilesStore,
-        *,
-        env: Callable[[], str],
-        apply_id: Callable[[], Optional[str]] = lambda: None,
-    ) -> None:
+    def __init__(self, store: ManagedFilesStore) -> None:
         self._store = store
-        self._env = env
-        # Which apply is writing — a thunk so the port, built once per apply
-        # by the strategy, can be handed the id after the fact.
-        self._apply_id = apply_id
 
-    def _scope(self, entity_type: str, entity_id: str, bot_id: str) -> ManagedFileScope:
-        return ManagedFileScope(
-            env=self._env(), entity_type=entity_type, entity_id=entity_id, bot_id=bot_id
-        )
+    @staticmethod
+    def _scope(entity_type: str, entity_id: str, bot_id: str) -> ManagedFileScope:
+        return ManagedFileScope(entity_type=entity_type, entity_id=entity_id, bot_id=bot_id)
 
 
 class StoreIdentityPort(_StorePort):
-    """``ManifestIdentityPort`` over the store: one row per identity file."""
+    """``ManifestIdentityPort`` over the store: one object per identity file."""
 
     async def list_bot_files(
         self,
@@ -100,12 +89,9 @@ class StoreIdentityPort(_StorePort):
         stage: str = "draft",
     ) -> str:
         scope = self._scope(entity_type, entity_id, bot_id)
-        row = await asyncio.to_thread(
-            self._store.get, scope, category=CATEGORY_IDENTITY, rel_path=_identity_path(file_type)
+        content = await asyncio.to_thread(
+            self._store.read_at, scope, _identity_path(file_type)
         )
-        if row is None:
-            return ""
-        content = await asyncio.to_thread(self._store.read, row)
         return content.decode("utf-8") if content is not None else ""
 
     async def update_bot_file(
@@ -124,8 +110,8 @@ class StoreIdentityPort(_StorePort):
         rel_path = _identity_path(file_type)
         if not content:
             # The domain's own "absent": an empty write removes the file. In
-            # the store that is a delete, so the index never carries an empty
-            # object the composer would then reference.
+            # the store that is a delete, so the composer never references an
+            # empty object.
             removed = await asyncio.to_thread(
                 self._store.delete, scope, category=CATEGORY_IDENTITY, rel_path=rel_path
             )
@@ -137,13 +123,12 @@ class StoreIdentityPort(_StorePort):
             name=file_type,
             rel_path=rel_path,
             content=content.encode("utf-8"),
-            apply_id=self._apply_id(),
         )
         return {"file_type": file_type, "digest": file.digest}
 
 
 class StoreResourcePort(_StorePort):
-    """``ManifestResourcePort`` over the store: rows under ``workspace/``."""
+    """``ManifestResourcePort`` over the store: objects under ``workspace/``."""
 
     async def upload_file(
         self,
@@ -165,7 +150,6 @@ class StoreResourcePort(_StorePort):
             name=declared,
             rel_path=_workspace_path(declared),
             content=data,
-            apply_id=self._apply_id(),
         )
         return {"path": declared, "digest": file.digest, "size_bytes": file.size_bytes}
 
@@ -220,7 +204,7 @@ class StoreSkillPackagePort(_StorePort):
     package to the bot's ``skills-local`` directory on the device and records
     a skill row whose locator is ``local://skills-local/<name>`` — the minimal
     logical path the teclaw layout already stores. This port keeps every
-    observable but the device: the same validator, one index row per package
+    observable but the device: the same validator, one object per package
     file under ``workspace/skills-local/<name>/…`` (category ``skills``,
     named by the skill), the same skill row with the same locator, and the
     same return shape. Activation is not this port's: the materialiser calls
@@ -228,7 +212,7 @@ class StoreSkillPackagePort(_StorePort):
 
     ``installed_package_digest`` answers the real service's question the
     real service's way — the sha256 of the canonical repack of the files
-    actually indexed under the name — so an unchanged package plans
+    actually stored under the name — so an unchanged package plans
     ``unchanged`` on the second apply and writes nothing.
     """
 
@@ -236,12 +220,10 @@ class StoreSkillPackagePort(_StorePort):
         self,
         store: ManagedFilesStore,
         *,
-        env: Callable[[], str],
-        apply_id: Callable[[], Optional[str]] = lambda: None,
         validator: SkillPackageValidator,
         skill_repository: SkillRepository,
     ) -> None:
-        super().__init__(store, env=env, apply_id=apply_id)
+        super().__init__(store)
         self._validator = validator
         self._skills = skill_repository
 
@@ -249,7 +231,7 @@ class StoreSkillPackagePort(_StorePort):
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]:
         # The same gate the real service runs: the package's own SKILL.md
-        # names the skill, and an invalid zip is refused here, not indexed.
+        # names the skill, and an invalid zip is refused here, not stored.
         validated = self._validator.validate_zip(package)
         return await asyncio.to_thread(
             self._install, bot_id, owner_id, actor_id, validated.name, validated
@@ -268,10 +250,9 @@ class StoreSkillPackagePort(_StorePort):
                 name=name,
                 rel_path=rel_path,
                 content=content,
-                apply_id=self._apply_id(),
             )
         # New files first, stale ones after: the package is never missing a
-        # member between the two, and a replaced file was upserted in place.
+        # member between the two, and a replaced file was overwritten in place.
         for row in self._store.list(scope, category=CATEGORY_SKILLS):
             if _under(row.rel_path, prefix) and row.rel_path not in wanted:
                 self._store.delete(scope, category=CATEGORY_SKILLS, rel_path=row.rel_path)
@@ -321,8 +302,9 @@ class StoreSkillPackagePort(_StorePort):
                 continue
             content = self._store.read(row)
             if content is None:
-                # A row whose object is gone: unknown, never equal — the
-                # write path restores the package while it is in hand.
+                # A member that vanished between the listing and the read:
+                # unknown, never equal — the write path restores the package
+                # while it is in hand.
                 return None
             files.append((row.rel_path[len(prefix) + 1 :], content))
         if not files:

@@ -173,15 +173,15 @@ Three earlier decisions are restated rather than re-derived:
 
 - [ ] The platform keeps a durable record of the manifest-delivered file set
       per bot and category — bytes in the bot-data object store under a
-      per-bot key layout, an index row per file — and that record is what the
-      teclaw composer reads for the three file categories when the map says
-      `platform`.
+      per-bot key layout that is itself the record (no index table, as of
+      plan rev 4) — and that record is what the teclaw composer reads for
+      the three file categories when the map says `platform`.
 - [ ] The identity and resource materialisers converge that record: `plan`
-      reads the index, `write` puts and deletes objects and index rows.
-      Convergence is observed from the index (an unchanged digest writes
-      nothing), never from the container.
+      reads the store, `write` puts and deletes objects. Convergence is
+      observed from the store (an unchanged file writes nothing), never from
+      the container.
 - [ ] A manifest skill is unpacked into the store under the engine's
-      local-skills directory layout, indexed like any other files, recorded
+      local-skills directory layout, stored like any other files, recorded
       as a skill with a `local://` locator, and emitted in the artifact both
       as files and as a `SkillRef` naming the package's store prefix.
 - [ ] MCP and skill activation for a bot that is not `ACTIVE` records the
@@ -192,7 +192,7 @@ Three earlier decisions are restated rather than re-derived:
 - [ ] The closing redeliver composes through the same composer the runtime
       device-sync plugin uses, so the redelivered artifact and the first
       artifact are produced by one path.
-- [ ] Objects and index rows for a bot are deleted when a W13 creation ends
+- [ ] The objects for a bot are deleted when a W13 creation ends
       without a bot, together with the manifest and the script row it already
       deletes. They are otherwise retained, like publish snapshots.
 
@@ -217,7 +217,7 @@ Three earlier decisions are restated rather than re-derived:
 - [ ] **First-artifact guarantee, with the switch on:** a test on the creation
       job pins that provisioning is called only after the pre-container phase
       is terminal, and a test on the provisioner pins that the artifact handed
-      to the container carries the indexed refs and the ownership map.
+      to the container carries the store's refs and the ownership map.
 
 ### `PUT` takes effect (§2.6)
 
@@ -339,7 +339,7 @@ only and proves itself by parsing the result back.
   awareness in the apply service, the creation job and the poll.
 - The ownership map on the artifact, the schema, the composer, and the
   contract addendum.
-- The managed-files store and index, the store-backed ports, record-only
+- The managed-files store, the store-backed ports, record-only
   activation, the store-backed skill package, the closing redeliver.
 - The deferred-provision option on `create_bot` and the provision call.
 - Lifting W13's teclaw refusal.

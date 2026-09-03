@@ -124,6 +124,8 @@ Conventions every task assumes:
 - **Depends on:** Task 4, Task 8 (reader implementation)
 
 ## [x] Task 7: The managed-files index
+- **Superseded in review (plan rev 4):** the table, its repository, protocol,
+  DDL and tests were removed; the store lists the object prefix instead.
 - **Files:** `core/bot_config_manifest/repository/managed_files_models.py` (new),
   `core/repository/protocols/bot/managed_files.py` (new),
   `core/repository/implementations/bot/managed_files.py` (new),

@@ -3,9 +3,9 @@
 Two questions, one object. *Which categories does the platform assert for this
 bot?* — the categories its stored manifest declares, as artifact field names,
 when the platform-managed switch is on; otherwise none. *What files does the
-platform hold for them?* — store-relative refs from the index, in the shapes
-the collector already yields, so the composer embeds them the way it embeds
-everything else.
+platform hold for them?* — store-relative refs from the store's listing, in
+the shapes the collector already yields, so the composer embeds them the way
+it embeds everything else.
 
 The document is parsed the same way apply parses it (``yaml.safe_load`` plus
 the orchestrator's ``declared_entries``), so "declared" means exactly what it
@@ -106,9 +106,9 @@ class ManagedFilesComposeReader:
         return [self._as_file(f) for f in self._files(req, CATEGORY_RESOURCES)]
 
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
-        """Every package the index holds, active or not.
+        """Every package the store holds, active or not.
 
-        The index keeps a package after the manifest stops declaring it — the
+        The store keeps a package after the manifest stops declaring it — the
         way a deactivated local skill keeps its files on an ARCA host — so
         the collector intersects this with the bot's active set before it
         emits a ``SkillRef``; the reader does not know the active set.
@@ -157,20 +157,15 @@ def _scope(req: ComposeRequest) -> ManagedFileScope:
     The identity and resources materialisers address a bot at
     ``("staff", owner_id)`` — the personal-bot surface's fixed pair
     (``identity_coords_from_record`` / the resources router) — and the
-    store-backed ports key the index by the pair they are handed. The
+    store-backed ports key the store by the pair they are handed. The
     composer's ``user_id`` *is* the bot's ``owner_id`` (``_compose_request``
     and the device-sync service both set it so), which is what makes the read
-    side land on the rows the write side wrote. ``req.entity_id`` is the
+    side land on the keys the write side wrote. ``req.entity_id`` is the
     manifest's storage key, a different vocabulary that happens to share the
-    name; it is used for the manifest lookup above and never for the index.
+    name; it is used for the manifest lookup above and never for the store.
     """
-    from agentclaw.community.utils.env_utils import get_current_env
-
     return ManagedFileScope(
-        env=get_current_env(),
-        entity_type=OWNER_ENTITY_TYPE,
-        entity_id=req.user_id,
-        bot_id=req.bot_id,
+        entity_type=OWNER_ENTITY_TYPE, entity_id=req.user_id, bot_id=req.bot_id
     )
 
 

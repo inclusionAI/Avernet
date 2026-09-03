@@ -1832,8 +1832,8 @@ manifest 层，所以 W8 没有「去激活」需要安放。）
 
 - **teclaw 第一份 artifact 带着 manifest**——在平台管理路径上成立：创建 job 先只写
   bot 记录，对着它跑唯一一个容器前阶段（每个类目写平台状态——store 后端的端口把
-  字节写进 bot-data 对象存储、索引行写进 `ac_bot_config_managed_files`；激活只记录
-  不投影），再开通；composer 读索引并写出 `ownership` 映射（引擎契约 §9）。
+  字节写进 bot-data 对象存储，键布局即记录、没有索引表；激活只记录
+  不投影），再开通；composer 列出对象存储前缀并写出 `ownership` 映射（引擎契约 §9）。
 - **teclaw 创建、解除拒绝**——已完成；轮询走
   `AWAITING_AUTHORIZATION → CREATING → APPLYING → CREATING → READY`。
 - **`PUT` 生效**——已完成：`PUT` 先存，再以 `put` 触发器启动一次 apply；响应的
