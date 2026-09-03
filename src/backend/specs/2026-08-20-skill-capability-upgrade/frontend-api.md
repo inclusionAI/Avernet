@@ -510,6 +510,13 @@ file_paths=["SKILL.md","references/example.md"]
 上传成功可能是“新建”或“同名替换”。新建项默认 inactive；替换必须保留原 active、Membership
 和 skill_id。上传后刷新 Bot Skill detail/list，再按最终控制来源处理：
 
+```http
+GET /openapi/v1/bots/{bot_id}/skills?source=LOCAL&page=1&page_size=20&user_id={actor_id}&owner_id={bot_owner_id}
+```
+
+`source=LOCAL` 只返回该 Bot 上传的 `local://` Skill（包含 active 与 inactive）。省略 `source`
+仍保持“Bot 全部可达 Skill”的现有列表语义，不能在前端用名称或 active 状态猜 Local 来源。
+
 | 上传后状态 | 后续动作 |
 | --- | --- |
 | inactive 且无 Membership | 调用下面的 Membership PUT |

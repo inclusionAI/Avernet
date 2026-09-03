@@ -103,9 +103,10 @@ removed.
 
 ## Out of Scope
 
-- A `type` query parameter or a `type` field on the `Skill` schema
-  (`2026-08-20-skill-capability-upgrade` *Phase 1*). This change makes the
-  listing complete; naming each row's source is its own change.
+- A source field on the `Skill` response. The additive `source=LOCAL` query
+  filter is supported for the legacy-compatible “Bot uploads” page; it filters
+  exact Bot-owned `local://` rows without changing the default complete-list
+  semantics. Naming every returned row's source remains out of scope.
 - `GET /skills/{skill_id}` and the three asset operations under it. They stay
   Local-only; only the collection changes.
 - Runtime reconciliation. The repair writes desired state; it never touches

@@ -422,6 +422,7 @@ class SkillRepository(
         page_size: int,
         active: bool | None,
         keyword: str | None,
+        source: str | None = None,
     ) -> tuple[int, list[dict]]:
         """Page every Skill one Bot reaches, by desired active state.
 
@@ -459,18 +460,24 @@ class SkillRepository(
                 self.Skill.bolt_id == bot_id,
                 self.Skill.user_id == _normalize_user_id(user_id),
             )
-            # Three ways, not two. A shared Skill the Bot activated directly
-            # belongs to no SkillSet and carries another owner's ``bolt_id``,
-            # so neither of the first two predicates finds it — yet
-            # ``list_bot_installed_assets`` puts it in the runtime projection, so
-            # leaving it out would hide a Skill the Bot is running.
-            reachable = [owned, installed]
-            if member_ids:
-                reachable.append(self.Skill.id.in_(member_ids))
             query = db.query(self.Skill, installed.label("active")).filter(
-                self.Skill.env == get_current_env(),
-                or_(*reachable),
+                self.Skill.env == get_current_env()
             )
+            if source == "LOCAL":
+                # A Local upload is an exact owner+Bot row. Do not let a
+                # shared Direct/SkillSet asset enter this legacy-compatible
+                # collection merely because it is currently installed.
+                query = query.filter(owned, self.Skill.git_path.like("local://%"))
+            else:
+                # Three ways, not two. A shared Skill the Bot activated directly
+                # belongs to no SkillSet and carries another owner's ``bolt_id``,
+                # so neither of the first two predicates finds it — yet
+                # ``list_bot_installed_assets`` puts it in the runtime projection,
+                # so leaving it out would hide a Skill the Bot is running.
+                reachable = [owned, installed]
+                if member_ids:
+                    reachable.append(self.Skill.id.in_(member_ids))
+                query = query.filter(or_(*reachable))
             if keyword and keyword.strip():
                 term = f"%{keyword.strip().lower()}%"
                 query = query.filter(

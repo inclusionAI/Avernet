@@ -48,6 +48,7 @@ def _page(repo, *, members=(), **overrides):
             "page_size": 20,
             "active": None,
             "keyword": None,
+            "source": None,
             **overrides,
         }
     )
@@ -114,8 +115,13 @@ def test_bot_owned_rows_are_listed_whatever_their_source_prefix(tmp_path):
             )
         total, rows = _page(repo)
 
-    assert total == 3
-    assert {row["name"] for row in rows} == {"forecast", "market", "space"}
+        assert total == 3
+        assert {row["name"] for row in rows} == {"forecast", "market", "space"}
+
+        local_total, local_rows = _page(repo, source="LOCAL")
+
+        assert local_total == 1
+        assert [row["name"] for row in local_rows] == ["forecast"]
 
 
 def test_a_bridged_row_is_listed_even_though_the_bot_does_not_own_it(tmp_path):
@@ -148,9 +154,14 @@ def test_a_bridged_row_is_listed_even_though_the_bot_does_not_own_it(tmp_path):
             }
         )
         total, rows = _page(repo, members=(int(shared["id"]),))
+        local_total, local_rows = _page(
+            repo, members=(int(shared["id"]),), source="LOCAL"
+        )
 
     assert total == 2
     assert {row["id"] for row in rows} == {mine["id"], shared["id"]}
+    assert local_total == 1
+    assert [row["id"] for row in local_rows] == [mine["id"]]
 
 
 def test_a_skill_both_owned_and_bridged_is_listed_once(tmp_path):

@@ -363,7 +363,7 @@ skills-local / skills-repo / skill-center / MCP/CLI projection
 
 | Method | Path | Request | 语义 |
 | --- | --- | --- | --- |
-| GET | `/openapi/v1/bots/{bot_id}/skills` | optional `type=LOCAL\|REPO\|SPACE\|ALL` | 产品显式传 `ALL`；过滤、去重后再分页 |
+| GET | `/openapi/v1/bots/{bot_id}/skills` | optional `source=LOCAL` | 省略时列出 Bot 全部可达 Skill；`LOCAL` 只列出该 Bot 上传的 Local Skill |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}` | path | 服务端解析类型和 Bot 关系 |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/content` | path | 返回可消费 `SKILL.md` |
 | GET | `/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters` | path | Bot 级参数 |
@@ -378,7 +378,7 @@ Bot-owned Local Asset
 ∪ 当前 Installation
 ```
 
-旧 `active` 字段表示当前是否存在 Installation。只增加 optional `type`、`managed_by`、`skill_set_id`，不增加 `direct_active/effective_active/sources`。
+旧 `active` 字段表示当前是否存在 Installation。只增加 optional `source=LOCAL`，不增加 `direct_active/effective_active/sources`。
 
 Direct activate/deactivate：
 

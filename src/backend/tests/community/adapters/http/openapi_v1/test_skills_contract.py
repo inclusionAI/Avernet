@@ -62,6 +62,11 @@ def test_collection_and_upload_are_bot_addressed_contracts() -> None:
     assert list_parameters["owner_id"]["required"] is False
     assert list_parameters["active"]["required"] is False
     assert list_parameters["keyword"]["required"] is False
+    assert list_parameters["source"]["required"] is False
+    assert {item.get("const") for item in list_parameters["source"]["schema"]["anyOf"]} == {
+        "LOCAL",
+        None,
+    }
 
     upload = paths["/openapi/v1/bots/{bot_id}/skills"]["post"]
     upload_parameters = {
