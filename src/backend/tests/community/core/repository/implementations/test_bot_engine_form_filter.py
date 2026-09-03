@@ -1,11 +1,12 @@
 """Parity between the SQL engine filter and ``uses_aicoding_runtime``.
 
-``engine_form_filter_criterion`` mirrors the runtime predicate arm-by-arm on
-the ``ac_bots`` column set (see its docstring in
-``repository/implementations/bot/bot.py``). This module pins that parity with
-in-memory SQLite: the rows the SQL criterion matches for ``engine=aicoding``
-are exactly the rows ``uses_aicoding_runtime`` accepts, across both vocabulary
-spells — and every other engine value keeps its exact-match semantics.
+``engine_criterion`` (
+``repository/implementations/bot/engine_filter.py``) mirrors the runtime
+predicate arm-by-arm on the ``ac_bots`` column set. This module pins that
+parity with in-memory SQLite: the rows the SQL criterion matches for
+``engine=aicoding`` are exactly the rows ``uses_aicoding_runtime`` accepts,
+across both vocabulary spells — and every other engine value keeps its
+exact-match semantics.
 """
 
 from __future__ import annotations
@@ -14,8 +15,8 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from agentclaw.community.core.repository.implementations.bot.bot import (
-    engine_form_filter_criterion,
+from agentclaw.community.core.repository.implementations.bot.engine_filter import (
+    engine_criterion,
 )
 from agentclaw.community.core.workspace.runtime_identity import (
     uses_aicoding_runtime,
@@ -69,7 +70,7 @@ def session() -> Session:
 def _sql_matched(session: Session, engine_filter: str) -> set[str]:
     rows = session.scalars(
         select(BotModel).where(
-            engine_form_filter_criterion(BotModel, engine_filter)
+            engine_criterion(BotModel, engine_filter)
         )
     ).all()
     return {row.bot_id for row in rows}
