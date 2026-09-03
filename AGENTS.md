@@ -101,9 +101,10 @@ merged. Both must carry meaning on their own.
 
 ### Title
 
-Use `<type>(<scope>): <concise outcome>`:
+Use `<type>: <concise outcome>` or `<type>(<scope>): <concise outcome>`:
 
 ```text
+feat: add whitelist observed state
 feat(backend): add whitelist observed state
 fix(bcs): reject routing updates for unknown bot ids
 docs(arch): document plugin protocol conformance shape
@@ -120,9 +121,10 @@ docs(arch): document plugin protocol conformance shape
 | `build` | Build system or dependencies |
 | `chore` | Other maintenance |
 
-The scope is the module or area you touched, such as `backend`, `baas`,
-`engine`, `bcs`, `frontend`, `gateway`, `arch`, or `ci`. The outcome describes
-what the change accomplishes, not which files moved.
+The optional scope is the module or area you touched, such as `backend`,
+`baas`, `engine`, `bcs`, `frontend`, `gateway`, `arch`, or `ci`. Include it
+when one module or area clearly owns the change. The outcome describes what the
+change accomplishes, not which files moved.
 
 Do not use vague or context-free titles such as `fix bug`, `update code`,
 `sync`, a bare branch name, or an issue number with no summary.
