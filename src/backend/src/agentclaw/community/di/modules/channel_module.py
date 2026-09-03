@@ -19,11 +19,16 @@ from __future__ import annotations
 from injector import Binder, Module, inject, provider, singleton
 
 from agentclaw.community.api.channel_service import ChannelServiceProtocol
+from agentclaw.community.core.channel.services.bcs_binding_client import (
+    BcsChannelBindingClientProtocol,
+    HttpBcsChannelBindingClient,
+)
 from agentclaw.community.core.channel.services.channel_service import ChannelService
 from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
 from agentclaw.community.core.repository.protocols.chat import ChannelRepository
+from agentclaw.community.di import config as cfg
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.repository.implementations.chat.channel import ChannelRepository as UnifiedChannelRepository
 
@@ -59,3 +64,15 @@ class ChannelModule(Module):
         config-compose collector (draft filter) and the publish flow
         (verify/online filters); a singleton over the same ``ChannelRepository``."""
         return ChannelEngineOverridesReader(channel_repo=channel_repo)
+
+    @singleton
+    @provider
+    def _bcs_channel_binding_client(
+        self, config: cfg.BcsBindingConfig
+    ) -> BcsChannelBindingClientProtocol:
+        """BCS bindings orchestration client for ``bcn_gateway`` channels."""
+        return HttpBcsChannelBindingClient(
+            base_url=config.base_url,
+            service_token=config.service_token,
+            timeout=config.timeout_seconds,
+        )
