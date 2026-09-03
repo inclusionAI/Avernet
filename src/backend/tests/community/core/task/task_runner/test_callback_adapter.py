@@ -6,7 +6,6 @@ TaskLoopCallback.report_result→engine.on_report、start_run 进度信号不驱
 from __future__ import annotations
 
 import asyncio
-import uuid
 
 from agentclaw.community.core.task.domain.models import (
     AcceptanceVerdict,
@@ -207,8 +206,8 @@ class TestPersist:
         assert rec.run_id == "t1" and rec.node_id == "c1"
         assert rec.result_success is True
         assert rec.exec_error is None
-        assert rec.event_id
-        assert str(uuid.UUID(rec.event_id)) == rec.event_id
+        assert rec.event_id is not None
+        assert rec.event_id.startswith("t1:c1:result:")
         # 无 workflow_source/instance_in data → NOT NULL 列退 ""(空保持空)
         assert rec.invoker == ""
         assert rec.main_session_id == ""

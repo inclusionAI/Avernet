@@ -9,7 +9,6 @@ import contextvars
 import hashlib
 import json
 import logging
-import uuid
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.task.repository.types import TaskCallbackRecord
@@ -357,10 +356,23 @@ class TaskLoopCallback(TaskLoopCallbackProtocol):
 
         logger.info("[task_callback] report_result, begin, data=%s", data)
         payload = data.data if isinstance(data.data, dict) else None
+        event_id = _derive_event_id(payload, "result") if payload is not None else None
+
+        # The same inbound result may be retried after the HTTP response is lost.
+        # Use the stable event id before creating an audit record or replaying the
+        # graph mutation, just like start_run does.
+        if self._is_already_processed(event_id):
+            logger.info(
+                "[task][task_callback] idempotent result event_id=%s session_id=%s",
+                event_id,
+                payload.get("workflow_instance_id") if payload is not None else "",
+            )
+            return
+
         record = (
             _to_callback_record(
                 payload,
-                event_id=str(uuid.uuid4()),
+                event_id=event_id,
                 process_status="PROCESSED",
             )
             if payload is not None

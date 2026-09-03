@@ -906,7 +906,7 @@ task_callback_router = APIRouter(
     prefix="/api/v1/collaboration/tasks/callback", tags=["task-callback"]
 )
 
-_TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG}
+_TERMINAL = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG}
 
 
 def _find_node_status(svc: TaskServiceProtocol, loop_task_id: str) -> Status | None:
