@@ -1,7 +1,8 @@
-# tests/community/core/task/task_runner/integration/test_bbs_executor.py
 import asyncio
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
+
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
     Context,
@@ -13,7 +14,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNode,
     TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _run(coro):
@@ -35,12 +36,8 @@ def _node(objective: str) -> TaskNode:
     )
 
 
-def test_task_executor_dispatch_bbs_delegates_to_bbs_runner():
-    """TaskExecutor.dispatch delegates BBS nodes to bbs_runner.notify.
-
-    BBS 候选 roster 经注入的 BcnService(复用统一 provider 身份)查询:notify 以
-    ``bcn=``(BcnService)、``bot=`` 透传,不再传 ``bcs``。
-    """
+def test_task_executor_dispatch_bbs_delegates_to_modal_executor():
+    """A BBS node is dispatched with the caller's current node snapshot."""
     on_bbs_report = AsyncMock()
     graph = MagicMock()
     persisted_root = _node("persisted objective")
@@ -52,24 +49,30 @@ def test_task_executor_dispatch_bbs_delegates_to_bbs_runner():
         task_id="t1",
     )
     graph.query_task_dashboard.return_value = execution_graph
-    exe = TaskExecutor(bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
-                       formatter=None, context=None, sink=None, poller=None,
-                       graph=graph, api_base_url="http://test:8888",
-                       on_bbs_report=on_bbs_report)
+    exe = TaskExecutor(
+        bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
+        formatter=None, context=None, sink=None, poller=None,
+        graph=graph, api_base_url="http://test:8888", on_bbs_report=on_bbs_report,
+    )
     node = _node("upper-layer updated objective")
-    with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify", new_callable=AsyncMock) as mock_notify:
+
+    with patch(
+        "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
+        new_callable=AsyncMock,
+    ) as mock_notify:
         assert _run(exe.dispatch([node])) == [True]
-        mock_notify.assert_awaited_once()
-        call_kwargs = mock_notify.call_args
-        assert call_kwargs.kwargs["backend_url"] == "http://test:8888"
-        dispatched_graph = call_kwargs.kwargs["execution_graph"]
-        assert dispatched_graph is not execution_graph
-        assert dispatched_graph.tasks[0] is node
-        assert dispatched_graph.tasks[0].task_spec.goal.objective == "upper-layer updated objective"
-        assert execution_graph.tasks == [persisted_root]
-        assert call_kwargs.kwargs["bcn"] is exe._bcn
-        assert call_kwargs.kwargs["bot"] is exe._bot
-        assert call_kwargs.kwargs["on_bbs_report"] is on_bbs_report  # 引擎收口回调透传 notify
+
+    mock_notify.assert_awaited_once()
+    kwargs = mock_notify.call_args.kwargs
+    assert kwargs["backend_url"] == "http://test:8888"
+    dispatched_graph = kwargs["execution_graph"]
+    assert dispatched_graph is not execution_graph
+    assert dispatched_graph.tasks[0] is node
+    assert dispatched_graph.tasks[0].task_spec.goal.objective == "upper-layer updated objective"
+    assert execution_graph.tasks == [persisted_root]
+    assert kwargs["bcn"] is exe._bcn
+    assert kwargs["bot"] is exe._bot
+    assert kwargs["on_bbs_report"] is on_bbs_report
 
 
 def test_task_executor_dispatch_bbs_propagates_graph_lookup_failure():
@@ -88,11 +91,7 @@ def test_task_executor_dispatch_bbs_propagates_graph_lookup_failure():
 def test_task_executor_dispatch_bbs_returns_false_when_node_missing():
     graph = MagicMock()
     graph.query_task_dashboard.return_value = TaskExecutionGraph(
-        run_id=1,
-        loop_round=1,
-        status=Status.HUNG,
-        tasks=[],
-        task_id="t1",
+        run_id=1, loop_round=1, status=Status.HUNG, tasks=[], task_id="t1",
     )
     exe = TaskExecutor(
         bot=MagicMock(), bcs=MagicMock(), bcn=MagicMock(),
@@ -101,7 +100,7 @@ def test_task_executor_dispatch_bbs_returns_false_when_node_missing():
     )
 
     with patch(
-        "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+        "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
         new_callable=AsyncMock,
     ) as notify:
         assert _run(exe.dispatch([_node("updated objective")])) == [False]

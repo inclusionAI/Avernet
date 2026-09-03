@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Optional, Protocol, Sequence, runtime_checkabl
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import Status
     from agentclaw.community.core.task.repository.types import (
+        BbsTaskOverviewRecord,
         TaskActionLogRecord,
         TaskCallbackRecord,
         TaskInfoRecord,
@@ -76,12 +77,12 @@ class TaskInfoRepositoryProtocol(Protocol):
     @abstractmethod
     def list_by_status(
         self,
-        status: "Status",
+        status: "Status | Sequence[Status]",
         *,
         gmt_modified_since: Optional[datetime] = None,
         limit: int = 100,
     ) -> list["TaskInfoRecord"]:
-        """Rows in ``status``, newest ``gmt_modified`` first (dashboard query)."""
+        """Rows in one or more statuses, newest ``gmt_modified`` first (dashboard query)."""
         ...
 
 
@@ -113,11 +114,11 @@ class TaskNodeRepositoryProtocol(Protocol):
     def list_by_status(
         self,
         task_id: Optional[str],
-        status: "Status",
+        status: "Status | Sequence[Status]",
         *,
         limit: int = 100,
     ) -> list["TaskNodeRecord"]:
-        """Nodes in ``status``; optionally scoped to ``task_id``."""
+        """Nodes in one or more statuses; optionally scoped to ``task_id``."""
         ...
 
 
@@ -373,6 +374,25 @@ class TaskGraphRepositoryProtocol(Protocol):
     @abstractmethod
     def release_bbs_owner(self, task_id: str, bot_id: str) -> bool:
         """Release a BBS relay claim held by ``bot_id``."""
+        ...
+
+    @abstractmethod
+    def list_bbs_tasks_overview(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """List one page (1-based) of BBS relay runs: ``task_node_run_info`` (run_mode='bbs')
+        ⋈ ``task_node`` on (task_id, node_id), with ``task_info.owner_bot_id`` attached as
+        ``publisher`` (batch-looked-up by task_id; missing task_info → ``None``). Returns
+        ``(records, total)``: ``total`` is the filtered row count, ``records`` the stable
+        ``(task_id, node_id)``-ordered page slice (LIMIT/OFFSET). Optional filters (None → no
+        filter): ``status`` (single value, equals ``task_node.status``); ``search_word``
+        (case-insensitive LIKE on ``task_node.task_spec`` or ``task_node_run_info.extend_props``).
+        Read-only overview projection feeding ``GET /api/v1/collaboration/tasks/bbs/list``."""
         ...
 
 

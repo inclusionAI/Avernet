@@ -1,0 +1,132 @@
+template_id: merchant-operations-goal-to-plan
+entry_bot_id: 20260901_kcvvkqqs
+entry_name: 店主Bot
+# 每个节点只描述本角色工作边界;上游正文由 StaticPlanRuntime 统一透传(接自/上游产出正文/本角色任务),
+# 不在 task 里替下游预写专业 checklist。输入=上一Bot输出(handoff 接力)。
+task_type: static_plan
+input_schema:
+  okr:
+    type: string
+    required: true
+
+nodes:
+  - id: set_redlines
+    name: 店主Bot
+    title: 店主·定红线封任务单
+    type: bot
+    bot_id: 20260901_kcvvkqqs
+    depends_on: []
+    input:
+      okr: $.input.okr
+      public_context: |
+        背景：理发店为庆祝成立18周年，准备开展周年促销、护理套餐和会员权益活动，通过优化服务安排与营销协作，提升到店客流和护理业务，同时维护老客口碑并沉淀可复购会员。
+        经营约束：促销预算 ≤ 20 万；备货新增现金占用 ≤ 8 万；活动窗口 2026.10.15—2026.11.15，共 32 天。
+        经营目标：新客到店 1500；券核销 ≥ 1000；护理售卖 200 份（转化 ≥ 15%）；新增会员 ≥ 800；客诉差评 ≤ 日常水平的 1.2 倍。
+    output:
+      handoff: $.result
+    task: |
+      你是店主侧经营负责人(第一次出场)。无论本次任务由店主本人、其他 Bot 还是人工重新触发,都把下面这张公共经营信息当作共同事实底稿,不要只依据“接自”一行猜测背景。
+
+      背景：理发店为庆祝成立18周年,准备开展周年促销、护理套餐和会员权益活动,通过优化服务安排与营销协作,提升到店客流和护理业务,同时维护老客口碑并沉淀可复购会员。
+      经营约束：促销预算≤20万;备货新增现金占用≤8万;活动窗口为2026.10.15—2026.11.15,共32天。
+      经营目标：新客到店1500;券核销≥1000;护理售卖200份;护理转化率≥15%;新增会员≥800;客诉差评≤日常水平的1.2倍。
+
+      请结合公共信息与本次触发消息,区分已知事实、待确认假设和需要店主取舍的事项,再用店主侧自持成本账本算出价格红线(补贴率/最低折扣/最低价)与平台合规红线,封成一套公共约束任务单:活动窗口、营业时段、促销预算上限、备货现金占用上限、价格红线、平台合规红线、客流目标。单品成本/毛利底线/授权清单自持不下发,留给后续利润核算。只定红线封任务单,不替门店运营、营销、评审或实施角色做专业判断。
+
+  - id: ops_capacity
+    name: 门店运营Bot
+    title: 门店运营·测产能出画像·带营销约束
+    type: bot
+    bot_id: 20260901_5r6cdh02
+    depends_on: [set_redlines]
+    input:
+      handoff: $.set_redlines.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接店主Bot的任务单(全套公共约束)。只用运营相关子集(活动窗口、营业时段、备货现金占用上限、客流目标)测算门店能力画像:工位/员工、服务时长、各时段空余产能、按服务类型可接上限、库存耗材现状与可补量、可扩选项、目标vs产能缺口。营销相关约束(促销预算、价格红线、平台合规红线、客流目标)原样透传附在产出里,不解读、不使用。产出能力画像+原样营销约束交营销出方案。
+
+  - id: marketing_plan
+    name: 营销Bot
+    title: 营销·在能力内出方案
+    type: bot
+    bot_id: 20260901_mylvdi1o
+    depends_on: [ops_capacity]
+    input:
+      handoff: $.ops_capacity.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接门店运营Bot的能力画像与原样营销约束(预算/红线/平台合规/目标)。在能力画像约束内设计可公开的营销方案:新客引流券(补贴率/折扣/放量分批按产能)、老客护理套餐(价格不低于红线、按库存与产能限量、预约制)、会员机制、投放节奏(占用率阈值暂停)。不替评审、核算或实施下结论;无法确认的保留为条件或待决策。
+
+  - id: review_group
+    name: 评审群
+    title: 评审群·修订过审
+    type: collaboration
+    depends_on: [marketing_plan]
+    collaboration:
+      bot_ids: [20260901_sesl8hmo, 20260901_4tn4mnnj]
+      bot_names: [商场运营Bot, 线上平台Bot]
+      mode: chat
+      completion: report
+    input:
+      handoff: $.marketing_plan.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你是评审群(driver 商场运营企划 + 线上平台口碑风控):基于上游完整营销方案做商场与平台侧评审,逐项给修订条件——商场:展位报批、传单限入口、营业时段内执行;平台:券有效期与预约限制须活动页明示、禁止全城最低、设等待超时安抚、客诉超阈值暂停投放。默认给修订条件不打回。处理不了的标明。
+
+  - id: profit_accounting
+    name: 店主Bot
+    title: 店主·利润核算·授权划界
+    type: bot
+    bot_id: 20260901_kcvvkqqs
+    depends_on: [review_group]
+    input:
+      handoff: $.review_group.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接评审群过审的完整方案(第二次出场)。用自持单品成本账本做利润核算:逐项算成本/售价/毛利是否达标,低于毛利底线标红。输出利润核算表、授权清单(哪些可自主、哪些需店主审批)、待取舍项。只给核算与授权划界,不替店主人决定取舍。
+
+  - id: launch
+    name: 投放实施
+    title: 投放实施·执行
+    type: bot
+    bot_id: 20260828_k9c2slro
+    depends_on: [profit_accounting]
+    input:
+      handoff: $.profit_accounting.output.handoff
+    output:
+      handoff: $.result
+    task: |
+      你接店主Bot利润核算与授权划界后的方案。执行投放:发券/传单/展位/推送已执行并记实施记录。发现能力缺口(如到店核销防重复领工具)时,把它作为不可实现任务在 unhandled_tasks 里上报(写清业务事实、影响和需要补齐的能力),不假装已完成无系统回执的操作;不要替研发角色预写技术实现方案。
+
+  - id: coupon_duplicate_claim_bbs
+    name: 补齐周年活动券重复领取拦截能力
+    title: 周年活动券重复领取拦截能力缺口
+    type: bbs_handoff
+    bot_id: 20260828_f7wfi27d
+    depends_on: [launch]
+    input:
+      handoff: $.launch.output.handoff
+      unhandled_tasks:
+        - id: merchant-coupon-duplicate-claim
+          title: 补齐周年活动券重复领取拦截能力
+          task_source: 周年活动投放实施阶段
+          business_context: 理发店成立18周年,活动窗口为2026.10.15—2026.11.15,经营目标包含新客到店1500、券核销不少于1000、护理售卖200份、新增会员800。
+          constraints: 促销预算不超过20万元;备货新增现金占用不超过8万元。
+          problem: 店方现有工具无法可靠判断同一用户是否已经领取过同类活动券,无法有效拦截重复领取。
+          impact: 若直接投放,可能造成重复领券、促销预算超支、到店核销争议和用户体验下降,并放大客诉与周年活动口碑风险。
+          current_owner_boundary: 投放实施角色只能配置和执行已有活动能力,没有开发新的领取状态判断或重复领取拦截能力。
+          requested_capability: 补齐活动券领取过程中的重复领取拦截能力,先判断现有活动链路和数据是否具备承接条件。
+          expected_result: 给出可实施的能力评估与实现结果,说明可用范围、接入方式、限制条件和验证结果;完成后回传投放实施环节继续活动执行。
+    output:
+      bbs_handed: $.result
+      handoff: $.result
+    task: |
+      我认领 BBS 上的“补齐周年活动券重复领取拦截能力”任务。
+
+      这项任务来自理发店18周年活动的投放实施阶段。当前活动方案、首批活动券和投放内容已经准备完成,但店方现有工具无法可靠判断同一用户是否已经领取过同类活动券,因此重复领券拦截能力存在缺口。若不补齐,可能导致重复领券、促销预算超支、到店核销争议以及客诉和活动口碑风险。
+
+      我过去完成过活动券领取状态、重复提交拦截或幂等处理相关开发,与这次问题的核心形态相似,所以先由我认领并评估。接下来我会先了解现有领取链路、用户识别方式和历史领取记录是否可用,再给出可实施方案、接入方式、限制条件和验证结果,完成后把结果回传投放实施环节。不要把尚未验证的实现能力当成已经完成。

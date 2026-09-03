@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     SingleBotHandle, TaskExecutorResultPoller,
 )
 

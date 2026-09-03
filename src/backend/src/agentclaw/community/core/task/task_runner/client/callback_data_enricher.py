@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from agentclaw.community.core.task.domain.models import Status, TaskCallbackData
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
 
@@ -30,7 +30,8 @@ logger = logging.getLogger("task.task_callback")
 
 # ===== ClawMind 状态映射 + ext_info → graph_to_dict 执行图快照 =====
 
-# 底层 status → TaskExecutionGraph 7 态:succeeded/done→DONE、failed→FAILED、
+# 底层 status → callback execution snapshot:completed means execution DONE;
+# acceptance pass is resolved by the task callback path to SUCCESS.
 # cancelled/aborted→CANCELLED、running/started→RUNNING,余缺省 PENDING。
 _CLAW_MIND_TO_TASK_STATUS: dict[str, Status] = {
     "succeeded": Status.DONE, "completed": Status.DONE, "done": Status.DONE,

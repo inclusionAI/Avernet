@@ -145,7 +145,7 @@ def _done_children(graph: TaskExecutionGraph, target: TaskNode) -> list[dict]:
     ]
     out: list[dict] = []
     for n in graph.tasks:
-        if n.node_id in child_ids and n.status == Status.DONE:
+        if n.node_id in child_ids and n.status == Status.SUCCESS:
             out.append({
                 "node_id": n.node_id,
                 "title": n.task_spec.metadata.title,
@@ -182,6 +182,7 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
 
     return_fmt = (
         '## 返回数据格式约定\n'
+        '硬约束：单次规划最多返回 3 个子任务，``tasks`` 数组长度不得超过 3；如果剩余事项超过 3 个，按依赖关系和优先级选择当前最重要的 3 个，未选事项留给后续规划，禁止返回第 4 个及之后的子任务。\n'
         '返回 JSON 字符串,结构为对象 ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str, "acceptance_verdicts": List[{"ac_id": str, "passed": bool, "reason": str}]}``:\n'
         '```json\n'
         '{"tasks": [{"metadata": {"task_id": "<子节点node_id>", "title": "<标题>", "instruction": "<指令>"},\n'
@@ -206,7 +207,7 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
         '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_verdicts": [{"ac_id": "<acceptance的id>", "passed": true, "reason": "已由已 DONE 子节点交付达成"}]}\n'
         '```'
     )
-    return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务;gap 已闭返回 has_gap=false。\n"
+    return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务;gap 已闭返回 has_gap=false。单次最多产出 3 个子任务，禁止超过 3 个。\n"
             f"目标节点 node_id={target.node_id}\n"
             f"已完成的子节点及其产出见快照 done_children;gap = 目标 - 已完成产出,据此产**尚未完成**的下一批子任务。\n"
             f"任务态快照\n{_json.dumps(snapshot, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")

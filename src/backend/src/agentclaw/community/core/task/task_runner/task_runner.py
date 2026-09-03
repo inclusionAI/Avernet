@@ -16,7 +16,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ class TaskRunner:
                 if port is not None:
                     return bool(await port.deliver(node))
                 logger.warning(
-                    "[task][runner] start_run 退桩(无 execution_backend 且无 %s delivery 注入)→ node=%s 记日志返 True,不真实发起",
+                    "[task][task_runner] start_run 退桩(无 execution_backend 且无 %s delivery 注入)→ node=%s 记日志返 True,不真实发起",
                     mode, node.node_id)
                 self._run_log.append(
                     {
@@ -117,12 +117,14 @@ class TaskRunner:
         协程化:BCS 建群是网络 IO,``await`` 不阻塞编排核(由 engine 锁外 await 调用)。
         注入 execution_backend 时委托其真实建群;否则 Avernet stub:生成 group_id 并记录 GroupFormation。
         prod BCS wiring(group_strategy=collab_mode;state_machine 注入 workflow yaml)在 ocb 仓。"""
+        logger.info("[task][task_runner] form_coop_group begin, group_formation=%s", gf)
+
         if self._execution_backend is not None:
             return await self._execution_backend.form_coop_group(gf)
         gid = f"grp_{uuid.uuid4().hex[:8]}"
         self._groups[gid] = gf
         logger.warning(
-            "[task][runner] form_coop_group 退桩(无 execution_backend)→ 造假 group_id=%s;"
+            "[task][task_runner] form_coop_group 退桩(无 execution_backend)→ 造假 group_id=%s;"
             "无真群/无 poller,任务将卡 RUNNING 不收敛。排查: grep [task][engine] execution_backend 不装配",
             gid)
         return gid
@@ -133,14 +135,14 @@ class TaskRunner:
         if self._execution_backend is not None:
             return await self._execution_backend.trigger_workflow(
                 bot_id=bot_id, message=message, metadata=metadata)
-        logger.warning("[task][runner] trigger_workflow 退桩(无 execution_backend)→ 造假 run_id,单 bot 不真实发起")
+        logger.warning("[task][task_runner] trigger_workflow 退桩(无 execution_backend)→ 造假 run_id,单 bot 不真实发起")
         return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
 
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""
         if self._execution_backend is not None:
             return await self._execution_backend.get_group_session(group_id)
-        logger.debug("[task][runner] get_group_session 退桩→ None(group_id=%s 无 execution_backend)", group_id)
+        logger.debug("[task][task_runner] get_group_session 退桩→ None(group_id=%s 无 execution_backend)", group_id)
         return None
 
     def _build_context(self, task_id: str, node_id: str) -> dict[str, Any]:
@@ -157,7 +159,7 @@ class TaskRunner:
             return {
                 "mode": "verify",
                 "child_outputs": {
-                    c.node_id: c.run_info.output for c in children if c.status == Status.DONE
+                    c.node_id: c.run_info.output for c in children if c.status == Status.SUCCESS
                 },
                 "goal": node.task_spec.goal if node else None,
                 "acceptances": node.task_spec.goal.acceptances if node else None,
@@ -170,7 +172,7 @@ class TaskRunner:
         sibling_outputs = {
             s.node_id: s.run_info.output
             for s in siblings
-            if s.status == Status.DONE and s.node_id != node_id
+            if s.status == Status.SUCCESS and s.node_id != node_id
         }
         return {
             "mode": "execute",

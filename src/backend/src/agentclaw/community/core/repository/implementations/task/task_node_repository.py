@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import Optional, Sequence
 
 from injector import inject
 
@@ -28,6 +28,7 @@ class TaskNodeRepository(TaskNodeRepositoryProtocol):
             node_id=record.node_id,
             task_spec=json.dumps(record.task_spec),
             status=record.status.value,
+            is_deleted=record.is_deleted,
         )
 
     def insert(self, record: TaskNodeRecord) -> TaskNodeRecord:
@@ -42,7 +43,11 @@ class TaskNodeRepository(TaskNodeRepositoryProtocol):
         with self._db.orm_session() as db:
             row = (
                 db.query(self._model)
-                .filter(self._model.task_id == task_id, self._model.node_id == node_id)
+                .filter(
+                    self._model.task_id == task_id,
+                    self._model.node_id == node_id,
+                    self._model.is_deleted.is_(False),
+                )
                 .first()
             )
             return row.to_record() if row else None
@@ -54,6 +59,7 @@ class TaskNodeRepository(TaskNodeRepositoryProtocol):
                 .filter(
                     self._model.task_id == task_id,
                     self._model.node_id == node_id,
+                    self._model.is_deleted.is_(False),
                 )
                 .update({"status": status.value}, synchronize_session=False)
             )
@@ -61,18 +67,26 @@ class TaskNodeRepository(TaskNodeRepositoryProtocol):
 
     def list_nodes(self, task_id: str) -> list[TaskNodeRecord]:
         with self._db.orm_session() as db:
-            rows = db.query(self._model).filter(self._model.task_id == task_id).all()
+            rows = (
+                db.query(self._model)
+                .filter(self._model.task_id == task_id, self._model.is_deleted.is_(False))
+                .all()
+            )
             return [r.to_record() for r in rows]
 
     def list_by_status(
         self,
         task_id: Optional[str],
-        status: Status,
+        status: Status | Sequence[Status],
         *,
         limit: int = 100,
     ) -> list[TaskNodeRecord]:
         with self._db.orm_session() as db:
-            q = db.query(self._model).filter(self._model.status == status.value)
+            statuses = [status] if isinstance(status, Status) else list(status)
+            q = db.query(self._model).filter(
+                self._model.status.in_([item.value for item in statuses]),
+                self._model.is_deleted.is_(False),
+            )
             if task_id is not None:
                 q = q.filter(self._model.task_id == task_id)
             rows = q.limit(limit).all()

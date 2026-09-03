@@ -41,13 +41,23 @@ class _SqliteDB:
             db.close()
 
 
+class _FakeRunner:
+    def __init__(self, calls: list[tuple]) -> None:
+        self._calls = calls
+
+    async def start_run(self, nodes) -> None:
+        self._calls.append(("start_run", nodes))
+
+
 class _FakeEngine:
-    """Stands in for ExecutionEngine; records calls."""
+    """Stands in for ExecutionEngine; records calls at its current runner seam."""
     def __init__(self, graph):
         self._graph = graph
         self.workflow_session = "wf-session-1"
         self.group_start = CoopGroupStart(group_id="grp-1", session_id="yaml-session-1")
         self.calls: list[tuple] = []
+        self._runner = _FakeRunner(self.calls)
+
     async def on_execute(self, task_id):
         self.calls.append(("on_execute", task_id))
 
@@ -82,61 +92,39 @@ def _service(task_type_stub_engine):
     return svc, node_repo, run_repo
 
 
-def test_execute_workflow_persists_session_id():
+def test_execute_workflow_dispatches_to_runner():
     eng = _FakeEngine(graph=None)
-    # patch the engine method used by execute:
-    async def trig(*, task_id, bot_id, message):
-        eng.calls.append(("workflow", task_id, bot_id, message))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-        return BotSendResult(run_id="r", session_id=eng.workflow_session)
-    eng.trigger_single_bot_workflow = trig
-    svc, node_repo, run_repo = _service(eng)
+    svc, _, _ = _service(eng)
 
-    result = asyncio.new_event_loop().run_until_complete(svc.execute(_request(TaskType.WORKFLOW, workflow_id="wf", args=["1", "2"])))
+    result = asyncio.new_event_loop().run_until_complete(
+        svc.execute(_request(TaskType.WORKFLOW, workflow_id="wf", args=["1", "2"]))
+    )
+
     assert result.success is True and result.task_id == "t1"
-    run = run_repo.get_latest("t1", "t1")
-    assert run is not None and run.run_mode == "single_bot" and run.session_id == "wf-session-1"
-    assert run.assignee == "b1"
-    node = node_repo.get("t1", "t1")
-    assert node is not None and node.status is Status.RUNNING
-    assert ("workflow", "t1", "b1:u1", "/wf 1 2") in eng.calls
-    # session_id surfaces in the persisted run_info extend_props AND the dashboard
-    # (root node's in-memory run_info.extend_props, serialized by graph_to_dto).
-    assert run.extend_props == {
-        "session_id": "wf-session-1",
-        "assignee_owner_id": "u1",
-    }
-    dash = svc.get_task_dashboard("t1")
-    assert dash.tasks[0].run_info.extend_props == {
-        "session_id": "wf-session-1",
-        "assignee_owner_id": "u1",
-    }
+    assert len(eng.calls) == 1
+    kind, nodes = eng.calls[0]
+    assert kind == "start_run"
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node.node_id == "t1"
+    assert node.run_info.run_mode == "single_bot"
+    assert node.run_info.assignee == "b1"
+    assert node.task_spec.metadata.title == "/wf 1 2"
 
 
 @pytest.mark.parametrize("owner_bot_id", ["b1", "b1:u1"])
 def test_execute_workflow_accepts_pure_or_composite_owner_bot_id(owner_bot_id):
     eng = _FakeEngine(graph=None)
-
-    async def trig(*, task_id, bot_id, message):
-        eng.calls.append(("workflow", task_id, bot_id, message))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-        return BotSendResult(run_id="r", session_id="wf-session")
-
-    eng.trigger_single_bot_workflow = trig
     svc, _, _ = _service(eng)
 
     result = asyncio.new_event_loop().run_until_complete(
-        svc.execute(
-            _request(
-                TaskType.WORKFLOW,
-                owner_bot_id=owner_bot_id,
-                workflow_id="wf",
-            )
-        )
+        svc.execute(_request(TaskType.WORKFLOW, owner_bot_id=owner_bot_id, workflow_id="wf"))
     )
 
     assert result.success is True
-    assert ("workflow", "t1", "b1:u1", "/wf ") in eng.calls
+    _, nodes = eng.calls[0]
+    assert nodes[0].run_info.assignee == "b1"
+    assert nodes[0].task_spec.metadata.title == "/wf "
 
 
 def test_execute_yaml_composes_owner_identity_before_forming_group():
@@ -170,6 +158,54 @@ def test_execute_yaml_composes_owner_identity_before_forming_group():
     assert captured["bot_ids"] == ["default:146836", "default:153364"]
 
 
+def test_normalize_owner_bot_id_preserves_real_owner_on_mismatch():
+    """(A) 归属解耦:owner_bot_id 内嵌归属(146836)与 owner_user_id(35983,执行用户/观察者)不一致时,
+    保留 owner_bot_id 复合(真实归属不被覆盖);owner_user_id 仍为执行用户。"""
+    req = _request(
+        TaskType.YAML,
+        owner_bot_id="default:146836",
+        owner_user_id="35983",
+        yaml="kind: collab",
+    )
+    norm = TaskService._normalize_owner_bot_id(req)
+    assert norm.owner_bot_id == "default:146836"  # 真实归属保留(不被 35983 覆盖)
+    assert norm.owner_user_id == "35983"  # 执行用户(人类观察者)
+
+
+def test_execute_yaml_owner_bot_keeps_real_owner_when_user_is_observer():
+    """(A):owner_bot 归属(146836)与执行用户(35983)不一致时,_run_yaml 建 owner bot 用真实归属
+    (default:146836),不被 owner_user_id(35983)覆盖;35983 仅作人类观察者(由 P1 保证,不在此断言)。"""
+    eng = _FakeEngine(graph=None)
+    captured = {}
+
+    async def start(gf):
+        captured["bot_ids"] = gf.bot_ids
+        return eng.group_start
+
+    eng.start_coop_group = start
+    svc, _, _ = _service(eng)
+
+    result = asyncio.new_event_loop().run_until_complete(
+        svc.execute(
+            _request(
+                TaskType.YAML,
+                owner_bot_id="default:146836",
+                owner_user_id="35983",  # mismatch:执行用户 35983 != bot 归属 146836
+                yaml="kind: collab",
+                participant_bot_ids=["default:153364"],
+                participant_bindings={
+                    "editor": ["default:146836"],
+                    "writer": ["default:153364"],
+                },
+            )
+        )
+    )
+
+    assert result.success is True
+    assert captured["bot_ids"][0] == "default:146836"  # 真实归属保留,不被 35983 覆盖
+    assert "default:35983" not in captured["bot_ids"]  # 执行用户不混入 bot 归属
+
+
 def test_execute_yaml_persists_session_id_with_state_machine():
     eng = _FakeEngine(graph=None)
     async def start(gf):
@@ -187,7 +223,11 @@ def test_execute_yaml_persists_session_id_with_state_machine():
     # group_id + session_id surface in run_info extend_props (DB + dashboard root node).
     assert run.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
     dash = svc.get_task_dashboard("t1")
-    assert dash.tasks[0].run_info.extend_props == {"group_id": "grp-1", "session_id": "yaml-session-1"}
+    assert dash.tasks[0].run_info.extend_props == {
+        "group_id": "grp-1",
+        "session_id": "yaml-session-1",
+        "assignee_owner_id": "u1",
+    }
 
 
 def test_execute_yaml_without_yaml_uses_manager_worker():

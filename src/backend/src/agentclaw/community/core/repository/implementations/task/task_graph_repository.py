@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from injector import inject
+from sqlalchemy import and_, case, func, or_
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
@@ -27,12 +28,13 @@ from agentclaw.community.core.task.repository.serializers import (
     runtime_from_dict,
     task_spec_to_dict,
 )
+from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 from agentclaw.community.plugin_api.database import DatabasePlugin
 
 
 _GRAPH_STATUS_KEY = "__graph_status"
-_TERMINAL = {Status.DONE, Status.FAILED, Status.HUNG, Status.CANCELLED}
+_TERMINAL = {Status.DONE, Status.SUCCESS, Status.FAILED, Status.HUNG, Status.CANCELLED}
 
 
 class TaskGraphRepository(TaskGraphRepositoryProtocol):
@@ -99,7 +101,10 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 return None
             node_rows = (
                 db.query(TaskNodeModel)
-                .filter(TaskNodeModel.task_id == task_id)
+                .filter(
+                    TaskNodeModel.task_id == task_id,
+                    TaskNodeModel.is_deleted.is_(False),
+                )
                 .order_by(TaskNodeModel.id.asc())
                 .all()
             )
@@ -279,7 +284,9 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             .all()
         ):
             if row.node_id not in current_node_ids:
-                db.delete(row)
+                # Logical delete: retain the node row for audit/history and keep
+                # task_node_run_info linked to the original execution attempt.
+                row.is_deleted = True
         current_relation_keys = {(rel.src_id, rel.dst_id) for rel in graph.relations}
         for row in (
             db.query(TaskNodeRelationModel)
@@ -302,6 +309,7 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                 db.add(row)
             row.task_spec = json.dumps(task_spec_to_dict(node.task_spec), ensure_ascii=False)
             row.status = node.status.value
+            row.is_deleted = False
             retry = int(node.run_info.extend_props.get("retry", 0))
             run_row = (
                 db.query(TaskNodeRunInfoModel)
@@ -551,3 +559,127 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             run_row.extend_props = self._json(props)
             db.flush()
             return True
+
+    def list_bbs_tasks_overview(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务的一页(1-based):``task_node_run_info`` ⋈ ``task_node``
+        (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher(缺失→None)。
+
+        BBS 判定(二选一 OR):① ``run_mode='bbs'``;② ``extend_props``(JSON)的 ``actual_run_mode='bbs'``
+        (BBS 经理-员工群派发时 scoped 节点 ``run_mode='coop_group'`` 但 ``actual_run_mode='bbs'``)。
+        只读投影;返回 ``(records, total)``——``total`` 为**过滤后**行数,``records`` 为当前页
+        (按 ``task_node_run_info.id`` 降序(最新优先)稳定切片,LIMIT/OFFSET;页越界 → 空列表,``total`` 仍真实)。
+
+        可选过滤(为 None 即不拼,退化为纯分页):``status``(单值,对 ``task_node.status`` 等值);
+        ``search_word``(大小写不敏感模糊匹配 ``task_node.task_spec`` 或 ``task_node_run_info.extend_props``
+        两列文本;``%``/``_`` 视作通配符,不做转义)。count 与分页两查询共用同一组 filters,保证 total 与页一致。
+
+        ``task_spec``/``extend_props``/``acceptance_result`` 复用模型 ``to_record()`` 的 JSON 解析;
+        title/goal/acceptances/assignee_name 由 adapter translator 二次解析(不在此 record 内)。
+        """
+        page = max(1, page)
+        page_size = max(1, page_size)
+        offset = (page - 1) * page_size
+        join_clause = and_(
+            TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
+            TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
+        )
+        with self._db.orm_session() as db:
+            # BBS 任务判定(二选一):① task_node_run_info.run_mode='bbs';
+            # ② extend_props(JSON)的 actual_run_mode='bbs'。后者覆盖 BBS 经理-员工群派发——scoped
+            # 节点 run_mode='coop_group' 但 extend_props.actual_run_mode='bbs'(见 bbs_modal_executor.notify
+            # 落库),原 run_mode 单判会漏这批。跨方言 JSON 提取:json_valid 护栏(非 JSON/NULL → NULL);
+            # 非 sqlite 需 json_unquote(MySQL JSON_EXTRACT 返回带引号标量,SQLite json_extract 已去引号)。
+            dialect = db.get_bind().dialect.name
+            actual_run_mode_val = case(
+                (
+                    func.json_valid(TaskNodeRunInfoModel.extend_props) == 1,
+                    func.json_extract(TaskNodeRunInfoModel.extend_props, "$.actual_run_mode"),
+                ),
+                else_=None,
+            )
+            if dialect != "sqlite":
+                actual_run_mode_val = func.json_unquote(actual_run_mode_val)
+            filters: list = [
+                or_(
+                    TaskNodeRunInfoModel.run_mode == "bbs",
+                    actual_run_mode_val == "bbs",
+                ),
+                TaskNodeModel.is_deleted.is_(False),
+            ]
+            if status is not None:
+                filters.append(TaskNodeModel.status == status)
+            if search_word is not None:
+                pat = f"%{search_word.lower()}%"
+                filters.append(
+                    or_(
+                        func.lower(TaskNodeModel.task_spec).like(pat),
+                        func.lower(TaskNodeRunInfoModel.extend_props).like(pat),
+                    )
+                )
+            total = (
+                db.query(func.count(TaskNodeRunInfoModel.task_id))
+                .join(TaskNodeModel, join_clause)
+                .filter(*filters)
+                .scalar()
+            ) or 0
+
+            joined = (
+                db.query(TaskNodeRunInfoModel, TaskNodeModel)
+                .join(TaskNodeModel, join_clause)
+                .filter(*filters)
+                .order_by(TaskNodeRunInfoModel.id.desc())
+                .limit(page_size)
+                .offset(offset)
+                .all()
+            )
+            if not joined:
+                return [], total
+
+            # publisher:按 distinct task_id 一次 in_() 批查 task_info.owner_bot_id + owner_user_id,避免 N+1。
+            task_ids = {run.task_id for run, _ in joined}
+            publishers: dict[str, str] = {}
+            owner_users: dict[str, str] = {}
+            if task_ids:
+                publisher_rows = (
+                    db.query(
+                        TaskInfoModel.task_id,
+                        TaskInfoModel.owner_bot_id,
+                        TaskInfoModel.owner_user_id,
+                    )
+                    .filter(TaskInfoModel.task_id.in_(task_ids))
+                    .all()
+                )
+                publishers = {tid: oid for tid, oid, _ in publisher_rows if oid}
+                owner_users = {tid: uid for tid, _, uid in publisher_rows if uid}
+
+            records: list[BbsTaskOverviewRecord] = []
+            for run, node in joined:
+                run_rec = run.to_record()  # 已 JSON 解析 extend_props/acceptance_result
+                node_rec = node.to_record()  # 已 JSON 解析 task_spec;status → Status
+                records.append(
+                    BbsTaskOverviewRecord(
+                        task_id=run_rec.task_id,
+                        node_id=run_rec.node_id,
+                        run_mode=run_rec.run_mode,
+                        retry=run_rec.retry,
+                        assignee_id=run_rec.assignee,
+                        status=node_rec.status,
+                        acceptance_result=run_rec.acceptance_result,
+                        extend_props=run_rec.extend_props,
+                        relay_create_time=node_rec.gmt_create,
+                        relay_begin_time=run_rec.gmt_create,
+                        relay_end_time=run_rec.gmt_modified,
+                        task_spec=node_rec.task_spec or {},
+                        publisher=publishers.get(run_rec.task_id),
+                        owner_user_id=owner_users.get(run_rec.task_id),
+                        # publisher_name 由 TaskService._enrich_bbs_publisher_names 批量补(repo 不查 BotService)
+                    )
+                )
+            return records, total

@@ -174,7 +174,35 @@ def graph(svc):
     return svc.initialize_graph(_task_info())
 
 
+# ===== task_dispatch lifecycle timestamps =====
+class TestPrepareDispatchStartTime:
+    def test_miss_node_records_start_time_before_dispatch_result(self, svc, graph):
+        dispatcher = StubDispatcher(miss=True)
+        eng = _engine(svc, dispatcher=dispatcher)
+        side: list[tuple] = []
+
+        _run(eng._prepare_into("t1", side))
+
+        root = svc._get_node(graph, "t1")
+        assert root.run_info.start_time is not None
+        assert side and side[0][0] == "miss"
+
+
 # ===== on_execute =====
+class TestDispatchStartTimeSemantics:
+    def test_retry_does_not_overwrite_first_dispatch_start_time(self, svc, graph):
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner)
+        _run(eng.on_execute("t1"))
+        node = svc._get_node(graph, "c1")
+        first_start = node.run_info.start_time
+        assert first_start is not None
+
+        _run(eng.on_harness(_patch("t1", "c1", exec_error="external_harness")))
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.start_time == first_start
+
+
 class TestOnExecute:
     def test_first_frame(self, svc, graph):
         planner = StubPlanner(lambda g: [_child("c1"), _child("c2")])
@@ -226,8 +254,8 @@ class TestOnExecute:
         # Step2:plan 返 []+has_gap=F = 根 gap 闭(终验通过)→ 翻根 DONE + 图 DONE
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_execute("t1"))
-        assert svc._get_node(graph, "t1").status == Status.DONE
-        assert graph.status == Status.DONE
+        assert svc._get_node(graph, "t1").status == Status.SUCCESS
+        assert graph.status == Status.SUCCESS
 
     def test_not_pending_root_no_op(self, svc, graph):
         svc.update_task_node_info(_patch("t1", "t1", status=Status.RUNNING, run_mode="single_bot", assignee="b"))
@@ -275,8 +303,8 @@ class TestExternalManagedIsolation:
             )
         )
 
-        assert graph.tasks[0].status == Status.DONE
-        assert graph.status == Status.DONE
+        assert graph.tasks[0].status == Status.SUCCESS
+        assert graph.status == Status.SUCCESS
         assert planner.plan_calls == 0
         assert runner.run_calls == []
         assert [n.node_id for n in graph.tasks] == ["t1"]
@@ -301,11 +329,11 @@ class TestExternalManagedIsolation:
                 )
             )
         )
-        assert graph.tasks[0].status == Status.FAILED
+        assert graph.tasks[0].status == Status.DONE
         assert runner.run_calls == []
 
         _run(eng.on_harness(_patch("t1", "t1", exec_error="timeout")))
-        assert graph.tasks[0].status == Status.FAILED
+        assert graph.tasks[0].status == Status.DONE
         assert runner.run_calls == []
 
     @pytest.mark.parametrize("task_type", ["workflow", "yaml"])
@@ -367,7 +395,7 @@ class TestOnReportPass:
         self._setup_running_children(svc, graph, 2)
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c_proceed")]))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
-        assert svc._get_node(graph, "c0").status == Status.DONE
+        assert svc._get_node(graph, "c0").status == Status.SUCCESS
         assert eng._planner.plan_calls == 0
 
     def test_pass_all_siblings_plan_new(self, svc, graph):
@@ -385,16 +413,16 @@ class TestOnReportPass:
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
-        assert svc._get_node(graph, "t1").status == Status.DONE  # gap 闭=终验通过→翻根 DONE
-        assert graph.status == Status.DONE
+        assert svc._get_node(graph, "t1").status == Status.SUCCESS  # gap 闭=终验通过→翻根 SUCCESS
+        assert graph.status == Status.SUCCESS
 
     def test_root_gap_closed_finish_graph(self, svc, graph):
         # 语义A:c0 PASS → plan[]→ gap 闭=终验通过 → 翻根 DONE + graph DONE(一步到位,不再等回投)
         self._setup_running_children(svc, graph, 1)
         eng = _engine(svc, planner=StubPlanner(lambda g: [], has_gap_when_empty=False))
         _run(eng.on_report(_patch("t1", "c0", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
-        assert svc._get_node(graph, "t1").status == Status.DONE  # 不再等回投
-        assert graph.status == Status.DONE
+        assert svc._get_node(graph, "t1").status == Status.SUCCESS  # 不再等回投
+        assert graph.status == Status.SUCCESS
 
 
 
@@ -425,17 +453,17 @@ class TestStructuralParentGapClosedRollup:
             output_patch={"output": "# 架构师名册\n章文嵩/毕玄/唐洪"})))
         # 结构父 m1: gap 闭翻 DONE, 补全 run_info(验收执行者=owner=b1)
         m = svc._get_node(graph, "m1")
-        assert m.status == Status.DONE
+        assert m.status == Status.SUCCESS
         assert m.run_info.run_mode == "single_bot"
         assert m.run_info.assignee == "b1"
         assert m.run_info.output == {"output": "# 架构师名册\n章文嵩/毕玄/唐洪"}
         assert m.run_info.acceptance_result is not None
         assert m.run_info.acceptance_result.verdict == AcceptanceVerdict.DONE
         assert m.run_info.acceptance_result.acceptances_metric == [{"ac1": "名册3位齐全"}]
-        # root: 一跳 done_children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 DONE
+        # root: 一跳 SUCCESS children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 SUCCESS
         root = svc._get_node(graph, "t1")
-        assert root.status == Status.DONE
-        assert graph.status == Status.DONE
+        assert root.status == Status.SUCCESS
+        assert graph.status == Status.SUCCESS
         assert root.run_info.run_mode == "single_bot"
         assert root.run_info.assignee == "b1"
         assert root.run_info.output  # 滚子交付物非空
@@ -451,7 +479,7 @@ class TestOnReportFail:
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert svc._get_node(graph, "c1").status == Status.HUNG  # 直接 HUNG,不再 FAILED/EXECUTING
+        assert svc._get_node(graph, "c1").status == Status.HUNG
         assert planner.plan_calls == 0  # 不 plan 补救(HUNG 冒泡/升 BBS 交既有逻辑)
 
     def test_acceptance_fail_folds_running_to_hung(self, svc, graph):
@@ -463,13 +491,12 @@ class TestOnReportFail:
         planner = StubPlanner(lambda g: [_child("c1_remedy")])
         eng = _engine(svc, planner=planner)
         r = _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]))))
-        assert r.new_status == Status.HUNG  # 折叠直驱:gateway 一次写即 HUNG,无 FAILED 瞬态
+        assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
-        assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
         assert n.run_info.acceptance_result is not None
-        assert n.run_info.acceptance_result.gaps == ["缺x"]  # 验收结论 + gaps 作 hung 上下文
-        assert graph.loop_round >= 1  # 根节点进入 BBS 时计次
+        assert n.run_info.acceptance_result.gaps == ["缺x"]
+        assert graph.loop_round == 1
         assert planner.plan_calls == 0
 
     def test_pull_fail_status_folded_to_hung(self, svc, graph):
@@ -486,14 +513,12 @@ class TestOnReportFail:
             status=Status.FAILED,
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["缺x"]),
         )))
-        assert r.new_status == Status.HUNG  # FAILED 被 on_report 折叠门归并为 HUNG,不停在 FAILED
+        assert r.new_status == Status.HUNG
         n = svc._get_node(graph, "c1")
         assert n.status == Status.HUNG
-        assert n.status != Status.FAILED  # 回归断言:pull FAIL 不再落 FAILED 瞬态
-        assert n.run_info.extend_props.get("hung_reason") == "acceptance_fail"
         assert n.run_info.acceptance_result is not None
         assert n.run_info.acceptance_result.gaps == ["缺x"]
-        assert graph.loop_round >= 1  # 根节点进入 BBS 时计次
+        assert graph.loop_round == 1
         assert planner.plan_calls == 0  # HUNG 冒泡/升 BBS 交既有逻辑,不 plan 补救
 
     def test_non_root_hung_does_not_consume_loop_round(self, svc, graph):
@@ -661,7 +686,7 @@ class TestLoopRound:
         before = graph.loop_round
         eng = _engine(svc, planner=StubPlanner(lambda g: [_child("c1_remedy")]))
         _run(eng.on_report(_patch("t1", "c1", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.FAILED, gaps=["x"]))))
-        assert graph.loop_round == before + 1  # HUNG 升 BBS 计次(既有逻辑)
+        assert graph.loop_round == before + 1
 
 
 
@@ -861,8 +886,8 @@ class TestOnPassBbsRecoverableGuard:
         _run(eng.on_report(_patch("t_p2", "c_struct", acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE))))
 
         # 修复后:放行 → gap 闭 → 图 DONE、根 DONE(不再卡 HUNG 死锁)
-        assert svc._get_node(g, "t_p2").status == Status.DONE
-        assert g.status == Status.DONE
+        assert svc._get_node(g, "t_p2").status == Status.SUCCESS
+        assert g.status == Status.SUCCESS
 
     def test_struct_leaf_last_done_gap_open_replans_or_hungs(self, svc):
         """同可恢复态,但 gap 未闭(planner 产新子或 has_gap)→ 不死锁:要么重 plan 产子,要么 HUNG 重升 BBS,

@@ -10,7 +10,7 @@ SSOT 播种经 injector 取 ``TaskGraphService`` 白盒建图/置 bbs_mode/根 P
 场景:
 - C(claim race):两 bot 同 ``bbs/claim`` 同一 bbs 任务 → 恰一 200、一 409(CAS 输者)。
 - B(FAIL-discard relay):botA claim→attach→result(FAIL+gaps)→**scoped 节点被删**(丢弃本次接力尝试,
-  不留 FAILED/checkpoint)+ 释放;botB claim→attach(新 scoped 节点)→result(PASS)→scoped DONE + 释放。
+  不留 FAILED/checkpoint)+ 释放;botB claim→attach(新 scoped 节点)→result(PASS)→scoped SUCCESS + 释放。
   FAIL 即作废本次接力尝试,下段从零做起(不再"部分交棒 checkpoint")。
 - D(crash lease):botA claim+attach 后不 result(模拟崩溃)→ harness SLA 到期清根 bbs_owner +
   scoped 标终态 FAILED(非 PENDING 重派)→ botB claim 接管并完成接力。
@@ -203,7 +203,7 @@ def test_c_two_bots_claim_same_bbs_task_exactly_one_wins(client):
 
 def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     """场景 B:botA claim→attach→result(FAIL+gaps)→**scoped 节点被删**(丢弃本次接力尝试,不留
-    FAILED/checkpoint)+ 释放;botB claim→attach(新 scoped 节点)→result(PASS)→scoped DONE + 释放。
+    FAILED/checkpoint)+ 释放;botB claim→attach(新 scoped 节点)→result(PASS)→scoped SUCCESS + 释放。
     FAIL 即作废本次尝试,下段从零做起(不再"部分交棒 checkpoint")。"""
     c, inj = client
     task_id = f"bbs-b-{uuid.uuid4().hex[:6]}"
@@ -231,17 +231,17 @@ def test_b_fail_deletes_scoped_then_next_bot_relays_fresh(client):
     assert r_attach_b.status_code == 200, r_attach_b.text
     node_b = r_attach_b.json()["data"]["node_id"]
     assert node_b != node_a, "接力应挂新 scoped 节点,不重做 botA 段"
-    # botB 续做:PASS → 本 scoped DONE + claim 释放(根收口由框架经 owner 复核自判,非 bot 声明;单测无 owner
-    # bot→不收图 DONE,见 natual live 测)。这里验接力机制:接力不重做 + checkpoint 留存 + claim 释放。
+    # botB 续做:PASS → 本 scoped SUCCESS + claim 释放(根收口由框架经 owner 复核自判,非 bot 声明;单测无 owner
+    # bot→不收图 SUCCESS,见 natual live 测)。这里验接力机制:接力不重做 + checkpoint 留存 + claim 释放。
     r_pass = c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
         task_id, node_b, "botB", verdict="DONE"))
     assert r_pass.status_code == 200, r_pass.text
 
-    # 终局:botA scoped 已删(FAIL 丢弃,不重做);botB scoped DONE;claim 已释放。
+    # 终局:botA scoped 已删(FAIL 丢弃,不重做);botB scoped SUCCESS;claim 已释放。
     # (根是否 DONE 由框架复核根 gap 自判;in-process 无 owner bot 不收口,断言略,见 natual live 测)
     d2, nodes2 = _dashboard_tasks(c, task_id)
     assert node_a not in nodes2, "botA scoped 应仍被删(FAIL 丢弃,不重做)"
-    assert nodes2[node_b]["status"] == "DONE"
+    assert nodes2[node_b]["status"] == "SUCCESS"
     assert _root_owner(nodes2, task_id) is None, "result 后 claim 应已释放"
 
 
@@ -285,8 +285,8 @@ def test_d_crash_lease_relay(client):
     assert not any(getattr(p, "node_id", None) == node_a for p in recorder), (
         f"bbs 节点不应经 on_harness_fn 重派(标终态不重派): {recorder}")
 
-    # botB claim 接管(owner 已清 → CAS 成功)并完成接力段 → 本 scoped DONE + claim 释放
-    # (根收口由框架自判;in-process 无 owner bot 不收图 DONE,见 natual live 测)
+    # botB claim 接管(owner 已清 → CAS 成功)并完成接力段 → 本 scoped SUCCESS + claim 释放
+    # (根收口由框架自判;in-process 无 owner bot 不收图 SUCCESS,见 natual live 测)
     assert c.post("/api/v1/collaboration/tasks/bbs/claim", json={"task_id": task_id, "bot_id": "botB"}).status_code == 200
     r_attach_b = c.post("/api/v1/collaboration/tasks/bbs/attach", json=_attach_body(task_id, task_id, "botB"))
     assert r_attach_b.status_code == 200, r_attach_b.text
@@ -294,7 +294,7 @@ def test_d_crash_lease_relay(client):
     assert c.post("/api/v1/collaboration/tasks/bbs/result", json=_result_body(
         task_id, node_b, "botB", verdict="DONE")).status_code == 200
     _, nodes_done = _dashboard_tasks(c, task_id)
-    assert nodes_done[node_b]["status"] == "DONE"
+    assert nodes_done[node_b]["status"] == "SUCCESS"
     assert _root_owner(nodes_done, task_id) is None
 
 

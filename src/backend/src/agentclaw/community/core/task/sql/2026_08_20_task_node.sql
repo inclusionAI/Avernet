@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS `task_node` (
     `node_id`        varchar(128)      NOT NULL                    COMMENT '节点唯一实例ID',
     `task_spec`         text           NOT NULL                            COMMENT '任务信息',
     `status`         varchar(64)       NOT NULL                    COMMENT '节点状态',
+    `is_deleted`           tinyint(1)    NOT NULL DEFAULT 0                 COMMENT '逻辑删除标记',
     `gmt_create`     timestamp         NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `gmt_modified`   timestamp         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
     PRIMARY KEY (`id`),

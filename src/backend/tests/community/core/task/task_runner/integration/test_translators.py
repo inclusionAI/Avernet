@@ -1,4 +1,4 @@
-from agentclaw.community.core.task.task_runner.integration.translators import (
+from agentclaw.community.core.task.task_runner.client.translators import (
     BcsSessionTranslator, BcsStateMachineRunTranslator, SingleBotRunTranslator,
 )
 

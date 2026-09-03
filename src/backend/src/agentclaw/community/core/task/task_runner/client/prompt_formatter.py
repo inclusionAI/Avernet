@@ -10,16 +10,17 @@ from typing import Any
 from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
 
 from agentclaw.community.core.task.domain.models import TaskNode
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     PromptFormatter, TaskContextBuilder,
 )
 
 
 def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id: str) -> str:
-    """skill HTTP 上报协议块:bot 主动 POST /callback/report 回投(与 poller 互斥)。
+    """skill HTTP callback protocol block for task-node result reporting.
 
-    用于 coop_group / state_machine / 开了开关的 single_bot。status=验收通过 DONE / 不通过 FAILED;
-    verdict 同步 DONE/FAILED;产出放 output 字符串。
+    Only emitted when ``skill_report_enabled`` is true. The disabled path must
+    not describe the platform's pull protocol to the model; the platform owns
+    result collection in that mode.
     """
     backend = str(context.get("backend") or "{backend}")
     reporter = context.get("reporter_bot_id")
@@ -32,46 +33,56 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
         "【强制执行闭环，不得跳过】",
         "阶段1 执行：先完成上面的任务指令，形成完整执行产出。",
         "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
-        "阶段3 验收：整理完整 output；验收全部满足则 status=DONE，否则 status=FAILED，并在 acceptance_result.gaps 写明差距。",
+        "阶段3 验收：整理完整 output；验收全部满足则 status=SUCCESS，否则 status=DONE，并在 acceptance_result.gaps 写明差距；只有执行失败才使用 status=FAILED。",
         "阶段4 上报：必须真正发起 HTTP POST，不能只在对话中输出‘完成’或只返回 JSON。",
         reporter_line,
         f"回调地址: POST {backend}/api/v1/collaboration/tasks/callback/report",
-        "请求体只能包含以下节点级字段；callback 内部会根据 task_id/node_id 组装回投关联字段：",
+        "请求体只能包含以下节点级字段，不要增加 loop_task_id/workflow_type/workflow_id/instance_id/result 包装：",
         json.dumps({
             "task_id": task_id,
             "node_id": node_id,
-            "status": "DONE",
+            "status": "SUCCESS",
             "output": "完整执行输出",
-            "acceptance_result": {},
+            "acceptance_result": {
+                "verdict": "DONE",
+                "acceptances_metric": [
+                    {"id": "验收项ID", "passed": True, "summary": "满足原因"}
+                ],
+                "gaps": [],
+            },
             "extend_props": {},
         }, ensure_ascii=False),
-        "上报前自检：task_id/node_id 与当前节点一致；status 只能是 DONE(通过)/ FAILED(不通过)；acceptance_result 和 extend_props 必须是对象；收到 HTTP 200 前不得认为上报完成。",
+        "上报前自检：task_id/node_id 必须使用当前节点值；status 只能是 SUCCESS(验收通过)/DONE(验收未通过)/FAILED(执行失败)；验收通过时 verdict=DONE 且 gaps=[]，验收未通过时 verdict=FAILED 且 gaps 非空；acceptances_metric 必须是数组，不要改成 {验收项ID:{passed,summary}} 映射；收到 HTTP 200 前不得认为上报完成。",
     ])
 
 
-def _poller_content_instruction() -> str:
-    """poller 拉取协议块:bot 在终态回复末尾产出 {success,data,gaps} JSON,供平台拉取回收(默认,与 HTTP 上报互斥)。"""
-    return "\n".join([
-        "【结果回收协议 — poller 拉取模式，不要 HTTP 上报】",
-        "你最终回复的末尾必须包含一个 JSON 对象，供任务平台拉取回收；不要发起任何 HTTP POST。",
-        "JSON 严格遵守以下字段名与类型：",
-        json.dumps({
-            "success": True,
-            "data": "完整执行产出文本",
-            "gaps": [],
-        }, ensure_ascii=False),
-        "字段要求：",
-        "- success: 布尔值；验收全部满足为 true，任一不满足为 false。必须是布尔，不能是字符串 \"true\"/\"false\"。",
-        "- data: 字符串；可直接阅读的结论/产出汇总文本，不是 http 响应原文，留空时给 \"\"。",
-        "- gaps: 字符串数组；success=false 时必须非空，逐条写明未满足的验收标准项；success=true 时保持 []。",
-        "阶段强制：先完成指令产出 → 逐条对照 goal.acceptances 校验 → 据校验结果填 success/gaps → 末尾输出该 JSON。",
-        "注意：不要凭‘看起来完成’直接判 success=true；任一验收不满足都必须 success=false 并填 gaps。",
-    ])
+def _no_callback_instruction() -> str:
+    """Boundary-only instruction for platform-managed result collection.
+
+    Deliberately omits the platform's pull payload schema so the model does
+    not confuse an internal collection format with business output.
+    """
+    return "本节点结果由平台接口负责回收；不要主动调用 /callback/report，不要构造或发送节点级 Push 请求。"
 
 
 class PromptFormatterImpl(PromptFormatter):
     def format_execute(self, context: dict[str, Any], node: TaskNode) -> str:
         instr = context.get("node_instruction") or node.task_spec.metadata.instruction
+        # 接力交接节点:instruction 由 static_plan_runtime._decorate 注入 "# 接自 ..." 三段
+        # (# 接自 / ## 群组成 / ## 上游产出正文 / ## 本角色任务)。此时直接下发交接正文即可——
+        # bot 收到的是"从 X 接过来一个任务,情况是…",不再套派单/目标/验收/回收协议/字段要求/禁联网;
+        # 结果回收与验收由各 bot 的 skill/rule 和平台回收机制承托。
+        if str(instr).lstrip().startswith("# 接自"):
+            protocol = (
+                _skill_report_instruction(
+                    context,
+                    task_id=str(context.get("task_id") or node.task_id),
+                    node_id=str(context.get("node_id") or node.node_id),
+                )
+                if context.get("skill_report_enabled", True)
+                else _no_callback_instruction()
+            )
+            return f"{instr.rstrip()}\n{protocol}"
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
@@ -85,26 +96,17 @@ class PromptFormatterImpl(PromptFormatter):
             f"指令:{instr}",
             f"验收标准:{json.dumps(acceptances, ensure_ascii=False)}",
         ]
-        mode = context.get("execution_mode")
-        if mode == "single_bot":
-            # single_bot 回收链路由开关决定(默认 poller 拉取;开启后走 skill HTTP 上报),两条链路互斥不并存。
-            if context.get("single_bot_skill_report"):
-                parts.append(_skill_report_instruction(
-                    context,
-                    task_id=str(context.get("task_id") or node.task_id),
-                    node_id=str(context.get("node_id") or node.node_id),
-                ))
-                parts.append("HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。")
-            else:
-                parts.append(_poller_content_instruction())
-        else:
-            # coop_group / state_machine / 其它:统一 skill HTTP 上报协议(回调驱动)。
+        # 所有执行模式统一由 skill_report_enabled 决定是否主动 callback；
+        # 关闭时只告诉 Bot 不要主动 callback，平台内部回收格式不注入 prompt。
+        if context.get("skill_report_enabled", True):
             parts.append(_skill_report_instruction(
                 context,
                 task_id=str(context.get("task_id") or node.task_id),
                 node_id=str(context.get("node_id") or node.node_id),
             ))
             parts.append("HTTP 上报完成后，回复中只需确认上报结果；不要用回复文本替代 HTTP POST。")
+        else:
+            parts.append(_no_callback_instruction())
         if siblings:
             parts.append(f"上游产出:{json.dumps(siblings, ensure_ascii=False, default=str)}")
         parts.append(NO_WEB_SEARCH_CONSTRAINT)

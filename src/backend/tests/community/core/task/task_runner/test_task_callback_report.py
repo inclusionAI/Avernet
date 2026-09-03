@@ -40,13 +40,13 @@ from agentclaw.community.adapters.http.task.translator import (
     merge_manager_worker_execution_graph,
     parse_manager_worker_bcn,
 )
-from agentclaw.community.core.task.task_runner.integration import (
+from agentclaw.community.core.task.task_runner.client import (
     callback_data_enricher as _enricher_mod,
 )
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 from agentclaw.community.core.task.domain.errors import TaskStateError
@@ -217,6 +217,12 @@ class _FakeCallbackRepo:
     def get(self, run_id: str, node_id: str) -> TaskCallbackRecord | None:
         for rec in reversed(self.calls):
             if rec.run_id == run_id and rec.node_id == node_id:
+                return rec
+        return None
+
+    def find_by_event_id(self, event_id: str) -> TaskCallbackRecord | None:
+        for rec in reversed(self.calls):
+            if rec.event_id == event_id:
                 return rec
         return None
 
@@ -880,30 +886,35 @@ class TestFallbackAndInvalid:
 # ===== 幂等:result 重投到已终态节点 =====
 
 class TestIdempotency:
-    """common_task 回投的幂等/上抛语义:report_result 不做 event_id 去重(重投再驱动 on_report);
-    on_report 抛 TaskStateError(非法翻态/非终态重投)→ _dispatch 上抛(envelope_errors→409)。"""
+    """common_task 回投的幂等/上抛语义:同一 result 重投使用稳定 event_id 并直接 ack;
+    非幂等的非法翻态仍上抛 TaskStateError。"""
 
     @staticmethod
     def _body(node_id="n1", status="DONE"):
         return {"task_id": "t1", "node_id": node_id, "status": status, "output": {"r": 1},
                 "acceptance_result": {"verdict": "DONE", "gaps": []}}
 
-    def test_result_replay_redrives_on_report(self):
-        # report_result 不做 event_id 幂等去重:同 body 二投 → on_report 被再次驱动(reports==2)
+    def test_result_replay_is_idempotent_and_returns_200(self):
+        # 同一 result 首次处理和重复处理都返回 200,重复请求不再次驱动 on_report。
         engine = _RecordingEngine()
-        svc, _e, _repo, _ri = _make_svc(
+        svc, _e, repo, _ri = _make_svc(
             engine=engine,
-            graph_nodes={"t1": [_node("t1", "n1", Status.DONE)]},
+            graph_nodes={"t1": [_node("t1", "n1", Status.SUCCESS)]},
         )
         body = self._body()
         r1 = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                                  InMemoryCallbackCorrelationRegistry()))
         _ok_envelope(r1)
         assert len(engine.reports) == 1
+        first_id = repo.calls[0].event_id
+        assert first_id is not None
+
         r2 = _run(_dispatch_call(_req(body), svc, NoopCallbackAuthenticator(),
                                  InMemoryCallbackCorrelationRegistry()))
         _ok_envelope(r2)
-        assert len(engine.reports) == 2  # 重投再驱动(无 event_id 幂等)
+        assert len(engine.reports) == 1
+        assert len(repo.calls) == 1
+        assert repo.calls[0].event_id == first_id
 
     def test_result_replay_to_non_terminal_re_raises_task_state_error(self):
         # on_report 抛 TaskStateError(非法翻态)→ _dispatch 上抛(envelope_errors→409,单测直接捕异常)

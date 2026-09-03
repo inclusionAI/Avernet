@@ -15,7 +15,8 @@ use bcs_service_api::application::v1::{
     PatchBotInternalAttributes, UserVisibility,
 };
 use bcs_service_api::{
-    ActorKind, BotUseCaseError, CoordinationMode, DeleteProviderBotCommand, ProviderAuthMode,
+    ActorKind, ActorStatus, BotUseCaseError, CoordinationMode, DeleteProviderBotCommand,
+    ProviderAuthMode,
     ProviderBotBinding, ProviderBotConnectionMode, ProviderBotRosterItem,
     ProviderBotTaskModesFilter, ProviderCoordinationConfig, ProviderOrganizationManagementConfig,
     ProviderRecord, RegisterProviderBotCommand, RegisterProviderCommand, ServiceError,
@@ -306,6 +307,9 @@ pub async fn list_provider_bots_by_task_modes(
     let filter = ProviderBotTaskModesFilter {
         task_claim_mode: parse_task_mode_toggle("task_claim_mode", &params.task_claim_mode)?,
         task_dream_mode: parse_task_mode_toggle("task_dream_mode", &params.task_dream_mode)?,
+        visibility: parse_non_empty_query(&params.visibility)?,
+        status: parse_actor_status(&params.status)?,
+        user_visibility: parse_user_visibility(&params.user_visibility)?,
         match_mode: match params
             .match_mode
             .as_deref()
@@ -866,10 +870,51 @@ pub struct TaskModesQueryParams {
     pub task_dream_mode: Option<String>,
     #[serde(rename = "match")]
     pub match_mode: Option<String>,
+    pub visibility: Option<String>,
+    pub status: Option<String>,
+    pub user_visibility: Option<String>,
 }
 
 /// Parse a task-mode toggle query param. `None`/empty => do not filter on this
 /// toggle; `true`/`1` => filter for the toggle ON; `false`/`0` => filter OFF.
+fn parse_non_empty_query(value: &Option<String>) -> Result<Option<String>, ProviderRouteError> {
+    match value.as_deref().map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(value) => Ok(Some(value.to_string())),
+    }
+}
+
+fn parse_actor_status(value: &Option<String>) -> Result<Option<ActorStatus>, ProviderRouteError> {
+    match value.as_deref().map(str::trim).map(str::to_ascii_lowercase) {
+        None => Ok(None),
+        Some(value) if value.is_empty() => Ok(None),
+        Some(value) => match value.as_str() {
+            "online" => Ok(Some(ActorStatus::Online)),
+            "hidden" => Ok(Some(ActorStatus::Hidden)),
+            other => Err(ProviderRouteError::bad_request(format!(
+                "invalid status value '{other}'; expected online|hidden"
+            ))),
+        },
+    }
+}
+
+fn parse_user_visibility(
+    value: &Option<String>,
+) -> Result<Option<UserVisibility>, ProviderRouteError> {
+    match value.as_deref().map(str::trim).map(str::to_ascii_lowercase) {
+        None => Ok(None),
+        Some(value) if value.is_empty() => Ok(None),
+        Some(value) => match value.as_str() {
+            "public" => Ok(Some(UserVisibility::Public)),
+            "protected" => Ok(Some(UserVisibility::Protected)),
+            "private" => Ok(Some(UserVisibility::Private)),
+            other => Err(ProviderRouteError::bad_request(format!(
+                "invalid user_visibility value '{other}'; expected public|protected|private"
+            ))),
+        },
+    }
+}
+
 fn parse_task_mode_toggle(
     name: &str,
     value: &Option<String>,

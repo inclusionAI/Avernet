@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 from agentclaw.community.core.task.domain.errors import TaskStateError
 from agentclaw.community.core.task.domain.models import (
-    AcceptanceCriteria, AcceptanceVerdict, Context, Goal, Metadata, RuntimeInfo, Status,
+    AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.bbs_runner import (
+from agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor import (
     _bid_prompt, _parse_bid, notify,
 )
 
@@ -43,9 +43,11 @@ class _FakeBot:
     ``dispatch_raises``: 若为真,dispatch 抛异常 → 走 notify except 收口分支(释放 claim)。
     """
 
-    def __init__(self, rates, *, dispatch_raises: bool = False, reasons=None):
+    def __init__(self, rates, *, dispatch_raises: bool = False, reasons=None, titles=None, goals=None):
         self._rates = rates
         self._reasons = reasons or {}
+        self._titles = titles or {}
+        self._goals = goals or {}
         self.dispatch_raises = dispatch_raises
         self.sent_messages: list[tuple] = []   # dispatch 消息(给胜出 bot)
         self.bid_prompts: list[str] = []        # bid prompt
@@ -58,8 +60,15 @@ class _FakeBot:
             if rate is None:
                 raise RuntimeError("bot error")
             reason = self._reasons.get(bot_id, f"reason-{bot_id}")
+            bid_obj: dict = {"completion_rate": rate, "relay_reason": reason}
+            title = self._titles.get(bot_id, "")
+            goal = self._goals.get(bot_id, "")
+            if title:
+                bid_obj["title"] = title
+            if goal:
+                bid_obj["goal"] = goal
             return {"status": "COMPLETED",
-                    "result": {"content": json.dumps({"completion_rate": rate, "relay_reason": reason})}}
+                    "result": {"content": json.dumps(bid_obj, ensure_ascii=False)}}
         # Phase 2: dispatch(给胜出 bot 发任务,等结果)
         self.sent_messages.append((bot_id, message, metadata))
         if self.dispatch_raises:
@@ -73,7 +82,7 @@ class _FakeBot:
     async def send_message(self, *, bot_id, message, metadata):
         # 兼容保留:notify 不再调用 send_message(dispatch 走 send_and_wait_async)
         self.sent_messages.append((bot_id, message, metadata))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
@@ -128,6 +137,8 @@ class _FakeGraph:
         self.claimed: str | None = None     # 历史 claim 的 winner(不重置,供断言)
         self.bbs_owner: str | None = None   # 当前根 bbs_owner 值(claim 设,收口/except 清)
         self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
+        self.added_nodes = []                # notify 创建的 scoped BBS 节点
+        self.root_status = Status.HUNG       # BBS 创建前根节点的恢复态
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
@@ -135,12 +146,20 @@ class _FakeGraph:
         return MagicMock(success=True)
 
     def update_task_node_info(self, patch):
-        if patch.extend_props_patch and patch.extend_props_patch.get("bbs_owner") is None:
+        if (
+            patch.extend_props_patch
+            and "bbs_owner" in patch.extend_props_patch
+            and patch.extend_props_patch["bbs_owner"] is None
+        ):
             self.bbs_owner = None
             self.cleared = True
 
-    def add_task_nodes(self, nodes, task_id):
-        # notify 新增 bbs scoped 节点:轻量记账即可(snapshot 取自 execution_graph 真实图)
+    def add_task_nodes(self, nodes, task_id, *, mark_parent_planning=True):
+        # Mirror TaskGraphService's parent-state side effect so this test catches
+        # accidental HUNG -> PLANNING transitions in the BBS runner.
+        self.added_nodes.extend(nodes)
+        if mark_parent_planning:
+            self.root_status = Status.PLANNING
         return MagicMock(success=True)
 
     def add_relations(self, task_id, edges):
@@ -176,9 +195,28 @@ class _FakeOnBbsReport:
 _GOAL = "整理基础架构方向架构师名册"
 
 
+def test_notify_keeps_hung_root_until_bbs_report():
+    """Creating the BBS scoped node must not resume root planning early."""
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80})
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-hung-root"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        on_bbs_report=_FakeOnBbsReport(graph),
+    ))
+
+    assert graph.root_status == Status.HUNG
+    assert len(graph.added_nodes) == 1
+
+
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     """bid→select→claim→dispatch→收口走引擎:选最高 completion_rate 的 bot、claim 根,经 on_bbs_report 收口
-    (翻 scoped DONE + finally 释放 claim)而非裸写根/ scoped 节点。"""
+    (翻 scoped SUCCESS + finally 释放 claim)而非裸写根/ scoped 节点。"""
     roster = _roster("A", "B", "C")
     bot = _FakeBot(rates={"A": 50, "B": 90, "C": 70})
     bcn = _FakeBcn(roster)
@@ -193,14 +231,15 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     assert len(bot.sent_messages) == 1           # 只给胜出 bot dispatch 一次
     msg_bot, msg_text, msg_meta = bot.sent_messages[0]
     assert msg_bot == "B"
-    # 收口走引擎:on_bbs_report 被调一次,patch 带 assignee(通过持有者校验)、scoped DONE、verdict DONE
-    assert len(on_bbs_report.calls) == 1
-    patch = on_bbs_report.calls[0]
-    assert patch.node_id.startswith("bbs-")
-    assert patch.status == Status.DONE
-    assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-    assert patch.assignee == "B"
-    assert graph.cleared          # 收口 finally 释放了 claim(bbs_owner=None)
+    # notify 仅完成 BBS 投递与 scoped 节点回写；根节点仍保持 HUNG，
+    # 后续由 callback/report 进入 engine.on_bbs_report 才能统一收口。
+    assert on_bbs_report.calls == []
+    assert graph.bbs_owner == "B"
+    assert not graph.cleared
+    assert len(graph.added_nodes) == 1
+    scoped = graph.added_nodes[0]
+    assert scoped.run_info.start_time is not None
+    assert scoped.run_info.extend_props["bbs_claim_at"] == scoped.run_info.start_time
     # bid prompt + dispatch msg 均内联任务态快照(goal objective 嵌入),而非只发 task_id
     assert bot.bid_prompts, "bid 未发出(空 bid_prompts)"
     assert any(_GOAL in p for p in bot.bid_prompts), "bid prompt 未内联 goal snapshot"
@@ -219,7 +258,7 @@ def test_notify_empty_roster_returns_silently():
 
 
 def test_notify_retries_roster_failure_and_only_filters_claim(monkeypatch):
-    import agentclaw.community.core.task.task_runner.integration.bbs_runner as module
+    import agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor as module
 
     monkeypatch.setattr(module, "_ROSTER_RETRY_DELAY", 0)
     bcn = _FlakyBcn(_roster("A"), failures=1)
@@ -279,12 +318,11 @@ class _RecordingGraph(_FakeGraph):
         super().update_task_node_info(patch)
 
 
-def test_notify_without_callback_never_writes_root_output():
-    """无 on_bbs_report 回调(else 回退路径)遵守 bbs 模式不变量:只改根节点状态 + graph 加关系,
-    绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
+def test_notify_without_callback_keeps_root_untouched_and_records_scoped_output():
+    """缺少 callback/report 收口时，BBS notify 只能写 scoped 节点，根保持 HUNG 和 claim。
 
-    回归 root.run_info.output == bbs output 的污染 bug:else 旧实现把 bbs task_result 直写根
-    output_patch/extend_props.output。修复后根 patch 仅 status=PLANNING,无 output 写入。
+    这避免执行器在 BBS lease 尚未被 callback 确认时提前释放 ``bbs_owner``、
+    改写根 output 或把根节点重新推进为 PLANNING/EXECUTING。
     """
     roster = _roster("W")
     bot = _FakeBot(rates={"W": 80})
@@ -295,14 +333,9 @@ def test_notify_without_callback_never_writes_root_output():
     _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s"))  # on_bbs_report 缺省 None
 
     root_patches = [p for p in graph.patches if p.node_id == "t6"]
-    assert len(root_patches) == 1, f"应只写一次根 patch,实际 {len(root_patches)}"
-    rp = root_patches[0]
-    # 不变量:根节点只允许改状态,不改 output
-    assert rp.status == Status.PLANNING
-    assert rp.output_patch is None, f"else 路径违规直写根 output_patch={rp.output_patch}"
-    assert rp.extend_props_patch is None or "output" not in rp.extend_props_patch, (
-        f"else 路径违规直写根 extend_props.output={rp.extend_props_patch}"
-    )
+    assert root_patches == []
+    assert graph.bbs_owner == "W"
+    assert not graph.cleared
     # scoped 接力节点仍落自身执行产出(属 runner 执行完成回投,非根 output 污染)
     scoped = [p for p in graph.patches if p.node_id != "t6"]
     # _bbs_output = task_result["result"] = {"content": "dispatched-task-result"}(FakeBot dispatch 返回结构)
@@ -324,7 +357,8 @@ def test_parse_bid_extracts_relay_reason():
         "run": {"status": "COMPLETED",
                 "result": {"content": json.dumps({"completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"})}},
     })
-    assert bid == {"bot_id": "B", "completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap"}
+    assert bid == {"bot_id": "B", "completion_rate": 90, "relay_reason": "已有相关产出,可补完剩余 gap",
+                   "title": "", "goal": ""}
 
 
 def test_parse_bid_relay_reason_defaults_empty_when_missing():
@@ -334,7 +368,7 @@ def test_parse_bid_relay_reason_defaults_empty_when_missing():
         "run": {"status": "COMPLETED",
                 "result": {"content": json.dumps({"completion_rate": 50})}},
     })
-    assert bid == {"bot_id": "A", "completion_rate": 50, "relay_reason": ""}
+    assert bid == {"bot_id": "A", "completion_rate": 50, "relay_reason": "", "title": "", "goal": ""}
 
 
 def test_notify_records_winner_relay_reason_in_scoped_extend_props():
@@ -345,7 +379,7 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
         reasons={"A": "A 可做", "B": "已产出相关交付,可补完剩余 gap", "C": "C 可做"},
     )
     bcn = _FakeBcn(roster)
-    graph = _FakeGraph()
+    graph = _RecordingGraph()
     g = _execution_graph("t1", _GOAL)
     on_bbs_report = _FakeOnBbsReport(graph)
 
@@ -353,6 +387,65 @@ def test_notify_records_winner_relay_reason_in_scoped_extend_props():
                 skill_name="bbs-relay-single-task", on_bbs_report=on_bbs_report))
 
     assert graph.claimed == "B"  # 最高 completion_rate 胜出(选优键未变)
-    assert len(on_bbs_report.calls) == 1
-    patch = on_bbs_report.calls[0]
-    assert patch.extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
+    assert on_bbs_report.calls == []
+    scoped = [p for p in graph.patches if p.node_id != "t1"]
+    assert len(scoped) == 1
+    assert scoped[0].extend_props_patch["relay_reason"] == "已产出相关交付,可补完剩余 gap"
+
+
+def test_bid_prompt_asks_for_title_and_goal_of_completable_part():
+    """bid prompt 除 completion_rate/relay_reason 外,还要求 bot 输出它能完成的那部分事项的 title 与 goal。"""
+    prompt = _bid_prompt(_execution_graph("t1", _GOAL), "B")
+    assert "completion_rate" in prompt
+    assert "relay_reason" in prompt
+    assert "title" in prompt
+    assert "goal" in prompt
+
+
+def test_parse_bid_extracts_title_and_goal():
+    """_parse_bid 从 bot 回复 JSON 解析它能完成的这部分事项的 title + goal。"""
+    bid = _parse_bid({
+        "bot_id": "B",
+        "run": {"status": "COMPLETED",
+                "result": {"content": json.dumps({
+                    "completion_rate": 90,
+                    "relay_reason": "已产出相关交付,可补完剩余 gap",
+                    "title": "补完架构师名册剩余 2 位",
+                    "goal": "给出剩余 2 位架构师姓名/角色/职责",
+                }, ensure_ascii=False)}},
+    })
+    assert bid == {
+        "bot_id": "B",
+        "completion_rate": 90,
+        "relay_reason": "已产出相关交付,可补完剩余 gap",
+        "title": "补完架构师名册剩余 2 位",
+        "goal": "给出剩余 2 位架构师姓名/角色/职责",
+    }
+
+
+def test_notify_brings_winner_title_goal_into_execution_message():
+    """胜出 bot 的 bid title/goal(它能完成的这部分事项)带入真正执行的任务消息(dispatch msg)。
+
+    非胜出 bot 的 title/goal 不得泄进执行消息。"""
+    roster = _roster("A", "B")
+    bot = _FakeBot(
+        rates={"A": 50, "B": 90},
+        reasons={"A": "A 理由", "B": "B 理由"},
+        titles={"A": "A 部分标题", "B": "B 部分标题"},
+        goals={"A": "A 部分目标", "B": "B 部分目标"},
+    )
+    bcn = _FakeBcn(roster)
+    graph = _FakeGraph()
+    g = _execution_graph("t1", _GOAL)
+    on_bbs_report = _FakeOnBbsReport(graph)
+
+    _run(notify(g, bcn=bcn, bot=bot, graph=graph, backend_url="http://x", skill_name="s",
+                on_bbs_report=on_bbs_report))
+
+    assert graph.claimed == "B"  # 最高 completion_rate 胜出
+    assert len(bot.sent_messages) == 1
+    msg_bot, msg_text, msg_meta = bot.sent_messages[0]
+    assert msg_bot == "B"
+    assert "B 部分标题" in msg_text  # 胜出 bot 的 bid title 进执行消息
+    assert "B 部分目标" in msg_text  # 胜出 bot 的 bid goal 进执行消息
+    assert "A 部分" not in msg_text  # 未胜出 bot 的 title/goal 不进执行消息

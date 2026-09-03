@@ -8,6 +8,8 @@ from agentclaw.community.core.repository.implementations.task.task_info_reposito
 from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
+    Relation,
+    RelationType,
     Metadata,
     RuntimeInfo,
     Status,
@@ -235,3 +237,38 @@ def test_group_formation_round_trips_through_shared_store(db):
     assert rgf.members_info == [{"bot_id": "B-1", "role": "manager", "responsibility": "drive"}]
     assert rgf.extend_props["definition_yaml"] == "yaml..."
     assert rgf.extend_props["manager_bot_id"] == "B-1"
+
+
+def test_removed_graph_node_is_logically_deleted_and_not_hard_deleted(db):
+    task_id = "T-LOGICAL-DELETE"
+    TaskInfoRepository(db).insert(
+        TaskInfoRecord(
+            id=0, task_id=task_id, source_type="bot", owner_user_id="U-1",
+            owner_bot_id="B-1", execution_config={},
+            task_spec={"metadata": {"task_id": task_id}}, status=Status.PENDING,
+        )
+    )
+    repo = TaskGraphRepository(db)
+    graph = _graph(task_id)
+    repo.create_graph(graph, runtime_status=Status.PENDING)
+    child = TaskNode(
+        node_id="child-1", task_id=task_id, status=Status.FAILED,
+        task_spec=graph.tasks[0].task_spec, run_info=RuntimeInfo(), node_run_graph=graph,
+    )
+    graph.tasks.append(child)
+    graph.relations.append(Relation(src_id=task_id, dst_id="child-1", type=RelationType.DEPENDENCY))
+    repo.save_graph(graph, expected_version=1, runtime_status=Status.PENDING, action_events=[])
+
+    graph.tasks = [node for node in graph.tasks if node.node_id != "child-1"]
+    graph.relations = [rel for rel in graph.relations if rel.dst_id != "child-1"]
+    repo.save_graph(graph, expected_version=2, runtime_status=Status.PENDING, action_events=[])
+
+    from agentclaw.community.core.task.repository.models import TaskNodeModel
+    with db.orm_session() as session:
+        row = (session.query(TaskNodeModel)
+               .filter(TaskNodeModel.task_id == task_id, TaskNodeModel.node_id == "child-1")
+               .one())
+        assert row.is_deleted is True
+    restored = repo.load_graph(task_id)
+    assert restored is not None
+    assert {node.node_id for node in restored.tasks} == {task_id}

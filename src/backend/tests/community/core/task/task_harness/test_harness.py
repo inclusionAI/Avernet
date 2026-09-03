@@ -88,6 +88,108 @@ class Recorder:
         self.patches.append(patch)
 
 
+class TestHarnessOnlyPollsExecutionLeaves:
+    def test_running_parent_with_children_is_not_reset(self, svc, graph):
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        root = svc._get_node(graph, "t1")
+        # 构造历史遗留的“结构父节点仍为单 Bot RUNNING”状态。
+        root.status = Status.RUNNING
+        root.run_info.run_mode = "single_bot"
+        root.run_info.assignee = "bot1"
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        assert h._poll_once() == []
+        clock.advance(10.0)
+
+        assert h._poll_once() == []
+        assert root.status == Status.RUNNING
+        assert rec.patches == []
+
+
+class TestBbsActualRunMode:
+    def test_actual_bbs_override_uses_bbs_lease_expiry_path(self, svc, graph):
+        svc.add_task_nodes([_child("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch(
+            "t1", "c1", status=Status.RUNNING, run_mode="coop_group", assignee="bot1",
+            extend_props_patch={"actual_run_mode": "bbs"},
+        ))
+        svc.update_task_node_info(_patch(
+            "t1", "t1", extend_props_patch={"bbs_owner": "bot1"},
+        ))
+
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=5.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(10.0)
+        assert h._poll_once() == []
+        assert svc._get_node(graph, "c1").status == Status.DONE
+        assert svc._get_node(graph, "t1").run_info.extend_props.get("bbs_owner") is None
+        assert rec.patches == []
+
+
+class TestRetryTimerReset:
+    def test_harness_retry_starts_a_fresh_sla_clock(self, svc, graph):
+        _dispatch_running(svc, graph, "c1", run_mode="coop_group", assignee="group1")
+        clock = _Clock(0.0)
+
+        def retry(patch):
+            svc.update_task_node_info(_patch("t1", "c1", status=Status.PENDING))
+            svc.update_task_node_info(_patch(
+                "t1", "c1", status=Status.RUNNING, run_mode="coop_group", assignee="group1"
+            ))
+
+        h = TaskHarness(
+            svc, retry, clock=clock, default_sla_timeout=600.0, interval=0
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(901.0)
+        assert len(h._poll_once()) == 1
+
+        # The retry callback put the node back into RUNNING. The next poll is
+        # the first observation of the new attempt, not another timeout.
+        clock.advance(1.0)
+        assert h._poll_once() == []
+
+
+class TestCoopGroupTimeout:
+    def test_coop_group_default_timeout_is_twelve_minutes(self, svc, graph):
+        _dispatch_running(
+            svc, graph, "c1", run_mode="coop_group", assignee="group1"
+        )
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(
+            svc, rec, clock=clock, default_sla_timeout=600.0, interval=0
+        )
+        h.register("t1")
+        h._poll_once()
+        clock.advance(899.0)
+        assert h._poll_once() == []
+        clock.advance(2.0)
+        resets = h._poll_once()
+        assert len(resets) == 1
+        assert resets[0].node_id == "c1"
+
+    def test_task_sla_override_still_wins_for_coop_group(self, svc, graph):
+        graph.extend_props["execution_config"]["SLA_TIMEOUT"] = 30.0
+        _dispatch_running(
+            svc, graph, "c1", run_mode="coop_group", assignee="group1"
+        )
+        clock = _Clock(0.0)
+        rec = Recorder()
+        h = TaskHarness(svc, rec, clock=clock, default_sla_timeout=600.0)
+        h.register("t1")
+        h._poll_once()
+        clock.advance(31.0)
+        assert len(h._poll_once()) == 1
+
+
 class TestPollOnce:
     def test_first_sight_records_no_reset(self, svc, graph):
         clock = _Clock(0.0)

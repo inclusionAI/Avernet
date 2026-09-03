@@ -67,6 +67,8 @@ def test_attach_creates_bbs_node_running():
     node = svc.attach_bbs_node("a1", parent_node_id="a1", task_spec=_scoped_spec(), bot_id="botA")
     assert node.run_info.run_mode == "bbs"
     assert node.run_info.assignee == "botA"
+    assert node.run_info.start_time is not None
+    assert node.run_info.extend_props["bbs_claim_at"] == node.run_info.start_time
     # 返回引用即 add_task_nodes 挂入图并被 update_task_node_info 原地翻 RUNNING 的同一对象;
     # 若未来实现改为返回副本,这里改经 query_task_dashboard 重取断言亦可。
     assert node.status == Status.RUNNING

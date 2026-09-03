@@ -715,11 +715,12 @@ class TaskDispatchConfig:
 
     The deterministic candidate-count rule is the safe default. Set
     ``task_search_skill_enabled: true`` only when the owner Bot task-search
-    round-trip should decide the dispatch shape.
+    round-trip should decide the dispatch shape. ``skill_report_enabled``
+    selects the unified task result Push/Pull protocol and defaults to true.
     """
 
     task_search_skill_enabled: bool = False
-    single_bot_skill_report_enabled: bool = False
+    skill_report_enabled: bool = True
 
 
 @dataclass(frozen=True)

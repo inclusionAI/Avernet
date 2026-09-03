@@ -46,3 +46,20 @@ def test_list_by_status_unscoped(db):
     repo.insert(_node("N-1", "T-1", Status.RUNNING))
     repo.insert(_node("N-2", "T-2", Status.RUNNING))
     assert len(repo.list_by_status(None, Status.RUNNING)) == 2
+
+
+def test_logically_deleted_node_is_hidden_from_current_queries(db):
+    repo = TaskNodeRepository(db)
+    deleted = _node("N-deleted")
+    deleted = TaskNodeRecord(
+        id=deleted.id,
+        task_id=deleted.task_id,
+        node_id=deleted.node_id,
+        task_spec=deleted.task_spec,
+        status=deleted.status,
+        is_deleted=True,
+    )
+    repo.insert(deleted)
+    assert repo.get("T-1", "N-deleted") is None
+    assert repo.list_nodes("T-1") == []
+    assert repo.update_status("T-1", "N-deleted", Status.RUNNING) is False

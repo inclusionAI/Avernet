@@ -20,9 +20,9 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 
@@ -119,6 +119,13 @@ def _search_result(nid: str | None) -> dict:
 
 
 # ===== discover double:语义预查候选集(返回固定候选)=====
+class _PollerModeSettings:
+    """Exercise the pull-poller branch; production defaults to skill HTTP push."""
+
+    def is_enabled(self, setting_type: str) -> bool:
+        return setting_type != "skill_report_enabled"
+
+
 class _DiscoverStub:
     def search_by_keyword(self, **kw):
         return {"total": 2, "items": [
@@ -144,13 +151,14 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
-# ===== Test 1: single_bot 投递 + poller 回投 → DONE =====
+# ===== Test 1: single_bot 投递 + poller 回投 → SUCCESS =====
 class TestSingleBotPollReportE2E:
     def test_single_bot_dispatch_poll_report_done(self):
         svc = TaskGraphService()
         svc.initialize_graph(_task_info())
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=_DoubleBcsClient(), discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         nodes = {n.node_id: n for n in g.tasks}
@@ -161,11 +169,11 @@ class TestSingleBotPollReportE2E:
         assert nodes["N_group"].status == Status.RUNNING  # 等拉群后投递(或先 RUNNING 标记)
         # 等 poller 回投 single_bot 终态(poll-to-terminal,几秒内)
         _wait_for(lambda: svc.query_task_dashboard("t_phase").tasks[0].status in (Status.DONE, Status.HUNG) or
-                  any(n.node_id == "N_single" and n.status == Status.DONE for n in svc.query_task_dashboard("t_phase").tasks),
+                  any(n.node_id == "N_single" and n.status == Status.SUCCESS for n in svc.query_task_dashboard("t_phase").tasks),
                   timeout=10.0)
         g = svc.query_task_dashboard("t_phase")
         n = next(n for n in g.tasks if n.node_id == "N_single")
-        assert n.status == Status.DONE, f"single_bot poll 回投未翻 DONE, status={n.status}"
+        assert n.status == Status.SUCCESS, f"single_bot poll 回投未翻 SUCCESS, status={n.status}"
         assert n.run_info.output, "single_bot 产出未 fold"
         _stop_poller(eng)
 
@@ -179,7 +187,8 @@ class TestCoopGroupManagerWorkerE2E:
                                    "success": True, "data": "group_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_group = next(n for n in g.tasks if n.node_id == "N_group")
@@ -188,10 +197,10 @@ class TestCoopGroupManagerWorkerE2E:
         assert n_group.status == Status.RUNNING
         # 等 poller 回投 coop_group 终态
         _wait_for(lambda: next((n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_group"), None) is not None and
-                  next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_group").status == Status.DONE,
+                  next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_group").status == Status.SUCCESS,
                   timeout=10.0)
         n_group = next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_group")
-        assert n_group.status == Status.DONE, f"coop_group poll 回投未翻 DONE, status={n_group.status}"
+        assert n_group.status == Status.SUCCESS, f"coop_group poll 回投未翻 SUCCESS, status={n_group.status}"
         _stop_poller(eng)
 
 
@@ -251,16 +260,17 @@ class TestCoopGroupStateMachineE2E:
                                    "success": True, "data": "sm_out", "gaps": []},
                                poll_once_then_terminal=True, terminal_after=1)
         eng = ExecutionEngine(svc, bot=_PhaseBot(), bcs=bcs, discover=_DiscoverStub(),
-                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True)
+                              bcs_identity=_DoubleBcsBotIdentityResolver(), task_search_skill_enabled=True,
+                              task_settings=_PollerModeSettings())
         _run(eng.on_execute("t_phase"))
         g = svc.query_task_dashboard("t_phase")
         n_sm = next(n for n in g.tasks if n.node_id == "N_sm")
         assert n_sm.run_info.run_mode == "coop_group"
         assert str(n_sm.run_info.assignee).startswith("grp_")
-        _wait_for(lambda: next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_sm").status == Status.DONE,
+        _wait_for(lambda: next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_sm").status == Status.SUCCESS,
                   timeout=10.0)
         n_sm = next(n for n in svc.query_task_dashboard("t_phase").tasks if n.node_id == "N_sm")
-        assert n_sm.status == Status.DONE, f"state_machine poll 回投未翻 DONE, status={n_sm.status}"
+        assert n_sm.status == Status.SUCCESS, f"state_machine poll 回投未翻 SUCCESS, status={n_sm.status}"
         _stop_poller(eng)
 
 
@@ -278,7 +288,7 @@ class TestBbsDispatchE2E:
                      node_run_graph=None)  # type: ignore[arg-type]
         svc.add_task_nodes([n], parent_node_id="t_bbs")
         with patch(
-            "agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+            "agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor.notify",
             new_callable=AsyncMock,
         ) as notify:
             ok = _run(exe._executor.dispatch([n]))  # type: ignore[attr-defined]
@@ -331,7 +341,7 @@ class TestR3LockModel:
         g = svc.query_task_dashboard("t_lock")
         n1 = next(n for n in g.tasks if n.node_id == "L1")
         n2 = next(n for n in g.tasks if n.node_id == "L2")
-        assert n1.status == Status.DONE and n2.status == Status.DONE, \
+        assert n1.status == Status.SUCCESS and n2.status == Status.SUCCESS, \
             f"并发回投后状态错: L1={n1.status} L2={n2.status}"
         _stop_poller(eng)
 

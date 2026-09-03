@@ -120,13 +120,16 @@ class TaskInfoRepository(TaskInfoRepositoryProtocol):
 
     def list_by_status(
         self,
-        status: Status,
+        status: Status | Sequence[Status],
         *,
         gmt_modified_since: Optional[datetime] = None,
         limit: int = 100,
     ) -> list[TaskInfoRecord]:
         with self._db.orm_session() as db:
-            q = db.query(self._model).filter(self._model.status == status.value)
+            statuses = [status] if isinstance(status, Status) else list(status)
+            q = db.query(self._model).filter(
+                self._model.status.in_([item.value for item in statuses])
+            )
             if gmt_modified_since is not None:
                 q = q.filter(self._model.gmt_modified >= gmt_modified_since)
             rows = q.order_by(self._model.gmt_modified.desc()).limit(limit).all()

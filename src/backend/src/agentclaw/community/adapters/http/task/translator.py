@@ -14,7 +14,7 @@ from agentclaw.community.core.task.domain.models import TaskCallbackData
 from agentclaw.community.core.task.task_runner.callback_correlation import (
     CallbackCorrelationRegistry,
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     _bcn_state_machine_status,
     _claw_mind_status_to_task,
 )

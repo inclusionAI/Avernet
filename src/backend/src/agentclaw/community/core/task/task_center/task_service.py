@@ -36,11 +36,17 @@ from agentclaw.community.core.task.domain.models import (
     TaskOpResult,
     TaskSpec,
     TaskType,
+    Metadata,
+    Context,
+    Goal,
+    RuntimeInfo,
+    effective_run_mode,
 )
 from agentclaw.community.core.task.domain.requests import TaskInfoRequest
 from agentclaw.community.core.task.domain.errors import TaskStateError
 
 from agentclaw.community.core.task.repository.types import (
+    BbsTaskOverviewRecord,
     TaskInfoRecord,
     TaskNodeRecord,
     TaskNodeRunInfoRecord,
@@ -62,8 +68,13 @@ from agentclaw.community.core.task.task_center.task_service_support import (
     resolve_coop_collab_mode,
 )
 
+from agentclaw.community.core.task.task_center.task_service_execution import (
+    TaskServiceExecutionMixin,
+)
 
-class TaskService:
+
+
+class TaskService(TaskServiceExecutionMixin):
     """对外 facade;内部持 ExecutionEngine 编排核 + TaskGraphService + Harness(可选)+ TaskLoopCallback。
 
     验收 100% 走回调回投;engine 不主动验,无 verify/bbs port。engine 对调用方不可见(无 property)。
@@ -280,7 +291,11 @@ class TaskService:
 
     @staticmethod
     def _normalize_owner_bot_id(request: TaskInfoRequest) -> TaskInfoRequest:
-        """Keep new task_info rows semantically split while accepting legacy composite input."""
+        """Keep new task_info rows semantically split while accepting legacy composite input.
+
+        归属解耦(A):当 owner_bot_id 内嵌归属与 owner_user_id(执行用户/人类观察者)不一致时,**保留**
+        owner_bot_id 复合(真实归属不被覆盖),owner_user_id 仍为执行用户 —— owner bot 寻址用真实归属,
+        执行用户仅作人类观察者(P1)。归属一致或缺执行用户时维持原行为(拆为 bare bot_id + owner_user_id)。"""
         bot_id, separator, embedded_owner_id = str(
             request.owner_bot_id or ""
         ).partition(":")
@@ -294,10 +309,12 @@ class TaskService:
         ):
             logger.warning(
                 "[task][execute] owner identity mismatch: owner_bot_id=%s owner_user_id=%s; "
-                "keep explicit owner_user_id",
+                "keep owner_bot's real owner (embedded), owner_user_id is the executing observer",
                 request.owner_bot_id,
                 request.owner_user_id,
             )
+            # 保留 owner_bot_id 复合(真实归属),不拆为 bare —— 供 _run_yaml 直接用作 owner bot 寻址。
+            return replace(request, owner_bot_id=request.owner_bot_id, owner_user_id=owner_user_id)
         return replace(request, owner_bot_id=bot_id, owner_user_id=owner_user_id)
 
     async def execute(self, request: TaskInfoRequest) -> TaskOpResult:
@@ -332,6 +349,7 @@ class TaskService:
                     task_id=task_id, success=False, error=f"persist failed: {exc}"
                 )
         graph = self._graph.initialize_graph(task_info)
+        self._enrich_anniversary_trigger_bot_name(request, graph)
         logger.info(
             "[task][execute] task=%s source=%s title=%s → initialize(run_id=%s)+on_execute(后台推进)",
             task_id,
@@ -355,176 +373,6 @@ class TaskService:
         bg.add_done_callback(self._on_bg_done)
         return TaskOpResult(task_id=task_id, success=True, run_id=graph.run_id)
 
-    async def _run_workflow(self, task_id, request, task_info, run_id):
-        ec = request.execution_config
-        wf_id = ec.get("workflow_id")
-        args = ec.get("args", [])
-        message = f"/{wf_id} " + " ".join(args) if wf_id else " ".join(args)
-        try:
-            bot_result = await self._engine.trigger_single_bot_workflow(
-                task_id=task_id,
-                bot_id=compose_bot_identity(request.owner_bot_id, request.owner_user_id),
-                message=message,
-            )
-        except Exception as exc:
-            return TaskOpResult(
-                task_id=task_id,
-                success=False,
-                error=f"workflow trigger failed: {exc}",
-                run_id=run_id,
-            )
-        session_id = bot_result.session_id if bot_result is not None else None
-        # Keep the graph identity semantically split.  ``assignee`` remains the
-        # product bot id, while the owner is persisted alongside it so dashboard
-        # reads never resolve a duplicate bot name under another user.
-        run_extend = {
-            "session_id": session_id,
-            "assignee_owner_id": request.owner_user_id,
-        }
-        self._graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                status=Status.RUNNING,
-                run_mode="single_bot",
-                assignee=request.owner_bot_id,
-                extend_props_patch=run_extend,
-            )
-        )
-        self._persist_node_run(
-            task_id,
-            task_info,
-            run_mode="single_bot",
-            assignee=request.owner_bot_id,
-            session_id=session_id,
-            extend_props=run_extend,
-        )
-        return TaskOpResult(task_id=task_id, success=True, run_id=run_id)
-
-    async def _run_yaml(self, task_id, request, task_info, run_id):
-        from agentclaw.community.core.task.task_dispatch.strategies import (
-            GroupFormation,
-        )
-
-        ec = request.execution_config
-        has_yaml = bool(ec.get("yaml"))
-        # 任务描述(目标)取 goal.objective → instruction → title 的第一个非空,作为 BCS 建群的 context,
-        # 注入 <GroupContext> 的 `目标` 行(BCS resolve_session_topic:session input→group.context→label)。
-        _ts = task_info.task_spec
-        _task_context = (
-            (_ts.goal.objective or _ts.metadata.instruction or _ts.metadata.title) or ""
-        ).strip()
-        gf = GroupFormation(
-            bot_ids=[
-                compose_bot_identity(request.owner_bot_id, request.owner_user_id),
-                *ec.get("participant_bot_ids", []),
-            ],
-            collab_mode=resolve_coop_collab_mode(has_yaml, ec.get("group_kind")),
-            group_name=ec.get("group_name", f"task-{task_id}"),
-            members_info=[],
-            extend_props={
-                "definition_yaml": ec.get("yaml"),
-                "task_id": task_id,
-                "api_base_url": self._api_base_url,
-                # YAML 路径不手动 start_state_machine_run:让 BCS 建群即自动开跑初始状态机。
-                "start_initial_run": True,
-                # 逻辑角色→产品 bot 绑定为创建 bcn 协作群接口的入参(非 yaml 模板内字段):
-                # 经 execution_config 透传 → TaskExecutor.form_coop_group 注入 BCS create_group
-                # (state_machine participant_bindings)。群 master 复用底层 driver_bot(bot_ids[0]=owner)。
-                "participant_bindings": ec.get("participant_bindings"),
-                # state_machine 面板组件由 execute.execution_config 指定，透传给 BCS。
-                "panel_component_name": ec.get("panel_component_name"),
-                # 任务描述(目标)→ BCS 建群 context → <GroupContext> `目标` 行。
-                "task_context": _task_context or None,
-                "task_objective": task_info.task_spec.goal.objective,
-                "task_instruction": task_info.task_spec.metadata.instruction,
-                "acceptances": [
-                    {"id": a.id, "description": a.description}
-                    for a in task_info.task_spec.goal.acceptances
-                ],
-            },
-        )
-        try:
-            start = await self._engine.start_coop_group(gf)
-        except Exception as exc:
-            return TaskOpResult(
-                task_id=task_id,
-                success=False,
-                error=f"yaml group failed: {exc}",
-                run_id=run_id,
-            )
-        run_extend = {"group_id": start.group_id, "session_id": start.session_id}
-        self._graph.update_task_node_info(
-            TaskNodePatch(
-                task_id=task_id,
-                node_id=task_id,
-                status=Status.RUNNING,
-                run_mode="coop_group",
-                assignee=start.group_id,
-                extend_props_patch=run_extend,
-            )
-        )
-        self._persist_node_run(
-            task_id,
-            task_info,
-            run_mode="coop_group",
-            assignee=start.group_id,
-            session_id=start.session_id,
-            extend_props=run_extend,
-        )
-        extend_props = {"group_id": start.group_id}
-        return TaskOpResult(
-            task_id=task_id, success=True, run_id=run_id, extend_props=extend_props
-        )
-
-    async def _run_bbs(self, task_id, request, task_info, run_id) -> TaskOpResult:
-        logger.info("[task][bbs_mode], begin_run_bbs, task_id=%s", task_id)
-
-        self._engine._hung_and_escalate(task_id=task_id, node_id=task_id, hung_reason="创建BBS接力任务")
-
-        logger.info("[task][bbs_mode], finish_run_bbs, task_id=%s", task_id)
-        return TaskOpResult(
-            task_id=task_id, success=True, run_id=run_id, extend_props={}
-        )
-
-    def _persist_node_run(
-        self, task_id, task_info, *, run_mode, assignee, session_id, extend_props=None
-    ):
-        # The aggregate graph repository already persists the node and runtime
-        # snapshot from the preceding graph mutation. Avoid duplicate inserts
-        # when the shared persistence path is enabled; retain the legacy direct
-        # repositories for lightweight/in-memory fixtures.
-        if self._graph.has_repository:
-            return
-        if self._task_node_repo is not None:
-            self._task_node_repo.insert(
-                TaskNodeRecord(
-                    id=0,
-                    task_id=task_id,
-                    node_id=task_id,
-                    task_spec=task_info.task_spec.to_dict(),
-                    status=Status.RUNNING,
-                )
-            )
-        if self._run_info_repo is not None:
-            now_ms = int(time.time() * 1000)
-            self._run_info_repo.insert(
-                TaskNodeRunInfoRecord(
-                    id=0,
-                    node_id=task_id,
-                    task_id=task_id,
-                    run_mode=run_mode,
-                    assignee=assignee,
-                    output=None,
-                    acceptance_result=None,
-                    retry=0,
-                    session_id=session_id,
-                    extend_props=extend_props,
-                    start_time=now_ms,
-                    update_time=now_ms,
-                    end_time=None,
-                )
-            )
 
     async def converge_by_session(
         self, session_id: str, *, success: bool, output: Any = None
@@ -550,9 +398,9 @@ class TaskService:
         if output is not None:
             result["data"] = output
         if not success:
-            # 失败收敛须带 gaps:CallbackAdapter.adapt 对"success=False 且无 gaps"会产出
-            # exec_error(→ harness 重投),而非验收 FAIL(→ 终态 FAILED)。补一个 gap 让失败
-            # 正确翻态为 FAILED(失败详情已随 output 落 run_info.output)。
+            # 未通过验收的收敛须带 gaps:CallbackAdapter.adapt 对"success=False 且无 gaps"会产出
+            # exec_error(→ harness 重投),而非验收 FAIL(→ DONE)。补一个 gap 让结果
+            # 正确记录为 DONE(失败详情已随 output 落 run_info.output)。
             result["gaps"] = ["external collaboration ended without success"]
         data = TaskCallbackData(
             data={
@@ -589,7 +437,7 @@ class TaskService:
             parse_manager_worker_bcn,
         )
         from agentclaw.community.core.task.repository.types import TaskCallbackRecord
-        from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+        from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
             _manager_worker_status,
         )
 
@@ -677,6 +525,63 @@ class TaskService:
             return
         await asyncio.gather(*self._bg_tasks, return_exceptions=True)
 
+    @staticmethod
+    def _hydrate_root_dashboard_runtime(graph: TaskExecutionGraph, task_id: str) -> None:
+        """Fill missing root runtime identity for dashboard compatibility.
+
+        ``initialize_graph`` creates a planning root before the concrete executor
+        exists, so its run mode/assignee/session can legitimately be empty. The
+        dashboard still needs a stable root context, so fill only missing fields
+        from graph metadata. This is a read-side projection and must not overwrite
+        real execution values written later by workflow/BCS/BBS dispatch.
+        """
+        root = next((node for node in graph.tasks if node.node_id == task_id), None)
+        if root is None:
+            return
+
+        graph_props = graph.extend_props or {}
+        config = graph_props.get("execution_config") or {}
+        if not isinstance(config, dict):
+            config = {}
+
+        source_type = graph_props.get("source_type")
+        source_type = getattr(source_type, "value", source_type)
+        source_type = str(source_type or "").strip().lower()
+        task_type = config.get("task_type")
+        task_type = getattr(task_type, "value", task_type)
+        task_type = str(task_type or "").strip().lower()
+
+        # ``api`` is a trigger channel rather than an execution mode. Resolve its
+        # concrete mode from task_type when available, otherwise retain the
+        # historical single-bot default.
+        run_mode_by_source = {
+            "bot": "single_bot",
+            "coop_group": "coop_group",
+        }
+        run_mode = run_mode_by_source.get(source_type)
+        if source_type == "api":
+            run_mode = {
+                "workflow": "single_bot",
+                "yaml": "coop_group",
+                "bbs": "bbs",
+            }.get(task_type, "single_bot")
+
+        if not root.run_info.run_mode and run_mode:
+            root.run_info.run_mode = run_mode
+        if not root.run_info.assignee:
+            owner_bot_id = graph_props.get("owner_bot_id")
+            if owner_bot_id:
+                root.run_info.assignee = str(owner_bot_id)
+
+        if not root.run_info.extend_props.get("session_id"):
+            main_session_id = config.get("main_session_id")
+            if main_session_id:
+                root.run_info.extend_props["session_id"] = main_session_id
+        if not root.run_info.extend_props.get("assignee_owner_id"):
+            owner_user_id = graph_props.get("owner_user_id")
+            if owner_user_id:
+                root.run_info.extend_props["assignee_owner_id"] = str(owner_user_id)
+
     def get_task_dashboard(
         self,
         task_id: str,
@@ -689,7 +594,16 @@ class TaskService:
         按 root(node_id==task_id)的 ``run_info.extend_props['session_id']`` 反查 ``task_callback`` 最新回调,
         把回调审计的 ``execution_graph``(BCN/ClawMind DAG 快照)挂在图级,便于 dashboard 可见;无 session_id /
         无 callback / 未配 ``callback_repo`` → 留 ``None``。子树投影(node_id 入参)不挂(root 不在投影内)。"""
+        # Dashboard requests can land on a different worker than the one that
+        # accepted ``execute``.  Re-register the task on every full-graph read so
+        # that this worker's Harness also watches persisted PENDING nodes.
+        # Registration is idempotent and intentionally skipped for subtree reads,
+        # which are read-only projections rather than task lifecycle heartbeats.
+        if node_id is None and self._harness is not None:
+            self._harness.register(task_id)
         graph = self._graph.query_task_dashboard(task_id, node_id)
+        if node_id is None:
+            self._hydrate_root_dashboard_runtime(graph, task_id)
         if include_action_log:
             self._graph.load_action_logs(graph)
         root = next((n for n in graph.tasks if n.node_id == task_id), None)
@@ -724,7 +638,7 @@ class TaskService:
         bot_cache: dict[str, dict | None] = {}
         pair_lookup = getattr(self._bot_service, "list_bots_by_owner_bot_pairs", None)
         for node in graph.tasks:
-            if node.run_info.run_mode not in ("single_bot", "bbs"):
+            if effective_run_mode(node) not in ("single_bot", "bbs"):
                 continue
             assignee = (node.run_info.assignee or "").strip()
             if not assignee:
@@ -770,6 +684,37 @@ class TaskService:
             if isinstance(info, dict):
                 node.run_info.extend_props["assignee_owner_id"] = info.get("owner_id")
                 node.run_info.extend_props["assignee_name"] = info.get("bot_name")
+
+    def _enrich_anniversary_trigger_bot_name(self, request, graph) -> None:
+        """best-effort 把店庆模板入口"接自"展示为实际触发 Bot 的名称,而非固定入口名。
+
+        仅 merchant-operations-goal-to-plan 模板的首节点会把入口身份展示为触发方;其他模板/Runtime
+        均不读此字段,故这里严格按 static_plan_id 限定,避免影响其它静态剧本。名称解析失败则不写入,
+        Runtime 自然回退到入口占位,绝不阻断 execute。"""
+        template_id = request.execution_config.get("static_plan_id")
+        if template_id != "merchant-operations-goal-to-plan":
+            return
+        if self._bot_service is None:
+            return
+        bare_bot_id, _, embedded_owner = str(request.owner_bot_id or "").partition(":")
+        if not bare_bot_id:
+            return
+        info = None
+        try:
+            info = self._bot_service.get_bot_by_id(bare_bot_id)
+        except Exception as exc:  # noqa: BLE001 展示富化,失败不影响
+            logger.debug(
+                "[task][execute] trigger bot name lookup failed bot_id=%s: %s",
+                bare_bot_id, exc,
+            )
+            return
+        name = info.get("bot_name") if isinstance(info, dict) else None
+        if name:
+            graph.extend_props.setdefault("trigger_bot_name", name)
+            logger.info(
+                "[task][execute] anniversary trigger bot display resolved task=%s bot_id=%s name=%s",
+                graph.task_id, bare_bot_id, name,
+            )
 
     @staticmethod
     def _split_owner_bot_id(owner_bot_id: str, owner_user_id: str) -> tuple[str, str]:
@@ -882,6 +827,70 @@ class TaskService:
         )
         return self._enrich_task_owner_display(records), total
 
+    def list_bbs_tasks(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        *,
+        search_word: str | None = None,
+        status: str | None = None,
+    ) -> "tuple[list[BbsTaskOverviewRecord], int]":
+        """列 BBS 接力任务(有效执行模态为 'bbs')的一页(1-based):run_info ⋈ node 联合,按 task_id 补 publisher(owner_bot_id)。
+
+        供 bbs/list 路由调用,委托 ``TaskGraphService.list_bbs_tasks_overview``,透传 status/search_word
+        可选过滤(为空不过滤,退化为纯分页)。返回 ``(records, total)``——``records`` 为
+        ``BbsTaskOverviewRecord``(含 task_spec/extend_props 原始 dict);title/goal/acceptances/
+        assignee_name 由 adapter translator 二次解析;``total`` 为**过滤后**行数。
+        查得后交 ``_enrich_bbs_publisher_names`` 把 publisher bot_id 批量解析为 name(降级 None)。
+        """
+        records, total = self._graph.list_bbs_tasks_overview(
+            page, page_size, search_word=search_word, status=status
+        )
+        return self._enrich_bbs_publisher_names(records), total
+
+    def _enrich_bbs_publisher_names(
+        self, records: list[BbsTaskOverviewRecord]
+    ) -> list[BbsTaskOverviewRecord]:
+        """批量解析 publisher bot_id → name(BotService.list_bots_by_owner_bot_pairs)。
+
+        展示字段增量:``bot_service`` 缺失 / pair 缺 bot_id 或 owner_id / 查询抛错 / 未命中 →
+        ``publisher_name=None``,绝不阻断列表(复用 ``_enrich_task_owner_display`` 的批量+降级模式)。
+        repo 只补 ``(publisher, owner_user_id)``;name 在此用一次批量下游查询,无 N+1。
+        """
+        if not records or self._bot_service is None:
+            return records
+        pairs = list(
+            dict.fromkeys(
+                (r.publisher, r.owner_user_id)
+                for r in records
+                if r.publisher and r.owner_user_id
+            )
+        )
+        names: dict[tuple[str, str], str | None] = {}
+        if pairs:
+            try:
+                result = (
+                    self._bot_service.list_bots_by_owner_bot_pairs(
+                        pairs=pairs, page=1, page_size=len(pairs)
+                    )
+                    or {}
+                )
+                for item in result.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    key = (
+                        str(item.get("bot_id") or ""),
+                        str(item.get("owner_id") or ""),
+                    )
+                    if key[0] and key[1]:
+                        names[key] = item.get("bot_name")
+            except Exception as exc:  # noqa: BLE001 display enrichment only
+                logger.warning("[task][bbs] publisher bot name lookup failed: %s", exc)
+        return [
+            replace(r, publisher_name=names.get((r.publisher, r.owner_user_id)))
+            for r in records
+        ]
+
     def claim_bbs_task(self, task_id: str, bot_id: str) -> NodeOpResult:
         """BBS 接力步②:任务根级 CAS 占有(委托 TaskGraphService.claim_bbs_owner)。
 
@@ -910,7 +919,7 @@ class TaskService:
     ) -> NodeOpResult:
         """BBS 接力步⑤:回投 scoped 节点终态 + 释放 claim(经 ``on_bbs_report``);收口由框架自行判定(非 bot 声明)。
 
-        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(PASS→DONE / FAIL+gaps→FAILED)/
+        供 bbs 接力执行实体(FR-PICK-05)回投:``acceptance_result``(BBS 完成后 scoped 节点置 SUCCESS)/
         ``output_patch``(checkpoint fold)/``exec_error``(执行报错 fold)。根目标是否满足由框架经 owner
         复核(``on_bbs_report``→``_on_pass_collect``→``plan(root)``→``_maybe_finish_graph``)判定,
         **非 bot 自报**(故无 ``root_verified``)。``bot_id`` 须为当前 ``bbs_owner``(经 on_bbs_report 持有者校验),
@@ -942,7 +951,7 @@ class TaskService:
         """内部节点写口:透传 ``TaskNodePatch`` 经 ``ExecutionEngine.on_report`` 落库(+触发翻态/验收/收敛旁路)。
 
         与回投同一入口(``on_report``):
-        ① ``acceptance_result`` 非空 → 验收驱动(PASS→DONE / FAIL+gaps→FAILED)+ 收敛传播;
+        ① ``acceptance_result`` 非空 → 验收驱动(PASS→SUCCESS / FAIL+gaps→DONE);仅 PASS 进入收敛传播;
         ② ``exec_error`` 非空 → 执行报错(→ on_harness 复位重投,计数达上限 HUNG);
         ③ ``status`` 非空(无前两者)→ 框架直驱(``_DIRECT_TRANSITIONS`` 约束 + 收敛旁路,如根子节点全终态收敛);
         三者全空 → 仅 fold 非状态字段(``output_patch``/``run_mode``/``assignee``/``extend_props_patch``)。

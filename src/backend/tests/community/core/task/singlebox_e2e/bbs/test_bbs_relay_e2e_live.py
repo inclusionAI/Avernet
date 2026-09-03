@@ -11,7 +11,7 @@ gated by ``SINGLEBOX_TASK_E2E=1``。本地 ``./scripts/singlebox.sh start all`` 
 - 新建 ``task-owner-bot``(装 planning+search,做任务规划/分解)+「金庸」(装 ``arch-analysis`` +
   ``bbs-relay-pickup``,BBS 接力执行者)。
 - 任务目标:**整理支付宝公司内部技术架构师**。理论上:owner 规划分解后,子任务"找架构师"经普通搜索
-  找不到合适的人 → 升 BBS;只有「金庸」会通过 bbs 接力把各方向的架构师逐段整理出来,最终满足根目标 → 图 DONE。
+  找不到合适的人 → 升 BBS;只有「金庸」会通过 bbs 接力把各方向的架构师逐段整理出来,最终满足根目标 → 图 SUCCESS。
 
 # 为什么是 in-process 图 + live adapter(设计说明)
 
@@ -62,7 +62,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskSpec,
 )
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxBotProvisioner,
     SingleboxEngineAdapter,
 )
@@ -310,26 +310,26 @@ class TestBbsRelayE2ELive(unittest.TestCase):
                     },
                 )
                 self.assertEqual(r.status_code, 200, f"result 未成功(@{sub}):{r.text}")
-                # 上报确认:节点 DONE;bbs_owner 已释放。根是否 DONE 由框架复核根 gap 自判;
+                # 上报确认:节点 SUCCESS;bbs_owner 已释放。根是否 SUCCESS 由框架复核根 gap 自判;
                 # 本 in-process 编排无 owner bot→根不收口(不断言根 DONE,根收口见 natual live 测)。
                 g = _dash()
                 nd = _node(g, node_id)
-                self.assertEqual(nd["status"], "DONE", f"result 后节点非 DONE(@{sub}):{nd['status']}")
+                self.assertEqual(nd["status"], "SUCCESS", f"result 后节点非 SUCCESS(@{sub}):{nd['status']}")
                 root = _node(g, TASK_ID)
                 self.assertIsNone(
                     (root["run_info"]["extend_props"] or {}).get("bbs_owner"),
                     f"result 后 bbs_owner 未释放(@{sub})",
                 )
-                print(f"[relay@{sub}] result 200 node=DONE root={root['status']} bbs_owner=释放 ✓")
+                print(f"[relay@{sub}] result 200 node=SUCCESS root={root['status']} bbs_owner=释放 ✓")
         finally:
             try:
                 await adapter._aclose()
             except Exception:
                 pass
 
-        # 5) 断言:各方向 scoped bbs 节点 DONE(assignee=金庸,带架构师 checkpoint)+ bbs_mode 已置。
+        # 5) 断言:各方向 scoped bbs 节点 SUCCESS(assignee=金庸,带架构师 checkpoint)+ bbs_mode 已置。
         # 根/图是否 DONE 由框架复核根 gap 自判(无 root_verified);本 in-process 编排无 owner bot→不收口,
-        # 故不断言图 DONE(根收口见 natual live 测 ``test_bbs_relay_e2e_natual``)。
+        # 故不断言图 SUCCESS(根收口见 natual live 测 ``test_bbs_relay_e2e_natual``)。
         g = client.get("/openapi/v1/collaboration/tasks/dashboard", params={"task_id": TASK_ID}).json()["data"]
         self.assertTrue(g["extend_props"].get("bbs_mode"), "图未置 bbs_mode")
         self.assertGreater(
@@ -348,7 +348,7 @@ class TestBbsRelayE2ELive(unittest.TestCase):
         )
         for n in bbs_nodes:
             ri = n["run_info"] or {}
-            self.assertEqual(n["status"], "DONE", f"scoped 未 DONE:{n['node_id']}")
+            self.assertEqual(n["status"], "SUCCESS", f"scoped 未 SUCCESS:{n['node_id']}")
             self.assertEqual(ri.get("assignee"), jy_id, f"scoped 非 金庸 接力:{n['node_id']}")
             self.assertTrue(
                 (ri.get("output") or {}).get("architects"),

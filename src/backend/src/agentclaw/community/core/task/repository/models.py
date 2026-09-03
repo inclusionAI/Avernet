@@ -125,6 +125,7 @@ class TaskNodeModel(Base):
     node_id = Column(_NODE_ID, nullable=False)
     task_spec = Column(Text, nullable=False)
     status = Column(String(64), nullable=False)
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default="0")
     gmt_create = Column(DateTime, default=func.now(), nullable=False)
     gmt_modified = Column(
         DateTime, default=func.now(), onupdate=func.now(), nullable=False
@@ -142,6 +143,7 @@ class TaskNodeModel(Base):
             node_id=self.node_id,
             task_spec=_loads(self.task_spec),
             status=Status(self.status),
+            is_deleted=bool(self.is_deleted),
             gmt_create=self.gmt_create,
             gmt_modified=self.gmt_modified,
         )

@@ -26,7 +26,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_dispatch.protocols import GroupFormation
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.runner import TaskRunner
+from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
 
 
 def _run(coro):

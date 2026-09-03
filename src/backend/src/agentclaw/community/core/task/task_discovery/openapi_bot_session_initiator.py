@@ -26,7 +26,7 @@ from agentclaw.community.core.task.task_discovery.models import (
     DiscoveredTask,
     DiscoverySession,
 )
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.log import get_logger

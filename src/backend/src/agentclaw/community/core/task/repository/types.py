@@ -60,6 +60,7 @@ class TaskNodeRecord:
     node_id: str
     task_spec: dict[str, Any]
     status: Status
+    is_deleted: bool = False
     gmt_create: Optional[datetime] = None
     gmt_modified: Optional[datetime] = None
 
@@ -93,6 +94,32 @@ class TaskNodeRunInfoRecord:
             ),
             gaps=list(self.acceptance_result.get("gaps", [])),
         )
+
+
+@dataclass(frozen=True)
+class BbsTaskOverviewRecord:
+    """``GET /bbs/list`` 后端联合投影:`task_node_run_info` (run_mode='bbs') ⋈ `task_node`,
+    再按 task_id 补 `task_info.owner_bot_id`(publisher)。忠实映射给定 SQL 的列别名。
+
+    `task_spec`/`extend_props`/`acceptance_result` 为已 JSON 解析的原始 dict;title/goal/
+    acceptances/assignee_name 由 adapter translator 二次解析(不在此 record 内)。
+    """
+
+    task_id: str
+    node_id: str
+    run_mode: Optional[str]
+    retry: int
+    assignee_id: Optional[str]  # task_node_run_info.assignee(原 SQL 别名 assignee_id)
+    status: Status  # task_node.status(领域枚举)
+    acceptance_result: Optional[dict[str, Any]]
+    extend_props: Optional[dict[str, Any]]
+    relay_create_time: Optional[datetime]  # task_node.gmt_create
+    relay_begin_time: Optional[datetime]  # task_node_run_info.gmt_create
+    relay_end_time: Optional[datetime]  # task_node_run_info.gmt_modified
+    task_spec: dict[str, Any]
+    publisher: Optional[str]  # task_info.owner_bot_id(缺失 → None)
+    owner_user_id: Optional[str] = None  # task_info.owner_user_id;供 service 批量查 name(不进 DTO)
+    publisher_name: Optional[str] = None  # 发布方 bot 名称(service enrich;缺失/降级 → None)
 
 
 @dataclass

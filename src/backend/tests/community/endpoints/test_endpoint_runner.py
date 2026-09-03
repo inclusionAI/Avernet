@@ -3,7 +3,7 @@
 Lives in ``tests/endpoints/`` (not ``tests/framework/``) for two reasons:
 
 1. **Pytest only collects from ``test_*.py``.** Putting the test
-   function in ``tests/framework/runner.py`` was a dead-end — pytest
+   function in ``tests/framework/task_runner.py`` was a dead-end — pytest
    never collected it, no matter how many cases were registered.
 2. **Parametrize must capture a populated registry.** ``tests/endpoints/
    conftest.py`` glob-imports every case file at conftest-load time,

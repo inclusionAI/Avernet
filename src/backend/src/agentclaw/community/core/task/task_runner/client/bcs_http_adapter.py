@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import BcsTokenProvider
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,9 @@ class BcsCreateGroupRequest:
     opening_message: dict[str, Any] | None = None
     event_subscriptions: list[dict[str, Any]] | None = None    # 内联事件订阅(回调 webhook);BCS 把 CloudEvent 推到 sink.url
     caller_bot_token: str | None = None                        # driver-bot 的 session token(直读 bcs_bots.session_token);参考 ocb:作为 Authorization: Bearer 做 caller 身份
+    routing_policy: dict[str, Any] | None = None               # 拉人/不发言投递策略,如 {"default_bot_final_delivery":"inject_observers"}(人类观察者场景)
+    label: str | None = None                                   # 群显示标签
+    master_bot: str | None = None                              # manager_worker 群的 master bot(=driver_bot/manager);与 ocb 拉群接口对齐,form_coop_group 注入
 
 
 @dataclass
@@ -190,7 +193,7 @@ class BcsHttpAdapter:  # pragma: no cover — live BCS HTTP client (HMAC signing
             body["group_strategy"] = req.group_strategy
         if req.event_subscriptions:
             body["event_subscriptions"] = req.event_subscriptions
-        for opt in ("context", "topic", "service_spec", "originator", "visibility"):
+        for opt in ("context", "topic", "service_spec", "originator", "visibility", "label", "routing_policy", "master_bot"):
             v = getattr(req, opt)
             if v is not None:
                 body[opt] = v

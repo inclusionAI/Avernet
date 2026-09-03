@@ -929,7 +929,7 @@ class ConfigModule(Module):
 
             task_dispatch:
               task_search_skill_enabled: false
-              single_bot_skill_report_enabled: false
+              skill_report_enabled: true              # true=skill HTTP Push, false=poller Pull
 
         The default keeps dispatch deterministic and avoids depending on the
         owner Bot's task-search skill. Set it to true to restore the skill
@@ -945,11 +945,11 @@ class ConfigModule(Module):
                 defaults.task_search_skill_enabled,
                 "task_dispatch",
             ),
-            single_bot_skill_report_enabled=_coerce(
+            skill_report_enabled=_coerce(
                 block,
-                "single_bot_skill_report_enabled",
+                "skill_report_enabled",
                 _as_bool,
-                defaults.single_bot_skill_report_enabled,
+                defaults.skill_report_enabled,
                 "task_dispatch",
             ),
         )

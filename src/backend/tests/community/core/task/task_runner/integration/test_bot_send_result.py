@@ -1,9 +1,9 @@
 from agentclaw.community.core.task.domain.models import RuntimeInfo, Status, TaskNode
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-from agentclaw.community.core.task.task_runner.integration.task_executor import (
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
     TaskExecutor,
 )
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 
@@ -24,6 +24,13 @@ class _FakeBot:
     async def send_and_wait_async(self, **kw):
         return {}
 
+
+
+
+class _PullSettings:
+    def is_enabled(self, setting_type):
+        assert setting_type == "skill_report_enabled"
+        return False
 
 class _FakeFormatter:
     def format_execute(self, ctx, node):
@@ -61,7 +68,8 @@ def test_dispatch_single_bot_reads_bot_send_result_and_carries_session_id():
     ex._context = _FakeContext()
     ex._poller = poller
     ex._graph = None  # __new__ 跳过 __init__;补 __init__ 默认(无图→_persist_dispatch_ids 跳过落库)
-    ex._task_settings = None  # __init__ 默认:未注入 task_settings → _single_bot_skill_report_enabled 回退 False(poller)
+    # This test exercises the poller Pull branch explicitly. Production default is Push.
+    ex._task_settings = _PullSettings()
     ex._api_base_url = ""  # __init__ 默认:_dispatch_single_bot ctx 携带 backend
     ex._identity_resolver = None
     ex._bot_token_provider = None
