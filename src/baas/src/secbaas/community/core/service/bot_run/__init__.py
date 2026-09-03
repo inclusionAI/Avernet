@@ -17,7 +17,6 @@ from ._async_chat_client import (
 from ._async_chat_client_pool import AsyncChatClientPool
 from ._async_session_client import AsyncSessionClient
 from ._baas_service import BaasBotService, BaasBotServiceConfig
-from ._bot_binding_resolver import BotBindingResolver
 from ._bot_concurrency import BotConcurrencyManager, FixedMachineCountProvider
 from ._bot_run_utils import (
     binding_data_to_info,
@@ -62,7 +61,6 @@ __all__ = [
     "BotSessionError",
     "ConcurrentSessionError",
     "NotConnectedError",
-    "BotBindingResolver",
     "binding_data_to_info",
     "BotRunner",
     "BotService",

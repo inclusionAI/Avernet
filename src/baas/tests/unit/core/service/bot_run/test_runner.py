@@ -42,6 +42,7 @@ from secbaas.community.core.service.bot_run._task_concurrency_pool import (
 from secbaas.community.core.service.bot_run._task_message_dispatcher import (
     TaskMessageDispatcher,
 )
+from secbaas.community.plugins.eval_env.stub import NoopEvalSessionLog
 from secbaas.community.spi.bot_service import BotBindingData
 
 # ==================== Fixtures ====================
@@ -131,6 +132,13 @@ def baas_binding_data():
     )
 
 
+def _make_config_service(get_config_return=None):
+    """Mock system_config_service with configurable get_config result."""
+    config_service = MagicMock()
+    config_service.get_config.return_value = get_config_return
+    return config_service
+
+
 def _make_runner(
     mock_selector,
     mock_run_repo,
@@ -146,6 +154,8 @@ def _make_runner(
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
         dispatchers=[dispatcher],
+        system_config_service=_make_config_service(),
+        eval_session_log=MagicMock(),
     )
 
 
@@ -165,6 +175,8 @@ def _make_runner_with_task_dispatcher(
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
         dispatchers=[dispatcher],
+        system_config_service=_make_config_service(),
+        eval_session_log=MagicMock(),
     )
 
 
@@ -1468,16 +1480,17 @@ def _make_runner_with_config(
         bot_service_plugin=mock_bot_service_plugin,
         dispatchers=dispatchers,
         system_config_service=config_service,
+        eval_session_log=MagicMock(),
     )
 
 
 class TestSelectDispatcherConfig:
     """Tests for system_config-driven dispatcher routing."""
 
-    def test_no_config_service_defaults_to_task(
+    def test_no_config_defaults_to_task(
         self, mock_selector, mock_run_repo, mock_bot_service_plugin
     ):
-        """Without system_config_service, defaults to TaskMessageDispatcher."""
+        """When no dispatcher_route config exists, defaults to TaskMessageDispatcher."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
         queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
@@ -1486,8 +1499,10 @@ class TestSelectDispatcherConfig:
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
             dispatchers=[queue_d, task_d],
+            system_config_service=_make_config_service(),
+            eval_session_log=MagicMock(),
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is task_d
 
     def test_config_returns_queue_dispatcher(
@@ -1510,7 +1525,7 @@ class TestSelectDispatcherConfig:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is queue_d
 
     def test_config_method_stream_overrides(
@@ -1538,8 +1553,10 @@ class TestSelectDispatcherConfig:
             [queue_d, task_d],
         )
 
-        assert runner._select_dispatcher("bot-1") is queue_d
-        assert runner._select_dispatcher("bot-1", method="stream") is task_d
+        assert runner._select_dispatcher("bot-1", "openclaw", metadata={}) is queue_d
+        assert (
+            runner._select_dispatcher("bot-1", "openclaw", method="stream", metadata={}) is task_d
+        )
 
     def test_config_fallback_to_default(
         self, mock_selector, mock_run_repo, mock_bot_service_plugin
@@ -1564,7 +1581,7 @@ class TestSelectDispatcherConfig:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is queue_d
 
     def test_config_get_config_exception_falls_through(
@@ -1593,7 +1610,7 @@ class TestSelectDispatcherConfig:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is queue_d
 
     def test_config_empty_value_falls_through(
@@ -1619,7 +1636,7 @@ class TestSelectDispatcherConfig:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is queue_d
 
     def test_config_unknown_dispatcher_name_falls_back(
@@ -1639,7 +1656,7 @@ class TestSelectDispatcherConfig:
             config_service,
             [task_d],
         )
-        result = runner._select_dispatcher("bot-1")
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata={})
         assert result is task_d
 
 
@@ -1677,7 +1694,7 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
         assert result is queue_d
 
     def test_bcn_switch_off_keeps_task(
@@ -1703,7 +1720,7 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
         assert result is task_d
 
     def test_bcn_switch_get_config_exception_falls_through(
@@ -1729,13 +1746,13 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
         assert result is task_d
 
-    def test_bcn_metadata_no_config_service_keeps_task(
+    def test_bcn_metadata_unconfigured_switch_keeps_task(
         self, mock_selector, mock_run_repo, mock_bot_service_plugin
     ):
-        """BCN metadata but no system_config_service → cannot read switch, defaults to Task."""
+        """BCN metadata but switch unconfigured (None) → defaults to Task."""
         task_d = TaskMessageDispatcher(run_repository=mock_run_repo)
         queue_d = MagicMock(spec=MessageDispatcher)
         queue_d.__class__.__name__ = "QueueTaskMessageDispatcher"
@@ -1745,8 +1762,10 @@ class TestSelectDispatcherBcnSwitch:
             run_repository=mock_run_repo,
             bot_service_plugin=mock_bot_service_plugin,
             dispatchers=[queue_d, task_d],
+            system_config_service=_make_config_service(),
+            eval_session_log=MagicMock(),
         )
-        result = runner._select_dispatcher("bot-1", metadata=_bcn_metadata())
+        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
         assert result is task_d
 
     def test_non_bcn_metadata_ignores_switch(
@@ -1773,7 +1792,7 @@ class TestSelectDispatcherBcnSwitch:
             [queue_d, task_d],
         )
         result = runner._select_dispatcher(
-            "bot-1", metadata={"bot_options": {"lifecycle_stage": "online"}}
+            "bot-1", "openclaw", metadata={"bot_options": {"lifecycle_stage": "online"}}
         )
         assert result is task_d
 
@@ -2077,6 +2096,8 @@ class TestListSessions:
             run_repository=mock_run_repo,
             bot_service_plugin=None,
             dispatchers=[],
+            system_config_service=_make_config_service(),
+            eval_session_log=MagicMock(),
         )
 
         # Patch _resolve_bot_route to return our binding and service
@@ -2304,6 +2325,7 @@ def _make_runner_with_eval_session_log(
         run_repository=mock_run_repo,
         bot_service_plugin=mock_bot_service_plugin,
         dispatchers=[dispatcher],
+        system_config_service=_make_config_service(),
         eval_session_log=eval_session_log,
     )
 
@@ -2423,14 +2445,14 @@ class TestEvalSessionLog:
         arca_binding_data,
         context,
     ):
-        """metadata 含 eval_id 但 eval_session_log=None 时正常执行不报错。"""
+        """metadata 含 eval_id 且注入 Noop EvalSessionLog 时正常执行不报错。"""
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
 
         runner = _make_runner_with_eval_session_log(
             mock_selector,
             mock_run_repo,
             mock_bot_service_plugin,
-            eval_session_log=None,
+            eval_session_log=NoopEvalSessionLog(),
         )
         await runner.deliver_message(
             bot_id=f"{BOT_ID}:{ENTITY_ID}",
@@ -2587,14 +2609,14 @@ class TestEvalSessionLogStream:
         arca_binding_data,
         context,
     ):
-        """deliver_message_stream 中 eval_id 存在但 eval_session_log=None 时正常执行。"""
+        """deliver_message_stream 中 eval_id 存在且注入 Noop EvalSessionLog 时正常执行。"""
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
 
         runner = _make_runner_with_eval_session_log(
             mock_selector,
             mock_run_repo,
             mock_bot_service_plugin,
-            eval_session_log=None,
+            eval_session_log=NoopEvalSessionLog(),
         )
 
         await runner.deliver_message_stream(

@@ -3,11 +3,11 @@
 from ._protocols import (
     EvalBindingResolverProtocol,
     EvalConsistencyCheckProtocol,
-    EvalSessionLogProtocol,
+    EvalSessionLog,
 )
 
 __all__ = [
     "EvalBindingResolverProtocol",
     "EvalConsistencyCheckProtocol",
-    "EvalSessionLogProtocol",
+    "EvalSessionLog",
 ]
