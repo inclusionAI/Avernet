@@ -7,7 +7,7 @@ from typing import Any, Protocol, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
     from agentclaw.community.core.task.domain.models import TaskCallbackData, TaskNode
-    from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+    from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
         BcsCreateGroupRequest as BcsCreateGroupRequest,
         BcsCreateGroupResult as BcsCreateGroupResult,
     )

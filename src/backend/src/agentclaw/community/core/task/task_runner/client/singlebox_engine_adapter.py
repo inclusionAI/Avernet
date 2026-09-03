@@ -32,11 +32,11 @@ from typing import Any
 import httpx
 import websockets
 
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     BotSendResult,
     OpenApiBotPort,
 )
-from agentclaw.community.core.task.task_runner.integration.protocols import (
+from agentclaw.community.core.task.task_runner.client.protocols import (
     BotPublicServiceProtocol,
 )
 

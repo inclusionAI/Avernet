@@ -6,17 +6,17 @@ from __future__ import annotations
 
 import threading
 
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_client import _DoubleBcsClient
-from agentclaw.community.core.task.task_runner.integration.double.double_context_provider import (
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_client import _DoubleBcsClient
+from agentclaw.community.core.task.task_runner.client.double.double_context_provider import (
     _DoubleApiKeyProvider, _DoubleContextProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.double.double_open_api_bot import _DoubleOpenApiBot
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+from agentclaw.community.core.task.task_runner.client.double.double_open_api_bot import _DoubleOpenApiBot
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
-from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
+from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 
@@ -31,10 +31,10 @@ def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = 
         ctx = _DoubleContextProvider()
         identity_resolver = identity_resolver or _DoubleBcsBotIdentityResolver()
     else:
-        from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsHttpAdapter
-        from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import _RealToken  # corp 覆写
-        from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import OpenApiBotAdapter
-        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import _RunnerContextBuilder
+        from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsHttpAdapter
+        from agentclaw.community.core.task.task_runner.client.bcs_token_provider import _RealToken  # corp 覆写
+        from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import OpenApiBotAdapter
+        from agentclaw.community.core.task.task_runner.client.prompt_formatter import _RunnerContextBuilder
         keys = _DoubleApiKeyProvider()
         bot = OpenApiBotAdapter(keys)
         bcs = BcsHttpAdapter(_RealToken())

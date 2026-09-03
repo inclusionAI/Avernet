@@ -18,18 +18,18 @@ from agentclaw.community.core.bot_management.services.bcn_service import BcnServ
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsCreateGroupRequest,
 )
-from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError,
     OpenApiBadRequestError,
 )
-from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
 )
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle,
     SingleBotHandle,
 )
@@ -992,7 +992,7 @@ class TaskExecutor:
     async def run_bbs(self, execution_graph) -> None:
         """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。
         延迟导入 bbs_runner 避免顶层循环依赖;bbs_runner 自身 best-effort 不抛。"""
-        from agentclaw.community.core.task.task_runner.integration import bbs_runner
+        from agentclaw.community.core.task.task_runner.client import bbs_runner
 
         await bbs_runner.notify(
             execution_graph=execution_graph,

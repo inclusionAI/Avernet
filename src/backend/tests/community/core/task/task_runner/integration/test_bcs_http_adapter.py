@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
     BcsClientRequestError, BcsCreateGroupRequest, BcsHttpAdapter, BcsServerError,
 )
 
@@ -175,7 +175,7 @@ def test_create_group_omits_bearer_when_no_caller_bot_token():
 
 
 def test_owned_client_isolated_when_event_loop_changes(monkeypatch):
-    import agentclaw.community.core.task.task_runner.integration.bcs_http_adapter as module
+    import agentclaw.community.core.task.task_runner.client.bcs_http_adapter as module
 
     class _FakeClient:
         instances = []

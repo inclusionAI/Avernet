@@ -13,7 +13,7 @@ from agentclaw.community.core.task.task_grant_service_protocol import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
-from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 from agentclaw.community.log import get_logger
 
 logger = get_logger()

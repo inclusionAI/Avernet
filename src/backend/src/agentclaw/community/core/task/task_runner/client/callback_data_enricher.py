@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 
 from agentclaw.community.core.task.domain.models import Status, TaskCallbackData
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
 

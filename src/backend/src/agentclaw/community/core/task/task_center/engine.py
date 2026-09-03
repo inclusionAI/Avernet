@@ -53,7 +53,7 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 
 logger = logging.getLogger("task.engine")
@@ -278,13 +278,13 @@ class ExecutionEngine:
                 "None" if self._bcs is None else type(self._bcs).__name__,
             )
             return None
-        from agentclaw.community.core.task.task_runner.integration.task_executor import (
+        from community.core.task.task_runner.modal_executor.task_executor import (
             TaskExecutor,
         )
-        from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+        from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
             TaskExecutorResultPoller,
         )
-        from agentclaw.community.core.task.task_runner.integration.prompt_formatter import (
+        from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
             PromptFormatterImpl,
         )
 

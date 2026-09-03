@@ -622,7 +622,7 @@ class TaskService:
             parse_manager_worker_bcn,
         )
         from agentclaw.community.core.task.repository.types import TaskCallbackRecord
-        from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+        from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
             _manager_worker_status,
         )
 

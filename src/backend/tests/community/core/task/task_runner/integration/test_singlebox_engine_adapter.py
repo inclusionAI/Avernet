@@ -2,7 +2,7 @@ import asyncio
 import threading
 import time
 
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxEngineAdapter,
     _extract_final_text,
 )

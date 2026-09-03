@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from agentclaw.community.core.task.task_runner.integration.ports import OpenApiBotPort
+from agentclaw.community.core.task.task_runner.client.ports import OpenApiBotPort
 GRANTED = "granted"
 REVOKED = "revoked"
 

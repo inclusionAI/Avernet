@@ -37,8 +37,8 @@
 import asyncio
 import json
 from unittest.mock import MagicMock, AsyncMock, patch
-from agentclaw.community.core.task.task_runner.integration.bbs_runner import notify
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BotTaskModeRoster
+from community.core.task.task_runner.modal_executor.bbs_runner import notify
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BotTaskModeRoster
 
 
 def _run(coro):
@@ -67,7 +67,7 @@ class _FakeBot:
 
     async def send_message(self, *, bot_id, message, metadata):
         self.sent_messages.append((bot_id, message, metadata))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
@@ -105,7 +105,8 @@ def test_notify_selects_highest_completion_rate_and_claims_and_sends():
     graph = _FakeGraph()
     g = _execution_graph()
 
-    _run(notify(g, bcs=bcs, bot=bot, graph=graph, backend_url="http://localhost:8888", skill_name="bbs-relay-single-task"))
+    _run(notify(g, bcs=bcs, bot=bot, graph=graph, backend_url="http://localhost:8888",
+                skill_name="bbs-relay-single-task"))
 
     assert graph.claimed == "B"  # highest completion_rate
     assert len(bot.sent_messages) == 1
@@ -353,7 +354,7 @@ git commit -m "feat(bbs-runner): bid→select→claim→dispatch module for BBS 
 # tests/community/core/task/task_runner/integration/test_bbs_executor.py
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _run(coro):
@@ -366,7 +367,8 @@ def test_task_executor_run_bbs_delegates_to_bbs_runner():
                        sink=None, poller=None, api_base_url="http://test:8888")
     g = MagicMock()
     g.task_id = "t1"
-    with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify", new_callable=AsyncMock) as mock_notify:
+    with patch("agentclaw.community.core.task.task_runner.integration.bbs_runner.notify",
+               new_callable=AsyncMock) as mock_notify:
         _run(exe.run_bbs(g))
         mock_notify.assert_awaited_once()
         call_kwargs = mock_notify.call_args
@@ -388,7 +390,7 @@ In `task_executor.py`:
 ```python
 async def run_bbs(self, execution_graph) -> None:
     """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。"""
-    from agentclaw.community.core.task.task_runner.integration import bbs_runner
+    from community.core.task.task_runner.modal_executor import bbs_runner
     await bbs_runner.notify(
         execution_graph,
         bcs=self._bcs, bot=self._bot,

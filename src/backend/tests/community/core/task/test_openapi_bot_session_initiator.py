@@ -16,7 +16,7 @@ from agentclaw.community.core.task.task_discovery.models import (
 from agentclaw.community.core.task.task_discovery.openapi_bot_session_initiator import (
     OpenApiBotSessionInitiator,
 )
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     BotSendResult,
 )
 

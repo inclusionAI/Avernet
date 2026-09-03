@@ -83,7 +83,7 @@ from agentclaw.community.adapters.http.task.translator import (
     translate_claw_mind,
     translate_common_task_callback
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user

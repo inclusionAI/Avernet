@@ -1,5 +1,5 @@
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
-from agentclaw.community.core.task.task_runner.integration.bcs_bot_identity_resolver import (
+from agentclaw.community.core.task.task_runner.client.bcs_bot_identity_resolver import (
     BotServiceBcsBotIdentityResolver,
 )
 

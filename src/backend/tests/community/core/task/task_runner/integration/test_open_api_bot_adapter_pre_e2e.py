@@ -51,7 +51,7 @@ import httpx  # noqa: E402
 import os
 import unittest
 
-from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (  # noqa: E402
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (  # noqa: E402
     OpenApiBotAdapter,
 )
 

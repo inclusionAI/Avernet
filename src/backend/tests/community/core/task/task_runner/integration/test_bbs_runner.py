@@ -8,7 +8,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.integration.bbs_runner import (
+from agentclaw.community.core.task.task_runner.client.bbs_runner import (
     _bid_prompt, _parse_bid, notify,
 )
 
@@ -82,7 +82,7 @@ class _FakeBot:
     async def send_message(self, *, bot_id, message, metadata):
         # 兼容保留:notify 不再调用 send_message(dispatch 走 send_and_wait_async)
         self.sent_messages.append((bot_id, message, metadata))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
         return BotSendResult(run_id=f"r_{bot_id}", session_id=None)
 
 
@@ -234,7 +234,7 @@ def test_notify_empty_roster_returns_silently():
 
 
 def test_notify_retries_roster_failure_and_only_filters_claim(monkeypatch):
-    import agentclaw.community.core.task.task_runner.integration.bbs_runner as module
+    import agentclaw.community.core.task.task_runner.client.bbs_runner as module
 
     monkeypatch.setattr(module, "_ROSTER_RETRY_DELAY", 0)
     bcn = _FlakyBcn(_roster("A"), failures=1)

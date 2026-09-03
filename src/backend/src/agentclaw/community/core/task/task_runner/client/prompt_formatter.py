@@ -10,7 +10,7 @@ from typing import Any
 from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
 
 from agentclaw.community.core.task.domain.models import TaskNode
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     PromptFormatter, TaskContextBuilder,
 )
 

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from agentclaw.community.core.task.domain.errors import BotIdentityResolutionError
-from agentclaw.community.core.task.task_runner.integration.ports import BcsBotIdentityResolver
-from agentclaw.community.core.task.task_runner.integration.protocols import BotServiceProtocol
+from agentclaw.community.core.task.task_runner.client.ports import BcsBotIdentityResolver
+from agentclaw.community.core.task.task_runner.client.protocols import BotServiceProtocol
 
 
 class BotServiceBcsBotIdentityResolver(BcsBotIdentityResolver):

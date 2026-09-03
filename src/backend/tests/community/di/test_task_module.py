@@ -15,7 +15,7 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
 from agentclaw.community.di.modules.task_module import TaskModule
 
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
-from agentclaw.community.core.task.task_runner.integration.singlebox_engine_adapter import (
+from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
     SingleboxKeywordBotDiscover,
 )
 

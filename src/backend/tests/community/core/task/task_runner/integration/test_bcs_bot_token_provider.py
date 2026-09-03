@@ -5,7 +5,7 @@ DB-backed 具体实现属 corp/数据源(经 DI 注入,见 task_module),不在 c
 """
 from __future__ import annotations
 
-from agentclaw.community.core.task.task_runner.integration.bcs_bot_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
     BcsBotTokenProvider, CachingBcsBotTokenProvider, NullBcsBotTokenProvider,
 )
 

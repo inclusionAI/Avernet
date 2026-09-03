@@ -4,10 +4,10 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status, TaskNode, TaskSpec,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.integration.bcs_http_adapter import BcsCreateGroupResult
-from agentclaw.community.core.task.task_runner.integration.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.integration.double.double_bcs_bot_identity_resolver import (
+from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import BcsCreateGroupResult
+from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
+from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_identity_resolver import (
     _DoubleBcsBotIdentityResolver,
 )
 

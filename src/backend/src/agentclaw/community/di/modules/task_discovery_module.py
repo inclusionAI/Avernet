@@ -64,7 +64,7 @@ from agentclaw.community.core.task.task_discovery.task_reader import (
     OrmTaskReader,
     TaskReader,
 )
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     OpenApiBotPort,
 )
 from agentclaw.community.di.profile import DeployProfile

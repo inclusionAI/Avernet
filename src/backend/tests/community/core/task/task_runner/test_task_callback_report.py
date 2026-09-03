@@ -40,13 +40,13 @@ from agentclaw.community.adapters.http.task.translator import (
     merge_manager_worker_execution_graph,
     parse_manager_worker_bcn,
 )
-from agentclaw.community.core.task.task_runner.integration import (
+from agentclaw.community.core.task.task_runner.client import (
     callback_data_enricher as _enricher_mod,
 )
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 from agentclaw.community.core.task.domain.errors import TaskStateError

@@ -6,7 +6,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.task_service import TaskService
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
-from agentclaw.community.core.task.task_runner.integration import build_integration
+from agentclaw.community.core.task.task_runner.client import build_integration
 
 
 def _run(coro):

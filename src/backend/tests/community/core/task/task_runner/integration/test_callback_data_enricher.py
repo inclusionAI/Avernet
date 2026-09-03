@@ -11,10 +11,10 @@ import asyncio
 import httpx
 
 from agentclaw.community.core.task.domain.models import TaskCallbackData
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import (
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     LocalBcsTokenProvider,
 )
-from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
     CallbackDataEnricher,
 )
 
@@ -146,7 +146,7 @@ class TestEnrichBcn:
 
 
 def test_parse_dict_strict_returns_empty_for_unsupported_value():
-    from agentclaw.community.core.task.task_runner.integration.callback_data_enricher import (
+    from agentclaw.community.core.task.task_runner.client.callback_data_enricher import (
         _parse_dict_strict,
     )
 

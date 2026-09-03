@@ -1,9 +1,9 @@
 from agentclaw.community.core.task.domain.models import RuntimeInfo, Status, TaskNode
-from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
-from agentclaw.community.core.task.task_runner.integration.task_executor import (
+from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
+from community.core.task.task_runner.modal_executor.task_executor import (
     TaskExecutor,
 )
-from agentclaw.community.core.task.task_runner.integration.task_executor_result_poller import (
+from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     TaskExecutorResultPoller,
 )
 

@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.bcs_token_provider import BcsTokenProvider
+from agentclaw.community.core.task.task_runner.client.bcs_token_provider import BcsTokenProvider
 
 
 logger = logging.getLogger(__name__)

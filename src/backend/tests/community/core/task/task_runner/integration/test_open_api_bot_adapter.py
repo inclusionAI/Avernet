@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter import (
+from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiAuthError, OpenApiBotAdapter, OpenApiError, OpenApiServerError, OpenApiTimeoutError, parse_bot_id,
 )
 
@@ -305,7 +305,7 @@ def test_owned_client_pinned_reused_same_loop_isolated_across_loops():
 
 def test_send_message_uses_loop_compatible_client_across_event_loops(monkeypatch):
     """Real adapter requests must not reuse an owned AsyncClient across loops."""
-    import agentclaw.community.core.task.task_runner.integration.open_api_bot_adapter as module
+    import agentclaw.community.core.task.task_runner.client.open_api_bot_adapter as module
 
     created = []
     used = []

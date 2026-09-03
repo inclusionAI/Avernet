@@ -1,7 +1,7 @@
 # tests/community/core/task/task_runner/integration/test_bbs_executor.py
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
-from agentclaw.community.core.task.task_runner.integration.task_executor import TaskExecutor
+from community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
 
 
 def _run(coro):

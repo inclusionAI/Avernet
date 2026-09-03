@@ -87,7 +87,7 @@ def test_execute_workflow_persists_session_id():
     # patch the engine method used by execute:
     async def trig(*, task_id, bot_id, message):
         eng.calls.append(("workflow", task_id, bot_id, message))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
         return BotSendResult(run_id="r", session_id=eng.workflow_session)
     eng.trigger_single_bot_workflow = trig
     svc, node_repo, run_repo = _service(eng)
@@ -119,7 +119,7 @@ def test_execute_workflow_accepts_pure_or_composite_owner_bot_id(owner_bot_id):
 
     async def trig(*, task_id, bot_id, message):
         eng.calls.append(("workflow", task_id, bot_id, message))
-        from agentclaw.community.core.task.task_runner.integration.ports import BotSendResult
+        from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
         return BotSendResult(run_id="r", session_id="wf-session")
 
     eng.trigger_single_bot_workflow = trig

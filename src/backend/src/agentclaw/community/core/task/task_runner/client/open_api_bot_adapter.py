@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from agentclaw.community.core.task.task_runner.integration.ports import (
+from agentclaw.community.core.task.task_runner.client.ports import (
     ApiKeyProvider,
     BotSendResult,
     OpenApiBotPort,
