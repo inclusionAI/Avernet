@@ -63,6 +63,9 @@ def assert_application_coding_create(
     messages). This copy has no production caller today — keep the two in
     sync, or single-source them once bot_inventory may depend on
     bot_management.
+
+    No space-kind gate: coding bots may be created in any business space
+    (``space_kind`` stays a parameter to mirror the strategy signature).
     """
     if deployment_mode is not DeployMode.CLOUD:
         return ComboDecision(False, "application coding is cloud-only")
@@ -72,6 +75,4 @@ def assert_application_coding_create(
         )
     if bot_type != "personal":
         return ComboDecision(False, "application coding bot must be personal")
-    if space_kind != "personal":
-        return ComboDecision(False, "application coding is personal-space only")
     return ComboDecision(True)
