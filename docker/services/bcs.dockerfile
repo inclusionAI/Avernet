@@ -67,7 +67,7 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /build/bcs /usr/local/bin/bcs
-COPY src/bcs/configs /app/configs
+COPY src/bcs/configs/bcs-config-community.toml /app/configs/bcs-config-prod.toml
 
 # Persistence: bots_base_dir and the session-file data_dir must live on a
 # writable volume. The shipped example config uses /var/lib/bcs; mount a
