@@ -237,6 +237,13 @@ class FakeExpertChat:
         self.calls.append(("create_chat_session", args, kwargs))
         return {"session_key": self.session["id"]}
 
+    async def connect_chat_session(self, *args, **kwargs):
+        self.calls.append(("connect_chat_session", args, kwargs))
+        return {
+            "session_key": self.session["id"],
+            "connection": {"ws_url": "wss://example.invalid/chat", "token": "opaque"},
+        }
+
     async def get_owned_chat_session(self, *args, **kwargs):
         self.calls.append(("get_owned_chat_session", args, kwargs))
         return self.session
