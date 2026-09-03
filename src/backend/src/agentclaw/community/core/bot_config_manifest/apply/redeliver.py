@@ -6,7 +6,7 @@ same whole-artifact delivery every runtime edit on teclaw takes
 (``TeclawDeviceSyncService.sync_symlinks``, which ignores its argument and
 recomposes). A bot with no live binding is not an error: provisioning will
 compose the first artifact from the state just written, which is the point of
-the ``RECORD_PRE_PROVISION`` sequence.
+the ``RECORD_APPLY_PROVISION`` sequence.
 
 The device graph is reached through two thunks rather than imported: this
 package does not depend on ``core.devices``, and the redeliver needs exactly
@@ -30,7 +30,16 @@ DispatchDeviceSync = Callable[[Any], Any]
 
 
 class TeclawRedeliver:
-    """One whole-artifact redeliver to a bound bot; nothing to an unbound one."""
+    """Deliver the whole artifact to the bot's running container, once.
+
+    "Re-deliver" because the container already received an artifact when it
+    was provisioned (and on every runtime edit since); after a manifest apply
+    changed platform state, the same delivery is made again so the container
+    catches up. A bot with an active device binding — a live container — gets
+    it; a bot without one (still being created, or its container gone) gets
+    nothing, because provisioning composes the first artifact from the
+    platform state itself.
+    """
 
     def __init__(
         self,

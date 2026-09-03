@@ -116,14 +116,14 @@ def test_a_failed_object_delete_raises_with_the_object_still_there() -> None:
     key = store.list(_SCOPE, category=CATEGORY_IDENTITY)[0].store_key
     oss.delete_object = lambda k: False  # type: ignore[method-assign]
     with pytest.raises(ManagedFilesStoreError):
-        store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+        store.delete(_SCOPE, rel_path="identity/a")
     assert [f.store_key for f in store.list(_SCOPE, category=CATEGORY_IDENTITY)] == [key]
     with pytest.raises(ManagedFilesStoreError):
         store.purge(_SCOPE)
     assert len(store.list(_SCOPE, category=CATEGORY_IDENTITY)) == 1
     # Once the store answers again, the same object lets the delete land.
     oss.delete_object = lambda k: oss.objects.pop(k, None) is not None  # type: ignore[method-assign]
-    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, rel_path="identity/a")
     assert key not in oss.objects and store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
 
 
@@ -133,10 +133,10 @@ def test_delete_is_issued_without_a_listing_so_a_listing_failure_cannot_skip_it(
     store, oss = _store()
     store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1")
     oss.list_objects = lambda prefix, max_keys=1000: []  # type: ignore[method-assign]
-    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, rel_path="identity/a")
     assert oss.objects == {}
     # And an absent object is already removed: no error, nothing listed first.
-    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, rel_path="identity/a")
 
 
 def test_a_purge_that_could_not_delete_every_object_keeps_only_those() -> None:
@@ -163,8 +163,8 @@ def test_delete_removes_one_object_and_purge_removes_everything_of_the_bot() -> 
     store.put(_SCOPE, category=CATEGORY_RESOURCES, name="b", rel_path="workspace/b", content=b"2")
     other = f"{_BASE}/staff_u1/bot8_manifest/teclaw/identity/a"
     oss.objects[other] = b"other bot"
-    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
-    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")  # idempotent
+    store.delete(_SCOPE, rel_path="identity/a")
+    store.delete(_SCOPE, rel_path="identity/a")  # idempotent
     # ``identity/a`` is a prefix of ``identity/a.bak``; only the exact key went.
     assert f"{_ROOT}/identity/a" not in oss.objects and f"{_ROOT}/identity/a.bak" in oss.objects
     assert store.purge(_SCOPE) == 2
@@ -217,6 +217,9 @@ def test_platform_managed_is_the_declared_file_categories_when_the_switch_is_on(
     store, _ = _store()
     doc = "schema_version: 1\nmanifest:\n  identity: []\n  resources:\n    - path: kb/a.md\n      content: hi\n  mcp: []\n"
     assert _reader(store, doc).platform_managed(_REQ) == frozenset({"identity_files", "resources"})
+    # The engine decision is the reader's: another family gets nothing, switch or no switch.
+    arca = ComposeRequest(entity_id="u1", bot_id="bot7", user_id="u1", engine_type="openclaw", entity_type="staff")
+    assert _reader(store, doc).platform_managed(arca) == frozenset()
     assert _reader(store, doc, switch=False).platform_managed(_REQ) == frozenset()
     assert _reader(store, None).platform_managed(_REQ) == frozenset()
     assert _reader(store, "schema_version: 1\n").platform_managed(_REQ) == frozenset()

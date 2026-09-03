@@ -33,7 +33,28 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
+from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+    ActivationPort,
+)
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
+    ManifestIdentityPort,
+)
+from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
+    ManifestResourcePort,
+)
+from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
+    SkillPackageUploadPort,
+)
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ALL_PHASES,
     APPLY_ORDER,
@@ -50,19 +71,21 @@ TECLAW_PLATFORM_MANAGED_KEY = "teclaw_platform_managed"
 class CreationSequence(StrEnum):
     """The order a W13 creation runs its steps in, per family.
 
-    ``PRE_CREATE_ON`` — the pre-container phase, then create and provision,
-    then wait for ``ACTIVE``, then the post-container phase. ARCA's sequence,
-    and teclaw's while the switch is off.
-
-    ``RECORD_PRE_PROVISION`` — create the bot **record** without provisioning,
-    run the single pre-container phase against it, then provision (which
-    composes the first artifact from the platform state just written), then
-    wait for ``ACTIVE``. There is no post-container phase. teclaw with the
-    switch on.
+    Each value names its steps in the order they run; the two differ in
+    *where the container is created* relative to the manifest phases.
     """
 
-    PRE_CREATE_ON = "pre_create_on"
-    RECORD_PRE_PROVISION = "record_pre_provision"
+    #: pre-container phase → create the bot **and provision it** → wait for
+    #: ``ACTIVE`` → post-container phase. The manifest is applied in two
+    #: halves around the container. ARCA's sequence, and teclaw's while the
+    #: platform-managed switch is off.
+    CREATE_BETWEEN_PHASES = "create_between_phases"
+    #: create the bot **record only** → the single pre-container phase writes
+    #: platform state against it → provision (which composes the first
+    #: artifact from that state) → wait for ``ACTIVE``. No post-container
+    #: phase: everything was delivered before the container existed. teclaw
+    #: with the platform-managed switch on.
+    RECORD_APPLY_PROVISION = "record_apply_provision"
 
 
 @dataclass(frozen=True)
@@ -71,18 +94,20 @@ class MaterialiserPorts:
 
     Field for field the keyword arguments that function takes; a strategy
     differs from another by which objects sit behind these names, never by
-    which materialisers exist.
+    which materialisers exist. Each field is typed by the narrow port the
+    materialiser calls through, so a device-backed service and a store-backed
+    port are interchangeable by shape.
     """
 
-    script_service: Any
-    activation_service: Any
-    mcp_auth_service: Any
-    identity_service: Any
-    upload_service: Any
-    capability_reader: Any
-    package_validator: Any
-    entry_fetcher: Any
-    resource_service: Any
+    script_service: BotStartupScriptServiceProtocol
+    activation_service: ActivationPort
+    mcp_auth_service: MCPAuthServiceProtocol
+    identity_service: ManifestIdentityPort
+    upload_service: SkillPackageUploadPort
+    capability_reader: BotCapabilityStateReaderProtocol
+    package_validator: SkillPackageValidator
+    entry_fetcher: EntryFetcher
+    resource_service: ManifestResourcePort
 
     def as_kwargs(self) -> dict[str, Any]:
         return {
@@ -99,10 +124,21 @@ class MaterialiserPorts:
 
 
 class DeliveryStrategy(Protocol):
-    """What differs between engine families, and nothing else."""
+    """What differs between engine families, and nothing else.
+
+    Implemented by ``ArcaDelivery`` and ``TeclawDelivery`` below, which
+    subclass it explicitly so the implementations are one jump away.
+    """
 
     @property
-    def family(self) -> str: ...
+    def family(self) -> str:
+        """The engine family's name: ``"arca"`` or ``"teclaw"``.
+
+        The key the factory selects a strategy by and the word a report or a
+        log uses for it. Example: ``ArcaDelivery().family == "arca"``;
+        ``DeliveryStrategyFactory.for_engine("teclaw").family == "teclaw"``.
+        """
+        ...
 
     @property
     def creation_sequence(self) -> CreationSequence: ...
@@ -146,11 +182,11 @@ def _steps(
     )
 
 
-class ArcaDelivery:
+class ArcaDelivery(DeliveryStrategy):
     """Today's behaviour, named: the phase table is ``APPLY_ORDER``'s own."""
 
     family = "arca"
-    creation_sequence = CreationSequence.PRE_CREATE_ON
+    creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
 
     def __init__(self, ports: Callable[[], MaterialiserPorts]) -> None:
         self._ports = ports
@@ -195,7 +231,7 @@ class TeclawPlatformBindings:
     redeliver: Redeliver
 
 
-class TeclawDelivery:
+class TeclawDelivery(DeliveryStrategy):
     """The artifact family.
 
     With ``platform_managed`` on, every non-script construct is
@@ -227,8 +263,8 @@ class TeclawDelivery:
     @property
     def creation_sequence(self) -> CreationSequence:
         if self._platform_managed:
-            return CreationSequence.RECORD_PRE_PROVISION
-        return CreationSequence.PRE_CREATE_ON
+            return CreationSequence.RECORD_APPLY_PROVISION
+        return CreationSequence.CREATE_BETWEEN_PHASES
 
     def phase_of(self, step: ApplyStep) -> ApplyPhase:
         if step.construct == ManifestSection.SCRIPT:

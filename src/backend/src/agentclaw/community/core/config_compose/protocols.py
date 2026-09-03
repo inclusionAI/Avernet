@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Collection, Protocol, runtime_checkable
 
+from agentclaw.community.kernel.bot_config import OwnershipCategory
 from agentclaw.community.core.config_compose.models import (
     CollectedFile,
     CollectedSkill,
@@ -33,14 +34,15 @@ class PlatformManagedCategoriesReader(Protocol):
     """Which artifact categories the platform asserts for a bot (W8).
 
     Answered from the bot's stored manifest and the platform-managed switch:
-    the categories the manifest declares, as artifact field names
-    (``identity_files``, ``resources``, ``skills``), or the empty set when the
-    switch is off or the bot has no manifest. The composer turns the answer
-    into the artifact's ``ownership`` map and into which source it reads the
-    file categories from.
+    the file categories the manifest declares (``IDENTITY_FILES``,
+    ``RESOURCES``, ``SKILLS``), or the empty set for an engine the reader does
+    not serve, when the switch is off, or when the bot has no manifest. The
+    composer turns the answer into the artifact's ``ownership`` map and into
+    which source it reads the file categories from. The engine decision is
+    the reader's: the collector asks without knowing the engine.
     """
 
-    def platform_managed(self, req: ComposeRequest) -> frozenset[str]: ...
+    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]: ...
 
 
 @runtime_checkable
@@ -48,7 +50,7 @@ class ManagedFilesReader(Protocol):
     """The platform's own copy of a teclaw bot's manifest-delivered files (W8).
 
     Store-relative refs, in the shape the collector already yields, read from
-    the managed-files index rather than from the running container. The
+    the managed-files store rather than from the running container. The
     composer consults it only for a category the platform asserts.
     """
 

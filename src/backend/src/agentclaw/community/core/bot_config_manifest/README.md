@@ -412,7 +412,7 @@ family.
 | Phases | `script` PRE_CONTAINER, the rest ON_CONTAINER — `APPLY_ORDER`'s own table | every construct PRE_CONTAINER (`script` is refused by the validator) | the rest ON_CONTAINER, as before W8 |
 | Ports | the device-backed services | the store-backed ports over `managed_files/` + record-only activation | the device-backed services |
 | Closing step | none — the owning services project as they write | one whole-artifact redeliver to the running container, none when unbound | none |
-| Creation sequence | `PRE_CREATE_ON`: phase A, create + provision, wait ACTIVE, phase B | `RECORD_PRE_PROVISION`: record, the single phase against it, provision, wait ACTIVE | `PRE_CREATE_ON` |
+| Creation sequence | `CREATE_BETWEEN_PHASES`: phase A, create + provision, wait ACTIVE, phase B | `RECORD_APPLY_PROVISION`: record, the single phase against it, provision, wait ACTIVE | `CREATE_BETWEEN_PHASES` |
 
 **The platform is the source of truth for what a manifest applies, on both
 families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
@@ -661,6 +661,7 @@ consumed_by:
 internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
+  - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
   - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8)
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)

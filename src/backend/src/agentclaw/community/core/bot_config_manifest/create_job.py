@@ -105,7 +105,7 @@ CREATE_QUEUE_DEADLINE_MARGIN_SECONDS = 5 * 60
 AUTHORIZATION_WINDOW_ELAPSED = "the authorization window elapsed"
 #: The ``Fail`` reason's prefix when the bot could not be provisioned. Shared
 #: with the poll for the same reason as the one above: under W8's
-#: ``RECORD_PRE_PROVISION`` sequence the service soft-deletes the record on an
+#: ``RECORD_APPLY_PROVISION`` sequence the service soft-deletes the record on an
 #: allocation failure, so the poll sees no bot beside a terminal job — a
 #: decline's shape — and only this prefix tells it the user did authorize.
 BOT_COULD_NOT_BE_PROVISIONED = "the bot could not be provisioned"
@@ -322,9 +322,9 @@ class BotCreateWithManifestHandler:
         self._auth_relationship_provider = auth_relationship_provider
         # W8: which order this engine's creation runs in — the delivery
         # strategy's ``creation_sequence``. Absent (the pre-W8 wiring and the
-        # suites built on it) means ``PRE_CREATE_ON``, today's order.
+        # suites built on it) means ``CREATE_BETWEEN_PHASES``, today's order.
         self._creation_sequence = creation_sequence or (
-            lambda _engine: CreationSequence.PRE_CREATE_ON
+            lambda _engine: CreationSequence.CREATE_BETWEEN_PHASES
         )
 
     @property
@@ -350,7 +350,7 @@ class BotCreateWithManifestHandler:
         bot = self._bots_provider().get_by_id_and_entity(bot_id, entity_id)
         if bot is None:
             return self._before_the_bot_exists(payload)
-        if self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION:
+        if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             return self._after_the_record_exists(payload, bot)
         return self._after_the_bot_exists(payload, bot)
 
@@ -400,7 +400,7 @@ class BotCreateWithManifestHandler:
                 return self._cleanup_did_not_land(bot_id)
             return Fail(f"authorization did not complete: {status}")
 
-        if self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION:
+        if self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION:
             # Authorized. Under this sequence the record comes first: the
             # single pre-container phase writes platform state against it,
             # and provisioning composes the first artifact from that state
@@ -413,7 +413,7 @@ class BotCreateWithManifestHandler:
             # next attempt finds the record if the first one did write it.
             # ``provision_bot`` is terminal only because the service
             # soft-deletes the record on failure, which a retry would then
-            # re-create. Same shape as the ``PRE_CREATE_ON`` call below.
+            # re-create. Same shape as the ``CREATE_BETWEEN_PHASES`` call below.
             self._create_the_bot(payload, provision=False)
             return Reschedule(POLL_DELAY_SECONDS)
 
@@ -441,7 +441,7 @@ class BotCreateWithManifestHandler:
         self._create_the_bot(payload)
         return Reschedule(POLL_DELAY_SECONDS)
 
-    # ── after there is a record (RECORD_PRE_PROVISION, W8) ───────────────────
+    # ── after there is a record (RECORD_APPLY_PROVISION, W8) ───────────────────
 
     def _after_the_record_exists(self, payload: dict, bot: dict) -> TaskOutcome:
         """The record exists; run the phase against it, then provision, then wait.
@@ -524,10 +524,10 @@ class BotCreateWithManifestHandler:
         """Remove what submission and the phase wrote; ``False`` if it did not land.
 
         The managed-files purge (``owner_id``) is asked for only under
-        ``RECORD_PRE_PROVISION``: the store is that sequence's, and a
-        ``PRE_CREATE_ON`` creation must not depend on a table it never wrote.
+        ``RECORD_APPLY_PROVISION``: the store is that sequence's, and a
+        ``CREATE_BETWEEN_PHASES`` creation must not depend on a table it never wrote.
         """
-        record_first = self._sequence(payload) is CreationSequence.RECORD_PRE_PROVISION
+        record_first = self._sequence(payload) is CreationSequence.RECORD_APPLY_PROVISION
         return self._seam_provider().discard(
             entity_id=str(payload["entity_id"]),
             bot_id=str(payload["bot_id"]),

@@ -27,17 +27,23 @@ from tests.community.core.config_compose.test_config_composer import _FakeCollec
 class _FakeManagedFiles:
     """A ``ManagedFilesReader`` + ``PlatformManagedCategoriesReader`` over dicts."""
 
-    def __init__(self, *, asserted: set[str], identity=(), resources=(), skills=(), skill_files=None) -> None:
+    def __init__(
+        self, *, asserted: set[str], identity=(), resources=(), skills=(), skill_files=None,
+        serves: str = "teclaw",
+    ) -> None:
         self.asserted = frozenset(asserted)
         self._identity = list(identity)
         self._resources = list(resources)
         self._skills = list(skills)
         self._skill_files = dict(skill_files or {})
+        self._serves = serves
         self.calls: list[str] = []
 
     def platform_managed(self, req):
+        # The engine decision is the reader's, as in the real one: it asserts
+        # nothing for an engine it does not serve.
         self.calls.append("platform_managed")
-        return self.asserted
+        return self.asserted if req.engine_type == self._serves else frozenset()
 
     def identity_files(self, req):
         return list(self._identity)
@@ -126,7 +132,10 @@ def test_teclaw_without_a_reader_answers_as_before_w8() -> None:
     assert collector.skills(req) == []
 
 
-def test_arca_never_consults_the_reader() -> None:
+def test_the_reader_decides_the_engine_so_arca_reads_no_managed_file() -> None:
+    """The collector names no engine: it asks the reader, and the reader
+    asserts nothing for a family it does not serve, so an ARCA compose
+    reads no managed file and answers exactly as before W8."""
     managed = _FakeManagedFiles(asserted={"identity_files"}, identity=[_RULES])
     identity_service = MagicMock()
     identity_service.get_bot_file_path.return_value = MagicMock(exists=lambda: False)
@@ -135,7 +144,7 @@ def test_arca_never_consults_the_reader() -> None:
     )
     assert collector.platform_managed(_req("openclaw")) == frozenset()
     assert collector.identity_files(_req("openclaw")) == []
-    assert managed.calls == []
+    assert managed.calls == ["platform_managed"], "asked once, memoised, answered nothing"
 
 
 def test_an_asserted_category_reads_the_index_and_an_unasserted_one_does_not() -> None:

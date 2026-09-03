@@ -600,7 +600,7 @@ def test_an_apply_already_in_flight_is_waited_out_not_failed():
     assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
 
 
-# ── RECORD_PRE_PROVISION: the record first, one phase, then provisioning (W8) ──
+# ── RECORD_APPLY_PROVISION: the record first, one phase, then provisioning (W8) ──
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
     CreationSequence,
@@ -669,7 +669,7 @@ def _record_first(
         bot_service_provider=lambda: service,
         auth_relationship_provider=lambda: _Relationships(),
         creation_sequence=lambda engine: (
-            CreationSequence.RECORD_PRE_PROVISION if engine == "teclaw" else CreationSequence.PRE_CREATE_ON
+            CreationSequence.RECORD_APPLY_PROVISION if engine == "teclaw" else CreationSequence.CREATE_BETWEEN_PHASES
         ),
     )
     return handler, applies, seam, bots, created, service
@@ -743,9 +743,9 @@ def test_record_first_provisioning_failure_is_terminal_and_discards():
     assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": "u_owner"}]
 
 
-def test_pre_create_on_discards_without_touching_the_store():
+def test_create_between_phases_discards_without_touching_the_store():
     handler, _applies, seam, _bots, created, _service = _record_first(passport_status="REJECTED")
-    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)  # claude_code → PRE_CREATE_ON
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)  # claude_code → CREATE_BETWEEN_PHASES
     assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": None}]
     assert not created
 
@@ -757,9 +757,9 @@ def test_record_first_a_declined_creation_purges_the_store_too():
     assert not created
 
 
-def test_pre_create_on_is_untouched_by_the_sequence_wiring():
+def test_create_between_phases_is_untouched_by_the_sequence_wiring():
     handler, applies, seam, _bots, created, service = _record_first()
-    p = dict(_PAYLOAD)  # claude_code → PRE_CREATE_ON
+    p = dict(_PAYLOAD)  # claude_code → CREATE_BETWEEN_PHASES
     handler.handle(p)
     assert seam.pre_container_calls == 1 and not created, "today's order: the phase first"
     applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
@@ -794,14 +794,14 @@ def test_record_first_a_provisioning_failure_is_terminal_even_when_the_discard_d
 def test_a_frozen_sequence_in_the_payload_wins_over_the_live_switch():
     """The sequence the creation started under is the one it finishes under."""
     handler, applies, seam, bots, created, service = _record_first()
-    # A claude_code payload would route PRE_CREATE_ON live; the frozen field says otherwise.
-    p = {**_PAYLOAD, "creation_sequence": CreationSequence.RECORD_PRE_PROVISION.value}
+    # A claude_code payload would route CREATE_BETWEEN_PHASES live; the frozen field says otherwise.
+    p = {**_PAYLOAD, "creation_sequence": CreationSequence.RECORD_APPLY_PROVISION.value}
     handler.handle(p)
     assert created and created[0][1] == {"provision": False}
     assert seam.pre_container_calls == 0
-    # And the other way round: a teclaw payload frozen as PRE_CREATE_ON runs today's order.
+    # And the other way round: a teclaw payload frozen as CREATE_BETWEEN_PHASES runs today's order.
     handler, applies, seam, bots, created, service = _record_first()
-    p = {**_TECLAW_PAYLOAD, "creation_sequence": CreationSequence.PRE_CREATE_ON.value}
+    p = {**_TECLAW_PAYLOAD, "creation_sequence": CreationSequence.CREATE_BETWEEN_PHASES.value}
     handler.handle(p)
     assert seam.pre_container_calls == 1 and not created
 
@@ -812,4 +812,4 @@ def test_the_payload_builder_freezes_the_sequence_only_when_given():
     base = dict(bot_id="b", entity_id="e", user_id="u", tenant="", env="dev", document_owner="u",
                 spec={}, iframe_url=None, redirect_url=None, window_seconds=60)
     assert "creation_sequence" not in build_create_job_payload(**base)
-    assert build_create_job_payload(**base, creation_sequence="record_pre_provision")["creation_sequence"] == "record_pre_provision"
+    assert build_create_job_payload(**base, creation_sequence="record_apply_provision")["creation_sequence"] == "record_apply_provision"

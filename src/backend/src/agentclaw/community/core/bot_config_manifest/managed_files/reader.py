@@ -41,17 +41,21 @@ from agentclaw.community.core.config_compose.models import (
     CollectedSkill,
     ComposeRequest,
 )
+from agentclaw.community.kernel.bot_config import OwnershipCategory
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-#: Manifest category → artifact field name.
-ARTIFACT_FIELD_OF: dict[ManifestCategory, str] = {
-    ManifestCategory.IDENTITY: "identity_files",
-    ManifestCategory.RESOURCES: "resources",
-    ManifestCategory.SKILLS: "skills",
-    ManifestCategory.MCP: "mcp",
+#: Manifest category → artifact category.
+ARTIFACT_FIELD_OF: dict[ManifestCategory, OwnershipCategory] = {
+    ManifestCategory.IDENTITY: OwnershipCategory.IDENTITY_FILES,
+    ManifestCategory.RESOURCES: OwnershipCategory.RESOURCES,
+    ManifestCategory.SKILLS: OwnershipCategory.SKILLS,
+    ManifestCategory.MCP: OwnershipCategory.MCP,
 }
+#: The engine family this store serves. The reader answers for it alone, so
+#: the collector never has to know which engine a compose is for.
+SERVED_ENGINE = "teclaw"
 
 
 class ManagedFilesComposeReader:
@@ -70,12 +74,16 @@ class ManagedFilesComposeReader:
 
     # ── PlatformManagedCategoriesReader ──────────────────────────────────
 
-    def platform_managed(self, req: ComposeRequest) -> frozenset[str]:
-        if not self._platform_managed():
+    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]:
+        if req.engine_type != SERVED_ENGINE or not self._platform_managed():
             return frozenset()
         parsed = self._parsed(req)
         if parsed is None:
             return frozenset()
+        # MCP is not a *file* category and is not decided here: on teclaw the
+        # artifact has carried the whole MCP set since W12, so the composer
+        # marks it the platform's unconditionally. This answer is about the
+        # three categories whose bytes the platform may or may not hold.
         return frozenset(
             field
             for category, field in ARTIFACT_FIELD_OF.items()
@@ -169,4 +177,4 @@ def _scope(req: ComposeRequest) -> ManagedFileScope:
     )
 
 
-__all__ = ["ARTIFACT_FIELD_OF", "ManagedFilesComposeReader"]
+__all__ = ["ARTIFACT_FIELD_OF", "SERVED_ENGINE", "ManagedFilesComposeReader"]

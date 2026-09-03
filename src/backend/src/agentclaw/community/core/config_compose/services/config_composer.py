@@ -27,9 +27,9 @@ from agentclaw.community.core.config_compose.protocols import (
 )
 from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
 from agentclaw.community.kernel.bot_config import (
-    OWNERSHIP_CATEGORIES,
     OWNERSHIP_ENGINE,
     OWNERSHIP_PLATFORM,
+    OwnershipCategory,
     SCHEMA_VERSION,
     BotConfigArtifact,
     FileRef,
@@ -49,8 +49,8 @@ __all__ = ["ConfigComposer"]
 #: (``OWNERSHIP_CATEGORIES``) but not written: nothing composes it yet, and an
 #: absent category keeps the engine's pre-W8 behaviour (A5) — for ``cli_tools``
 #: that is its own contract's removal rule, which the map must not restate.
-_OWNERSHIP_WRITTEN: tuple[str, ...] = tuple(
-    c for c in OWNERSHIP_CATEGORIES if c != "cli_tools"
+_OWNERSHIP_WRITTEN: tuple[OwnershipCategory, ...] = tuple(
+    c for c in OwnershipCategory if c is not OwnershipCategory.CLI_TOOLS
 )
 
 
@@ -203,13 +203,13 @@ class ConfigComposer:
         """
         if req.engine_type != "teclaw":
             return None
-        asserted: frozenset[str] = frozenset()
+        asserted: frozenset[OwnershipCategory] = frozenset()
         if isinstance(self._collector, PlatformManagedCategoriesReader):
             asserted = frozenset(self._collector.platform_managed(req))
         return {
-            category: (
+            category.value: (
                 OWNERSHIP_PLATFORM
-                if category == "mcp" or category in asserted
+                if category is OwnershipCategory.MCP or category in asserted
                 else OWNERSHIP_ENGINE
             )
             for category in _OWNERSHIP_WRITTEN

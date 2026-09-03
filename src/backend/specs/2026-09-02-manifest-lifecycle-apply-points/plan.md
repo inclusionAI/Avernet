@@ -66,8 +66,8 @@ class DeliveryStrategy(Protocol):
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> None: ...
 ```
 
-`CreationSequence` is an enum with two members: `PRE_CREATE_ON` (ARCA and
-teclaw-off) and `RECORD_PRE_PROVISION` (teclaw-on). The job and the poll branch
+`CreationSequence` is an enum with two members: `CREATE_BETWEEN_PHASES` (ARCA and
+teclaw-off) and `RECORD_APPLY_PROVISION` (teclaw-on). The job and the poll branch
 on it; nothing else does.
 
 `DeliveryStrategyFactory.for_bot(bot | engine_type)` picks by `is_teclaw` and
@@ -152,14 +152,14 @@ runs step 2 and the tail for a record created that way. The default path
 calls both back to back and is byte-for-byte today's behaviour.
 
 `complete_manifest_creation` gains `provision: bool`; the job passes
-`False` when the strategy's sequence is `RECORD_PRE_PROVISION`, then, once the
+`False` when the strategy's sequence is `RECORD_APPLY_PROVISION`, then, once the
 `create:pre_container` record is terminal, calls `bot_service.provision_bot`.
 The job's steps stay questions about durable state: "record exists but no
 binding and no terminal pre-container record → start the phase"; "record
 exists, phase terminal, no binding → provision"; "binding present → wait for
 ACTIVE → Complete". Phase B is never started under this sequence.
 
-The poll's `_creation_state` takes the sequence: under `RECORD_PRE_PROVISION`,
+The poll's `_creation_state` takes the sequence: under `RECORD_APPLY_PROVISION`,
 `READY` is bot `ACTIVE` with the pre-container record `SUCCEEDED`,
 `APPLY_FAILED` with it `PARTIAL` / `FAILED`, `APPLYING` while it is `RUNNING`,
 `CREATING` between phase and `ACTIVE`.
@@ -262,7 +262,7 @@ constructs — `write_through_script`, `script_body`, the splice helper).
   binding; none without; none with the switch off; a failing redeliver is a
   report note.
 - **Creation** — `create_bot(provision=False)` + `provision_bot()` equals
-  `create_bot()`; the job under `RECORD_PRE_PROVISION`: record, phase, provision
+  `create_bot()`; the job under `RECORD_APPLY_PROVISION`: record, phase, provision
   only after terminal, no phase B, re-entrant at every step; the provisioner
   hands an artifact with refs and the map; the poll's states under both
   sequences; ARCA job tests unedited.

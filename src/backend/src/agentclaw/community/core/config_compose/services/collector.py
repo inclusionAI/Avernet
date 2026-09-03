@@ -57,6 +57,7 @@ from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bolt_base_dir,
 )
+from agentclaw.community.kernel.bot_config import OwnershipCategory
 from agentclaw.community.log import get_logger
 
 
@@ -169,24 +170,28 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         self._managed_files = managed_files_reader
 
     # ── platform-managed categories (W8) ────────────────────────────────
-    def platform_managed(self, req: ComposeRequest) -> frozenset[str]:
+    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]:
         """The artifact categories the platform asserts for this bot.
 
-        Artifact field names (``identity_files`` / ``resources`` / ``skills``),
-        read once per compose from the managed-files reader; empty for ARCA,
-        for a bot without a manifest, and while the platform-managed switch is
-        off. The composer turns it into the artifact's ``ownership`` map; the
-        three file-category branches below read the store for a category in
-        it and answer as before for one that is not.
+        Read once per compose from the managed-files reader, which decides
+        for its own engine family; empty when no reader is bound (the
+        bare/unit collector), for an engine the reader does not serve, for a
+        bot without a manifest, and while the platform-managed switch is off.
+        The composer turns it into the artifact's ``ownership`` map; the three
+        file-category branches below read the store for a category in it and
+        answer as before for one that is not. The collector itself never
+        names an engine.
         """
-        if req.engine_type != "teclaw" or self._managed_files is None:
+        if self._managed_files is None:
             return frozenset()
         reader = self._managed_files
         return req.memoized(
             "platform_managed", lambda: frozenset(reader.platform_managed(req))
         )
 
-    def _managed(self, req: ComposeRequest, category: str) -> ManagedFilesReader | None:
+    def _managed(
+        self, req: ComposeRequest, category: OwnershipCategory
+    ) -> ManagedFilesReader | None:
         """The reader, when ``category`` is the platform's for this bot."""
         if category in self.platform_managed(req):
             return self._managed_files
@@ -262,7 +267,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                 )
             # local:// (user upload) intentionally skipped — engine-owned; see
             # docstring — unless the platform holds the package (W8, below).
-        managed = self._managed(req, "skills")
+        managed = self._managed(req, OwnershipCategory.SKILLS)
         if managed is not None:
             # The platform's copies of the bot's local packages: a ``SkillRef``
             # per package the store holds *and* the bot has active. The store
@@ -648,11 +653,11 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         engine owns must not carry files the engine would then ignore.
         Nothing when the platform asserts neither, as before W8.
         """
-        managed = self._managed(req, "resources")
+        managed = self._managed(req, OwnershipCategory.RESOURCES)
         if managed is None:
             return []
         collected: list[CollectedFile] = list(managed.resources(req))
-        managed_skills = self._managed(req, "skills")
+        managed_skills = self._managed(req, OwnershipCategory.SKILLS)
         if managed_skills is not None:
             active = req.memoized("active_skill_rows", lambda: self._active_skill_rows(req))
             names = self._active_local_names(active)
@@ -686,7 +691,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # the engine at promotion, like resources.
         if req.engine_type == "teclaw":
             # W8: the platform's copies when it asserts the category.
-            managed = self._managed(req, "identity_files")
+            managed = self._managed(req, OwnershipCategory.IDENTITY_FILES)
             return list(managed.identity_files(req)) if managed is not None else []
 
         from agentclaw.community.core.services.identity import VALID_IDENTITY_FILES

@@ -1372,7 +1372,7 @@ async def get_bot_startup_script(
     )
     return envelope(
         _startup_script_payload(
-            bot_id, record, state, reason, declared=declared, declared_by=declared_by
+            bot_id, record, state, reason, manifest_body=declared, manifest_record=declared_by
         ),
         request,
     )
@@ -1449,7 +1449,7 @@ async def update_bot_startup_script(
         bot_id, entity_id, owner_id, bot_service, startup_script_service
     )
     return envelope(
-        _startup_script_payload(bot_id, record, SUPPORTED, "", declared=body.script),
+        _startup_script_payload(bot_id, record, SUPPORTED, "", manifest_body=body.script),
         request,
     )
 

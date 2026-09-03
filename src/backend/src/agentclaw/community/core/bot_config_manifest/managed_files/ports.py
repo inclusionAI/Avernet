@@ -52,6 +52,14 @@ from agentclaw.community.core.skill_center.skill_package import (
 
 
 class _StorePort:
+    """Every method below has the signature of the port protocol it fills
+    (``ManifestIdentityPort``, ``ManifestResourcePort``, the skills upload
+    road) — the device-backed services' own signatures, which the
+    materialisers call by keyword. The parameters a store-backed port does
+    not need (``owner_id``, ``engine_type``, ``stage``, ``operator_id``) are
+    therefore accepted and left unused rather than dropped: dropping one
+    would break the call, and the shape is the seam (spec D-7)."""
+
     def __init__(self, store: ManagedFilesStore) -> None:
         self._store = store
 
@@ -113,7 +121,7 @@ class StoreIdentityPort(_StorePort):
             # the store that is a delete, so the composer never references an
             # empty object.
             await asyncio.to_thread(
-                self._store.delete, scope, category=CATEGORY_IDENTITY, rel_path=rel_path
+                self._store.delete, scope, rel_path=rel_path
             )
             return {"file_type": file_type, "removed": True}
         file = await asyncio.to_thread(
@@ -176,7 +184,7 @@ class StoreResourcePort(_StorePort):
             if row.rel_path == rel or row.rel_path.startswith(rel + "/"):
                 # Listed, so it was there; the delete raises if it did not land.
                 await asyncio.to_thread(
-                    self._store.delete, scope, category=CATEGORY_RESOURCES, rel_path=row.rel_path
+                    self._store.delete, scope, rel_path=row.rel_path
                 )
                 removed = True
         return removed
@@ -256,7 +264,7 @@ class StoreSkillPackagePort(_StorePort):
         # member between the two, and a replaced file was overwritten in place.
         for row in self._store.list(scope, category=CATEGORY_SKILLS):
             if _under(row.rel_path, prefix) and row.rel_path not in wanted:
-                self._store.delete(scope, category=CATEGORY_SKILLS, rel_path=row.rel_path)
+                self._store.delete(scope, rel_path=row.rel_path)
 
         locator = f"local://{SKILLS_LOCAL_DIR}/{name}"
         existing = _own_row(

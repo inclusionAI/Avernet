@@ -20,7 +20,6 @@ from agentclaw.community.core.bot_config_manifest.apply.context import ApplyCont
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ApplyPhase,
     ApplyStep,
-    steps_for,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     NO_MATERIALISER_REASON,
@@ -95,14 +94,15 @@ class ApplyOrchestrator:
         self,
         materialisers: Mapping[ApplyConstruct, Materialiser],
         *,
-        steps: Callable[[frozenset[ApplyPhase] | None], tuple[ApplyStep, ...]] | None = None,
+        steps: Callable[[frozenset[ApplyPhase] | None], tuple[ApplyStep, ...]],
     ) -> None:
         self._materialisers = dict(materialisers)
         # Which construct belongs to which phase is the engine family's to say
-        # (``apply/delivery.py``, W8): the strategy hands its ``steps_for`` in.
-        # The default is the order table's own reading — ARCA's — so a caller
-        # that predates the seam is unchanged.
-        self._steps = steps or steps_for
+        # (``apply/delivery.py``, W8): every caller hands the strategy's
+        # ``steps_for`` in — there is no default, so the phase table in use is
+        # always visible at the call site. The order table's own reading,
+        # ``apply.order.steps_for``, is ARCA's.
+        self._steps = steps
 
     async def apply(
         self,

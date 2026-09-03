@@ -41,8 +41,8 @@ Conventions every task assumes:
   - [x] Protocol per plan K-1; `ArcaDelivery` reproduces `APPLY_ORDER`'s phases
         and `steps_for`; `TeclawDelivery(platform_managed=True)` maps every
         non-script step to `PRE_CONTAINER`, `(False)` to `ON_CONTAINER`.
-  - [x] `CreationSequence.PRE_CREATE_ON` for ARCA and teclaw-off,
-        `RECORD_PRE_PROVISION` for teclaw-on.
+  - [x] `CreationSequence.CREATE_BETWEEN_PHASES` for ARCA and teclaw-off,
+        `RECORD_APPLY_PROVISION` for teclaw-on.
   - [x] `BotConfigManifestConfig.teclaw_platform_managed: bool = False` read
         from `user_config.bot_config_manifest`; the factory takes it and
         `is_teclaw`.
@@ -240,11 +240,11 @@ Conventions every task assumes:
   `…/test_creation_ordering_teclaw.py` (new; the ARCA ordering suite is unedited)
 - **Done when:**
   - [x] The handler asks the strategy for the sequence. Under
-        `RECORD_PRE_PROVISION`: authorized → `complete(provision=False)`;
+        `RECORD_APPLY_PROVISION`: authorized → `complete(provision=False)`;
         record without binding and no terminal pre-container record → start
         the phase; record terminal and no binding → `provision_bot`; binding
         present → wait `ACTIVE` → `Complete`. Never starts phase B.
-  - [x] Under `PRE_CREATE_ON` the handler is today's, and its tests are
+  - [x] Under `CREATE_BETWEEN_PHASES` the handler is today's, and its tests are
         unedited.
   - [x] Ordering tests: provision only after the phase is terminal; a second
         invocation at every step is a no-op; a failed phase still provisions
@@ -262,7 +262,7 @@ Conventions every task assumes:
   - [x] `_TECLAW_REFUSAL`, the engine violation and `is_teclaw` are gone from
         the preflight and the seam; `script` on teclaw is still
         `unsupported_script`.
-  - [x] `_creation_state` takes the sequence; under `RECORD_PRE_PROVISION` the
+  - [x] `_creation_state` takes the sequence; under `RECORD_APPLY_PROVISION` the
         pre-container record is the terminal one (`READY` / `APPLY_FAILED` /
         `APPLYING`), with `CREATING` between the phase and `ACTIVE`.
   - [x] Endpoint: `202` on teclaw; the poll walks

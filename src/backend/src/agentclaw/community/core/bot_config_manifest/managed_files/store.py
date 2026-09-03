@@ -61,6 +61,13 @@ SKILLS_LOCAL_DIR = "skills-local"
 #: record's ``{entity_type}_{entity_id}`` the promotion step uses; the two
 #: never share a key (``_manifest`` versus a publish stage).
 OWNER_ENTITY_TYPE = "staff"
+#: The engine segment of the key layout. Managed files mirror the *promotion*
+#: layout, ``{bot_id}_{stage}/teclaw/{ns}/{rel}``, because that is the prefix
+#: the teclaw engine already pulls a bot's files from (contract R-O3); the
+#: store is used by the teclaw delivery strategy alone — ARCA writes into a
+#: live container and holds no platform copy — so the segment is fixed here
+#: rather than parameterised.
+ENGINE_LAYOUT_SEGMENT = "teclaw"
 #: The categories.
 CATEGORY_IDENTITY = "identity"
 CATEGORY_RESOURCES = "resources"
@@ -87,18 +94,37 @@ class ManagedFileScope:
 
     @property
     def rel_root(self) -> str:
-        return f"{self.entity_type}_{self.entity_id}/{self.bot_id}_manifest/teclaw"
+        """The bot's prefix under the store base; every ref path starts with it."""
+        return f"{self.entity_type}_{self.entity_id}/{self.bot_id}_manifest/{ENGINE_LAYOUT_SEGMENT}"
 
 
 @dataclass(frozen=True)
 class ManagedFile:
     """One delivered file as the composer will reference it.
 
+    Three paths, each one segment longer than the last, for the identity file
+    ``RULES.md`` of bot ``bot7`` owned by ``u1`` under the base
+    ``teclaw/dev/bolt_data``:
+
+    - ``rel_path`` — engine-relative: ``identity/RULES.md``. The layout's
+      ``{ns}/{rel}``; what the category and name are read from, and what a
+      port addresses a file by.
+    - ``ref_path`` — store-relative: ``staff_u1/bot7_manifest/teclaw/identity/RULES.md``.
+      ``scope.rel_root + "/" + rel_path``; what goes into the artifact as
+      ``FileRef.path``, resolved by the engine against the ``bot-data``
+      store's base.
+    - ``store_key`` — absolute in the object store:
+      ``teclaw/dev/bolt_data/staff_u1/bot7_manifest/teclaw/identity/RULES.md``.
+      ``base + "/" + ref_path``; what the store reads and writes.
+
     ``digest`` and ``size_bytes`` are known when the bytes were in hand — a
     ``put`` or a ``get`` — and ``None`` from a listing, which reads keys only.
     """
 
+    #: ``identity`` / ``resources`` / ``skills``, read off ``rel_path``.
     category: str
+    #: The identity file type, the resource's declared path, or the skill
+    #: package's name — what the file is called within its category.
     name: str
     rel_path: str
     ref_path: str
@@ -190,7 +216,7 @@ class ManagedFilesStore:
             size_bytes=len(content),
         )
 
-    def delete(self, scope: ManagedFileScope, *, category: str, rel_path: str) -> None:
+    def delete(self, scope: ManagedFileScope, *, rel_path: str) -> None:
         """Remove one file; a file that is not there is already removed.
 
         No existence check first: the plugin's ``delete_object`` is idempotent
@@ -284,6 +310,7 @@ __all__ = [
     "CATEGORY_IDENTITY",
     "CATEGORY_RESOURCES",
     "CATEGORY_SKILLS",
+    "ENGINE_LAYOUT_SEGMENT",
     "IDENTITY_NS",
     "ManagedFile",
     "ManagedFileScope",

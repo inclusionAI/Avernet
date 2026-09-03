@@ -302,7 +302,7 @@ async def get_bot_create_with_manifest_status(
     sequence = (
         apply_service.delivery_for_bot(bot).creation_sequence
         if bot is not None
-        else CreationSequence.PRE_CREATE_ON
+        else CreationSequence.CREATE_BETWEEN_PHASES
     )
     status = _creation_state(
         bot=bot,
@@ -342,13 +342,13 @@ def _creation_state(
     bot: Optional[dict],
     report: Optional[ApplyReport],
     job: Callable[[], Optional[TaskRecord]],
-    sequence: CreationSequence = CreationSequence.PRE_CREATE_ON,
+    sequence: CreationSequence = CreationSequence.CREATE_BETWEEN_PHASES,
 ) -> Optional[tuple[CreationState, Optional[TaskRecord]]]:
     """Map durable rows to a state. ``None`` means there is nothing here (404).
 
     ``sequence`` (W8) names which of the creation's own records is the terminal
-    one: the post-container phase's under ``PRE_CREATE_ON``, the single
-    pre-container phase's under ``RECORD_PRE_PROVISION`` — where that phase
+    one: the post-container phase's under ``CREATE_BETWEEN_PHASES``, the single
+    pre-container phase's under ``RECORD_APPLY_PROVISION`` — where that phase
     runs against the record and *before* the container, so its terminal
     record with a bot that is not yet running reads as `CREATING`, not as an
     outcome.
@@ -369,20 +369,20 @@ def _creation_state(
         return (_bot_less_terminal(record), record)
 
     # The bot exists, and the sequence's terminal phase is the only record that
-    # answers how far the creation got. Under ``PRE_CREATE_ON`` phase A's is
+    # answers how far the creation got. Under ``CREATE_BETWEEN_PHASES`` phase A's is
     # written *before* the bot, and a later `explicit` apply belongs to a bot
     # that is already configured — both read the same as no record here.
     if report is not None and report.trigger == _terminal_trigger(sequence):
         if report.status is ApplyStatus.RUNNING:
             return (CreationState.APPLYING, None)
-        if sequence is CreationSequence.PRE_CREATE_ON or _bot_is_running(bot):
-            # Under ``PRE_CREATE_ON`` this record exists only once the bot is
-            # up; under ``RECORD_PRE_PROVISION`` it is the outcome once the
+        if sequence is CreationSequence.CREATE_BETWEEN_PHASES or _bot_is_running(bot):
+            # Under ``CREATE_BETWEEN_PHASES`` this record exists only once the bot is
+            # up; under ``RECORD_APPLY_PROVISION`` it is the outcome once the
             # bot is up. PARTIAL and FAILED alike: part of the manifest is not.
             if report.status is ApplyStatus.SUCCEEDED:
                 return (CreationState.READY, None)
             return (CreationState.APPLY_FAILED, None)
-        # ``RECORD_PRE_PROVISION``, the phase finished, the container not up:
+        # ``RECORD_APPLY_PROVISION``, the phase finished, the container not up:
         # still being provisioned from what the phase wrote, or never coming.
         # The job's row below tells the two apart, exactly as it does for a
         # bot with no record of its own.
@@ -428,7 +428,7 @@ def _creation_state(
 
 def _terminal_trigger(sequence: CreationSequence) -> str:
     """The creation's own terminal record, per sequence (W8)."""
-    if sequence is CreationSequence.RECORD_PRE_PROVISION:
+    if sequence is CreationSequence.RECORD_APPLY_PROVISION:
         return CREATE_PRE_CONTAINER_TRIGGER
     return CREATE_ON_CONTAINER_TRIGGER
 
@@ -448,7 +448,7 @@ def _bot_less_terminal(record) -> CreationState:
     if last_error == AUTHORIZATION_WINDOW_ELAPSED:
         return CreationState.AUTHORIZATION_EXPIRED
     if last_error.startswith(BOT_COULD_NOT_BE_PROVISIONED):
-        # W8: under ``RECORD_PRE_PROVISION`` a provisioning failure soft-deletes
+        # W8: under ``RECORD_APPLY_PROVISION`` a provisioning failure soft-deletes
         # the record the job had written, so the poll sees no bot beside a
         # terminal job — the shape of a decline, which it is not: the user
         # authorized, and the platform could not provision.
@@ -479,7 +479,7 @@ def _bot_is_shown(state: CreationState) -> bool:
 def _report_is_shown(
     state: CreationState,
     report,
-    sequence: CreationSequence = CreationSequence.PRE_CREATE_ON,
+    sequence: CreationSequence = CreationSequence.CREATE_BETWEEN_PHASES,
 ) -> bool:
     """Only the creation's own report, and only where it means something.
 

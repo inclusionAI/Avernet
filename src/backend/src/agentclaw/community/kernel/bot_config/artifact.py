@@ -34,6 +34,8 @@ Module rules (kernel is the lowest layer):
 """
 from __future__ import annotations
 
+from enum import StrEnum
+
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -62,14 +64,21 @@ SCHEMA_VERSION = 4
 # The two values ``BotConfigArtifact.ownership`` admits (W8). Spelled once.
 OWNERSHIP_PLATFORM = "platform"
 OWNERSHIP_ENGINE = "engine"
-#: The category names the map may carry — the artifact's own field names.
-OWNERSHIP_CATEGORIES: tuple[str, ...] = (
-    "mcp",
-    "skills",
-    "resources",
-    "identity_files",
-    "cli_tools",
-)
+
+
+class OwnershipCategory(StrEnum):
+    """The categories the ``ownership`` map may name — the artifact's own
+    field names, so a map key and the list it governs are spelled once."""
+
+    MCP = "mcp"
+    SKILLS = "skills"
+    RESOURCES = "resources"
+    IDENTITY_FILES = "identity_files"
+    CLI_TOOLS = "cli_tools"
+
+
+#: The category names the map may carry, as plain strings, in the enum's order.
+OWNERSHIP_CATEGORIES: tuple[str, ...] = tuple(c.value for c in OwnershipCategory)
 
 
 @dataclass(frozen=True)

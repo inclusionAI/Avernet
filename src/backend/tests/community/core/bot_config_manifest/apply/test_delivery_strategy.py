@@ -47,7 +47,7 @@ def test_arca_phases_are_the_order_tables_own() -> None:
     assert arca.steps_for(frozenset({ApplyPhase.PRE_CONTAINER})) == steps_for(
         frozenset({ApplyPhase.PRE_CONTAINER})
     )
-    assert arca.creation_sequence is CreationSequence.PRE_CREATE_ON
+    assert arca.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert arca.needs_container()
 
 
@@ -70,7 +70,7 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
     assert teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER})) == ()
     # Position order survives the re-phasing.
     assert [s.position for s in pre] == sorted(s.position for s in pre)
-    assert teclaw.creation_sequence is CreationSequence.RECORD_PRE_PROVISION
+    assert teclaw.creation_sequence is CreationSequence.RECORD_APPLY_PROVISION
     assert not teclaw.needs_container()
     assert teclaw.ports() == _ports("store")
 
@@ -88,7 +88,7 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
     assert [s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
         ManifestSection.SCRIPT
     ]
-    assert teclaw.creation_sequence is CreationSequence.PRE_CREATE_ON
+    assert teclaw.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert teclaw.needs_container()
     assert teclaw.ports() == _ports("device")
 

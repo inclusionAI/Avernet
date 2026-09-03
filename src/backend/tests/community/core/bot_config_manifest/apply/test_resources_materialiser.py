@@ -26,6 +26,7 @@ from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources 
     _DECLARED_TREE,
     ResourcesMaterialiser,
 )
+from agentclaw.community.core.bot_config_manifest.apply.order import steps_for
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
     ApplyOrchestrator,
 )
@@ -879,7 +880,8 @@ def _resources_engine(svc, fetcher):
             package_validator=real_validator(),
             entry_fetcher=fetcher,
             resource_service=svc,
-        )
+        ),
+        steps=steps_for
     )
 
 

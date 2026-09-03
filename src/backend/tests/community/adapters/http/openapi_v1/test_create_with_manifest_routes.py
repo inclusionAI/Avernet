@@ -456,13 +456,13 @@ def _annotations(fn) -> set[str]:
     }
 
 
-# ── RECORD_PRE_PROVISION: the pre-container record is the terminal one (W8) ──
+# ── RECORD_APPLY_PROVISION: the pre-container record is the terminal one (W8) ──
 
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
     CreationSequence,
 )
 
-_RECORD_FIRST = CreationSequence.RECORD_PRE_PROVISION
+_RECORD_FIRST = CreationSequence.RECORD_APPLY_PROVISION
 
 
 def _record_first_state(*, bot, report=None, job=None):
@@ -507,7 +507,7 @@ def test_record_first_a_bot_that_never_came_up_is_create_failed():
     assert state is CreationState.CREATE_FAILED
 
 
-def test_record_first_shows_the_pre_container_report_and_pre_create_on_does_not():
+def test_record_first_shows_the_pre_container_report_and_create_between_phases_does_not():
     report = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
     assert create_with_manifest._report_is_shown(CreationState.READY, report, _RECORD_FIRST)
     assert not create_with_manifest._report_is_shown(CreationState.READY, report)
@@ -516,7 +516,7 @@ def test_record_first_shows_the_pre_container_report_and_pre_create_on_does_not(
     )
 
 
-def test_pre_create_on_still_ignores_the_pre_container_record():
+def test_create_between_phases_still_ignores_the_pre_container_record():
     """Under today's sequence phase A's record is written before the bot and
     never the outcome — a bot with only that record and a live job is CREATING."""
     (state, _), _ = _state(
@@ -540,7 +540,7 @@ def test_record_first_a_retired_job_with_the_container_never_up_is_create_failed
 
 
 def test_a_provisioning_failure_that_soft_deleted_the_record_is_create_failed():
-    """W8: under RECORD_PRE_PROVISION the service soft-deletes the record on an
+    """W8: under RECORD_APPLY_PROVISION the service soft-deletes the record on an
     allocation failure, so the poll sees no bot beside a terminal job — the
     shape of a decline, which it is not."""
     (state, _), _ = _state(job=_Job(TaskStatus.FAILED, f"{BOT_COULD_NOT_BE_PROVISIONED}: no capacity"))

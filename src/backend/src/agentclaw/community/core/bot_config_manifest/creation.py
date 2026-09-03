@@ -281,12 +281,12 @@ class BotCreationManifestSeam:
     ) -> Optional[str]:
         """Apply the pre-container phase. Returns its ``apply_id``.
 
-        **Runs before the bot record exists** under the ``PRE_CREATE_ON``
+        **Runs before the bot record exists** under the ``CREATE_BETWEEN_PHASES``
         sequence, which is what makes the ordering guarantee structural rather
         than a hook in the right place: the startup-script row is keyed by
         ``(entity_id, bot_id)`` and needs no record, so the row is written
         before anything composes a start command. Under
-        ``RECORD_PRE_PROVISION`` (W8) the record exists first and is handed in
+        ``RECORD_APPLY_PROVISION`` (W8) the record exists first and is handed in
         as ``bot``, so the materialisers that read the record (the skills
         area's flush) see the real row rather than the stand-in.
 
@@ -378,7 +378,7 @@ class BotCreationManifestSeam:
         """Remove what submission and the pre-container phase wrote.
 
         With ``owner_id`` (W8) the managed-files store is purged as well: under
-        the ``RECORD_PRE_PROVISION`` sequence the pre-container phase writes
+        the ``RECORD_APPLY_PROVISION`` sequence the pre-container phase writes
         platform files for a bot that, if creation then ends without one, has
         no record for ordinary deletion to reach.
 
