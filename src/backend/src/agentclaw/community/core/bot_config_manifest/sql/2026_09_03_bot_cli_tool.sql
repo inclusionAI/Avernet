@@ -69,10 +69,13 @@ CREATE TABLE `ac_bot_cli_tool` (
   -- the sibling manifest_content/manifest_apply indexes lead with it for the
   -- same reason.
   --
-  -- entity_id is deliberately NOT in the index, unlike those siblings: theirs
-  -- is varchar(256), this one matches ac_bots at varchar(1024), and 1024
-  -- utf8mb4 characters is 4096 bytes on its own — past InnoDB's 3072-byte
-  -- index-key cap. It stays a residual filter over the handful of rows one
-  -- (tenant, env, bot_id) already selects.
+  -- entity_id is deliberately NOT in the index, unlike those siblings (theirs
+  -- is varchar(256); this one matches ac_bots at varchar(1024)). Not because
+  -- it could not be indexed — a prefix such as entity_id(191) is legal, and
+  -- prepare_for_mysql() applies exactly that rewrite automatically to
+  -- over-long ORM indexes — but because it adds no selectivity: (tenant, env,
+  -- bot_id) already narrows to the handful of tools one bot has, and entity_id
+  -- is functionally determined by bot_id within a tenant. It stays a residual
+  -- filter, and the index stays narrow.
   KEY `idx_tenant_env_bot` (`avernet_tenant`, `env`, `bot_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot CLI 工具';

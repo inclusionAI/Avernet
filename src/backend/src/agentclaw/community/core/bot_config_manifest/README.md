@@ -540,6 +540,9 @@ below.
 ```yaml
 purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf, and (W11) the platform's own durable copy of what was fetched, with its provenance log.
 provides:
+  - BotCliToolModel  # W9: the platform's record of a bot's installed CLI tools
+  - BotCliToolRecord
+  - INSTALLED_BY_MANIFEST  # the installed_by value a manifest apply writes
   - BotConfigManifestApplyService
   - BotConfigManifestApplyServiceProtocol
   - BotConfigManifestApplyRecord
@@ -630,8 +633,6 @@ provides:
   - ManifestContentService
   - ManifestContentServiceProtocol
   - ManifestContentRepositoryProtocol
-  - BotCliToolModel
-  - BotCliToolRecord
   - ManifestContentModel
   - StoredContentRecord
   - ContentScope

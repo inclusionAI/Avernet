@@ -275,18 +275,44 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
                 self._Tool.entity_id == entity_id,
                 self._Tool.bot_id == bot_id,
             )
-            # Read the keys as a column query, then delete in one statement.
-            # Selecting whole entities and calling ``db.delete(row)`` per row
-            # would be an N+1 *and* unsafe: the SELECT takes no locks, so a
-            # concurrent delete between it and the flush leaves the unit of
-            # work issuing a DELETE that matches zero rows, which SQLAlchemy
-            # raises on. A bulk delete is immune and reports what it removed.
-            keys = [key for (key,) in db.query(self._Tool.oss_key).filter(*scope)]
-            removed = db.query(self._Tool).filter(*scope).delete(
-                synchronize_session=False
+            # Enumerate ids *and* keys, then delete exactly those ids.
+            #
+            # Deleting by the same predicate the enumeration used would be a
+            # bug under REPEATABLE READ (OceanBase/MySQL's default, and nothing
+            # here overrides it): the SELECT establishes a read view while the
+            # DELETE is a current read, so a row committed by a concurrent
+            # install between them is deleted without ever appearing in
+            # ``keys`` — its ``oss_key`` lived only on that row, so the object
+            # is orphaned with nothing able to enumerate it. That is precisely
+            # the failure returning keys exists to prevent.
+            #
+            # Deleting by primary key makes the two statements describe the
+            # same rows by construction: the delete can only remove what was
+            # enumerated, whatever commits alongside it.
+            rows = db.query(self._Tool.id, self._Tool.oss_key).filter(*scope).all()
+            keys = [key for (_, key) in rows]
+            removed = 0
+            if rows:
+                removed = (
+                    db.query(self._Tool)
+                    .filter(self._Tool.id.in_([row_id for (row_id, _) in rows]))
+                    .delete(synchronize_session=False)
+                )
+        if removed != len(keys):
+            # Only reachable when another writer deleted some of the enumerated
+            # rows first. Harmless for cleanup — those keys are still safe to
+            # remove — but it is the one signal that two writers raced on a
+            # bot's tools, so it is findable rather than buried at INFO.
+            logger.warning(
+                "[cli_tool.delete_all] enumerated %s row(s) but deleted %s; "
+                "a concurrent writer removed some first: env=%s, bot_id=%s",
+                len(keys),
+                removed,
+                env,
+                bot_id,
             )
         logger.info(
-            "[cli_tool.delete_all] env=%s, bot_id=%s, keys=%s, deleted=%s",
+            "[cli_tool.delete_all] env=%s, bot_id=%s, enumerated=%s, deleted=%s",
             env,
             bot_id,
             len(keys),

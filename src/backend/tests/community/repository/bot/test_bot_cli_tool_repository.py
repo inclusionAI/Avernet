@@ -8,14 +8,14 @@ from contextlib import contextmanager
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import DateTime, bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 # Imported for side effect: registers BotCliToolModel on Base.metadata so
 # create_all() builds the ac_bot_cli_tool table.
-from agentclaw.community.core.bot_config_manifest.cli_tools.models import (  # noqa: F401
+from agentclaw.community.core.bot_config_manifest.cli_tools import (  # noqa: F401
     INSTALLED_BY_MANIFEST,
     BotCliToolModel,
 )
@@ -165,14 +165,20 @@ def test_upsert_touches_gmt_modified_even_when_nothing_changed(repo, db_engine):
     no sleep, and it stays correct if the column ever gains sub-second
     precision.
     """
-    _install(repo)
+    first = _install(repo)
     stale = datetime(2020, 1, 1, 0, 0, 0)
     with db_engine.begin() as conn:
         conn.execute(
-            text("UPDATE ac_bot_cli_tool SET gmt_modified = :t"), {"t": stale}
+            text(
+                "UPDATE ac_bot_cli_tool SET gmt_modified = :t WHERE name = :n"
+            ).bindparams(bindparam("t", type_=DateTime), bindparam("n")),
+            {"t": stale, "n": "mycli"},
         )
     again = _install(repo)  # byte-identical values
+    # Later than the back-dated value *and* than the original write: a stamp of
+    # any fixed post-2020 constant would satisfy only the first.
     assert again.gmt_modified > stale
+    assert again.gmt_modified >= first.gmt_create
 
 
 def test_two_bots_may_share_a_tool_name(repo):
@@ -221,10 +227,13 @@ def test_delete_all_returns_the_oss_keys_it_removed(repo):
     _install(repo, name="b")
     _install(repo, name="a", bot_id="other")  # another bot's object must survive
     keys = repo.delete_all(env="dev", entity_id="ent", bot_id="bot")
-    assert sorted(keys) == ["tools/bot/a", "tools/bot/b"]
-    # Never another bot's key: the store scopes every key to one bot, which is
-    # what makes the returned keys safe for a caller to delete.
+    # Membership, not exact equality: an exact assertion would already fail for
+    # any change that leaked the other bot's key, leaving the check below dead.
+    assert "tools/bot/a" in keys and "tools/bot/b" in keys
     assert "tools/other/a" not in keys
+    assert len(keys) == 2
+    # And the other bot's row is untouched, so its object is still referenced.
+    assert len(repo.list(env="dev", entity_id="ent", bot_id="other")) == 1
     assert repo.list(env="dev", entity_id="ent", bot_id="bot") == []
 
 
@@ -254,7 +263,17 @@ def test_get_is_scoped_by_env_and_entity(repo):
 def test_delete_is_scoped_by_env_and_entity(repo):
     _install(repo)
     assert repo.delete(env="prod", entity_id="ent", bot_id="bot", name="mycli") is False
+    assert repo.delete(env="dev", entity_id="other", bot_id="bot", name="mycli") is False
     assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli") is not None
+
+
+def test_delete_all_is_scoped_by_env_and_entity(repo):
+    """A destructive bulk operation: its env scoping is what stops a prod
+    cleanup wiping a dev bot's rows."""
+    _install(repo)
+    assert repo.delete_all(env="prod", entity_id="ent", bot_id="bot") == []
+    assert repo.delete_all(env="dev", entity_id="other", bot_id="bot") == []
+    assert len(repo.list(env="dev", entity_id="ent", bot_id="bot")) == 1
 
 
 # --- the upsert retry -------------------------------------------------------
@@ -312,6 +331,24 @@ def test_tools_are_invisible_across_tenants(repo):
         assert repo.list(env="dev", entity_id="ent", bot_id="bot") == []
     with avernet_tenant_scope("tenant-a"):
         assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+
+
+def test_two_tenants_may_install_the_same_tool_on_colliding_bot_ids(repo):
+    """The one case the tenant-omitting surrogate could fail on: identical
+    (env, entity_id, bot_id, name) in two tenants hashes to the *same*
+    ``tool_key``, so both rows can only coexist because the UNIQUE key is
+    (avernet_tenant, tool_key). Narrow that key and tenant-b's install would
+    either overwrite tenant-a's row or surface a duplicate-key error."""
+    with avernet_tenant_scope("tenant-a"):
+        _install(repo, name="mycli", digest="sha256:a")
+    with avernet_tenant_scope("tenant-b"):
+        _install(repo, name="mycli", digest="sha256:b")
+    with avernet_tenant_scope("tenant-a"):
+        got = repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+        assert got.digest == "sha256:a"
+    with avernet_tenant_scope("tenant-b"):
+        got = repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+        assert got.digest == "sha256:b"
 
 
 def test_one_tenant_cannot_delete_anothers_tool(repo):

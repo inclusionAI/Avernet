@@ -84,7 +84,13 @@ class BotCliToolRepositoryProtocol(Protocol):
 
     @abstractmethod
     def delete(self, *, env: str, entity_id: str, bot_id: str, name: str) -> bool:
-        """Hard-delete one row. Idempotent — returns ``False`` when absent."""
+        """Hard-delete one row. Idempotent — returns ``False`` when absent.
+
+        A caller that also removes the object this row pointed at must first
+        satisfy the same invariant :meth:`delete_all` documents: **no object is
+        referenced by more than one row**. This method does not check it, and
+        the row is gone by the time it returns.
+        """
         ...
 
     @abstractmethod
@@ -100,11 +106,14 @@ class BotCliToolRepositoryProtocol(Protocol):
         deleted first and asked afterwards could never enumerate what it had
         just orphaned.
 
-        **The keys are safe to delete only because the store scopes every key
-        to one bot.** Nothing in this table enforces that — ``oss_key`` carries
-        no uniqueness constraint — so an implementation that reused one object
-        across bots would have this method hand a caller the key of another
-        bot's live tool. The store's per-bot prefix is what makes the contract
-        true; a change to it is a change to this contract.
+        **The keys are safe to delete only while no object is referenced by
+        more than one row.** Nothing in this table enforces that — ``oss_key``
+        carries no uniqueness constraint — and a per-bot prefix alone is not
+        enough: a content-addressed layout like ``tools/{bot}/{sha256}`` keeps
+        bots apart yet gives *one* bot's two commands the same key whenever the
+        same archive is installed under two names, which the model explicitly
+        allows (two rows may share a ``digest``). The store's one-object-per-row
+        layout is what makes this contract true; a change to it is a change to
+        this contract.
         """
         ...

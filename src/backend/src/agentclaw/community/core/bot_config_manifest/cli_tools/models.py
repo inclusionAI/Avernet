@@ -130,7 +130,7 @@ class BotCliToolModel(Base):
     # would fail the whole upsert on a long principal *after* the bytes are in
     # OSS and the tool is already installed, leaving no row for a live tool.
     installed_by = Column(
-        String(1024), nullable=False, comment="'manifest' 或安装它的用户 ID"
+        String(1024), nullable=False, comment="安装者：manifest 或用户 ID"
     )
     modifier = Column(String(1024), nullable=False, comment="审计：最后写入者")
 
