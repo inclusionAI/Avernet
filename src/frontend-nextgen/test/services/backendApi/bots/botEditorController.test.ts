@@ -6,6 +6,7 @@ const ok = () =>
     ok: true,
     headers: new Headers({ 'content-type': 'application/json' }),
     json: async () => ({ code: 200000, data: null }),
+    blob: async () => new Blob(),
   } as Response);
 describe('botEditorController', () => {
   afterEach(() => {
@@ -22,6 +23,12 @@ describe('botEditorController', () => {
       'resources',
       () => botEditorController.listResources('bot-1', 'docs'),
       '/openapi/v1/bots/bot-1/resources?path=docs&page=1&page_size=100',
+      'GET',
+    ],
+    [
+      'resource directory download',
+      () => botEditorController.downloadResourceDirectory('bot-1', 'docs/spec'),
+      '/openapi/v1/bots/bot-1/resources/download-dir?path=docs%2Fspec',
       'GET',
     ],
     [
@@ -82,8 +89,8 @@ describe('botEditorController', () => {
     ],
     [
       'Skill workshop',
-      () => botEditorController.listSpaceSkills('12'),
-      '/openapi/v1/bots/spaces/12/skills?page_no=1&page_size=100',
+      () => botEditorController.listConsumableSpaceSkills('12'),
+      '/openapi/v1/bots/spaces/12/skills/consumable?page=1&page_size=100',
       'GET',
     ],
     [

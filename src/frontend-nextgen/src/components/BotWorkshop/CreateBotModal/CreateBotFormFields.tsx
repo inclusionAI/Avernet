@@ -5,7 +5,7 @@ import { Switch } from '@/components/ui/Switch';
 import { Textarea } from '@/components/ui/Textarea';
 import { useBotEngineOptions } from '@/hooks/useBotEngineOptions';
 import type { BotCreateInput, BotCreateSpace } from '@/services/botWorkshop';
-import type { AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
+import { supportsServiceBot, type AgentCodingTemplate } from '@/services/botWorkshop/agentCodingTemplateService';
 import { Sparkles } from 'lucide-react';
 import type React from 'react';
 import { AgentCodingSection } from './agentCoding/AgentCodingSection';
@@ -46,7 +46,10 @@ export function CreateBotFormFields({
   const engineOptions = useBotEngineOptions();
   const isLocal = values.scenario === 'local';
   const isAgentCoding = values.engine === 'aicoding';
-  const serviceDisabled = isLocal || values.engine === 'hermes' || isAgentCoding;
+  const isApplicationCoding = values.agentCoding?.kind === 'applicationCoding';
+  const templateSupportsService = supportsServiceBot(values.agentCoding?.template as AgentCodingTemplate | undefined);
+  const agentCodingServiceDisabled = isApplicationCoding || !templateSupportsService;
+  const serviceDisabled = isLocal || values.engine === 'hermes' || (isAgentCoding && agentCodingServiceDisabled);
   const nameHasInvalidCharacter = values.name.includes('@');
 
   return (
@@ -148,7 +151,14 @@ export function CreateBotFormFields({
               disabled={creating}
               onChange={(agentCoding) => {
                 onAgentCodingErrorChange(undefined);
-                setValues((current) => ({ ...current, agentCoding }));
+                setValues((current) => ({
+                  ...current,
+                  agentCoding,
+                  serviceMode:
+                    agentCoding?.kind === 'template' && supportsServiceBot(agentCoding.template as AgentCodingTemplate)
+                      ? current.serviceMode
+                      : 'non-service',
+                }));
               }}
               onValidationChange={onAgentCodingErrorChange}
               onRetry={onRetryAgentCodingTemplates}
@@ -170,8 +180,10 @@ export function CreateBotFormFields({
             <span className="mt-1 block text-[10px] text-muted-foreground">
               {isLocal
                 ? '本地 Bot 暂不支持'
-                : values.engine === 'hermes' || isAgentCoding
-                ? `${values.engine === 'hermes' ? 'Hermes' : 'AgentCoding'} 暂不支持`
+                : values.engine === 'hermes'
+                ? 'Hermes 暂不支持'
+                : isApplicationCoding || (isAgentCoding && !templateSupportsService)
+                ? '当前模板未开启服务 Bot 能力'
                 : '开启后不可变更'}
             </span>
           </span>

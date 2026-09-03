@@ -136,12 +136,15 @@ export const defaultCapabilities: AppCapabilities = {
   getInternalNavigationItems: () => ({ status: 'available', value: [] }),
   // Open Core 默认不收录内部 route meta（/capability-workshop/*、/market/* 已从 routeMetaList 剥离）。
   getInternalRouteMetas: () => ({ status: 'available', value: [] }),
-  // Open Core 引擎可选清单：不暴露 Claude Code 原生创建入口；仅保留开源后端可运行的
-  // OpenClaw。Claude Code 的 AgentCoding 创建入口仅由 internal overlay 注入。引擎领域映射规则
-  // 属后端契约事实，保留在领域层全量，不随本清单收窄。
+  // Open Core 引擎可选清单：OpenClaw + 原生 Claude Code 直建入口（阿里云部署依赖原生 claude_code
+  // 引擎展示与创建，不可删除）。AgentCoding（管理 CC 模板创建）仍仅由 internal overlay 注入。
+  // 引擎领域映射规则属后端契约事实，保留在领域层全量，不随本清单收窄。
   getBotEngineOptions: (): CapabilityResult<BotEngineOption[]> => ({
     status: 'available',
-    value: [{ value: 'openclaw', label: 'OpenClaw' }],
+    value: [
+      { value: 'openclaw', label: 'OpenClaw' },
+      { value: 'claude_code', label: 'Claudecode引擎-原生' },
+    ],
   }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({

@@ -25,7 +25,7 @@ afterEach(() => {
   extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
 });
 
-test('创建云端 Bot（Open Core 形态）仅提供 OpenClaw，不展示 Claude Code 原生入口', async () => {
+test('创建云端 Bot（Open Core 形态）提供 OpenClaw + Claudecode引擎-原生，不展示 AgentCoding 等内部引擎', async () => {
   render(
     <CreateBotModal
       scenario="cloud"
@@ -39,7 +39,7 @@ test('创建云端 Bot（Open Core 形态）仅提供 OpenClaw，不展示 Claud
   fireEvent.click(screen.getByRole('combobox', { name: '引擎类型' }));
 
   expect(screen.getByRole('option', { name: 'OpenClaw' })).toBeTruthy();
-  expect(screen.queryByRole('option', { name: 'Claudecode引擎-原生' })).toBeNull();
+  expect(screen.getByRole('option', { name: 'Claudecode引擎-原生' })).toBeTruthy();
   expect(screen.queryByRole('option', { name: 'AgentCoding' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'Hermes' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'TEClaw' })).toBeNull();
@@ -71,7 +71,7 @@ test('internal overlay 引擎清单下，选择 AIcoding 后关闭服务化并�
   fireEvent.click(screen.getByRole('option', { name: 'AgentCoding' }));
 
   expect(screen.getByRole('switch', { name: '是否提供服务' })).toHaveProperty('disabled', true);
-  expect(screen.getByText('AgentCoding 暂不支持')).toBeTruthy();
+  expect(screen.getByText('当前模板未开启服务 Bot 能力')).toBeTruthy();
 });
 
 test('归属空间固定为当前空间且不提供空间选择器', () => {

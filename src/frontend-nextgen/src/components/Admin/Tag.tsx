@@ -21,7 +21,7 @@ export function Tag({ tone, className, ...props }: TagProps) {
   return (
     <span
       className={cn(
-        'inline-flex h-5 items-center gap-1 rounded-sm px-2 text-[10px] font-medium leading-5',
+        'inline-flex h-5 items-center gap-1 rounded-sm px-2 text-[12px] font-medium leading-5',
         tone ? TONES[tone] : 'bg-muted text-muted-foreground',
         className,
       )}

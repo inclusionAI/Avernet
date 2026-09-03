@@ -4,6 +4,7 @@ import WorkflowDagView from '@/components/BotWorkshop/TaskEscortFlowConfig/Workf
 import { TaskEscortStatCard } from '@/components/BotWorkshop/TaskEscortStatCard';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import { isLiveRunStatus } from '@/hooks/useTaskEscort';
@@ -74,7 +75,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
       setRunNodes([]);
       setWorkflowSpec(null);
       setDetailError(null);
-setActiveTab('nodes');
+      setActiveTab('nodes');
       setIsLoadingDetail(true);
       try {
         const [detail, spec] = await Promise.all([
@@ -163,17 +164,10 @@ setActiveTab('nodes');
             {flowRuns.map((run) => (
               <div key={run.flow_id}>
                 {/* Run row - clickable */}
-                <div
-                  className="cursor-pointer px-3 py-2 transition-colors hover:bg-[var(--color-panel-muted)]"
+                <Button
+                  variant="ghost"
+                  className="h-auto w-full justify-start rounded-none border-0 px-3 py-2 text-left font-normal hover:bg-[var(--color-panel-muted)]"
                   onClick={() => handleRunClick(run.flow_id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      handleRunClick(run.flow_id);
-                    }
-                  }}
                 >
                   <div className="flex items-center gap-2">
                     {expandedRunId === run.flow_id ? (
@@ -185,9 +179,9 @@ setActiveTab('nodes');
                       <div className="flex items-center gap-2">
                         <span className="truncate font-mono text-xs font-medium">{run.flow_id}</span>
                         {run.trigger && (
-                          <span className="shrink-0 rounded bg-[var(--color-panel-muted)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]">
+                          <Badge tone="neutral" className="shrink-0 rounded px-1.5 py-0.5 text-[10px]">
                             {TRIGGER_LABEL[run.trigger] || run.trigger}
-                          </span>
+                          </Badge>
                         )}
                       </div>
                       <div className="mt-0.5 flex items-center gap-2 text-[10px] text-[var(--color-muted)]">
@@ -206,7 +200,7 @@ setActiveTab('nodes');
                       {run.error_message}
                     </div>
                   )}
-                </div>
+                </Button>
 
                 {/* Expanded detail */}
                 {expandedRunId === run.flow_id && (
@@ -243,9 +237,9 @@ setActiveTab('nodes');
                     {activeTab === 'nodes' && !isLoadingDetail && !detailError && runNodes.length > 0 && (
                       <div className="space-y-1">
                         {runNodes.map((node) => (
-                          <div
+                          <Card
                             key={node.node_id}
-                            className="flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-panel)] px-2 py-1.5"
+                            className="flex items-center gap-2 rounded-md bg-[var(--color-panel)] px-2 py-1.5 shadow-none"
                           >
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-xs font-medium">{node.node_title || node.node_id}</div>
@@ -258,7 +252,7 @@ setActiveTab('nodes');
                             <Badge tone={STATUS_TONE[node.status] || 'neutral'}>
                               {STATUS_LABEL[node.status] || node.status}
                             </Badge>
-                          </div>
+                          </Card>
                         ))}
                       </div>
                     )}

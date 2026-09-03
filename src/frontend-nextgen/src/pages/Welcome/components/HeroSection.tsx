@@ -1,7 +1,32 @@
 import { getCapabilities } from '@/capabilities';
-import { Button } from '@/components/ui';
-import { ChevronRight, Github } from 'lucide-react';
+import { Badge, Button } from '@/components/ui';
+import { ChevronRight, Github, Network } from 'lucide-react';
 import { GITHUB_REPO_URL } from '../constants';
+
+/**
+ * Signature 视觉:「星群网络」——离散节点经细线互联,即异构 Agent 组网的产品隐喻。
+ * 纯装饰 SVG,aria-hidden,品牌蓝低透明度,不做循环动画。
+ */
+function ConstellationIllustration({ className }: { className?: string }) {
+  const links = 'M14 92 L60 34 L132 58 M60 34 L104 14 M104 14 L132 58 L196 40 M132 58 L168 104 L232 76 M168 104 L120 138';
+  return (
+    <svg
+      viewBox="0 0 240 160"
+      fill="none"
+      aria-hidden
+      className={className}
+    >
+      <path d={links} stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+      {/* 节点:普通成员 + 大一号的"发现中的"主节点(空心圈) */}
+      {[
+        [14, 92], [60, 34], [104, 14], [132, 58], [196, 40], [168, 104], [120, 138], [232, 76],
+      ].map(([cx, cy]) => (
+        <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="3" fill="currentColor" />
+      ))}
+      <circle cx="132" cy="58" r="9" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
 
 interface HeroSectionProps {
   /** CTA「进入产品」回调(页面层 push /workspace,登录态交给既有登录链路)。 */
@@ -16,8 +41,23 @@ interface HeroSectionProps {
 export function HeroSection({ onEnter }: HeroSectionProps) {
   const brand = getCapabilities().getProductBrand().value;
   return (
-    <section className="rounded-[28px] border border-border bg-card px-8 py-12 text-center shadow-sm">
-      <div className="mx-auto max-w-[920px]">
+    <section className="relative overflow-hidden rounded-[28px] border border-border bg-card px-8 py-12 text-center shadow-sm">
+      {/* 装饰层:品牌蓝光晕 + 星群网络(小屏隐藏,视觉焦点让给 CTA) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -left-24 -top-24 size-72 rounded-full bg-primary/10 blur-3xl"
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-32 -right-20 size-80 rounded-full bg-primary/5 blur-3xl"
+      />
+      <ConstellationIllustration className="pointer-events-none absolute -right-8 -top-6 hidden w-60 text-primary/25 sm:block" />
+      <ConstellationIllustration className="pointer-events-none absolute -bottom-8 -left-6 hidden w-44 text-primary/15 sm:block" />
+      <div className="relative z-10 mx-auto max-w-[920px]">
+        <Badge tone="primary" className="mb-5 px-3 py-1 text-xs">
+          <Network className="mr-1 size-3.5" aria-hidden />
+          多智能体协作网络
+        </Badge>
         <h1 className="text-5xl font-semibold leading-[1.1] text-foreground">{brand.name}</h1>
         <p className="mt-4 text-3xl font-semibold leading-snug text-foreground">让智能体在此协同、执行、进化。</p>
         <p className="mt-5 text-base leading-8 text-muted-foreground">

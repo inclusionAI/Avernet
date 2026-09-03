@@ -6,7 +6,7 @@ import type {
   BotEngineConfig,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
-import { botEditorController } from '@/services/backendApi/bots/botEditorController';
+import { botEditorController, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
 import {
   dataOr,
@@ -17,6 +17,20 @@ import {
   mapSkill,
   toRoutineWrite,
 } from './botEditorMappers';
+
+async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkillDto[]> {
+  const pageSize = 100;
+  const items: SpaceSkillDto[] = [];
+  for (let page = 1; ; page += 1) {
+    const response = await botEditorController.listConsumableSpaceSkills(spaceId, page, pageSize);
+    const pageItems = response.data?.items ?? [];
+    items.push(...pageItems);
+    const total = response.data?.total;
+    if (!pageItems.length || pageItems.length < pageSize || (total !== undefined && items.length >= total)) break;
+  }
+  return items;
+}
+
 export const botEditorService = {
   async registerRenderScreenLibraries(botId: string) {
     if (!botId) return 0;
@@ -107,11 +121,12 @@ export const botEditorService = {
     };
   },
   async loadCapabilityCandidates(botId: string, spaceId?: string) {
-    const [boundMcps, mcpServers, repositorySkills, spaceSkills] = await Promise.all([
+    const [boundMcps, mcpServers, repositorySkills, skillCenterSkills, spaceSkills] = await Promise.all([
       botEditorController.listBotMcps(botId),
       botEditorController.listMcpServers(),
       botEditorController.listRepositorySkills(),
-      spaceId ? botEditorController.listSpaceSkills(spaceId) : Promise.resolve({ data: { total: 0, items: [] } }),
+      botEditorController.listSkillCenterSkills(),
+      spaceId ? listAllConsumableSpaceSkills(spaceId) : Promise.resolve([]),
     ]);
     return {
       availableMcps: dataOr(mcpServers.data?.items, []).map(
@@ -128,15 +143,30 @@ export const botEditorService = {
           name: item.name,
           description: item.description,
           version: item.latest_published_version ?? item.version,
-          source: 'market',
+          source: 'teamclaw-market',
           active: false,
         }),
       ),
-      workshopSkills: dataOr(spaceSkills.data?.items, []).map(
+      skillCenterSkills: dataOr(skillCenterSkills.data?.items, []).flatMap((item): BotEditorSkill[] => {
+        if (!item.skillCode) return [];
+        return [
+          {
+            id: item.skillCode,
+            name: item.skillName || item.skillCode,
+            description: item.description,
+            version: item.latestVersionNumber === undefined ? undefined : String(item.latestVersionNumber),
+            homepageUrl: item.homepageUrl,
+            source: 'skillcenter-market',
+            active: false,
+          },
+        ];
+      }),
+      workshopSkills: spaceSkills.map(
         (item): BotEditorSkill => ({
           id: item.skill_id,
           name: item.name,
           description: item.description,
+          version: item.latest_published_version?.version ? `V${item.latest_published_version.version}` : undefined,
           source: 'workshop',
           active: false,
         }),
@@ -163,6 +193,26 @@ export const botEditorService = {
     botEditorController.setSkillSetActive(botId, set.id, active),
   setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
     botEditorController.setSkillSetSkill(botId, setId, skillId, active),
+  async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[]) {
+    const created = await botEditorController.createSkillCenterReferences(
+      botId,
+      setId,
+      [...new Set(skillCodes)].slice(0, 20),
+    );
+    const requestId = created.data?.request_id;
+    if (!requestId) throw new Error('SkillCenter 引用已提交，但响应缺少轮询标识');
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+      const result = await botEditorController.listSkillCenterReferences(botId, setId, requestId);
+      const items = result.data?.items ?? [];
+      const failed = items.find((item) => item.status === 'FAILED');
+      if (failed) throw new Error(failed.error_message || 'SkillCenter Skill 添加失败');
+      if (items.length > 0 && items.every((item) => item.status === 'COMPLETED')) return;
+      await new Promise((resolve) => {
+        setTimeout(resolve, 2_000);
+      });
+    }
+    throw new Error('SkillCenter Skill 仍在添加中，请稍后刷新查看');
+  },
   async setSkillSetMcp(botId: string, setId: string, serverCode: string, active: boolean) {
     if (active) {
       const permission = await botEditorController.getMcpPermission(serverCode);
@@ -187,6 +237,8 @@ export const botEditorService = {
     return (await botEditorController.previewResource(botId, path)).data?.content ?? '';
   },
   downloadResource: (botId: string, path: string) => botEditorController.downloadResource(botId, path),
+  downloadResourceDirectory: (botId: string, path: string) =>
+    botEditorController.downloadResourceDirectory(botId, path),
   createScreen: (botId: string, input: BotRenderScreenInput) =>
     botEditorController.createRenderScreen(botId, { name: input.name, cdn_url: input.cdnUrl }),
   updateScreen: (botId: string, id: number, input: BotRenderScreenInput) =>

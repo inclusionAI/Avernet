@@ -11,10 +11,26 @@ import { TruncatedText } from './TruncatedText';
 import type { TaskNodeView } from './types';
 // 复用主屏对话同款 MarkdownRenderer（@tc-chat/ui）：统一适配 markdown / 代码块 / JSON / 列表等格式，
 // 不再把 ```json 等内容当纯文本原样输出。
+import { getCapabilities } from '@/capabilities';
 import { MarkdownRenderer } from '@tc-chat/ui/es/MarkdownRender';
 import styled from 'styled-components';
 import { renderableSource, unwrapHttpEnvelope } from './outputEnvelope';
 import { truncateText } from './text';
+
+/** 解析当前登录用户的纯工号(供协作群视角匹配群成员归属)。
+ * panel params 未下发 userId(后端 opening_message 不带),回退能力层 getHumanIdentity 取人类身份工号;
+ * 与群成员 actor_id 末段(:工号)比对,定位本人创建的 bot 以作 view_bot_id。
+ * 资产目录禁止反向 import stores/domain,故统一只经 @/capabilities 取人类身份。 */
+function resolveCurrentUserId(preferred?: string): string {
+  const explicit = (preferred ?? '').trim();
+  if (explicit && explicit.toLowerCase() !== 'me') return explicit;
+  const human = getCapabilities().getHumanIdentity();
+  if (human.status === 'available' && human.value) {
+    const uid = (human.value.userId ?? '').trim();
+    if (uid) return uid;
+  }
+  return '';
+}
 
 function isMockId(id: string): boolean {
   return id.startsWith('mock_');
@@ -455,8 +471,9 @@ export const GroupSessionView: React.FC<{
 }> = ({ node, bcsBaseUrl, apiBaseUrl, userId, onBack }) => {
   const groupId = node.groupId;
   const sessionId = node.sessionId;
-  // 根节点可能只有 run_mode=coop_group + sessionId，没有回填 groupId；仍按协作群会话读取消息。
-  const isGroup = node.runMode === 'coop_group' || Boolean(groupId);
+  // 下钻通道按物理 session 形态判定:协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId。
+  // run_mode 可能被 actual_run_mode(权限绕过真实模式)覆盖,不能再据 run_mode 选消息端点。
+  const isGroup = node.runMode === 'coop_group' || Boolean(groupId) || (sessionId?.startsWith('bcs_grp_') ?? false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [group, setGroup] = useState<GroupData | null>(null);
@@ -504,15 +521,20 @@ export const GroupSessionView: React.FC<{
       try {
         const g = await memberPromise;
         if (cancelled) return;
-        const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], userId) : null;
-        // 根节点没有 group detail 时，graph owner assignee 可作为协作群消息视角 bot。
-        const viewBotId = isGroup ? ownedViewBot?.actor_id ?? assignee ?? '' : '';
+        const effectiveUserId = resolveCurrentUserId(userId);
+        // 协作群:以群成员中归属本人(bot owner 工号 === 当前登录人)的 bot 作 view_bot_id;无则无查询权限。
+        //   view_bot_id 不能用 group_id 或 assignee(group_id 形态)冒充,群消息端点会 40300 拒绝。
+        const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], effectiveUserId) : null;
+        // 有群详情(真实群成员)且无归属本人 bot → 无查询权限;无 group_id(根节点仅 sessionId,无群成员)
+        // 时回退节点 assignee 作为视角 bot(节点 bot 多为本人 master/driver),避免群消息端点 40300。
+        const viewBotId = isGroup ? ownedViewBot?.actor_id ?? (groupId ? '' : assignee ?? '') : '';
         // 单聊会话归属人(session_id 里的 :user:xxx,即 bot owner);与当前登录人不符 → 跨用户,无权查看。
         const singleSessionUser = !isGroup ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
-        const crossUserSingle = !isGroup && singleSessionUser !== '' && Boolean(userId) && singleSessionUser !== userId;
+        const crossUserSingle =
+          !isGroup && singleSessionUser !== '' && Boolean(effectiveUserId) && singleSessionUser !== effectiveUserId;
         const canViewMessages = isGroup ? Boolean(viewBotId) : !crossUserSingle;
         const msgs = canViewMessages
-          ? await fetchSessionMessages(sessionId, isGroup, assignee, userId, viewBotId || undefined)
+          ? await fetchSessionMessages(sessionId, isGroup, assignee, effectiveUserId, viewBotId || undefined)
           : [];
         if (cancelled) return;
         setGroup(g);

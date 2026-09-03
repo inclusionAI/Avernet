@@ -30,14 +30,14 @@ export function buildVisibleResourceTree(resources: BotEditorResource[], expande
   resources.forEach((item) => children.set(item.parentPath, [...(children.get(item.parentPath) ?? []), item]));
   const result: Array<{ item: BotEditorResource; depth: number }> = [];
   const visited = new Set<string>();
-  const append = (parentPath: string, depth: number) => {
+  function append(parentPath: string, depth: number) {
     (children.get(parentPath) ?? []).forEach((item) => {
       if (visited.has(item.path)) return;
       visited.add(item.path);
       result.push({ item, depth });
       if (item.type === 'folder' && expanded.includes(item.path)) append(item.path, depth + 1);
     });
-  };
+  }
   append('', 0);
   return result;
 }
@@ -59,7 +59,7 @@ export function ResourcePanel({
   onDelete: (path: string) => Promise<void>;
   onUpload: (path: string, file: File) => Promise<void>;
   onPreview: (path: string) => Promise<string>;
-  onDownload: (path: string) => Promise<void>;
+  onDownload: (path: string, type: BotEditorResource['type']) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
 }) {
@@ -82,7 +82,7 @@ export function ResourcePanel({
             </p>
           </div>
           <div className="flex max-w-full shrink-0 flex-wrap justify-end gap-2">
-            <input
+            <Input
               ref={uploadRef}
               hidden
               type="file"
@@ -163,15 +163,13 @@ export function ResourcePanel({
                       {item.type === 'file' && item.size !== undefined ? ` · ${formatBytes(item.size)}` : ''}
                     </div>
                   </div>
-                  {item.type === 'file' ? (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`下载${item.name}`}
-                      leftIcon={<Download className="size-4" />}
-                      onClick={() => void onDownload(item.path)}
-                    />
-                  ) : null}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`下载${item.type === 'folder' ? '文件夹' : '文件'}${item.name}`}
+                    leftIcon={<Download className="size-4" />}
+                    onClick={() => void onDownload(item.path, item.type)}
+                  />
                   {item.type === 'file' ? (
                     <Button
                       variant="ghost"
@@ -204,7 +202,7 @@ export function ResourcePanel({
             <Empty compact title="工作区为空" description="当前目录没有文件或文件夹。" />
           )}
           {preview ? (
-            <div className="mt-4 rounded-lg border border-border bg-muted/30 p-4">
+            <Card className="mt-4 bg-muted/30 p-4 shadow-none">
               <div className="mb-2 flex items-center justify-between">
                 <p className="m-0 truncate text-xs font-medium">{preview.path}</p>
                 <Button variant="ghost" size="sm" onClick={() => setPreview(undefined)}>
@@ -212,7 +210,7 @@ export function ResourcePanel({
                 </Button>
               </div>
               <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{preview.content}</pre>
-            </div>
+            </Card>
           ) : null}
         </CardContent>
       </Card>

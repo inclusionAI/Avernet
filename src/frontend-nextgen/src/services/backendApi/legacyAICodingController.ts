@@ -26,7 +26,7 @@ interface AntCodeRaw {
   name?: string;
   name_with_namespace?: string;
   path_with_namespace?: string;
-  description?: string;
+  description?: string | null;
   access_level?: number | string;
 }
 interface AntCodeResponse {
@@ -59,7 +59,7 @@ export async function searchAntCodeProjects(query: string, signal?: AbortSignal)
     .map((item) => ({
       name: item.name!,
       web_url: `${resources.antCodeProjectBaseUrl}/${item.path_with_namespace}`,
-      description: item.description,
+      description: item.description ?? undefined,
       accessLevel: typeof item.access_level === 'number' ? item.access_level : Number(item.access_level),
     }));
 }

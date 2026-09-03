@@ -214,15 +214,17 @@ const BotWorkshopDetailPage: React.FC = () => {
           ) : tab === 'capability' ? (
             <CapabilityPanel
               skillSets={editor.skillSets}
-              mySkills={editor.skills}
+              mySkills={editor.skills.filter((skill) => skill.source === 'local')}
               availableMcps={editor.availableMcps}
               marketSkills={editor.marketSkills}
+              skillCenterSkills={editor.skillCenterSkills}
               workshopSkills={editor.workshopSkills}
               editable={editable}
               onCreate={editor.createSkillSet}
               onDelete={editor.deleteSkillSet}
               onActive={editor.setSkillSetActive}
               onSkill={editor.setSkillSetSkill}
+              onSkillCenterReferences={editor.addSkillCenterReferences}
               onUploadSkillFolder={editor.uploadSkillFolder}
               onLoadCandidates={editor.loadCapabilityCandidates}
               onMcp={editor.setSkillSetMcp}

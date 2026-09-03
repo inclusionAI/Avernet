@@ -41,6 +41,54 @@ describe('botMapper', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  test('Coding Bot 卡片画像保留模板名称', () => {
+    const result = mapBotDto({
+      bot_id: 'architect-1',
+      engine_type: 'claude_code',
+      template_type: 'generalCC',
+      engine_properties: {
+        template_config: {
+          template_name: '架构 Bot',
+          bot_template_config: { template_name: '架构 Bot' },
+        },
+      },
+    });
+
+    expect(result.item.runtime.templateName).toBe('架构 Bot');
+  });
+
+  test('应用 Coding Bot 缺少接口模板名称时使用固定模板名称', () => {
+    const result = mapBotDto({
+      bot_id: 'application-1',
+      engine_type: 'claude_code',
+      template_type: 'applicationCoding',
+    });
+
+    expect(result.item.runtime.templateName).toBe('应用 Bot');
+  });
+
+  test('历史个人 Coding Bot 缺少接口模板名称时使用固定模板名称', () => {
+    const result = mapBotDto({
+      bot_id: 'personal-coding-1',
+      engine_type: 'claude_code',
+      template_type: 'personalCoding',
+    });
+
+    expect(result.item.runtime.templateName).toBe('个人 Coding Bot');
+  });
+
+  test('普通 Claude Code 不把模板名称作为卡片模板标签', () => {
+    const result = mapBotDto({
+      bot_id: 'normal-1',
+      engine_type: 'claude_code',
+      template_type: 'normalCC',
+      template_name: '普通 CC',
+    });
+
+    expect(result.item.runtime.isAgentCodingBot).toBe(false);
+    expect(result.item.runtime.templateName).toBe('普通 CC');
+  });
+
   test('未知引擎进入安全只读画像并返回 warning', () => {
     const result = mapBotDto({ bot_id: 'b-2', active_engine: 'future_engine' });
 
@@ -62,6 +110,42 @@ describe('botMapper', () => {
     expect(result.item.runtime.visibleInOpenCore).toBe(true);
     expect(result.item.runtime.capabilityProfile.canEdit).toBe(true);
     expect(result.item.runtime.capabilityProfile.canPublish).toBe(false);
+  });
+
+  test.each([
+    ['应用 Coding Bot 不允许服务化', { template_type: 'applicationCoding', engine: 'claude_code' }, false],
+    [
+      '模板能力开启时允许服务化',
+      {
+        template_type: 'generalCC',
+        engine: 'claude_code',
+        engine_properties: { template_config: { capabilities: { upgrade_service_bot: true } } },
+      },
+      true,
+    ],
+    [
+      '历史个人 Coding Bot 未声明能力时兼容允许服务化',
+      { template_type: 'personalCoding', engine: 'claude_code' },
+      true,
+    ],
+    [
+      '其他 Coding 模板未声明能力时不允许服务化',
+      { template_type: 'generalCC', engine: 'claude_code', bot_type: 'personal' },
+      false,
+    ],
+    [
+      '模板明确关闭能力时不允许服务化',
+      {
+        template_type: 'generalCC',
+        engine: 'claude_code',
+        engine_properties: { template_config: { capabilities: { upgrade_service_bot: false } } },
+      },
+      false,
+    ],
+  ])('%s', (_label, dto, expected) => {
+    const result = mapBotDto({ bot_id: 'coding-service-capability', bot_type: 'personal', ...dto });
+
+    expect(result.item.canUpgradeToService).toBe(expected);
   });
 
   test('支持从嵌套 space 对象读取 space_id', () => {
@@ -87,6 +171,31 @@ describe('botMapper', () => {
     });
 
     expect(result.items.map((item) => item.entityKey)).toEqual(['a:personal:same', 'b:service:same']);
+  });
+
+  test('映射服务 Bot 卡片版本与后端唯一 card_id', () => {
+    const result = mapBotDto({
+      bot_id: 'service-1',
+      card_id: 'service-1:publication:22',
+      kind: 'service',
+      publication_version: 2,
+      live_version: 1,
+    });
+
+    expect(result.item).toEqual(
+      expect.objectContaining({
+        cardId: 'service-1:publication:22',
+        entityKey: 'service-1:publication:22',
+        publicationVersion: 2,
+        liveVersion: 1,
+      }),
+    );
+  });
+
+  test('FAILED 库存状态映射为创建失败而不是未知', () => {
+    const result = mapBotDto({ bot_id: 'failed-1', display_state: 'failed', status: 'FAILED' });
+
+    expect(result.item.lifecycle).toBe('failed');
   });
 
   test('库存 kind=service 时识别为服务化，不受底层 bot_type 影响', () => {
@@ -172,5 +281,8 @@ describe('Agent Coding Bot runtime classification', () => {
     expect(
       mapBotDto({ bot_id: 'normal', engine: 'claude_code', template_type: 'normalCC' }).item.runtime.isAgentCodingBot,
     ).toBe(false);
+    expect(
+      mapBotDto({ bot_id: 'general', engine: 'claude_code', template_type: 'generalCC' }).item.runtime.isAgentCodingBot,
+    ).toBe(true);
   });
 });

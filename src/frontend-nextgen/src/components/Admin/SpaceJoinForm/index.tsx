@@ -1,6 +1,15 @@
 // 申请加入团队空间表单：Modal 内「目标空间」只读展示 + 「申请理由（选填）」textarea + 说明 + 提交/取消。
 // 视觉对齐 PRD：标题「申请加入团队空间」，提交后提示审批进度查看入口。
-import { Button, Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle, Textarea } from '@/components/ui';
+import {
+  Button,
+  CaptionText,
+  Modal,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+  Textarea,
+} from '@/components/ui';
 import type { Space } from '@/domain/admin/models';
 import { useState } from 'react';
 
@@ -32,12 +41,12 @@ export function SpaceJoinForm({ space, open, onOpenChange, onSubmit }: SpaceJoin
           <ModalTitle>申请加入团队空间</ModalTitle>
         </ModalHeader>
         <div className="space-y-4 py-2">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2">
             <span className="text-muted-foreground">目标空间：</span>
-            <span className="font-medium text-foreground">{space.spaceName}</span>
+            <span className="font-medium">{space.spaceName}</span>
           </div>
           <div className="space-y-2">
-            <label className="text-sm text-muted-foreground">申请理由（选填）</label>
+            <CaptionText as="label">申请理由（选填）</CaptionText>
             <Textarea
               placeholder="希望加入该团队空间参与协作"
               value={reason}
@@ -46,15 +55,15 @@ export function SpaceJoinForm({ space, open, onOpenChange, onSubmit }: SpaceJoin
               maxLength={512}
             />
           </div>
-          <p className="m-0 text-xs text-muted-foreground">
+          <CaptionText className="m-0">
             提交后需等待该团队管理员审批，审批结果可在「工单中心 - 我发起的」中查看。
-          </p>
+          </CaptionText>
         </div>
         <ModalFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={submitting}>
             取消
           </Button>
-          <Button variant="primary" onClick={() => void submit()} disabled={submitting}>
+          <Button variant="primary" size="sm" onClick={() => void submit()} disabled={submitting}>
             {submitting ? '提交中…' : '提交申请'}
           </Button>
         </ModalFooter>

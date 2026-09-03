@@ -1,5 +1,5 @@
 import * as botTemplateController from '@/services/backendApi/bots/botTemplateController';
-import { agentCodingTemplateService } from '@/services/botWorkshop/agentCodingTemplateService';
+import { agentCodingTemplateService, supportsServiceBot } from '@/services/botWorkshop/agentCodingTemplateService';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 const listTemplates = jest.spyOn(botTemplateController, 'listAgentCodingTemplates');
@@ -78,5 +78,46 @@ describe('agentCodingTemplateService', () => {
         }),
       ]),
     );
+  });
+
+  it('只按模板能力位判断是否支持服务 Bot，应用 Coding Bot 始终不支持', () => {
+    const template = (capabilities?: Record<string, unknown>) => ({
+      key: 'architect',
+      versionId: '2600004',
+      name: '架构 Bot',
+      engine: 'claude_code',
+      source: 'official' as const,
+      templateType: 'architect',
+      fields: [],
+      config: { capabilities },
+      raw: {},
+      capabilityTags: [],
+    });
+
+    expect(supportsServiceBot(template({ upgrade_service_bot: true }))).toBe(true);
+    expect(supportsServiceBot(template({ upgrade_service_bot: false }))).toBe(false);
+    expect(supportsServiceBot(template({ upgrade_service_bot: 'true' }))).toBe(false);
+    expect(supportsServiceBot({ ...template({ upgrade_service_bot: true }), templateType: 'applicationCoding' })).toBe(
+      false,
+    );
+  });
+
+  it('兼容模板工厂将服务能力放在 template_config.capabilities 下', () => {
+    expect(
+      supportsServiceBot({
+        key: 'architect',
+        versionId: '2600004',
+        name: '架构 Bot',
+        engine: 'claude_code',
+        source: 'official',
+        templateType: 'architect',
+        fields: [],
+        config: {},
+        raw: {
+          template_config: { capabilities: { upgrade_service_bot: true } },
+        },
+        capabilityTags: [],
+      }),
+    ).toBe(true);
   });
 });

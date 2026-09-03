@@ -1,5 +1,6 @@
 import { resolveBotRuntime } from '@/adapters/bot-runtime/resolveBotRuntime';
 import type { BackendApiPage, BackendUnknownRecord } from '@/services/backendApi/types';
+import { getServiceBotCapability } from './agentCodingTemplateService';
 import type { BotDomain, BotLifecycle, BotRuntimeDomain } from './types';
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'hermes', 'teclaw']);
@@ -8,12 +9,12 @@ const VISIBLE_ENGINES = new Set([...PUBLIC_ENGINES, ...INTERNAL_ENGINES]);
 const DISPLAY_STATE_LIFECYCLE: Record<string, BotLifecycle> = {
   running: 'running',
   pending: 'deploying',
-  failed: 'unknown',
+  failed: 'failed',
   dormant: 'offline',
   local_running: 'running',
   local_offline: 'offline',
   local_pending: 'deploying',
-  local_failed: 'unknown',
+  local_failed: 'failed',
   service_draft: 'draft',
   service_deploying: 'deploying',
   service_prestable: 'prestable',
@@ -23,13 +24,60 @@ const DISPLAY_STATE_LIFECYCLE: Record<string, BotLifecycle> = {
 };
 const asString = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : undefined);
 const asNumber = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : undefined);
+const asRecord = (value: unknown): BackendUnknownRecord =>
+  value && typeof value === 'object' ? (value as BackendUnknownRecord) : {};
+
+function templateConfigFrom(dto: BackendUnknownRecord) {
+  const engineProperties = asRecord(dto.engine_properties);
+  const engineTemplateConfig = asRecord(engineProperties.template_config);
+  const directTemplateConfig = asRecord(dto.template_config);
+  return {
+    engineProperties,
+    engineTemplateConfig,
+    directTemplateConfig,
+    engineBotTemplateConfig: asRecord(engineTemplateConfig.bot_template_config),
+    directBotTemplateConfig: asRecord(directTemplateConfig.bot_template_config),
+    botTemplateConfig: asRecord(dto.bot_template_config),
+  };
+}
+
+function templateTypeFrom(dto: BackendUnknownRecord) {
+  const config = templateConfigFrom(dto);
+  return (
+    asString(dto.template_type) ??
+    asString(config.engineProperties.template_type) ??
+    asString(config.engineTemplateConfig.template_type) ??
+    asString(config.directTemplateConfig.template_type)
+  );
+}
+
+function templateNameFrom(dto: BackendUnknownRecord, templateType?: string) {
+  const config = templateConfigFrom(dto);
+  const name = [
+    dto.template_name,
+    config.engineProperties.template_name,
+    config.engineTemplateConfig.template_name,
+    config.engineBotTemplateConfig.template_name,
+    config.directTemplateConfig.template_name,
+    config.directBotTemplateConfig.template_name,
+    config.botTemplateConfig.template_name,
+  ]
+    .map(asString)
+    .find(Boolean);
+  if (name) return name;
+  const normalizedTemplateType = templateType?.toLowerCase().replace(/[\s_-]/g, '');
+  if (normalizedTemplateType === 'applicationcoding') return '应用 Bot';
+  if (normalizedTemplateType === 'personalcoding') return '个人 Coding Bot';
+  return undefined;
+}
 
 function runtimeFrom(dto: BackendUnknownRecord, warnings: string[]): BotRuntimeDomain {
   const rawEngine = asString(dto.active_engine) ?? asString(dto.engine_type) ?? asString(dto.engine);
-  const templateType = asString(dto.template_type);
+  const templateType = templateTypeFrom(dto);
   const runtime = resolveBotRuntime({
     engine: rawEngine,
     templateType,
+    templateName: templateNameFrom(dto, templateType),
     botType: asString(dto.bot_type),
     botId: asString(dto.bot_id),
   });
@@ -66,7 +114,7 @@ function lifecycle(dto: BackendUnknownRecord, warnings: string[]) {
     return 'unknown' as const;
   }
   if (status === 'PENDING') return 'deploying' as const;
-  if (status === 'FAILED') return 'unknown' as const;
+  if (status === 'FAILED') return 'failed' as const;
   if (status === 'OFFLINE' || status === 'RELEASED' || status === 'RECYCLED') return 'offline' as const;
   // Bot 详情接口没有 inventory 的 display_state / publication 状态。服务 Bot 的草稿运行时
   // 同样会返回 ACTIVE，不能把它当成 online；只有明确发布状态或 inventory 展示态才能判定已上线。
@@ -86,6 +134,7 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const space = dto.space && typeof dto.space === 'object' ? (dto.space as BackendUnknownRecord) : undefined;
   const ownerId = asString(dto.owner_entity_id) ?? asString(dto.owner_id);
   const spaceId = asString(dto.space_id) ?? asString(space?.space_id) ?? asString(dto.owner_entity_id);
+  const spaceName = asString(dto.space_name) ?? asString(space?.space_name) ?? asString(space?.name);
   const entityId = asString(dto.entity_id) ?? asString(dto.owner_entity_id) ?? spaceId;
   const botType = asString(dto.bot_type) ?? 'personal';
   const inventoryKind = asString(dto.kind);
@@ -94,9 +143,23 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const ownership =
     entityType === 'proj' || entityType === 'team' || spaceKind === 'team' ? ('team' as const) : ('personal' as const);
   const runtime = runtimeFrom(dto, warnings);
+  const templateType = templateTypeFrom(dto);
   const deployment = botType === 'desktop' ? ('local' as const) : ('cloud' as const);
   const serviceMode =
     inventoryKind === 'service' || botType === 'service' ? ('service' as const) : ('non-service' as const);
+  const codingTemplate = runtime.isAgentCodingBot
+    ? ({
+        templateType,
+        config: dto,
+        raw: dto,
+      } as never)
+    : undefined;
+  const serviceBotCapability = getServiceBotCapability(codingTemplate);
+  const normalizedTemplateType = templateType?.toLowerCase().replace(/[\s_-]/g, '');
+  const isHistoricalPersonalCodingBot = normalizedTemplateType === 'personalcoding';
+  const canUpgradeToService = runtime.isAgentCodingBot
+    ? serviceBotCapability === true || (serviceBotCapability === undefined && isHistoricalPersonalCodingBot)
+    : ['openclaw', 'teclaw'].includes(runtime.engine);
   const lockRaw =
     dto.edit_lock && typeof dto.edit_lock === 'object'
       ? (dto.edit_lock as BackendUnknownRecord)
@@ -105,15 +168,20 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
       : undefined;
   const item: BotDomain = {
     id,
+    cardId: asString(dto.card_id),
+    publicationVersion: asNumber(dto.publication_version),
+    liveVersion: asNumber(dto.live_version),
     ownerId,
-    entityKey: `${spaceId ?? 'unknown'}:${botType}:${id}`,
+    entityKey: asString(dto.card_id) ?? `${spaceId ?? 'unknown'}:${botType}:${id}`,
     name: asString(dto.bot_name) ?? asString(dto.name) ?? '未命名 Bot',
     description: asString(dto.bot_desc) ?? asString(dto.description),
     spaceId,
+    spaceName,
     spaceKind: spaceKind === 'team' ? 'team' : 'personal',
     ownership,
     deployment,
     serviceMode,
+    canUpgradeToService,
     lifecycle: lifecycle(dto, warnings),
     rawStatus: asString(dto.status),
     rawPublishStatus: asString(dto.publish_status),

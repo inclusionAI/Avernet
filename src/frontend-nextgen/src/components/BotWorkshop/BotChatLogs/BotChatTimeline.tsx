@@ -42,16 +42,17 @@ function ObservationNode({
               : 'border-transparent hover:bg-[var(--color-panel-muted)]',
           )}
           style={{ marginLeft: level * 16, width: `calc(100% - ${level * 16}px)` }}
-          onClick={() => onSelect(item)}
+          onClick={(event) => {
+            if (hasChildren && (event.target as HTMLElement | null)?.closest('[data-observation-toggle]')) {
+              event.stopPropagation();
+              setExpanded((value) => !value);
+              return;
+            }
+            onSelect(item);
+          }}
         >
           {hasChildren ? (
-            <span
-              className="flex size-4 shrink-0 items-center justify-center"
-              onClick={(event) => {
-                event.stopPropagation();
-                setExpanded((value) => !value);
-              }}
-            >
+            <span data-observation-toggle className="flex size-4 shrink-0 items-center justify-center">
               {expanded ? (
                 <ChevronDown className="size-3 text-[var(--color-muted)]" />
               ) : (

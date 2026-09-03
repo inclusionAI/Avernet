@@ -16,6 +16,12 @@ jest.mock('@/hooks/useBotWorkshopEditorIdentity', () => ({
 jest.mock('@/hooks/useSpaceContext', () => ({
   useSpaceContext: jest.fn(),
 }));
+jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
+  agentCodingTemplateService: {
+    list: jest.fn(),
+  },
+  supportsServiceBot: jest.fn(() => false),
+}));
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
     list: jest.fn(),
@@ -37,6 +43,9 @@ jest.mock('@/services/botHealthCheck', () => ({
 const mockedIdentity = useBotWorkshopRequestIdentity as jest.MockedFunction<typeof useBotWorkshopRequestIdentity>;
 const mockedSpaceContext = useSpaceContext as jest.MockedFunction<typeof useSpaceContext>;
 const mockedList = botWorkshopService.list as jest.MockedFunction<typeof botWorkshopService.list>;
+const { agentCodingTemplateService } = jest.requireMock('@/services/botWorkshop/agentCodingTemplateService') as {
+  agentCodingTemplateService: { list: jest.Mock };
+};
 let currentSpaceId: number | undefined;
 let spaceInitialized: boolean;
 
@@ -83,6 +92,24 @@ it('首次进入时等待用户身份就绪后再加载 Bot 列表', async () =>
   await waitFor(() => expect(result.current.loading).toBe(false));
 });
 
+it('Open Core 打开云端创建弹窗时不加载 AgentCoding 模板', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  agentCodingTemplateService.list.mockResolvedValue([]);
+
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  act(() => {
+    result.current.openCreateCloud();
+  });
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(agentCodingTemplateService.list).not.toHaveBeenCalled();
+});
+
 it('刷新页面时等待空间初始化完成，只加载一次 Bot 列表', async () => {
   mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
   mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
@@ -98,6 +125,22 @@ it('刷新页面时等待空间初始化完成，只加载一次 Bot 列表', as
 
   await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
   expect(mockedList).toHaveBeenCalledWith(expect.objectContaining({ spaceId: '10001' }));
+});
+
+it('列表每 30 秒静默同步状态，不受微前端容器的 visibilityState 影响', async () => {
+  jest.useFakeTimers();
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+
+  const { unmount } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  act(() => jest.advanceTimersByTime(30_000));
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(2));
+  unmount();
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  jest.useRealTimers();
 });
 
 it('按全局当前空间加载 Bot，切换空间后自动重新加载', async () => {
@@ -153,6 +196,27 @@ it('点击健康检查时导航到独立健康检查页面', async () => {
   result.current.openHealthCheck(bot);
 
   await waitFor(() => expect(history.push).toHaveBeenCalledWith('/bot-workshop/health-check?id=bot-1'));
+});
+
+it('Coding Bot 点击去使用时跳转到 Coding Chat，并携带当前 Bot ID', () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const { result } = renderHook(() => useBotWorkshop());
+  const bot = {
+    id: 'coding-bot:2088',
+    spaceId: '73',
+    spaceName: '测试空间',
+    name: '应用 Bot',
+    runtime: { engine: 'claude_code', isAgentCodingBot: true, visibleInOpenCore: true },
+  } as unknown as BotDomain;
+
+  act(() => {
+    result.current.openConversation(bot);
+  });
+
+  expect(history.push).toHaveBeenCalledWith(
+    '/coding/coding-chat?botId=coding-bot%3A2088&space_id=73&space_name=%E6%B5%8B%E8%AF%95%E7%A9%BA%E9%97%B4',
+  );
 });
 
 it('点击对话时跳转到用户单聊并展开对应 Bot', () => {

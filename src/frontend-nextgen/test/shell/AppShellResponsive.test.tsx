@@ -17,13 +17,19 @@ jest.mock('@/hooks/useMediaQuery', () => ({
   useMinWidth: () => mockViewport.desktop,
   useMediaQuery: () => mockViewport.desktop,
 }));
-jest.mock('@/hooks/useSpaceContext', () => ({ initSpaceContext: jest.fn(async () => undefined) }));
+jest.mock('@/hooks/useSpaceContext', () => ({
+  initSpaceContext: jest.fn(async () => undefined),
+  ensurePersonalSpaceOnAppEntry: jest.fn(async () => undefined),
+}));
 jest.mock('@/services/workspace/identityService', () => ({
   identityService: {
     loadIdentities: jest.fn(async () => ({
       ok: true as const,
       data: { identities: [], defaultActiveId: null },
     })),
+    // AppShell 经 useHumanIdentity 调用这两个状态访问器推导 loading/ready/error。
+    isIdentityLoading: jest.fn(() => false),
+    isIdentityResolved: jest.fn(() => false),
   },
 }));
 // AppHeader 真实渲染（含汉堡按钮），但其重叶子组件桩化以免拉起真实服务。

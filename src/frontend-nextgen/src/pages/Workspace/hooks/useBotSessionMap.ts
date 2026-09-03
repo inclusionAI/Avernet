@@ -103,7 +103,13 @@ export function useBotSessionMap(
   useEffect(() => {
     if (!activeIdentityId) return;
     for (const bot of chatBots) {
-      if (!bot.chatable || !expandedBotIds.includes(bot.botId) || loadedRef.current.has(bot.botId)) continue;
+      if (
+        !bot.chatable ||
+        bot.isAgentCodingBot ||
+        !expandedBotIds.includes(bot.botId) ||
+        loadedRef.current.has(bot.botId)
+      )
+        continue;
       void loadFirstPage(bot, activeIdentityId);
     }
   }, [activeIdentityId, chatBots, expandedBotIds, loadFirstPage]);

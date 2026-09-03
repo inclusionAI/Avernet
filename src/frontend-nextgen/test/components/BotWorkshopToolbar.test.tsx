@@ -29,7 +29,7 @@ it('服务类型下拉提供可清除条件的默认项', async () => {
   expect(onServiceModeChange).toHaveBeenCalledWith(undefined);
 });
 
-it('引擎筛选下拉（Open Core 形态）不展示 Claude Code 原生入口', async () => {
+it('引擎筛选下拉（Open Core 形态）提供 Claude Code 原生入口', async () => {
   HTMLElement.prototype.hasPointerCapture = jest.fn(() => false);
   HTMLElement.prototype.setPointerCapture = jest.fn();
   HTMLElement.prototype.releasePointerCapture = jest.fn();
@@ -49,7 +49,11 @@ it('引擎筛选下拉（Open Core 形态）不展示 Claude Code 原生入口',
 
   fireEvent.click(screen.getByRole('combobox', { name: '引擎类型' }));
 
-  expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual(['引擎类型', 'OpenClaw']);
+  expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    '引擎类型',
+    'OpenClaw',
+    'Claudecode引擎-原生',
+  ]);
   expect(screen.queryByRole('option', { name: 'AgentCoding' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'Hermes' })).toBeNull();
   expect(screen.queryByRole('option', { name: 'TEClaw' })).toBeNull();

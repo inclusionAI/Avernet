@@ -5,10 +5,13 @@
 //   getHumanIdentity() 读 store me 映射 HumanIdentity。
 // - 内部 overlay：extensions/internal.ts 覆盖 getHumanIdentity 读内部身份源。
 // - 本 hook 纯读 capability + service 访问器，不直接 fetch；单飞复用 identityService。
+// - oauth-provider（阿里云）：订阅 externalAuthStore（/auth/user 与 mine 并跑，auth 常更晚落位），
+//   登录后晚到的正确身份即刷出，不等业务偶发 re-render。
 // Hook ≤ 150 行（AGENTS.md store 约束）。
 import type { HumanIdentity } from '@/capabilities';
 import { getCapabilities } from '@/capabilities';
 import { identityService } from '@/services/workspace/identityService';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEffect, useState } from 'react';
 
@@ -55,6 +58,10 @@ export function useHumanIdentity(): UseHumanIdentityResult {
 
   // identities 变化时重算（Open Core 路径 store 写入后触发）
   const identities = useWorkspaceStore((s) => s.identities);
+  // oauth-provider 路径：/auth/user（checkAuth）与 mine 并跑且常更晚返回；capability 契约规定
+  // externalAuthStore.user 优先。订阅该 userId 让「登录后晚到的正确身份」触发重算与守卫重入，
+  // 而非依赖业务引发的偶发 re-render（此前需切 tab 才刷出正确头像/花名）。
+  const oauthUserId = useExternalAuthStore((s) => s.user?.userId ?? null);
 
   useEffect(() => {
     // capability 已有值（含内部 overlay 直接命中）→ 无需触发加载
@@ -78,7 +85,7 @@ export function useHumanIdentity(): UseHumanIdentityResult {
     return () => {
       cancelled = true;
     };
-  }, [identities.length]);
+  }, [identities.length, oauthUserId]);
 
   // identities 变化后重算（对齐 Open Core 路径 store 写入）
   const recomputed = computeCurrent();

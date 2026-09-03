@@ -1,13 +1,18 @@
 /** @jest-environment node */
 // 通道 A(global-error-notify-dedup):业务失败 2xx→reject+投递;HTTP/网络错误→投递+上抛;已报告不重复;skip 透传。
+// 未登录处置(external-oauth-login):oauth 策略下未登录失败 → 登录弹窗信号 + 静默上抛,不投递逐条错误 toast。
 import {
   RequestProtocolError,
   reportProtocolFailure,
   teamclawErrorHandler,
   teamclawResponseInterceptor,
 } from '@/requestConfig';
+import { AceLoginRedirectError } from '@/services/backendApi/httpClient';
 import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
-import { beforeEach, describe, expect, it } from '@jest/globals';
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useLoginRedirectStore } from '@/stores/loginRedirectStore';
+import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 
 beforeEach(() => useErrorNotifyStore.getState().reset());
 
@@ -108,5 +113,82 @@ describe('reportProtocolFailure(投递 + 抛错)', () => {
     expect(err.message).toBe('boom');
 
     expect(useErrorNotifyStore.getState().queue[0].toastKey).toBe('req:/api/r:op');
+  });
+});
+
+describe('未登录处置(oauth-provider 策略,通道 A)', () => {
+  const resetExternalAuth = (): void =>
+    useExternalAuthStore.setState({ status: 'unknown', user: null, error: null, isCheckingAuth: false });
+
+  beforeEach(() => {
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    useLoginRedirectStore.getState().reset();
+    useErrorNotifyStore.getState().reset();
+    resetExternalAuth();
+  });
+
+  afterEach(() => {
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
+    useLoginRedirectStore.getState().reset();
+    resetExternalAuth();
+  });
+
+  it('HTTP 2xx + 网关误包 40100 信封 → 弹窗信号 + 静默抛 AceLoginRedirectError,不入错误提示队列', () => {
+    const response = {
+      status: 200,
+      config: { url: '/api/x', operation: 'op' },
+      data: { code: 40100, message: 'Authentication is required', request_id: 'r' },
+    };
+
+    expect(() => teamclawResponseInterceptor(response)).toThrow(AceLoginRedirectError);
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('原始 HTTP 401 错误 → 弹窗信号 + 静默抛 AceLoginRedirectError,不入错误提示队列', () => {
+    const error = {
+      config: { url: '/api/y', operation: 'op' },
+      response: { status: 401, data: { message: 'unauthorized' } },
+    };
+
+    expect(() => teamclawErrorHandler(error)).toThrow(AceLoginRedirectError);
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+  });
+
+  it('已确认未登录 + 非 401 失败(500)→ 静默抛 RequestProtocolError(alreadyHandled),不入错误提示队列', () => {
+    useExternalAuthStore.getState().setUnauthenticated();
+    const error = {
+      config: { url: '/api/z', operation: 'op' },
+      response: { status: 500, data: { message: '服务异常' } },
+    };
+
+    let caught: unknown;
+    try {
+      teamclawErrorHandler(error);
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(RequestProtocolError);
+    expect((caught as RequestProtocolError).alreadyHandled).toBe(true);
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(0);
+    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+  });
+
+  it('ace-gateway(默认策略)→ 行为不变:照常投递默认提示', () => {
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
+    const response = {
+      status: 200,
+      config: { url: '/api/x', operation: 'op' },
+      data: { code: 40100, message: 'Authentication is required', request_id: 'r' },
+    };
+
+    expect(() => teamclawResponseInterceptor(response)).toThrow(RequestProtocolError);
+
+    expect(useLoginRedirectStore.getState().pendingLogin).toBeUndefined();
+    expect(useErrorNotifyStore.getState().queue).toHaveLength(1);
   });
 });
