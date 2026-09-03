@@ -115,6 +115,13 @@ class TestPublishConfig:
         assert "direct" in defaults["stages"]
         assert defaults["drain_timeout_seconds"] == 0
 
+    def test_get_defaults_for_type_update_device(self):
+        defaults = PublishConfig.get_defaults_for_type(PublishType.UPDATE_DEVICE)
+        assert defaults == {
+            "stages": {"direct": {"batch_capacity": 10, "cooldown_seconds": 0}},
+            "drain_timeout_seconds": 0,
+        }
+
 
 class TestPublishBatchConfig:
     """Tests for PublishBatchConfig model."""
@@ -606,3 +613,30 @@ class TestSerializeHookResult:
     def test_serialized_json_valid(self):
         result = serialize_hook_result(exit_code=0, stdout="test")
         assert json.loads(result)["exit_code"] == 0
+
+    def test_serialize_hook_result_truncate_keep_negative(self):
+        # When message is long enough to make the stdout/stderr budget < 11
+        # (length of "[truncated]"), keep = budget - 11 falls below 0 and is
+        # clamped to 0 by the `_truncate` inner helper.
+        result = serialize_hook_result(
+            exit_code=0,
+            stdout="x" * 8000,
+            stderr=None,
+            message="m" * 4080,
+        )
+        assert "[truncated]" in result
+        assert len(result) <= 4096
+
+    def test_serialize_hook_result_final_safety_truncation(self):
+        # When the serialized JSON still exceeds _RESULT_MESSAGE_MAX after
+        # per-field truncation (e.g. message itself is very long), the final
+        # safety branch trims the whole string to exactly _RESULT_MESSAGE_MAX
+        # and appends "[truncated]".
+        result = serialize_hook_result(
+            exit_code=0,
+            stdout="x" * 8000,
+            stderr="y" * 8000,
+            message="m" * 4080,
+        )
+        assert len(result) == 4096
+        assert result.endswith("[truncated]")
