@@ -14,6 +14,9 @@
 #   1. Write .adaptorEnv (openclaw). Also clear a stale .relayEnv left by
 #      a previous claude_code pod, so a later manual
 #      `supervisorctl start claude_relay` cannot pick up old credentials.
+#      Then reset workspace/HEARTBEAT.md from the image template — openclaw
+#      appends tasks to that file at runtime and the /home/admin mount makes
+#      the runtime copy persist, so every startup must overwrite it.
 #   2. Wait for the supervisord socket
 #   3. Start the engine program via supervisorctl
 #   4. Wait for the engine /health endpoint
@@ -57,6 +60,23 @@ success "Engine env file written to $ADAPTOR_ENV_FILE"
 # would let a manual `supervisorctl start claude_relay` boot with old
 # credentials.
 rm -f /home/admin/.relayEnv
+
+# Reset the OpenClaw workspace heartbeat file from the image template.
+# openclaw reads and appends tasks to workspace/HEARTBEAT.md at runtime, and
+# /home/admin is NAS-mounted, so the runtime copy survives pod restarts. This
+# script runs after the mount (via docker exec start_service.sh) and before
+# openclaw's first on-demand start, so copying here overwrites whatever the
+# previous run generated. Unconditional copy — template-wins, the opposite
+# of start_claude_code.sh's mount-wins claude-settings.json staging.
+HEARTBEAT_TEMPLATE="/opt/config/HEARTBEAT.md"
+HEARTBEAT_TARGET="/home/admin/.openclaw/workspace/HEARTBEAT.md"
+if [ -f "$HEARTBEAT_TEMPLATE" ]; then
+    mkdir -p "$(dirname "$HEARTBEAT_TARGET")"
+    cp -f "$HEARTBEAT_TEMPLATE" "$HEARTBEAT_TARGET"
+    success "Workspace HEARTBEAT.md reset from template"
+else
+    warn "Heartbeat template missing at $HEARTBEAT_TEMPLATE - keeping existing file"
+fi
 
 # --- Step 2: Wait for supervisord socket ---
 
