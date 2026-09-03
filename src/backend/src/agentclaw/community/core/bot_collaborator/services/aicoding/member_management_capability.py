@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional
 
+from agentclaw.community.core.workspace.runtime_identity import (
+    normalize_runtime_engine,
+)
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -86,16 +89,24 @@ class AICodingMemberManagementCapability:
         """AICoding coding bots or opted-in templates use member management.
 
         应用 Coding Bot（``applicationCoding``）与个人 Coding Bot
-        （``personalCoding``）都运行在 ``claude_code`` 引擎上，并复用协作者表
-        做应用成员管理。其它 Bot 必须通过模板 ``member_management`` 显式开关
-        放行；模板开关是引擎无关的显式契约，一旦开启即代表该 Bot 支持成员
-        协作语义。
+        （``personalCoding``）复用协作者表做应用成员管理;引擎拼写按
+        engine/form 词汇分裂前后两半皆认（legacy ``aicoding`` 字面值与
+        ``claude_code``）。其它 Bot 必须通过模板 ``member_management`` 显式
+        开关放行；模板开关是引擎无关的显式契约，一旦开启即代表该 Bot 支持
+        成员协作语义。
         """
         if self._has_template_switch_enabled(bot, bot_id):
             return True
+        # 引擎拼写收敛:applicationCoding/personalCoding 的 coding bot 在
+        # engine/form 词汇分裂前后两半都存在(legacy ``active_engine='aicoding'``
+        # 与 ``claude_code``),按拼写任一命中即认定。枚举保持窄集——member
+        # 语义不随 runtime 谓词(uses_aicoding_runtime)放宽到 architect 等
+        # 其它 coding 模板形态。
+        engine = normalize_runtime_engine(bot.get("active_engine"))
         return (
-            bot.get("active_engine") == "claude_code"
-            and bot.get("template_type") in ("applicationCoding", "personalCoding")
+            engine in ("aicoding", "claude_code")
+            and bot.get("template_type")
+            in ("applicationCoding", "personalCoding")
         )
 
     def _has_template_switch_enabled(

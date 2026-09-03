@@ -45,6 +45,9 @@ from injector import inject
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.bot_management.errors import BotLookupAmbiguousError
+from agentclaw.community.core.repository.implementations.bot.engine_filter import (
+    engine_criterion,
+)
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
@@ -58,6 +61,7 @@ from agentclaw.community.core.repository.protocols.bot import (
 )
 
 logger = get_logger()
+
 
 # Prod's exact ``update_by_owner`` allowlist. Any field not here
 # (e.g. engine_types, creator_id, entity_id) is silently ignored —
@@ -385,7 +389,7 @@ class BotRepository(
             if space_id is not None:
                 query = query.filter(self.Model.space_id == space_id)
             if engine:
-                query = query.filter(self.Model.active_engine == engine)
+                query = query.filter(engine_criterion(self.Model, engine))
             if status:
                 query = query.filter(self.Model.status == status)
             total = query.count()
@@ -875,7 +879,7 @@ class BotRepository(
 
             # active_engine 过滤
             if active_engine:
-                query = query.filter(self.Model.active_engine == active_engine)
+                query = query.filter(engine_criterion(self.Model, active_engine))
 
             # bot_id 过滤
             if bot_id:

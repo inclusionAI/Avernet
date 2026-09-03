@@ -1098,6 +1098,41 @@ class TestUpgradeBotToService:
             nick_name="Test User",
         )
 
+    @pytest.mark.parametrize(
+        "active_engine,template_type",
+        [
+            # legacy 字面拼写（历史行为，回归保护）
+            ("aicoding", "personalCoding"),
+            # post-split 形态:claude_code + coding 模板（修复前被放走）
+            ("claude_code", "applicationCoding"),
+            ("claude_code", "personalCoding"),
+        ],
+    )
+    def test_upgrade_rejects_both_aicoding_spells(self, active_engine, template_type):
+        """升级 gate 按两半拼写拦 aicoding 形态（engine/form 词汇分裂后）。"""
+        mock_bot_repo = Mock()
+        mock_bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "bot_001",
+            "bot_name": "Coding Bot",
+            "bot_type": "personal",
+            "active_engine": active_engine,
+            "template_type": template_type,
+            "owner_id": "user_001",
+        }
+        bcn_service = Mock()
+
+        service = _make_service(
+            bot_publish_repo=Mock(),
+            bot_repo=mock_bot_repo,
+            bcn_service=bcn_service,
+        )
+
+        with pytest.raises(BotTypeNotSupportedError):
+            service.upgrade_bot_to_service(bot_id="bot_001", owner_id="user_001")
+        # 拒升级时绝不能已触发 BCN 切换（修复前 claude_code 拼写一路走到这里）。
+        bcn_service.switch_bot.assert_not_called()
+
     def test_upgrade_bot_to_service_with_existing_publish(self):
         """已有发布记录时，只更新 bot_type，不创建新发布记录，返回已有发布记录，但会异步重启 Bot。"""
         # Arrange

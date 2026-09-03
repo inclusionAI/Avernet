@@ -575,7 +575,14 @@ async def list_bots(
     ] = None,
     engine: Annotated[
         str | None,
-        Query(description="Filter: only bots on this engine, matched exactly."),
+        Query(
+            description=(
+                "Filter: only bots on this engine. Values other than 'aicoding' "
+                "match the stored engine exactly; 'aicoding' expands to both the "
+                "legacy literal spelling and post-split claude_code coding-form "
+                "bots (engine/form vocabulary split)."
+            ),
+        ),
     ] = None,
     status: Annotated[
         str | None,
@@ -791,7 +798,14 @@ async def list_inventory(
     ] = None,
     engine: Annotated[
         str | None,
-        Query(description="Filter inventory items by engine, matched exactly."),
+        Query(
+            description=(
+                "Filter inventory items by engine. Values other than 'aicoding' "
+                "match the stored engine exactly; 'aicoding' expands to both the "
+                "legacy literal spelling and post-split claude_code coding-form "
+                "bots (engine/form vocabulary split)."
+            ),
+        ),
     ] = None,
     deploy_mode: Annotated[
         DeployMode | None,
