@@ -11,11 +11,18 @@ from typing import Any
 from injector import inject
 
 from agentclaw.community.core.mcp.services.auth_service import MCPAuthService
-from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
-from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
+from agentclaw.community.core.repository.protocols.skill_center import (
+    SkillRepository,
+    SkillSetRepository,
+    SkillVersionRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.mcp_dependency_scope import (
+    mcp_dependency_codes_from_version_metadata,
+)
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.skill_center.skill_auth_service_protocol import SkillAuthServiceProtocol
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 logger = get_logger()
@@ -33,11 +40,13 @@ class SkillAuthService(SkillAuthServiceProtocol):
         self,
         skill_repo: SkillRepository,
         skill_set_repo: SkillSetRepository,
+        skill_version_repo: SkillVersionRepositoryProtocol,
         mcp_center: MCPCenterPlugin,
         mcp_auth_service: MCPAuthService,
     ):
         self.skill_repo = skill_repo
         self.skill_set_repo = skill_set_repo
+        self.skill_version_repo = skill_version_repo
         self.mcp_center = mcp_center
         self.mcp_auth_service = mcp_auth_service
 
@@ -73,7 +82,29 @@ class SkillAuthService(SkillAuthServiceProtocol):
         skill = self.skill_repo.get_by_id(skill_id)
         if not skill:
             raise ValueError(f"Skill not found: {skill_id}")
-        return skill, self._extract_server_codes(skill)
+        return skill, self._effective_server_codes(skill)
+
+    def _effective_server_codes(self, skill: dict) -> list[str]:
+        """Read dependencies from the same source as Runtime resolution."""
+
+        if not str(skill.get("git_path") or "").startswith("center://"):
+            return self._extract_server_codes(skill)
+        try:
+            numeric_skill_id = int(skill["id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Center Skill has no stable identity") from exc
+        versions = self.skill_version_repo.list_latest_published(
+            env=get_current_env(), skill_ids=(numeric_skill_id,)
+        )
+        if len(versions) != 1:
+            raise ValueError("Center Skill has no PUBLISHED Version")
+        return list(
+            dict.fromkeys(
+                mcp_dependency_codes_from_version_metadata(
+                    versions[0].get("metadata_json")
+                )
+            )
+        )
 
     # ----------------------------------------------------------
     # 公开方法
@@ -273,7 +304,7 @@ class SkillAuthService(SkillAuthServiceProtocol):
             # 路径 2: skill_set 内 skill 的 mcp_dependencies
             skills = self.skill_set_repo.get_skills_in_set(ss_id)
             for sk in (skills or []):
-                for code in self._extract_server_codes(sk):
+                for code in self._effective_server_codes(sk):
                     if code not in seen:
                         seen.add(code)
                         all_codes.append(code)
@@ -458,7 +489,7 @@ class SkillAuthService(SkillAuthServiceProtocol):
         skill_to_codes: dict[str, list[str]] = {}
 
         for sk in skills:
-            codes = self._extract_server_codes(sk)
+            codes = self._effective_server_codes(sk)
             skill_to_codes[str(sk.get("id", ""))] = codes
             for c in codes:
                 if c not in seen:

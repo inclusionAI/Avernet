@@ -5,6 +5,9 @@ from typing import Any
 
 import pytest
 
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.core.service_bot.services.deploy.teclaw_compose_producer import (
     TeclawComposeProducer,
 )
@@ -42,7 +45,15 @@ def test_engine_ext_fetched_via_plugin_and_frozen_verbatim() -> None:
     producer = TeclawComposeProducer(_StubComposer(_artifact()), client)
 
     result = producer.produce_artifact(
-        {"bot_id": "b", "entity_id": "u", "owner_id": "u1", "bot_name": "Support Bot"}, 3
+        ArtifactBuildRequest.create(
+            bot={
+                "bot_id": "b",
+                "entity_id": "u",
+                "owner_id": "u1",
+                "bot_name": "Support Bot",
+            },
+            version=3,
+        )
     )
 
     # plugin consulted with the bot dict
@@ -66,7 +77,9 @@ def test_empty_engine_ext_from_noop_client() -> None:
     producer = TeclawComposeProducer(
         _StubComposer(_artifact()), _MockEngineExtClient({})
     )
-    result = producer.produce_artifact({"bot_id": "b"}, 1)
+    result = producer.produce_artifact(
+        ArtifactBuildRequest.create(bot={"bot_id": "b"}, version=1)
+    )
     # Empty engine payload → only the backend identity/stage keys remain.
     assert result.ext["config_artifact"]["engine_ext"] == {
         "bot_id": "b",

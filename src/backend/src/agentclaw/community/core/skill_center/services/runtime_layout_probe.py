@@ -56,10 +56,19 @@ class _ResolvedFilesystemLayoutEvidence(BaseModel):
     pool_center: str
 
 
+class _CenterMountEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["READY", "NOT_READY", "UNAVAILABLE"]
+    reason: str | None
+    restart_required: bool
+
+
 class _RuntimeLayoutProbeEvidence(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     resolved_layout: _ResolvedFilesystemLayoutEvidence | None = None
+    center_mount: _CenterMountEvidence | None = None
 
 
 class _RuntimeLayoutProbeData(BaseModel):

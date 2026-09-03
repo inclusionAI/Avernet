@@ -24,8 +24,17 @@ from agentclaw.community.core.spaces.services.space_access_service import (
 from agentclaw.community.core.skill_center.services.space_skill_grant_service import (
     space_skill_actor_permissions,
 )
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+
+
+logger = get_logger()
 
 
 class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
@@ -36,9 +45,11 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
         self,
         access_service: SpaceAccessService,
         repository: SpaceSkillReadRepository,
+        staff_dept: StaffDeptPlugin,
     ) -> None:
         self._access_service = access_service
         self._repository = repository
+        self._staff_dept = staff_dept
 
     def list_space_skills(
         self,
@@ -64,12 +75,14 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             offset=(page - 1) * page_size,
             limit=page_size,
         )
+        owner_display_names = self._resolve_owner_display_names(records)
         return total, [
             self._to_summary(
                 record,
                 actor_id=actor_id,
                 space_type=space.space_type,
                 space_role=member.role,
+                owner_display_name=owner_display_names[record["owner_user_id"]],
             )
             for record in records
         ]
@@ -86,24 +99,29 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             actor_id=actor_id,
             env=get_current_env(),
         )
+        owner_display_name = self._resolve_owner_display_names([record])[
+            record["owner_user_id"]
+        ]
         summary = self._to_summary(
             record,
             actor_id=actor_id,
             space_type=space.space_type,
             space_role=member.role,
+            owner_display_name=owner_display_name,
         )
         summary["source"] = record["source_type"]
         summary["offline_at"] = record["offline_at"]
         summary["offline_by"] = record["offline_by"]
         return summary
 
-    @staticmethod
     def _to_summary(
+        self,
         record: SpaceSkillReadRecord,
         *,
         actor_id: str,
         space_type,
         space_role,
+        owner_display_name: str | None,
     ) -> SpaceSkillSummaryRecord:
         role = record["current_user_skill_role"]
         is_team = record["space_type"] == "TEAM"
@@ -207,7 +225,7 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             "space_type": record["space_type"],
             "owner": {
                 "user_id": record["owner_user_id"],
-                "display_name": record["owner_display_name"],
+                "display_name": owner_display_name,
             },
             "latest_published_version": latest,
             "draft": draft,
@@ -225,3 +243,34 @@ class SpaceSkillQueryService(SpaceSkillQueryServiceProtocol):
             "gmt_created": record["gmt_created"],
             "gmt_modified": record["gmt_modified"],
         }
+
+    def _resolve_owner_display_names(
+        self, records: list[SpaceSkillReadRecord]
+    ) -> dict[str, str | None]:
+        """Resolve the current display name once per Owner in one read response.
+
+        ``ac_space_member.user_name`` is a historical snapshot and may be null.
+        The workshop contract needs the current staff-directory display name. A
+        profile outage must not make a read-only Skill listing unavailable, so
+        the persisted value remains a best-effort fallback.
+        """
+        persisted_names = {
+            record["owner_user_id"]: record["owner_display_name"] for record in records
+        }
+        resolved: dict[str, str | None] = {}
+        for owner_id, persisted_name in persisted_names.items():
+            try:
+                profile = self._staff_dept.get_profile_by_work_no(
+                    work_no=normalize_work_no_for_lookup(owner_id)
+                )
+            except StaffProfileLookupError:
+                logger.warning(
+                    "staff profile lookup failed; retaining stored Space Skill owner name",
+                    extra={"owner_id": owner_id},
+                    exc_info=True,
+                )
+                resolved[owner_id] = persisted_name
+                continue
+            display_name = (profile.nick_name or "").strip()
+            resolved[owner_id] = display_name[:128] or persisted_name
+        return resolved

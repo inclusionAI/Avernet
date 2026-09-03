@@ -38,7 +38,7 @@
 | 查看发布影响 | Mock 在“确认升级”时展示 Bot，`CapabilityWorkshop.tsx:1046-1076` | 最终接口为 `publication-impact`，在真正发布前提示；upgrade 仅创建 Draft | **已由产品确认**：PD 后续把影响弹窗从 upgrade 移到 publish confirm |
 | 升级 Vn→Vn+1 | `CapabilityWorkshop.tsx:1046-1076` | 从 exact Published Vn 创建 Vn+1 EDITING Draft | 满足，除影响弹窗时机 |
 | 下线 | Mock 无引用时把 running 改回 draft，`CapabilityWorkshop.tsx:1078-1125` | TeamClaw-local Offline；保留 Published Vn 并创建 Vn+1 Draft，重新发布后上线 | 满足产品意图；前端需避免把历史 Vn 真正改成 Draft |
-| 下线前引用阻断 | 同上，只展示 Bot refs | Offline impact 覆盖 Membership、Installation、Attempt、Artifact、UNKNOWN_ARTIFACT | Backend 更严格且满足安全需求；前端需支持非 Bot blocker 分类/counts |
+| 下线前引用阻断 | 同上，只展示 Bot refs | Offline impact 覆盖 Membership、Installation、Attempt、已证明的 Artifact；不可读 Artifact 以 UNKNOWN_ARTIFACT warning 返回 | 前端需支持非 Bot blocker 分类/counts 和不阻断的 warnings |
 | 删除未发布 Skill/放弃升级 Draft | Draft 卡片“删除”，`CapabilityWorkshop.tsx:762-770` | `DELETE .../draft` 返回 `deleted_scope=SKILL|DRAFT`，FROZEN 拒绝 | 满足 |
 | Team 编辑锁、抢占、关闭释放 | `CapabilityWorkshop.tsx:572-662,742-751,928-947` | 永久 Lease、fencing、acquire/release/takeover，无 TTL | 满足 |
 | 普通成员申请编辑权限 | `CapabilityWorkshop.tsx:554-569,746-760` | `editor-requests` + `SKILL_COLLABORATOR` Work Order | 满足 |
@@ -110,7 +110,7 @@ presentation metadata，不能映射到 `ac_skill.name` 或绕过 Version。
 
 ## 6. 明确不属于缺口的原型差异
 
-- 原型没有超时、并发、幂等、补偿、Task deadline、RESULT_UNKNOWN 和 UNKNOWN_ARTIFACT；这些是
+- 原型没有超时、并发、幂等、补偿、Task deadline、RESULT_UNKNOWN 和 UNKNOWN_ARTIFACT warning；这些是
   Backend 必须补齐的可靠性合同，不需要 Mock 先画出来。
 - 原型把状态压成 `draft/running/offline`；正式 Spec 使用 Asset、Draft、Attempt、Version、
   Offline 分离状态，前端必须映射，不能要求 Backend 把旧 Published Vn 变成 Draft。

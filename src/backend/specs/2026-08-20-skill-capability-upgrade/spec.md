@@ -100,7 +100,7 @@ artifact。本文先冻结待实现合同；实现完成后生成的 OpenAPI JSO
 50. 作为 SkillCenter Public 用户，我希望一次选择多个 Skill 后获得可跨刷新恢复的异步引用进度，且只有物化完成后才加入 SkillSet。
 51. 作为发布者，我希望发布前看到可能受 Track Latest 影响的 Bot，但该预览不阻断发布，发布成功后由后端重新计算真实候选。
 52. 作为发布者，我希望自动重试耗尽后可以针对同一个 Attempt 恢复准备、查询 SC 结果或重试物化，而不会重复发布。
-53. 作为 Skill Owner/Manager，我希望下线前看到完整血缘；无引用时保留历史 Published Vn、创建 Vn+1 Draft，并允许修改后重新发布。
+53. 作为 Skill Owner/Manager，我希望下线前看到完整血缘；无引用时保留历史 Published Vn 并下线该资产，必要时复制 Vn 为独立新 Skill。
 
 ## Implementation Decisions
 
@@ -704,9 +704,10 @@ GET/PUT 分别服务编辑器目录、内容读取和保存。
 exact version 下载并修复 Store，再创建 Vn+1 Draft。禁止使用 current/latest、旧 Draft 或历史
 package URL。发布成功后不保留 Draft；只有再次点击升级才创建下一版 Draft。
 
-DELETE 要求 `expected_revision_id`，Team Lease 必须 FREE/HELD_BY_ME；无 Published Version 且
-无 Attempt/Version/Installation/Membership/Artifact 等外部事实时删除整个 Skill 聚合，否则只
-放弃升级 Draft。FROZEN 永不允许删除。DB 事实先提交，OSS 做 best-effort 清理。
+DELETE 要求 `expected_revision_id`，Team Lease 必须 FREE/HELD_BY_ME；无 Published Version，且
+除终态 FAILED Attempt 外不存在 Version/Installation/Membership/Artifact 等外部事实时，删除
+整个从未发布的 Skill 聚合及其 FAILED Attempt，否则只放弃升级 Draft。FROZEN 永不允许删除。
+DB 事实先提交，OSS 做 best-effort 清理；只放弃 Draft 时同步失效当前 Lease/fencing token。
 
 URL 中 `{version}` 是业务序号 `1/2/3`，不是 `ac_skill_version.id`。Published Version 不可修改、删除或单独下线。
 
@@ -725,6 +726,11 @@ Center 缺 `skill_uuid`、PUBLISHED Version、`sc_version_number` 或合法 depe
 属于 Runtime 计划解析错误：命令保留已提交 Desired State 并返回 `PENDING`，不能用不完整资产
 投影半套运行时。一次 Runtime projection 只能消费 Reader/Resolver 返回的同一份不可变 assets
 tuple，避免 Skill mapping 与 MCP dependency 跨版本。
+
+单 Skill add/remove、Direct activate/deactivate 和 Default exclusion/un-exclusion 在声明本次
+`ProjectionScope` 时必须遵循同一依赖来源：Local/Repo 读取 `ac_skill.mcp_dependencies`，Center
+读取最高 ordinal 的 PUBLISHED `ac_skill_version.metadata_json.mcp_dependencies`。不得因为
+Center 的资产级依赖列为空而把一次实际包含 MCP 变化的命令误报成 Skill-only projection。
 
 Space 发布产生的 `ac_skill_version.publication_attempt_id` 非空；SC Public 懒物化没有
 TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Attempt。Published Service
@@ -747,9 +753,10 @@ TeamClaw Publication Attempt，因此该列必须允许 NULL，不能伪造 Atte
 - 本期只有 Owner/Manager 两种 Skill Grant，不新增 Editor 或普通 Skill Member。
 - Owner 直接 `PUT/DELETE managers` 不生成 Work Order。移除当前 Lease holder 的
   Manager Grant 时，必须在同一事务内使该 Lease/fencing token 失效。
-- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 在没有 Attempt、Version、
-  Installation、SkillSet Membership、Artifact 或其他外部历史事实时，可以在同一事务中
-  删除 Draft 事实、Owner/Manager Grant、该 Skill 自己的 Space Binding 和 Skill Identity。
+- 删除升级 Draft 只放弃本次升级；首次从未发布的 Draft 在除终态 FAILED Attempt 外没有
+  Version、Installation、SkillSet Membership、Artifact 或其他外部历史事实时，可以在同一
+  事务中删除 FAILED Attempt、Draft 事实、Lease、Owner/Manager Grant、该 Skill 自己的 Space
+  Binding 和 Skill Identity。
 - FROZEN Draft 不能放弃，必须先由 Attempt 收敛到明确结果。
 
 编辑权申请 body：
@@ -802,6 +809,7 @@ Owner 审批，旧 Owner 不得继续审批。
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/publications/{attempt_id}/retry` | 恢复同一 Attempt；按最新阶段分流，不要求新幂等键 |
 | GET | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline-impact` | 下线影响检查 |
 | POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/offline` | 本地隐藏 Published Skill，并创建下一版 Draft |
+| POST | `/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy` | 复制已下线 Skill 的精确 Vn 为独立新 Skill V1 Draft |
 
 发布事务：
 
@@ -860,10 +868,10 @@ acknowledgement token。预览到 PUBLISHED 之间事实可能变化，Track Lat
 
 #### 12.1 Offline、重新发布与血缘
 
-产品“下线”是 TeamClaw-local、可恢复的 Offline，不是永久 Retirement，也不把历史 Published
-Version 改回 Draft。无 blocker 时，Offline 保留不可变 Published Vn，并基于 Vn 创建 Vn+1
-EDITING Draft；用户修改后发布 Vn+1，成功事务清空 `offline_at/offline_by`，恢复 PUBLISHED
-可见性。重新上线必须产生新 Version，禁止覆盖或重新发布旧 Vn。
+产品“下线”是 TeamClaw-local 的终态 Offline，不是永久 Retirement，也不把历史 Published
+Version 改回 Draft。无 blocker 时，Offline 仅写 `offline_at/offline_by`，保留不可变 Published
+Vn；原 Skill 不再创建 Draft、升级或重新发布。用户需要继续创作时，复制精确 Vn 为新 UUID、
+独立新 Skill 的 V1 Draft；发布新副本会在同一 SC Team 创建独立 SC Skill，绝不复用原 SC 身份。
 
 Offline 期间从 TeamClaw 市场和 consumable 列表隐藏，禁止新的 Direct activation、Membership
 和其他 Bot 消费；Owner/Manager 仍可查看历史、编辑 Draft 和发布。它不调用 Skill Center
@@ -880,7 +888,7 @@ GET impact 供产品预览，POST 必须在事务内锁定 Skill 并重新检查
 | 任意普通/Default Membership，含 inactive/excluded | 是 |
 | Bot Skill Installation | 是 |
 | 存活 Service Bot 仍可 restart/scale/rollback 的 exact Artifact ref | 是 |
-| 无法读取/解析/完整扫描的 Artifact | 是，返回 UNKNOWN_ARTIFACT |
+| 无法读取/解析/完整扫描的 Artifact | 否；作为 `UNKNOWN_ARTIFACT` diagnostic warning 返回，不计入 blocker |
 | Published Version、Canonical Store、Favorite、Grant、Space Binding | 否 |
 | Source Service Bot 已彻底删除，只剩审计 Artifact | 否 |
 
@@ -891,16 +899,10 @@ Service Artifact 血缘不建新索引表、不 backfill。唯一 `ServiceArtifa
 仅把存活 Service Bot 的 SUCCESS/UPGRADED/RELEASED/VALIDATING 等仍可重放记录作为 blocker；
 Service Bot 仅下线仍可能重新上线，因此仍阻断，必须彻底删除/退役该 Service Bot 才释放血缘。
 
-Offline Application Service 复用 Upgrade Draft 的 exact source 规则：先做只读 impact 预检，
-从 TC Canonical Store 读取 Published Vn（失败时从 SC exact version 修复）并写新 immutable Draft
-Revision，再在一个 DB 事务中锁 Skill、重查 blocker、写 `offline_at/offline_by` 与 Vn+1 Draft
-facts。DB 失败或并发 blocker 出现时清理新 Revision；不存在“已下线但没有 Draft”的半状态。
-
-POST 已 Offline 且 Vn+1 Draft 存在时幂等 `changed=false`。存在 blocker 返回
+Offline Application Service 先做只读 impact 预检，再在一个 DB 事务中锁 Skill、重查 blocker、
+仅写 `offline_at/offline_by`。POST 已 Offline 时幂等 `changed=false`。存在 blocker 返回
 `409 SKILL_OFFLINE_BLOCKED` 与最新 counts。Offline 与新增引用共享 Skill row lock 和
-`offline_at IS NULL` 不变量；Offline 期间新引用返回 `SKILL_OFFLINE`。若用户主动放弃 Offline
-Draft，Skill 仍保持 Offline，可再次调用 `draft/upgrade` 重新创建下一版 Draft；只有新 Version
-PUBLISHED 才恢复上线。
+`offline_at IS NULL` 不变量；Offline 期间新引用和原 Skill 的 `draft/upgrade` 返回 `SKILL_OFFLINE`。
 
 ### 13. Skill Center 映射与精确版本物化
 
@@ -984,7 +986,13 @@ Artifact build 都消费同一已解析值对象；Published Service 历史实�
 
 所有 Skill 都有 `mcp_dependencies`；Local/Repo 从当前兼容投影读取，Center 的权威是 exact
 `ac_skill_version.metadata_json.mcp_dependencies`（或等价版本级列/子表）。Materializer 只有在
-依赖解析、metadata 和所有 Canonical Store 完整后才能 PUBLISHED；扫描失败不能降级为空依赖。
+依赖解析、metadata 和所有 Canonical Store 完整后才能 PUBLISHED。所有由 SkillCenter exact
+download 进入的版本（Public 懒物化/同步和 TeamClaw Space/Team 发布）都以返回的
+`mcpServices` 为版本依赖权威：`null`、缺失或空数组都表示无依赖，非空数组按 `serverCode`
+规范化到 `mcp_dependencies[].code`。SkillCenter 的公共市场或 Team 发布流程已完成安全检查，
+TeamClaw 的 exact Version Materializer 不再重复调用 Scanner，`risk_tags` 固定为空；但仍继续
+执行 SHA256、ZIP 安全、`SKILL.md`、Team name 一致性和 Canonical Store 完整性校验。Local/Repo
+的既有 Scanner 链路不在本规则范围内，保持不变。
 
 SC Public 不接 Webhook。周期巡检与手动同步复用一个新的 exact-version
 `SkillCenterSyncService.sync()` 深模块：
@@ -1031,27 +1039,72 @@ Personal/Desktop 与 Service Draft binding 参与 Track Latest。Published Servi
 #### 14.2 文件型 Service Artifact
 
 本期采用简单方案 A，不新增 `ServiceCapabilitySnapshot`：Service build pre-stage 先经 Reader
-执行一次 `BotRuntimeProjector.project(ProjectionScope.everything())`，随后现有 Artifact Producer
-从已收敛的同一 Runtime 目录打包。接受 build 期间能力并发变化的有限窗口；未来可增加不可变
-Snapshot/fingerprint，但不阻塞本期。
+执行一次 `BotRuntimeProjector.project(ProjectionScope.everything())`，随后按 Artifact Producer
+能力决定是否读取当前 Runtime layout。ARCA/BaaS 文件型 Producer 在每次 build 执行一次 fresh
+`RuntimeLayoutProbeServiceProtocol.probe_bot()`，将 transport evidence 归一化为 typed
+`ServiceArtifactLayoutObservation`，并通过不可变 `ArtifactBuildRequest` 传给 Producer；Teclaw
+Config Artifact 不做文件系统 Probe。Artifact build 禁止读取
+`ac_bot_skill_layout_state.last_probe_evidence` 作为当前物理路径证据，该字段仅属于 Pool
+Reconcile/Recovery。Local/Repo 仍接受既有 build 并发窗口；Center exact capability 在 finalize
+前重新通过 Reader 读取并与 capture 完全比较，发生漂移时本次 build 失败、由既有发布 Retry 重做。
 
 Artifact 只复制 Bot 实际 active Slice：Local 内容随 Artifact 复制；完整 `skills-repo` 和
-`skill-center` corpus 必须排除，只保留实际 active Skill 的精确 symlink。Deploy 时把共享
-Repo/Center OSS 只读挂载到 physical runtime 的 `skills-pool/skills-repo` 与
-`skills-pool/skill-center`；logical Claude Code + coding template 必须由统一 layout resolver
-落到 physical AICoding 路径。
+`skill-center` corpus 必须排除，只保留实际 active Skill 的精确 symlink。Repo/Center 物理
+OSS mount 的唯一 Owner 是 OCB image entrypoint；Avernet 的 Managed BaaS deploy composer
+不得把 `shared_corpora` 或默认 Repo 再转换为 `mount_points`。`shared_corpora` 只承担 Snapshot
+exclusion、exact-link validation 与历史 Artifact 声明，不是运行时 mount 指令。logical
+Claude Code + coding template 必须由统一 layout resolver 落到 physical AICoding 路径。
 
-现有 `skills_manifest schema_version=1` 采用 additive optional `center_skills`，不升 v2：
+文件型 build 的顺序固定为：
+
+```text
+Runtime Project (best effort)
+→ resolve Artifact Producer
+→ ARCA/BaaS fresh Probe once
+→ ArtifactBuildRequest(bot, version, typed observation)
+→ capture exact Center refs + layout generation
+→ rsync Snapshot
+→ validate corpus exclusion + exact Center links
+→ re-read exact Center refs + layout generation
+→ finalize skills_manifest
+```
+
+Probe 总状态与 Center mount 瞬时状态分离：Pool 或包含 Center 的 Legacy build 需要总体
+`READY` 路径证据；无 Center 的 Legacy build 在 `NOT_CAPABLE/TRANSIENT_ERROR/INVALID` 时继续
+使用历史静态 BuildPlan。Center 需要 Engine 声明支持 mapping v3，无 Center 的 Pool 至少支持
+mapping v2。`center_mount=NOT_READY/UNAVAILABLE` 不单独阻止 Artifact，因为 OCB 会在每次启动
+重新 mount；但 Canonical Store exact Version、Snapshot exact links 和 exclusion 仍然 fail closed。
+
+现有 `skills_manifest schema_version=1` 采用 additive optional `center_skills` 与
+`shared_corpora`，不升 v2。兼容矩阵为：Legacy 无 Center 不写 shared；Legacy 有 Center 只写
+`[center]`；新 Pool Artifact 无论是否有 Center 都写有序 `[repo, center]`。历史无
+`skills_manifest`、Legacy 无 shared、以及 Pool 无 Center/无 shared Artifact 保持可读；有
+Center 却无 exact Center delivery、Legacy 声明 Repo delivery 或其它组合均 fail closed。
+
+Legacy + Center 示例：
 
 ```json
 {
   "schema_version": 1,
+  "engine": "openclaw",
+  "active_layout": "legacy",
+  "layout_contract_version": null,
   "center_skills": [
     {
       "runtime_name": "pdf",
       "skill_uuid": "uuid",
       "sc_version_number": "1.0.0",
-      "mcp_dependencies": ["mcp.a"]
+      "mcp_dependencies": [{"code": "mcp.a"}]
+    }
+  ],
+  "shared_corpora": [
+    {
+      "corpus": "center",
+      "runtime_path": "/engine/workspace/skills-pool/skill-center",
+      "store_prefix": "aidesktop/aidesktop_<env>/bolt_shared/skills-center",
+      "layout_contract_version": "skills-pool-p3-v1",
+      "permission": "read_only",
+      "snapshot_policy": "exclude"
     }
   ]
 }
@@ -1060,8 +1113,18 @@ Repo/Center OSS 只读挂载到 physical runtime 的 `skills-pool/skills-repo` �
 按 `runtime_name + skill_uuid + sc_version_number` 稳定排序。Manifest 只承担 exact-version 审计、
 物理 Artifact 校验、Offline 血缘和问题定位，不在 restart 时重新解析 latest 或重建软链。旧 Artifact
 没有 `center_skills` 时按无 Center 的原合同读取。Validator 必须保证：不携带完整共享 Corpus；
-Center link 与 manifest 一一对应并指向 exact version；共享 Store 中 `SKILL.md` 可读；不存在
-未声明/版本漂移/越界 link。
+Center link 与 manifest 一一对应、使用 canonical absolute target 并指向 exact version；共享 Store
+exact Version 可读；不存在未声明/版本漂移/越界 link；Probe 返回的 active/local/repo/center roots
+为当前 Engine、同一 contract 下的 canonical 绝对路径。
+
+构建失败沿用现有 `FAILED + source_status=building` 与 Retry 状态机，并在内部 ext 记录稳定错误码：
+`SERVICE_ARTIFACT_LAYOUT_EVIDENCE_UNAVAILABLE`、
+`SERVICE_ARTIFACT_LAYOUT_EVIDENCE_INVALID`、
+`SERVICE_ARTIFACT_CENTER_STORE_NOT_READY`、
+`SERVICE_ARTIFACT_SNAPSHOT_INVALID`、
+`SERVICE_ARTIFACT_CAPABILITY_CHANGED`。公开 OpenAPI Service Publication facade 继续返回脱敏失败提示；
+存量 BFF 保留已有的详细 `error_message` 兼容合同，Probe 原始 evidence 与异常栈仍只进入内部日志。
+成功重试必须清理旧的 build error 字段。
 
 #### 14.3 Teclaw v4
 
@@ -1233,7 +1296,7 @@ Phase 2 必测：
 - 文件型 manifest v1 additive center_skills、共享 Center mount、排除完整 Corpus、exact symlink
   校验；Teclaw v4 additive Store 与真实 Consumer/offload/re-inline。
 - Offline 覆盖 Draft/Attempt、inactive/default Membership、Installation、inline/offloaded
-  replayable Artifact 与 UNKNOWN_ARTIFACT；无 force、无 SC 下线；成功创建 Vn+1 Draft并可重新发布。
+  replayable Artifact；无 force、无 SC 下线；成功保留原 Vn 为 OFFLINE，精确 Version Copy 创建独立 V1 Draft。
 - Local/Repo/Center 并存、Mapping v2/v3、所有实际 Bot/Engine 走共享合同而无静态拒绝分支。
 
 Phase 2 完成定义：产品主流程 E2E、SC pre 联调、多引擎矩阵、Service Artifact

@@ -28,7 +28,6 @@ from agentclaw.community.core.spaces.repository.models import SpaceModel
 
 
 _UUID = "11111111-1111-4111-8111-111111111111"
-_REV = "22222222-2222-4222-8222-222222222222"
 
 
 class _Database:
@@ -176,22 +175,15 @@ def test_inspection_includes_inactive_membership_installation_and_attempt():
     assert inspection.actor_roles == ("OWNER",)
 
 
-def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_one():
+def test_offline_commit_preserves_published_version_without_creating_a_draft():
     db = _Database()
     space_id, skill_id = _seed(db)
     repo = SpaceSkillOfflineRepository(db)
-    identity = repo.inspect(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="test"
-    ).identity
 
     result = repo.commit(
         space_id=space_id,
         skill_id=skill_id,
         actor_id="owner-1",
-        expected_version_id=identity.latest_version_id,
-        target_version=3,
-        new_locator=f"draft://{_UUID}/v3/{_REV}",
-        new_description="published",
         env="test",
         guard=lambda _inspection: None,
     )
@@ -202,8 +194,9 @@ def test_offline_commit_preserves_published_version_and_creates_editing_vn_plus_
         assert skill.status == "PUBLISHED"
         assert skill.offline_at is not None
         assert skill.offline_by == "owner-1"
-        assert skill.draft_target_version == 3
-        assert skill.draft_status == "EDITING"
+        assert skill.draft_target_version is None
+        assert skill.draft_status is None
+        assert skill.zip_url is None
         assert session.query(SkillVersion).filter_by(skill_id=skill_id).count() == 1
 
 
@@ -211,9 +204,6 @@ def test_transaction_guard_runs_after_locked_db_recheck_and_can_abort():
     db = _Database()
     space_id, skill_id = _seed(db)
     repo = SpaceSkillOfflineRepository(db)
-    identity = repo.inspect(
-        space_id=space_id, skill_id=skill_id, actor_id="owner-1", env="test"
-    ).identity
 
     def _guard(locked):
         assert locked.identity.skill_id == skill_id
@@ -226,10 +216,6 @@ def test_transaction_guard_runs_after_locked_db_recheck_and_can_abort():
             space_id=space_id,
             skill_id=skill_id,
             actor_id="owner-1",
-            expected_version_id=identity.latest_version_id,
-            target_version=3,
-            new_locator=f"draft://{_UUID}/v3/{_REV}",
-            new_description="published",
             env="test",
             guard=_guard,
         )

@@ -19,11 +19,9 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
 )
 from agentclaw.community.core.skill_center.materialization_contract import (
     SkillVersionMaterializerProtocol,
-    SkillVersionScannerProtocol,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
 from agentclaw.community.core.skill_center.services.skill_version_materializer import (
-    SdkSkillVersionScanner,
     SkillVersionMaterializer,
 )
 from agentclaw.community.core.skill_center.skill_center_gateway_service_protocol import (
@@ -58,11 +56,6 @@ class SkillVersionModule(Module):
             to=SkillVersionRepository,
             scope=singleton,
         )
-        binder.bind(
-            SkillVersionScannerProtocol,
-            to=SdkSkillVersionScanner,
-            scope=singleton,
-        )
 
     @singleton
     @provider
@@ -72,7 +65,6 @@ class SkillVersionModule(Module):
         versions: SkillVersionMaterializationRepositoryProtocol,
         gateway: SkillCenterGatewayServiceProtocol,
         http: Annotated[HttpClient, QUALIFIER_GENERAL],
-        scanner: SkillVersionScannerProtocol,
         store: CanonicalCenterVersionStore,
     ) -> SkillVersionMaterializerProtocol:
         return SkillVersionMaterializer(
@@ -80,6 +72,5 @@ class SkillVersionModule(Module):
             gateway=gateway,
             http=http,
             validator=SkillPackageValidator(SkillParser()),
-            scanner=scanner,
             store=store,
         )

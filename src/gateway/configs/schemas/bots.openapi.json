@@ -541,7 +541,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
+            "description": "Stored template snapshot, copied verbatim from the bot's creation input (no field filtering). Null without a template. May carry sensitive values the creator supplied (e.g. 'token', 'bot_template_config.ext_config.thetaKey') and the server-managed 'engine_form' marker — treat as sensitive.",
             "title": "Template Config"
           },
           "template_type": {
@@ -845,7 +845,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional engine-specific properties. Omit for a plain bot; provide template for an application-coding bot."
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot."
           },
           "space_id": {
             "anyOf": [
@@ -874,15 +874,27 @@
         "additionalProperties": false,
         "description": "Engine-specific properties used while creating a bot.",
         "properties": {
-          "template": {
+          "template_config": {
             "additionalProperties": true,
-            "description": "Application-coding template properties. Passed through unchanged to the template validator; platform-managed identity and lifecycle fields are not accepted.",
-            "title": "Template",
+            "description": "Template configuration. Either hand-written application-coding properties, or a template-factory snapshot (identified by template_key + template_uid) echoed verbatim from bot-templates/available-tc-list; platform-managed identity and lifecycle fields are not accepted.",
+            "title": "Template Config",
             "type": "object"
+          },
+          "template_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Template type declared with the config. Required for template-factory snapshots (any value, echoed from available-tc-list); for hand-written application-coding configs omit it or pass 'applicationCoding'.",
+            "title": "Template Type"
           }
         },
         "required": [
-          "template"
+          "template_config"
         ],
         "title": "BotCreateEngineProperties",
         "type": "object"
@@ -1302,7 +1314,7 @@
                 "type": "null"
               }
             ],
-            "description": "Server-projected template snapshot (display-safe subset; secrets never returned). Null without a template. Includes the server-managed 'engine_form' marker for bots whose runtime form differs from the engine (e.g. engine_form='aicoding').",
+            "description": "Stored template snapshot, copied verbatim from the bot's creation input (no field filtering). Null without a template. May carry sensitive values the creator supplied (e.g. 'token', 'bot_template_config.ext_config.thetaKey') and the server-managed 'engine_form' marker — treat as sensitive.",
             "title": "Template Config"
           },
           "template_type": {
@@ -2853,6 +2865,12 @@
       "CreateSpaceRequest": {
         "description": "Request for creating a shared team Space.",
         "properties": {
+          "skipSC": {
+            "default": false,
+            "description": "Whether to skip creating the corresponding Skill Center Team.",
+            "title": "Skipsc",
+            "type": "boolean"
+          },
           "space_name": {
             "description": "Display name for the new Space.",
             "maxLength": 128,
@@ -12683,6 +12701,19 @@
         "title": "ImportSpaceSkillFromGitRequest",
         "type": "object"
       },
+      "InitializePersonalSpaceRequest": {
+        "description": "Optional controls for initializing the current user's personal Space.",
+        "properties": {
+          "skipSC": {
+            "default": false,
+            "description": "Whether to skip creating or binding the corresponding Skill Center Team.",
+            "title": "Skipsc",
+            "type": "boolean"
+          }
+        },
+        "title": "InitializePersonalSpaceRequest",
+        "type": "object"
+      },
       "LifecycleAdvanceRequest": {
         "additionalProperties": false,
         "description": "Target stage for advancing the current service-Bot publication.",
@@ -19046,6 +19077,12 @@
       "SkillActorPermissions": {
         "description": "ACL/Grant qualifications; current command state is checked separately.",
         "properties": {
+          "copy_offline_skill": {
+            "default": false,
+            "description": "Actor may copy an Offline Skill's exact Published Version.",
+            "title": "Copy Offline Skill",
+            "type": "boolean"
+          },
           "create_upgrade_draft": {
             "description": "Actor may request creation of an upgrade Draft.",
             "title": "Create Upgrade Draft",
@@ -19067,7 +19104,7 @@
             "type": "boolean"
           },
           "offline_skill": {
-            "description": "Actor may request recoverable Skill Offline.",
+            "description": "Actor may request terminal local Skill Offline.",
             "title": "Offline Skill",
             "type": "boolean"
           },
@@ -19912,7 +19949,7 @@
         "x-enum-descriptions": [
           "The Skill has a Draft but no Published Version.",
           "The Skill has at least one Published Version and is online.",
-          "The Skill is recoverably offline but remains editable."
+          "The Skill is offline, retains its Published history, and is not editable."
         ],
         "x-enum-varnames": [
           "DRAFT_ONLY",
@@ -20051,7 +20088,7 @@
         "type": "object"
       },
       "SkillOfflineBlockerKind": {
-        "description": "Reason a Space Skill cannot safely enter recoverable Offline.",
+        "description": "Category for an Offline blocker or a diagnostic warning.",
         "enum": [
           "DRAFT",
           "PUBLICATION",
@@ -20068,7 +20105,7 @@
           "An ordinary or Default SkillSet still contains the Skill.",
           "A Bot still has an effective Skill Installation.",
           "A live Service Bot can replay this exact Skill Version.",
-          "Artifact lineage could not be proved complete and valid."
+          "Artifact lineage could not be proved complete and valid; returned only as a non-blocking diagnostic warning."
         ],
         "x-enum-varnames": [
           "DRAFT",
@@ -20088,7 +20125,7 @@
         ]
       },
       "SkillOfflineImpact": {
-        "description": "Complete blocker counts plus one requested page of blocker details.",
+        "description": "Complete explicit blockers plus diagnostic warnings for recoverable Offline.",
         "properties": {
           "blocked": {
             "description": "Whether at least one blocker exists.",
@@ -20099,7 +20136,7 @@
             "additionalProperties": {
               "type": "integer"
             },
-            "description": "Non-zero blocker totals keyed by blocker category.",
+            "description": "Non-zero explicit blocker totals keyed by blocker category.",
             "title": "Counts",
             "type": "object"
           },
@@ -20112,10 +20149,18 @@
             "type": "array"
           },
           "total": {
-            "description": "Total blockers across all categories.",
+            "description": "Total explicit blockers across all categories.",
             "minimum": 0.0,
             "title": "Total",
             "type": "integer"
+          },
+          "warnings": {
+            "description": "Diagnostic findings that did not prove a live reference and therefore do not block Offline.",
+            "items": {
+              "$ref": "#/components/schemas/SkillOfflineImpactItem"
+            },
+            "title": "Warnings",
+            "type": "array"
           }
         },
         "required": [
@@ -20128,7 +20173,7 @@
         "type": "object"
       },
       "SkillOfflineImpactItem": {
-        "description": "One live fact that prevents recoverable Offline.",
+        "description": "One explicit blocker or diagnostic warning for recoverable Offline.",
         "properties": {
           "display_name": {
             "description": "Human-readable blocker label.",
@@ -20154,28 +20199,36 @@
         "type": "object"
       },
       "SkillOfflineResult": {
-        "description": "Recoverable Offline state and the editable next-version Draft.",
+        "description": "Terminal local Offline result for the existing Skill.",
         "properties": {
           "changed": {
             "description": "Whether this request newly moved the Skill Offline.",
             "title": "Changed",
             "type": "boolean"
           },
-          "draft": {
-            "$ref": "#/components/schemas/SkillDraftSummary",
-            "description": "Editable Vn+1 Draft retained for recovery publication."
-          },
           "lifecycle_status": {
             "const": "OFFLINE",
             "description": "Current recoverable lifecycle state.",
             "title": "Lifecycle Status",
             "type": "string"
+          },
+          "offline_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UTC time at which Offline was recorded.",
+            "title": "Offline At"
           }
         },
         "required": [
           "changed",
-          "lifecycle_status",
-          "draft"
+          "lifecycle_status"
         ],
         "title": "SkillOfflineResult",
         "type": "object"
@@ -21410,7 +21463,7 @@
                 "type": "null"
               }
             ],
-            "description": "UTC recoverable Offline time, or null.",
+            "description": "UTC terminal local Offline time, or null.",
             "title": "Offline At"
           },
           "offline_by": {
@@ -21443,7 +21496,8 @@
             "description": "Original Space Skill creation source.",
             "enum": [
               "FOLDER",
-              "GIT"
+              "GIT",
+              "COPY"
             ],
             "title": "Source",
             "type": "string"
@@ -39776,6 +39830,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/InitializePersonalSpaceRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -47706,6 +47777,225 @@
         ]
       }
     },
+    "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy": {
+      "post": {
+        "operationId": "copy_offline_space_skill_version_openapi_v1_bots_spaces__space_id__skills__skill_id__versions__version__copy_post",
+        "parameters": [
+          {
+            "description": "Space primary identifier.",
+            "in": "path",
+            "name": "space_id",
+            "required": true,
+            "schema": {
+              "description": "Space primary identifier.",
+              "minimum": 1,
+              "title": "Space Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Space Skill primary identifier.",
+            "in": "path",
+            "name": "skill_id",
+            "required": true,
+            "schema": {
+              "description": "Space Skill primary identifier.",
+              "minimum": 1,
+              "title": "Skill Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Business version ordinal.",
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "description": "Business version ordinal.",
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable identity for replaying this creation command.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Stable identity for replaying this creation command.",
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SpaceSkillDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The authenticated user lacks the required space membership or role"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Copy Offline Space Skill Version",
+        "tags": [
+          "space-skills"
+        ]
+      }
+    },
     "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files": {
       "get": {
         "operationId": "get_space_skill_version_file_tree_openapi_v1_bots_spaces__space_id__skills__skill_id__versions__version__files_get",
@@ -51521,7 +51811,7 @@
     "/openapi/v1/bots/{bot_id}/auth-status": {
       "get": {
         "deprecated": true,
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nOn the 202 create flow the bot is only actually created here, so the\ncaller must re-supply the attributes it created with — the optional query\nparameters mirror the create body and are forwarded to completion. Omit\nthem and the bot is created with defaults that contradict what was\nrequested, so always echo back engine, cluster_name, bot_name, bot_desc\nand bot_type when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, and the\nsame personal/service restriction on bot_type.\n\nThis retired GET spelling is plain-bot only: it carries no template\nparameters, so an application-coding creation must be completed through the\nPOST at the same path, which accepts the nested 'engine_properties.template_config' object.\nPolling an application-coding creation here would complete it as a plain bot,\nwhich is not supported.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.\n\nDeprecated: use POST /openapi/v1/bots/{bot_id}/auth-status instead.",
         "operationId": "get_bot_auth_status_openapi_v1_bots__bot_id__auth_status_get",
         "parameters": [
           {
@@ -68987,6 +69277,214 @@
           }
         },
         "summary": "Download File",
+        "tags": [
+          "resources"
+        ]
+      }
+    },
+    "/openapi/v1/bots/{bot_id}/resources/download-dir": {
+      "get": {
+        "description": "Download a whole directory as a zip archive, addressed by path.\n\nThe path may name any directory; omit it to download the entire\nworkspace. Raw bytes, not an envelope — the body is the archive.\n\nThe archive is built on disk before the response starts, so a walk\nfailure mid-way is still a clean error envelope, never a 200 with a\npartial zip. Exceeding the directory download caps is answered with\na 413.",
+        "operationId": "download_directory_openapi_v1_bots__bot_id__resources_download_dir_get",
+        "parameters": [
+          {
+            "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+            "in": "path",
+            "name": "bot_id",
+            "required": true,
+            "schema": {
+              "description": "The bot this operation addresses — its `bot_id` as issued at creation and returned by the bots listing, e.g. `20260813_a7k2m9p1`.",
+              "title": "Bot Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace-relative path of the folder to download, e.g. 'docs/spec' — exactly as returned in a listing entry's `path`. Omit it to download the entire workspace. A leading slash is tolerated; '..' segments are refused (400).",
+            "in": "query",
+            "name": "path",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Workspace-relative path of the folder to download, e.g. 'docs/spec' — exactly as returned in a listing entry's `path`. Omit it to download the entire workspace. A leading slash is tolerated; '..' segments are refused (400).",
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "The end user this request acts for. Every read and write is scoped to it. A caller authenticated as a person must name themselves; naming another user is refused (403). An application calling with its own credential and no end user names the user who authorized it, and reaches only what that user has authorized it for — anything else is answered exactly as if it did not exist (404).",
+              "minLength": 1,
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/zip": {}
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400000,
+                  "message": "Bad Request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401000,
+                  "message": "Unauthorized",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403000,
+                  "message": "Forbidden",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The user_id names a user the authenticated caller may not act for"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404000,
+                  "message": "Not found",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not found — also returned when the resource exists but does not belong to the caller"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 409000,
+                  "message": "Conflict",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflicts with current state"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413000,
+                  "message": "Directory too large to download",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The directory exceeds the download caps: 100 MB per file, 5000 files, 500 MB in total."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 422000,
+                  "message": "Invalid request",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request failed validation"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500000,
+                  "message": "Internal Server Error",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 502000,
+                  "message": "Bad Gateway",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Upstream service error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 503000,
+                  "message": "Service Unavailable",
+                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Temporarily unavailable"
+          }
+        },
+        "summary": "Download Directory",
         "tags": [
           "resources"
         ]

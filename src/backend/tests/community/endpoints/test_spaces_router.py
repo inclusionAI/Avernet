@@ -184,6 +184,7 @@ def _seed_space_skills(world) -> None:
                         "delete_draft": True,
                         "create_upgrade_draft": True,
                         "offline_skill": True,
+                        "copy_offline_skill": True,
                         "manage_grants": True,
                         "transfer_owner": True,
                         "request_edit_access": False,
@@ -239,6 +240,7 @@ def _space_skill_detail_record() -> dict:
                 "delete_draft": True,
                 "create_upgrade_draft": True,
                 "offline_skill": True,
+                "copy_offline_skill": True,
                 "manage_grants": True,
                 "transfer_owner": True,
                 "request_edit_access": False,
@@ -365,6 +367,21 @@ def _seed_space_skill_version_reads(world) -> None:
                         },
                     }
                 ],
+            ),
+        },
+    )
+
+
+def _seed_space_skill_copy(world) -> None:
+    _seed_space_skill_version_reads(world)
+    _seed_space_skill_draft_commands(world)
+    _seed_space_skill_creation_and_detail(world)
+    bind_overrides(
+        world,
+        SpaceSkillApplicationServiceProtocol,
+        {
+            "copy_published_version": lambda _self, **_kwargs: SpaceSkillCreationOutcome(
+                skill_id=51, created=True
             ),
         },
     )
@@ -541,6 +558,17 @@ _SPACE_SKILL_LOOP_CASES = (
             headers=_principal_headers(),
         ),
         200,
+    ),
+    (
+        "POST",
+        "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy",
+        _seed_space_skill_copy,
+        CaseInput(
+            path_params={"space_id": 1, "skill_id": 51, "version": 1},
+            query_params={"user_id": _USER_ID},
+            headers={**_principal_headers(), "Idempotency-Key": "copy-1"},
+        ),
+        201,
     ),
     (
         "POST",

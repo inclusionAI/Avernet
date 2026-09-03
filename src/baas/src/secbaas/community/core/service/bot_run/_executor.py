@@ -332,6 +332,22 @@ class BotRunRequestExecutor:
             stream,
         )
 
+        # eval 对话 session 日志与保护性校验 — 委托 Plugin（与 Runner 路径对称）
+        eval_id = metadata.get("eval_id")
+        if eval_id:
+            logger.info(
+                "[BotRunExecutor] eval chat session: eval_id=%s, bot_id=%s",
+                eval_id,
+                run.bot_id,
+            )
+            if self._eval_session_log is not None:
+                self._eval_session_log.log_eval_session(
+                    eval_id=eval_id,
+                    bot_id=run.bot_id,
+                    session_id=session_id,
+                    method="execute",
+                )
+
         try:
             if request_type == "inject":
                 await self._do_inject(

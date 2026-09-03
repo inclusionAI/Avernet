@@ -651,10 +651,8 @@ class TestOfflinePublish:
         mock_repo.update_status.assert_called_once_with(
             1, PublishStatus.DRAFT, PublishStatus.VALIDATING
         )
-        # 取消预发既回退状态，也用持久任务销毁 verify 运行时。
-        mock_publish_flow_service.enqueue_offline_destroy.assert_called_once_with(
-            publish_id=1, stage=PublishStage.VERIFY, operator="system"
-        )
+        # 回退草稿只更新发布单状态，不销毁现有 verify 运行时。
+        mock_publish_flow_service.enqueue_offline_destroy.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_offline_publish_not_found(self):

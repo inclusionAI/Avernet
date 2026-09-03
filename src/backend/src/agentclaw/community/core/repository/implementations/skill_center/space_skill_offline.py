@@ -39,7 +39,6 @@ from agentclaw.community.core.repository.implementations.skill_center.skill_vers
 )
 from agentclaw.community.core.skill_center.errors import (
     DraftNotFoundError,
-    DraftRevisionConflictError,
 )
 from agentclaw.community.core.spaces.repository.models import SpaceModel
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -73,10 +72,6 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
         space_id: int,
         skill_id: int,
         actor_id: str,
-        expected_version_id: int,
-        target_version: int,
-        new_locator: str,
-        new_description: str | None,
         env: str,
         guard: Callable[[OfflineInspection], None],
     ) -> OfflineCommit:
@@ -89,40 +84,21 @@ class SpaceSkillOfflineRepository(SpaceSkillOfflineRepositoryProtocol):
                 env=env,
                 lock=True,
             )
-            identity = inspection.identity
             skill = session.query(Skill).filter(Skill.id == skill_id).one()
-            if (
-                skill.offline_at is not None
-                and skill.draft_status is not None
-                and skill.zip_url
-                and skill.draft_target_version is not None
-            ):
+            if skill.offline_at is not None:
                 return OfflineCommit(
                     changed=False,
-                    target_version=int(skill.draft_target_version),
-                    status=str(skill.draft_status),
-                    locator=str(skill.zip_url),
+                    offline_at=skill.offline_at,
                 )
 
             guard(inspection)
-            if identity.latest_version_id != expected_version_id:
-                raise DraftRevisionConflictError("latest Published Version changed")
-            if target_version != identity.latest_version_ordinal + 1:
-                raise DraftRevisionConflictError("Offline Draft target changed")
-
-            skill.offline_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            offline_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            skill.offline_at = offline_at
             skill.offline_by = actor_id
-            skill.zip_url = new_locator
-            skill.draft_target_version = target_version
-            skill.draft_status = "EDITING"
-            skill.draft_description = new_description
-            skill.draft_source_kind = "PUBLISHED_VERSION"
             session.flush()
             return OfflineCommit(
                 changed=True,
-                target_version=target_version,
-                status="EDITING",
-                locator=new_locator,
+                offline_at=offline_at,
             )
 
     def _inspection(

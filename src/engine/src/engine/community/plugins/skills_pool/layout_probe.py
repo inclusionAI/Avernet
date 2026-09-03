@@ -20,11 +20,14 @@ from engine.community.core.skills.layout_planner import (
     MAPPING_V3_CONTRACT_VERSION,
     LayoutIdentity,
     RuntimeLayoutContext,
+    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
     resolve_filesystem_skill_layout,
     resolved_filesystem_layout_evidence,
 )
-from engine.community.core.skills.layout_planner import (
-    ResolvedFilesystemLayoutPlan as _FilesystemPoolLayout,
+from engine.community.plugins.skills_pool.center_mount import (
+    CenterMountInspection,
+    CenterMountStatus,
+    inspect_center_mount,
 )
 
 
@@ -58,6 +61,7 @@ def _ready_evidence(
     layout: _FilesystemPoolLayout,
     marker: dict[str, Any],
     checks: dict[str, bool],
+    center_mount: CenterMountInspection,
     mapping_contract_version: str | None,
     activation_state: str | None = None,
 ) -> dict[str, Any]:
@@ -75,13 +79,14 @@ def _ready_evidence(
             }
         )
     if mapping_contract_version is not None:
+        supported_mapping_contract_versions = [MAPPING_CONTRACT_VERSION]
+        if center_mount.status is CenterMountStatus.READY:
+            supported_mapping_contract_versions.append(MAPPING_V3_CONTRACT_VERSION)
         evidence.update(
             {
                 "mapping_contract_version": mapping_contract_version,
-                "supported_mapping_contract_versions": [
-                    MAPPING_CONTRACT_VERSION,
-                    MAPPING_V3_CONTRACT_VERSION,
-                ],
+                "supported_mapping_contract_versions": supported_mapping_contract_versions,
+                "center_mount": center_mount.to_evidence(),
                 "resolved_layout": resolved_filesystem_layout_evidence(
                     layout,
                     local_root=layout.pool_local,
@@ -467,6 +472,7 @@ def inspect_runtime_layout(
     mapping_contract_version: str | None = MAPPING_CONTRACT_VERSION,
     home: Path = Path("/home/admin"),
     repo_is_mounted: Callable[[Path], bool] = os.path.ismount,
+    center_is_mounted: Callable[[Path], bool] | None = None,
     repo_delivery: RepoDelivery | None = None,
 ) -> RuntimeLayoutInspection:
     """Inspect local runtime facts; this function never mutates the filesystem."""
@@ -675,6 +681,10 @@ def inspect_runtime_layout(
             error=error,
             preparation_id=preparation_id,
         )
+    center_mount = inspect_center_mount(
+        layout.pool_center,
+        is_mounted=center_is_mounted or repo_is_mounted,
+    )
     active_marker: dict[str, Any] | None = None
     try:
         active_marker_stat = layout.active_marker.lstat()
@@ -826,6 +836,9 @@ def inspect_runtime_layout(
                 active_marker["activation_state"] == "active"
             ),
         }
+        if center_mount.status is CenterMountStatus.READY:
+            active_checks["pool_center_mounted"] = True
+            active_checks["pool_center_readable"] = True
         if (
             engine in {"aicoding", "hermes"}
             and active_marker["activation_state"] == "active"
@@ -842,6 +855,7 @@ def inspect_runtime_layout(
                 activation_state=active_marker["activation_state"],
                 mapping_contract_version=mapping_contract_version,
                 checks=active_checks,
+                center_mount=center_mount,
             ),
         )
     if engine == "claude_code" and effective_repo_delivery is RepoDelivery.MOUNT:
@@ -986,6 +1000,9 @@ def inspect_runtime_layout(
         "pool_repo_readable": True,
         "managed_active_entries_valid": True,
     }
+    if center_mount.status is CenterMountStatus.READY:
+        checks["pool_center_mounted"] = True
+        checks["pool_center_readable"] = True
     if engine == "openclaw" and effective_repo_delivery is RepoDelivery.MOUNT:
         checks["legacy_repo_bridge_valid"] = True
     else:
@@ -1007,6 +1024,7 @@ def inspect_runtime_layout(
             marker=marker,
             mapping_contract_version=mapping_contract_version,
             checks=checks,
+            center_mount=center_mount,
         ),
     )
 

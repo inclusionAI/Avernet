@@ -9,6 +9,11 @@ import pytest
 from agentclaw.community.core.service_bot.services.deploy.arca_snapshot_producer import (
     ArcaSnapshotProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+    ServiceArtifactLayoutObservation,
+    ServiceArtifactResolvedLayout,
+)
 from agentclaw.community.core.service_bot.services.deploy.service_skills_manifest import (
     ResolvedSharedCorpusDelivery,
     ServiceSkillsManifestBuilder,
@@ -24,6 +29,13 @@ from agentclaw.community.core.skills_pool.types import (
     SkillLayoutPhase,
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+    RuntimeLayoutProbeStatus,
+)
+from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
+    MAPPING_CONTRACT_VERSION,
+    MAPPING_V3_CONTRACT_VERSION,
+)
 
 
 _CENTER_STORE_PREFIX = "aidesktop/aidesktop_dev/bolt_shared/skills-center"
@@ -58,6 +70,46 @@ def _resolved_layout(engine: str, pool_center: str) -> dict[str, str]:
     }
 
 
+def _ready_observation(
+    engine: str,
+    pool_center: str | None = None,
+) -> ServiceArtifactLayoutObservation:
+    center = pool_center or {
+        "openclaw": "/home/admin/.openclaw/workspace/skills-pool/skill-center",
+        "claude_code": "/home/admin/.claude_code/workspace/skills-pool/skill-center",
+        "aicoding": "/home/admin/.aicoding/workspace/skills-pool/skill-center",
+        "hermes": "/home/admin/.hermes/workspace/skills-pool/skill-center",
+    }[engine]
+    resolved = _resolved_layout(engine, center)
+    return ServiceArtifactLayoutObservation(
+        status=RuntimeLayoutProbeStatus.READY,
+        engine=engine,
+        layout_contract_version="skills-pool-p3-v1",
+        resolved_layout=ServiceArtifactResolvedLayout(
+            engine=engine,
+            layout_contract_version="skills-pool-p3-v1",
+            active_root=resolved["active_root"],
+            local_root=resolved["local_root"],
+            repo_root=resolved["repo_root"],
+            center_root=resolved["pool_center"],
+        ),
+        supported_mapping_contract_versions=frozenset(
+            {MAPPING_CONTRACT_VERSION, MAPPING_V3_CONTRACT_VERSION}
+        ),
+        center_mount_status="READY",
+        reason=None,
+    )
+
+
+def _request(bot: dict[str, Any], version: int) -> ArtifactBuildRequest:
+    engine = str(bot.get("active_engine") or "openclaw")
+    return ArtifactBuildRequest.create(
+        bot=bot,
+        version=version,
+        layout_observation=_ready_observation(engine),
+    )
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("bot", "runtime_engine", "runtime_path"),
@@ -85,24 +137,8 @@ def _resolved_layout(engine: str, pool_center: str) -> dict[str, str]:
 def test_shared_center_delivery_uses_engine_runtime_evidence(
     bot, runtime_engine, runtime_path
 ) -> None:
-    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
-    state = BotSkillLayoutState(
-        scope=scope,
-        active_layout=SkillLayout.POOL,
-        target_layout=None,
-        phase=SkillLayoutPhase.POOL_ACTIVE,
-        migration_generation="generation-1",
-        persisted=True,
-        layout_contract_version="skills-pool-p3-v1",
-        last_probe_result="READY",
-        last_probe_evidence={
-            "resolved_layout": _resolved_layout(runtime_engine, runtime_path)
-        },
-    )
-
-    delivery = ResolvedSharedCorpusDelivery.center_from_state(
-        state=state,
-        bot=bot,
+    delivery = ResolvedSharedCorpusDelivery.center_from_observation(
+        observation=_ready_observation(runtime_engine, runtime_path),
         store_prefix=_CENTER_STORE_PREFIX,
     )
 
@@ -112,23 +148,8 @@ def test_shared_center_delivery_uses_engine_runtime_evidence(
 @pytest.mark.unit
 def test_shared_repo_delivery_uses_engine_runtime_evidence() -> None:
     pool_center = "/home/admin/.openclaw/workspace/skills-pool/skill-center"
-    state = BotSkillLayoutState(
-        scope=BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1"),
-        active_layout=SkillLayout.POOL,
-        target_layout=None,
-        phase=SkillLayoutPhase.POOL_ACTIVE,
-        migration_generation="generation-1",
-        persisted=True,
-        layout_contract_version="skills-pool-p3-v1",
-        last_probe_result="READY",
-        last_probe_evidence={
-            "resolved_layout": _resolved_layout("openclaw", pool_center)
-        },
-    )
-
-    delivery = ResolvedSharedCorpusDelivery.repo_from_state(
-        state=state,
-        bot={"active_engine": "openclaw"},
+    delivery = ResolvedSharedCorpusDelivery.repo_from_observation(
+        observation=_ready_observation("openclaw", pool_center),
         store_prefix=_REPO_STORE_PREFIX,
     )
 
@@ -138,43 +159,18 @@ def test_shared_repo_delivery_uses_engine_runtime_evidence() -> None:
 
 
 @pytest.mark.unit
-def test_shared_center_delivery_rejects_missing_or_mismatched_evidence() -> None:
-    scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
-    state = BotSkillLayoutState(
-        scope=scope,
-        active_layout=SkillLayout.POOL,
-        target_layout=None,
-        phase=SkillLayoutPhase.POOL_ACTIVE,
-        migration_generation="generation-1",
-        persisted=True,
-        layout_contract_version="skills-pool-p3-v1",
-        last_probe_result="READY",
-        last_probe_evidence={
-            "resolved_layout": {
-                "engine": "openclaw",
-                "layout_contract_version": "skills-pool-p3-v1",
-            }
-        },
-    )
-
-    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
-        ResolvedSharedCorpusDelivery.center_from_state(
-            state=state,
-            bot={"active_engine": "openclaw"},
-            store_prefix=_CENTER_STORE_PREFIX,
-        )
-    with pytest.raises(ServiceSkillsManifestError, match="matching READY"):
-        ResolvedSharedCorpusDelivery.center_from_state(
-            state=replace(
-                state,
-                last_probe_evidence={
-                    "resolved_layout": _resolved_layout(
-                        "hermes",
-                        "/home/admin/.hermes/workspace/skills-pool/skill-center",
-                    )
-                },
+def test_shared_center_delivery_rejects_missing_evidence() -> None:
+    with pytest.raises(ServiceSkillsManifestError, match="missing its runtime path"):
+        ResolvedSharedCorpusDelivery.center_from_observation(
+            observation=ServiceArtifactLayoutObservation(
+                status=RuntimeLayoutProbeStatus.INVALID,
+                engine="openclaw",
+                layout_contract_version="skills-pool-p3-v1",
+                resolved_layout=None,
+                supported_mapping_contract_versions=frozenset(),
+                center_mount_status=None,
+                reason="invalid",
             ),
-            bot={"active_engine": "openclaw"},
             store_prefix=_CENTER_STORE_PREFIX,
         )
 
@@ -208,7 +204,7 @@ class _NoSkillsManifestBuilder(ServiceSkillsManifestBuilder):
     def __init__(self) -> None:
         pass
 
-    def capture(self, *, bot: dict[str, Any]) -> None:
+    def capture(self, *, bot: dict[str, Any], layout_observation) -> None:
         return None
 
 
@@ -216,7 +212,9 @@ class _NoSkillsManifestBuilder(ServiceSkillsManifestBuilder):
 def test_passes_bot_and_version_through_to_build() -> None:
     stub = _RecordingBuild({"success": True})
     bot = {"bot_id": "b1", "entity_id": "u1"}
-    ArcaSnapshotProducer(stub, _NoSkillsManifestBuilder()).produce_artifact(bot, 7)
+    ArcaSnapshotProducer(stub, _NoSkillsManifestBuilder()).produce_artifact(
+        _request(bot, 7)
+    )
     assert stub.calls == [(bot, 7)]
 
 
@@ -234,7 +232,7 @@ def test_maps_success_and_both_paths_onto_ext() -> None:
     )
     artifact = ArcaSnapshotProducer(
         stub, _NoSkillsManifestBuilder()
-    ).produce_artifact({}, 3)
+    ).produce_artifact(_request({}, 3))
     assert artifact.success is True
     assert artifact.message == ""
     assert artifact.ext == {
@@ -248,7 +246,7 @@ def test_failed_build_propagates_success_false_and_message() -> None:
     stub = _RecordingBuild({"success": False})
     artifact = ArcaSnapshotProducer(
         stub, _NoSkillsManifestBuilder()
-    ).produce_artifact({}, 1)
+    ).produce_artifact(_request({}, 1))
     assert artifact.success is False
     assert artifact.message == "构建失败"
     assert artifact.ext == {}
@@ -261,7 +259,7 @@ def test_missing_paths_are_omitted_from_ext() -> None:
     stub = _RecordingBuild({"success": True, "migration_path": "/only/mig"})
     artifact = ArcaSnapshotProducer(
         stub, _NoSkillsManifestBuilder()
-    ).produce_artifact({}, 1)
+    ).produce_artifact(_request({}, 1))
     assert artifact.ext == {"migration_path": "/only/mig"}
 
 
@@ -313,13 +311,12 @@ def test_pool_build_freezes_the_draft_layout_into_one_versioned_artifact(
             _REPO_STORE_PREFIX,
         ),
     ).produce_artifact(
-        {
+        _request({
             "bot_id": "b1",
             "entity_id": "u1",
             "env": "dev",
             "active_engine": "openclaw",
-        },
-        7,
+        }, 7),
     )
 
     assert artifact.ext["skills_manifest"] == {
@@ -427,13 +424,12 @@ def test_pool_artifact_rejects_undeclared_center_link(tmp_path) -> None:
         match="Center links do not match the frozen exact manifest",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            7,
+            }, 7),
         )
 
 
@@ -499,13 +495,12 @@ def test_center_link_outside_active_root_cannot_satisfy_manifest(tmp_path) -> No
         match="Center links do not match the frozen exact manifest",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            7,
+            }, 7),
         )
 
 
@@ -588,14 +583,13 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
     )
 
     artifact = producer.produce_artifact(
-        {
+        _request({
             "bot_id": "b1",
             "owner_id": "u1",
             "entity_id": "u1",
             "env": "dev",
             "active_engine": "openclaw",
-        },
-        7,
+        }, 7),
     )
 
     assert artifact.ext["skills_manifest"]["schema_version"] == 1
@@ -637,19 +631,18 @@ def test_service_manifest_v1_adds_sorted_exact_center_skills(tmp_path) -> None:
         "1.0.0",
         "2.0.0",
     ]
-    assert reader.calls == [
-        {
+    expected_reader_call = {
+        "bot_id": "b1",
+        "owner_id": "u1",
+        "bot": {
             "bot_id": "b1",
             "owner_id": "u1",
-            "bot": {
-                "bot_id": "b1",
-                "owner_id": "u1",
-                "entity_id": "u1",
-                "env": "dev",
-                "active_engine": "openclaw",
-            },
-        }
-    ]
+            "entity_id": "u1",
+            "env": "dev",
+            "active_engine": "openclaw",
+        },
+    }
+    assert reader.calls == [expected_reader_call, expected_reader_call]
 
 
 @pytest.mark.unit
@@ -696,7 +689,8 @@ def test_center_service_build_fails_when_exact_store_version_is_missing() -> Non
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            }
+            },
+            layout_observation=_ready_observation("openclaw"),
         )
 
 
@@ -758,13 +752,12 @@ def test_layout_is_captured_before_physical_build_starts(tmp_path) -> None:
         match="draft Skills layout changed during service build",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            8,
+            }, 8),
         )
 
 
@@ -812,13 +805,12 @@ def test_build_rejects_non_terminal_layout_before_physical_snapshot(
         match="terminal Skills layout state",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            8,
+            }, 8),
         )
 
     assert build.calls == []
@@ -893,13 +885,12 @@ def test_build_rejects_phase_or_generation_drift_after_physical_snapshot(
         match="draft Skills layout changed during service build",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            8,
+            }, 8),
         )
 
 
@@ -959,13 +950,12 @@ def test_legacy_build_rejects_contract_drift_after_physical_snapshot(
         match="draft Skills layout changed during service build",
     ):
         producer.produce_artifact(
-            {
+            _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "openclaw",
-            },
-            8,
+            }, 8),
         )
 
 
@@ -1046,13 +1036,12 @@ def test_legacy_draft_builds_a_legacy_artifact_without_pool_contract(
     )
 
     artifact = producer.produce_artifact(
-        {
+        _request({
             "bot_id": "legacy-bot",
             "entity_id": "u1",
             "env": "dev",
             "active_engine": "openclaw",
-        },
-        1,
+        }, 1),
     )
 
     frozen = artifact.ext["skills_manifest"]
@@ -1098,13 +1087,12 @@ def test_aicoding_service_engine_uses_the_shared_manifest_contract() -> None:
     )
 
     artifact = producer.produce_artifact(
-        {
+        _request({
             "bot_id": "b1",
             "entity_id": "u1",
             "env": "dev",
             "active_engine": "aicoding",
-        },
-        1,
+        }, 1),
     )
 
     assert artifact.ext["skills_manifest"]["engine"] == "aicoding"
@@ -1151,13 +1139,12 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
     )
 
     artifact = producer.produce_artifact(
-        {
+        _request({
             "bot_id": "b1",
             "entity_id": "u1",
             "env": "dev",
             "active_engine": "hermes",
-        },
-        1,
+        }, 1),
     )
 
     assert artifact.ext["skills_manifest"] == {
@@ -1188,7 +1175,7 @@ def test_hermes_pool_service_manifest_uses_the_shared_contract() -> None:
 
 
 @pytest.mark.unit
-def test_hermes_legacy_publish_fails_without_ready_engine_evidence() -> None:
+def test_hermes_legacy_publish_without_center_uses_historical_build_plan() -> None:
     scope = BotSkillLayoutScope(env="dev", entity_id="u1", bot_id="b1")
     build = _RecordingBuild(
         {
@@ -1208,15 +1195,15 @@ def test_hermes_legacy_publish_fails_without_ready_engine_evidence() -> None:
         ),
     )
 
-    with pytest.raises(ServiceSkillsManifestError, match="READY Pool runtime"):
-        producer.produce_artifact(
-            {
+    artifact = producer.produce_artifact(
+        _request({
                 "bot_id": "b1",
                 "entity_id": "u1",
                 "env": "dev",
                 "active_engine": "hermes",
-            },
-            1,
-        )
+            }, 1),
+    )
 
-    assert build.calls == []
+    assert artifact.success is True
+    assert artifact.ext["skills_manifest"]["active_layout"] == "legacy"
+    assert build.calls
