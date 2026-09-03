@@ -314,14 +314,10 @@ def _prepare_create(
     if spec.engine_properties:
         prepared = _prepare_with_engine_strategy(spec, context)
     elif spec.template_type == "applicationCoding":
-        # Core-only compatibility representation: the "template_config" key's
-        # presence preserves the legacy intent even when the caller
-        # intentionally omitted the config, so both input shapes share the
-        # Strategy's gate.
+        # Keeping the "template_config" key preserves legacy intent when the
+        # caller omits the config, so both input shapes share the Strategy gate.
         prepared = _prepare_with_engine_strategy(
-            replace(
-                spec, engine_properties={"template_config": spec.template_config}
-            ),
+            replace(spec, engine_properties={"template_config": spec.template_config}),
             context,
         )
     else:
