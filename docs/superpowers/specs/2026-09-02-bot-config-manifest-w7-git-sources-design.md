@@ -70,8 +70,8 @@ W7 的核心。一个模块、一个公开协议、一个 subprocess 实现。
 
 - 源声明的 `auth` 指向 W3 凭证服务的 `header` 类型凭证
   （X1 已关闭的决定：专用机器账号 + read_repository 令牌，HTTP Basic）。
-- 注入方式：`git -c http.<url>.extraHeader="Authorization: Basic …"`。
-  **凭证绝不进 URL**、不进 argv 之外的环境、不进日志——错误信息里只出现
+- 注入方式（`fix/w7-review-fixes` 修订）：`GIT_CONFIG_KEY_n=http.extraHeader` / `GIT_CONFIG_VALUE_n` **env** 注入。
+  **凭证绝不进 URL、不进 argv（ps 对所有本机用户可见）、不进日志**——错误信息里只出现
   凭证名，沿用 `EntryFetchError` 的安全属性。
 - 凭证在 fetch 前经 W3 前缀授权（`git` URL 就是授权对象），与 URL 源同一套政策。
 

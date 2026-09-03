@@ -203,6 +203,24 @@ class BotConfigManifestApplyRepository(BotConfigManifestApplyRepositoryProtocol)
             )
             return row.to_record() if row is not None else None
 
+    def recent(
+        self, *, env: str, entity_id: str, bot_id: str, limit: int
+    ) -> list[BotConfigManifestApplyRecord]:
+        """The newest ``limit`` applies, newest first — the bounded walk the
+        strict-mode baselines read back through: an apply that failed to
+        resolve a source carries no resolution for it, so its record lives
+        further back in this window.
+        """
+        with self._db.orm_session() as db:
+            rows = (
+                db.query(self._Apply)
+                .filter(*self._match(env=env, entity_id=entity_id, bot_id=bot_id))
+                .order_by(self._Apply.id.desc())
+                .limit(limit)
+                .all()
+            )
+            return [row.to_record() for row in rows]
+
 
 class BotConfigManifestApplyLockRepository(
     BotConfigManifestApplyLockRepositoryProtocol

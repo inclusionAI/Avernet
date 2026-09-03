@@ -90,6 +90,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
     git_receipt_url,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    FETCH_ENTRY_LIMITS,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchRefusedError,
@@ -160,22 +163,31 @@ class GitEntrySource:
     wire; the git road hands back a proven tree and lets the materialiser
     read it, because what "the entry's bytes" are (a file? a package? a
     canonical zip?) is a *category* question the fetch layer must not answer.
+
+    ``file_limit`` is the category's per-entry byte cap (the same
+    ``FETCH_ENTRY_LIMITS`` number the URL road enforces at the transport) —
+    the tree's readers refuse a member by its *declared* size against it.
+    ``auth`` is the credential **name** the acquisition rode, threaded to the
+    receipts so W11's lineage attributes git-sourced bytes the way it does
+    URL-sourced ones.
     """
 
     checkout: GitCheckout
     source_url: str
     subpath: Optional[str]
     moved_from: Optional[str]
+    auth: Optional[str] = None
+    file_limit: Optional[int] = None
 
     def files(self) -> list[tuple[str, bytes]]:
         try:
-            return self.checkout.files(self.subpath)
+            return self.checkout.files(self.subpath, file_limit=self.file_limit)
         except FetchRefusedError as exc:
             raise EntryFetchError(str(exc)) from exc
 
     def read_file(self) -> bytes:
         try:
-            return self.checkout.read_file(self.subpath)
+            return self.checkout.read_file(self.subpath, file_limit=self.file_limit)
         except FetchRefusedError as exc:
             raise EntryFetchError(str(exc)) from exc
 
@@ -497,6 +509,27 @@ class EntryFetcher:
                 "digest pinning is not supported on a git source in v1 — "
                 "pin by writing the commit SHA as the source's ref"
             )
+        if entry.get("subpath") is not None:
+            # The same narrowing, the same style: an entry-level 'subpath' is
+            # real vocabulary on the URL roads (it scopes an archive's
+            # subtree), and a caller who writes it beside a git source
+            # believes they scoped something they did not. One checkout serves
+            # *every* entry that names the source, so scoping belongs to the
+            # declaration the tree is read by.
+            raise EntryFetchError(
+                "entry-level 'subpath' is not supported on a git source in "
+                "v1 — declare 'subpath' on the source itself, which is what "
+                "the tree is read by"
+            )
+        if entry.get("auth") is not None:
+            # Schema already refuses this next to 'from'; an inline git
+            # source reaches here with it, and the fetch must not quietly
+            # fetch anonymously under a credential the caller believes rode.
+            raise EntryFetchError(
+                "entry-level 'auth' is not supported on a git source in v1 — "
+                "declare 'auth' inside the source object; the credential "
+                "applies to the fetch the source names"
+            )
 
         spec = GitSourceSpec(
             url=_substitute(ctx, decl["git"]),
@@ -513,8 +546,8 @@ class EntryFetcher:
                 binding = self._credentials.binding(name=auth)
                 binding.reauthorize(httpx.URL(spec.url))
                 headers = dict(binding.headers_for(httpx.URL(spec.url)))
-            checkout = session.checkout(
-                spec, headers=headers, display=display, auth_name=auth
+            checkout, fresh = session.checkout(
+                spec, headers=headers, display=display
             )
         except CredentialError as exc:
             raise EntryFetchError(str(exc)) from exc
@@ -525,11 +558,23 @@ class EntryFetcher:
         except FetchFailedError as exc:
             fallback = self._git_keep_last(
                 ctx, session=session, spec=spec, display=display,
-                keep_last=keep_last, wire_error=exc,
+                keep_last=keep_last,
             )
             if fallback is not None:
                 return fallback
             raise EntryFetchError(str(exc)) from exc
+
+        if fresh:
+            # The wire really moved for this (url, ref) in THIS apply — the
+            # tree's declared bytes are what the ledger that bounds one
+            # apply's total download must count. A cached checkout (another
+            # entry sharing the source) answers a read, not a fetch, so it is
+            # free — the same ruling the URL road's store fast path records.
+            if ctx.budget is not None:
+                ctx.budget.charge(checkout.tree_bytes)
+                expired = ctx.budget.expired()
+                if expired is not None:
+                    raise EntryFetchError(expired)
 
         baseline = session.baseline(display)
         if (
@@ -542,12 +587,23 @@ class EntryFetcher:
                 f"{baseline}, this one resolved {checkout.sha} — the entry "
                 "is refused and the bot keeps running what it has"
             )
+        # Adopted AFTER the strict gate: a refused move must not write the
+        # moved SHA into this apply's report, because the next apply reads
+        # its baseline from there — adopting here would turn strict mode
+        # into "refuse each move exactly once, then deliver it".
+        session.adopt(
+            display=display, spec=spec, checkout=checkout, auth_name=auth
+        )
         moved = baseline if (baseline is not None and baseline != checkout.sha) else None
         return GitEntrySource(
             checkout=checkout,
             source_url=spec.url,
             subpath=spec.subpath,
             moved_from=moved,
+            auth=auth,
+            file_limit=FETCH_ENTRY_LIMITS.get(
+                category, FETCH_ENTRY_LIMITS["resources_file"]
+            ),
         )
 
     def _git_keep_last(
@@ -558,7 +614,6 @@ class EntryFetcher:
         spec: GitSourceSpec,
         display: str,
         keep_last: bool,
-        wire_error: FetchFailedError,
     ) -> "Optional[FetchedEntry]":
         """`keep_last` for the git road: the receipt of the *last-resolved*
         SHA, when there was one. A first-time source has no baseline — and
@@ -581,9 +636,13 @@ class EntryFetcher:
                 from_store=True,
                 content_type=receipt.content_type,
                 source_url=target,
+                # The failure is named, never quoted: the git road's transport
+                # error text is report-safe on its own ("git fetch failed"),
+                # and re-embedding it here would just restate the same words —
+                # the reason keep_last fired stays one clean sentence.
                 fallback_reason=(
                     "delivered from the platform's stored copy (keep_last): "
-                    f"the git fetch failed — {wire_error}"
+                    "the git fetch failed"
                 ),
             )
         except (ContentStoreError, ContentStoreFault) as exc:
@@ -598,10 +657,16 @@ class EntryFetcher:
         category: str,
         entry_identity: Optional[str] = None,
         content_type: Optional[str] = None,
+        credential_name: Optional[str] = None,
     ) -> str:
         """File entry-level bytes the wire never fetched — the git road's
         canonical form (a package's canonical zip, a single file's bytes)
         — so audit and ``keep_last`` read the same store everyone else does.
+
+        ``credential_name`` threads the acquisition's auth into the W11
+        lineage exactly as the URL road's store call does, so a git-sourced
+        receipt answers "which named credential distributed this content"
+        the same way a URL-sourced one answers it.
 
         Returns the content digest. Raises :class:`EntryFetchError` on a
         store fault; the charge against the apply budget keeps the ledger
@@ -616,6 +681,7 @@ class EntryFetcher:
         try:
             self._content.store(
                 obj, scope=scope_of(ctx), source_url=source_url,
+                credential_name=credential_name,
                 modifier=ctx.actor_id, apply_id=ctx.apply_id,
                 category=category, entry_identity=entry_identity,
             )

@@ -2033,6 +2033,25 @@ directory-level ownership semantics; teclaw per-file expansion.
 > source's ref); `resources` entries still accept URL sources only —
 > wiring W6's materialiser to the git road is follow-up work (W6 merged
 > before W7 and carries no git consumption).
+>
+> **🔧 Review fixes (2026-09-02, `fix/w7-review-fixes`).** A whole-diff review
+> of #1829 found the delivery above gated off and carried five latent
+> defects, all fixed here: the admission rows for `SourceForm.GIT`/`NAMED`
+> were never flipped, leaving the entire runtime unreachable through PUT
+> (now flipped, with the resources narrowing moved to a per-entry schema
+> refusal so it stays precise when the blanket gate opens); strict-mode
+> resolutions are now adopted only after the strict gate and read back
+> through a bounded report-history walk, so a refusal no longer poisons the
+> next baseline once and a failed fetch no longer disarms strict/keep_last;
+> git failure text is report-safe (step + exit only — stderr with its URL
+> echoes is dropped, matching W2's contract); tree byte caps and the category
+> entry cap are enforced on `ls-tree -l` declared sizes **before** checkout
+> or any read, and the tree's bytes charge the apply ledger once per `(url,
+> ref)`; quotepath-escaped member names are unquoted (non-ASCII filenames
+> work; non-UTF-8 names are refused by their quoted form); git receipts
+> carry `credential_name` like URL receipts; the subprocess env is read at
+> the composition root with ambient `GIT_*` dropped, and credentials ride
+> `GIT_CONFIG_*` env (owner-only readable) instead of the ps-visible argv.
 
 
 **Goal.** One `ref` change resolves a whole configuration to one commit, and

@@ -121,6 +121,40 @@ def test_put_stores_the_caller_bytes_not_a_re_serialisation(service, repository)
     assert repository.writes[0]["document"] == document
 
 
+def test_put_accepts_a_git_source_document(service, repository):
+    """The admission flip this fix delivers, pinned end to end: a document
+    declaring named and git sources for skills/identity stores through the
+    same PUT path every URL-source document always used — the one-file
+    review given to W7 found the delivered runtime gated off behind the
+    still-closed capability rows."""
+    document = (
+        "schema_version: 1\n"
+        "sources:\n"
+        "  repo:\n"
+        "    git: https://code.example.com/team/skills.git\n"
+        "    ref: v1.2.0\n"
+        "    subpath: packages/demo\n"
+        "manifest:\n"
+        "  identity:\n"
+        "    - type: SOUL.md\n"
+        "      from: repo\n"
+        "  resources:\n"
+        "    - path: assets/logo.png\n"
+        "      source: https://cdn.example.com/logo.png\n"
+        "      digest: sha256:" + "0" * 64 + "\n"
+    )
+    result = service.put(
+        entity_id="ent",
+        bot_id="bot",
+        document=document,
+        modifier="u1",
+        active_engine="openclaw",
+        bot_type="personal",
+    )
+    assert result.record.schema_version == 1
+    assert repository.writes[0]["size_bytes"] == len(document.encode("utf-8"))
+
+
 def test_a_refused_document_is_not_written_at_all(service, repository):
     """All-or-nothing: one unsupported category refuses the whole document."""
     document = "schema_version: 1\nmanifest:\n  cli_tools: []\n"
