@@ -448,6 +448,24 @@ class WorkOrderService(WorkOrderServiceProtocol):
         nickname = (profile.nick_name or "").strip()
         return nickname[:128] or applicant_user_id
 
+    def _get_reviewer_name(self, *, reviewer_user_id: str | None) -> str | None:
+        if not reviewer_user_id:
+            return None
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(reviewer_user_id)
+            )
+        except StaffProfileLookupError:
+            logger.warning(
+                "failed to resolve reviewer nickname",
+                extra={"user_id": reviewer_user_id},
+                exc_info=True,
+            )
+            return None
+
+        nickname = (profile.nick_name or "").strip()
+        return nickname[:128] or None
+
     def list_items(
         self,
         *,
@@ -478,7 +496,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
         if detail is None:
             raise WorkOrderNotFoundError("work order not found")
-        return detail
+        return detail.model_copy(
+            update={
+                "reviewer_user_name": self._get_reviewer_name(
+                    reviewer_user_id=detail.work_order.reviewer_user_id
+                )
+            }
+        )
 
     def approve(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
         normalized_remark = (review_remark or "").strip() or None
