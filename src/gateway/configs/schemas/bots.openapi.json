@@ -20058,6 +20058,18 @@
       "SkillGrantItem": {
         "description": "One active OWNER or MANAGER Grant.",
         "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current staff-directory display name.",
+            "title": "Display Name"
+          },
           "role": {
             "$ref": "#/components/schemas/SkillRole",
             "description": "Role held by the user for this Skill."
