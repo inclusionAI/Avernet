@@ -13,11 +13,13 @@ the platform's own table. The pipeline itself is pinned in the service's suite.
 
 from __future__ import annotations
 
+import hashlib
 import time
 
 import jwt
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import PRINCIPAL_HEADER
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
@@ -32,6 +34,7 @@ from tests.community.framework import (
     CaseInput,
     ExpectError,
     ExpectSuccess,
+    bind_overrides,
     endpoint_test,
 )
 
@@ -39,10 +42,14 @@ _OWNER = "cli-tools-owner"
 _BOT_ID = "cli-tools-bot"
 _DESKTOP_BOT_ID = "cli-tools-desktop-bot"
 _SHARED_BOT_ID = "cli-tools-shared-bot"
+_TECLAW_BOT_ID = "cli-tools-teclaw-bot"
 _MEMBER = "cli-tools-member"
 _KEY = "cli-tools-framework-signing-key-at-least-32-bytes"
 
-_DIGEST = "sha256:" + "a" * 64
+#: A minimal little-endian x86-64 ELF header, which is what the platform
+#: verifies before it will distribute an executable.
+_ELF = bytes(bytearray(b"\x7fELF\x02\x01\x01" + b"\x00" * 11 + b"\x3e\x00")) + b"\x00" * 64
+_DIGEST = "sha256:" + hashlib.sha256(_ELF).hexdigest()
 
 
 class _Secret:
@@ -173,6 +180,42 @@ def _seed_no_bot(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
 
 
+class _Fetched:
+    """What ``EntryFetcher.fetch`` hands back, for a source no test can reach."""
+
+    def __init__(self, content: bytes, digest: str) -> None:
+        self.content = content
+        self.digest = digest
+        self.from_store = False
+        self.fallback_reason = None
+        self.source_url = None
+
+
+def _seed_teclaw_bot_with_a_reachable_source(world) -> None:
+    """A teclaw bot, and a fetch that answers with a real ELF header.
+
+    Two things are stood in for, and only two. The **fetch** is stubbed because
+    no test can reach a source URL — the guarded transport is exercised by its
+    own suite. The **engine** is not stubbed at all: on teclaw the composed
+    artifact is the delivery, so ``install`` genuinely makes no engine call, and
+    this case runs the real service, the real ELF verification, the real object
+    write and the real row.
+    """
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw")
+
+    def _fetch(self, ctx, **kwargs):
+        return _Fetched(_ELF, kwargs.get("digest") or _DIGEST)
+
+    bind_overrides(world, EntryFetcher, {"fetch": _fetch})
+
+
+def _seed_teclaw_bot_with_a_tool(world) -> None:
+    init_principal_verifier_config(_Resolver(), "test-key", strict=False)
+    _insert_bot(world, bot_id=_TECLAW_BOT_ID, engine="teclaw")
+    _install_row(world, bot_id=_TECLAW_BOT_ID, name="mycli")
+
+
 # ── GET ────────────────────────────────────────────────────────────────────
 
 
@@ -262,6 +305,41 @@ def an_unknown_bot_is_refused():
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/cli-tools",
+    scenario="installs_a_tool_and_records_what_it_verified",
+    input=CaseInput(
+        path_params={"bot_id": _TECLAW_BOT_ID},
+        query_params=_QUERY,
+        headers=_HEADERS,
+        json_body=_install_body(version="1.4.2"),
+    ),
+    seed=_seed_teclaw_bot_with_a_reachable_source,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {
+                "name": "mycli",
+                "version": "1.4.2",
+                "digest": _DIGEST,
+                "size_bytes": len(_ELF),
+                # From the principal, never the body.
+                "installed_by": _OWNER,
+            },
+        },
+    ),
+)
+def install_records_the_platforms_own_md5_and_size():
+    """The response is the row, and the row is what the platform verified.
+
+    ``size_bytes`` is the delivered executable's, not the request's — there is
+    no byte count in the body to echo. ``installed_by`` is the acting caller,
+    which is what lets a later manifest apply's report say it replaced a tool a
+    person installed."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/openapi/v1/bots/{bot_id}/cli-tools",
     scenario="a_duplicate_name_is_409",
     input=CaseInput(
         path_params={"bot_id": _BOT_ID},
@@ -338,6 +416,23 @@ def a_member_may_not_install_an_executable():
 
 
 # ── DELETE ─────────────────────────────────────────────────────────────────
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/openapi/v1/bots/{bot_id}/cli-tools/{name}",
+    scenario="removes_an_installed_tool",
+    input=CaseInput(
+        path_params={"bot_id": _TECLAW_BOT_ID, "name": "mycli"},
+        query_params=_QUERY,
+        headers=_HEADERS,
+    ),
+    seed=_seed_teclaw_bot_with_a_tool,
+    expect=ExpectSuccess(status=200, json_contains={"code": 200000}),
+)
+def delete_removes_the_tool_the_row_and_the_bytes():
+    """One call removes all three. On teclaw the engine is not asked — the next
+    composed artifact simply stops carrying the ref."""
 
 
 @endpoint_test(
