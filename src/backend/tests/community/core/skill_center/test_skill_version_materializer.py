@@ -139,7 +139,7 @@ class _Versions:
             name=kwargs["name"],
             description=kwargs["description"],
             metadata_json=kwargs["metadata_json"],
-            published_at=kwargs["published_at"],
+            published_at=datetime(2026, 8, 30, 12, 0),
         )
 
 
@@ -173,7 +173,6 @@ def _materializer(
         http=_Http(package),
         validator=SkillPackageValidator(SkillParser()),
         store=LocalCanonicalCenterVersionStore(),
-        clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
     )
 
 
@@ -554,7 +553,6 @@ def test_materializing_a_new_version_never_reactivates_a_terminally_offline_skil
         http=_Http(package),
         validator=SkillPackageValidator(SkillParser()),
         store=LocalCanonicalCenterVersionStore(),
-        clock=lambda: datetime(2026, 8, 30, 12, 0, tzinfo=UTC),
     ).materialize(
         SkillVersionMaterializationRequest(
             env="pre",

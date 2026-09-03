@@ -101,6 +101,7 @@ class PublicationWork:
     skill_name: str
     draft_description: str
     package_url: str | None
+    database_now: datetime
 
 
 @dataclass(frozen=True, slots=True)
