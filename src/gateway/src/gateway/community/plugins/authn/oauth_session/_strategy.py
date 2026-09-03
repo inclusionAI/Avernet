@@ -70,6 +70,9 @@ class OauthSessionStrategy:
                 algorithms=[_BCS_SESSION_ALGORITHM],
                 options={"require": ["sub", "src", "iat", "exp"]},
             )
+        except jwt.ExpiredSignatureError as exc:
+            logger.warning("bcs_session cookie expired")
+            raise AuthError("bcs session cookie has expired, please log in again") from exc
         except jwt.PyJWTError as exc:
             logger.warning("bcs_session cookie verification failed")
             raise AuthError("invalid bcs session cookie") from exc
