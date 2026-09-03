@@ -34,6 +34,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderReviewResult,
     WorkOrderStatus,
+    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -205,7 +206,9 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                     event_type=WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value,
                     biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
                     biz_id=str(skill_id),
-                    title=title,
+                    title=notification_title_for(
+                        WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value, title
+                    ),
                     content=content,
                     env=env,
                 )
@@ -381,7 +384,10 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                     event_type=WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
                     biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
                     biz_id=str(skill_id),
-                    title=notification.title,
+                    title=notification_title_for(
+                        WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
+                        notification.title,
+                    ),
                     content=notification.content,
                     env=env,
                 )

@@ -411,13 +411,15 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["item_type"] == "APPROVAL"
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
+    assert items[0]["summary"] == "你有一条新的通知，请查看详情。"
     assert items[0]["content"] is None
     assert items[0]["gmt_created"] == "2026-08-18T01:02:03"
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
-    assert items[1]["title"] == "空间加入申请已通过"
+    assert items[1]["title"] == "空间加入申请已处理"
+    assert items[1]["summary"] == "空间加入申请已有处理结果，请查看详情。"
     assert items[1]["content"] == {"message": "approved"}
     assert items[1]["gmt_created"] == "2026-08-18T01:02:03"
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05"
@@ -464,23 +466,20 @@ def test_list_work_orders_derives_space_title_without_notification(
 
 
 @pytest.mark.parametrize(
-    ("stored_title", "expected"),
+    ("event_type", "stored_title", "expected"),
     [
-        ("空间加入申请待审批", "空间加入申请待审批"),
-        ("空间加入申请已通过", "空间加入申请已通过"),
-        ("空间加入申请未通过", "空间加入申请未通过"),
-        ("SPACE_JOIN APPROVED", "空间加入申请已通过"),
-        ("SPACE_JOIN REJECTED", "空间加入申请未通过"),
-        ("SPACE_JOIN_PENDING", "空间加入申请待审批"),
-        ("SPACE_JOIN_APPROVED", "空间加入申请已通过"),
-        ("SPACE_JOIN_REJECTED", "空间加入申请未通过"),
-        ("custom title", "custom title"),
+        (WorkOrderEventType.SPACE_JOIN_REVIEWED, None, "空间加入申请已处理"),
+        (WorkOrderEventType.SKILL_COLLABORATOR_APPLIED, None, "Skill 共同编辑申请待审批"),
+        (WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED, "BOT_FRIEND APPROVED", "Bot 好友申请已处理"),
+        ("EXTERNAL_EVENT", "custom title", "custom title"),
     ],
 )
-def test_list_work_orders_translates_compatible_titles(
-    client, work_order_service, stored_title, expected
+def test_list_work_orders_uses_event_type_display_contract(
+    client, work_order_service, event_type, stored_title, expected
 ):
-    notification = _notification().model_copy(update={"title": stored_title})
+    notification = _notification().model_copy(
+        update={"event_type": event_type, "title": stored_title}
+    )
     work_order_service.list_items.return_value = (
         1,
         [
@@ -495,7 +494,9 @@ def test_list_work_orders_translates_compatible_titles(
     response = client.get("/openapi/v1/bots/work-orders")
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["title"] == expected
+    item = response.json()["data"]["items"][0]
+    assert item["title"] == expected
+    assert item["summary"]
 
 
 def test_get_work_order_maps_nested_content(client, work_order_service):
@@ -667,7 +668,8 @@ def test_notification_detail_and_mark_read(client, notification_service):
         "work_order_id": 11,
         "notification_category": "APPROVAL",
         "event_type": "SPACE_JOIN_REVIEWED",
-        "title": "空间加入申请已通过",
+        "title": "空间加入申请已处理",
+        "summary": "空间加入申请已有处理结果，请查看详情。",
         "content": {"message": "approved"},
         "is_read": False,
         "work_order_status": "PENDING",
@@ -701,7 +703,8 @@ def test_notification_detail_wraps_historical_plain_text(client, notification_se
     response = client.get("/openapi/v1/bots/work-order-notifications/21")
 
     assert response.status_code == 200
-    assert response.json()["data"]["title"] == "空间加入申请已通过"
+    assert response.json()["data"]["title"] == "空间加入申请已处理"
+    assert response.json()["data"]["summary"] == "空间加入申请已有处理结果，请查看详情。"
     assert response.json()["data"]["content"] == {"legacy_value": "approved"}
 
 

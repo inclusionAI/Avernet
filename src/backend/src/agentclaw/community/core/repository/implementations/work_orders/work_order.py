@@ -51,7 +51,9 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderDecision,
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
+    WorkOrderEventType,
     reviewed_event_type_for,
+    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderModel,
@@ -822,7 +824,10 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         notification.biz_type, "value", notification.biz_type
                     ),
                     biz_id=notification.biz_id,
-                    title=WorkOrderTitleKey[f"SPACE_JOIN_{target_status.value}"].value,
+                    title=notification_title_for(
+                        WorkOrderEventType.SPACE_JOIN_REVIEWED.value,
+                        notification.title,
+                    ),
                     content=notification.content,
                     env=env,
                 )

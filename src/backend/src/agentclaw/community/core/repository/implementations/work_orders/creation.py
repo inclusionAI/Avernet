@@ -24,6 +24,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
     WorkOrderMessageContent,
     WorkOrderTitleKey,
+    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -112,7 +113,7 @@ class _WorkOrderCreationRepository:
                     event_type=event_type,
                     biz_type=biz_type,
                     biz_id=biz_id,
-                    title=title,
+                    title=notification_title_for(event_type, title),
                     content=content,
                     env=env,
                 )
@@ -275,7 +276,9 @@ class _WorkOrderCreationRepository:
                         event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
                         biz_type=WorkOrderBizType.SPACE_JOIN.value,
                         biz_id=str(space_id),
-                        title=title,
+                        title=notification_title_for(
+                            WorkOrderEventType.SPACE_JOIN_APPLIED.value, title
+                        ),
                         content=content,
                         env=env,
                     )
