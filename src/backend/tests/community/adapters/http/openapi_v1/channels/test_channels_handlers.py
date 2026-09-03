@@ -33,6 +33,10 @@ from agentclaw.community.adapters.http.openapi_v1.channels.schemas import (
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
+from agentclaw.community.core.channel.errors import (
+    ChannelBindingConflictError,
+    ChannelModeViolationError,
+)
 from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di.config import AixConfig
@@ -164,6 +168,16 @@ class _Channels:
 class _MissingBotChannels(_Channels):
     async def set_channel_status(self, channel_id: int, status: str):
         raise BotNotFoundError("runtime Bot is unavailable")
+
+
+class _ModeViolationChannels(_Channels):
+    async def set_channel_status(self, channel_id: int, status: str):
+        raise ChannelModeViolationError("mode violation")
+
+
+class _ConflictChannels(_Channels):
+    async def set_channel_status(self, channel_id: int, status: str):
+        raise ChannelBindingConflictError("conflict")
 
 
 @pytest.mark.asyncio
@@ -322,6 +336,40 @@ async def test_runtime_bot_lookup_failure_is_normalized_to_upstream_error():
 
     assert response.status_code == 502
     assert json.loads(response.body)["message"] == "Channel synchronization failed"
+
+
+@pytest.mark.asyncio
+async def test_update_status_maps_mode_violation_to_422():
+    response = await update_channel_status(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelStatusUpdate(status="active"),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_ModeViolationChannels([_record()]),
+        locks=_Locks(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_status_maps_binding_conflict_to_409():
+    response = await update_channel_status(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelStatusUpdate(status="active"),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_ConflictChannels([_record()]),
+        locks=_Locks(),
+    )
+    assert response.status_code == 409
+    assert json.loads(response.body)["message"] == "Channel binding conflict"
 
 
 @pytest.mark.asyncio
