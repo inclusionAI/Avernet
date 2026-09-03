@@ -200,7 +200,7 @@ allow_mock_headers = true
 base_url = "https://avernet.alipay.com"
 jwt_secret = "${BCS_ALIPAY_JWT_SECRET}"
 cookie_secure = true
-idle_timeout_minutes = 30
+idle_timeout_minutes = 720
 # Preserve the prior hard-coded post-login redirect (frontend reads ?login=success).
 success_redirect_path = "/workspace"
 
