@@ -303,6 +303,7 @@ async def create_session(
         body={
             "title": body.title,
             "model": body.model,
+            **({"cwd": body.cwd} if body.cwd is not None else {}),
             # The verified caller (never accepted from the body), so on a
             # shared bot a session records the operator who created it.
             "user_id": user_id,

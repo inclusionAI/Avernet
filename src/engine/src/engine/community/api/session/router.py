@@ -147,10 +147,11 @@ async def create_session(body: CreateSessionBody) -> ApiResponse:
     warning = check_capability(Capability.SESSION_CREATE)
     try:
         api = _get_session_api(body.engine)
-        log.info(f"[create_session] 收到请求: title={body.title}, user_id={body.user_id}, agent_id={body.agent_id}, model={body.model}, runtime={body.runtime}, engine={body.engine}, uuid={body.uuid}")
+        log.info(f"[create_session] 收到请求: title={body.title}, user_id={body.user_id}, agent_id={body.agent_id}, model={body.model}, runtime={body.runtime}, cwd={body.cwd}, engine={body.engine}, uuid={body.uuid}")
         session = await api.create(SessionCreateRequest(
             title=body.title, user_id=body.user_id or "default", agent_id=body.agent_id, model=body.model,
             runtime=body.runtime,
+            cwd=body.cwd,
             uuid=body.uuid,
             extInfo=body.extInfo,
             payload=body.payload,

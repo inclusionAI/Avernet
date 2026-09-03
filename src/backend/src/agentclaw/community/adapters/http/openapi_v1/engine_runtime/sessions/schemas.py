@@ -117,9 +117,7 @@ class SessionCreate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Only fields every engine on this surface actually persists — the same
-    # ruling `cwd` got on SessionUpdate, for the same reason. An agent was
-    # offered here and withdrawn: these local engines build
+    # An agent was offered here and withdrawn: these local engines build
     # `session:{uuid}:user:{user_id}` / related local session keys and do not send
     # the agent through this request body, while `openclaw` also builds
     # `session:{uuid}:user:{user_id}` and never sends the agent at all,
@@ -133,6 +131,29 @@ class SessionCreate(BaseModel):
     model: str | None = Field(
         default=None, description="Optional model for the session."
     )
+    # Published on create — and only on create — because that is the one
+    # operation the engine's session API carries it through: the create request
+    # reaches the engine's own `cwd` field, which seeds the working directory a
+    # session is bound to before any turn runs. The engine that models no
+    # working directory reports it back empty on `Session.cwd`, which is what
+    # the read field already documents, so a caller can tell what took effect
+    # rather than being told a request applied when it did not. `PATCH` still
+    # rejects it: rebinding an established session's directory is not the same
+    # operation, and the field keeps its 422 there.
+    #
+    # The handler omits the key entirely rather than forwarding a null when this
+    # is unset: the engine binds a session to its own default directory on a
+    # create that carries no `cwd`, and an explicit null would have to travel
+    # through a relay body and an engine request model that both read "absent"
+    # as that fallback. Sending only what was asked for keeps the fallback the
+    # engine's to choose.
+    cwd: str | None = Field(
+        default=None,
+        description="Optional working directory for the session on the bot's "
+        "device. Left unset, the bot's engine picks its own default. A bot "
+        "whose engine does not model a working directory ignores this and "
+        "reports `cwd` empty on the created session.",
+    )
 
 
 class SessionUpdate(BaseModel):
@@ -145,7 +166,11 @@ class SessionUpdate(BaseModel):
     # applies it and the other discards it without saying so, which would have
     # made the same request succeed and do nothing depending on which engine the
     # bot runs. `extra="forbid"` means a caller still sending `cwd` gets a 422
-    # rather than a silent no-op.
+    # rather than a silent no-op. `SessionCreate` publishes `cwd` and this does
+    # not: creating is where the engine's session API takes a directory to bind
+    # the session to, and the created session reports back the value that took
+    # effect. Rebinding one afterwards is the operation that silently does
+    # nothing on an engine modelling no working directory, so it stays a 422.
     title: str | None = Field(default=None, description="New session title.")
     model: str | None = Field(default=None, description="New model.")
 

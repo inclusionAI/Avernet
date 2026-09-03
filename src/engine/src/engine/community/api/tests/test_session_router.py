@@ -30,6 +30,7 @@ def _make_session(session_id: str = "sess-1", **kwargs):
     s.agent_id = kwargs.get("agent_id", None)
     s.model = kwargs.get("model", "gpt-4")
     s.runtime = kwargs.get("runtime", None)
+    s.cwd = kwargs.get("cwd", None)
     s.permission_mode = kwargs.get("permission_mode", None)
     s.created_at = _NOW
     s.updated_at = _NOW
@@ -199,6 +200,29 @@ class TestCreateSession:
         resp = client.post("/api/sessions", json={})
         assert resp.status_code == 200
         assert "runtime" not in resp.json()["data"]
+
+    def test_cwd_forwarded_to_create_request(self, client, mock_session_api):
+        resp = client.post("/api/sessions", json={
+            "title": "Report",
+            "cwd": "/home/admin/workspace",
+        })
+        assert resp.status_code == 200
+        req = mock_session_api.create.call_args[0][0]
+        assert req.cwd == "/home/admin/workspace"
+
+    def test_cwd_defaults_to_none(self, client, mock_session_api):
+        """Absent leaves the working directory to the engine: the claude_code
+        relay falls back to its own default, and an engine that models no
+        working directory ignores it."""
+        client.post("/api/sessions", json={})
+        req = mock_session_api.create.call_args[0][0]
+        assert req.cwd is None
+
+    def test_cwd_in_response(self, client, mock_session_api):
+        mock_session_api.create.return_value = _make_session(cwd="/home/admin/workspace")
+        resp = client.post("/api/sessions", json={"cwd": "/home/admin/workspace"})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["cwd"] == "/home/admin/workspace"
 
 # ── GET /api/sessions/{session_id} ───────────────────────────────────────────
 

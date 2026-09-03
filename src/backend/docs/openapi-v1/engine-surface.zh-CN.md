@@ -92,7 +92,7 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
 | 方法 | 公共路径 | engine 路由 | 说明 |
 |---|---|---|---|
 | GET | `…/{bot_id}/sessions` | `GET /api/sessions` | `agent_id`、`session_key`、分页 → `Envelope[SessionPage]` |
-| POST | `…/{bot_id}/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
+| POST | `…/{bot_id}/sessions` | `POST /api/sessions` | 请求体为 `title`/`model`/`cwd`，见下 → `201 Envelope[Session]` |
 | GET | `…/{bot_id}/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
 | GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | 分页 → `Envelope[MessagePage]` |
@@ -118,6 +118,13 @@ C1 的权威清单是 `src/frontend/src/requestConfig.ts:189-205` 里的 proxypa
   中一个会应用它、另一个不声不响地丢弃，那会让同一个请求"成功但什么也没做"，
   取决于该 bot 跑的是哪个引擎。仍然发送它的调用方会拿到 422，而不是一个静默的
   空操作。_2026-07-30 决定。_
+- **`POST` 接受 `cwd`，`PATCH` 仍然不接受。** engine 的 session API 在创建请求上
+  接收工作目录，并在任何一轮对话开始前把会话绑定到它，因此公共创建路由会转发该
+  字段 —— 调用方没填时整个键都不发送，这正是"请引擎用自己的默认值"的表达方式。
+  这不是对上一条裁定的翻案：那条裁定否决的是"成功但什么也没做"的工作目录，而在
+  创建路径上，返回的会话会报出实际生效的 `cwd`（不建模工作目录的引擎报空），
+  所以应答说得清到底发生了哪一种。真正会被静默丢弃的是给*已建立*的会话改绑目录，
+  那仍然是 422。_2026-09-03 决定。_
 
 ### engine（4）—— engine `/api/engine`
 

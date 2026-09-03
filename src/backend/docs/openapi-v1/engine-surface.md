@@ -112,7 +112,7 @@ the `Envelope[T]` / `Page[T]` shapes from `openapi_v1/contracts.py`.
 | Method | Public path | Engine route | Notes |
 |---|---|---|---|
 | GET | `…/{bot_id}/sessions` | `GET /api/sessions` | `agent_id`, `session_key`, paged → `Envelope[SessionPage]` |
-| POST | `…/{bot_id}/sessions` | `POST /api/sessions` | `201 Envelope[Session]` |
+| POST | `…/{bot_id}/sessions` | `POST /api/sessions` | body is `title`/`model`/`cwd` — see below → `201 Envelope[Session]` |
 | GET | `…/{bot_id}/sessions/{session_id}` | `GET /api/sessions/{session_id}` | `Envelope[Session]` |
 | DELETE | `…/{bot_id}/sessions/{session_id}` | `DELETE /api/sessions/{session_id}` | `Envelope[Deleted]` |
 | GET | `…/{bot_id}/sessions/{session_id}/messages` | `GET …/messages` | paged → `Envelope[MessagePage]` |
@@ -155,6 +155,16 @@ Two things about this group are not the shape a reader would assume:
   discards it without saying so, which would make the same request succeed and
   do nothing depending on which engine the bot runs. A caller still sending it
   gets a 422 rather than a silent no-op. _Decided 2026-07-30._
+- **`POST` accepts a `cwd`, and `PATCH` still does not.** The engine's session
+  API takes a working directory on the create request and binds the session to
+  it before any turn runs, so the public create forwards it — omitting the key
+  entirely when the caller left it unset, which is how the engine is asked for
+  its own default. This is not a reversal of the ruling above: what that ruling
+  rejected is a directory that succeeds and does nothing, and on create the
+  created session reports back the `cwd` that took effect (empty from an engine
+  that models no working directory), so the answer says which happened.
+  Rebinding an *established* session's directory is the operation that would
+  still be silently dropped, and it keeps its 422. _Decided 2026-09-03._
 
 ### engine (4) — engine `/api/engine`
 
