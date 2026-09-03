@@ -2,7 +2,7 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
+Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 6.
 
 ## Task 1: Add the `ac_bot_cli_tool` table, record and repository
 - **Goal:** Give the platform its own record of what a bot has installed.
@@ -13,55 +13,69 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] The `env` column and `register_avernet_tenant_guard` are present, matching `ac_bot_startup_script`.
   - [ ] The side-effect import is registered in `core/schema.py` so local `create_all` emits the table.
   - [ ] Protocol and implementation are split under `core/repository/…/bot/`, protocol declared as a base class (§8).
+  - [ ] `oss_key` records where the platform kept the bytes.
   - [ ] **No column holds a container path** — the engine owns placement, the row identifies a tool by `name`.
   - [ ] The repository covers: upsert by `(bot_id, name)`, delete by name, list by bot, delete-all by bot.
 - **Depends on:** —
 
-## Task 2: Define the engine port and build the ARCA implementation
-- **Goal:** A name-addressed protocol, and the ARCA side of it.
-- **Files:** `core/bot_config_manifest/cli_tools/engine_port.py` (new), `.../arca_port.py` (new)
+## Task 2: Build the OSS tool store
+- **Goal:** Keep the platform's own copy of every tool's bytes.
+- **Files:** `core/bot_config_manifest/cli_tools/store.py` (new)
 - **Done when:**
-  - [ ] `CliToolEnginePort` declares `install` / `delete` / `list` / `get` / `replace_all`, and **every signature takes a name, never a path** — a test asserts it.
-  - [ ] `get` returns a tool's bytes by name; it exists for the teclaw promotion gather.
-  - [ ] `replace_all` has a default implementation that loops, so an engine that cannot batch still works.
+  - [ ] `put` writes the bytes under a per-bot key and returns the key recorded on the row.
+  - [ ] `copy_to_stage` performs a **server-side copy** to a stage-scoped prefix, the layout `TeclawFilePromotion` already builds.
+  - [ ] `delete` removes an object, and is called whenever a row is removed.
+  - [ ] The module docstring states why the copy exists: a teclaw artifact composed for a live update or a manifest apply has to reference the tool now, and gathering from the engine then would be circular.
+
+- **Depends on:** —
+
+## Task 3: Define the delivery port and build the ARCA implementation
+- **Goal:** A name-addressed delivery protocol, and the ARCA side of it.
+- **Files:** `core/bot_config_manifest/cli_tools/delivery_port.py` (new), `.../arca_port.py` (new)
+- **Done when:**
+  - [ ] `CliToolDeliveryPort` declares `install` / `delete` / `list` / `replace_all`, and **every signature takes a name, never a path** — a test asserts it.
+  - [ ] There is **no `get`** — the platform holds the bytes, so nothing reads them back out of a container; a test asserts its absence.
+  - [ ] `replace_all` has a default implementation that loops.
   - [ ] `ArcaCliToolPort.install` writes through the existing device file chain, then `chmod 0755` via `execute_baas_shell_command`.
   - [ ] A non-zero `chmod` exit **raises** with the command's stderr, so the tool is never recorded as installed.
   - [ ] The directory is a constant private to the ARCA port — proposed `/home/admin/.openclaw/cli` — appearing in no signature, table column or API response.
   - [ ] The tool name is `shlex.quote`d into the command, and a test passes a hostile name.
 - **Depends on:** —
 
-## Task 3: Build the teclaw port
-- **Goal:** The same name-addressed protocol against the teclaw engine's CLI endpoints.
+## Task 4: Build the teclaw delivery port
+- **Goal:** The artifact is the delivery; no engine upload call.
 - **Files:** `core/bot_config_manifest/cli_tools/teclaw_port.py` (new)
 - **Done when:**
-  - [ ] `install` / `delete` / `list` / `get` call the teclaw engine's CLI endpoints by name.
-  - [ ] Nothing in the module composes or parses a container path — teclaw's layout is not ours to know.
-  - [ ] `get` is exercised by a test, since promotion depends on it.
-- **Depends on:** Task 2
+  - [ ] `install` / `delete` do not call the engine: the row-and-store write stands, and the next compose carries the new set, the way `mcp` is delivered.
+  - [ ] A test asserts **no engine upload call is made** on teclaw.
+  - [ ] `list` remains available for the drift read.
+  - [ ] Nothing in the module composes or parses a container path.
+- **Depends on:** Task 3
 
-## Task 4: Build `CliToolService`
+## Task 5: Build `CliToolService`
 - **Goal:** The one component that installs, removes, lists and replaces.
 - **Files:** `core/bot_config_manifest/cli_tools/service.py` (new), `.../verify.py` (new), `.../README.md` (new, with a Context Boundary block per §8)
 - **Done when:**
-  - [ ] `install` runs fetch → `sha256` → unpack → `select_subpath` → `verify_amd64_elf` → `md5` → `engine.install` → record, in that order, recording nothing for a step that failed.
+  - [ ] `install` runs fetch → `sha256` → unpack → `select_subpath` → `verify_amd64_elf` → `md5` → **OSS store** → deliver → record, in that order, recording nothing for a step that failed.
   - [ ] `select_subpath` refuses an absent member, a non-regular file, or one escaping the tree after symlink resolution.
   - [ ] `verify_amd64_elf` refuses a non-ELF file and a wrong `e_machine`, naming what was found.
   - [ ] `replace_all` makes the installed set equal the declaration, computing removals **from the table**, and returns a per-tool outcome list.
-  - [ ] `remove`, `list` and `drift` behave as `plan.md` describes; `drift` compares the table against `engine.list`.
+  - [ ] `remove` deletes the OSS object with the row.
+  - [ ] `list` and `drift` behave as `plan.md` describes; `drift` compares the table against the family's `list`.
   - [ ] Fetching goes through `EntryFetcher` under the `cli_tools` category and its existing 200 MiB width.
   - [ ] Nothing in the service branches on engine type, and nothing in it composes a filesystem path.
-- **Depends on:** Tasks 2, 3
+- **Depends on:** Tasks 2, 3, 4
 
-## Task 5: Service tests
+## Task 6: Service tests
 - **Goal:** Pin the pipeline and the failure modes that would otherwise be silent.
 - **Files:** `tests/community/core/bot_config_manifest/cli_tools/test_service.py` (new)
 - **Done when:**
   - [ ] The eleven cases named in `plan.md`'s service test strategy pass.
   - [ ] `nothing_is_recorded_when_placement_fails` and `chmod_failure_fails_the_entry_with_stderr` both hold.
   - [ ] `replace_all_computes_removals_from_the_table_not_the_engine` holds.
-- **Depends on:** Task 4
+- **Depends on:** Task 5
 
-## Task 6: The management API
+## Task 7: The management API
 - **Goal:** A surface that delegates to the service and implements nothing itself.
 - **Files:** `api/bot_cli_tool_service.py` (new), `adapters/http/openapi_v1/bots/cli_tools.py` (new), `adapters/http/openapi_v1/bots/schemas_cli_tools.py` (new)
 - **Done when:**
@@ -70,26 +84,26 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] The `api/` contract is registered in the consistency `_PAIRS`; `core` never imports that layer.
   - [ ] A declaration without `digest` is refused; a duplicate name answers 409.
   - [ ] The routes contain no fetch, verification or placement logic, and no response exposes a container path.
-- **Depends on:** Task 4
+- **Depends on:** Task 5
 
-## Task 7: API endpoint tests
+## Task 8: API endpoint tests
 - **Goal:** Prove the surface and its authorization.
 - **Files:** `tests/community/endpoints/test_openapi_cli_tools.py` (new)
 - **Done when:**
   - [ ] The five cases named in `plan.md`'s endpoint test strategy pass.
   - [ ] `every_route_has_an_admission_line` holds.
-- **Depends on:** Task 6
+- **Depends on:** Task 7
 
-## Task 8: Assert CLI tools are absent from the resources surface
+## Task 9: Assert CLI tools are absent from the resources surface
 - **Goal:** Pin the property, given that nothing was built to make it true.
 - **Files:** `tests/community/core/resources/test_cli_tools_absent_from_listings.py` (new)
 - **Done when:**
   - [ ] A test asserts an installed tool never appears in a resources listing for that bot.
   - [ ] A test asserts **no resources file was modified** by this feature — no filter, no hidden-name entry, no namespace change.
   - [ ] `core/config_compose/teclaw_paths.py` is untouched (rev 4 added a namespace; rev 5 does not).
-- **Depends on:** Tasks 2, 6
+- **Depends on:** Tasks 3, 7
 
-## Task 9: The materialiser, registration and the capability unlock
+## Task 10: The materialiser, registration and the capability unlock
 - **Goal:** Make manifest apply a caller of the service, and let the category be accepted.
 - **Files:** `core/bot_config_manifest/apply/materialisers/cli_tools.py` (new), `.../apply/{registry,delivery}.py`, `.../capabilities.py`, `.../apply/materialisers/__init__.py`
 - **Done when:**
@@ -97,23 +111,25 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] `plan` reads the table: matching `(digest, subpath)` plans `unchanged`, rows the declaration no longer names plan removals; `version` never affects convergence.
   - [ ] `MaterialiserPorts` gains `cli_tool_service`, bound per strategy with the family's engine port already inside it.
   - [ ] `ManifestCategory.CLI_TOOLS` maps to `None` in `blocked` and `_REASON_CLI_TOOLS` is deleted; desktop and unknown-engine refusals still win.
-  - [ ] **`order.py` is not modified** — `cli_tools` stays `ON_CONTAINER`, and delivery is a live engine call on both families.
-  - [ ] `cli_tools` is **always platform-managed and does not consult `teclaw_platform_managed`**, exactly as `mcp` does not; a test pins that the switch changes nothing for this category.
+  - [ ] **`order.py` is not modified** — it carries the ARCA reading, `ON_CONTAINER`.
+  - [ ] `TeclawDelivery.phase_of` gains a `cli_tools` branch returning `PRE_CONTAINER` **under either switch position**, because a teclaw creation has no phase B and the artifact is composed before provisioning.
+  - [ ] `cli_tools` is **always platform-managed and never consults `teclaw_platform_managed`** for ownership, exactly as `mcp` does not.
   - [ ] The stale "`cli_tools` arrives with W9" comments in `registry.py:218` and `materialisers/__init__.py:10` are removed.
   - [ ] W13 creation provisions tools through the same service call; a failed creation removes the rows and the installed tools.
   - [ ] The existing "orchestrator stays generic" and "no materialiser names an engine" tests pass unedited.
-- **Depends on:** Task 4
+- **Depends on:** Task 5
 
-## Task 10: Materialiser and apply tests
+## Task 11: Materialiser and apply tests
 - **Goal:** Pin delegation, convergence and the two-caller equivalence.
 - **Files:** `tests/community/core/bot_config_manifest/apply/test_cli_tools_materialiser.py` (new), `tests/.../test_iteration1_ordering.py`, `tests/.../test_capabilities.py`
 - **Done when:**
   - [ ] The six cases named in `plan.md`'s materialiser test strategy pass, including `api_and_apply_refuse_the_same_hostile_declaration`.
-  - [ ] A test pins `cli_tools` as `ON_CONTAINER` on both families regardless of the switch, added as a new row rather than by editing an existing assertion.
+  - [ ] Tests pin `cli_tools` as `ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw under **both** switch positions, added as new rows rather than by editing existing assertions.
+  - [ ] A test pins that a teclaw creation with declared tools carries them in its **first** artifact.
   - [ ] Capabilities report `cli_tools` supported on ARCA and teclaw, unsupported on desktop and unknown engines.
-- **Depends on:** Task 9
+- **Depends on:** Task 10
 
-## Task 11: Record how the agent finds a tool in v1
+## Task 12: Record how the agent finds a tool in v1
 - **Goal:** Write down the v1 answer and its cost, rather than leaving a false promise in the schema.
 - **Files:** `docs/bot-config-manifest/manifest-schema.zh-CN.md`, `docs/bot-config-manifest/engine-requirements.zh-CN.md`
 - **Done when:**
@@ -122,33 +138,33 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] It is recorded that adding the directory to `PATH` later is an **engine-side** change requiring no change to the schema, the API, the table or the artifact contract — which is what makes deferring it safe.
   - [ ] A2 is updated to what shipped: placement and exposure are the engine's, not a platform-side answer negotiated per image.
   - [ ] The proposed ARCA directory (`/home/admin/.openclaw/cli`) is recorded as the engine's constant, with the note that each ARCA engine has its own and the default skill set is already per-engine.
-- **Depends on:** Task 2
+- **Depends on:** Task 3
 
-## Task 12: Gather tools at promotion and carry them in the artifact
-- **Goal:** Make service-bot promotion (draft→verify, verify→online) bring a bot's tools with it.
+## Task 13: Promote tool objects and carry them in the artifact
+- **Goal:** Make service-bot promotion (draft→verify, verify→online) bring a bot's tools with it, without touching the engine.
 - **Files:** `core/service_bot/services/deploy/teclaw_file_promotion.py`, `core/config_compose/{protocols,models}.py`, `services/config_composer.py`
 - **Done when:**
-  - [ ] At a promotion boundary the backend iterates the **metadata table**, calls `engine.get(name=…)` per tool, and writes each to a **stage-scoped OSS key** under the layout `TeclawFilePromotion` already builds.
+  - [ ] At a promotion boundary the backend iterates the **metadata table** and performs a **server-side copy** of each tool object to the new stage-scoped prefix.
+  - [ ] **Nothing is downloaded from the engine** — a test asserts the engine is never called during promotion.
   - [ ] Draft and verify snapshots do not share objects.
-  - [ ] A tool the engine no longer has fails that entry by name, rather than producing an artifact referencing an object never written.
   - [ ] `CollectedCliTool` exists and the composed artifact carries `{name, store, path, md5, version}` per `cliToolRef`, with `md5` and `version` read from the table rather than re-hashed.
-  - [ ] `ownership.cli_tools` is `platform` on **every** compose, as `mcp` is — not conditional on the switch.
+  - [ ] `ownership.cli_tools` is `platform` on **every** compose, as `mcp` is.
   - [ ] `BotConfigArtifact` is built with `cli_tools=cli_tools or None`, so a bot with no tools omits the key and composes byte-identical output to today's.
   - [ ] `SCHEMA_VERSION` stays 4 and the existing drift test passes untouched.
   - [ ] The composer's `_ownership` docstring loses its "nothing composes a `cli_tools` list yet" paragraph.
-- **Depends on:** Tasks 3, 4
+- **Depends on:** Tasks 2, 5
 
-## Task 13: Promotion and compose-side tests
+## Task 14: Promotion and compose-side tests
 - **Goal:** Prove the gather, the stage isolation and the no-tools invariant.
 - **Files:** `tests/community/core/service_bot/test_teclaw_cli_tool_promotion.py` (new), `tests/community/core/config_compose/test_cli_tools_refs.py` (new)
 - **Done when:**
-  - [ ] The six promotion cases named in `plan.md` pass, including `md5_and_version_come_from_the_table_not_a_rehash`.
+  - [ ] The five promotion cases named in `plan.md` pass, including `promotion_never_calls_the_engine`.
   - [ ] The artifact carries refs with the platform-computed `md5`.
   - [ ] A bot with no tools omits `cli_tools` and is byte-identical to today's artifact.
   - [ ] `ownership.cli_tools` is `platform` on every compose.
-- **Depends on:** Task 12
+- **Depends on:** Task 13
 
-## Task 14: Documentation and work-item reconciliation
+## Task 15: Documentation and work-item reconciliation
 - **Goal:** State the limits and the new surface where they are read, and correct what is stale.
 - **Files:** `docs/bot-config-manifest/{manifest-schema,user-manual,teclaw-cli-contract}.zh-CN.md`, `docs/bot-config-manifest/work-items{,.zh-CN}.md`
 - **Done when:**
@@ -158,9 +174,9 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] The `cli_tools` rows are removed from the gate tables in schema §7 and work-items §5 W1.
   - [ ] `teclaw-cli-contract.zh-CN.md` is reconciled: the `schema_version` 4 → 5 claim and the `entrypoints` / "unpacked directory" language are corrected to the shipped one-entry-one-file shape.
   - [ ] The W9 entry in both work-items files reflects what shipped, and the stale rows are fixed (`${BOT_ARCH}` landed with W1; the artifact field landed with #1734).
-- **Depends on:** Tasks 11, 13
+- **Depends on:** Tasks 12, 14
 
-## Task 15: Tests & Verification
+## Task 16: Tests & Verification
 - **Goal:** Ensure the feature meets the spec's acceptance criteria.
 - **Files:** the whole feature
 - **Done when:**
@@ -169,7 +185,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
   - [ ] No existing manifest, artifact, resources, creation or deploy test has an edited assertion.
   - [ ] No deploy-path file beyond `teclaw_file_promotion.py`, no `core/skill_center/*` file, no `teclaw_paths.py` change and no resources file is modified.
   - [ ] `engine_config` is still unsupported with its existing reason.
-- **Depends on:** Task 14
+- **Depends on:** Task 15
 
 ---
 
@@ -177,15 +193,15 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 5.
 
 - **Group A — The record:** Task 1
   - Theme: The platform gets its own table for what a bot has installed. Nothing user-reachable yet.
-- **Group B — The name-addressed protocol:** Tasks 2, 3
-  - Theme: Both engine ports behind one protocol whose every operation takes a tool name and never a path — device write plus `chmod` on ARCA, the engine's CLI endpoints on teclaw.
-- **Group C — The service:** Tasks 4, 5
+- **Group B — Bytes and delivery:** Tasks 2, 3, 4
+  - Theme: The platform's own copy of the bytes, plus both delivery ports behind one name-addressed protocol — device write plus `chmod` on ARCA, the artifact itself on teclaw.
+- **Group C — The service:** Tasks 5, 6
   - Theme: The one component that fetches, verifies, records, delegates and replaces, with its failure modes pinned.
-- **Group D — The API:** Tasks 6, 7, 8
+- **Group D — The API:** Tasks 7, 8, 9
   - Theme: A management surface that delegates, plus the assertion that tools stay out of the resources surface — a property, since nothing was built to enforce it.
-- **Group E — Manifest apply:** Tasks 9, 10
+- **Group E — Manifest apply:** Tasks 10, 11
   - Theme: Apply becomes a second caller of the same service, with full-override semantics, always platform-managed regardless of the switch.
-- **Group F — Promotion and the artifact:** Tasks 12, 13
+- **Group F — Promotion and the artifact:** Tasks 13, 14
   - Theme: Service-bot promotion gathers tools from the engine into stage-scoped OSS, and the artifact's refs point at them.
-- **Group G — Docs and verification:** Tasks 11, 14, 15
+- **Group G — Docs and verification:** Tasks 12, 15, 16
   - Theme: Record how the agent finds a tool in v1 and correct §3.7's `PATH` promise, write down the limits, and check off the spec.

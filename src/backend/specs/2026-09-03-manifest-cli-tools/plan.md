@@ -4,48 +4,45 @@ Spec: `spec.md` in this directory. Work item W9, issue #1477.
 
 ## Approach
 
-A table, a service, a name-addressed engine port, and three thin callers.
-`ac_bot_cli_tool` holds the platform's record of what a bot has installed.
-`CliToolService` is the only code that fetches, verifies, records and delegates
-— the HTTP routes and the manifest materialiser both call it. Placement goes
-through `CliToolEnginePort`, whose every operation takes a **tool name and never
-a path**: the engine chooses the directory, sets the executable bit and exposes
-the tool to the agent. teclaw's promotion gather reads tools back out through
-that port's `get` and stages them into OSS for the artifact's refs.
+A table, an OSS tool store, a service, and per-family delivery.
+`ac_bot_cli_tool` records what a bot has; the OSS store holds the bytes.
+`CliToolService` is the only code that fetches, verifies, stores, records and
+delivers — the HTTP routes and the manifest materialiser both call it. ARCA
+installs into the live container by name (device write plus `chmod`); on teclaw
+the composed artifact's `cli_tools` refs point at the OSS objects and *are* the
+delivery. Promotion copies those objects to the new stage prefix.
 
-> **Revision 5** (PR #1870 review, third round). Rev 4 gave tools their own
-> `tools/` namespace so the resources API could not reach them. Withdrawn: the
-> backend does not need to know the directory *at all*, which removes the
-> namespace, the `to_engine_relative` change and every isolation mechanism at
-> once. Also: `cli_tools` is always platform-managed like `mcp` — the teclaw
-> switch does not apply — and the teclaw arm gains the promotion gather.
+> **Revision 6** (PR #1870 review, fourth round). Rev 5 produced the artifact
+> refs by gathering from the engine at promotion time, which left a live CLI
+> update or a manifest apply on teclaw with nothing to reference. The platform
+> now stores the bytes at install time, which also removes the protocol's `get`,
+> turns promotion into a copy, and settles the phase per family.
 
 ## Affected Components
 
-- `core/bot_config_manifest/cli_tools/` — **new package**: the service, the
-  engine port, the record and the two port implementations.
-- `core/repository/{protocols,implementations}/bot/cli_tool.py` — **new**, the
-  repository split §8 requires.
+- `core/bot_config_manifest/cli_tools/` — **new package**: the service, the OSS
+  tool store, the record, the ARCA delivery port and the teclaw ref source.
+- `core/repository/{protocols,implementations}/bot/cli_tool.py` — **new**.
 - `core/schema.py` — register the ORM model's side-effect import.
-- `api/bot_cli_tool_service.py` — **new**, the service API contract, registered
-  in the consistency `_PAIRS`.
+- `api/bot_cli_tool_service.py` — **new**, registered in the consistency `_PAIRS`.
 - `adapters/http/openapi_v1/bots/cli_tools.py` — **new**, the management routes.
 - `core/bot_config_manifest/apply/materialisers/cli_tools.py` — **new**, a thin
   materialiser delegating to the service.
-- `core/bot_config_manifest/apply/{registry,delivery}.py` — register it and bind
-  the service. `order.py` and the orchestrator are **not** touched.
+- `core/bot_config_manifest/apply/delivery.py` — bind the service, and the
+  `phase_of` rule that makes `cli_tools` `PRE_CONTAINER` on teclaw regardless of
+  the switch. `order.py` and the orchestrator are **not** touched.
+- `core/bot_config_manifest/apply/registry.py` — register the materialiser.
 - `core/bot_config_manifest/capabilities.py` — unlock `cli_tools`.
-- `core/service_bot/services/deploy/teclaw_file_promotion.py` — gather tools by
-  name into stage-scoped OSS keys.
+- `core/service_bot/services/deploy/teclaw_file_promotion.py` — copy tool
+  objects to the new stage prefix.
 - `core/config_compose/{protocols,models}.py`, `services/config_composer.py` —
   the `cli_tools` refs and always-`platform` ownership.
 - `docs/bot-config-manifest/*` — schema (including the §3.7 `PATH` correction),
   user manual, teclaw contract, A2.
 
-**Not touched:** `service_bot/services/deploy/*` apart from the promotion file;
-`core/skill_center/*` and the runtime projection; `core/config_compose/teclaw_paths.py`
-(no new namespace — rev 4 added one, rev 5 does not); and **every resources
-endpoint and `core/services/resource_file_service.py`** — nothing to filter.
+**Not touched:** `core/skill_center/*` and the runtime projection;
+`core/config_compose/teclaw_paths.py`; and every resources endpoint and
+`core/services/resource_file_service.py`.
 
 ## Data Model Changes
 
@@ -67,6 +64,7 @@ class BotCliToolORM(Base):
     digest = Column(String(80), nullable=False)     # pinned sha256:…
     subpath = Column(String(512), nullable=True)    # selected archive member
     md5 = Column(String(32), nullable=False)        # platform-computed
+    oss_key = Column(String(512), nullable=False)   # where the platform kept the bytes
     size_bytes = Column(BigInteger, nullable=False)
     version = Column(String(64), nullable=True)     # metadata only
     installed_by = Column(String(64), nullable=False)  # "manifest" | user id
@@ -100,14 +98,19 @@ class CliToolService:
     """
 
     def __init__(
-        self, *, repo: CliToolRepositoryProtocol, engine: CliToolEnginePort,
-        entry_fetcher: EntryFetcher,
+        self, *, repo: CliToolRepositoryProtocol, store: CliToolStore,
+        delivery: CliToolDeliveryPort, entry_fetcher: EntryFetcher,
     ) -> None: ...
 
     async def install(self, ctx: CliToolContext, decl: CliToolDecl) -> CliToolOutcome:
-        """fetch → enforce sha256 → unpack → select subpath → verify ELF →
-        md5 → engine.upload → record. Nothing is recorded for a step that
-        failed, so the table never claims a tool the container lacks."""
+        """fetch → sha256 → unpack → select subpath → verify ELF → md5 →
+        **store in OSS** → deliver → record.
+
+        The OSS write comes before delivery because it is what a teclaw
+        artifact references (spec D-4); on ARCA it is also what makes a
+        re-delivery possible without re-fetching a source URL that may have
+        rotated. Nothing is recorded for a step that failed.
+        """
 
     async def remove(self, ctx: CliToolContext, name: str) -> CliToolOutcome: ...
 
@@ -126,7 +129,7 @@ class CliToolService:
         """
 
     async def drift(self, ctx: CliToolContext) -> CliToolDrift:
-        """Table versus ``engine.list`` — observable rather than assumed away."""
+        """Table versus ``delivery.list`` — observable, not assumed away."""
 ```
 
 ```python
@@ -146,46 +149,55 @@ def select_subpath(tree: UnpackedTree, subpath: str, *, location: str) -> Path:
     regular file, must still resolve inside the tree after symlinks."""
 ```
 
-## The engine port
+## The OSS tool store
 
 ```python
-# core/bot_config_manifest/cli_tools/engine_port.py (new)
-@runtime_checkable
-class CliToolEnginePort(Protocol):
-    """What the service asks of an engine.
+# core/bot_config_manifest/cli_tools/store.py (new)
+class CliToolStore:
+    """The platform's copy of a bot's tool bytes.
 
-    **Every operation addresses a tool by name.** No container path crosses this
-    boundary in either direction: the engine picks the directory, sets the
-    executable bit and exposes the tool to the agent (spec D-3). That is what
-    lets teclaw — an external engine whose layout we do not know — implement the
-    same protocol as the ARCA family.
+    Exists because a teclaw artifact composed for a live update or a manifest
+    apply has to reference the tool *now* — gathering from the engine at that
+    moment would be circular, since the platform is the side that just fetched
+    and verified the bytes (spec D-4).
     """
 
-    async def install(self, ctx: CliToolContext, *, name: str, data: bytes) -> None:
-        """Place the file and make it executable. Raises on either failure."""
+    def put(self, ctx: CliToolContext, *, name: str, data: bytes) -> str:
+        """Write the bytes; return the OSS key recorded on the row."""
 
+    def copy_to_stage(self, ctx, *, name: str, stage: str) -> str:
+        """Server-side copy to a stage-scoped prefix. What promotion calls."""
+
+    def delete(self, ctx: CliToolContext, *, name: str) -> None: ...
+```
+
+## The delivery ports
+
+```python
+# core/bot_config_manifest/cli_tools/delivery_port.py (new)
+@runtime_checkable
+class CliToolDeliveryPort(Protocol):
+    """How a family gets a tool into a bot. Name-addressed; no path crosses.
+
+    There is deliberately **no `get`**: the platform holds the bytes, so nothing
+    reads them back out of a container (spec D-5). ``list`` remains, for the
+    drift read only.
+    """
+
+    async def install(self, ctx: CliToolContext, *, name: str, data: bytes) -> None: ...
     async def delete(self, ctx: CliToolContext, *, name: str) -> None: ...
-
-    async def list(self, ctx: CliToolContext) -> list[str]:
-        """The engine's own view — the input to the drift read."""
-
-    async def get(self, ctx: CliToolContext, *, name: str) -> bytes:
-        """One tool's bytes. Exists for the teclaw promotion gather, which has
-        to snapshot what is installed without knowing where it lives."""
-
+    async def list(self, ctx: CliToolContext) -> list[str]: ...
     async def replace_all(
         self, ctx: CliToolContext, *, install: Sequence[tuple[str, bytes]],
         remove: Sequence[str],
-    ) -> None:
-        """Make the installed set equal ``install``. One round trip where the
-        engine supports it; the default implementation loops."""
+    ) -> None: ...
 ```
 
-### ARCA implementation — write, then chmod
+### ARCA delivery — write, then chmod
 
 ```python
 # core/bot_config_manifest/cli_tools/arca_port.py (new)
-class ArcaCliToolPort(CliToolEnginePort):
+class ArcaCliToolPort(CliToolDeliveryPort):
     """Device write through the existing file chain, then the executable bit.
 
     The chmod uses ``execute_baas_shell_command`` — the channel
@@ -213,37 +225,56 @@ if result.exit_code != 0:
 `name` is validated by W1 (no path separators, unique per bot) *and* quoted
 here: the schema rule is the contract, the quoting is the defence.
 
-### teclaw implementation and the promotion gather
+### teclaw delivery — the artifact is the delivery
 
 ```python
 # core/bot_config_manifest/cli_tools/teclaw_port.py (new)
-class TeclawCliToolPort(CliToolEnginePort):
-    """The teclaw engine's CLI endpoints, by name.
+class TeclawCliToolPort(CliToolDeliveryPort):
+    """No engine upload call. The refs on the composed artifact are the
+    delivery, exactly as ``mcp`` is composed and delivered.
 
-    We do not know where teclaw puts a tool and do not need to. ``get`` is the
-    operation promotion depends on: it returns the bytes so the backend can
-    stage them without walking a directory it cannot see.
+    ``install`` and ``delete`` therefore do nothing beyond letting the caller's
+    row-and-store write stand: the next compose carries the new set. The
+    strategy's existing closing redeliver (W8) is what pushes it.
     """
 ```
 
 ```diff
 # core/service_bot/services/deploy/teclaw_file_promotion.py
-  # workspace and identity are swept through DeviceFileSystem by
-  # namespace-relative path. Tools are not: their directory is the engine's,
-  # so they are gathered through the CLI port by name.
-+ async def _gather_cli_tools(self, ...) -> list[CliToolStagedRef]:
-+     for record in await self._tools.list(ctx):          # the platform's table
-+         data = await self._engine.get(ctx, name=record.name)
-+         key = self._stage_key(f"cli-tools/{record.name}")   # stage-scoped
-+         self._oss.put_object(key, data)
+  # workspace and identity are read from the engine, because the container owns
+  # them. Tools are not: the platform holds the bytes, so promotion is a copy.
++ def _promote_cli_tools(self, ...) -> list[CliToolStagedRef]:
++     for record in self._tools.list(ctx):              # the platform's table
++         new_key = self._store.copy_to_stage(ctx, name=record.name, stage=stage)
 +     # → {name, store, path, md5, version} refs for the composed artifact
 ```
 
-The stage prefix is the one `TeclawFilePromotion` already builds
-(`{bot_id}_{publish_id}_{stage}/…`), so draft and verify snapshots stay
-isolated exactly as they are for `workspace` and `identity`. `md5` and
-`version` come from the metadata table, not from re-hashing the gathered bytes
-— the table is the record of what was installed.
+Nothing is downloaded from the engine, so promotion costs a server-side copy
+rather than a round trip through the container. `md5` and `version` come from
+the metadata table.
+
+## The phase rule
+
+```diff
+# core/bot_config_manifest/apply/delivery.py — TeclawDelivery.phase_of
+     def phase_of(self, step: ApplyStep) -> ApplyPhase:
+         if step.construct == ManifestSection.SCRIPT:
+             return step.phase
++        if step.construct == ManifestCategory.CLI_TOOLS:
++            # The artifact is teclaw's delivery and it is composed before
++            # provisioning; a teclaw creation has no phase B at all under the
++            # switch-on sequence. So this category is PRE_CONTAINER whatever
++            # the switch says — it is always platform-managed (spec D-6, D-8).
++            return ApplyPhase.PRE_CONTAINER
+         if self._platform_managed:
+             return ApplyPhase.PRE_CONTAINER
+         return ApplyPhase.ON_CONTAINER
+```
+
+`order.py` keeps `cli_tools` at `ON_CONTAINER` — that table is the ARCA reading,
+per its own comment — and is not modified. Rev 5 claimed the per-family phase
+needed no category-specific code; that was wrong, because the generic re-phasing
+keys on the switch and this category must not.
 
 ## The management API
 
@@ -336,10 +367,19 @@ None. `hashlib` for the md5, `shlex` for the chmod quoting.
 - **Risk:** `name` reaches a shell.
   **Mitigation:** W1 forbids path separators and enforces per-bot uniqueness,
   and the command is `shlex.quote`d regardless. A test passes a hostile name.
-- **Risk:** promotion gathers a tool the engine no longer has.
-  **Mitigation:** the gather iterates the **table** and calls `get` per name; a
-  missing tool fails that entry with its name, rather than silently producing an
-  artifact that references an object never written.
+- **Risk:** the OSS copy and the container drift apart — the store has a tool
+  the container lost, or vice versa.
+  **Mitigation:** `drift()` compares the table against the family's `list`, and
+  `replace_all` re-asserts every declared tool from the platform's own bytes, so
+  recovery never depends on the user's source URL still serving them.
+- **Risk:** an OSS object is orphaned when a tool is removed or a bot is deleted.
+  **Mitigation:** `remove` deletes the object with the row, and the creation
+  cleanup path removes both; a test covers each.
+- **Risk:** the extra OSS write doubles the bytes moved on install.
+  **Mitigation:** accepted (spec D-4). On teclaw it is not redundant at all — the
+  OSS object *is* the delivery. On ARCA it buys re-delivery without re-fetching a
+  source that may have rotated, which is worth one write of a ≤200 MiB file at
+  install time.
 - **Risk:** a partial `replace_all` leaves some tools new and some old.
   **Mitigation:** per-tool outcomes in one report, and the table records only
   what landed — so the next apply converges the remainder.
@@ -363,6 +403,13 @@ None. `hashlib` for the md5, `shlex` for the chmod quoting.
 - **Filtering CLI tools out of the resources endpoints.** Rejected twice over:
   unnecessary once tools are not in the workspace, and `_HIDDEN_DIRNAMES`
   already shows how a filter decays (it guards the root listing only).
+- **Composing teclaw's refs by gathering from the engine at promotion time**
+  (rev 5). Rejected: it answers only the promotion case. A live CLI update or a
+  manifest apply composes an artifact immediately, and there is nothing for it to
+  reference unless the platform already holds the bytes.
+- **Storing the bytes only for teclaw.** Tempting, since only teclaw's artifact
+  needs a ref. Rejected: it splits the install pipeline in two by family for a
+  saving of one write, and it gives up ARCA's re-delivery-without-refetch.
 - **Putting the tools directory on `PATH` now.** Deferred per D-8; engine-side,
   and reversible without touching the schema, the API, the table or the
   artifact contract.
@@ -396,7 +443,10 @@ def test_chmod_failure_fails_the_entry_with_stderr(): ...
 def test_hostile_tool_name_is_quoted_into_the_chmod(): ...
 def test_replace_all_removes_tools_absent_from_the_declaration(): ...
 def test_replace_all_computes_removals_from_the_table_not_the_engine(): ...
-def test_no_engine_port_signature_takes_a_path(): ...
+def test_no_delivery_port_signature_takes_a_path(): ...
+def test_delivery_port_has_no_get(): ...
+def test_bytes_are_written_to_oss_before_delivery(): ...
+def test_remove_deletes_the_oss_object_with_the_row(): ...
 def test_replace_all_reports_per_tool_on_partial_failure(): ...
 def test_drift_reports_a_table_row_the_engine_does_not_have(): ...
 ```
@@ -431,17 +481,18 @@ def test_api_and_apply_refuse_the_same_hostile_declaration(): ...
 
 ```python
 # tests/community/core/service_bot/test_teclaw_cli_tool_promotion.py (new)
-def test_promotion_gathers_each_installed_tool_by_name(): ...
-def test_gathered_objects_use_the_stage_scoped_prefix(): ...
+def test_promotion_copies_objects_to_the_new_stage_prefix(): ...
+def test_promotion_never_calls_the_engine(): ...
 def test_draft_and_verify_snapshots_do_not_share_objects(): ...
 def test_md5_and_version_come_from_the_table_not_a_rehash(): ...
-def test_a_tool_the_engine_no_longer_has_fails_that_entry_by_name(): ...
 def test_promotion_of_a_bot_with_no_tools_is_byte_identical(): ...
 ```
 
 ```python
 # tests/community/core/bot_config_manifest/test_iteration1_ordering.py (extend)
-def test_cli_tools_is_on_container_on_both_families_regardless_of_the_switch(): ...
+def test_cli_tools_is_on_container_on_arca(): ...
+def test_cli_tools_is_pre_container_on_teclaw_under_both_switch_positions(): ...
+def test_teclaw_creation_carries_tools_in_its_first_artifact(): ...
 ```
 
 Also extended: a test pinning that no deploy-path file (beyond the promotion

@@ -3,12 +3,13 @@
 Work item W9 of `docs/bot-config-manifest/work-items.zh-CN.md` §5, issue #1477.
 Plan: `plan.md` in this directory.
 
-> **Revision 5 (2026-09-03).** The engine owns the tools directory entirely —
-> the backend never knows or addresses a physical path, and every CLI operation
-> is by tool **name**. `cli_tools` is always platform-managed, like `mcp`, and
-> does not depend on the teclaw switch. The teclaw arm gains what service-bot
-> promotion needs: a GET from the engine, staged into OSS, referenced by the
-> artifact. Revision history at the end.
+> **Revision 6 (2026-09-03).** The platform **stores every tool's bytes in OSS
+> at install time**. Without that copy there is nothing for a teclaw artifact to
+> reference on a live update or a manifest apply — the gap rev 5 missed. That
+> makes the artifact teclaw's delivery (no separate engine upload), makes
+> promotion a re-key rather than a download, and settles the phase: `cli_tools`
+> is `PRE_CONTAINER` on teclaw and `ON_CONTAINER` on ARCA, under either switch
+> position. Revision history at the end.
 
 ## Summary
 
@@ -46,201 +47,113 @@ longer there.
    "the artifact has carried the whole MCP set on every compose since W12, so
    there is no engine state for it to keep" (`config_composer.py`).
    `cli_tools` behaves the same way.
-3. **`TeclawFilePromotion` is the promotion gather this feature must join.** At
+3. **teclaw creation has no on-container phase.** W8's creation sequence with
+   the platform-managed switch on is record → pre-container phase → provision →
+   `ACTIVE`, with **no phase B**; with the switch off it is an empty phase A →
+   create and provision → `ACTIVE` → phase B. Under *either* position the
+   pre-container phase runs before the first artifact is composed, so a
+   construct teclaw delivers by artifact must be `PRE_CONTAINER` — an
+   `ON_CONTAINER` `cli_tools` would simply never run on a teclaw creation.
+4. **`TeclawFilePromotion` is the promotion boundary this feature must join.** At
    a promotion boundary (draft→verify, verify→publish) the backend "must **read
    the source container's files from the engine**, write each to a
    **stage-scoped OSS key**, and return `{store, path}` refs to embed in the
    composed `BotConfigArtifact` for the new stage". It sweeps two namespaces
    today, `workspace` and `identity`, through `DeviceFileSystem`.
-4. **The platform already runs commands in live ARCA containers, as routine
+5. **The platform already runs commands in live ARCA containers, as routine
    business.** `BaasService.exec_command_on_bot` drives
    `baas_container_init.py` (bootstrap, engine install, supervisor setup,
    service start, watchdog) and `baas_codefuse_writer.py`, through
    `execute_baas_shell_command(...)` which returns a `CommandResult` with an
    exit code and stderr. The executable bit costs no new channel.
-5. **`write_file` cannot set a mode** on any transport: the BaaS device uploads
+6. **`write_file` cannot set a mode** on any transport: the BaaS device uploads
    through `POST /api/file/upload` with a `target_path` and no mode field, and
    `DeviceFileSystem` exposes no `chmod`.
-6. **The table pattern is established.** `ac_bot_startup_script` is the model:
+7. **The table pattern is established.** `ac_bot_startup_script` is the model:
    ORM plus a pydantic record, `env` column, tenant guard, `UniqueConstraint`,
    registered by a side-effect import in `core/schema.py`, protocol and
    implementation split under `core/repository/{protocols,implementations}/bot/`.
-7. **`${BOT_ARCH}` already resolves to `amd64`** (`schema/placeholders.py`) —
+8. **`${BOT_ARCH}` already resolves to `amd64`** (`schema/placeholders.py`) —
    W1 shipped it, contrary to the W9 progress table. Only the ELF verification
    half of that row is outstanding.
-8. **The schema already parses a `cli_tools` entry** and enforces the mandatory
+9. **The schema already parses a `cli_tools` entry** and enforces the mandatory
    `digest`; `fetch/limits.py` carries the 200 MiB width; `APPLY_ORDER` places
    `cli_tools` at `ON_CONTAINER`. The category is refused today only by the
    capability gate.
 
 ## The design
 
-**One core component does the work. Everything else calls it. The engine owns
-the filesystem.**
+**One core component does the work. The platform keeps the bytes. The engine
+owns the filesystem.**
 
 ```text
       POST/GET/DELETE .../cli-tools          manifest apply / W13 creation
                    │                                      │
                    └──────────────┬───────────────────────┘
                                   ▼
-                          CliToolService              ← the only thing that
-                        (fetch · verify · record       does the work
-                         · delegate · replace)
+                          CliToolService          ← the only thing that
+             (fetch · verify · store · record       does the work
+                    · deliver · replace)
                                   │
-                    ┌─────────────┴─────────────┐
-                    ▼                           ▼
-            ac_bot_cli_tool              engine CLI protocol
-             (metadata)              install · delete · list · get
-                                       · replace_all  — all by NAME
+                ┌─────────────────┼─────────────────┐
+                ▼                 ▼                 ▼
+        ac_bot_cli_tool     OSS tool store    delivery, per family
+          (metadata)         (the bytes)      ARCA: install by name
+                                              teclaw: artifact refs
 ```
 
-- **The backend never knows where a tool lives.** Every operation addresses a
-  tool by its `name`. The engine chooses the directory, sets the executable bit,
-  and exposes it to the agent. No physical path crosses the boundary in either
-  direction, so there is no path for the backend to compute, store, validate or
-  leak.
+- **The platform stores every tool's bytes in OSS at install time.** This is the
+  gap rev 5 missed: on a live CLI update or a manifest apply, a teclaw artifact
+  has to reference the tool *now*, and there is nothing to reference unless the
+  platform kept a copy. Gathering from the engine at that moment would be
+  circular — the platform is the side that just fetched and verified the bytes.
 - **Metadata is the platform's.** `ac_bot_cli_tool` holds one row per tool per
   bot: the pinned `digest`, the selected `subpath`, the delivered `md5`, the
-  `version`, size and audit stamps. It answers "what does this bot have", and it
-  is what makes replacement and removal decidable.
+  `version`, the OSS key, size and audit stamps. It answers "what does this bot
+  have", and it makes replacement and removal decidable.
+- **Delivery differs by family, and only there.**
+  - **ARCA** — the tool is installed into the live container by name: the
+    existing device file write, then `chmod` through the existing exec channel.
+    Needs the container, so `ON_CONTAINER`.
+  - **teclaw** — the artifact *is* the delivery. The platform updates the row,
+    writes the bytes to OSS, composes the `cli_tools` refs and delivers, exactly
+    as `mcp` is composed and delivered. No separate engine upload call.
+- **The backend never knows where a tool lands.** ARCA's install is by name and
+  the directory is the port's private constant; teclaw resolves the refs itself.
+  No container path crosses the boundary in either direction.
 - **The API delegates; it does not implement.** The HTTP routes are a thin
   adapter over `CliToolService`.
-- **Manifest apply is just another caller.** The `cli_tools` materialiser calls
-  `CliToolService`, not the HTTP endpoints — backend code has no reason to make
-  an HTTP request to itself. A manifest apply is a **full override**: the
-  declared set becomes the installed set, exactly as every other category
-  behaves under §3.2.
-- **Always platform-managed, like `mcp`.** `cli_tools` does not depend on the
-  `teclaw_platform_managed` switch: the platform is the source of truth for the
-  installed set on both families, always.
-- **No projection component.** Skills and MCP project because they are platform
-  state a runtime must be *told about* and reconciled against. A tool is
-  installed or it is not.
+- **Manifest apply is just another caller**, and a **full override**: the
+  declared set becomes the installed set, per §3.2.
+- **Always platform-managed, like `mcp`** — independent of the
+  `teclaw_platform_managed` switch.
+- **No projection component.**
 
-### Why the ELF header is checked
+### The phase, and why it differs by family
 
-ELF — Executable and Linkable Format — is the binary format Linux executables
-use. Every ELF file opens with a fixed header whose first two fields are all
-this needs: the magic bytes `\x7fELF` at offset 0, and `e_machine` at offset 18
-(`0x3E` = x86-64, `0xB7` = arm64). Two field reads, no parsing library.
+`cli_tools` is **`ON_CONTAINER` on ARCA** (a live container write) and
+**`PRE_CONTAINER` on teclaw** (the artifact is composed before provisioning),
+under *either* switch position. On an existing bot the two phases run back to
+back and the distinction is invisible; it only decides anything on the W13
+creation path — which is exactly where an `ON_CONTAINER` `cli_tools` would never
+run on teclaw, because that sequence has no phase B.
 
-It is checked **in addition to** the mandatory `sha256` because the two answer
-different questions. `digest` answers *"are these the bytes you asked for"* —
-the supply chain. The ELF check answers *"can this machine run them"* — the
-architecture. An arm64 build, a mislabelled `.zip`, or an HTML error page a CDN
-served with a 200 all have perfectly valid digests.
-
-Without it the failure lands at the worst moment: the apply reports success, the
-tool sits in the container looking installed, and the model discovers
-`cannot execute binary file: Exec format error` mid-task. With it, the apply
-report says which architecture was found and which the fleet runs, at install
-time, while the owner is still there to fix the URL. It also pairs with
-`${BOT_ARCH}`: a manifest may write `…/mycli-linux-${BOT_ARCH}`, and this is
-what verifies the URL served what the substitution asked for.
-
-### The teclaw arm and service-bot promotion
-
-teclaw is an external engine and the backend does not know where its tools live
-— which is exactly why the protocol needs a **GET**. At a promotion boundary the
-backend gathers the tools *from the engine*, writes them to stage-scoped OSS
-keys, and composes an artifact whose `cli_tools` refs point at those objects.
-This is the same shape `TeclawFilePromotion` already performs for `workspace`
-and `identity`, with one difference that follows from the design: those two are
-swept through `DeviceFileSystem` by namespace-relative path, whereas tools are
-fetched through the engine's CLI GET **by name**, because their directory is not
-the backend's to walk.
-
-### Nothing to isolate from the resources API
-
-Because the backend never addresses a tool by path, and the engine keeps tools
-outside the workspace it serves to the file APIs, CLI tools simply are not part
-of the resources surface — there is nothing to hide and no filter to add. The
-resources endpoints are untouched, and a test asserts a bot's installed tool
-never appears in its resources listing.
-
-## User Stories
-
-- As a bot owner, I declare a tool with a URL and a `sha256` in my manifest, and
-  the model can invoke it in the container.
-- As a bot owner, I install, list and delete tools through the CLI-tools API
-  without writing a manifest at all.
-- As a bot owner, I declare a tool inside a `.tar.gz` by naming its `subpath`,
-  and only that one file is delivered.
-- As a bot owner, my manifest apply makes the installed set equal the declared
-  set: tools I removed from the document are gone from the container.
-- As a bot owner, I can ask what tools a bot has and get the platform's record —
-  name, version, digest, when it was installed and by whom.
-- As a bot owner promoting a service bot from draft to verify to online, the
-  tools installed on the source container come with it.
-- As a bot owner, I declare a tool built for the wrong architecture and the apply
-  report tells me so, instead of the model hitting `exec format error` mid-task.
-- As a bot owner, I omit `digest` and the request is refused, because the
-  platform will not distribute an unpinned executable on my behalf.
-- As a backend engineer, I never see or construct a container path for a tool, so
-  I cannot get one wrong.
-
-## Acceptance Criteria
-
-### The metadata table
-
-- [ ] `ac_bot_cli_tool` exists with one row per `(env, bot_id, name)` —
-      uniqueness enforced by constraint, so a duplicate command name is
-      unwritable rather than merely validated.
-- [ ] A row carries the declared `source` and `digest`, the selected `subpath`,
-      the platform-computed `md5`, `size_bytes`, `version`, `installed_by`
-      (`manifest` or a user id), `modifier` and timestamps.
-- [ ] **No column holds a container path.** The engine owns placement; the row
-      identifies a tool by `name`.
-- [ ] The ORM model registers through the side-effect import in
-      `core/schema.py`, carries the `env` column and the tenant guard, and splits
-      protocol from implementation under `core/repository/…/bot/`.
-
-### The core service
-
-- [ ] `CliToolService` is the single component that installs, deletes, lists and
-      replaces tools. Both the HTTP adapter and the manifest materialiser call
-      it; neither reimplements any part of it.
-- [ ] `install` fetches under the `cli_tools` width, enforces the declared
-      `sha256` over the fetched source object, unpacks an archive under W2's
-      guards, selects the one `subpath` member, verifies the ELF header (below),
-      computes
-      the `md5`, calls the engine, and writes the metadata row — in that order,
-      recording nothing for a step that failed.
-- [ ] `replace_all` implements full override: the given set becomes the installed
-      set, tools not in it are removed, and the outcome is reported per tool.
-      Removals are computed **from the table**, so a tool the platform installed
-      is removed even if the engine's view has drifted.
-- [ ] `list` answers from the platform's table; `drift` compares it against the
-      engine's own list so divergence is observable rather than assumed away.
-- [ ] Nothing in the service branches on engine type, and nothing in it composes
-      a filesystem path.
-
-### The engine protocol
-
-- [ ] Engine-side operations exist for **install one**, **delete one**,
-      **list**, **get one**, and a **batch** operation sufficient for full
-      override. Every one addresses a tool by `name`.
-- [ ] `install` places the file and makes it executable. On the ARCA family that
-      is the file write followed by a `chmod` through
-      `execute_baas_shell_command`; a failure to set the bit **fails the entry**
-      with the command's stderr, rather than leaving a file the model cannot run.
-- [ ] `get` returns a tool's bytes by name — what the promotion gather needs from
-      an engine whose directory the backend does not know.
-- [ ] The engine, not the backend, decides the directory and how the agent
-      reaches the tool.
-- [ ] The batch operation is what a manifest apply uses, so a full override is
-      not N round trips when the engine can take one.
+This is a **category-specific rule** in the teclaw strategy's `phase_of`, and
+rev 5's claim that the per-family phase needs no category-specific code was
+wrong: the generic re-phasing keys on the switch, and this category must not.
 
 ### teclaw promotion
 
-- [ ] At a promotion boundary (draft→verify, verify→publish) the backend gathers
-      each installed tool from the engine by name, writes it to a **stage-scoped
-      OSS key** under the same layout `TeclawFilePromotion` uses, and the composed
-      artifact's `cli_tools` refs point at those objects.
+- [ ] At a promotion boundary (draft→verify, verify→publish) the tool objects are
+      **copied to the new stage-scoped prefix** under the layout
+      `TeclawFilePromotion` already builds, and the composed artifact's refs
+      point at the new objects.
+- [ ] **Nothing is downloaded from the engine.** The platform's OSS copy is the
+      source, so promotion costs a server-side copy rather than a round trip
+      through the container.
 - [ ] Each ref is `{name, store, path, md5, version}` per `cliToolRef`, with
       `md5` and `version` read from the metadata table.
-- [ ] Draft and verify snapshots do not share objects, matching the existing
-      stage-scoping rule.
+- [ ] Draft and verify snapshots do not share objects.
 - [ ] A promotion of a bot with no tools composes an artifact byte-identical to
       today's, with `cli_tools` omitted.
 
@@ -260,9 +173,13 @@ never appears in its resources listing.
 
 - [ ] The `cli_tools` materialiser calls `CliToolService.replace_all` and adds no
       fetch, verification or placement logic of its own.
-- [ ] `cli_tools` is **`ON_CONTAINER` on both families and does not depend on the
-      `teclaw_platform_managed` switch** — it is always platform-managed, like
-      `mcp`. Delivery is a live engine call, so it needs the container.
+- [ ] `cli_tools` is **`ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw,
+      under either switch position** — a category-specific rule in the teclaw
+      strategy's `phase_of`, because the generic re-phasing keys on the switch
+      and this category must not. `order.py` still carries the ARCA reading and
+      is not modified.
+- [ ] A test pins that a teclaw creation with declared tools has them in its
+      **first** artifact, under both switch positions.
 - [ ] `ownership.cli_tools` is `platform` on every compose, for the same reason
       `mcp` is.
 - [ ] A `PUT` takes effect immediately on both families. **No §2.6 exception.**
@@ -317,25 +234,38 @@ container path crosses the boundary. This is what makes the teclaw arm possible
 at all (an external engine's layout is not ours to know) and it removes a whole
 class of path-handling from the backend.
 
-**D-4 — The engine gets install / delete / list / get plus a batch operation.**
-`get` exists for the promotion gather; batch exists because full override is the
-manifest's semantics for every category and should not cost N round trips.
+**D-4 — The platform stores every tool's bytes in OSS at install time.** Without
+it a teclaw artifact composed for a live update or a manifest apply has nothing
+to reference. The accepted cost is one extra write per install — and on ARCA,
+where the artifact is not the delivery, that write buys re-delivery without
+re-fetching a source URL that may have rotated or gone away, which is worth it
+on its own.
 
-**D-5 — Nothing is needed to hide tools from the resources API.** Earlier
+**D-5 — Delivery is per family, and that is the only thing that differs.** ARCA
+installs by name into the live container; teclaw's artifact *is* the delivery, so
+there is no separate engine upload. The engine protocol needs no `get`, because
+the platform never reads bytes back out of a container.
+
+**D-6 — `cli_tools` is `ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw**,
+under either switch position, because a teclaw creation has no phase B and its
+artifact is composed before provisioning. This is a category-specific rule in
+`phase_of`; rev 5's "no category-specific code" claim was wrong.
+
+**D-7 — Nothing is needed to hide tools from the resources API.** Earlier
 revisions proposed a `tools/` namespace and, before that, a filter. Neither is
 required once the backend never addresses a tool by path and the engine keeps
 tools outside the workspace it serves.
 
-**D-6 — Always platform-managed, independent of the teclaw switch**, exactly as
+**D-8 — Always platform-managed, independent of the teclaw switch**, exactly as
 `mcp` is. `ownership.cli_tools` is `platform` on every compose.
 
-**D-7 — Convergence keys on `digest` *and* `subpath`.** `subpath` is a
+**D-9 — Convergence keys on `digest` *and* `subpath`.** `subpath` is a
 **source-side** path — which member of the fetched archive is the tool — never a
 target path. The same archive with `subpath` moved from `bin/old` to `bin/new`
 delivers a different file under the same command name; keying on `digest` alone
 would report `unchanged` and leave the old binary answering to it.
 
-**D-8 — The agent finds tools through a default-skillset skill, not `PATH`, in
+**D-10 — The agent finds tools through a default-skillset skill, not `PATH`, in
 v1.** Accepted on the owner's call, with the cost stated: the model invokes a
 tool by absolute path, so `mycli --help` does not work and every invocation
 depends on the skill being read; a script that shells out to a sibling tool will
@@ -345,11 +275,11 @@ API, the table or the artifact contract. **`manifest-schema` §3.7's promise tha
 the platform guarantees the tool is on the agent's `PATH` is therefore no longer
 true and must be corrected**, not left to be discovered.
 
-**D-9 — `SCHEMA_VERSION` stays 4.** Settled with the teclaw owner on 2026-08-31
+**D-11 — `SCHEMA_VERSION` stays 4.** Settled with the teclaw owner on 2026-08-31
 and pinned by a test. `schema_version` no longer tracks this contract's
 evolution, so "does this artifact carry `cli_tools`?" is answered by probing.
 
-**D-10 — v1 delivers one self-contained executable per entry.** The flattening
+**D-12 — v1 delivers one self-contained executable per entry.** The flattening
 that removed `entrypoints` also removed the shape that could express "executable
 but not a command", so an in-package helper cannot be made executable. Rather
 than reopen "do we trust an archive's mode bits", v1 states the limit.
@@ -358,10 +288,11 @@ than reopen "do we trust an archive's mode bits", v1 states the limit.
 
 - The `ac_bot_cli_tool` table, its record, protocol and implementation.
 - `CliToolService`: install, delete, list, `replace_all`, drift.
-- The name-addressed engine protocol and the ARCA implementation (file write
-  plus `chmod` through the existing helper).
-- The teclaw arm: the promotion gather into stage-scoped OSS and the artifact's
-  `cli_tools` refs.
+- The OSS tool store: the bytes the platform keeps per bot.
+- The ARCA delivery: name-addressed install / delete / list / batch, file write
+  plus `chmod` through the existing helper.
+- The teclaw delivery: `cli_tools` refs on the composed artifact, and promotion
+  as a stage-scoped **copy** of the OSS objects.
 - The `/cli-tools` management API and its `api/` contract.
 - The `cli_tools` materialiser, delegating to the service.
 - The capability unlock and content-dependent `subpath` validation.
@@ -400,3 +331,4 @@ which no platform code depends on:
 | **rev 3** | Projection withdrawn — a tool is not platform state a runtime must be told about. `cli_tools` as `resources` plus an executable bit, no platform record on ARCA. |
 | **rev 4** | Platform-managed on the owner's decision: metadata table, one core service every caller delegates to, engine CRUD plus batch, a management API, no projection. |
 | **rev 5** | The engine owns the directory and the protocol is **name-addressed** (D-3), so the `tools/` namespace and every isolation mechanism are dropped (D-5). `cli_tools` is always platform-managed, independent of the teclaw switch, like `mcp` (D-6). The teclaw arm gains the **promotion gather** — GET from the engine, stage-scoped OSS, artifact refs — which is why the protocol needs `get`. `PATH` is replaced by a default-skillset skill for v1, with the cost and the §3.7 correction written down (D-8). |
+| **rev 6** | **The platform stores the bytes in OSS at install time** (D-4) — rev 5 had no answer for what a teclaw artifact references on a live update or a manifest apply. The artifact becomes teclaw's delivery with no separate engine upload (D-5); promotion becomes a stage-scoped copy rather than a download, so the protocol's `get` is no longer needed; and the phase settles as ARCA `ON_CONTAINER` / teclaw `PRE_CONTAINER` under either switch position (D-6), correcting rev 5's claim that no category-specific code was required. |
