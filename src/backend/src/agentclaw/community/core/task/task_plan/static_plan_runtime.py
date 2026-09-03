@@ -96,7 +96,7 @@ class StaticPlanRuntime:
         if definition.task:
             # V2 接力输入: 框架下发"# 接自 / ## 群组成(仅 collab) / ## 上游产出正文 / ## 本角色任务"。
             # 不做摘要/合成;rule(怎么分析/输出/接力交接)归各 bot 的 skill/rule,不在此注入。
-            node.task_spec.metadata.instruction = self._relay_instruction(definition, resolved)
+            node.task_spec.metadata.instruction = self._relay_instruction(definition, resolved, graph)
             node.task_spec.goal = Goal(objective=(definition.title or definition.name), acceptances=[])
             logger.info(
                 "[task][static-plan-runtime] relay v2 injected task=%s node=%s type=%s task_head=%r",
@@ -117,9 +117,26 @@ class StaticPlanRuntime:
                 extend_props={"static_input": resolved},
             )
 
-    def _upstream_identity(self, definition: StaticPlanNodeDefinition) -> str:
+    def _upstream_identity(self, definition: StaticPlanNodeDefinition, graph) -> str:
         deps = list(definition.depends_on)
         if not deps:
+            # 仅店庆模板需要把入口“接自”展示为实际触发方；其他静态模板
+            # 保持既有入口元信息，避免改变既有剧本的接力语义。
+            if self.definition.template_id == "merchant-operations-goal-to-plan":
+                props = getattr(graph, "extend_props", {}) or {}
+                cfg = props.get("execution_config") or {}
+                trigger_id = (
+                    props.get("trigger_bot_id")
+                    or cfg.get("trigger_bot_id")
+                    or props.get("owner_bot_id")
+                )
+                trigger_name = (
+                    props.get("trigger_bot_name")
+                    or cfg.get("trigger_bot_name")
+                    or ("触发Bot" if trigger_id else self.definition.entry_name)
+                )
+                if trigger_id:
+                    return f"{trigger_name or '触发Bot'}({trigger_id})"
             return f"{self.definition.entry_name or '入口'}({self.definition.entry_bot_id})"
         up = self.by_id.get(deps[0])
         if not up:
@@ -143,8 +160,8 @@ class StaticPlanRuntime:
             return "(无)"
         return json.dumps(resolved, ensure_ascii=False, default=str)
 
-    def _relay_instruction(self, definition: StaticPlanNodeDefinition, resolved: dict[str, Any]) -> str:
-        parts = [f"# 接自:{self._upstream_identity(definition)}"]
+    def _relay_instruction(self, definition: StaticPlanNodeDefinition, resolved: dict[str, Any], graph) -> str:
+        parts = [f"# 接自:{self._upstream_identity(definition, graph)}"]
         if definition.node_type == "collaboration" and definition.bot_names:
             ids = definition.bot_ids
             names = definition.bot_names
