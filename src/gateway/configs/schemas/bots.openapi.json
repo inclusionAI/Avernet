@@ -23609,6 +23609,7 @@
             "type": "string"
           },
           "space_type": {
+            "description": "Whether the quota belongs to a Personal or Team Space.",
             "enum": [
               "PERSONAL",
               "TEAM"

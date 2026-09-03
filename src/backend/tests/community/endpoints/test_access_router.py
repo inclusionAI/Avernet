@@ -311,10 +311,11 @@ def set_bots_ceiling_forbidden_non_operator():
 
 @endpoint_test(
     method="PUT",
-    path="/api/v1/access/spaces/1/bots-ceiling",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
     scenario="operator_sets_team_space_ceiling",
     seed=_seed_operator_and_team,
     input=CaseInput(
+        path_params={"space_id": 1},
         json_body={"ceiling": 25},
         headers={"x-user-id": "u_operator"},
     ),
@@ -327,10 +328,11 @@ def set_team_space_ceiling_ok():
 
 @endpoint_test(
     method="PUT",
-    path="/api/v1/access/spaces/1/bots-ceiling",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
     scenario="non_operator_cannot_set_team_space_ceiling",
     seed=_seed_non_operator_and_team,
     input=CaseInput(
+        path_params={"space_id": 1},
         json_body={"ceiling": 25},
         headers={"x-user-id": "u_operator"},
     ),
@@ -346,10 +348,12 @@ def set_team_space_ceiling_forbidden_non_operator():
 
 @endpoint_test(
     method="DELETE",
-    path="/api/v1/access/spaces/1/bots-ceiling",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
     scenario="operator_resets_team_space_ceiling",
     seed=_seed_team_with_override,
-    input=CaseInput(headers={"x-user-id": "u_operator"}),
+    input=CaseInput(
+        path_params={"space_id": 1}, headers={"x-user-id": "u_operator"}
+    ),
     expect=ExpectSuccess(status=200, json_contains={"success": True}),
     extra_assertions=(_assert_space_ceiling_reset,),
 )
@@ -359,10 +363,12 @@ def reset_team_space_ceiling_ok():
 
 @endpoint_test(
     method="DELETE",
-    path="/api/v1/access/spaces/1/bots-ceiling",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
     scenario="non_operator_cannot_reset_team_space_ceiling",
     seed=_seed_non_operator_team_with_override,
-    input=CaseInput(headers={"x-user-id": "u_operator"}),
+    input=CaseInput(
+        path_params={"space_id": 1}, headers={"x-user-id": "u_operator"}
+    ),
     expect=ExpectError(
         status=403,
         json_contains={"detail": "权限不足：您没有操作员权限"},

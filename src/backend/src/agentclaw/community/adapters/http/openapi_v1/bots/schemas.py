@@ -502,7 +502,9 @@ class BotQuotaExceededData(BaseModel):
 
     space_id: str = Field(description="Identifier of the full target Space.")
     space_name: str = Field(description="Display name of the full target Space.")
-    space_type: Literal["PERSONAL", "TEAM"]
+    space_type: Literal["PERSONAL", "TEAM"] = Field(
+        description="Whether the quota belongs to a Personal or Team Space."
+    )
     ceiling: int = Field(gt=0, description="Configured Bot ceiling for the Space.")
     used: int = Field(ge=0, description="Current non-deleted cloud Bot count.")
 

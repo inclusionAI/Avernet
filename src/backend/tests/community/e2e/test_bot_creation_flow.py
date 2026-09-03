@@ -389,6 +389,8 @@ class TestRouterLogic:
             bot_id=test_bot_id,
             engine_type="openclaw",
             bot_name="My First Bot",
+            space_id=None,
+            space_quota=False,
         )
         mock_bot_service.create_bot.assert_called_once()
 
@@ -445,6 +447,8 @@ class TestRouterLogic:
             bot_id="default",
             engine_type="openclaw",
             bot_name="My First Bot",
+            space_id=None,
+            space_quota=False,
         )
         mock_bot_service.create_bot.assert_not_called()
 
