@@ -26,6 +26,45 @@ def _resolve_repo_root() -> Path:
 TEST_BOTS_ROOT = _resolve_repo_root() / "test-bots"
 
 
+def _upload_when_baas_visible(
+    client: httpx.Client,
+    *,
+    bot_id: str,
+    path: str,
+    filename: str,
+    payload: bytes,
+) -> httpx.Response:
+    """Upload after BaaS's freshly activated bot becomes queryable.
+
+    A device callback can make Backend report the binding ACTIVE just before
+    BaaS's WebSocket lookup is visible. The file endpoint represents that
+    transient failure as a 200 response with an empty ``uploaded`` list, so
+    retry only the two observed BaaS errors; other response shapes fail at the
+    original test boundary.
+    """
+    last_response: httpx.Response | None = None
+    for attempt in range(5):
+        response = client.post(
+            f"/api/resources/files/upload?bot_id={bot_id}&path={path}",
+            files={"files": (filename, io.BytesIO(payload), "text/plain")},
+        )
+        body = response.json() if response.status_code == 200 else {}
+        if response.status_code == 200 and body.get("uploaded"):
+            return response
+        last_response = response
+        if not any(
+            marker in response.text
+            for marker in ("BOT_NOT_FOUND", "tuple index out of range")
+        ):
+            break
+        time.sleep(0.1 * (attempt + 1))
+
+    assert last_response is not None
+    assert last_response.status_code == 200, last_response.text
+    assert last_response.json().get("uploaded"), last_response.text
+    return last_response
+
+
 @pytest.mark.acceptance
 def test_workspace_file_roundtrip(live_backend):
     """Create, upload, inspect, download, and delete a real workspace file."""
@@ -50,9 +89,12 @@ def test_workspace_file_roundtrip(live_backend):
         )
         assert response.status_code == 200, response.text
 
-        response = client.post(
-            f"/api/resources/files/upload?bot_id={bot_id}&path={parent}",
-            files={"files": (filename, io.BytesIO(payload), "text/plain")},
+        response = _upload_when_baas_visible(
+            client,
+            bot_id=bot_id,
+            path=parent,
+            filename=filename,
+            payload=payload,
         )
         assert response.status_code == 200, response.text
         assert response.json()["uploaded"][0]["path"] == f"{parent}/{filename}"
