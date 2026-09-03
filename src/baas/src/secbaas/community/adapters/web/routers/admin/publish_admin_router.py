@@ -6,7 +6,7 @@ These endpoints bypass normal state machine transitions — use with caution.
 Endpoints:
 - POST /api/v1/admin/force-success - Force a publish and all related entities to success states
 - POST /api/v1/admin/devices/{device_uuid}/status - Update a device's status directly
-- POST /api/v1/admin/bots/{bot_uuid}/status - Update a bot's status directly
+- POST /api/v1/admin/bots/{bot_id}/status - Update a bot's status directly
 """
 
 from typing import Annotated
@@ -183,7 +183,8 @@ class UpdateBotStatusRequest(BaseModel):
 
 
 class UpdateBotStatusResponse(BaseModel):
-    bot_uuid: str = Field(..., description="Bot UUID that was updated")
+    bot_id: int = Field(..., description="Bot ID that was updated")
+    bot_uuid: str = Field(..., description="Bot UUID of the updated bot")
     previous_status: str = Field(..., description="Previous status of the bot")
     new_status: str = Field(..., description="New status after the update")
 
@@ -192,6 +193,7 @@ def _to_update_bot_status_response(
     result: UpdateBotStatusResult,
 ) -> UpdateBotStatusResponse:
     return UpdateBotStatusResponse(
+        bot_id=result.bot_id,
         bot_uuid=result.bot_uuid,
         previous_status=result.previous_status,
         new_status=result.new_status,
@@ -199,16 +201,15 @@ def _to_update_bot_status_response(
 
 
 @router.post(
-    "/bots/{bot_uuid}/status",
+    "/bots/{bot_id}/status",
     response_model=ApiResponse[UpdateBotStatusResponse],
 )
 @inject
 async def update_bot_status_endpoint(
-    bot_uuid: Annotated[
-        str,
-        Path(description="Bot UUID to update"),
+    bot_id: Annotated[
+        int,
+        Path(description="Bot ID (primary key) to update"),
     ],
-    tenant: Annotated[str, Query(description="Tenant name")],
     request: UpdateBotStatusRequest,
     admin_service: PublishAdminService = Depends(
         Provide[ApplicationContainer.services.publish_admin_service]
@@ -218,19 +219,19 @@ async def update_bot_status_endpoint(
 
     **WARNING**: This is a test/development tool. It intentionally bypasses
     the normal state machine transitions and does not perform any real
-    publish workflow or PaaS operation. Use with caution. Only ACTIVE bots
-    can be updated through this endpoint; non-ACTIVE bot resuscitation
-    should go through `force-success` or the publish workflow.
+    publish workflow or PaaS operation. Use with caution. The bot is
+    resolved by its primary key (bot_id); tenant and env are sourced from
+    the fetched record, not from the request.
     """
     try:
         result = await admin_service.update_bot_status(
-            bot_uuid=bot_uuid,
+            bot_id=bot_id,
             status=request.status,
             operator=request.operator,
         )
     except PublishNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail=f"Bot {bot_uuid} not found or not active",
+            detail=f"Bot {bot_id} not found",
         )
     return ApiResponse(data=_to_update_bot_status_response(result))

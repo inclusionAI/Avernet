@@ -149,7 +149,7 @@ class DefaultPublishAdminService(PublishAdminService):
     async def update_bot_status(
         self,
         *,
-        bot_uuid: str,
+        bot_id: int,
         status: str,
         operator: str,
     ) -> UpdateBotStatusResult:
@@ -157,22 +157,22 @@ class DefaultPublishAdminService(PublishAdminService):
 
         WARNING: Admin operation for test/development use only.
         Does not trigger any publish workflow or PaaS operation.
-        Uses get_active_by_bot_uuid_only() to allow cross-env admin access.
+        Uses get_by_id_only() to allow cross-tenant/env admin access by PK.
         """
-        bot = self._bot_repo.get_active_by_bot_uuid_only(bot_uuid)
+        bot = self._bot_repo.get_by_id_only(bot_id)
         if bot is None:
-            raise PublishNotFoundError(f"Bot {bot_uuid} not found or not active")
+            raise PublishNotFoundError(f"Bot {bot_id} not found")
 
         previous_status = bot.status
         logger.warning(
-            f"ADMIN_UPDATE_BOT_STATUS: bot_uuid={bot_uuid} "
-            f"tenant={bot.tenant} env={bot.env} "
+            f"ADMIN_UPDATE_BOT_STATUS: bot_id={bot_id} "
+            f"bot_uuid={bot.bot_uuid} tenant={bot.tenant} env={bot.env} "
             f"previous_status={previous_status} "
             f"new_status={status} operator={operator}"
         )
 
         self._bot_repo.update_status(
-            bot_id=bot.id,
+            bot_id=bot_id,
             tenant=bot.tenant,
             env=bot.env,
             status=status,
@@ -180,7 +180,8 @@ class DefaultPublishAdminService(PublishAdminService):
         )
 
         return UpdateBotStatusResult(
-            bot_uuid=bot_uuid,
+            bot_id=bot_id,
+            bot_uuid=bot.bot_uuid,
             previous_status=previous_status,
             new_status=status,
         )

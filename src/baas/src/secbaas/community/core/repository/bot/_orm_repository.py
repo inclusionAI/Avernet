@@ -249,6 +249,21 @@ class OrmBotRepository(OrmConnectionMixin, BotRepository):
         return record
 
     @with_orm_session
+    def get_by_id_only(self, bot_id: int) -> BotRecord | None:
+        log.info("get_by_id_only: bot_id=%s", bot_id)
+        row = (
+            self._session.query(BotModel)
+            .filter(
+                BotModel.id == bot_id,
+                BotModel.is_deleted == 0,
+            )
+            .first()
+        )
+        record = row.to_record() if row else None
+        log.info("[bot:get_by_id_only] result: %s", record.id if record else "None")
+        return record
+
+    @with_orm_session
     def update_bot(
         self,
         *,
