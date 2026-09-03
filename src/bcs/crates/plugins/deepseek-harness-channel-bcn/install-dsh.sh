@@ -7,6 +7,7 @@ endpoint=""
 bot_name="DeepSeek Harness Bot"
 package_spec="@avernet-plugin/deepseek-harness-channel-bcn"
 start_dsh=true
+dsh_package="${DSH_PACKAGE:-@deepseek-ai/dsh@0.1.1-rc.2}"
 
 usage() {
   echo "Usage: install-dsh.sh --endpoint <url> [--profile <name>] [--bot-name <name>] [--package <npm-spec-or-path>] [--no-start]"
@@ -66,7 +67,16 @@ if [[ ! "$profile" =~ ^[a-z0-9][a-z0-9-]{0,63}$ ]]; then
   exit 2
 fi
 if ! command -v dsh >/dev/null 2>&1; then
-  echo "install-dsh.sh: dsh is not available on PATH" >&2
+  cat >&2 <<EOF
+DeepSeek Harness CLI (dsh) was not found on PATH.
+
+Install it first, then run this command again:
+  npm install --global ${dsh_package}
+
+If npm is not available, install Node.js 22 or newer and retry. The DSH
+installer intentionally stops here so that no onboarding Token is consumed
+before the local CLI is ready.
+EOF
   exit 1
 fi
 
