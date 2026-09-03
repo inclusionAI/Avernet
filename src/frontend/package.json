@@ -52,7 +52,7 @@
     "@codemirror/language": "^6.12.3",
     "@codemirror/view": "^6.42.1",
     "@dicebear/bottts": "^9.4.2",
-    "@dicebear/core": "^9.4.2",
+    "@dicebear/core": "^9.4.3",
     "@lezer/highlight": "^1.2.3",
     "@monaco-editor/react": "^4.7.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
