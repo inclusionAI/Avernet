@@ -120,11 +120,11 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     _group_enabled = _singlebot_2_group_switch(graph, task_id)
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
-    # 先增加一个bbs节点,RUNNING
+    # 先增加一个bbs节点,PENDING
     bbs_task_node = TaskNode(
         node_id=f"bbs-{uuid.uuid4().hex[:8]}",
         task_id=task_id,
-        status=Status.RUNNING,
+        status=Status.PENDING,
         task_spec=TaskSpec(
             metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
             context=Context(background=""),
@@ -197,7 +197,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         _scoped_patch = TaskNodePatch(
             task_id=task_id,
             node_id=bbs_task_node.node_id,
-            status=Status.SUCCESS,
+            status=Status.RUNNING,
             # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,

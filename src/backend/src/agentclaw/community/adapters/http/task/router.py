@@ -1091,6 +1091,7 @@ async def _dispatch_impl(
         raise HTTPException(status_code=422, detail="callback body must be a JSON object")
 
     if is_common_task_payload(_raw_obj):
+        logger.info("[task_callback] common_task_loop_callback session_id=%s, raw_obj=%s", _sid, _raw_obj)
         tc = translate_common_task_callback(_raw_obj)
         try:
             await svc.callback.report_result(tc.data)
