@@ -212,7 +212,7 @@ def test_prepare_application_coding_allows_any_business_space() -> None:
     for space_kind in ("personal", "team"):
         prepared = _strategy_prepare(
             engine_type="claude_code",
-            engine_properties={"template": {"devflow_workflow": "x"}},
+            engine_properties={"template_config": {"devflow_workflow": "x"}},
             space_kind=space_kind,
         )
         assert prepared.template_type == "applicationCoding"
@@ -741,8 +741,9 @@ def test_factory_snapshot_gates_match_application_coding() -> None:
         _strategy_prepare("openclaw", props)
     with pytest.raises(BotCombinationUnsupportedError):
         _strategy_prepare("claude_code", props, bot_type="service")
-    with pytest.raises(BotCombinationUnsupportedError):
-        _strategy_prepare("claude_code", props, space_kind="team")
+    prepared = _strategy_prepare("claude_code", props, space_kind="team")
+    assert prepared.template_type == "architect"
+    assert prepared.template_config == _FACTORY_SNAPSHOT
 
 
 def test_handcrafted_path_rejects_foreign_template_type() -> None:
