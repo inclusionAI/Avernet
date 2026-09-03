@@ -123,8 +123,20 @@ def test_a_failed_object_delete_raises_with_the_object_still_there() -> None:
     assert len(store.list(_SCOPE, category=CATEGORY_IDENTITY)) == 1
     # Once the store answers again, the same object lets the delete land.
     oss.delete_object = lambda k: oss.objects.pop(k, None) is not None  # type: ignore[method-assign]
-    assert store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
     assert key not in oss.objects and store.list(_SCOPE, category=CATEGORY_IDENTITY) == []
+
+
+def test_delete_is_issued_without_a_listing_so_a_listing_failure_cannot_skip_it() -> None:
+    """The plugin folds a transport failure into an empty listing; a delete
+    gated on that would silently leave the object behind."""
+    store, oss = _store()
+    store.put(_SCOPE, category=CATEGORY_IDENTITY, name="a", rel_path="identity/a", content=b"1")
+    oss.list_objects = lambda prefix, max_keys=1000: []  # type: ignore[method-assign]
+    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    assert oss.objects == {}
+    # And an absent object is already removed: no error, nothing listed first.
+    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
 
 
 def test_a_purge_that_could_not_delete_every_object_keeps_only_those() -> None:
@@ -151,8 +163,8 @@ def test_delete_removes_one_object_and_purge_removes_everything_of_the_bot() -> 
     store.put(_SCOPE, category=CATEGORY_RESOURCES, name="b", rel_path="workspace/b", content=b"2")
     other = f"{_BASE}/staff_u1/bot8_manifest/teclaw/identity/a"
     oss.objects[other] = b"other bot"
-    assert store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
-    assert not store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")
+    store.delete(_SCOPE, category=CATEGORY_IDENTITY, rel_path="identity/a")  # idempotent
     # ``identity/a`` is a prefix of ``identity/a.bak``; only the exact key went.
     assert f"{_ROOT}/identity/a" not in oss.objects and f"{_ROOT}/identity/a.bak" in oss.objects
     assert store.purge(_SCOPE) == 2

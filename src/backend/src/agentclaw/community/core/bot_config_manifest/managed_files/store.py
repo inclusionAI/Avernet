@@ -26,7 +26,12 @@ layout and the record can never disagree.
 **Failures raise.** A put that did not land raises before anything else
 happens. A delete that did not land raises with the object still there, so a
 later delete or purge finds it and tries again; the store never forgets bytes
-it can still reach, because the bytes are the record.
+it can still reach, because the bytes are the record. Reads cannot raise —
+the plugin folds a transport failure into "absent" or an empty listing — so
+nothing here gates a write on a read: a delete is issued unconditionally
+(idempotent on an absent object), and a listing that came back empty is what
+the composer and the ports see, which errs towards writing again, never
+towards skipping a write.
 
 **The base is part of the key.** A file written under an earlier ``bot-data``
 base is not found under the current one; the next apply writes it again.
@@ -185,17 +190,20 @@ class ManagedFilesStore:
             size_bytes=len(content),
         )
 
-    def delete(self, scope: ManagedFileScope, *, category: str, rel_path: str) -> bool:
-        """Remove one file. ``False`` when there was none."""
-        rel_path = rel_path.lstrip("/")
-        key = self.store_key(scope, rel_path)
-        if not self._exists(key):
-            return False
+    def delete(self, scope: ManagedFileScope, *, category: str, rel_path: str) -> None:
+        """Remove one file; a file that is not there is already removed.
+
+        No existence check first: the plugin's ``delete_object`` is idempotent
+        on an absent object, and a pre-check through ``list_objects`` would
+        fold a transient listing failure into "not there" and skip the delete
+        silently. A delete that did not land raises instead, so the
+        category's write reports it and the object is still there for the
+        next delete or purge to find. A caller that needs to know whether the
+        file was there asks the listing it already holds.
+        """
+        key = self.store_key(scope, rel_path.lstrip("/"))
         if not self._oss.delete_object(key):
-            # Raised, so the category's write reports the failure; the object
-            # is still there for the next delete or purge to find.
             raise ManagedFilesStoreError(f"object store delete failed for {key!r}")
-        return True
 
     def purge_owner_bot(self, owner_id: str, bot_id: str) -> int:
         """``purge`` for the bot the materialisers address at ``("staff", owner)``
@@ -269,12 +277,6 @@ class ManagedFilesStore:
 
     def read_at(self, scope: ManagedFileScope, rel_path: str) -> Optional[bytes]:
         return self._oss.get_object(self.store_key(scope, rel_path.lstrip("/")))
-
-    def _exists(self, key: str) -> bool:
-        # A listing rather than a read: the question is whether the key is
-        # there, not what it holds. The prefix listing is filtered to the
-        # exact key because ``a/b`` is a prefix of ``a/b.bak``.
-        return any(k == key for k in self._oss.list_objects(key, _LIST_LIMIT))
 
 
 __all__ = [

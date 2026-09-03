@@ -112,10 +112,10 @@ class StoreIdentityPort(_StorePort):
             # The domain's own "absent": an empty write removes the file. In
             # the store that is a delete, so the composer never references an
             # empty object.
-            removed = await asyncio.to_thread(
+            await asyncio.to_thread(
                 self._store.delete, scope, category=CATEGORY_IDENTITY, rel_path=rel_path
             )
-            return {"file_type": file_type, "removed": removed}
+            return {"file_type": file_type, "removed": True}
         file = await asyncio.to_thread(
             self._store.put,
             scope,
@@ -174,10 +174,11 @@ class StoreResourcePort(_StorePort):
         )
         for row in rows:
             if row.rel_path == rel or row.rel_path.startswith(rel + "/"):
-                if await asyncio.to_thread(
+                # Listed, so it was there; the delete raises if it did not land.
+                await asyncio.to_thread(
                     self._store.delete, scope, category=CATEGORY_RESOURCES, rel_path=row.rel_path
-                ):
-                    removed = True
+                )
+                removed = True
         return removed
 
     async def exists(
