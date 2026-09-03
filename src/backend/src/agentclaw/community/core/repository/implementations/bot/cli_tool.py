@@ -21,7 +21,7 @@ from injector import inject
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql import func
 
-from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
+from agentclaw.community.core.bot_config_manifest.cli_tools import (
     BotCliToolModel,
     BotCliToolRecord,
 )
@@ -166,7 +166,11 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
                 env,
                 bot_id,
                 name,
-                exc.__class__.__name__,
+                # ``exc.orig`` is the driver's own error — the constraint name
+                # and code. ``exc.__class__.__name__`` would be the constant
+                # "IntegrityError" whatever the cause, which is exactly the
+                # ambiguity this line exists to resolve.
+                exc.orig,
             )
             return self._upsert_once(**fields)
 
@@ -266,22 +270,26 @@ class BotCliToolRepository(BotCliToolRepositoryProtocol):
         deleted first and asked later could never enumerate what to clean up.
         """
         with self._db.orm_session() as db:
-            rows = (
-                db.query(self._Tool)
-                .filter(
-                    self._Tool.env == env,
-                    self._Tool.entity_id == entity_id,
-                    self._Tool.bot_id == bot_id,
-                )
-                .all()
+            scope = (
+                self._Tool.env == env,
+                self._Tool.entity_id == entity_id,
+                self._Tool.bot_id == bot_id,
             )
-            keys = [row.oss_key for row in rows]
-            for row in rows:
-                db.delete(row)
+            # Read the keys as a column query, then delete in one statement.
+            # Selecting whole entities and calling ``db.delete(row)`` per row
+            # would be an N+1 *and* unsafe: the SELECT takes no locks, so a
+            # concurrent delete between it and the flush leaves the unit of
+            # work issuing a DELETE that matches zero rows, which SQLAlchemy
+            # raises on. A bulk delete is immune and reports what it removed.
+            keys = [key for (key,) in db.query(self._Tool.oss_key).filter(*scope)]
+            removed = db.query(self._Tool).filter(*scope).delete(
+                synchronize_session=False
+            )
         logger.info(
-            "[cli_tool.delete_all] env=%s, bot_id=%s, deleted=%s",
+            "[cli_tool.delete_all] env=%s, bot_id=%s, keys=%s, deleted=%s",
             env,
             bot_id,
             len(keys),
+            removed,
         )
         return keys

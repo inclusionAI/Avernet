@@ -53,7 +53,7 @@ CREATE TABLE `ac_bot_cli_tool` (
   -- it replaced an API-installed tool instead of silently overwriting it.
   -- 1024 to match modifier: both hold the same acting-user principal, and a
   -- narrower width would fail the upsert after the tool is already installed.
-  `installed_by`  varchar(1024) NOT NULL COMMENT "'manifest' 或安装它的用户 ID",
+  `installed_by`  varchar(1024) NOT NULL COMMENT '安装者：manifest 或用户 ID',
   `modifier`      varchar(1024) NOT NULL COMMENT '审计：最后写入者',
   `avernet_tenant` varchar(64)  NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
   `tool_key`      char(64)      NOT NULL COMMENT '唯一键代理：sha256(env|entity_id|bot_id|name)',
@@ -63,7 +63,16 @@ CREATE TABLE `ac_bot_cli_tool` (
   -- A command name is unwritable twice for one bot: two concurrent installs of
   -- the same name cannot both land, whichever order they arrive in.
   UNIQUE KEY `uk_tenant_cli_tool_key` (`avernet_tenant`, `tool_key`),
-  -- Listing a bot's tools is the hot read (every apply, every compose), and it
-  -- filters on the three columns rather than the surrogate.
-  KEY `idx_env_entity_bot` (`env`, `bot_id`)
+  -- Listing a bot's tools is the hot read (every apply, every compose). The
+  -- tenant leads because the guard appends `avernet_tenant = ?` to every SELECT
+  -- on this model, so a tenant-trailing index would make it a residual filter —
+  -- the sibling manifest_content/manifest_apply indexes lead with it for the
+  -- same reason.
+  --
+  -- entity_id is deliberately NOT in the index, unlike those siblings: theirs
+  -- is varchar(256), this one matches ac_bots at varchar(1024), and 1024
+  -- utf8mb4 characters is 4096 bytes on its own — past InnoDB's 3072-byte
+  -- index-key cap. It stays a residual filter over the handful of rows one
+  -- (tenant, env, bot_id) already selects.
+  KEY `idx_tenant_env_bot` (`avernet_tenant`, `env`, `bot_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot CLI 工具';

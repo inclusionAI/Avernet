@@ -24,6 +24,7 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
+    Index,
     Integer,
     String,
     Text,
@@ -112,7 +113,7 @@ class BotCliToolModel(Base):
     entity_id = Column(
         String(1024), nullable=False, comment="实体ID（bot 的 entity_id）"
     )
-    bot_id = Column(String(256), nullable=False, index=True, comment="Bot ID")
+    bot_id = Column(String(256), nullable=False, comment="Bot ID")
     name = Column(String(128), nullable=False, comment="命令名（bot 内唯一）")
 
     source = Column(Text, nullable=False, comment="声明的来源 URL / 命名源")
@@ -173,6 +174,19 @@ class BotCliToolModel(Base):
             "avernet_tenant",
             "tool_key",
             name="uk_tenant_cli_tool_key",
+        ),
+        # Declared here, under the DDL's own name, rather than as ``index=True``
+        # on a column. A column-level flag would emit ``ix_ac_bot_cli_tool_bot_id``
+        # under ``create_all`` while prod's hand-applied DDL builds a different
+        # index — the two schemas this one repository body runs against would
+        # then have different indexes, and a plan validated locally would not
+        # describe prod. ``ac_bot_startup_script``'s DDL states the rule:
+        # no second lookup key that can drift out of step with the ORM model.
+        Index(
+            "idx_tenant_env_bot",
+            "avernet_tenant",
+            "env",
+            "bot_id",
         ),
     )
 

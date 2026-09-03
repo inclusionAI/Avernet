@@ -4,12 +4,14 @@ Exercised against in-memory SQLite — the same single ORM body that runs on pro
 OceanBase, so the UNIQUE guard, the upsert-not-duplicate behavior and the
 deterministic ordering are tested against a real database rather than a mock.
 """
-import time
 from contextlib import contextmanager
+from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+
+from agentclaw.community.utils.avernet_tenant import avernet_tenant_scope
 
 # Imported for side effect: registers BotCliToolModel on Base.metadata so
 # create_all() builds the ac_bot_cli_tool table.
@@ -44,21 +46,27 @@ class InMemorySqliteDB:
 
 
 @pytest.fixture
-def repo():
+def db_engine():
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}
     )
     from agentclaw.community.core.base import Base
 
     Base.metadata.create_all(engine)
-    return BotCliToolRepository(InMemorySqliteDB(engine))
+    return engine
+
+
+@pytest.fixture
+def repo(db_engine):
+    return BotCliToolRepository(InMemorySqliteDB(db_engine))
 
 
 def _install(repo, *, name="mycli", digest="sha256:aa", subpath=None, **over):
+    bot_id = over.pop("bot_id", "bot")
     fields = dict(
         env="dev",
         entity_id="ent",
-        bot_id="bot",
+        bot_id=bot_id,
         name=name,
         source="https://example.com/mycli",
         digest=digest,
@@ -66,7 +74,10 @@ def _install(repo, *, name="mycli", digest="sha256:aa", subpath=None, **over):
         md5="9f" * 16,
         size_bytes=1024,
         version="1.4.2",
-        oss_key=f"tools/bot/{name}",
+        # Scoped to the bot, as the store's real key layout is. delete_all
+        # hands these keys to a caller as safe to delete, and that is only true
+        # because no two bots share an object.
+        oss_key=f"tools/{bot_id}/{name}",
         installed_by=INSTALLED_BY_MANIFEST,
         modifier="u1",
     )
@@ -145,14 +156,23 @@ def test_upsert_replaces_rather_than_duplicating(repo):
     assert rows[0].digest == "sha256:new"
 
 
-def test_upsert_touches_gmt_modified_even_when_nothing_changed(repo):
+def test_upsert_touches_gmt_modified_even_when_nothing_changed(repo, db_engine):
     """SQLAlchemy emits no UPDATE when every assigned value equals the stored
     one, so ``onupdate`` never fires and a re-install would show the previous
-    write's timestamp. The repository force-stamps it."""
-    first = _install(repo)
-    time.sleep(1.1)
-    again = _install(repo)
-    assert again.gmt_modified > first.gmt_modified
+    write's timestamp. The repository force-stamps it.
+
+    Asserted by back-dating the stored row and re-upserting identical values —
+    no sleep, and it stays correct if the column ever gains sub-second
+    precision.
+    """
+    _install(repo)
+    stale = datetime(2020, 1, 1, 0, 0, 0)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE ac_bot_cli_tool SET gmt_modified = :t"), {"t": stale}
+        )
+    again = _install(repo)  # byte-identical values
+    assert again.gmt_modified > stale
 
 
 def test_two_bots_may_share_a_tool_name(repo):
@@ -199,8 +219,12 @@ def test_delete_all_returns_the_oss_keys_it_removed(repo):
     orphaned: oss_key lives only on these rows."""
     _install(repo, name="a")
     _install(repo, name="b")
+    _install(repo, name="a", bot_id="other")  # another bot's object must survive
     keys = repo.delete_all(env="dev", entity_id="ent", bot_id="bot")
     assert sorted(keys) == ["tools/bot/a", "tools/bot/b"]
+    # Never another bot's key: the store scopes every key to one bot, which is
+    # what makes the returned keys safe for a caller to delete.
+    assert "tools/other/a" not in keys
     assert repo.list(env="dev", entity_id="ent", bot_id="bot") == []
 
 
@@ -213,3 +237,91 @@ def test_delete_all_leaves_other_bots_alone(repo):
 
 def test_delete_all_on_a_bot_with_no_tools_returns_empty(repo):
     assert repo.delete_all(env="dev", entity_id="ent", bot_id="bot") == []
+
+
+# --- scoping ----------------------------------------------------------------
+
+def test_get_is_scoped_by_env_and_entity(repo):
+    """``get`` resolves through the hashed surrogate while ``list`` filters on
+    the raw columns, so the two share no code. If ``_tool_key`` ever dropped
+    ``env``, a dev-pinned executable would be served to a prod bot."""
+    _install(repo)
+    assert repo.get(env="prod", entity_id="ent", bot_id="bot", name="mycli") is None
+    assert repo.get(env="dev", entity_id="other", bot_id="bot", name="mycli") is None
+    assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli") is not None
+
+
+def test_delete_is_scoped_by_env_and_entity(repo):
+    _install(repo)
+    assert repo.delete(env="prod", entity_id="ent", bot_id="bot", name="mycli") is False
+    assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli") is not None
+
+
+# --- the upsert retry -------------------------------------------------------
+
+def test_upsert_retries_once_when_an_insert_loses_a_race(repo, monkeypatch):
+    """The read-then-insert is not atomic: two first writes for the same key
+    can both see ``None`` and the UNIQUE constraint fails one. The loser is
+    entitled to the update it was always going to make."""
+    from sqlalchemy.exc import IntegrityError
+
+    real = repo._upsert_once
+    calls = {"n": 0}
+
+    def flaky(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+        return real(**kwargs)
+
+    monkeypatch.setattr(repo, "_upsert_once", flaky)
+    record = _install(repo)
+    assert calls["n"] == 2
+    assert record.name == "mycli"
+
+
+def test_upsert_does_not_retry_forever_on_a_persistent_failure(repo, monkeypatch):
+    """A NOT NULL violation raises the same class as a race. It must surface
+    after exactly two attempts, not loop."""
+    from sqlalchemy.exc import IntegrityError
+
+    calls = {"n": 0}
+
+    def always_fails(**kwargs):
+        calls["n"] += 1
+        raise IntegrityError("INSERT", {}, Exception("column is not null"))
+
+    monkeypatch.setattr(repo, "_upsert_once", always_fails)
+    with pytest.raises(IntegrityError):
+        _install(repo)
+    assert calls["n"] == 2
+
+
+# --- tenant isolation -------------------------------------------------------
+
+def test_tools_are_invisible_across_tenants(repo):
+    """``_tool_key`` hashes only (env, entity_id, bot_id, name) — the tenant is
+    carried as a separate column, so cross-tenant safety rests entirely on the
+    guard's injected WHERE. A tool row names an executable that runs in a
+    container, which is what makes this the hazard the DDL calls out.
+    """
+    with avernet_tenant_scope("tenant-a"):
+        _install(repo, name="mycli", digest="sha256:a")
+    with avernet_tenant_scope("tenant-b"):
+        assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli") is None
+        assert repo.list(env="dev", entity_id="ent", bot_id="bot") == []
+    with avernet_tenant_scope("tenant-a"):
+        assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+
+
+def test_one_tenant_cannot_delete_anothers_tool(repo):
+    with avernet_tenant_scope("tenant-a"):
+        _install(repo, name="mycli")
+    with avernet_tenant_scope("tenant-b"):
+        assert (
+            repo.delete(env="dev", entity_id="ent", bot_id="bot", name="mycli")
+            is False
+        )
+        assert repo.delete_all(env="dev", entity_id="ent", bot_id="bot") == []
+    with avernet_tenant_scope("tenant-a"):
+        assert repo.get(env="dev", entity_id="ent", bot_id="bot", name="mycli")

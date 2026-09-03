@@ -630,6 +630,8 @@ provides:
   - ManifestContentService
   - ManifestContentServiceProtocol
   - ManifestContentRepositoryProtocol
+  - BotCliToolModel
+  - BotCliToolRecord
   - ManifestContentModel
   - StoredContentRecord
   - ContentScope

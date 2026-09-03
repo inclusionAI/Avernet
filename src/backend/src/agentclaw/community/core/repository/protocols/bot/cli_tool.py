@@ -11,7 +11,7 @@ from abc import abstractmethod
 from typing import Optional, Protocol, Sequence, TYPE_CHECKING, runtime_checkable
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
+    from agentclaw.community.core.bot_config_manifest.cli_tools import (
         BotCliToolRecord,
     )
 
@@ -41,11 +41,18 @@ class BotCliToolRepositoryProtocol(Protocol):
     def list(
         self, *, env: str, entity_id: str, bot_id: str
     ) -> Sequence[BotCliToolRecord]:
-        """Every tool installed on the bot, ordered by ``name``.
+        """Every tool installed on the bot, in ``name`` **code-point order**.
 
         Ordered so a report, an artifact's ref list and a test all see the same
         sequence for the same state — an arbitrary order would make byte
         comparison of composed artifacts flaky for no reason.
+
+        The contract says *code-point* order, not merely "by name", because
+        "by name" is ambiguous across collations: SQLite sorts ``Zip`` before
+        ``aws`` and a case-insensitive MySQL collation sorts it after. An
+        implementation satisfying this with a plain ``ORDER BY name`` would
+        pass CI and diverge in production, where the composed artifact's bytes
+        are compared.
         """
         ...
 
@@ -92,5 +99,12 @@ class BotCliToolRepositoryProtocol(Protocol):
         cleaned up too**. ``oss_key`` lives only on these rows, so a caller that
         deleted first and asked afterwards could never enumerate what it had
         just orphaned.
+
+        **The keys are safe to delete only because the store scopes every key
+        to one bot.** Nothing in this table enforces that — ``oss_key`` carries
+        no uniqueness constraint — so an implementation that reused one object
+        across bots would have this method hand a caller the key of another
+        bot's live tool. The store's per-bot prefix is what makes the contract
+        true; a change to it is a change to this contract.
         """
         ...
