@@ -235,7 +235,7 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
         Returns the deployment name.
         """
         images = self._default_images.get(template_id) or {}
-        config_envs = _parse_envs_string(images.pop("env", ""))
+        config_envs = _parse_envs_string(images.get("env", ""))
         merged_envs = {**config_envs, **(envs or {})}
         variables = _build_template_vars(
             uid,
@@ -249,6 +249,13 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             outbound_operation_rule=outbound_operation_rule,
         )
         rendered = _render_template(template_id, variables)
+        logger.info(
+            "[aliyun_ack] rendered template uid=%s namespace=%s template_id=%s\n%s",
+            uid,
+            namespace,
+            template_id,
+            rendered,
+        )
 
         docs = list(yaml.safe_load_all(rendered))
         client = self._client()
@@ -292,7 +299,6 @@ class AliyunAckSandboxPlugin(ArcaSandboxPlugin):
             ready_timeout_in_seconds * 3,
         )
         ready_timeout_in_seconds = ready_timeout_in_seconds * 3
-
 
         namespace = self._get_namespace()
         sandbox_id = f"{template_id}-{uuid.uuid4().hex[:12]}"
