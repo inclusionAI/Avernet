@@ -4,18 +4,18 @@
 
 Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
 
-## Task 1: Add the `ac_bot_cli_tool` table, record and repository
+## Task 1: Add the `ac_bot_cli_tool` table, record and repository  `[x]`
 - **Goal:** Give the platform its own record of what a bot has installed.
 - **Files:** `core/bot_config_manifest/cli_tools/models.py` (new), `core/repository/{protocols,implementations}/bot/cli_tool.py` (new), `core/schema.py`
 - **Done when:**
-  - [ ] The ORM model and the pydantic record exist with the columns `plan.md` names, including `installed_by` and `md5`.
-  - [ ] `UniqueConstraint(env, bot_id, name)` makes a duplicate command name unwritable, not merely invalid.
-  - [ ] The `env` column and `register_avernet_tenant_guard` are present, matching `ac_bot_startup_script`.
-  - [ ] The side-effect import is registered in `core/schema.py` so local `create_all` emits the table.
-  - [ ] Protocol and implementation are split under `core/repository/…/bot/`, protocol declared as a base class (§8).
-  - [ ] `oss_key` records where the platform kept the bytes.
-  - [ ] **No column holds a container path** — the engine owns placement, the row identifies a tool by `name`.
-  - [ ] The repository covers: upsert by `(bot_id, name)`, delete by name, list by bot, delete-all by bot.
+  - [x] The ORM model and the pydantic record exist with the columns `plan.md` names, including `installed_by` and `md5`.
+  - [x] `UniqueConstraint(env, bot_id, name)` makes a duplicate command name unwritable, not merely invalid.
+  - [x] The `env` column and `register_avernet_tenant_guard` are present, matching `ac_bot_startup_script`.
+  - [x] The side-effect import is registered in `core/schema.py` so local `create_all` emits the table.
+  - [x] Protocol and implementation are split under `core/repository/…/bot/`, protocol declared as a base class (§8).
+  - [x] `oss_key` records where the platform kept the bytes.
+  - [x] **No column holds a container path** — the engine owns placement, the row identifies a tool by `name`.
+  - [x] The repository covers: upsert by `(bot_id, name)`, delete by name, list by bot, delete-all by bot.
 - **Depends on:** —
 
 ## Task 2: Build the OSS tool store
