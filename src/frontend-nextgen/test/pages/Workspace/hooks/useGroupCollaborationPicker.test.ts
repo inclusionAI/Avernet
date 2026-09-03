@@ -42,7 +42,16 @@ it('loads more friends with the next offset', async () => {
   act(() => result.current.loadMore());
   await waitFor(() => expect(result.current.friends).toHaveLength(2));
 
-  expect(cs.listFriends).toHaveBeenNthCalledWith(2, 'actor-1', { offset: 50, limit: 50 });
+  expect(cs.listFriends).toHaveBeenNthCalledWith(1, 'actor-1', {
+    offset: 0,
+    limit: 50,
+    detailSource: 'collaboration',
+  });
+  expect(cs.listFriends).toHaveBeenNthCalledWith(2, 'actor-1', {
+    offset: 50,
+    limit: 50,
+    detailSource: 'collaboration',
+  });
   expect(result.current.friendsHasMore).toBe(false);
 });
 

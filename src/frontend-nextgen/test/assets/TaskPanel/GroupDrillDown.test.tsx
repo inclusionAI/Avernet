@@ -5,6 +5,7 @@ import {
   filterGroupMessages,
   isNonMessageGroupContent,
   resolveMasterBot,
+  resolveOwnedViewBot,
   shouldCollapseMessage,
   sortMessagesByTimestamp,
   type GroupMessage,
@@ -272,5 +273,28 @@ describe('GroupSessionView root session fallback', () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+});
+
+describe('GroupDrillDown view bot resolution', () => {
+  const participants = [
+    { actor_id: 'bcs_grp_abc:round-1', actor_kind: 'bot', name: '群id占位', role: 'driver', mode: 'auto' },
+    { actor_id: 'default:35983', actor_kind: 'bot', name: '蔣建', role: 'worker', mode: 'auto' },
+    { actor_id: '20260826_20rphqo0:146836', actor_kind: 'bot', name: '金庸', role: 'worker', mode: 'auto' },
+    { actor_id: '20260826_q3tbj2da:146836', actor_kind: 'bot', name: '数据架构视角Bot', role: 'manager', mode: 'auto' },
+  ];
+
+  it('选取群成员中归属本人工号的 bot 作 view_bot_id,不回退 group_id', () => {
+    // 工号 146836 本人:优先 worker(任务执行侧),次选 manager/master/driver
+    expect(resolveOwnedViewBot(participants, '146836')?.actor_id).toBe('20260826_20rphqo0:146836');
+  });
+
+  it('群成员中无归属本人工号的 bot → null(不回退 group_id 或 driver)', () => {
+    expect(resolveOwnedViewBot(participants, '999999')).toBeNull();
+  });
+
+  it('本人仅有 manager 身份时选 manager', () => {
+    const onlyManager = participants.filter((p) => p.actor_id !== '20260826_20rphqo0:146836');
+    expect(resolveOwnedViewBot(onlyManager, '146836')?.actor_id).toBe('20260826_q3tbj2da:146836');
   });
 });

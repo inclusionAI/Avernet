@@ -10,6 +10,7 @@ export const lifecycleLabel: Record<BotDomain['lifecycle'], string> = {
   prestable: '预发',
   running: '运行中',
   offline: '已下线',
+  failed: '创建失败',
   unknown: '状态未知',
 };
 

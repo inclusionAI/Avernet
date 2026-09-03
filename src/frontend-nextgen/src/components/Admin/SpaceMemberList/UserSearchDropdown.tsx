@@ -6,7 +6,8 @@
 // 回车提交合成 {userId, displayName: userId}，保证添加成员弹窗始终可用。
 // 仅消费 useUserSearch hook 与 @/components/ui 白名单，不直接调 service/api（import-boundaries 门禁）。
 import type { SearchedUser } from '@/capabilities';
-import { Button, Input } from '@/components/ui';
+import { Button, CaptionText, Input, ValueText } from '@/components/ui';
+import { Card } from '@/components/ui/Card';
 import { useUserSearch } from '@/hooks/useUserSearch';
 import { cn } from '@/utils/cn';
 import { Loader2, Search, X } from 'lucide-react';
@@ -131,16 +132,16 @@ export function UserSearchDropdown({
       </div>
 
       {supported && open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
+        <Card className="absolute left-0 right-0 top-full z-50 mt-1 max-h-60 overflow-hidden p-0 shadow-lg">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+            <CaptionText className="flex items-center justify-center gap-2 px-3 py-4">
               <Loader2 size={16} className="animate-spin text-primary" />
               搜索中...
-            </div>
+            </CaptionText>
           ) : items.length === 0 ? (
-            <div className="py-4 text-center text-sm text-muted-foreground">
+            <CaptionText className="px-3 py-4 text-center">
               {keyword.trim().length < 2 ? '输入至少 2 个字符搜索' : '未找到匹配的用户'}
-            </div>
+            </CaptionText>
           ) : (
             <ul className="m-0 list-none p-0">
               {items.map((u) => {
@@ -172,17 +173,25 @@ export function UserSearchDropdown({
                         {initial}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-medium text-foreground">{primaryText}</span>
-                        <span className="block truncate text-xs text-muted-foreground">{u.email || u.userId}</span>
+                        <ValueText as="span" className="block truncate">
+                          {primaryText}
+                        </ValueText>
+                        <CaptionText as="span" className="block truncate">
+                          {u.email || u.userId}
+                        </CaptionText>
                       </span>
-                      {isDisabled && <span className="shrink-0 text-xs text-muted-foreground">已添加</span>}
+                      {isDisabled && (
+                        <CaptionText as="span" className="shrink-0">
+                          已添加
+                        </CaptionText>
+                      )}
                     </Button>
                   </li>
                 );
               })}
             </ul>
           )}
-        </div>
+        </Card>
       )}
     </div>
   );

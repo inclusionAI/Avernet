@@ -1,5 +1,5 @@
-import { request } from '@umijs/max';
 import { isEnvelopeSuccessAnyDialect, type BackendApiEnvelope } from '@/services/backendApi/types';
+import { request } from '@umijs/max';
 
 export interface AuthEndpointConfig {
   providers: string;
@@ -74,7 +74,9 @@ function unwrapAuthEnvelope<T>(body: unknown): T {
 }
 
 export function getAuthProviders() {
-  return request<AuthProvidersDto>(AUTH_ENDPOINTS.providers, cookieRequest('GET')).then(unwrapAuthEnvelope<AuthProvidersDto>);
+  return request<AuthProvidersDto>(AUTH_ENDPOINTS.providers, cookieRequest('GET')).then(
+    unwrapAuthEnvelope<AuthProvidersDto>,
+  );
 }
 
 export function getCurrentAuthUser() {

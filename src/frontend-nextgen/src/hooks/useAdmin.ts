@@ -25,6 +25,7 @@ export function useAdmin() {
     membersLoading,
     setKeyword,
     setPageNo,
+    setPageSize,
     setList,
     setLoading,
     setError,
@@ -36,17 +37,18 @@ export function useAdmin() {
   const keywordRef = useRef(keyword);
 
   const fetchList = useCallback(
-    async (override?: { keyword?: string; spaceType?: typeof spaceType; pageNo?: number }) => {
+    async (override?: { keyword?: string; spaceType?: typeof spaceType; pageNo?: number; pageSize?: number }) => {
       const kw = override?.keyword ?? keywordRef.current;
       const st = override?.spaceType ?? spaceType;
       const p = override?.pageNo ?? pageNo;
+      const ps = override?.pageSize ?? pageSize;
       setLoading(true);
       setError(null);
       const r = await adminService.listSpaces({
         keyword: kw,
         spaceType: st === 'ALL' ? undefined : st,
         page: p,
-        pageSize,
+        pageSize: ps,
       });
       setLoading(false);
       if (r.error) {
@@ -84,6 +86,15 @@ export function useAdmin() {
       void fetchList({ pageNo: p });
     },
     [fetchList, setPageNo],
+  );
+
+  // 切换每页条数：store 内同时重置回第 1 页，显式传 pageSize 避免闭包旧值
+  const changePageSize = useCallback(
+    (size: number) => {
+      setPageSize(size);
+      void fetchList({ pageSize: size, pageNo: 1 });
+    },
+    [fetchList, setPageSize],
   );
 
   const createTeamSpace = useCallback(
@@ -222,6 +233,7 @@ export function useAdmin() {
     membersLoading,
     onKeywordChange,
     changePage,
+    changePageSize,
     createTeamSpace,
     openSpaceDetail,
     closeSpaceDetail,

@@ -20,6 +20,7 @@ test('能力集以统一成员样式展示聚合接口返回的 CLI', () => {
       ]}
       mySkills={[]}
       marketSkills={[]}
+      skillCenterSkills={[]}
       workshopSkills={[]}
       marketMcps={[]}
       editable
@@ -27,6 +28,7 @@ test('能力集以统一成员样式展示聚合接口返回的 CLI', () => {
       onDelete={jest.fn()}
       onActive={jest.fn()}
       onSkill={jest.fn()}
+      onSkillCenterReferences={jest.fn()}
       onMcp={jest.fn()}
       onUploadSkillFolder={jest.fn()}
       onLoadCandidates={jest.fn()}
@@ -55,6 +57,7 @@ test('系统默认能力集隐藏 Skill、MCP 和 CLI 的添加入口', () => {
       ]}
       mySkills={[]}
       marketSkills={[]}
+      skillCenterSkills={[]}
       workshopSkills={[]}
       marketMcps={[]}
       editable
@@ -62,6 +65,7 @@ test('系统默认能力集隐藏 Skill、MCP 和 CLI 的添加入口', () => {
       onDelete={jest.fn()}
       onActive={jest.fn()}
       onSkill={jest.fn()}
+      onSkillCenterReferences={jest.fn()}
       onMcp={jest.fn()}
       onUploadSkillFolder={jest.fn()}
       onLoadCandidates={jest.fn()}
@@ -90,6 +94,7 @@ test('非默认能力集仍展示 Skill 和 MCP 的添加入口', () => {
       ]}
       mySkills={[]}
       marketSkills={[]}
+      skillCenterSkills={[]}
       workshopSkills={[]}
       marketMcps={[]}
       editable
@@ -97,6 +102,7 @@ test('非默认能力集仍展示 Skill 和 MCP 的添加入口', () => {
       onDelete={jest.fn()}
       onActive={jest.fn()}
       onSkill={jest.fn()}
+      onSkillCenterReferences={jest.fn()}
       onMcp={jest.fn()}
       onUploadSkillFolder={jest.fn()}
       onLoadCandidates={jest.fn()}

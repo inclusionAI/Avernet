@@ -13,10 +13,10 @@ export function useBotChats() {
   const location = useLocation();
   const [initializationError, setInitializationError] = useState<string>();
 
+  const identities = useWorkspaceStore.getState().identities;
   const resolveActingUser = useCallback(async () => {
     const isRealHuman = (identity: (typeof identities)[number]) =>
       identity.kind === 'user' && identity.id !== 'me' && !isTestUserIdentity(identity.id);
-    const identities = useWorkspaceStore.getState().identities;
     const existing = identities.find(isRealHuman);
     if (existing) return resolveUserId(existing.id);
     const loaded = await identityService.loadIdentities();

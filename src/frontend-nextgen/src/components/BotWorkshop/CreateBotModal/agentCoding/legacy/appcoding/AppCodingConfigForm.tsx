@@ -48,9 +48,10 @@ export interface AppCodingConfigFormProps {
  */
 export interface AppCodingConfigFormRef {
   validateYuqueKbRepos: () => Promise<boolean>;
+  validate: () => Promise<string | undefined>;
 }
 export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingConfigFormProps>(
-  function AppCodingConfigForm(
+  (
     {
       disabled = false,
       repoFieldsDisabled = false,
@@ -65,7 +66,7 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
       onReloadModels,
     }: AppCodingConfigFormProps,
     ref,
-  ) {
+  ) => {
     const [backendRepos, setBackendRepos] = useState<string[]>(['']);
     const [frontendRepos, setFrontendRepos] = useState<string[]>(['']);
     const [libRepos, setLibRepos] = useState<string[]>(['']);
@@ -104,7 +105,12 @@ export const AppCodingConfigForm = forwardRef<AppCodingConfigFormRef, AppCodingC
         if (hasEntriesToValidate) setValidatingYuque(false);
       }
     }, [yuqueKbRepos]);
-    useImperativeHandle(ref, () => ({ validateYuqueKbRepos }), [validateYuqueKbRepos]);
+    const validate = useCallback(async (): Promise<string | undefined> => {
+      const yuqueValid = await validateYuqueKbRepos();
+      if (!yuqueValid) return '语雀知识库校验失败，请检查标红的条目';
+      return modelValidationError ?? undefined;
+    }, [modelValidationError, validateYuqueKbRepos]);
+    useImperativeHandle(ref, () => ({ validateYuqueKbRepos, validate }), [validate, validateYuqueKbRepos]);
     useEffect(() => {
       if (!initialConfig) return;
       if (lastInitConfigRef.current === initialConfig) return;

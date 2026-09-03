@@ -21,8 +21,8 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const [availableMcps, setAvailableMcps] = useState<BotEditorMcp[]>([]);
   const [marketSkills, setMarketSkills] = useState<BotEditorSkill[]>([]);
+  const [skillCenterSkills, setSkillCenterSkills] = useState<BotEditorSkill[]>([]);
   const [workshopSkills, setWorkshopSkills] = useState<BotEditorSkill[]>([]);
-  const [candidatesLoaded, setCandidatesLoaded] = useState(false);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
@@ -54,25 +54,25 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     }
   }, [botId, enabled, serviceBot, spaceId]);
   useEffect(() => {
-    setCandidatesLoaded(false);
     setAvailableMcps([]);
     setMarketSkills([]);
+    setSkillCenterSkills([]);
     setWorkshopSkills([]);
     void load();
   }, [botId, load]);
   const loadCapabilityCandidates = useCallback(async () => {
-    if (!botId || candidatesLoaded) return;
+    if (!botId) return;
     try {
       const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId);
       setAvailableMcps(candidates.availableMcps);
       setMarketSkills(candidates.marketSkills);
+      setSkillCenterSkills(candidates.skillCenterSkills);
       setWorkshopSkills(candidates.workshopSkills);
-      setCandidatesLoaded(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '可选能力加载失败');
       throw error;
     }
-  }, [botId, candidatesLoaded, spaceId]);
+  }, [botId, spaceId]);
   const act = useCallback(
     async (work: () => Promise<unknown>, message: string) => {
       try {
@@ -92,6 +92,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     mcps,
     availableMcps,
     marketSkills,
+    skillCenterSkills,
     workshopSkills,
     loadCapabilityCandidates,
     resources,
@@ -121,17 +122,21 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     uploadResource: (path: string, file: File, overwrite = false) =>
       act(() => botEditorService.uploadResource(botId!, path, file, overwrite), '资源已上传'),
     previewResource: (path: string) => botEditorService.previewResource(botId!, path),
-    downloadResource: async (path: string) => {
+    downloadResource: async (path: string, type: BotEditorResource['type']) => {
       try {
-        const blob = await botEditorService.downloadResource(botId!, path);
+        const blob =
+          type === 'folder'
+            ? await botEditorService.downloadResourceDirectory(botId!, path)
+            : await botEditorService.downloadResource(botId!, path);
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a');
         anchor.href = url;
-        anchor.download = path.split('/').pop() || 'resource';
+        const name = path.split('/').pop() || 'resource';
+        anchor.download = type === 'folder' ? `${name}.zip` : name;
         anchor.click();
         URL.revokeObjectURL(url);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '资源下载失败');
+        toast.error(error instanceof Error ? error.message : type === 'folder' ? '文件夹下载失败' : '文件下载失败');
       }
     },
     saveScreen: (input: BotRenderScreenInput, id?: number) =>
@@ -150,6 +155,8 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
         () => botEditorService.setSkillSetSkill(botId!, setId, skillId, active),
         active ? 'Skill 已加入能力集' : 'Skill 已移出能力集',
       ),
+    addSkillCenterReferences: (setId: string, skillCodes: string[]) =>
+      act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes), 'SkillCenter Skill 已加入能力集'),
     uploadSkillFolder: async (files: File[]) => {
       try {
         const skill = await botEditorService.uploadSkillFolder(botId!, files);

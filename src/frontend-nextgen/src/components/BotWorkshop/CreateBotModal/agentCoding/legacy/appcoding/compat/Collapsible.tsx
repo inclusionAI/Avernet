@@ -37,7 +37,7 @@ export function Collapsible({
 export const CollapsibleTrigger = React.forwardRef<
   HTMLButtonElement,
   React.ButtonHTMLAttributes<HTMLButtonElement> & { children: React.ReactNode }
->(function CollapsibleTrigger({ children, onClick, ...props }, ref) {
+>(({ children, onClick, ...props }, ref) => {
   const { open, setOpen } = React.useContext(CollapsibleContext);
   return (
     <Button
@@ -62,7 +62,7 @@ export const CollapsibleTrigger = React.forwardRef<
 export const CollapsibleContent = React.forwardRef<
   HTMLDivElement,
   { children: React.ReactNode; className?: string; forceMount?: boolean }
->(function CollapsibleContent({ children, className, forceMount = false }, ref) {
+>(({ children, className, forceMount = false }, ref) => {
   const { open } = React.useContext(CollapsibleContext);
   const [mounted, setMounted] = React.useState(open);
   React.useEffect(() => {

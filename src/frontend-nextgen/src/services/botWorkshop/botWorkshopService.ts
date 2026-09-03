@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import {
   createBot,
   deleteBot,
@@ -15,7 +16,7 @@ import {
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { runAfterCreateActions } from './agentCodingAfterCreateService';
-import { agentCodingTemplateService, type AgentCodingTemplate } from './agentCodingTemplateService';
+import { agentCodingTemplateService, supportsServiceBot, type AgentCodingTemplate } from './agentCodingTemplateService';
 import { mapBotDto, mapBotList } from './botMapper';
 import type {
   AvernetBotCreateRequest,
@@ -35,6 +36,18 @@ export interface BotWorkshopServiceOverview {
 
 const PUBLIC_ENGINES = new Set(['openclaw', 'claude_code', 'aicoding', 'hermes', 'teclaw']);
 const SERVICE_ENGINES = new Set(['openclaw', 'claude_code', 'teclaw']);
+
+/**
+ * 当前形态的引擎可选清单是否提供原生 Claude Code 直建入口（经 getBotEngineOptions 差异化）：
+ * - Open Core（含阿里云部署）：清单含 `claude_code`，普通 CC 个人云端直建合法；
+ * - internal overlay：清单不含（CC 创建由 AgentCoding 模板接管），手工 `engine=claude_code` 仍拦截。
+ */
+function nativeClaudeCodeSelectable(): boolean {
+  return getCapabilities()
+    .getBotEngineOptions()
+    .value.some((option) => option.value === 'claude_code');
+}
+
 function configuredLocalUserId() {
   return typeof TEAMCLAW_OPENAPI_USER_ID === 'string' ? TEAMCLAW_OPENAPI_USER_ID.trim() : '';
 }
@@ -55,9 +68,15 @@ function validateCreate(input: BotCreateInput) {
   if (name.includes('@')) throw new Error('Bot 名称不能包含 @');
   if (name.length > 40) throw new Error('Bot 名称不能超过 40 个字符');
   if (!PUBLIC_ENGINES.has(input.engine)) throw new Error('请选择可用的公开引擎');
-  if (input.scenario === 'cloud' && input.serviceMode === 'service' && !SERVICE_ENGINES.has(input.engine)) {
-    const engineName = input.engine === 'hermes' ? 'Hermes' : input.engine === 'aicoding' ? 'AIcoding' : '当前引擎';
-    throw new Error(`${engineName} 暂不支持服务化`);
+  if (input.scenario === 'cloud' && input.serviceMode === 'service') {
+    if (input.engine === 'aicoding') {
+      const template = input.agentCoding?.template as AgentCodingTemplate | undefined;
+      if (!template) throw new Error('请选择 AgentCoding 模板');
+      if (!supportsServiceBot(template)) throw new Error('当前模板未开启服务 Bot 能力');
+    } else if (!SERVICE_ENGINES.has(input.engine)) {
+      const engineName = input.engine === 'hermes' ? 'Hermes' : '当前引擎';
+      throw new Error(`${engineName} 暂不支持服务化`);
+    }
   }
   if (input.scenario === 'cloud' && !input.spaceId.trim()) throw new Error('请选择有效的归属空间');
   if (input.engine === 'aicoding') {
@@ -70,7 +89,8 @@ function validateCreate(input: BotCreateInput) {
     input.scenario === 'cloud' &&
     input.ownership === 'personal' &&
     input.engine === 'claude_code' &&
-    !input.agentCoding?.template
+    !input.agentCoding?.template &&
+    !nativeClaudeCodeSelectable()
   )
     throw new Error('普通 Claude Code 请通过 AgentCoding 模板创建');
   if (input.agentCoding?.template && ['normal', 'normalCC'].includes(input.agentCoding.template.templateType))

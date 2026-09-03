@@ -4,10 +4,14 @@ import { listBotMetadata, type BotMetadataDto } from '@/services/backendApi/bots
 import {
   createBotFriendRequest,
   listBotCandidates,
-  listBotFriendships,
   listMyBots,
+  queryCollaborationBots,
   type CollaborationBotDto,
 } from '@/services/backendApi/collaboration/collaborationBotController';
+import {
+  listFriendConnections,
+  type FriendConnectionSummaryDto,
+} from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import type { DomainError, DomainResult } from './identityService';
 
 export interface CollaborationBotView {
@@ -22,6 +26,7 @@ export interface CollaborationBotView {
   isFriend?: boolean;
   engine?: string;
   botType?: string;
+  detailsResolved?: boolean;
 }
 
 export interface CollaborationBotPage {
@@ -30,6 +35,13 @@ export interface CollaborationBotPage {
   offset: number;
   limit: number;
   hasMore: boolean;
+}
+
+interface ListFriendsOptions {
+  actorType?: 'human' | 'bot';
+  detailSource?: 'metadata' | 'collaboration';
+  offset?: number;
+  limit?: number;
 }
 
 function toDomainError(code: string, friendlyMessage: string): DomainError {
@@ -46,6 +58,8 @@ function mapBot(dto: CollaborationBotDto, isFriend?: boolean): CollaborationBotV
     status: dto.status === 'hidden' ? 'hidden' : 'online',
     reachability: dto.reachability === 'unreachable' ? 'unreachable' : 'reachable',
     visibility: dto.visibility ?? 'private',
+    engine: dto.engine,
+    botType: dto.bot_type,
     ...(isFriend !== undefined ? { isFriend } : {}),
   };
 }
@@ -70,8 +84,74 @@ function splitCompoundBotId(botId: string): { botId: string; ownerId?: string } 
   return { botId: botId.slice(0, index), ownerId: botId.slice(index + 1) };
 }
 
+function toUnavailableFriendBot(id: string, name?: string): CollaborationBotView {
+  return {
+    id,
+    name: name ?? id,
+    online: true,
+    status: 'online',
+    reachability: 'reachable',
+    visibility: 'private',
+    isFriend: true,
+  };
+}
+
+function toUnknownFriendBot(id: string): CollaborationBotView {
+  return {
+    id,
+    name: id,
+    online: false,
+    status: 'hidden',
+    reachability: 'reachable',
+    visibility: 'private',
+    isFriend: true,
+    detailsResolved: false,
+  };
+}
+
+async function loadMetadataFriendDetails(
+  actorId: string,
+  friendIds: string[],
+  namesById: Map<string, string | undefined>,
+): Promise<CollaborationBotView[]> {
+  const botResp = await listBotMetadata(
+    { user_id: resolveOpenApiUserId(actorId), page: 1, page_size: friendIds.length },
+    {
+      bots: friendIds.map((friendId) => {
+        const { botId, ownerId } = splitCompoundBotId(friendId);
+        return ownerId
+          ? { bot_id: botId, owner_id: ownerId }
+          : { bot_id: botId, owner_id: resolveOpenApiUserId(actorId) };
+      }),
+    },
+  );
+  const detailsByKey = new Map(
+    (botResp.data?.items ?? []).map((bot) => [bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id, bot]),
+  );
+  return friendIds.map((friendId) => {
+    const detail = detailsByKey.get(friendId);
+    return detail
+      ? { ...mapBotMetadata(detail, friendId), name: detail.bot_name || namesById.get(friendId) || friendId }
+      : toUnavailableFriendBot(friendId, namesById.get(friendId));
+  });
+}
+
+async function loadCollaborationFriendDetails(
+  friendIds: string[],
+  namesById: Map<string, string | undefined>,
+): Promise<CollaborationBotView[]> {
+  const botResp = await queryCollaborationBots({ bot_ids: friendIds });
+  const detailsByBotId = new Map((botResp.data?.items ?? []).map((bot) => [bot.bot_id, bot]));
+  return friendIds.map((friendId) => {
+    const detail = detailsByBotId.get(friendId);
+    return detail
+      ? { ...mapBot(detail, true), id: friendId, name: detail.name || namesById.get(friendId) || friendId }
+      : toUnknownFriendBot(friendId);
+  });
+}
+
 /**
- * 发起协作弹窗的候选 Bot 数据层：好友列表走 friendships + metadata/queries 两步，可协作 Bot 走 candidates。
+ * 候选 Bot 数据层：好友列表先读 Friend Connections，再按调用场景补齐 bot 详情。
  * 组件只消费 DomainResult<CollaborationBotView[]>，不直接依赖 DTO。
  */
 export const collaborationCandidateService = {
@@ -94,44 +174,32 @@ export const collaborationCandidateService = {
     }
   },
 
-  async listFriends(
-    actorId: string,
-    opts: { offset?: number; limit?: number } = {},
-  ): Promise<DomainResult<CollaborationBotPage>> {
+  async listFriends(actorId: string, opts: ListFriendsOptions = {}): Promise<DomainResult<CollaborationBotPage>> {
     try {
       const offset = opts.offset ?? 0;
       const limit = opts.limit ?? 50;
-      const relResp = await listBotFriendships(actorId, { offset, limit });
+      const actorType = opts.actorType ?? (actorId.startsWith('human_') ? 'human' : 'bot');
+      const relResp = await listFriendConnections<FriendConnectionSummaryDto>({
+        actor_type: actorType,
+        actor_id: actorType === 'human' ? resolveOpenApiUserId(actorId) : actorId,
+      });
       const relationItems = relResp.data?.items ?? [];
-      const friendIds = Array.from(new Set(relationItems.map((item) => item.friend_bot_uuid)));
+      const friendIds = Array.from(new Set(relationItems.map((item) => item.actor?.id).filter(Boolean) as string[]));
+      const namesById = new Map<string, string | undefined>();
+      relationItems.forEach((item) => {
+        if (item.actor?.id && !namesById.has(item.actor.id)) namesById.set(item.actor.id, item.name);
+      });
       const total = relResp.data?.total ?? friendIds.length;
       if (friendIds.length === 0) {
-        return { ok: true, data: { items: [], total, offset, limit, hasMore: offset + relationItems.length < total } };
+        return { ok: true, data: { items: [], total, offset, limit, hasMore: false } };
       }
 
-      const botResp = await listBotMetadata(
-        { user_id: resolveOpenApiUserId(actorId), page: 1, page_size: friendIds.length },
-        {
-          bots: friendIds.map((friendId) => {
-            const { botId, ownerId } = splitCompoundBotId(friendId);
-            return ownerId
-              ? { bot_id: botId, owner_id: ownerId }
-              : { bot_id: botId, owner_id: resolveOpenApiUserId(actorId) };
-          }),
-        },
-      );
-      const detailsByKey = new Map(
-        (botResp.data?.items ?? []).map((bot) => [bot.owner_id ? `${bot.bot_id}:${bot.owner_id}` : bot.bot_id, bot]),
-      );
-      const items = friendIds
-        .map((friendId) => {
-          const detail = detailsByKey.get(friendId);
-          return detail ? mapBotMetadata(detail, friendId) : null;
-        })
-        .filter((bot): bot is CollaborationBotView => Boolean(bot));
+      const items = await (opts.detailSource === 'collaboration'
+        ? loadCollaborationFriendDetails(friendIds, namesById)
+        : loadMetadataFriendDetails(actorId, friendIds, namesById));
       return {
         ok: true,
-        data: { items, total, offset, limit, hasMore: offset + relationItems.length < total },
+        data: { items, total, offset, limit, hasMore: false },
       };
     } catch {
       return {

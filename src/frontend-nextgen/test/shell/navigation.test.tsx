@@ -26,8 +26,22 @@ describe('getMergedNavigationItems（internal overlay 语义，capability overri
       getInternalNavigationItems: () => ({
         status: 'available',
         value: [
-          { id: 'capability-workshop', label: '能力工坊', path: '/capability-workshop', icon: Sparkles, area: 'manage', description: '管理 Skill 与 MCP' },
-          { id: 'market', label: '能力市场', path: '/market', icon: Compass, area: 'manage', description: '发现和添加通用能力' },
+          {
+            id: 'capability-workshop',
+            label: '能力工坊',
+            path: '/capability-workshop',
+            icon: Sparkles,
+            area: 'manage',
+            description: '管理 Skill 与 MCP',
+          },
+          {
+            id: 'market',
+            label: '能力市场',
+            path: '/market',
+            icon: Compass,
+            area: 'manage',
+            description: '发现和添加通用能力',
+          },
         ],
       }),
       getShellVisibility: () => ({

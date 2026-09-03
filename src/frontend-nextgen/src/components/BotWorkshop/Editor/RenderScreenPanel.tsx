@@ -52,7 +52,7 @@ export function RenderScreenPanel({
         </CardHeader>
         <CardContent className="space-y-3">
           {formOpen ? (
-            <div className="grid gap-3 rounded-lg border border-border bg-muted/30 p-4">
+            <Card className="grid gap-3 bg-muted/30 p-4 shadow-none">
               <Input
                 value={name}
                 disabled={!editable}
@@ -76,7 +76,7 @@ export function RenderScreenPanel({
                   保存
                 </Button>
               </div>
-            </div>
+            </Card>
           ) : null}
           {screens.length ? (
             screens.map((screen) => (

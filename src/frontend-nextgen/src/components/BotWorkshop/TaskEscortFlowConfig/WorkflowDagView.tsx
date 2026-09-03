@@ -9,6 +9,7 @@ import '@xyflow/react/dist/style.css';
 import { useMemo } from 'react';
 
 import type { TaskEscortWorkflowSpec } from '@/components/BotWorkshop/TaskEscort/types';
+import { Card } from '@/components/ui/Card';
 
 /** 安全提取字符串 */
 function toText(value: unknown, fallback = ''): string {
@@ -59,24 +60,24 @@ type DagNode = Node<DagNodeData>;
 function DagNodeComponent({ data }: NodeProps<DagNode>) {
   const colors = EXECUTOR_COLORS[data.executorType] ?? DEFAULT_COLOR;
   return (
-    <div
+    <Card
       className="min-w-[120px] max-w-[180px] rounded-lg border-2 px-2.5 py-1.5 shadow-sm"
       style={{ borderColor: colors.border, backgroundColor: colors.bg }}
     >
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-slate-400 !border-white" />
+      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-muted-foreground !border-white" />
       <div className="text-center">
         <div className="text-[11px] font-medium leading-tight" style={{ color: colors.text }}>
           {data.label}
         </div>
-        <div className="mt-0.5 text-[9px]" style={{ color: colors.text, opacity: 0.7 }}>
+        <div className="mt-0.5 text-[10px]" style={{ color: colors.text, opacity: 0.7 }}>
           {data.executorType}
         </div>
         {data.executorDetail && (
-          <div className="mt-0.5 truncate font-mono text-[8px] text-slate-400">{data.executorDetail}</div>
+          <div className="mt-0.5 truncate font-mono text-[8px] text-muted-foreground">{data.executorDetail}</div>
         )}
       </div>
-      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-slate-400 !border-white" />
-    </div>
+      <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !bg-muted-foreground !border-white" />
+    </Card>
   );
 }
 
@@ -113,7 +114,7 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
 
     // 自动分层布局：基于 dependsOn 计算层级
     const levels = new Map<string, number>();
-    const resolveLevel = (id: string, visited = new Set<string>()): number => {
+    function resolveLevel(id: string, visited = new Set<string>()): number {
       if (levels.has(id)) return levels.get(id)!;
       if (visited.has(id)) return 0;
       visited.add(id);
@@ -127,7 +128,7 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
       const level = maxDepLevel + 1;
       levels.set(id, level);
       return level;
-    };
+    }
     for (const n of specNodes) {
       resolveLevel(toText(n.id));
     }
@@ -185,14 +186,14 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
 
   if (flowNodes.length === 0) {
     return (
-      <div className="flex h-64 items-center justify-center text-sm text-[var(--color-muted)]">
+      <Card className="flex h-64 items-center justify-center border-dashed bg-muted/20 text-sm text-muted-foreground">
         暂无节点数据可用于 DAG 可视化
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="h-96 rounded-lg border border-[var(--color-border)] bg-white">
+    <Card className="h-96 overflow-hidden">
       <ReactFlow
         nodes={flowNodes}
         edges={edges}
@@ -206,6 +207,6 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
         <Background gap={16} size={1} color="#e2e8f0" />
         <Controls />
       </ReactFlow>
-    </div>
+    </Card>
   );
 }

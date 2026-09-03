@@ -10,7 +10,16 @@ import { normalizeTaskStatus } from '@/shared/taskStatus';
 import type { TaskDashboardResponse, TaskNodeDto, TaskStatusCode, TaskType } from './contract';
 import { renderableSource, unwrapHttpEnvelope } from './outputEnvelope';
 import { ARTIFACT_TYPE_LABELS, SOURCE_LABELS, TASK_STATUS_TONES, TASK_TYPE_LABELS } from './tokens';
-import type { DagEdgeView, DagNodeView, NodeStatus, StepTraceView, TaskNodeView, TaskStatus, TaskView } from './types';
+import type {
+  DagEdgeView,
+  DagNodeView,
+  NodeStatus,
+  StepTraceView,
+  TaskNodeView,
+  TaskOutputDimension,
+  TaskStatus,
+  TaskView,
+} from './types';
 
 /** 执行模态 → 头像底色 */
 function executorColor(runMode?: string | null): string | null {
@@ -72,6 +81,31 @@ function isEmptyOutput(output: unknown, outputSummary: string | null | undefined
 function resolveOutputRender(output: unknown, outputSummary: string | null | undefined): string | null {
   if (outputSummary) return outputSummary;
   return renderableSource(output);
+}
+
+/** 将根节点 output 的顶层对象拆成多个产出维度，优先读取每个维度下的 summary；非结构化输出返回空数组。 */
+function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
+  let payload: unknown = output;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return [];
+    }
+  }
+  payload = unwrapHttpEnvelope(payload);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
+
+  return Object.entries(payload as Record<string, unknown>)
+    .map(([key, value]) => {
+      const summary =
+        value && typeof value === 'object' && !Array.isArray(value)
+          ? (value as Record<string, unknown>).summary
+          : undefined;
+      const content = typeof summary === 'string' && summary.trim() ? summary : renderableSource(value);
+      return content?.trim() ? { key, content } : null;
+    })
+    .filter((item): item is TaskOutputDimension => item !== null);
 }
 
 function getExtendString(extendProps: Record<string, unknown> | undefined, ...keys: string[]): string | null {
@@ -400,12 +434,26 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
       const ri = n.run_info ?? {};
       const title = n.task_spec?.metadata?.title ?? n.node_id;
       const isRootNode = n.node_id === graphRootNode?.node_id || n.node_id === d.task_id;
+      // 派发未命中事件透出为节点元数据(视图层仅作展示/提示用);「未分配」判定统一由赋值是否为空决定,
+      // 不在此处按 miss_events 清空 session 继承(避免影响 yaml/workflow 共享根会话的回填)。
+      const nodeMissEventsRaw = ri.extend_props?.miss_events;
+      const nodeMissEvents = Array.isArray(nodeMissEventsRaw)
+        ? nodeMissEventsRaw.filter((e): e is string => typeof e === 'string')
+        : [];
+      const nodeHungReason = getExtendString(ri.extend_props, 'hung_reason');
       // 根节点的运行信息可能没有完整落在 run_info 中：用 graph 级 extend_props 做只读兜底，
       // 不覆盖节点自身已有值。子节点仍保持原有节点级字段解析逻辑。
       const effectiveExtendProps = isRootNode ? { ...graphExtProps, ...(ri.extend_props ?? {}) } : ri.extend_props;
-      const effectiveRunMode =
+      // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group;真实执行模式以 extend_props.actual_run_mode 为准(存在则覆盖 run_mode)。
+      const baseRunMode =
         (hasNonEmptyValue(ri.run_mode) ? ri.run_mode : null) ??
         (isRootNode ? mapSourceTypeToRunMode(getExtendString(graphExtProps, 'source_type') ?? d.source_type) : null);
+      // actual_run_mode 仅接受已知执行模态,未知/非法值降级到 baseRunMode,避免脏数据污染下游单/群判别。
+      const actualRunMode = getExtendString(effectiveExtendProps, 'actual_run_mode');
+      const effectiveRunMode =
+        (actualRunMode === 'single_bot' || actualRunMode === 'coop_group' || actualRunMode === 'bbs'
+          ? actualRunMode
+          : null) ?? baseRunMode;
       const effectiveAssignee =
         (hasNonEmptyValue(ri.assignee) ? ri.assignee : null) ??
         (isRootNode ? getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? null : null);
@@ -422,18 +470,28 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
       const assigneeBinding =
         assigneeRaw && typeof assigneeRaw === 'object' ? (assigneeRaw as { binding?: string }).binding ?? null : null;
       const assigneeNorm = typeof assigneeRaw === 'string' ? assigneeRaw : assigneeBotId ?? assigneeBinding ?? null;
+      // 透出 assignee_name:绕过群执行时 assignee 常为 bcs 群 id,视图层需用可读 bot 名展示执行者。
+      const nodeAssigneeName =
+        (typeof effectiveRunInfo.assignee_name === 'string' && effectiveRunInfo.assignee_name.trim()
+          ? effectiveRunInfo.assignee_name
+          : null) ?? getExtendString(effectiveRunInfo.extend_props, 'assignee_name');
+      // 根节点会话/群信息可能在 graph 级 extend_props 兜底继承;非根节点只用自身值,不继承根节点
+      // (避免 MISS/未分配节点张冠李戴继承根会话而被当成可下钻)。yaml/workflow 子节点应自带 session。
       const rawGroupId =
-        getExtendString(effectiveRunInfo.extend_props, 'group_id', 'coop_group_id', 'source_group_id') ?? rootGroupId;
+        getExtendString(effectiveRunInfo.extend_props, 'group_id', 'coop_group_id', 'source_group_id') ??
+        (isRootNode ? rootGroupId : null);
       const nodeSessionId =
         getExtendString(effectiveRunInfo.extend_props, 'session_id', 'group_session_id', 'main_session_id') ??
-        rootSessionId;
+        (isRootNode ? rootSessionId : null);
       // 单/群判别:协作群 session_id 形如 bcs_grp_xxx:round,单聊形如 agent:main:session:...:user:xxx。
       // 不能再用 group_id 是否存在判断——单 bot 执行也会在 extend_props 带 group_id(群上下文泄漏),
       // 会导致会话消息查询误走协作群端点。统一以 run_mode=coop_group 或 session_id 以 bcs_grp_ 开头为准。
       const isGroupNode = effectiveRunMode === 'coop_group' || nodeSessionId?.startsWith('bcs_grp_') === true;
       const groupId = isGroupNode ? rawGroupId : null;
       const groupName = isGroupNode
-        ? getExtendString(effectiveRunInfo.extend_props, 'group_name') ?? rootGroupName ?? 'BCS协作群'
+        ? getExtendString(effectiveRunInfo.extend_props, 'group_name') ??
+          (isRootNode ? rootGroupName : null) ??
+          'BCS协作群'
         : null;
       return {
         id: n.node_id,
@@ -450,6 +508,9 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
         groupName,
         sessionId: nodeSessionId,
         assignee: assigneeNorm,
+        assigneeName: nodeAssigneeName,
+        missEvents: nodeMissEvents,
+        hungReason: nodeHungReason,
         startedAt: msToDisplay(effectiveRunInfo.start_time),
         endAt: msToDisplay(effectiveRunInfo.end_time),
         timeConsuming: durationDisplay(effectiveRunInfo.start_time, effectiveRunInfo.end_time),
@@ -479,8 +540,12 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     });
 
   const { dagNodes, dagEdges } = layoutDag(nodes, graphRelations);
-  // 产物 Tab 展示根节点（data.tasks[0].run_info）的 output，统一按 markdown 渲染。
-  const rootOutputRender = defaultRootOutputRender;
+  // OKR/多节点任务若存在已完成的「投放实施」节点，产物 Tab 绑定该节点 output；否则回退根节点 output。
+  const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
+  const selectedOutputNode = implementationNode?.status === 'done' ? implementationNode : undefined;
+  const rootOutputRender = selectedOutputNode?.outputRender ?? defaultRootOutputRender;
+  const rootDimensions = resolveOutputDimensions(selectedOutputNode?.output ?? rootRunInfo?.output);
+  const rootOutputDimensions = rootDimensions.length ? rootDimensions : undefined;
 
   const graphOwnerBotId = getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? '';
   const graphSourceType =
@@ -524,6 +589,7 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
     mainSessionName: d.main_session?.name ?? (execCfg.main_session_name as string) ?? tcCtx?.main_session_name ?? null,
     progress: computeProgress(d, nodes),
     rootOutputRender,
+    rootOutputDimensions,
     artifacts: mapArtifacts(d.artifacts),
     nodes,
     dagNodes,

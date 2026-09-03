@@ -1,5 +1,6 @@
 import { parseEvidence } from '@/components/BotWorkshop/BotHealthCheckDrawer/utils';
 import { Badge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/Drawer';
 import type { BotHealthCheckItem } from '@/domain/botHealthCheck';
 
@@ -32,22 +33,17 @@ export function BadCaseDrawer({ item, onOpenChange }: BadCaseDrawerProps) {
                 {lowScoreSessionIds.length > 0 ? (
                   <div className="space-y-2">
                     {lowScoreSessionIds.map((sessionId, index) => (
-                      <div
-                        key={sessionId}
-                        className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-2"
-                      >
+                      <Card key={sessionId} className="bg-muted p-3 shadow-none">
                         <div className="text-xs text-[var(--color-muted)]">#{index + 1}</div>
                         <code className="block break-words text-sm text-[var(--color-fg)]">{sessionId}</code>
-                      </div>
+                      </Card>
                     ))}
                   </div>
                 ) : (
                   <div className="text-sm text-[var(--color-muted)]">暂无低分会话记录</div>
                 )}
                 {item.badCase ? (
-                  <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-panel-muted)] px-3 py-2 text-sm text-[var(--color-fg)]">
-                    {item.badCase}
-                  </div>
+                  <Card className="bg-muted px-3 py-2 text-sm text-[var(--color-fg)] shadow-none">{item.badCase}</Card>
                 ) : null}
               </div>
             )}

@@ -8,32 +8,31 @@ export interface TaskPreflightMockResult {
 const DEMO_OKR_PREFLIGHT_MESSAGE = `我已收到任务需求，正在进行分析。
 
 需求分析：
-这是一个包含 GMV 增长目标和大促营销场景的 OKR 任务，核心需要补齐完整的大促营销策略。
+这是 18 周年店庆的运营增长任务，需在活动窗口（2026.10.15-11.15，共 32 天）内实现客流与护理双增长，在不伤老客口碑的前提下沉淀可复购会员，并严守促销预算与备货现金占用约束。
+
+核心目标拆解：
+O：18 周年店庆实现客流与护理双增长，不伤老客口碑，沉淀可复购会员。
+KR：新客到店 1500、券核销 ≥ 1000，护理售卖 200 份（转化 ≥ 15%），新增会员 ≥ 800，客诉差评 ≤ 日常 1.2 倍。
+经营约束：促销预算 ≤ 20 万、备货新增现金占用 ≤ 8 万、活动窗口 2026.10.15-11.15（32 天）。
 
 自我评估：
-当前 Bot 无法独立完成该需求，原因是当前 Bot 不具备完整的大促营销策略制定能力。
-
-需求匹配：
-经分析，该任务需要“营销策略制定”和“大促活动策划”能力。
+当前 Bot 无法独立完成该需求，原因是当前 Bot 不掌握门店客流运营、护理品售卖与会员复购经营的完整决策链路，难以在预算与口碑约束下自主达成 KR。
 
 专家搜推：
-已发现「大促营销策略专家 Bot」，其能力满足当前任务要求。
+经搜推，未发现具备完整门店经营链路的能力型 Bot，自动执行无法满足该需求。
 
 任务指派：
-现将该任务指派给「大促营销策略专家 Bot」执行，后续将由任务协作中心启动任务流程。`;
+现将该任务指派给「店主Bot」执行，由店主统筹经营资源、把控口碑与预算，后续将由任务协作中心启动任务流程。`;
 
 function containsAny(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => text.includes(keyword));
 }
 
-/** 演示规则：同时命中 GMV 增长语义和大促营销场景时，模拟 OKR 前置判断。 */
+/** 演示规则：同时命中「周年店庆」语义和「客流/护理/会员复购增长」场景时，模拟 OKR 前置判断。 */
 export function isDemoOkrMarketingTask(form: TaskComposerForm): boolean {
   const text = [form.title, form.objective, form.instruction, form.background ?? ''].join('\n').toLowerCase();
 
-  return (
-    containsAny(text, ['gmv', '交易额', '销售额', '增长目标']) &&
-    containsAny(text, ['大促', '双十一', '618', '营销活动', '活动营销'])
-  );
+  return containsAny(text, ['周年', '店庆', '周年庆']) && containsAny(text, ['护理', '客流', '会员', '复购']);
 }
 
 /**

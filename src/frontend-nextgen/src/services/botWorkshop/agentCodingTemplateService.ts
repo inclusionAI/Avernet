@@ -90,6 +90,43 @@ const capabilityLabels: Record<string, string> = {
   workflow: '工作流',
   aix: '工作流',
 };
+/**
+ * 判断 AgentCoding 模板是否声明支持创建服务 Bot。
+ *
+ * 模板工厂的能力位使用 `capabilities.upgrade_service_bot`，且只有显式
+ * `true` 才算支持；缺失、字符串或其他 truthy 值都不能误开放服务化。
+ * 应用 Coding Bot 是前端内置的固定模板，即使未来接口返回能力位，也不
+ * 应被当作可服务化模板。
+ */
+export function getServiceBotCapability(template?: AgentCodingTemplate): boolean | undefined {
+  if (!template) return undefined;
+  if (
+    String(template.templateType ?? '')
+      .toLowerCase()
+      .replace(/[\s_-]/g, '') === 'applicationcoding'
+  )
+    return false;
+
+  const configs = [
+    record(template.config),
+    record(record(template.config).bot_template_config),
+    record(template.raw),
+    record(record(template.raw).template_config),
+    record(record(template.raw).bot_template_config),
+    record(record(template.raw).engine_properties),
+    record(record(record(template.raw).engine_properties).template_config),
+  ];
+  const capabilityEntries = configs
+    .map((config) => record(config.capabilities))
+    .filter((capabilities) => Object.prototype.hasOwnProperty.call(capabilities, 'upgrade_service_bot'));
+  if (!capabilityEntries.length) return undefined;
+  return capabilityEntries.some((capabilities) => capabilities.upgrade_service_bot === true);
+}
+
+export function supportsServiceBot(template?: AgentCodingTemplate): boolean {
+  return getServiceBotCapability(template) === true;
+}
+
 const normalizeSupportEngines = (value: unknown): string[] =>
   Array.isArray(value)
     ? Array.from(
