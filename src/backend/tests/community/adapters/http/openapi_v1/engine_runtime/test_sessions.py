@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
+    converter_creation,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
@@ -183,13 +186,17 @@ def test_create_session_other_engine_does_not_add_reconciliation_call(client, re
 
 
 def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
-    client, relay
+    client, relay, monkeypatch
 ):
+    monkeypatch.setattr(converter_creation, "_DELAYS", (0.0, 0.0, 0.0))
     relay.results = [EngineResult(data=ENGINE_SESSION)]
     original_call = relay.call
+    list_attempts = 0
 
     async def fail_only_list(**kwargs):
+        nonlocal list_attempts
         if kwargs["method"] == "GET":
+            list_attempts += 1
             raise EngineUpstreamError("list temporarily unavailable")
         return await original_call(**kwargs)
 
@@ -199,6 +206,7 @@ def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
 
     assert resp.status_code == 201, resp.json()
     assert resp.json()["data"]["session_id"] == SESSION_ID
+    assert list_attempts == 3
 
 
 def test_create_rejects_an_agent_one_engine_would_silently_drop(client, relay):

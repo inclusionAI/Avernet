@@ -15,7 +15,12 @@ logger = get_logger()
 # Direct Engine consumers keep OpenClaw's historical relative id. Only the
 # public OpenAPI response is reconciled with its canonical list row.
 _LIMIT = 20
-_DELAYS = (0.0, 0.05, 0.15)
+# OpenClaw acknowledges ``sessions.patch`` before a newly-created empty
+# session is necessarily visible through ``sessions.list``.  Cloud runtimes
+# can take longer to publish that read model than an in-process/internal
+# deployment, so keep the same three-attempt bound but allow up to two seconds
+# for convergence.
+_DELAYS = (0.0, 0.5, 1.5)
 
 
 def _matches(candidate_id: str, created_id: str) -> bool:
@@ -45,12 +50,13 @@ async def reconcile_created_session(
             )
         except Exception as error:
             # The write already succeeded. Do not invite a retry that creates
-            # another empty session because this best-effort read failed.
+            # another empty session because this best-effort read failed. A
+            # transient list failure must not consume all remaining attempts.
             logger.warning(
                 "[openapi.sessions.create] canonical reconciliation failed: %s",
                 type(error).__name__,
             )
-            return created_item
+            continue
 
         match = next((
             item for item in _as_list(listed.data)
