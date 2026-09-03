@@ -266,7 +266,7 @@ def test_the_context_addresses_the_store_by_its_own_coordinates() -> None:
 
     ctx = CliToolContext(
         bot_id="bot7", owner_id="u1", actor_id="u2", entity_id="u1",
-        env="dev", engine_type="openclaw",
+        env="dev", engine_type="openclaw", tenant="teamclaw",
     )
     store, _ = _store()
     assert ctx.scope == _SCOPE

@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import base64
 import inspect
-import io
-import tokenize
 
 import pytest
 
@@ -38,6 +36,8 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterHTTPStatusError,
 )
 
+from ._fakes import code_of
+
 _CTX = CliToolContext(
     bot_id="bot7",
     owner_id="u1",
@@ -45,6 +45,7 @@ _CTX = CliToolContext(
     entity_id="u1",
     env="dev",
     engine_type="openclaw",
+    tenant="teamclaw",
 )
 _BYTES = b"\x7fELF\x02\x01\x01"
 
@@ -255,23 +256,6 @@ async def test_an_unbound_device_raises_the_ports_own_error() -> None:
 # ── ARCA runs no shell ────────────────────────────────────────────────────
 
 
-def _code_of(module) -> str:
-    """The module's source with comments and string literals removed.
-
-    Prose is not the subject of these two tests — a docstring may perfectly
-    well say "this port issues no chmod", and asserting over raw source would
-    make the sentence that documents the rule the thing that breaks it. What
-    must stay absent is a *call* and a *constant*.
-    """
-    source = inspect.getsource(module)
-    kept: list[str] = []
-    for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.type in (tokenize.COMMENT, tokenize.STRING):
-            continue
-        kept.append(token.string)
-    return " ".join(kept)
-
-
 def test_the_arca_port_reaches_no_shell_channel() -> None:
     """The executable bit is part of what the engine's ``install`` means. A
     platform-side ``chmod`` would be a second implementation of the engine's
@@ -279,7 +263,7 @@ def test_the_arca_port_reaches_no_shell_channel() -> None:
     quote into it."""
     from agentclaw.community.core.bot_config_manifest.cli_tools import arca_port
 
-    code = _code_of(arca_port)
+    code = code_of(arca_port)
     for forbidden in (
         "chmod", "exec_command", "execute_baas_shell", "shell_command",
         "subprocess", "run_shell",
@@ -339,6 +323,6 @@ async def test_teclaw_list_refuses_rather_than_answering_wrongly() -> None:
 def test_the_teclaw_port_composes_no_container_path() -> None:
     from agentclaw.community.core.bot_config_manifest.cli_tools import teclaw_port
 
-    code = _code_of(teclaw_port)
+    code = code_of(teclaw_port)
     for forbidden in ("/workspace", "/identity", "/home/admin", "os.path", "Path("):
         assert forbidden not in code, f"the teclaw port names {forbidden!r}"

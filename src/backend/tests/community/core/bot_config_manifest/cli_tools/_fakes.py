@@ -57,3 +57,126 @@ class FakeCopyingObjectStorage(FakeObjectStorage):
         self.copies.append((source_key, dest_key))
         self.objects[dest_key] = self.objects[source_key]
         return True
+
+
+# ── the service's collaborators ───────────────────────────────────────────
+
+
+class FakeCliToolRepo:
+    """An in-memory ``BotCliToolRepositoryProtocol``, scoped like the real one."""
+
+    def __init__(self) -> None:
+        self.rows: dict[tuple[str, str, str, str], object] = {}
+        self.deletes: list[str] = []
+
+    @staticmethod
+    def _key(env, entity_id, bot_id, name):
+        return (env, entity_id, bot_id, name)
+
+    def get(self, *, env, entity_id, bot_id, name):
+        return self.rows.get(self._key(env, entity_id, bot_id, name))
+
+    def list(self, *, env, entity_id, bot_id):
+        rows = [
+            row for (e, ent, b, _), row in self.rows.items()
+            if (e, ent, b) == (env, entity_id, bot_id)
+        ]
+        return sorted(rows, key=lambda r: r.name)
+
+    def upsert(self, **kwargs):
+        from agentclaw.community.core.bot_config_manifest.cli_tools import (
+            BotCliToolRecord,
+        )
+
+        record = BotCliToolRecord(id=len(self.rows) + 1, **kwargs)
+        self.rows[
+            self._key(kwargs["env"], kwargs["entity_id"], kwargs["bot_id"], kwargs["name"])
+        ] = record
+        return record
+
+    def delete(self, *, env, entity_id, bot_id, name) -> bool:
+        self.deletes.append(name)
+        return self.rows.pop(self._key(env, entity_id, bot_id, name), None) is not None
+
+    def delete_all(self, *, env, entity_id, bot_id):
+        keys = []
+        for composite in list(self.rows):
+            if composite[:3] == (env, entity_id, bot_id):
+                keys.append(self.rows.pop(composite).oss_key)
+        return keys
+
+
+class FakeDelivery:
+    """Records every delivery call; refuses on demand."""
+
+    def __init__(self, *, install_error=None, delete_error=None, listing=None) -> None:
+        self.installed: list[tuple[str, bytes]] = []
+        self.deleted: list[str] = []
+        self.listed = 0
+        self.install_error = install_error
+        self.delete_error = delete_error
+        self.listing = listing
+
+    async def install(self, ctx, *, name, data) -> None:
+        if self.install_error is not None:
+            raise self.install_error
+        self.installed.append((name, data))
+
+    async def delete(self, ctx, *, name) -> None:
+        if self.delete_error is not None:
+            raise self.delete_error
+        self.deleted.append(name)
+
+    async def list(self, ctx):
+        self.listed += 1
+        if isinstance(self.listing, Exception):
+            raise self.listing
+        return list(self.listing or [])
+
+
+class FakeFetchedEntry:
+    def __init__(self, content: bytes, digest: str) -> None:
+        self.content = content
+        self.digest = digest
+        self.from_store = False
+        self.fallback_reason = None
+        self.source_url = None
+
+
+class FakeEntryFetcher:
+    """Answers with canned bytes; records the keyword arguments it was given."""
+
+    def __init__(self, *, content: bytes = b"", digest: str = "", error=None) -> None:
+        self.content = content
+        self.digest = digest
+        self.error = error
+        self.calls: list[dict] = []
+
+    def fetch(self, ctx, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return FakeFetchedEntry(self.content, self.digest or kwargs.get("digest") or "")
+
+
+def code_of(module) -> str:
+    """The module's source with comments and string literals removed.
+
+    Prose is not the subject of the source-scan tests — a docstring may
+    perfectly well say "this service branches on no engine type", and
+    asserting over raw source would make the sentence that documents the rule
+    the thing that breaks it. What must stay absent is a *call*, a *branch* and
+    a *constant*.
+    """
+    import inspect
+    import io
+    import tokenize
+
+    kept: list[str] = []
+    for token in tokenize.generate_tokens(
+        io.StringIO(inspect.getsource(module)).readline
+    ):
+        if token.type in (tokenize.COMMENT, tokenize.STRING):
+            continue
+        kept.append(token.string)
+    return " ".join(kept)

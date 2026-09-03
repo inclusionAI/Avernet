@@ -10,12 +10,28 @@ operation needs: ``owner_id`` resolves the bot and its device binding,
 ``entity_id`` / ``entity_type`` are the storage coordinates. ``engine_type``
 is carried but read by nobody here: the family difference lives in *which*
 delivery port the strategy bound, never in a branch inside one.
+
+It also satisfies ``apply/entry_fetch.py``'s :class:`FetchContext`, which is
+what lets an HTTP-driven install fetch through the *same* funnel a manifest
+apply does. ``apply_id``, ``budget`` and ``source_session`` are the three
+fields only an apply has, and they are ``None`` for the API caller: an
+unbudgeted single install files a receipt with no apply linkage, which is
+exactly what that column's nullability means.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
 from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolScope
+
+if TYPE_CHECKING:
+    from agentclaw.community.core.bot_config_manifest.apply.budget import (
+        ApplyFetchBudget,
+    )
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
 
 
 @dataclass(frozen=True)
@@ -35,9 +51,15 @@ class CliToolContext:
     #: Carried for logs and for the report; the port a strategy bound is what
     #: actually decides how a tool is delivered.
     engine_type: str
+    #: The tenant the fetch pipeline substitutes into ``${BOT_TENANT}``.
+    tenant: str
     #: The personal-bot surface's fixed pair, as the identity and resources
     #: materialisers address every bot.
     entity_type: str = "staff"
+    #: The three an apply has and a single API-driven install does not.
+    apply_id: Optional[str] = None
+    budget: Optional["ApplyFetchBudget"] = None
+    source_session: Optional["SourceSession"] = None
 
     @property
     def scope(self) -> CliToolScope:

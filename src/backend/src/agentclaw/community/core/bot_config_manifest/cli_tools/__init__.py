@@ -25,10 +25,19 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
 )
+from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
+    CliToolDecl,
+    CliToolDrift,
+    CliToolOp,
+    CliToolOutcome,
+)
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
     CliToolDeliveryError,
     CliToolDeliveryPort,
     CliToolPlacementError,
+)
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+    CliToolService,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
     BOT_DATA_STORE,
@@ -49,10 +58,15 @@ __all__ = [
     "BotCliToolModel",
     "BotCliToolRecord",
     "CliToolContext",
+    "CliToolDecl",
     "CliToolDeliveryError",
     "CliToolDeliveryPort",
+    "CliToolDrift",
+    "CliToolOp",
+    "CliToolOutcome",
     "CliToolPlacementError",
     "CliToolScope",
+    "CliToolService",
     "CliToolStore",
     "CliToolStoreError",
     "StoredCliTool",

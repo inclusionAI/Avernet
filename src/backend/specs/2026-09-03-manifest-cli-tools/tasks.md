@@ -52,27 +52,27 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
   - [x] Nothing in the module composes or parses a container path.
 - **Depends on:** Task 3
 
-## Task 5: Build `CliToolService`
+## Task 5: Build `CliToolService`  `[x]`
 - **Goal:** The one component that installs, removes, lists and replaces.
-- **Files:** `core/bot_config_manifest/cli_tools/service.py` (new), `.../verify.py` (new), `.../README.md` (new, with a Context Boundary block per §8)
+- **Files:** `core/bot_config_manifest/cli_tools/{service,verify,declarations}.py` (new), `.../README.md` (new), `apply/entry_fetch.py` (the `FetchContext` seam)
 - **Done when:**
-  - [ ] `install` runs fetch → `sha256` → unpack → `select_subpath` → `verify_amd64_elf` → `md5` → **OSS store** → deliver → record, in that order, recording nothing for a step that failed.
-  - [ ] `select_subpath` refuses an absent member, a non-regular file, or one escaping the tree after symlink resolution.
-  - [ ] `verify_amd64_elf` refuses a non-ELF file and a wrong `e_machine`, naming what was found.
-  - [ ] `replace_all` makes the installed set equal the declaration, computing removals **from the table**, and returns a per-tool outcome list.
-  - [ ] `remove` deletes the OSS object with the row.
-  - [ ] `list` and `drift` behave as `plan.md` describes; `drift` compares the table against the family's `list`.
-  - [ ] Fetching goes through `EntryFetcher` under the `cli_tools` category and its existing 200 MiB width.
-  - [ ] Nothing in the service branches on engine type, and nothing in it composes a filesystem path.
+  - [x] `install` runs fetch → `sha256` → unpack → `select_subpath` → `verify_amd64_elf` → `md5` → **OSS store** → deliver → record, in that order, recording nothing for a step that failed — and discarding the object it stored when delivery then failed, since that key is derived rather than recorded.
+  - [x] `select_subpath` refuses an absent member, a non-regular file, or one escaping the tree after symlink resolution.
+  - [x] `verify_amd64_elf` refuses a non-ELF file and a wrong `e_machine`, naming what was found, reading `e_machine` in the endianness `EI_DATA` declares.
+  - [x] `replace_all` makes the installed set equal the declaration, computing removals **from the table**, and returns a per-tool outcome list.
+  - [x] `remove` deletes the OSS object with the row.
+  - [x] `list` and `drift` behave as `plan.md` describes; `drift` compares the table against the family's `list`, and reports `observable=False` rather than "converged" on a family that cannot be asked.
+  - [x] Fetching goes through `EntryFetcher` under the `cli_tools` category and its existing 200 MiB width. The funnel's ctx parameter is now the declared `FetchContext` protocol, which `CliToolContext` satisfies — so an HTTP-driven install and a manifest apply fetch through the same code rather than two copies.
+  - [x] Nothing in the service branches on engine type, and nothing in it composes a filesystem path.
 - **Depends on:** Tasks 2, 3, 4
 
-## Task 6: Service tests
+## Task 6: Service tests  `[x]`
 - **Goal:** Pin the pipeline and the failure modes that would otherwise be silent.
-- **Files:** `tests/community/core/bot_config_manifest/cli_tools/test_service.py` (new)
+- **Files:** `tests/community/core/bot_config_manifest/cli_tools/{test_service,test_verify}.py` (new)
 - **Done when:**
-  - [ ] The eleven cases named in `plan.md`'s service test strategy pass.
-  - [ ] `nothing_is_recorded_when_placement_fails` and `engine_install_failure_fails_the_entry_with_the_engine_error` both hold.
-  - [ ] `replace_all_computes_removals_from_the_table_not_the_engine` holds.
+  - [x] Every case named in `plan.md`'s service test strategy passes.
+  - [x] `nothing_is_recorded_when_placement_fails` and the engine-error case both hold.
+  - [x] `replace_all_computes_removals_from_the_table_not_the_engine` holds — and asserts the engine's listing was never even consulted.
 - **Depends on:** Task 5
 
 ## Task 7: The management API
