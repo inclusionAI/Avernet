@@ -139,6 +139,16 @@ class ChannelService:
                     exc,
                 )
 
+    # bcn_gateway 行的服务端管理/派生键：内部 TC 面的 ChannelConfig 模型没有
+    # 这些字段，全量替换 config 会把 bcn 渠道静默降级成 plugin 语义并孤儿化
+    # BCS 绑定 —— 调用方不感知的键必须从存量行继承。
+    _BCN_MANAGED_KEYS = (
+        "binding_mode",
+        "bcs_binding_id",
+        "group_chat_scope",
+        "outbound_visibility",
+    )
+
     def update_channel(
         self,
         *,
@@ -151,7 +161,12 @@ class ChannelService:
         status: str,
         stage: Optional[str] = None,
     ) -> None:
-        """根据 id 更新配置"""
+        """根据 id 更新配置（保留调用方不感知的 bcn_gateway 服务端键）"""
+        existing = self._repository.get_by_id(channel_id)
+        if existing is not None and self._is_bcn_channel(existing):
+            for key in self._BCN_MANAGED_KEYS:
+                if key not in config and key in existing.config:
+                    config = {**config, key: existing.config[key]}
         self._repository.update_by_id(
             channel_id=channel_id,
             type=type,
@@ -283,8 +298,11 @@ class ChannelService:
         Ordering is provider-dependent, and intentionally so:
 
         * **bcn_gateway** — BCS **first** (may raise), then persist — same
-          fail-closed ordering as openclaw: activate = ensure_active + store the
-          returned ``bcs_binding_id``; deactivate = patch the binding inactive.
+          fail-closed ordering as openclaw, both directions routed through
+          :meth:`_sync_bcn_binding`: activate = ensure_active + store the
+          returned ``bcs_binding_id`` + push the current config (so a
+          deactivate → edit → reactivate flow cannot leave BCS serving the
+          pre-edit config); deactivate = patch the binding inactive.
         * **teclaw** — persist the status **first**, then deliver (best-effort).
           The teclaw runtime is updated by recomposing the whole artifact, which
           reads the freshly-persisted status from the DB, so the write must
@@ -301,13 +319,11 @@ class ChannelService:
 
         if self._is_bcn_channel(channel):
             # 与 openclaw 路径同序：先 BCS（可能抛，fail-closed）再落库。
-            if status == "1":
-                binding_id = await self._bcs_client.ensure_active(channel)
-                self._store_bcs_binding_id(channel, binding_id)
-            else:
-                binding_id = str(channel.config.get("bcs_binding_id") or "")
-                if binding_id:
-                    await self._bcs_client.set_active(binding_id, active=False)
+            # apply 会 ensure + 回写 binding_id + push_config，
+            # 保证重激活时 BCS 侧配置与 DB（SoT）一致。
+            await self._sync_bcn_binding(
+                channel, action="apply" if status == "1" else "remove"
+            )
             self.update_status(channel_id, status)
             return
 

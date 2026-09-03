@@ -421,6 +421,13 @@ async def update_channel(
         patch = body.config.model_dump(exclude_unset=True)
         if patch.get("client_secret") is None:
             patch.pop("client_secret", None)
+        # Explicit nulls on bcn keys mean "not provided" (same semantics as
+        # client_secret): keeping them would persist null, and the BCS
+        # ``_binding_payload``'s ``config.get(key, default)`` would then send
+        # null instead of the default/stored value.
+        for bcn_key in ("group_chat_scope", "outbound_visibility"):
+            if patch.get(bcn_key) is None:
+                patch.pop(bcn_key, None)
         config.update(patch)
     try:
         validate_mode_matrix(

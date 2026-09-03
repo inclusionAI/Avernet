@@ -25,9 +25,6 @@ from agentclaw.community.core.channel.errors import (
     ChannelSyncError,
 )
 from agentclaw.community.core.channel.models import ChannelRecord
-from agentclaw.community.log import get_logger
-
-logger = get_logger()
 
 _BINDING_PATH = "/openapi/v1/collaboration/channels/bindings"
 

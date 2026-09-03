@@ -1231,8 +1231,40 @@ class TestBcnGatewayLifecycle:
         await channel_service.set_channel_status(1, "1")
 
         mock_bcs_client.ensure_active.assert_awaited_once_with(record)
+        # 激活必须把当前配置 push 给 BCS —— 重激活场景下 BCS 拿到的是最新
+        # 配置（SoT 是 DB），而不是绑定创建时的旧配置。
+        mock_bcs_client.push_config.assert_awaited_once_with(
+            record, binding_id="bcs-binding-1"
+        )
         stored = mock_repository.update_by_id.call_args.kwargs["config"]
         assert stored["bcs_binding_id"] == "bcs-binding-1"
+        mock_repository.update_status_by_id.assert_called_once_with(
+            channel_id=1, status="1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_reactivate_after_config_edit_pushes_fresh_config(
+        self, channel_service, mock_repository, mock_bcs_client
+    ):
+        """停用→改配置→重激活：重激活必须把改后的配置 push 给 BCS。
+
+        回归防护：老实现只 ensure_active（已有 binding_id 时只 PATCH
+        active=true），BCS 会继续用旧配置（例如已轮换的 secret）。
+        """
+        record = _bcn_record(
+            status="0",
+            bcs_binding_id="bcs-binding-1",
+            client_id="client-rotated",
+        )
+        mock_repository.get_by_id.return_value = record
+        mock_repository.update_status_by_id = MagicMock()
+
+        await channel_service.set_channel_status(1, "1")
+
+        mock_bcs_client.ensure_active.assert_awaited_once_with(record)
+        mock_bcs_client.push_config.assert_awaited_once_with(
+            record, binding_id="bcs-binding-1"
+        )
         mock_repository.update_status_by_id.assert_called_once_with(
             channel_id=1, status="1"
         )
@@ -1263,6 +1295,8 @@ class TestBcnGatewayLifecycle:
         mock_bcs_client.set_active.assert_awaited_once_with(
             "bcs-binding-1", active=False
         )
+        # 停用只下线绑定，不需要推送配置
+        mock_bcs_client.push_config.assert_not_awaited()
         mock_repository.update_status_by_id.assert_called_once_with(
             channel_id=1, status="0"
         )
@@ -1333,3 +1367,71 @@ class TestBcnGatewayLifecycle:
         await channel_service.remove_channel(1)
 
         mock_bcs_client.delete_binding.assert_not_awaited()
+
+
+class TestUpdateChannelPreservesBcnManagedKeys:
+    """update_channel must carry over bcn server-managed keys the caller can't see.
+
+    内部 TC 面的 ChannelConfig 模型没有 binding_mode/bcs_binding_id/
+    group_chat_scope/outbound_visibility 字段，全量替换 config 会把 bcn 渠道
+    静默降级成 plugin 语义并孤儿化 BCS 绑定；这些键必须从存量行继承。
+    """
+
+    def _update(self, channel_service, config: dict) -> None:
+        channel_service.update_channel(
+            channel_id=1,
+            type="dingding",
+            description="test channel",
+            identity_id="user1",
+            bind_bot_id="bot1",
+            config=config,
+            status="1",
+            stage=None,
+        )
+
+    def test_bcn_row_preserves_all_managed_keys(self, channel_service, mock_repository):
+        stored = _bcn_record(
+            bcs_binding_id="bcs-binding-1",
+            group_chat_scope="conversation_shared",
+            outbound_visibility="lead_only",
+        )
+        mock_repository.get_by_id.return_value = stored
+        mock_repository.update_by_id = MagicMock()
+
+        incoming = {"client_id": "client-1", "client_secret": "secret-rotated"}
+        self._update(channel_service, incoming)
+
+        saved = mock_repository.update_by_id.call_args.kwargs["config"]
+        assert saved["binding_mode"] == "bcn_gateway"
+        assert saved["bcs_binding_id"] == "bcs-binding-1"
+        assert saved["group_chat_scope"] == "conversation_shared"
+        assert saved["outbound_visibility"] == "lead_only"
+        assert saved["client_secret"] == "secret-rotated"
+        # 调用方传入的 dict 不被就地修改
+        assert "binding_mode" not in incoming
+
+    def test_plugin_row_injects_no_bcn_keys(self, channel_service, mock_repository):
+        mock_repository.get_by_id.return_value = _make_channel_record()
+        mock_repository.update_by_id = MagicMock()
+
+        self._update(channel_service, {"client_id": "test_client", "client_secret": "s"})
+
+        saved = mock_repository.update_by_id.call_args.kwargs["config"]
+        for key in ChannelService._BCN_MANAGED_KEYS:
+            assert key not in saved
+
+    def test_explicit_keys_are_not_overridden(self, channel_service, mock_repository):
+        """公开 API 传全量 config（含 binding_mode）时，以传入值为准不覆盖。"""
+        stored = _bcn_record(
+            bcs_binding_id="bcs-binding-1", group_chat_scope="per_sender"
+        )
+        mock_repository.get_by_id.return_value = stored
+        mock_repository.update_by_id = MagicMock()
+
+        self._update(
+            channel_service,
+            {**stored.config, "group_chat_scope": "conversation_shared"},
+        )
+
+        saved = mock_repository.update_by_id.call_args.kwargs["config"]
+        assert saved["group_chat_scope"] == "conversation_shared"

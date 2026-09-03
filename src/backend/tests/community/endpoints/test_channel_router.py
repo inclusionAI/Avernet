@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import json
 
+from agentclaw.community.api.channel_service import ChannelServiceProtocol
 from agentclaw.community.core.channel.json_config_utils import _get_local_base_dir
+from agentclaw.community.core.repository.protocols.chat import ChannelRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.utils.env_utils import get_current_env
 from tests.community.factories.access import make_staff_user
@@ -26,6 +28,7 @@ from tests.community.framework import (
     ExpectError,
     ExpectSuccess,
     bind_failing_method,
+    bind_overrides,
     endpoint_test,
 )
 
@@ -273,3 +276,82 @@ def _seed_generator_breaks_unexpectedly(world):
 )
 def get_openclaw_configs_unexpected_error():
     """Unexpected errors return 500 status."""
+
+
+# ============================================================================
+# POST /api/channels/{channel_id}/delete
+# ============================================================================
+
+
+def _seed_bcn_channel_for_delete(world):
+    """Seed an owner, a bot, a bcn_gateway channel row, and record the
+    service's two delete paths.
+
+    The internal delete endpoint used to call ``service.delete`` (row-only,
+    no BCS cleanup), orphaning the BCS binding of a bcn_gateway row. It must
+    route through ``remove_channel`` — the same orchestration the public API
+    delete uses — so the binding is removed too.
+    """
+    _seed_owner_with_bot(world)
+    world.get(ChannelRepository).insert_channel(
+        type="dingding",
+        description="bcn channel",
+        identity_id="u_owner",
+        bind_bot_id="bot_test",
+        config={
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "robot_code": "robot-1",
+            "binding_mode": "bcn_gateway",
+            "bcs_binding_id": "bcs-binding-1",
+        },
+        status="0",
+        stage=None,
+    )
+
+    async def _remove_channel(self, channel_id: int):
+        self._remove_calls.append(channel_id)
+
+    def _delete(self, channel_id: int):
+        self._delete_calls.append(channel_id)
+
+    stand_in = bind_overrides(
+        world,
+        ChannelServiceProtocol,
+        {"remove_channel": _remove_channel, "delete": _delete},
+    )
+    stand_in._remove_calls = []
+    stand_in._delete_calls = []
+
+
+def _assert_delete_routes_through_remove_channel(response, world):
+    """The delete must go through remove_channel (BCS cleanup), not bare delete."""
+    service = world.get(ChannelServiceProtocol)
+    assert service._remove_calls == [1], (
+        "internal delete must call remove_channel (best-effort BCS binding "
+        f"cleanup), got remove calls: {service._remove_calls}"
+    )
+    assert service._delete_calls == [], (
+        "internal delete must not call the row-only service.delete anymore"
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/channels/{channel_id}/delete",
+    scenario="owner_deletes_bcn_channel",
+    input=CaseInput(
+        path_params={"channel_id": 1},
+        headers={"x-user-id": "u_owner"},
+    ),
+    seed=_seed_bcn_channel_for_delete,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={"success": True},
+    ),
+    extra_assertions=(
+        _assert_delete_routes_through_remove_channel,
+    ),
+)
+def delete_channel_routes_through_remove_channel():
+    """Owner deleting a channel goes through remove_channel (with BCS cleanup)."""

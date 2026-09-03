@@ -704,3 +704,48 @@ async def test_update_rejects_plugin_field_on_bcn_channel():
         aix_config=AixConfig(),
     )
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_explicit_null_bcn_fields_keep_stored_values():
+    """显式传 null 的 bcn 字段不能把 null 落库/送进 BCS payload。
+
+    ``group_chat_scope=None`` 能通过校验（字段已 provided），但
+    ``_binding_payload`` 的 ``config.get(..., default)`` 对"键存在且为
+    None"返回 None —— payload 会送 null。显式 null 按省略处理，保留存量值。
+    """
+    service = _Channels([_record(status="0", config={
+        **_record().config,
+        "binding_mode": "bcn_gateway",
+        "robot_code": "robot-1",
+        "group_chat_scope": "per_sender",
+        "outbound_visibility": "full_transcript",
+    })])
+    body = ChannelUpdate.model_validate(
+        {
+            "config": {
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "group_chat_scope": None,
+            }
+        }
+    )
+
+    result = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=body,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["group_chat_scope"] == "per_sender"
+    assert update_args["config"]["outbound_visibility"] == "full_transcript"
+    assert update_args["config"]["client_id"] == "client-2"
+    assert result.data.config.group_chat_scope == "per_sender"
