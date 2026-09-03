@@ -355,3 +355,40 @@ def _assert_delete_routes_through_remove_channel(response, world):
 )
 def delete_channel_routes_through_remove_channel():
     """Owner deleting a channel goes through remove_channel (with BCS cleanup)."""
+
+
+def _seed_channel_for_delete_permission(world):
+    """Seed an owner-owned channel row so the permission interceptor can
+    resolve the delete target and reject a non-collaborator.
+
+    The interceptor (``extract_from_channel_id``) resolves the channel → bot
+    → collaborator scope before the handler runs, so the real service is
+    never reached and no overrides are needed.
+    """
+    _seed_owner_and_other_user(world)
+    world.get(ChannelRepository).insert_channel(
+        type="dingding",
+        description=None,
+        identity_id="u_owner",
+        bind_bot_id="bot_test",
+        config={"client_id": "client-1"},
+        status="0",
+        stage=None,
+    )
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/channels/{channel_id}/delete",
+    scenario="non_owner_forbidden",
+    input=CaseInput(
+        path_params={"channel_id": 1},
+        headers={"x-user-id": "u_other"},  # Different user
+    ),
+    seed=_seed_channel_for_delete_permission,
+    expect=ExpectError(
+        status=403,
+    ),
+)
+def delete_channel_non_owner_forbidden():
+    """Non-owner cannot delete another user's channel."""
