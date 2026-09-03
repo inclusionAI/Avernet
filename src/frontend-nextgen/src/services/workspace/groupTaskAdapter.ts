@@ -1,8 +1,8 @@
 import type { ExecuteTaskRequest } from '@/services/tasks/taskModel';
 import type { CreateGroupInput } from '@/services/workspace/groupCreateRequest';
 
-/** 自定义协作群(state_machine) execute 建群的默认副屏组件名。 */
-export const GROUP_PANEL_COMPONENT_NAME = 'bcsPanel.StateMachineRunView';
+/** 自定义协作群(state_machine) execute 建群挂载的任务副屏组件名(全路径)。 */
+export const GROUP_PANEL_COMPONENT_NAME = 'taskPanel.TaskLoopView';
 /**
  * 自定义协作群(state_machine) → task execute 请求适配器。
  *
@@ -20,7 +20,7 @@ export const GROUP_PANEL_COMPONENT_NAME = 'bcsPanel.StateMachineRunView';
  *     - yaml ← input.definitionYaml
  *     - participant_bot_ids = 选中成员去掉 owner 后全部（去重）
  *     - participant_bindings：Array<{binding, actor_ids}> → Record<role, botId[]>
- *     - panel_component_name = GROUP_PANEL_COMPONENT_NAME（建群默认副屏组件名，先占位）
+ *     - panel_component_name = GROUP_PANEL_COMPONENT_NAME（任务副屏 taskPanel.TaskLoopView）
  */
 export function buildExecuteRequestFromGroup(input: CreateGroupInput, ownerUserId: string): ExecuteTaskRequest | null {
   if (input.strategy !== 'state_machine') return null;

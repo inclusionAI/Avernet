@@ -6,6 +6,9 @@ import { cn } from '@/utils/cn';
 import { FileUp, FolderOpen, ImageDown, Plus, Search, Sparkles, Workflow, X } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 
+/** 工作流任务功能暂未开放：前端屏蔽点击（始终展示该项、不可点）；开放时 flip 为 true 恢复能力。 */
+const WORKFLOW_TASK_ENABLED = false;
+
 export interface ComposerCapabilitiesMenuProps {
   execution: UseTaskExecutionResult;
   onUpload?: () => void;
@@ -43,12 +46,12 @@ const MenuRow = React.forwardRef<
     disabled={disabled}
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
-    leftIcon={<span className="text-[var(--color-primary)]">{icon}</span>}
+    leftIcon={<span className="text-primary">{icon}</span>}
     className="h-auto w-full justify-start px-3 py-2 text-left"
   >
     <span className="flex flex-col">
-      <span className="font-medium text-[var(--color-fg)]">{label}</span>
-      <span className="text-xs text-[var(--color-muted)]">{desc}</span>
+      <span className="font-medium text-foreground">{label}</span>
+      <span className="text-xs text-muted-foreground">{desc}</span>
     </span>
   </Button>
 ));
@@ -71,12 +74,12 @@ function WorkflowListView({
   return (
     <div className="flex flex-col gap-1">
       <div className="relative px-1 pb-1">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--color-muted)]" />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索工作流" className="h-7 pl-8 text-xs" />
       </div>
-      {loading && <p className="px-3 py-2 text-xs text-[var(--color-muted)]">加载中…</p>}
+      {loading && <p className="px-3 py-2 text-xs text-muted-foreground">加载中…</p>}
       {!loading && filtered.length === 0 && (
-        <p className="px-3 py-2 text-xs text-[var(--color-muted)]">
+        <p className="px-3 py-2 text-xs text-muted-foreground">
           {keyword ? '无匹配工作流' : '未加载到工作流，请确认 Bot 可用工作流'}
         </p>
       )}
@@ -87,7 +90,7 @@ function WorkflowListView({
           onClick={() => onPick(w)}
           className="h-auto justify-start px-3 py-2 text-left"
         >
-          <span className="font-medium text-[var(--color-fg)] text-xs">{w.title}</span>
+          <span className="font-medium text-foreground text-xs">{w.title}</span>
         </Button>
       ))}
     </div>
@@ -112,6 +115,7 @@ function MenuBody({
   onManageFiles,
   onDynamic,
   onPickWorkflow,
+  workflowEnabled,
   disabled,
   workflows,
   workflowsLoading,
@@ -123,6 +127,8 @@ function MenuBody({
   onManageFiles?: () => void;
   onDynamic?: () => void;
   onPickWorkflow?: (w: { workflowId: string; title: string }) => void;
+  /** 工作流任务是否可点(功能开关 × enableWorkflow)。false 时只展示、屏蔽点击，不展开二级列表。 */
+  workflowEnabled: boolean;
   disabled?: boolean;
   workflows: { workflowId: string; title: string }[];
   workflowsLoading: boolean;
@@ -130,9 +136,16 @@ function MenuBody({
 }) {
   const [wfOpen, setWfOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 功能未开放或整体不可用时屏蔽：行禁用且 hover 不展开二级工作流列表。
+  const workflowDisabled = disabled || !workflowEnabled;
+  const workflowDesc = !workflowEnabled
+    ? '功能暂未开放'
+    : workflowsLoading
+    ? '加载工作流列表…'
+    : '指定 workflow 编排执行';
   const enter = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
-    if (!disabled) {
+    if (!workflowDisabled) {
       setWfOpen(true);
       onWorkflowHover?.();
     }
@@ -179,37 +192,35 @@ function MenuBody({
         onClick={onDynamic}
         disabled={disabled}
       />
-      {onPickWorkflow && (
-        <Popover open={wfOpen} onOpenChange={setWfOpen}>
-          <PopoverTrigger asChild>
-            <MenuRow
-              icon={<Workflow className="h-4 w-4" />}
-              label="工作流任务"
-              desc={workflowsLoading ? '加载工作流列表…' : '指定 workflow 编排执行'}
-              disabled={disabled}
-              onMouseEnter={enter}
-              onMouseLeave={leave}
-            />
-          </PopoverTrigger>
-          <PopoverContent
-            side="right"
-            align="end"
-            sideOffset={4}
-            className="w-[220px] p-2"
+      <Popover open={workflowDisabled ? false : wfOpen} onOpenChange={setWfOpen}>
+        <PopoverTrigger asChild>
+          <MenuRow
+            icon={<Workflow className="h-4 w-4" />}
+            label="工作流任务"
+            desc={workflowDesc}
+            disabled={workflowDisabled}
             onMouseEnter={enter}
             onMouseLeave={leave}
-          >
-            <WorkflowListView
-              workflows={workflows}
-              loading={workflowsLoading}
-              onPick={(w) => {
-                setWfOpen(false);
-                onPickWorkflow(w);
-              }}
-            />
-          </PopoverContent>
-        </Popover>
-      )}
+          />
+        </PopoverTrigger>
+        <PopoverContent
+          side="right"
+          align="end"
+          sideOffset={4}
+          className="w-[220px] p-2"
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+        >
+          <WorkflowListView
+            workflows={workflows}
+            loading={workflowsLoading}
+            onPick={(w) => {
+              setWfOpen(false);
+              onPickWorkflow?.(w);
+            }}
+          />
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -266,15 +277,14 @@ export function ComposerCapabilitiesMenu({
               onDynamicSelected?.();
               close();
             }}
-            onPickWorkflow={enableWorkflow ? pickWorkflow : undefined}
+            onPickWorkflow={enableWorkflow && WORKFLOW_TASK_ENABLED ? pickWorkflow : undefined}
+            workflowEnabled={enableWorkflow && WORKFLOW_TASK_ENABLED}
             disabled={disabled}
             workflows={execution.workflows}
             workflowsLoading={execution.workflowsLoading}
             onWorkflowHover={() => void execution.loadWorkflows()}
           />
-          {disabled && disabledReason && (
-            <p className="mt-1 px-2 text-xs text-[var(--color-error)]">{disabledReason}</p>
-          )}
+          {disabled && disabledReason && <p className="mt-1 px-2 text-xs text-destructive">{disabledReason}</p>}
         </PopoverContent>
       </Popover>
 

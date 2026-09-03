@@ -9,7 +9,7 @@ import type { BackendApiEnvelope, BackendUnknownRecord } from '@/services/backen
 
 // === BCS 前端资源清单（manifest） ===
 
-/** BCS 前端资源包：副屏 CDN 库映射条目（方案 B 后 manifest 不再吐 bcsPanel，见 tasks.md）。 */
+/** BCS 前端资源包：副屏 CDN 库映射条目（manifest 返回的 CDN 库，含 bcsPanel 等）。 */
 export interface BcsManifestBundle {
   /** 库名（如 'asfui'），对应 <AixUI component="asfui.X"> 的 libraryName 段。 */
   name: string;
@@ -21,7 +21,7 @@ export interface BcsManifestBundle {
 export interface BcsManifest {
   schema_version: number;
   env: string;
-  /** CDN 库映射条目；方案 B 去重后不含 bcsPanel（bcsPanel.StateMachineRunView 走方式③本地注册）。 */
+  /** CDN 库映射条目；manifest 返回的 CDN 库（含 bcsPanel，由 UmdPanel 加载远程 UMD 渲染）。 */
   bundles: BcsManifestBundle[];
 }
 

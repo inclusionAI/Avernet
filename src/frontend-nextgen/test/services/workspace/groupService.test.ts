@@ -150,6 +150,76 @@ it('getVisibleGroups kind filter + search + sort', () => {
   ).toEqual(['g2', 'g3', 'g1']);
 });
 
+describe('loadGroupSessions pagination', () => {
+  it('dedupes concurrent session list requests with the same arguments', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], offset: 0, limit: 10, total: 0 },
+    });
+
+    const [first, second] = await Promise.all([
+      groupService.loadGroupSessionsOrBcs('g1', 'bot-1'),
+      groupService.loadGroupSessionsOrBcs('g1', 'bot-1'),
+    ]);
+
+    expect(sc.listGroupSessions).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(second);
+  });
+
+  it('defaults to the first 10 sessions and preserves page metadata', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          {
+            session_id: 's1',
+            group_id: 'g1',
+            title: '会话一',
+            status: 'running',
+            created_at: 1,
+            updated_at: 2,
+          },
+        ],
+        total: 12,
+        offset: 0,
+        limit: 10,
+      },
+    });
+
+    const res = await groupService.loadGroupSessions('g1', 'bot-1');
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 0, limit: 10, view_bot_id: 'bot-1' });
+    expect(res).toEqual({
+      ok: true,
+      data: {
+        items: [expect.objectContaining({ sessionId: 's1', groupId: 'g1', title: '会话一' })],
+        offset: 0,
+        limit: 10,
+        total: 12,
+        hasMore: true,
+      },
+    });
+  });
+
+  it('passes an explicit offset and limit for loading the next page', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], total: 12, offset: 10, limit: 10 },
+    });
+
+    const res = await groupService.loadGroupSessions('g1', undefined, { offset: 10, limit: 10 });
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 10, limit: 10 });
+    expect(res.ok && res.data).toMatchObject({ offset: 10, limit: 10, total: 12, hasMore: true });
+  });
+});
+
 describe('loadGroupDetail', () => {
   it('passes view_bot_id to listGroupSessions when provided', async () => {
     gc.getGroup.mockResolvedValue({
@@ -261,14 +331,18 @@ describe('createGroup', () => {
     },
   };
 
-  it('chat strategy maps to GroupCreateChatBody with delivery_policy', async () => {
-    gc.createGroup.mockResolvedValue(baseDetail);
+  it('chat strategy maps originator and preserves initial_session_id', async () => {
+    gc.createGroup.mockResolvedValue({
+      ...baseDetail,
+      data: { ...baseDetail.data, initial_session_id: 'initial-session' },
+    });
     gc.getGroup.mockResolvedValue(baseDetail);
     sc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
     const res = await groupService.createGroup({
       name: '我的群',
       strategy: 'chat',
       deliveryPolicy: 'send_to_driver',
+      originator: 'actor-bot',
       driverBotUuid: 'b1',
       participants: [{ actor_id: 'b1' }],
     });
@@ -276,12 +350,14 @@ describe('createGroup', () => {
       expect.objectContaining({
         group_kind: 'normal',
         name: '我的群',
+        originator: 'actor-bot',
         driver_bot_uuid: 'b1',
         participants: [{ actor_id: 'b1', role: 'driver' }],
         collaboration: { strategy: 'chat', delivery_policy: { bot_final_delivery: 'send_to_driver' } },
       }),
     );
     expect(res.ok).toBe(true);
+    expect(res.ok && res.data.initialSessionId).toBe('initial-session');
   });
 
   it('state_machine strategy assembles definition.content_yaml + participant_bindings', async () => {
@@ -307,6 +383,7 @@ describe('createGroup', () => {
       strategy: 'state_machine',
       definitionYaml: yaml,
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(gc.createGroup).toHaveBeenCalledWith(
@@ -329,6 +406,7 @@ describe('createGroup', () => {
       name: '任务群',
       strategy: 'manager_worker',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }, { actor_id: 'b2' }],
     });
 
@@ -342,6 +420,46 @@ describe('createGroup', () => {
     );
   });
 
+  it.each([
+    ['chat', 'run-driver'],
+    ['manager_worker', 'run-manager'],
+  ] as const)('preserves the %s initial responder run fields from the create response', async (strategy, runId) => {
+    gc.createGroup.mockResolvedValue({
+      ...baseDetail,
+      data: {
+        ...baseDetail.data,
+        initial_session_id: 'session-initial',
+        initial_run: {
+          run_id: runId,
+          bot_uuid: 'b1',
+          activity_kind: 'group_bootstrap',
+          state: 'running',
+          started_at: '2026-08-31T00:00:00Z',
+        },
+      },
+    });
+    gc.getGroup.mockResolvedValue(baseDetail);
+    sc.listGroupSessions.mockResolvedValue({ code: 20000, data: { items: [], total: 0, offset: 0, limit: 50 } });
+
+    const res = await groupService.createGroup({
+      name: '协作群',
+      strategy,
+      driverBotUuid: 'b1',
+      originator: 'actor-1',
+      participants: [{ actor_id: 'b1' }],
+    });
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({
+          initialSessionId: 'session-initial',
+          initialRun: expect.objectContaining({ runId, botUuid: 'b1', state: 'running' }),
+        }),
+      }),
+    );
+  });
+
   it('400 maps to friendlyMessage inline', async () => {
     gc.createGroup.mockRejectedValue({ status: 400, message: 'YAML 校验不通过: invalid role' });
     const res = await groupService.createGroup({
@@ -349,6 +467,7 @@ describe('createGroup', () => {
       strategy: 'state_machine',
       definitionYaml: 'a:\n  b',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(res.ok).toBe(false);
@@ -361,6 +480,7 @@ describe('createGroup', () => {
       name: '我的群',
       strategy: 'chat',
       driverBotUuid: 'b1',
+      originator: 'actor-bot',
       participants: [{ actor_id: 'b1' }],
     });
     expect(res.ok).toBe(false);

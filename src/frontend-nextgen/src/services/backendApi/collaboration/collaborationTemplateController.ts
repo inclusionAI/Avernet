@@ -31,7 +31,11 @@ const BASE = '/api/v1/collaboration/templates';
 
 /** 获取自定义协作模板列表：GET /api/v1/collaboration/templates。 */
 export function listCollaborationTemplates(options?: { [key: string]: unknown }) {
-  return backendRequest<BackendApiEnvelope<CollaborationTemplatesData>>(BASE, { method: 'GET', ...(options || {}) });
+  return backendRequest<BackendApiEnvelope<CollaborationTemplatesData>>(BASE, {
+    method: 'GET',
+    ...(options || {}),
+    injectUserId: false,
+  });
 }
 
 /** 获取自定义协作模板 YAML 内容（纯文本）：GET /api/v1/collaboration/templates/{template_id}?lang={lang}。
@@ -46,6 +50,7 @@ export function getCollaborationTemplateYaml(
     method: 'GET',
     responseType: 'text',
     params: query,
+    injectUserId: false,
     ...(options || {}),
   });
 }

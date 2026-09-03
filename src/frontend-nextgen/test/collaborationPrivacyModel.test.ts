@@ -1,3 +1,4 @@
+import { mapOverviewTransport } from '../src/domain/collaborationPrivacy/mapper';
 import {
   friendApprovalConfigsEqual,
   normalizeOrganizationPaths,
@@ -5,20 +6,19 @@ import {
   publicConfigsEqual,
   validateFriendApproval,
 } from '../src/domain/collaborationPrivacy/policies';
-import { mapOverviewTransport } from '../src/domain/collaborationPrivacy/mapper';
 
 describe('collaboration privacy domain policies', () => {
   test('组织路径会去空、去重并稳定排序', () => {
     expect(
       normalizeOrganizationPaths([
-        [' 蚂蚁集团 ', '平台技术事业群'],
-        ['蚂蚁集团', '平台技术事业群'],
+        [' 示例集团 ', '平台技术团队'],
+        ['示例集团', '平台技术团队'],
         ['', ''],
-        ['蚂蚁集团', '数字科技事业群'],
+        ['示例集团', '数字技术团队'],
       ]),
     ).toEqual([
-      ['蚂蚁集团', '平台技术事业群'],
-      ['蚂蚁集团', '数字科技事业群'],
+      ['示例集团', '平台技术团队'],
+      ['示例集团', '数字技术团队'],
     ]);
   });
 
@@ -42,14 +42,18 @@ describe('collaboration privacy domain policies', () => {
   });
 
   test('好友审批配置比较会忽略路径顺序和非 partial_exempt 的冗余路径', () => {
-    expect(friendApprovalConfigsEqual(
-      { mode: 'partial_exempt', exemptOrganizationPaths: [['B'], ['A']] },
-      { mode: 'partial_exempt', exemptOrganizationPaths: [['A'], ['B'], ['A']] },
-    )).toBe(true);
-    expect(friendApprovalConfigsEqual(
-      { mode: 'all', exemptOrganizationPaths: [['不应保留']] },
-      { mode: 'all', exemptOrganizationPaths: [] },
-    )).toBe(true);
+    expect(
+      friendApprovalConfigsEqual(
+        { mode: 'partial_exempt', exemptOrganizationPaths: [['B'], ['A']] },
+        { mode: 'partial_exempt', exemptOrganizationPaths: [['A'], ['B'], ['A']] },
+      ),
+    ).toBe(true);
+    expect(
+      friendApprovalConfigsEqual(
+        { mode: 'all', exemptOrganizationPaths: [['不应保留']] },
+        { mode: 'all', exemptOrganizationPaths: [] },
+      ),
+    ).toBe(true);
   });
 
   test('Mapper 对未知枚举使用安全值并隔离 transport shape', () => {

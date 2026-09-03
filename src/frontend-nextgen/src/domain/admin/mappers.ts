@@ -145,6 +145,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
   if (status === UNKNOWN_SUFFIX) warnings.push('未知 status');
 
   // content 契约不对称：详情为结构化对象（见 synthesizeContentDisplay），列表/通知为字符串。
+  // content = 列表/铃铛用的合成文案（保留）；contentRaw = 详情抽屉用的原始 JSON（仅对象 content 填充）。
   const rawContent = dto.content;
   const contentObj =
     typeof rawContent === 'object' && rawContent !== null && !Array.isArray(rawContent)
@@ -156,6 +157,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
       : contentObj
       ? synthesizeContentDisplay(contentObj)
       : '';
+  const contentRaw = contentObj ? JSON.stringify(contentObj, null, 2) : undefined;
   // apply_reason / applicant_* 在详情里藏在 content 内，在列表里位于顶层；顶层优先、对象兜底。
   const applyReason = asString(dto.apply_reason) ?? (contentObj ? asString(contentObj.reason) : undefined);
   const applicantUserId =
@@ -186,6 +188,7 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     eventType: eventType ?? '',
     title: asString(dto.title) ?? '',
     content: contentDisplay,
+    contentRaw,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],
     typeLabel: typeMeta.label,

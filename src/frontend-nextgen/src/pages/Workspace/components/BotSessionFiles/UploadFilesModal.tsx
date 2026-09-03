@@ -17,6 +17,7 @@ export interface BotUploadFilesModalProps {
   isUploading: boolean;
   stageFiles: (files: File[]) => string[];
   submit: () => Promise<void>;
+  onAddToSession: () => void;
   removeTask: (localId: string) => void;
 }
 
@@ -27,6 +28,7 @@ export function BotUploadFilesModal({
   isUploading,
   stageFiles,
   submit,
+  onAddToSession,
   removeTask,
 }: BotUploadFilesModalProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -36,10 +38,13 @@ export function BotUploadFilesModal({
     (files: FileList | File[] | null) => {
       if (!files) return;
       const arr = Array.from(files);
-      if (arr.length) stageFiles(arr);
+      if (arr.length) {
+        stageFiles(arr);
+        void submit();
+      }
       if (inputRef.current) inputRef.current.value = '';
     },
-    [stageFiles],
+    [stageFiles, submit],
   );
 
   const handleClose = useCallback(() => {
@@ -49,7 +54,7 @@ export function BotUploadFilesModal({
     onClose();
   }, [queue, removeTask, onClose]);
 
-  const stagedCount = queue.filter((t) => t.phase === 'staged').length;
+  const readyCount = queue.filter((t) => t.phase === 'ready' && t.resourceId).length;
 
   return (
     <Modal open={open} onOpenChange={(o) => !o && void handleClose()}>
@@ -72,26 +77,21 @@ export function BotUploadFilesModal({
           onDragLeave={() => setIsDragOver(false)}
           className={cn(
             'flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors',
-            isDragOver
-              ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)]'
-              : 'border-[var(--color-border)] bg-[var(--color-panel-muted)] hover:bg-[var(--color-panel-strong)]',
+            isDragOver ? 'border-primary bg-primary/10' : 'border-border bg-muted/50 hover:bg-muted',
           )}
         >
-          <FileText className="mb-2 h-8 w-8 text-[var(--color-primary)]" />
-          <p className="text-sm font-medium text-[var(--color-fg)]">点击或拖拽上传文件</p>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">支持表格、文档、压缩包、HTML 与图片类文件</p>
-          <p className="mt-0.5 text-[11px] text-[var(--color-muted)]">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
+          <FileText className="mb-2 h-8 w-8 text-primary" />
+          <p className="text-sm font-medium text-foreground">点击或拖拽选择文件</p>
+          <p className="mt-1 text-xs text-muted-foreground">选中文件后将自动上传，完成后可添加至会话</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">单次最多上传 {SESSION_FILE_MAX_BATCH} 个</p>
           <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => pickFiles(e.target.files)} />
         </div>
 
         <div className="mt-4">
-          <p className="mb-1.5 text-[11px] text-[var(--color-muted)]">支持文件类型</p>
+          <p className="mb-1.5 text-[11px] text-muted-foreground">支持文件类型</p>
           <div className="flex flex-wrap gap-1.5">
             {SESSION_FILE_ALLOWED_EXT.map((ext) => (
-              <span
-                key={ext}
-                className="rounded bg-[var(--color-panel-strong)] px-1.5 py-0.5 text-[10px] text-[var(--color-muted)]"
-              >
+              <span key={ext} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                 {ext.replace(/^\./, '')}
               </span>
             ))}
@@ -103,45 +103,43 @@ export function BotUploadFilesModal({
             {queue.map((task) => (
               <div
                 key={task.localId}
-                className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-white p-2"
+                className="flex items-center gap-2 rounded-lg border border-border bg-background p-2"
               >
-                <div className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-[var(--color-panel-strong)]">
-                  <FileText className="h-4 w-4 text-[var(--color-muted)]" />
+                <div className="flex h-8 w-8 flex-none items-center justify-center rounded-lg bg-muted">
+                  <FileText className="h-4 w-4 text-muted-foreground" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="truncate text-sm text-[var(--color-fg)]">{task.name}</span>
+                          <span className="truncate text-sm text-foreground">{task.name}</span>
                         </TooltipTrigger>
                         <TooltipContent>{task.name}</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
-                    <span className="flex-none text-[11px] text-[var(--color-muted)]">{formatFileSize(task.size)}</span>
+                    <span className="flex-none text-[11px] text-muted-foreground">{formatFileSize(task.size)}</span>
                   </div>
-                  {task.phase === 'staged' && <span className="text-[11px] text-[var(--color-muted)]">待上传</span>}
+                  {task.phase === 'staged' && <span className="text-[11px] text-muted-foreground">待上传</span>}
                   {task.phase === 'completing' && (
-                    <span className="flex items-center gap-1 text-[11px] text-[var(--color-primary)]">
+                    <span className="flex items-center gap-1 text-[11px] text-primary">
                       <LoaderCircle className="h-3 w-3 animate-spin" />
                       组装中
                     </span>
                   )}
                   {task.phase === 'uploading' && (
                     <div className="mt-1 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-panel-strong)]">
-                        <div className="h-full bg-[var(--color-primary)]" style={{ width: `${task.progress}%` }} />
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full bg-primary" style={{ width: `${task.progress}%` }} />
                       </div>
-                      <span className="w-9 text-right text-[11px] tabular-nums text-[var(--color-muted)]">
+                      <span className="w-9 text-right text-[11px] tabular-nums text-muted-foreground">
                         {task.progress}%
                       </span>
                     </div>
                   )}
-                  {task.phase === 'ready' && <span className="text-[11px] text-[var(--color-success)]">已完成</span>}
+                  {task.phase === 'ready' && <span className="text-[11px] text-success">已完成</span>}
                   {task.phase === 'failed' && (
-                    <span className="text-[11px] text-[var(--color-error)]">
-                      上传失败{task.error ? `：${task.error}` : ''}
-                    </span>
+                    <span className="text-[11px] text-destructive">上传失败{task.error ? `：${task.error}` : ''}</span>
                   )}
                 </div>
                 {(task.phase === 'staged' || task.phase === 'uploading' || task.phase === 'failed') && (
@@ -158,8 +156,8 @@ export function BotUploadFilesModal({
           <Button variant="secondary" onClick={() => void handleClose()}>
             关闭
           </Button>
-          <Button disabled={stagedCount === 0 || isUploading} onClick={() => void submit()}>
-            {isUploading ? '上传中…' : '上传'}
+          <Button disabled={readyCount === 0 || isUploading} onClick={onAddToSession}>
+            {isUploading ? '上传中…' : '添加至会话'}
           </Button>
         </ModalFooter>
       </ModalContent>

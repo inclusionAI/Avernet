@@ -8,6 +8,3 @@
  * 副屏（src/assets/TaskPanel）不读本文件；apiBaseUrl 由 useTaskExecution 透传给 openTab.params。
  */
 export const TASK_API_BASE = '';
-
-/** 我的任务列表默认拉取条数；后端分页契约稳定后可替换为分页加载。 */
-export const TASK_LIST_PAGE_SIZE = 100;

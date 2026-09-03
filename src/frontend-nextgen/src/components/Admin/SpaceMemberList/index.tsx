@@ -131,12 +131,12 @@ export function SpaceMemberList({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           {isPersonal ? (
-            <User size={20} className="text-brand" aria-hidden />
+            <User size={20} className="text-muted-foreground" aria-hidden />
           ) : (
-            <Users size={20} className="text-[var(--color-primary)]" aria-hidden />
+            <Users size={20} className="text-primary" aria-hidden />
           )}
-          <span className="text-base font-bold text-foreground">{space.spaceName}</span>
-          {isPersonal && <Tag tone="purple">个人</Tag>}
+          <span className="text-lg font-semibold text-foreground">{space.spaceName}</span>
+          {isPersonal && <Tag>个人</Tag>}
         </div>
         {topRight}
       </div>
@@ -210,7 +210,7 @@ export function SpaceMemberList({
                 />
                 {selectedUser && (
                   <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-xs font-medium text-white">
+                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
                       {(selectedUser.nickName || selectedUser.realName || selectedUser.userId || '?')
                         .charAt(0)
                         .toUpperCase()}

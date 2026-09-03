@@ -14,15 +14,12 @@ export function NotificationItem({ item, onClick }: NotificationItemProps) {
   return (
     <Button
       variant="ghost"
-      className={cn(
-        'h-auto w-full justify-start rounded-lg px-4 py-2.5 text-left',
-        unread && 'bg-[var(--color-primary)]/5',
-      )}
+      className={cn('h-auto w-full justify-start rounded-lg px-4 py-2.5 text-left', unread && 'bg-primary/5')}
       onClick={() => onClick?.(item)}
     >
       <div className="flex w-full items-start gap-2">
         <span className="mt-1 h-1.5 w-1.5 shrink-0">
-          {unread && <span className="block h-full w-full rounded-full bg-[var(--color-primary)]" aria-label="未读" />}
+          {unread && <span className="block h-full w-full rounded-full bg-primary" aria-label="未读" />}
         </span>
         <div className="min-w-0 flex-1">
           <p className="m-0 truncate text-sm font-medium text-foreground">{item.title}</p>

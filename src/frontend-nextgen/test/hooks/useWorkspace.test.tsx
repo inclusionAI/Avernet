@@ -137,7 +137,14 @@ beforeEach(() => {
     useWorkspaceStore.getState().setIdentities(
       [
         { id: 'me', kind: 'user', displayName: '我', online: true },
-        { id: 'b1', kind: 'bot', displayName: '真实Bot', avatarUrl: 'https://x/a.png', online: true },
+        {
+          id: 'b1',
+          kind: 'bot',
+          displayName: '真实Bot',
+          avatarUrl: 'https://x/a.png',
+          online: true,
+          engine: 'OpenClaw',
+        },
         { id: 'b:2088', kind: 'bot', displayName: '复合Bot', online: true },
       ],
       'me',
@@ -170,7 +177,7 @@ it('mount 调用 initWorkspace 加载真实 bot 列表（mine 接口），返回
     expect(identities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'me', name: '我', kind: 'user' }),
-        expect.objectContaining({ id: 'b1', name: '真实Bot', kind: 'bot' }),
+        expect.objectContaining({ id: 'b1', name: '真实Bot', kind: 'bot', engine: 'OpenClaw' }),
       ]),
     );
   });
@@ -189,6 +196,7 @@ it('avatar 优先使用 avatarUrl（真实头像 URL），无 URL 时回退到 d
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byId = new Map<string, any>(result.current.identities.map((i: { id: string }) => [i.id, i]));
     expect(byId.get('b1')?.avatar).toBe('https://x/a.png');
+    expect(byId.get('b1')?.engine).toBe('OpenClaw');
     expect(byId.get('me')?.avatar).toBe('我');
   });
 });

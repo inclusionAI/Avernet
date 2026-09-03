@@ -69,7 +69,7 @@ export function ResourceManageModal({ sessionId, messages, onClose }: ResourceMa
     <Modal open={sessionId !== null} onOpenChange={(o) => !o && onClose()}>
       <ModalContent size="lg" closeLabel="关闭资源管理弹窗">
         <ModalHeader>
-          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-[var(--color-fg)]">
+          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-foreground">
             资源管理
             <Badge tone="neutral">只读</Badge>
           </ModalTitle>
@@ -97,21 +97,21 @@ export function ResourceManageModal({ sessionId, messages, onClose }: ResourceMa
               {filtered.map((item, idx) => (
                 <li
                   key={`${item.name}-${idx}`}
-                  className="flex items-center justify-between border-b border-[var(--color-border)] py-2 last:border-b-0"
+                  className="flex items-center justify-between border-b border-border py-1.5 last:border-b-0"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    <FileText aria-hidden className="h-4 w-4 shrink-0 text-[var(--color-muted)]" />
+                    <FileText aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
                     {item.url ? (
                       <a
                         href={item.url}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="truncate text-sm text-[var(--color-primary)] hover:underline"
+                        className="truncate text-sm text-primary hover:underline"
                       >
                         {item.name}
                       </a>
                     ) : (
-                      <span className="truncate text-sm text-[var(--color-fg)]">{item.name}</span>
+                      <span className="truncate text-sm text-foreground">{item.name}</span>
                     )}
                   </div>
                   <Badge tone="neutral">{item.source}</Badge>

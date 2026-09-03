@@ -1,29 +1,28 @@
-import { Button, Empty, Input, Segmented, Skeleton } from '@/components/ui';
+import { Button, Empty, Input, Skeleton } from '@/components/ui';
+import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
-import type { GroupKind, GroupView, SessionView } from '@/domain/collaboration/types';
-import { cn } from '@/utils/cn';
-import { ChevronDown, ChevronUp, Search } from 'lucide-react';
-import { useState } from 'react';
+import type { GroupView, SessionView } from '@/domain/collaboration/types';
+import type { DomainResult } from '@/services/workspace/identityService';
+import type { Identity } from '@/services/workspace/workspaceModel';
+import { Search } from 'lucide-react';
 import { WorkspaceActionButton } from '../WorkspaceActionButton';
+import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
 import { GroupItem } from './GroupItem';
+import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
 
-export type KindFilter = 'all' | GroupKind;
 export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
-export type Membership = 'direct' | 'session_only';
-
-const KIND_LABELS: Record<KindFilter, string> = {
-  all: '全部',
-  free_chat: '自由聊天',
-  task_master_slave: '任务协作',
-  task_dag: '自定义协同',
-};
 
 export interface GroupSidebarProps {
   view: 'chat' | 'group';
   onViewChange: (v: 'chat' | 'group') => void;
   /** 当前身份可见视图；Bot 仅协作群时不再渲染「会话」切换项。 */
   availableViews?: WorkspaceView[];
+  identities?: Identity[];
+  activeIdentityId?: string | null;
+  onChangeIdentity?: (id: string) => void;
+  onOpenPermissions?: () => void;
+  userAvatarUrl?: string;
   groups: GroupView[];
   isLoading: boolean;
   onSelectGroup: (groupId: string) => void;
@@ -38,11 +37,16 @@ export interface GroupSidebarProps {
   expandedGroupIds: Record<string, true>;
   onToggleGroupExpanded: (groupId: string) => void;
   sessionsByGroupId: Record<string, SessionView[]>;
+  hasMoreSessionsByGroupId?: Record<string, boolean>;
+  totalSessionsByGroupId?: Record<string, number>;
+  isLoadingMoreSessionsByGroupId?: Record<string, boolean>;
+  onLoadMoreSessions?: (groupId: string) => Promise<void>;
   sessionTabsByGroup: Record<string, SessionTab>;
   onSessionTabForGroup: (groupId: string, tab: SessionTab) => void;
   favoriteSessionIds: string[];
   sessionSearchText: string;
   onSessionSearchTextChange: (v: string) => void;
+  selectedGroupId: string | null;
   selectedSessionId: string | null;
   onSelectSession: (groupId: string, sessionId: string) => void;
   onCreateSession: (groupId: string) => void;
@@ -55,28 +59,22 @@ export interface GroupSidebarProps {
   /** 会话管理：打开管理面板。 */
   onManageSession: (groupId: string, sessionId: string) => void;
   /** 分享群。 */
-  onShareGroup: (groupId: string) => void;
+  onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
   /** 解散群（已在组件内二次确认，此处直接执行）。 */
   onDissolveGroup: (groupId: string) => void;
 }
 
-const KIND_OPTIONS: KindFilter[] = ['all', 'free_chat', 'task_master_slave', 'task_dag'];
-
-const kindChipClass = (active: boolean) =>
-  cn(
-    'h-auto flex-1 whitespace-nowrap rounded-full border-0 px-1 py-1 text-xs hover:bg-transparent',
-    active
-      ? 'bg-[var(--color-primary-soft)] font-medium text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)] hover:text-[var(--color-primary)]'
-      : 'bg-transparent font-normal text-[var(--color-muted)]',
-  );
-
 /** 二级协作群列表内容本体（不含 <aside> 外壳）。由内流 GroupSidebar 与 <lg 抽屉复用，保证两处一致。 */
 export function GroupSidebarList(props: GroupSidebarProps) {
-  const [kindFilterOpen, setKindFilterOpen] = useState(false);
   const {
     view,
     onViewChange,
     availableViews: availableViewsProp,
+    identities = [],
+    activeIdentityId = null,
+    onChangeIdentity = () => {},
+    onOpenPermissions = () => {},
+    userAvatarUrl,
     groups,
     isLoading,
     onSelectGroup,
@@ -89,11 +87,16 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     expandedGroupIds,
     onToggleGroupExpanded,
     sessionsByGroupId,
+    hasMoreSessionsByGroupId = {},
+    totalSessionsByGroupId = {},
+    isLoadingMoreSessionsByGroupId = {},
+    onLoadMoreSessions = async () => {},
     sessionTabsByGroup,
     onSessionTabForGroup,
     favoriteSessionIds,
     sessionSearchText,
     onSessionSearchTextChange,
+    selectedGroupId,
     selectedSessionId,
     onSelectSession,
     onCreateSession,
@@ -103,171 +106,130 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onAddFriend,
     onManageGroup,
     onManageSession,
+    onShareGroup,
+    onDissolveGroup,
   } = props;
   const availableViews = availableViewsProp ?? ['chat', 'group'];
-  const tabOptions = availableViews.map((v) => ({ value: v, label: v === 'chat' ? '会话' : '协作群' }));
 
   return (
-    <>
-      <div className="mb-2 flex items-center gap-2">
-        <Segmented<'chat' | 'group'>
-          className="min-w-0 flex-1"
-          value={view}
-          options={tabOptions}
-          onChange={onViewChange}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-[18px] pb-3 pt-4">
+        <WorkspaceIdentitySelector
+          identities={identities}
+          activeId={activeIdentityId}
+          onChange={onChangeIdentity}
+          onOpenPermissions={onOpenPermissions}
+          userAvatarUrl={userAvatarUrl}
+          layout="sidebar"
         />
-        <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
       </div>
-      {/* 角色：群成员 / 会话成员 二元开关，映射 listGroups membership 参数 */}
-      <div className="mb-2 flex items-center gap-2 pl-1">
-        <span className="shrink-0 text-xs text-[var(--color-fg)]">角色</span>
-        <Segmented<Membership>
-          className="min-w-0 flex-1"
-          value={membership}
-          options={[
-            { value: 'direct', label: '群成员' },
-            { value: 'session_only', label: '会话成员' },
-          ]}
-          onChange={onMembershipChange}
-        />
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={kindFilterOpen}
-          aria-controls="group-kind-filter"
-          onClick={() => setKindFilterOpen((open) => !open)}
-          className={cn(
-            'shrink-0 gap-1 rounded-lg',
-            kindFilterOpen
-              ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]'
-              : 'border border-[var(--color-primary)] text-[var(--color-fg)] hover:bg-[var(--color-primary-soft)]',
-          )}
-        >
-          群类型
-          {kindFilterOpen ? (
-            <ChevronUp className="h-3.5 w-3.5" aria-hidden />
-          ) : (
-            <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-          )}
-        </Button>
-      </div>
-
-      {/* Kind 过滤：四选一 radio group（用 Button 渲染以满足 a11y 角色） */}
-      {kindFilterOpen && (
-        <div
-          id="group-kind-filter"
-          role="radiogroup"
-          aria-label="协作群类型过滤"
-          className="mb-2 flex items-center gap-1 pl-1"
-        >
-          <span className="mr-1 shrink-0 text-xs text-[var(--color-fg)]">群类型</span>
-          {KIND_OPTIONS.map((kind) => (
-            <Button
-              key={kind}
-              variant="ghost"
-              size="sm"
-              role="radio"
-              aria-checked={kindFilter === kind}
-              onClick={() => onKindFilterChange(kind)}
-              className={kindChipClass(kindFilter === kind)}
-            >
-              {KIND_LABELS[kind]}
-            </Button>
-          ))}
+      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted">
+        <div className="sticky top-0 z-20 mb-2 flex items-center gap-2 bg-muted px-[18px]">
+          <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
+          <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
         </div>
-      )}
-
-      {/* 搜索 */}
-      <div className="relative my-2">
-        <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--color-muted)]" />
-        <Input
-          className="pl-9"
-          value={groupSearchText}
-          onChange={(event) => onSearchTextChange(event.target.value)}
-          placeholder="搜索协作群名称"
-          aria-label="搜索协作群"
+        <GroupSidebarFilters
+          groupSearchText={groupSearchText}
+          onSearchTextChange={onSearchTextChange}
+          kindFilter={kindFilter}
+          onKindFilterChange={onKindFilterChange}
+          membership={membership}
+          onMembershipChange={onMembershipChange}
         />
-      </div>
 
-      <div className="mb-2 flex items-center justify-end gap-2">
-        {sessionSearchText && (
-          <Button variant="ghost" size="sm" onClick={onClearSessionFilter}>
-            清除
-          </Button>
+        {sessionSearchText !== '' && (
+          <div className="mb-2 space-y-1">
+            <div className="flex items-center justify-end">
+              <Button variant="ghost" size="sm" onClick={onClearSessionFilter}>
+                清除会话搜索
+              </Button>
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="pl-9"
+                value={sessionSearchText}
+                onChange={(event) => onSessionSearchTextChange(event.target.value)}
+                placeholder="搜索会话标题"
+                aria-label="搜索会话"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 列表区 */}
+        {isLoading ? (
+          <div className="overflow-hidden border-y border-border bg-background">
+            {[1, 2, 3].map((i) => (
+              <Skeleton.Block key={i} className="h-14 w-full rounded-none border-b border-border last:border-b-0" />
+            ))}
+          </div>
+        ) : groups.length === 0 ? (
+          groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
+            <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+              <p className="m-0 text-base font-medium text-foreground">没有匹配的协作群</p>
+              <p className="mt-2 text-sm text-muted-foreground">试试调整搜索词或筛选条件。</p>
+            </div>
+          ) : (
+            <Empty
+              compact
+              title="暂无协作群"
+              description="创建协作群后，可在这里与多个 Bot 和用户协同。"
+              action={
+                <Button size="sm" onClick={onCreateGroup}>
+                  发起协作
+                </Button>
+              }
+            />
+          )
+        ) : (
+          <>
+            <div className="flex items-center justify-between border-b border-border px-[18px] py-2 text-xs">
+              <span className="font-medium text-foreground">协作群</span>
+              <span className="text-muted-foreground">{groups.length} 个群</span>
+            </div>
+            <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
+              {groups.map((group) => {
+                const sessions = sessionsByGroupId[group.groupId];
+                return (
+                  <GroupItem
+                    key={group.groupId}
+                    group={group}
+                    expanded={!!expandedGroupIds[group.groupId]}
+                    sessions={sessions}
+                    sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
+                    onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
+                    favoriteSessionIds={favoriteSessionIds}
+                    selectedGroupId={selectedGroupId}
+                    selectedSessionId={selectedSessionId}
+                    onSelectGroup={onSelectGroup}
+                    onToggleGroupExpanded={onToggleGroupExpanded}
+                    onSelectSession={onSelectSession}
+                    onToggleFavorite={onToggleFavorite}
+                    onCreateSession={onCreateSession}
+                    onManageGroup={onManageGroup}
+                    onManageSession={onManageSession}
+                    onShareGroup={onShareGroup}
+                    onDissolveGroup={onDissolveGroup}
+                    totalSessionCount={totalSessionsByGroupId[group.groupId]}
+                    hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
+                    isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
+                    onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
-      {sessionSearchText !== '' && (
-        <div className="relative mb-2">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-[var(--color-muted)]" />
-          <Input
-            className="pl-9"
-            value={sessionSearchText}
-            onChange={(event) => onSessionSearchTextChange(event.target.value)}
-            placeholder="搜索会话标题"
-            aria-label="搜索会话"
-          />
-        </div>
-      )}
-
-      {/* 列表区 */}
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <Skeleton.Block key={i} className="h-16 w-full rounded-xl" />
-          ))}
-        </div>
-      ) : groups.length === 0 ? (
-        groupSearchText !== '' || kindFilter !== 'all' ? (
-          <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-            <p className="m-0 text-base font-medium text-[var(--color-fg)]">没有匹配的协作群</p>
-            <p className="mt-2 text-sm text-[var(--color-muted)]">试试调整搜索词或筛选条件。</p>
-          </div>
-        ) : (
-          <Empty
-            compact
-            title="暂无协作群"
-            description="创建协作群后，可在这里与多个 Bot 和用户协同。"
-            action={
-              <Button size="sm" onClick={onCreateGroup}>
-                发起协作
-              </Button>
-            }
-          />
-        )
-      ) : (
-        <div className="space-y-2">
-          {groups.map((group) => {
-            const sessions = sessionsByGroupId[group.groupId];
-            return (
-              <GroupItem
-                key={group.groupId}
-                group={group}
-                expanded={!!expandedGroupIds[group.groupId]}
-                sessions={sessions}
-                sessionTab={sessionTabsByGroup[group.groupId] ?? 'all'}
-                onSessionTabChange={(t) => onSessionTabForGroup(group.groupId, t)}
-                favoriteSessionIds={favoriteSessionIds}
-                selectedSessionId={selectedSessionId}
-                onSelectGroup={onSelectGroup}
-                onToggleGroupExpanded={onToggleGroupExpanded}
-                onSelectSession={onSelectSession}
-                onToggleFavorite={onToggleFavorite}
-                onCreateSession={onCreateSession}
-                onManageGroup={onManageGroup}
-                onManageSession={onManageSession}
-              />
-            );
-          })}
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <aside className="app-scrollbar hidden w-[340px] shrink-0 flex-col overflow-y-auto border-r border-[var(--color-border)] bg-[var(--color-panel-muted)] p-2 lg:flex">
+    <aside className="hidden w-[360px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/20 lg:flex">
       <GroupSidebarList {...props} />
     </aside>
   );

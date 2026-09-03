@@ -6,9 +6,13 @@ export type IdentityView = {
   displayName: string;
   avatarUrl?: string;
   online: boolean;
-  /** bot 可聊天状态：online→可聊天，hidden→不可聊天。human 项无此字段。 */
+  /** Bot 实例运行状态：online→在线，hidden→不在线。human 项无此字段。 */
   status?: IdentityStatus;
-  /** bot 可达性：reachable→绿点，unreachable→红点。human 项无此字段。 */
+  /** Bot 所使用的引擎类型；后端未返回时保持缺省。 */
+  engine?: string;
+  /** Bot 类型原始枚举值：personal / service / desktop。 */
+  botType?: string;
+  /** Bot 群聊链路可达性；与运行状态分开表达。human 项无此字段。 */
   reachability?: IdentityReachability;
 };
 export type GroupKind = 'free_chat' | 'task_master_slave' | 'task_dag';
@@ -36,6 +40,13 @@ export interface SidePanelConfig {
   componentName?: string;
   cdnUrl?: string;
 }
+export interface GroupInitialRun {
+  runId: string;
+  botUuid: string;
+  activityKind: 'group_bootstrap';
+  state: 'running' | 'failed';
+  startedAt: string;
+}
 export interface GroupView {
   groupId: string;
   name: string;
@@ -47,12 +58,16 @@ export interface GroupView {
   createdAt: number;
   participantCount: number;
   ownerUserId?: string;
+  /** 创建群时后端同步生成的初始会话 ID；仅在创建响应链路保留。 */
+  initialSessionId?: string;
   joinedRole?: ParticipantRole;
   membership?: 'direct' | 'session_only';
   isPublic: boolean;
   publicJoinRole?: ParticipantRole;
   deliveryPolicy: DeliveryPolicy;
   sidePanelConfig?: SidePanelConfig;
+  /** 仅创建响应返回，用于立即展示 Driver/Manager 启动状态。 */
+  initialRun?: GroupInitialRun;
 }
 export interface SessionView {
   sessionId: string;
@@ -67,6 +82,17 @@ export interface SessionView {
   createdAt: number;
   favorite: boolean;
   contextQuery?: string;
+  /** 会话创建者 actor_id（bot_id 或 user_id），用于权限判定（creator 可删除会话）。 */
+  createdBy?: string;
+  /** 发起调用的主体标识（区分身份维度）。 */
+  callerPrincipal?: string;
+}
+export interface GroupSessionPage {
+  items: SessionView[];
+  offset: number;
+  limit: number;
+  total: number;
+  hasMore: boolean;
 }
 export interface InvitationView {
   token: string;

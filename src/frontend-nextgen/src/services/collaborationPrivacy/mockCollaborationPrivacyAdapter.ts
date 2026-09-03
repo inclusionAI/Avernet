@@ -20,7 +20,7 @@ export class MockCollaborationPrivacyAdapter implements CollaborationPrivacyGate
     this.overview = structuredClone(overview);
   }
 
-  async loadOverview(signal?: AbortSignal): Promise<CollaborationPrivacyOverview> {
+  async loadOverview(_userId: string, signal?: AbortSignal): Promise<CollaborationPrivacyOverview> {
     const response = await fetch(MOCK_ENDPOINT, { signal });
     if (!response.ok) throw new Error('协作权限 Mock 数据加载失败');
     this.overview = mapOverviewTransport((await response.json()) as CollaborationPrivacyOverviewTransport);
@@ -32,7 +32,15 @@ export class MockCollaborationPrivacyAdapter implements CollaborationPrivacyGate
     return this.overview;
   }
 
-  async syncDepartment() {
+  async refreshManagedBot(botId: string) {
+    await delay(200);
+    const bot = this.requireOverview().bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    return structuredClone(bot);
+  }
+
+  async syncDepartment(_userId: string) {
+    void _userId;
     await delay(350);
     return { ...structuredClone(this.requireOverview().currentUser), lastSyncedAt: new Date().toISOString() };
   }
@@ -74,5 +82,22 @@ export class MockCollaborationPrivacyAdapter implements CollaborationPrivacyGate
     if (!bot) throw new Error('未找到目标 Bot');
     bot.friendApproval = structuredClone(command.config);
     return structuredClone(command.config);
+  }
+
+  async enableTaskClaim(botId: string) {
+    await delay(300);
+    const bot = this.requireOverview().bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    bot.taskClaimingEnabled = true;
+    bot.taskClaimStatus = 'authorized';
+    return structuredClone(bot);
+  }
+  async disableTaskClaim(botId: string) {
+    await delay(300);
+    const bot = this.requireOverview().bots.find((item) => item.id === botId);
+    if (!bot) throw new Error('未找到目标 Bot');
+    bot.taskClaimingEnabled = false;
+    bot.taskClaimStatus = 'unauthorized';
+    return structuredClone(bot);
   }
 }

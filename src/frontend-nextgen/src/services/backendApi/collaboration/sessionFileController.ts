@@ -60,12 +60,16 @@ export async function listSessionFiles(
   return backendRequest<BackendApiEnvelope<ListSessionFilesData>>(filesPath(sessionId), {
     method: 'GET',
     params: params as Record<string, unknown>,
+    injectUserId: false,
   });
 }
 
 /** 查询单个文件元数据。 */
 export async function getSessionFile(sessionId: string, fileId: string) {
-  return backendRequest<BackendApiEnvelope<SessionFileDto>>(filePath(sessionId, fileId), { method: 'GET' });
+  return backendRequest<BackendApiEnvelope<SessionFileDto>>(filePath(sessionId, fileId), {
+    method: 'GET',
+    injectUserId: false,
+  });
 }
 
 /** 准备上传。 */
@@ -76,6 +80,7 @@ export async function prepareSessionFile(
   return backendRequest<BackendApiEnvelope<PrepareUploadData>>(filesPath(sessionId), {
     method: 'POST',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -84,12 +89,16 @@ export async function completeSessionFile(sessionId: string, fileId: string) {
   return backendRequest<BackendApiEnvelope<SessionFileDto>>(`${filePath(sessionId, fileId)}/complete`, {
     method: 'POST',
     data: {},
+    injectUserId: false,
   });
 }
 
 /** 删除/取消会话文件。 */
 export async function deleteSessionFile(sessionId: string, fileId: string) {
-  return backendRequest<BackendApiEnvelope<unknown>>(filePath(sessionId, fileId), { method: 'DELETE' });
+  return backendRequest<BackendApiEnvelope<unknown>>(filePath(sessionId, fileId), {
+    method: 'DELETE',
+    injectUserId: false,
+  });
 }
 
 /** 生成分享链接（仅 ready 文件）。 */
@@ -97,6 +106,7 @@ export async function shareSessionFile(sessionId: string, fileId: string, body: 
   return backendRequest<BackendApiEnvelope<ShareSessionFileData>>(`${filePath(sessionId, fileId)}/share`, {
     method: 'POST',
     data: body,
+    injectUserId: false,
   });
 }
 

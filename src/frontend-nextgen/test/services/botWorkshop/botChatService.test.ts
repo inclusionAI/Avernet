@@ -1,17 +1,11 @@
 import * as controller from '@/services/backendApi/bots/botChatController';
-import * as logController from '@/services/backendApi/bots/botLogController';
 import { botChatService } from '@/services/botWorkshop/botChatService';
 import { emptyBotChatFilters, useBotChatStore } from '@/stores/botChatStore';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/bots/botChatController');
-jest.mock('@/services/backendApi/bots/botLogController');
 const listBotChats = controller.listBotChats as jest.MockedFunction<typeof controller.listBotChats>;
 const getBotChat = controller.getBotChat as jest.MockedFunction<typeof controller.getBotChat>;
-const listGroupBotTraces = logController.listGroupBotTraces as jest.MockedFunction<
-  typeof logController.listGroupBotTraces
->;
-const getGroupBotTrace = logController.getGroupBotTrace as jest.MockedFunction<typeof logController.getGroupBotTrace>;
 
 afterEach(() => {
   jest.resetAllMocks();
@@ -55,7 +49,41 @@ describe('botChatService', () => {
     expect(useBotChatStore.getState().detail?.id).toBe('t1');
   });
 
-  it('日志详情关联查询使用精确标识但保留默认时间限制', async () => {
+  it('详情查询先按 session ID 查询全部历史，再请求匹配 Trace 详情', async () => {
+    listBotChats.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: {
+        sessions: [{ id: 't1', timestamp: '2026-08-19T00:00:00Z', bot_id: 'source-bot' }],
+        total: 1,
+        page: 1,
+        limit: 100,
+        has_more: false,
+      },
+    });
+    getBotChat.mockResolvedValue({
+      code: 200000,
+      message: 'OK',
+      data: { id: 't1', timestamp: '2026-08-19T00:00:00Z' },
+    });
+    const context = { botId: 'viewer-bot', botName: 'Bot', userId: 'u1', ownerId: 'owner' };
+    useBotChatStore.getState().openFor(context);
+
+    await botChatService.detail(context, 't1', undefined, 'viewer-bot', 'session-1');
+
+    expect(listBotChats).toHaveBeenCalledWith('viewer-bot', {
+      user_id: 'u1',
+      owner_id: 'owner',
+      session_id: 'session-1',
+      match_mode: 'exact',
+      time_scope: 'all',
+      page: 1,
+      limit: 100,
+    });
+    expect(getBotChat).toHaveBeenCalledWith('source-bot', 't1', { user_id: 'u1', owner_id: 'owner' });
+  });
+
+  it('日志详情按 session ID 关联查询全部历史', async () => {
     listBotChats.mockResolvedValue({
       code: 200000,
       message: 'OK',
@@ -69,6 +97,7 @@ describe('botChatService', () => {
         id: 't1',
         timestamp: '2026-08-19T00:00:00Z',
         name: 'Trace',
+        sessionId: 'session-id-1',
         sessionKey: 'session-1',
         status: 'SUCCESS',
         latencyMs: 0,
@@ -80,12 +109,17 @@ describe('botChatService', () => {
     );
     expect(listBotChats).toHaveBeenCalledWith(
       'b1',
-      expect.objectContaining({ session_key: 'session-1', match_mode: 'exact', limit: 100 }),
+      expect.objectContaining({
+        session_id: 'session-id-1',
+        session_key: undefined,
+        match_mode: 'exact',
+        time_scope: 'all',
+        limit: 100,
+      }),
     );
-    expect(listBotChats.mock.calls[0][1]).not.toHaveProperty('time_scope');
   });
 
-  it('按群 ID 使用老 bot-chats 接口并显式查询全部历史', async () => {
+  it('按群 ID 使用 Gateway bot-chats 接口并显式查询全部历史', async () => {
     listBotChats.mockResolvedValue({
       code: 200000,
       message: 'OK',
@@ -122,13 +156,46 @@ describe('botChatService', () => {
         limit: 100,
       }),
     );
-    expect(listGroupBotTraces).not.toHaveBeenCalled();
   });
 
-  it('群关联详情保留关联列表并使用 Group 授权上下文', async () => {
-    getGroupBotTrace.mockResolvedValue({
+  it('session 关联详情保留已加载的关联列表', async () => {
+    getBotChat.mockResolvedValue({
       code: 200000,
       message: 'OK',
+      data: { id: 'other-trace', timestamp: '2026-08-19T00:00:00Z', session_id: 'session-1' },
+    });
+    const context = { botId: 'viewer-bot', botName: 'Viewer', userId: 'u1' };
+    useBotChatStore.getState().openFor(context);
+    const related = {
+      items: [
+        {
+          id: 'other-trace',
+          timestamp: '2026-08-19T00:00:00Z',
+          name: 'Other Trace',
+          sessionId: 'session-1',
+          status: 'SUCCESS',
+          latencyMs: 0,
+          totalTokens: 0,
+          totalCost: 0,
+        },
+      ],
+      total: 2,
+      page: 1,
+      limit: 100,
+      hasMore: false,
+    };
+    useBotChatStore.getState().setRelatedState({ relationScope: 'session', related });
+
+    await botChatService.detail(context, 'other-trace', undefined, 'viewer-bot', undefined, true);
+
+    expect(useBotChatStore.getState().related).toBe(related);
+    expect(useBotChatStore.getState().relationScope).toBe('session');
+  });
+
+  it('群关联详情使用来源 Bot 的 Gateway 路由且保留关联列表', async () => {
+    getBotChat.mockResolvedValue({
+      success: true,
+      message: 'ok',
       data: { id: 'other-trace', timestamp: '2026-08-19T00:00:00Z', group_id: 'group-1' },
     });
     const context = { botId: 'viewer-bot', botName: 'Viewer', userId: 'u1' };
@@ -136,15 +203,12 @@ describe('botChatService', () => {
     const related = { items: [], total: 3, page: 1, limit: 100, hasMore: false };
     useBotChatStore.getState().setRelatedState({ relationScope: 'group', related });
 
-    await botChatService.detail(context, 'other-trace', 'group-1');
+    await botChatService.detail(context, 'other-trace', 'group-1', 'source-bot');
 
-    expect(getGroupBotTrace).toHaveBeenCalledWith('other-trace', {
-      bot_id: 'viewer-bot',
-      group_id: 'group-1',
+    expect(getBotChat).toHaveBeenCalledWith('source-bot', 'other-trace', {
       user_id: 'u1',
       owner_id: undefined,
     });
-    expect(getBotChat).not.toHaveBeenCalled();
     expect(useBotChatStore.getState().related).toBe(related);
     expect(useBotChatStore.getState().relationScope).toBe('group');
   });

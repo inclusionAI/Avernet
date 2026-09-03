@@ -44,9 +44,15 @@ export function WorkOrderDetailDrawer({
           <Skeleton.Line />
         ) : (
           <>
-            <div className="rounded-lg bg-muted/60 p-4 text-xs leading-relaxed text-foreground">
-              {detail?.content || '（暂无内容）'}
-            </div>
+            {detail?.contentRaw ? (
+              <pre className="m-0 max-h-64 overflow-auto rounded-lg bg-muted/60 p-4 text-xs font-mono whitespace-pre-wrap break-all text-foreground">
+                {detail.contentRaw}
+              </pre>
+            ) : detail?.content ? (
+              <div className="rounded-lg bg-muted/60 p-4 text-xs leading-relaxed text-foreground">{detail.content}</div>
+            ) : (
+              <div className="rounded-lg bg-muted/60 p-4 text-xs text-muted-foreground">（暂无内容）</div>
+            )}
             {detail?.itemType === 'APPROVAL' ? (
               <dl className="mt-4 grid grid-cols-[80px_1fr] gap-x-3 gap-y-2 text-xs">
                 {detail.applicantName || detail.applicantUserId ? (

@@ -7,7 +7,7 @@
 export type TaskStatus = 'DRAFTING' | 'DEFINED' | 'EXECUTING' | 'REVIEWING' | 'DONE' | 'FAILED' | 'CANCELLED';
 
 /** 节点视图态（归一化小写，对齐 PRD demo F3/B3） */
-export type NodeStatus = 'done' | 'running' | 'failed' | 'pending' | 'skipped';
+export type NodeStatus = 'done' | 'running' | 'failed' | 'hung' | 'cancelled' | 'pending';
 
 export interface TaskArtifactView {
   id: string;
@@ -41,6 +41,7 @@ export interface TaskNodeView {
   timeConsuming?: string | null;
   output?: string | null;
   outputSummary?: string | null;
+  outputRender?: string | null;
   tokens?: number | null;
   artifacts: TaskArtifactView[];
   groupId?: string | null;
@@ -57,7 +58,7 @@ export interface TaskNodeView {
   };
   stepTraces: StepTraceView[];
   acceptanceResult?: {
-    verdict: 'PASS' | 'FAIL';
+    verdict: 'PASS' | 'FAIL' | 'DONE' | null;
     acceptancesMetric: string[];
     gaps: string[];
   } | null;
@@ -98,6 +99,8 @@ export interface TaskView {
   template?: string | null;
   parentTaskId?: string | null;
   mainSessionName?: string | null;
+  /** 任务根节点(data.tasks[0].run_info)产物的渲染源：剥 HTTP 信封后按 markdown 渲染，用于「产物」Tab。 */
+  rootOutputRender?: string | null;
   progress: {
     total: number;
     pending: number;

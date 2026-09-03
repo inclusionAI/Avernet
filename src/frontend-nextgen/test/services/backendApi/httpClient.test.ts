@@ -14,6 +14,26 @@ afterEach(() => {
 });
 
 describe('backendRequest', () => {
+  it('keeps explicitly marked legacy AgentCoding APIs same-origin for proxy routing', async () => {
+    const fetchMock = jest.fn<typeof fetch>().mockResolvedValue({
+      ok: true,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ success: true, data: [] }),
+    } as unknown as Response);
+    global.fetch = fetchMock;
+
+    await backendRequest('/api/aicoding/workflows', {
+      method: 'GET',
+      target: 'legacy-agentclaw',
+      injectUserId: false,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/aicoding/workflows',
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
   it('passes AbortSignal to fetch', async () => {
     const signal = new AbortController().signal;
     const fetchMock = jest.fn<typeof fetch>().mockResolvedValue({

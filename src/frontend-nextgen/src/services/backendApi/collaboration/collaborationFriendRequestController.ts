@@ -17,7 +17,7 @@ export const COLLABORATION_FRIEND_REQUEST_ENDPOINTS = {
 export function listFriendRequests(bot_uuid: string, params?: BackendUnknownRecord) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationFriendRequestDto>>>(
     COLLABORATION_FRIEND_REQUEST_ENDPOINTS.friendRequests(bot_uuid),
-    { method: 'GET', params },
+    { method: 'GET', params, injectUserId: false },
   );
 }
 
@@ -25,7 +25,7 @@ export function listFriendRequests(bot_uuid: string, params?: BackendUnknownReco
 export function createFriendRequest(bot_uuid: string, body: CreateFriendRequestRequest) {
   return backendRequest<BackendApiEnvelope<CollaborationFriendRequestDto>>(
     COLLABORATION_FRIEND_REQUEST_ENDPOINTS.friendRequests(bot_uuid),
-    { method: 'POST', data: body },
+    { method: 'POST', data: body, injectUserId: false },
   );
 }
 
@@ -33,7 +33,7 @@ export function createFriendRequest(bot_uuid: string, body: CreateFriendRequestR
 export function acceptFriendRequest(request_id: string) {
   return backendRequest<BackendApiEnvelope<CollaborationFriendRequestDto>>(
     COLLABORATION_FRIEND_REQUEST_ENDPOINTS.accept(request_id),
-    { method: 'POST' },
+    { method: 'POST', injectUserId: false },
   );
 }
 
@@ -41,7 +41,7 @@ export function acceptFriendRequest(request_id: string) {
 export function rejectFriendRequest(request_id: string) {
   return backendRequest<BackendApiEnvelope<CollaborationFriendRequestDto>>(
     COLLABORATION_FRIEND_REQUEST_ENDPOINTS.reject(request_id),
-    { method: 'POST' },
+    { method: 'POST', injectUserId: false },
   );
 }
 
@@ -49,6 +49,6 @@ export function rejectFriendRequest(request_id: string) {
 export function deleteFriendship(bot_uuid: string, friend_bot_uuid: string) {
   return backendRequest<BackendApiEnvelope<void>>(
     COLLABORATION_FRIEND_REQUEST_ENDPOINTS.friendship(bot_uuid, friend_bot_uuid),
-    { method: 'DELETE' },
+    { method: 'DELETE', injectUserId: false },
   );
 }

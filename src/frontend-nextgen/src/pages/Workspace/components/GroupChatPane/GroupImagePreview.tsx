@@ -15,7 +15,7 @@ export function GroupImagePreview({ images, uploadStates, maxCount, onRemove }: 
   if (images.length === 0) return null;
 
   return (
-    <div className="flex gap-2 overflow-x-auto rounded-lg bg-[var(--color-panel-strong)] p-2">
+    <div className="flex gap-2 overflow-x-auto rounded-lg bg-muted p-2">
       {images.map((image) => {
         const state = uploadStates[image.id];
         const isUploading = state?.status === 'uploading';
@@ -29,17 +29,17 @@ export function GroupImagePreview({ images, uploadStates, maxCount, onRemove }: 
                 src={image.previewUrl}
                 alt={image.name}
                 className={cn(
-                  'h-11 w-11 rounded-md border border-[var(--color-border)] bg-[var(--color-panel-muted)] object-cover',
+                  'h-11 w-11 rounded-md border border-border bg-muted/50 object-cover',
                   isError && 'opacity-50',
                 )}
               />
               {isUploading && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/30 text-[10px] font-medium text-white">
+                <div className="absolute inset-0 flex items-center justify-center rounded-md bg-black/30 text-[10px] font-medium text-primary-foreground">
                   {progressPercent}%
                 </div>
               )}
               {isError && (
-                <div className="absolute inset-0 flex items-center justify-center rounded-md text-[10px] text-[var(--color-error)]">
+                <div className="absolute inset-0 flex items-center justify-center rounded-md text-[10px] text-destructive">
                   失败
                 </div>
               )}
@@ -48,19 +48,19 @@ export function GroupImagePreview({ images, uploadStates, maxCount, onRemove }: 
                 variant="ghost"
                 aria-label="移除图片"
                 onClick={() => onRemove(image.id)}
-                className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full border-2 border-white bg-[var(--color-muted)] p-0 text-white shadow-sm hover:scale-110 hover:bg-[var(--color-muted)]"
+                className="absolute -right-1.5 -top-1.5 h-5 w-5 rounded-full border-2 border-background bg-muted p-0 text-foreground shadow-sm hover:scale-110 hover:bg-muted"
               >
                 <X className="h-2.5 w-2.5" />
               </Button>
             </div>
-            <span className="max-w-[44px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-[var(--color-muted)]">
+            <span className="max-w-[44px] overflow-hidden text-ellipsis whitespace-nowrap text-[10px] font-medium text-muted-foreground">
               {image.name.length > 8 ? `${image.name.slice(0, 8)}…` : image.name}
             </span>
           </div>
         );
       })}
       {images.length >= maxCount && (
-        <div className="self-center text-xs font-medium text-amber-500">已达到最大数量限制 ({maxCount})</div>
+        <div className="self-center text-xs font-medium text-warning">已达到最大数量限制 ({maxCount})</div>
       )}
     </div>
   );

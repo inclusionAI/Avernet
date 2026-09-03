@@ -4,6 +4,7 @@ import path from 'node:path';
 import { TextDecoder, TextEncoder } from 'node:util';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { FriendApprovalEditor } from '../src/components/CollaborationPrivacy/FriendApprovalEditor';
 import { IdentityCard } from '../src/components/CollaborationPrivacy/IdentityCard';
 import {
   buildOrganizationColumns,
@@ -13,6 +14,7 @@ import { PermissionCard } from '../src/components/CollaborationPrivacy/Permissio
 import { PublicationEditor } from '../src/components/CollaborationPrivacy/PublicationEditor';
 import { RelationCard } from '../src/components/CollaborationPrivacy/RelationCard';
 import { RequestList } from '../src/components/CollaborationPrivacy/RequestList';
+import { ScopeViewer } from '../src/components/CollaborationPrivacy/ScopeViewer';
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { Switch } from '../src/components/ui/Switch';
 import type { CollaborationBot } from '../src/domain/collaborationPrivacy/types';
@@ -22,7 +24,7 @@ Object.assign(globalThis, { TextDecoder, TextEncoder });
 const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
 
 const bot: CollaborationBot = {
-  id: 'product-assistant',
+  id: '20260825_mbu0ey8f:447147',
   name: '产品协作助手',
   engine: 'OpenClaw',
   joinedBcn: true,
@@ -52,11 +54,14 @@ describe('collaboration privacy accessible UI', () => {
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
 
     expect(pageSource).not.toContain('PageMessage');
-    // 错误/成功经统一 notify 入口(右下角、错误 6s、可关),不再自行设 top-center 位置。
+    // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
     expect(hookSource).not.toContain("position: 'top-center'");
     expect(hookSource).toContain("from '@/components/ui/notify'");
     expect(hookSource).toContain('notifyError');
     expect(hookSource).toContain('notifySuccess');
+    expect(hookSource).toContain('公开范围已关闭，当前已立即生效');
+    expect(hookSource).toContain('审批申请已提交，当前公开范围保持不变');
+    expect(hookSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');
     expect(hookSource).not.toContain('（Mock）');
@@ -71,7 +76,9 @@ describe('collaboration privacy accessible UI', () => {
     expect(pageSource).not.toContain('协作治理');
     expect(pageSource).not.toContain('Mock 验证');
     expect(pageSource).not.toContain('sample-only Mock 数据');
-    expect(pageSource).toContain('管理归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。');
+    expect(pageSource).toContain(
+      '管理用户信息，以及归属于当前用户的所有 Bot 在 BCN 网络中的各类协作状态及好友审批策略。',
+    );
     expect(mockSource).not.toContain('待接入助手');
     expect(mockSource).not.toContain('joined_bcn: false');
   });
@@ -105,10 +112,12 @@ describe('collaboration privacy accessible UI', () => {
         bot={bot}
         busyAction={null}
         onCopyId={jest.fn()}
+        onRefresh={jest.fn()}
         onToggleDirect={jest.fn()}
         onEditPublication={jest.fn()}
         onEditFriendApproval={jest.fn()}
         onViewScope={jest.fn()}
+        onViewFriendApprovalScope={jest.fn()}
       />,
     );
     expect(html).not.toContain('示例数据');
@@ -116,16 +125,25 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('未加入 BCN');
     expect(html).not.toContain('群聊在线');
     expect(html).not.toContain('群聊隐身');
+    expect(html).toContain('OpenClaw');
     expect(html).not.toContain('bg-gray-');
     expect(html).not.toContain('animate-pulse');
+    expect(html).toContain('>Bot UUID<');
+    expect(html).toContain('title="20260825_mbu0ey8f:447147"');
+    expect(html).not.toContain('Bot ID：20260825_mbu0ey8f:447147');
+    expect(html).toContain('aria-label="复制 产品协作助手 的 Bot UUID"');
     expect(html).toContain('参与协作群聊');
-    expect(html).toContain('控制 Bot 是否可参与群聊会话。关闭后无法加入新协作群，并停止在已加入的协作群会话中回复消息');
-    expect(html).toContain('允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察');
-    expect(html).toContain('开启后，Bot 将每天自动扫描任务广场并认领可执行的任务');
-    expect(html).toContain('开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送');
+    expect(html).toContain('控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。');
+    expect(html).toContain('允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。');
+    expect(html).toContain('Bot 画像公开');
+    expect(html).toContain('开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。');
+    expect(html).toContain('开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。');
     expect(html).not.toContain('协作群可见');
     expect(html).not.toContain('在协作群中隐身');
-    expect(html).toContain('mt-4 space-y-3');
+    expect(html).toContain('text-xs font-semibold tracking-wide text-muted-foreground');
+    expect(html).toContain('mb-3 flex items-center');
+    expect(html).not.toContain('border-b border-border pb-2');
+    expect(html).toContain('divide-y divide-border');
 
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
     expect(hookSource).toContain('开启后可加入新协作群，并在已加入的协作群会话中回复消息。好友单聊不受影响。');
@@ -141,14 +159,22 @@ describe('collaboration privacy accessible UI', () => {
           departmentPath: ['示例集团-产品部'],
           lastSyncedAt: '2026-08-18T08:00:00.000Z',
         }}
+        avatarUrl="https://avatar.example/admin.png"
         syncing={false}
         onSync={jest.fn()}
       />,
     );
 
     expect(html).toContain('aria-label="同步用户部门信息"');
+    expect(html).toContain('src="https://avatar.example/admin.png"');
+    expect(html).toContain('alt="示例管理员"');
+    expect(html).not.toContain('UserRound');
     expect(html).not.toContain('title="同步用户部门信息"');
     expect(html).toContain('h-7 w-7');
+    expect(html).toContain('text-base font-semibold text-foreground');
+    expect(html).toContain('text-xs text-muted-foreground');
+    expect(html).toContain('text-xs leading-5 text-muted-foreground');
+    expect(html).not.toContain('text-sm leading-6 text-[var(--color-muted)]');
     expect(html).toContain('工号 447147');
     expect(html).toContain('示例集团-产品部');
     expect(html).not.toContain('示例集团 / 产品部');
@@ -166,6 +192,7 @@ describe('collaboration privacy accessible UI', () => {
           audience: 'user',
           target: { scope: 'all', organizationPaths: [] },
           submittedAt: '2026-08-18T09:30:00.000Z',
+          approvalUrl: 'https://approval.example.com/ticket/MOCK-WO-24081801',
         }}
         onEdit={jest.fn()}
         onViewScope={jest.fn()}
@@ -174,12 +201,33 @@ describe('collaboration privacy accessible UI', () => {
 
     expect(html).toContain('查看审批进度');
     expect(html).toContain('<a');
-    expect(html).toContain('href="/admin/work-orders"');
+    expect(html).toContain('href="https://approval.example.com/ticket/MOCK-WO-24081801"');
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
     expect(html).not.toContain('Mock 工单');
     expect(html).not.toContain('目标配置尚未生效');
-    expect(html).not.toContain('MOCK-WO-24081801');
+    expect(html).not.toContain('>MOCK-WO-24081801<');
+  });
+
+  test('待审批响应没有安全审批地址时不渲染伪造入口', () => {
+    const html = renderToStaticMarkup(
+      <RelationCard
+        audience="bot"
+        config={{ scope: 'all', organizationPaths: [] }}
+        pending={{
+          id: 'PENDING-bot',
+          audience: 'bot',
+          target: { scope: 'restricted', organizationPaths: [['示例集团']] },
+          submittedAt: '2026-08-18T09:30:00.000Z',
+        }}
+        onEdit={jest.fn()}
+        onViewScope={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('待审批');
+    expect(html).not.toContain('查看审批进度');
+    expect(html).not.toContain('/admin/work-orders');
   });
 
   test('组织级联支持可变层级且父级和中间层级均可选择', () => {
@@ -207,15 +255,57 @@ describe('collaboration privacy accessible UI', () => {
   });
 
   test('好友审批摘要统一使用组织范围口径', () => {
+    const onViewScope = jest.fn();
     const html = renderToStaticMarkup(
       <RequestList
-        config={{ mode: 'partial_exempt', exemptOrganizationPaths: [['示例集团']] }}
+        config={{ mode: 'partial_exempt', exemptOrganizationPaths: [['示例集团'], ['示例集团', '技术部']] }}
         disabled={false}
         onEdit={jest.fn()}
+        onViewScope={onViewScope}
       />,
     );
     expect(html).toContain('部分组织免审批');
+    expect(html).toContain('2 个免审批范围');
+    expect(html).toContain('>查看<');
     expect(html).not.toContain('部分团队免审批');
+  });
+
+  test('好友审批免审批范围可独立查看具体组织路径', () => {
+    const html = renderWithPortals(
+      <ScopeViewer
+        open
+        kind="friendApproval"
+        config={{
+          mode: 'partial_exempt',
+          exemptOrganizationPaths: [
+            ['示例集团', '技术部'],
+            ['示例集团', '产品部'],
+          ],
+        }}
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('好友申请免审批范围');
+    expect(html).toContain('示例集团 / 技术部');
+    expect(html).toContain('示例集团 / 产品部');
+  });
+
+  test('好友审批范围未解析出名称时不再把部门编码当作展示名称', () => {
+    const html = renderWithPortals(
+      <ScopeViewer
+        open
+        kind="friendApproval"
+        config={{ mode: 'partial_exempt', exemptOrganizationPaths: [], exemptDepartmentNos: ['A4195', 'A4196'] }}
+        onClose={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('范围数量：2');
+    expect(html).toContain('部门名称暂未加载');
+    expect(html).not.toContain('部门编码：');
+    expect(html).not.toContain('A4195');
+    expect(html).not.toContain('A4196');
   });
 
   test('公开范围编辑器按对象使用易理解的发现与好友申请文案', () => {
@@ -263,8 +353,41 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(html).toContain('选择组织范围');
     expect(html).toContain('可分别搜索集团、事业部、部门或团队，并连续添加多个范围。提交后将进入审批流程。');
+    expect(html).toContain('已选组织范围（1）');
+    expect(html).toContain('示例集团 / 事业部 / 部门 / 团队');
     expect(html).toContain('配置未发生变化，无需提交审批');
     expect(html).not.toContain('Mock');
     expect(html).toContain('disabled=""');
+  });
+
+  test('公开范围和好友审批编辑器使用单选组语义', () => {
+    const publicationHtml = renderWithPortals(
+      <PublicationEditor
+        open
+        audience="user"
+        initialConfig={{ scope: 'all', organizationPaths: [] }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+    expect(publicationHtml).toContain('role="radiogroup"');
+    expect(publicationHtml).toContain('aria-label="公开范围"');
+    expect(publicationHtml).toContain('role="radio"');
+    expect(publicationHtml).toContain('aria-checked="true"');
+
+    const friendApprovalHtml = renderWithPortals(
+      <FriendApprovalEditor
+        open
+        initialConfig={{ mode: 'all', exemptOrganizationPaths: [] }}
+        onSearch={jest.fn()}
+        onClose={jest.fn()}
+        onSubmit={jest.fn()}
+      />,
+    );
+    expect(friendApprovalHtml).toContain('role="radiogroup"');
+    expect(friendApprovalHtml).toContain('aria-label="好友审批策略"');
+    expect(friendApprovalHtml).toContain('role="radio"');
+    expect(friendApprovalHtml).toContain('aria-checked="true"');
   });
 });

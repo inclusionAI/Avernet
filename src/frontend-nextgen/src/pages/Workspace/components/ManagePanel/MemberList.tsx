@@ -39,8 +39,8 @@ function Avatar({ participant }: { participant: ParticipantView }) {
     <div
       className={
         participant.kind === 'bot'
-          ? 'grid size-10 flex-none place-items-center rounded-2xl bg-zinc-900 text-sm font-medium text-white shadow-sm dark:bg-zinc-100 dark:text-zinc-900'
-          : 'grid size-10 flex-none place-items-center rounded-2xl bg-brand/15 text-sm font-medium text-brand shadow-sm'
+          ? 'grid size-8 flex-none place-items-center rounded-full bg-foreground text-xs font-medium text-background shadow-sm'
+          : 'grid size-8 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand shadow-sm'
       }
     >
       {symbol}
@@ -67,9 +67,9 @@ export function MemberList({
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs font-medium text-[var(--color-muted)]">
-          {showLoading ? '加载中…' : `${participants.length} 位成员`}
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">
+          {showLoading ? '加载中…' : `${participants.length} 个成员`}
         </span>
         {canManage && (
           <Button
@@ -83,41 +83,37 @@ export function MemberList({
         )}
       </div>
 
-      {!canManage && disabledReason ? (
-        <p className="m-0 mb-2 text-xs text-[var(--color-muted)]">{disabledReason}</p>
-      ) : null}
+      {!canManage && disabledReason ? <p className="m-0 mb-2 text-xs text-muted-foreground">{disabledReason}</p> : null}
 
       {participants.length === 0 ? (
         showLoading ? (
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <Skeleton.Block key={i} className="h-14 w-full rounded-xl" />
+              <Skeleton.Block key={i} className="h-12 w-full rounded-lg" />
             ))}
           </div>
         ) : (
-          <div className="rounded-xl border border-dashed border-[var(--color-border)] px-3 py-6 text-center text-sm text-[var(--color-muted)]">
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-sm text-muted-foreground">
             {emptyText}
           </div>
         )
       ) : (
-        <div className="space-y-2.5">
+        <div className="space-y-2">
           {participants.map((participant) => (
             <div
               key={participant.actorId}
-              className="flex items-center gap-3 rounded-xl border border-[var(--color-border)] bg-white p-2.5 shadow-sm"
+              className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
             >
               <Avatar participant={participant} />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="max-w-full truncate text-sm font-semibold text-[var(--color-fg)]">
-                    {participant.name}
-                  </span>
+                  <span className="max-w-full truncate text-sm font-semibold text-foreground">{participant.name}</span>
                   <Badge tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
                     {participant.kind === 'bot' ? 'Bot' : '用户'}
                   </Badge>
                   <Badge tone={ROLE_BADGE_TONE[participant.role]}>{ROLE_LABEL[participant.role]}</Badge>
                 </div>
-                <p className="m-0 mt-0.5 text-xs text-[var(--color-muted)]">
+                <p className="m-0 mt-0.5 text-xs text-muted-foreground">
                   {participant.mode === 'present'
                     ? '在场'
                     : participant.mode === 'muted'
@@ -135,11 +131,7 @@ export function MemberList({
                   confirmVariant="destructive"
                   onConfirm={() => void onRemove(participant.actorId)}
                 >
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-error)]"
-                  >
+                  <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive">
                     <UserMinus className="h-4 w-4" />
                     移除
                   </Button>

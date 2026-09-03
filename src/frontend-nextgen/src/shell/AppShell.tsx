@@ -10,11 +10,13 @@ import type { AccountUser } from './AccountBadge';
 import { AppHeader } from './AppHeader';
 import { AppSidebar } from './AppSidebar';
 import { SidebarNavList } from './SidebarNavList';
-import { getNavigationItem, navigationItems, type NavigationArea } from './navigation';
+import { getMergedNavigationItems, getNavigationItem, type NavigationArea } from './navigation';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const activeItem = useMemo(() => getNavigationItem(location.pathname), [location.pathname]);
+  // 合并 Open Core 基线与 internal overlay 注入的额外导航项（capability 同步返回，无请求）。
+  const mergedItems = useMemo(() => getMergedNavigationItems(), []);
   const [area, setArea] = useState<NavigationArea>(activeItem?.area ?? 'work');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -54,11 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (res.ok) {
         useWorkspaceStore.getState().setIdentities(res.data.identities, res.data.defaultActiveId);
         const identity = getCapabilities().getHumanIdentity().value;
-        setCurrentUser(
-          identity
-            ? { displayName: identity.displayName, avatarUrl: identity.avatarUrl, online: identity.online }
-            : undefined,
-        );
+        setCurrentUser(identity ? { displayName: identity.displayName, avatarUrl: identity.avatarUrl } : undefined);
       }
     });
   }, []);
@@ -78,9 +76,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           area={area}
           activePath={location.pathname}
           collapsed={sidebarCollapsed}
-          items={navigationItems}
+          items={mergedItems}
           onNavigate={(path) => history.push(path)}
-          onExpand={() => setSidebarCollapsed(false)}
         />
         <main className="relative min-w-0 flex-1 overflow-hidden">{children}</main>
       </div>
@@ -91,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SidebarNavList
             area={area}
             activePath={location.pathname}
-            items={navigationItems}
+            items={mergedItems}
             onNavigate={handleMobileNavigate}
           />
         </DrawerContent>

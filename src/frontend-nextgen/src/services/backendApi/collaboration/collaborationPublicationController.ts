@@ -18,33 +18,29 @@ export interface BcsPublicRequest {
   public_scope: 'user' | 'agent';
   /** 部门范围；null 或空数组表示不限部门。 */
   view_depts?: ViewDept[] | null;
-  /** public = 走审批工单；private = 快速路径直接收回可见性。默认 private。 */
+  /** public = 公开（是否限制部门由 view_depts 区分）；private = 不公开。 */
   visibility?: 'public' | 'private';
 }
 
-/** 发布结果。 */
+/** 发布结果。除 success 外，快速路径可能不返回审批字段。 */
 export interface BcsPublishResult {
   success: boolean;
-  /** 审批工单 ID；快速路径为 null。 */
-  puid: string | null;
-  /** 审批 URL；快速路径为 null。 */
-  approval_url: string | null;
-  /** 工单状态：PROCESSING（待审）/ COMPLETED（已终态）。 */
-  state: 'PROCESSING' | 'COMPLETED' | null;
-  /** 终态标记：AGREE / DISAGREE / CANCEL；PROCESSING 时为 null。 */
-  last_operate: string | null;
-  error_msg: string | null;
-  /** 快速路径返回实际可见性值。 */
-  visibility?: string;
-  /** 快速路径返回更新的可见性字段名。 */
-  visibility_field?: string;
+  puid?: string | null;
+  approval_url?: string | null;
+  state?: string | null;
+  last_operate?: string | null;
+  error_msg?: string | null;
+  visibility?: string | null;
+  visibility_field?: string | null;
 }
 
 /** 提交 Bot 公开范围变更（审批工单或快速收回）。 */
-export function publishBotPublic(botUuid: string, body: BcsPublicRequest, signal?: AbortSignal) {
+export function publishBotPublic(botUuid: string, userId: string, body: BcsPublicRequest, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BcsPublishResult>>(COLLABORATION_PUBLICATION_ENDPOINTS.publish(botUuid), {
     method: 'POST',
+    params: { user_id: userId },
     data: body,
+    injectUserId: false,
     signal,
   });
 }

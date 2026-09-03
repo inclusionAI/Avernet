@@ -1,6 +1,8 @@
+import { getCapabilities } from '@/capabilities';
 import { NotificationBell } from '@/components/Admin/NotificationBell';
 import { Button, IconButton } from '@/components/ui';
-import { AppWindow, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { cn } from '@/utils/cn';
+import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { AccountBadge, type AccountUser } from './AccountBadge';
 import { HelpMenu } from './HelpMenu';
 import type { NavigationArea } from './navigation';
@@ -23,13 +25,16 @@ export function AppHeader({
   onOpenMobileNav,
   currentUser,
 }: AppHeaderProps) {
+  // 品牌语义经 capability 解析：Open Core = Avernet 横版 wordmark（capabilities/brandLogos.tsx）；
+  // internal overlay = 现状「蓝底色块 + AppWindow + TeamClaw」组合（src/internal/brand，随其剥离）。
+  const brand = getCapabilities().getProductBrand().value;
+  // 通知中心为形态级入口（getShellVisibility.notificationBell）：Open Core（阿里云部署）默认隐藏，
+  // 未读数轮询（useNotifications 30s 定时）随组件不挂载自然停止，通知 service 层不改。
+  const { notificationBell } = getCapabilities().getShellVisibility().value;
   return (
     <header className="relative z-40 flex h-[var(--shell-header-height)] items-center border-b border-[var(--color-border)] bg-white px-4">
       <div className="flex min-w-[200px] items-center gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)] text-white">
-          <AppWindow className="h-5 w-5" aria-hidden />
-        </div>
-        <strong className="text-lg tracking-tight">TeamClaw</strong>
+        <brand.Logo className="h-9" />
         <IconButton
           className="ml-2 hidden lg:inline-flex"
           label={sidebarCollapsed ? '展开导航' : '折叠导航'}
@@ -44,11 +49,16 @@ export function AppHeader({
           onClick={onOpenMobileNav}
         />
       </div>
-      <nav aria-label="产品区域" className="ml-2 flex items-center rounded-lg bg-[var(--color-panel-strong)] p-0.5">
+      <nav aria-label="产品区域" className="ml-2 flex items-center rounded-md bg-[var(--color-panel-strong)] p-0.5">
         <Button
           size="sm"
           variant="ghost"
-          className={area === 'work' ? 'bg-white text-[var(--color-primary)] shadow-sm hover:bg-white' : ''}
+          className={cn(
+            'h-8 rounded px-3 text-xs',
+            area === 'work'
+              ? 'bg-background text-primary shadow-sm hover:bg-background'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
           onClick={() => onAreaChange('work')}
         >
           工作
@@ -56,7 +66,12 @@ export function AppHeader({
         <Button
           size="sm"
           variant="ghost"
-          className={area === 'manage' ? 'bg-white text-[var(--color-primary)] shadow-sm hover:bg-white' : ''}
+          className={cn(
+            'h-8 rounded px-3 text-xs',
+            area === 'manage'
+              ? 'bg-background text-primary shadow-sm hover:bg-background'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
           onClick={() => onAreaChange('manage')}
         >
           管理
@@ -64,7 +79,7 @@ export function AppHeader({
       </nav>
       <div className="ml-auto flex items-center gap-1">
         <HelpMenu />
-        <NotificationBell />
+        {notificationBell && <NotificationBell />}
         {/* 右上角账号身份栏（迁移自左下角） */}
         <AccountBadge currentUser={currentUser} />
       </div>

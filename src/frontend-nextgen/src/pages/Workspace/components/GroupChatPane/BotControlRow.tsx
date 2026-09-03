@@ -37,12 +37,12 @@ export function BotControlRow({ botMode, switching, onModeChange }: BotControlRo
   return (
     <div className="flex items-center justify-between py-1.5">
       <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-soft)]">
-          <DisplayIcon className="h-4 w-4 text-[var(--color-primary)]" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+          <DisplayIcon className="h-4 w-4 text-primary" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-[var(--color-fg)]">{display.title}</p>
-          <p className="mt-0.5 text-xs leading-tight text-[var(--color-muted)]">{display.description}</p>
+          <p className="text-sm font-medium leading-tight text-foreground">{display.title}</p>
+          <p className="mt-0.5 text-xs leading-tight text-muted-foreground">{display.description}</p>
         </div>
       </div>
       <Popover open={open} onOpenChange={setOpen}>
@@ -55,15 +55,15 @@ export function BotControlRow({ botMode, switching, onModeChange }: BotControlRo
             className="h-auto shrink-0 gap-3 rounded-xl px-3 py-2"
           >
             {switching ? (
-              <Loader2 className="h-4 w-4 animate-spin text-[var(--color-primary)]" />
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
             ) : (
-              <Bot className="h-4 w-4 text-[var(--color-primary)]" />
+              <Bot className="h-4 w-4 text-primary" />
             )}
             <span className="text-left">
-              <span className="block text-[10px] leading-none text-[var(--color-muted)]">Bot发言模式</span>
-              <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-[var(--color-fg)]">
+              <span className="block text-[10px] leading-none text-muted-foreground">Bot发言模式</span>
+              <span className="mt-0.5 flex items-center gap-1 text-xs font-medium text-foreground">
                 {display.label}
-                <ChevronDown className="h-3 w-3 text-[var(--color-muted)]" />
+                <ChevronDown className="h-3 w-3 text-muted-foreground" />
               </span>
             </span>
           </Button>
@@ -82,31 +82,16 @@ export function BotControlRow({ botMode, switching, onModeChange }: BotControlRo
                   onModeChange(mode);
                   setOpen(false);
                 }}
-                className={cn(
-                  'h-auto w-full justify-start gap-2.5 px-2.5 py-2 text-left',
-                  active && 'bg-[var(--color-primary-soft)]',
-                )}
+                className={cn('h-auto w-full justify-start gap-2.5 px-2.5 py-2 text-left', active && 'bg-primary/10')}
               >
-                <ItemIcon
-                  className={cn(
-                    'h-4 w-4 shrink-0',
-                    active ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted)]',
-                  )}
-                />
+                <ItemIcon className={cn('h-4 w-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')} />
                 <span className="min-w-0 flex-1">
-                  <span
-                    className={cn(
-                      'block text-xs font-medium',
-                      active ? 'text-[var(--color-fg)]' : 'text-[var(--color-fg)]',
-                    )}
-                  >
-                    {item.label}
-                  </span>
-                  <span className="mt-0.5 block text-[11px] leading-snug text-[var(--color-muted)]">
+                  <span className={cn('block text-xs font-medium', 'text-foreground')}>{item.label}</span>
+                  <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
                     {item.description}
                   </span>
                 </span>
-                {active && <Check className="h-3.5 w-3.5 shrink-0 text-[var(--color-primary)]" />}
+                {active && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
               </Button>
             );
           })}

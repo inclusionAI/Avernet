@@ -48,11 +48,7 @@ export function BotChatDetail({
             Trace ID：<span className="font-mono">{detail.id}</span>
           </span>
         </div>
-        <dl className="mt-3 grid gap-3 text-xs text-[var(--color-muted)] md:grid-cols-2 xl:grid-cols-6">
-          <div>
-            <dt>Session</dt>
-            <dd className="break-all text-[var(--color-fg)]">{detail.sessionKey ?? detail.sessionId ?? '-'}</dd>
-          </div>
+        <dl className="mt-3 grid gap-3 text-xs text-[var(--color-muted)] md:grid-cols-2 xl:grid-cols-5">
           <div>
             <dt>请求时间</dt>
             <dd className="text-[var(--color-fg)]">{new Date(detail.timestamp).toLocaleString()}</dd>

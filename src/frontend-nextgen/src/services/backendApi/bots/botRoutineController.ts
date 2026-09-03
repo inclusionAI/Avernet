@@ -5,6 +5,8 @@ import { userScopedParams } from './botController';
 export type BotRoutineDto = BackendUnknownRecord;
 export type BotRoutineRunDto = BackendUnknownRecord;
 export const BOT_ROUTINE_ENDPOINTS = {
+  // owner 级聚合入口：不含 bot_id 字面量，必须声明在 list 之前，避免被 per-bot 通配抢走。
+  all: () => `/openapi/v1/bots/routines/all`,
   list: (bot_id: string) => `/openapi/v1/bots/${bot_id}/routines`,
   detail: (bot_id: string, routine_id: string) => `/openapi/v1/bots/${bot_id}/routines/${routine_id}`,
   run: (bot_id: string, routine_id: string) => `/openapi/v1/bots/${bot_id}/routines/${routine_id}/run`,
@@ -13,6 +15,13 @@ export const BOT_ROUTINE_ENDPOINTS = {
 // 查询定时任务列表。
 export function listBotRoutines(bot_id: string, params?: BackendUnknownRecord) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<BotRoutineDto>>>(BOT_ROUTINE_ENDPOINTS.list(bot_id), {
+    method: 'GET',
+    params: userScopedParams(params),
+  });
+}
+// owner 级聚合查询：一次拉取该用户（含协作）全部 Bot 的定时任务，跨 draft/verify/online 阶段，服务端统一分页。
+export function listAllRoutines(params?: BackendUnknownRecord) {
+  return backendRequest<BackendApiEnvelope<BackendApiPage<BotRoutineDto>>>(BOT_ROUTINE_ENDPOINTS.all(), {
     method: 'GET',
     params: userScopedParams(params),
   });

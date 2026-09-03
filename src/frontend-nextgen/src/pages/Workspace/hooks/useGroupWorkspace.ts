@@ -25,10 +25,11 @@ export interface UseGroupWorkspaceResult {
   setMembership: (m: 'direct' | 'session_only') => void;
   expandedGroupIds: Record<string, true>;
   toggleGroupExpanded: (groupId: string) => void;
-  onSelectGroup: (groupId: string) => Promise<void>;
+  onSelectGroup: (groupId: string) => void;
   refreshGroups: () => Promise<void>;
-  /** 重拉当前选中群详情并写回本地 groups（管理面板更新成员/公开性后就地刷新）。 */
-  reloadSelectedGroup: () => Promise<void>;
+  /** 重拉群详情并写回本地 groups。管理面板打开/更新后就地刷新；可传 groupId 直接刷新指定群
+   *  （默认刷新当前选中群）。群详情含 participants/owner/driver，仅查看/编辑时按需调用。 */
+  reloadSelectedGroup: (groupId?: string) => Promise<void>;
   dissolveGroup: (groupId: string) => Promise<void>;
   /** Service 政策结果：当前选中群 + 当前身份是否有管理权限（policy 计算归 Hook，组件只消费）。 */
   canManageGroup: PolicyResult;
@@ -165,37 +166,34 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
     [selectedGroup, activeIdentityId],
   );
 
-  const onSelectGroup = useCallback(
-    async (groupId: string) => {
-      useWorkspaceStore.getState().selectGroup(groupId);
-      // 管理按钮需读取群详情里的 participants/owner/driver；列表项没有这些字段，选中后必须补齐详情。
-      const detail = await groupService.loadGroupDetailOrBcs(groupId, activeIdentityId ?? undefined);
-      if (!detail.ok) {
-        toast.error(detail.error.code === 'GROUP_MISSING' ? '该协作群不存在或已被删除。' : '加载协作群失败。');
-        return;
-      }
-      setSessionGroups((current) =>
-        current.some((g) => g.groupId === detail.data.groupId)
-          ? current.map((g) => (g.groupId === detail.data.groupId ? detail.data : g))
-          : [detail.data, ...current],
-      );
-    },
-    [activeIdentityId],
-  );
+  // 选中群：仅写入选中态，不拉群详情。会话列表由 useSessionMap 调 /groups/{id}/sessions 单独拉取；
+  // 群详情（participants/owner/driver）仅在打开管理面板（查看/编辑）时由 handleManageGroup →
+  // reloadSelectedGroup 按需拉取，避免每次选中群都触发 GET /groups/{id} 详情请求。
+  const onSelectGroup = useCallback((groupId: string) => {
+    useWorkspaceStore.getState().selectGroup(groupId);
+  }, []);
 
   const refreshGroups = useCallback(async () => {
     await loadGroups(activeIdentityId, lastSearchRef.current || undefined);
   }, [loadGroups, activeIdentityId]);
 
-  const reloadSelectedGroup = useCallback(async () => {
-    if (!selectedGroupId) return;
-    const res = await groupService.loadGroupDetailOrBcs(selectedGroupId, activeIdentityId ?? undefined);
-    if (!res.ok) {
-      toast.error(res.error.friendlyMessage);
-      return;
-    }
-    setSessionGroups((current) => current.map((group) => (group.groupId === selectedGroupId ? res.data : group)));
-  }, [activeIdentityId, selectedGroupId]);
+  const reloadSelectedGroup = useCallback(
+    async (groupId?: string) => {
+      const gid = groupId ?? selectedGroupId;
+      if (!gid) return;
+      const res = await groupService.loadGroupDetailOrBcs(gid, activeIdentityId ?? undefined);
+      if (!res.ok) {
+        toast.error(res.error.friendlyMessage);
+        return;
+      }
+      setSessionGroups((current) =>
+        current.some((g) => g.groupId === gid)
+          ? current.map((g) => (g.groupId === gid ? res.data : g))
+          : [res.data, ...current],
+      );
+    },
+    [activeIdentityId, selectedGroupId],
+  );
 
   const dissolveGroup = useCallback(
     async (groupId: string) => {

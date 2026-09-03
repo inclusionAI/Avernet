@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { sessionService } from '@/services/workspace/sessionService';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 
 // 使用 auto-mock（不带 factory），避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
@@ -35,6 +36,39 @@ it('createNewSession maps to SessionView with favorite false', async () => {
     title: '新会话',
     favorite: false,
   });
+  // acting_bot_id 取当前角色 id（创建请求时 activeIdentityId 为空则不传）。
+  expect(sc.createSession).toHaveBeenCalledWith('g1', { title: '新会话', input: undefined });
+});
+
+it('createNewSession 以 activeIdentityId 作为 acting_bot_id 传递当前角色', async () => {
+  useWorkspaceStore.getState().reset();
+  useWorkspaceStore
+    .getState()
+    .setIdentities([{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }], 'human_327325');
+  try {
+    sc.createSession.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        session_id: 'g1:s10',
+        group_id: 'g1',
+        title: '',
+        status: 'running',
+        participants: [],
+        created_at: 1,
+        updated_at: 2,
+      },
+    });
+    await sessionService.createNewSession('g1', '新会话', '协作目标');
+    expect(sc.createSession).toHaveBeenCalledWith('g1', {
+      title: '新会话',
+      input: { query: '协作目标' },
+      acting_bot_id: 'human_327325',
+    });
+  } finally {
+    useWorkspaceStore.getState().reset();
+  }
 });
 
 it('setFavorite true calls collect API and returns collected status', async () => {

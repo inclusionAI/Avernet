@@ -10,6 +10,11 @@ import {
   type PublicGroupMemberTransport,
   type PublicGroupTransport,
 } from '@/domain/collaborationSquare/mapper';
+import {
+  mapPublicTaskDto,
+  sortPublicTasksByPublishedDesc,
+  type PublicTaskTransport,
+} from '@/domain/collaborationSquare/taskMapper';
 import type {
   BotRelationshipStatus,
   CreateSessionResult,
@@ -19,6 +24,9 @@ import type {
   PublicBotSearchQuery,
   PublicGroup,
   PublicGroupSearchQuery,
+  PublicTask,
+  PublicTaskPage,
+  PublicTaskSearchQuery,
 } from '@/domain/collaborationSquare/types';
 import { CollaborationSquareError } from './collaborationSquareError';
 import type { CollaborationSquareGateway } from './collaborationSquareGateway';
@@ -40,10 +48,14 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
   private groups: PublicGroup[] = [];
 
   async listBots(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
+    return (await this.listBotPage(_query, _context, signal)).items;
+  }
+
+  async listBotPage(_query?: PublicBotSearchQuery, _context?: HumanBotActionContext, signal?: AbortSignal) {
     this.bots = (await readJson<PublicBotTransport[]>('/api/mock/collaboration-square/bots', signal)).map(
       mapBotTransport,
     );
-    return structuredClone(this.bots);
+    return { items: structuredClone(this.bots), total: this.bots.length };
   }
 
   async discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
@@ -56,8 +68,9 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
     );
   }
 
-  async requestBotFriendship(botId: string, _context: HumanBotActionContext) {
+  async requestBotFriendship(botId: string, _context: HumanBotActionContext, _friendRequestBotId?: string) {
     void _context;
+    void _friendRequestBotId;
     await delay(420);
     const bot = this.bots.find((item) => item.id === botId);
     if (!bot) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
@@ -83,10 +96,15 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
   }
 
   async listGroups(query: PublicGroupSearchQuery = {}, signal?: AbortSignal) {
+    return (await this.listGroupPage(query, signal)).items;
+  }
+
+  async listGroupPage(query: PublicGroupSearchQuery = {}, signal?: AbortSignal) {
     this.groups = (await readJson<PublicGroupTransport[]>('/api/mock/collaboration-square/groups', signal)).map(
       mapGroupTransport,
     );
-    return structuredClone(filterPublicGroups(this.groups, query.search ?? ''));
+    const groups = filterPublicGroups(this.groups, query.search ?? '');
+    return { items: structuredClone(groups), total: groups.length };
   }
 
   async listGroupMembers(groupId: string, signal?: AbortSignal) {
@@ -106,8 +124,39 @@ export class MockCollaborationSquareAdapter implements CollaborationSquareGatewa
       throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
     return {
       sessionId: `square-${groupId}-${Date.now()}`,
-      memberSource: 'session_temp',
-      defaultRole: groupId === 'sample-engineering-group' ? '观察者' : '参与者',
     };
+  }
+
+  // 任务广场：本期仅 Mock（后端公开跨用户 BBS 任务广场端点 Out of Scope 未建设），跨用户公开，不做 owner 过滤。
+  async listPublicTasks(query: PublicTaskSearchQuery = {}, signal?: AbortSignal): Promise<PublicTaskPage> {
+    // 可控失败触发（仅浏览器，对齐既有 mock 的 simulate 范式）；node 测试无 window 不触发。
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('simulate') === 'task-fail') {
+      throw new CollaborationSquareError('network', '任务广场数据加载失败');
+    }
+    const dtos = await readJson<PublicTaskTransport[]>('/api/mock/collaboration-square/tasks', signal);
+    const all = dtos.map(mapPublicTaskDto).filter((task): task is PublicTask => task !== null);
+    const keyword = (query.search ?? '').trim().toLocaleLowerCase();
+    const matched = keyword
+      ? all.filter(
+          (task) => task.name.toLocaleLowerCase().includes(keyword) || task.goal.toLocaleLowerCase().includes(keyword),
+        )
+      : all;
+    const filtered =
+      query.status && query.status !== 'all' ? matched.filter((task) => task.status === query.status) : matched;
+    // 与真实 adapter 一致：客户端过滤后按 publishedAt 倒序（最新发布在前），再分页。
+    const sorted = sortPublicTasksByPublishedDesc(filtered);
+    const offset = Math.max(0, query.offset ?? 0);
+    const limit = query.limit ?? sorted.length;
+    return { items: structuredClone(sorted.slice(offset, offset + limit)), total: sorted.length };
+  }
+
+  async getPublicTask(taskId: string, signal?: AbortSignal): Promise<PublicTask> {
+    const dto = await readJson<PublicTaskTransport>(
+      `/api/mock/collaboration-square/tasks/${encodeURIComponent(taskId)}`,
+      signal,
+    );
+    const task = mapPublicTaskDto(dto);
+    if (!task) throw new CollaborationSquareError('target_invalid', '内容已取消公开或不可访问');
+    return task;
   }
 }

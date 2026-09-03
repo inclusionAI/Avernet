@@ -12,7 +12,7 @@ export interface CollabPanelState {
   botActorId: string | null;
   botMode: 'auto' | 'muted' | null;
   botName: string;
-  /** 会话内 human 成员（当前用户）。 */
+  /** 会话内 human 成员（当前查看用户身份对应的协作者）。 */
   human: ParticipantView | null;
   humanJoined: boolean;
   humanName: string;
@@ -87,7 +87,7 @@ export function useCollabPanel(
   }, [session]);
   const humanJoined = human?.mode === 'present';
   const humanAbsent = human?.mode === 'absent';
-  const humanName = human?.name ?? '我';
+  const humanName = human?.name ?? (activeIdentity?.kind === 'user' ? activeIdentity.displayName : '用户协作身份');
 
   const identities = useWorkspaceStore((s) => s.identities);
   const humanIdentityId = useMemo(

@@ -41,7 +41,7 @@ export function NotificationBell() {
             <span
               className={cn(
                 'pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center',
-                'rounded-full bg-error px-1 text-[10px] font-semibold leading-none text-white',
+                'rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground',
               )}
               aria-label={`${unreadCount} 条未读`}
             >

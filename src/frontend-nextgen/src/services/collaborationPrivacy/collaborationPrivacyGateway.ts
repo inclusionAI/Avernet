@@ -1,4 +1,5 @@
 import type {
+  CollaborationBot,
   CollaborationPrivacyOverview,
   CurrentUserIdentity,
   FriendApprovalConfig,
@@ -35,11 +36,17 @@ export interface FriendApprovalCommand {
 }
 
 export interface CollaborationPrivacyGateway {
-  loadOverview(signal?: AbortSignal): Promise<CollaborationPrivacyOverview>;
-  syncDepartment(signal?: AbortSignal): Promise<CurrentUserIdentity>;
+  loadOverview(userId: string, signal?: AbortSignal): Promise<CollaborationPrivacyOverview>;
+  refreshManagedBot(botId: string, signal?: AbortSignal): Promise<CollaborationBot>;
+  syncDepartment(userId: string, signal?: AbortSignal): Promise<CurrentUserIdentity>;
   /** 按关键词搜索部门，返回匹配的组织路径列表。keyword 必传。 */
   searchDepartments(keyword: string, signal?: AbortSignal): Promise<OrganizationSearchEntry[]>;
   updateDirectSetting(command: DirectSettingCommand, signal?: AbortSignal): Promise<DirectSettingCommand['value']>;
   submitPublication(command: PublicationCommand, signal?: AbortSignal): Promise<PublicationResult>;
   updateFriendApproval(command: FriendApprovalCommand, signal?: AbortSignal): Promise<FriendApprovalConfig>;
+
+  /** 开启任务认领：grant 公共 api-key 给该 Bot 后 PATCH task_claim_mode=true，双写同成同败（PATCH 失败回滚 grant）。 */
+  enableTaskClaim(botId: string, signal?: AbortSignal): Promise<CollaborationBot>;
+  /** 关闭任务认领：revoke 后 PATCH task_claim_mode=false，双写同成同败（PATCH 失败回滚回 grant）。 */
+  disableTaskClaim(botId: string, signal?: AbortSignal): Promise<CollaborationBot>;
 }

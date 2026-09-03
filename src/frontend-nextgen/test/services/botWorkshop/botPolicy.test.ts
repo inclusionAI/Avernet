@@ -1,5 +1,5 @@
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
-import { getBotActionAvailability } from '@/services/botWorkshop/botPolicy';
+import { getBotActionAvailability, getBotCollaborationMode } from '@/services/botWorkshop/botPolicy';
 
 describe('botPolicy', () => {
   test('部署中只允许查看和日志', () => {
@@ -37,5 +37,26 @@ describe('botPolicy', () => {
 
     expect(actions.find((action) => action.action === 'edit')?.enabled).toBe(false);
     expect(actions.find((action) => action.action === 'edit')?.disabledReason).toContain('引擎未识别');
+  });
+});
+
+describe('Bot 授权入口跟随空间类型', () => {
+  test('团队空间 Owner 可授权，个人空间即使 Bot 标记为团队归属也不展示', () => {
+    const teamBot = mapBotDto({
+      bot_id: 'team-bot',
+      engine: 'openclaw',
+      space: { space_id: '12', kind: 'team' },
+      actions: ['view'],
+    }).item;
+    const personalBot = {
+      ...teamBot,
+      spaceKind: 'personal' as const,
+      ownership: 'team' as const,
+    };
+
+    expect(getBotCollaborationMode(teamBot, true)).toBe('authorize');
+    expect(getBotCollaborationMode(teamBot, false)).toBe('request');
+    expect(getBotCollaborationMode(personalBot, true)).toBeUndefined();
+    expect(getBotCollaborationMode(personalBot, false)).toBeUndefined();
   });
 });

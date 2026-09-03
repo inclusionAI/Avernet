@@ -1,5 +1,15 @@
 @import 'tailwindcss';
 
+/*
+ * 消息正文末尾与常驻操作栏保持设计规范中的紧凑间距。
+ * @tc-chat/ui 的 Markdown 节点自带 bottom margin，且 styled-components
+ * 的样式优先级高于页面 utility；仅收口每个 Markdown 内容容器的末尾节点，
+ * 不影响正文段落之间的阅读间距，也不改变消息数据或交互语义。
+ */
+.message-bubble-compact .x-markdown > :last-child {
+  margin-bottom: 0 !important;
+}
+
 /* ==========================================================================
    暗色模式策略：基于 .dark 类切换
    ========================================================================== */
@@ -217,6 +227,20 @@ button {
   background: hsl(var(--brand) / 0.2);
 }
 
+/* Tooltip 文案允许划选；选中时保持与深色提示背景匹配的白色文字。 */
+.teamclaw-tooltip-content::selection,
+.teamclaw-tooltip-content ::selection {
+  color: hsl(var(--background));
+  background: hsl(var(--muted-foreground) / 0.8);
+}
+
+/* 创建 Bot 专用深色 Tooltip：覆盖所有后代，避免全局 ::selection 让选中文字变黑。 */
+.create-bot-tooltip-content::selection,
+.create-bot-tooltip-content *::selection {
+  color: hsl(var(--primary-foreground)) !important;
+  background: hsl(var(--primary-foreground) / 0.32) !important;
+}
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -237,6 +261,27 @@ button {
   scrollbar-width: thin;
   scrollbar-gutter: stable;
 }
+
+/* 创建弹窗和模板列表沿用旧版行为：滚动条不预留布局宽度，使用系统 overlay scrollbar，
+ * 在 macOS 上停止滚动后会自动淡出；标准属性也让滚动条保持细窄、深色。 */
+.overlay-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(60, 60, 67, 55%) transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.overlay-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(60, 60, 67, 55%);
+  border-radius: 999px;
+}
+.overlay-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 60, 67, 72%);
+}
 .app-scrollbar::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -244,6 +289,16 @@ button {
 .app-scrollbar::-webkit-scrollbar-thumb {
   background: #cdd2df;
   border-radius: 999px;
+}
+
+/* 单行横滑的筛选 pill 行（收起态）：隐藏滚动条——展开入口是右侧 chevron，
+   横滑能力本身保留（触控板/拖拽）。对齐老平台 tailwind-scrollbar-hide 的效果。 */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
 }
 
 /* ==========================================================================

@@ -1,9 +1,12 @@
+import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { Switch } from '@/components/ui/Switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
-import { Copy } from 'lucide-react';
+import { Copy, Info, RefreshCw } from 'lucide-react';
 import { RelationCard } from '../RelationCard';
 import { RequestList } from '../RequestList';
 
@@ -11,10 +14,12 @@ interface PermissionCardProps {
   bot: CollaborationBot;
   busyAction: string | null;
   onCopyId: (botId: string) => void;
+  onRefresh: (bot: CollaborationBot) => void;
   onToggleDirect: (bot: CollaborationBot, setting: DirectSetting, value: boolean | 'online' | 'hidden') => void;
   onEditPublication: (bot: CollaborationBot, audience: PublicAudience) => void;
   onEditFriendApproval: (bot: CollaborationBot) => void;
   onViewScope: (bot: CollaborationBot, audience: PublicAudience) => void;
+  onViewFriendApprovalScope: (bot: CollaborationBot) => void;
 }
 
 interface SettingRowProps {
@@ -23,15 +28,37 @@ interface SettingRowProps {
   checked: boolean;
   disabled: boolean;
   busy: boolean;
+  status?: string;
+  statusReason?: string;
   onChange: (checked: boolean) => void;
 }
 
-function SettingRow({ label, description, checked, disabled, busy, onChange }: SettingRowProps) {
+function SettingRow({ label, description, checked, disabled, busy, status, statusReason, onChange }: SettingRowProps) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3">
-      <div>
-        <p className="m-0 text-sm font-medium text-[var(--color-fg)]">{label}</p>
-        <p className="mt-1 text-xs leading-5 text-[var(--color-muted)]">{description}</p>
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="m-0 text-sm font-medium text-foreground">{label}</p>
+          {status && (
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 gap-1 px-1 text-muted-foreground"
+                    aria-label={`${label}${status}说明`}
+                  >
+                    <Badge tone="neutral">{status}</Badge>
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                {statusReason && <TooltipContent>{statusReason}</TooltipContent>}
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
       <Switch
         checked={checked}
@@ -47,24 +74,48 @@ export function PermissionCard({
   bot,
   busyAction,
   onCopyId,
+  onRefresh,
   onToggleDirect,
   onEditPublication,
   onEditFriendApproval,
   onViewScope,
+  onViewFriendApprovalScope,
 }: PermissionCardProps) {
   const disabledReason = bot.joinedBcn ? undefined : '加入 BCN 后才能修改协作权限';
   const directBusy = (setting: DirectSetting) => busyAction === `${bot.id}:${setting}`;
   const friendDisabledByScope = bot.publication.user.scope === 'none' && bot.publication.bot.scope === 'none';
+  const refreshBusy = busyAction === `${bot.id}:refresh`;
   return (
     <Card className="overflow-hidden">
-      <CardHeader className="border-b border-[var(--color-border)] pb-5">
-        <div>
-          <CardTitle>{bot.name}</CardTitle>
-          <p className="mt-2 text-xs text-[var(--color-muted)]">{bot.engine}</p>
-          <div className="mt-2 flex items-center gap-1 text-xs text-[var(--color-muted)]">
-            <span>Bot ID：{bot.id}</span>
+      <CardHeader className="border-b border-border pb-5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <CardTitle className="min-w-0 truncate text-lg" title={bot.name}>
+                {bot.name}
+              </CardTitle>
+              {bot.engine !== 'unknown' && <Badge tone="neutral">{bot.engine}</Badge>}
+            </div>
             <IconButton
-              label={`复制 ${bot.name} 的 Bot ID`}
+              className="shrink-0"
+              label={`刷新 ${bot.name} 的权限状态`}
+              icon={<RefreshCw className={`h-3.5 w-3.5${refreshBusy ? ' animate-spin' : ''}`} aria-hidden />}
+              size="sm"
+              disabled={Boolean(busyAction)}
+              onClick={() => onRefresh(bot)}
+            />
+          </div>
+          <div className="mt-3 flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-xs font-medium text-muted-foreground">Bot UUID</span>
+            <code
+              className="min-w-0 flex-1 truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
+              title={bot.id}
+            >
+              {bot.id}
+            </code>
+            <IconButton
+              className="shrink-0"
+              label={`复制 ${bot.name} 的 Bot UUID`}
               icon={<Copy className="h-3.5 w-3.5" aria-hidden />}
               size="sm"
               onClick={() => onCopyId(bot.id)}
@@ -72,18 +123,20 @@ export function PermissionCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-6">
         {disabledReason && (
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
+          <div className="border-y border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
             {disabledReason}
           </div>
         )}
         <section>
-          <h4 className="m-0 text-sm font-semibold text-[var(--color-fg)]">协作能力</h4>
-          <div className="mt-2 divide-y divide-[var(--color-border)]">
+          <div className="mb-3 flex items-center">
+            <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">协作能力</h4>
+          </div>
+          <div className="divide-y divide-border">
             <SettingRow
               label="参与协作群聊"
-              description="控制 Bot 是否可参与群聊会话。关闭后无法加入新协作群，并停止在已加入的协作群会话中回复消息"
+              description="控制当前 Bot 是否可参与群聊。关闭后无法加入新协作群，已加入的协作群也不再回复。"
               checked={bot.collaborationStatus === 'online'}
               disabled={!bot.joinedBcn || bot.collaborationStatus === 'offline'}
               busy={directBusy('collaborationStatus')}
@@ -91,23 +144,29 @@ export function PermissionCard({
             />
             <SettingRow
               label="Bot 画像公开"
-              description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察"
+              description="允许其他用户在群聊中通过「融合模式」查看公开画像并进行跨 Bot 增量洞察。"
               checked={bot.profilePublic}
-              disabled={!bot.joinedBcn}
+              disabled={!bot.joinedBcn || bot.profilePublicStatus === 'unavailable'}
               busy={directBusy('profilePublic')}
+              status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
+              statusReason={
+                bot.profilePublicStatus === 'unavailable'
+                  ? '该Bot暂未设置过允许其他Bot可添加好友，请先调整公开范围'
+                  : undefined
+              }
               onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
             />
             <SettingRow
               label="任务认领"
-              description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务"
+              description="开启后，Bot 将每天自动扫描任务广场并认领可执行的任务。"
               checked={bot.taskClaimingEnabled}
               disabled={!bot.joinedBcn}
               busy={directBusy('taskClaimingEnabled')}
               onChange={(checked) => onToggleDirect(bot, 'taskClaimingEnabled', checked)}
             />
             <SettingRow
-              label="Dream Model"
-              description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送"
+              label="Dream Mode"
+              description="开启后，Bot 将每天基于用户数据（语雀、会议纪要等）挖掘潜在任务并推送。"
               checked={bot.dreamModelEnabled}
               disabled={!bot.joinedBcn}
               busy={directBusy('dreamModelEnabled')}
@@ -116,8 +175,25 @@ export function PermissionCard({
           </div>
         </section>
         <section>
-          <h4 className="m-0 text-sm font-semibold text-[var(--color-fg)]">公开范围</h4>
-          <div className="mt-4 space-y-3">
+          <div className="mb-3 flex items-center gap-1.5">
+            <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">公开范围</h4>
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-5 w-5 text-muted-foreground"
+                    aria-label="公开范围说明"
+                  >
+                    <Info className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>控制其他用户和其他 Bot 是否可发现并添加当前 Bot 为好友。</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+          <div className="divide-y divide-border">
             <RelationCard
               audience="user"
               config={bot.publication.user}
@@ -143,6 +219,7 @@ export function PermissionCard({
             disabledReason ?? (friendDisabledByScope ? '至少开放一种公开范围后才能修改好友审批策略' : undefined)
           }
           onEdit={() => onEditFriendApproval(bot)}
+          onViewScope={() => onViewFriendApprovalScope(bot)}
         />
       </CardContent>
     </Card>

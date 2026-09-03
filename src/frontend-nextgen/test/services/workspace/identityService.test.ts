@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import * as ownedBotController from '@/services/backendApi/bots/botController';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
 import type { DomainError } from '@/services/workspace/identityService';
 import { identityService, type LoadIdentitiesResult } from '@/services/workspace/identityService';
@@ -10,9 +11,22 @@ jest.mock('@tc-chat/adapters', () => ({}));
 // 使用 auto-mock（不带 factory），避免在 hoisted factory 内引用 jest.fn() —— 与 @jest/globals 一起会触发 TDZ。
 // auto-mock 会把 listMyBots 替成 jest.fn()，下方强取即可。
 jest.mock('@/services/backendApi/collaboration/collaborationBotController');
+jest.mock('@/services/backendApi/bots/botController');
 type SuccessResult = { ok: true; data: LoadIdentitiesResult };
 type FailureResult = { ok: false; error: DomainError };
 const listMyBots = (botController as unknown as { listMyBots: jest.Mock<any> }).listMyBots;
+const listBots = (ownedBotController as unknown as { listBots: jest.Mock<any> }).listBots;
+
+beforeEach(() => {
+  listMyBots.mockReset();
+  listBots.mockReset();
+  listBots.mockResolvedValue({
+    code: 200000,
+    message: '',
+    request_id: 'r-engine',
+    data: { items: [], total: 0, offset: 0, limit: 100 },
+  });
+});
 
 describe('identityService.loadIdentities', () => {
   it('merges a user identity with mine bots, defaulting active to first bot when no localStorage', async () => {
@@ -22,7 +36,7 @@ describe('identityService.loadIdentities', () => {
       request_id: 'r',
       data: {
         items: [
-          { kind: 'bot', bot_id: 'b1', name: 'Bot一号', avatar_url: 'u1', status: 'online' },
+          { kind: 'bot', bot_id: 'b1', name: 'Bot一号', avatar_url: 'u1', status: 'online', engine: 'OpenClaw' },
           { kind: 'bot', bot_id: 'b2', name: 'Bot二号', avatar_url: 'u2', status: 'offline' },
         ],
         total: 2,
@@ -35,7 +49,13 @@ describe('identityService.loadIdentities', () => {
     const data = (res as SuccessResult).data;
     expect(data.identities.length).toBe(3);
     expect(data.identities[0]).toMatchObject({ kind: 'user', displayName: '我' });
-    expect(data.identities[1]).toMatchObject({ kind: 'bot', id: 'b1', displayName: 'Bot一号', online: true });
+    expect(data.identities[1]).toMatchObject({
+      kind: 'bot',
+      id: 'b1',
+      displayName: 'Bot一号',
+      online: true,
+      engine: 'OpenClaw',
+    });
     expect(data.defaultActiveId).toBe('me');
   });
 
@@ -47,7 +67,7 @@ describe('identityService.loadIdentities', () => {
       data: {
         items: [
           { kind: 'human', bot_id: 'human-1', name: '风太', avatar_url: 'avatar-x', status: 'online' },
-          { kind: 'bot', bot_id: 'b1', name: 'Bot一号', avatar_url: 'u1', status: 'online' },
+          { kind: 'bot', bot_id: 'b1', name: 'Bot一号', avatar_url: 'u1', status: 'online', engine: 'OpenClaw' },
           { kind: 'bot', bot_id: 'b2', name: 'Bot二号', avatar_url: 'u2', status: 'offline' },
         ],
         total: 3,
@@ -73,7 +93,299 @@ describe('identityService.loadIdentities', () => {
     expect(data.defaultActiveId).toBe('human-1');
   });
 
-  it('maps bot status/reachability: hidden→不可聊天状态, unreachable→红点可达性', async () => {
+  it('补充 mine 缺失的 engine：从通用 bots 接口按 Bot ID 回填引擎', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [{ kind: 'bot', bot_id: 'b1:owner-1', name: 'Bot一号', status: 'online' }],
+        total: 1,
+        offset: 0,
+        limit: 20,
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [{ bot_id: 'b1', bot_name: 'Bot一号', engine: 'Hermes', bot_type: 'service' }],
+        total: 1,
+        offset: 0,
+        limit: 100,
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toContainEqual(
+      expect.objectContaining({ id: 'b1:owner-1', kind: 'bot', engine: 'Hermes', botType: 'service' }),
+    );
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100 });
+  });
+
+  it('兼容 bots 接口的 name、active_engine、engine_type 字段，避免引擎信息降级为空', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'bot', bot_id: 'b-active', name: 'Active Engine Bot', status: 'online' },
+          { kind: 'bot', bot_id: 'b-type', name: 'Engine Type Bot', status: 'online' },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 20,
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [
+          { bot_id: 'b-active', name: 'Active Engine Bot', active_engine: 'OpenClaw', bot_type: 'personal' },
+          { bot_id: 'b-type', name: 'Engine Type Bot', engine_type: 'Hermes', bot_type: 'desktop' },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 100,
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'b-active', engine: 'OpenClaw', botType: 'personal' }),
+        expect.objectContaining({ id: 'b-type', engine: 'Hermes', botType: 'desktop' }),
+      ]),
+    );
+  });
+
+  it('优先使用 engine 对象中的真实引擎类型，不把 provider/name 映射成引擎', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'bot', bot_id: 'b-claude-object', name: 'Claude Bot', status: 'online' },
+          { kind: 'bot', bot_id: 'b-claude-string', name: 'Claude String Bot', status: 'online' },
+          { kind: 'bot', bot_id: 'b-provider-fallback', name: 'Provider Fallback Bot', status: 'online' },
+        ],
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [
+          {
+            bot_id: 'b-claude-object',
+            engine: { name: 'TeamClaw网关', type: 'claude_code' },
+            bot_type: 'service',
+          },
+          { bot_id: 'b-claude-string', engine: 'claude_code', bot_type: 'personal' },
+          { bot_id: 'b-provider-fallback', provider: { name: 'TeamClaw网关' }, bot_type: 'desktop' },
+        ],
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'b-claude-object', engine: 'claude_code', botType: 'service' }),
+        expect.objectContaining({ id: 'b-claude-string', engine: 'claude_code', botType: 'personal' }),
+        expect.objectContaining({ id: 'b-provider-fallback', engine: undefined, botType: 'desktop' }),
+      ]),
+    );
+  });
+
+  it('始终以 bots 接口的 engine 覆盖 mine 中的展示名称，避免显示 TeamClaw 网关', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'bot', bot_id: 'b-openclaw', name: 'OpenClaw Bot', status: 'online', engine: 'TeamClaw网关' },
+          { kind: 'bot', bot_id: 'b-claude', name: 'Claude Bot', status: 'online', engine: 'TeamClaw网关' },
+        ],
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [
+          { bot_id: 'b-openclaw', bot_name: 'OpenClaw Bot', engine: 'openclaw' },
+          { bot_id: 'b-claude', bot_name: 'Claude Bot', engine: 'claude_code' },
+        ],
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'b-openclaw', engine: 'openclaw' }),
+        expect.objectContaining({ id: 'b-claude', engine: 'claude_code' }),
+      ]),
+    );
+  });
+
+  it('bots 接口命中但缺少 engine 时不回退到 mine 中的 provider 展示名称', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'bot', bot_id: 'b-no-engine', name: 'No Engine Bot', status: 'online', engine: 'TeamClaw网关' },
+        ],
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [{ bot_id: 'b-no-engine', bot_name: 'No Engine Bot', bot_type: 'personal' }],
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toContainEqual(
+      expect.objectContaining({ id: 'b-no-engine', engine: undefined, botType: 'personal' }),
+    );
+  });
+  it('兼容 bots 接口 data 直接为数组、id/botId/uuid 以及嵌套引擎字段', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'bot', bot_id: 'b-array', name: '数组 Bot', status: 'online' },
+          { kind: 'bot', bot_id: 'b-nested', name: '嵌套 Bot', status: 'online' },
+          { kind: 'bot', bot_id: 'b-runtime', name: '运行时 Bot', status: 'online' },
+        ],
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: [
+        { id: 'b-array', engine: { name: 'OpenClaw' }, bot_type: 'personal' },
+        { botId: 'b-nested', engine_info: { type: 'Hermes' }, bot_type: 'service' },
+        { uuid: 'b-runtime', runtime: { engine: 'ClaudeCode' }, bot_type: 'desktop' },
+      ],
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'b-array', engine: 'OpenClaw', botType: 'personal' }),
+        expect.objectContaining({ id: 'b-nested', engine: 'Hermes', botType: 'service' }),
+        expect.objectContaining({ id: 'b-runtime', engine: 'ClaudeCode', botType: 'desktop' }),
+      ]),
+    );
+  });
+
+  it('兼容 bots 接口 data.bots 列表结构并回填引擎与 Bot 类型', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [{ kind: 'bot', bot_id: 'b-data-bots', name: 'Data Bots', status: 'online' }],
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      data: { bots: [{ bot_id: 'b-data-bots', engine: 'OpenClaw', bot_type: 'personal' }] },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toContainEqual(
+      expect.objectContaining({ id: 'b-data-bots', engine: 'OpenClaw', botType: 'personal' }),
+    );
+  });
+
+  it('兼容 bots 接口外层 items 列表结构并回填引擎与 Bot 类型', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      items: [{ kind: 'bot', bot_id: 'b-root-items', name: 'Root Items', status: 'online' }],
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      items: [{ bot_id: 'b-root-items', engine: 'Hermes', bot_type: 'service' }],
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toContainEqual(
+      expect.objectContaining({ id: 'b-root-items', engine: 'Hermes', botType: 'service' }),
+    );
+  });
+
+  it('uses the human identity from mine as the explicit user scope when enriching Bot metadata', async () => {
+    listMyBots.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: {
+        items: [
+          { kind: 'human', bot_id: 'human_447147', name: '风太', status: 'online' },
+          { kind: 'bot', bot_id: 'b1', name: 'Bot一号', status: 'online' },
+        ],
+        total: 2,
+        offset: 0,
+        limit: 20,
+      },
+    });
+    listBots.mockResolvedValue({
+      code: 200000,
+      message: '',
+      request_id: 'r-engine',
+      data: {
+        items: [{ bot_id: 'b1', bot_name: 'Bot一号', engine: 'Hermes', bot_type: 'service' }],
+        total: 1,
+        offset: 0,
+        limit: 100,
+      },
+    });
+
+    const res = await identityService.loadIdentities();
+
+    expect(res.ok).toBe(true);
+    expect((res as SuccessResult).data.identities).toContainEqual(
+      expect.objectContaining({ id: 'b1', engine: 'Hermes', botType: 'service' }),
+    );
+    expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '447147' });
+  });
+
+  it('maps bot runtime status and group-chat reachability independently', async () => {
     listMyBots.mockResolvedValue({
       code: 20000,
       message: '',

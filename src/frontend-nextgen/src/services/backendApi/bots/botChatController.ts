@@ -1,8 +1,10 @@
 import { backendRequest } from '../httpClient';
 
 export interface BotChatEnvelope<T> {
-  code: number;
+  code?: number;
+  success?: boolean;
   message: string;
+  error_code?: number;
   data?: T;
   request_id?: string;
 }
@@ -60,6 +62,7 @@ export interface BotChatPageDto {
 
 export interface BotChatListParams {
   user_id: string;
+  bot_id?: string;
   owner_id?: string;
   trace_id?: string;
   session_id?: string;

@@ -49,6 +49,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     } = restoreIdentitySelection(updatedMemo, id, views, state.view);
     set({
       activeIdentityId: id ?? null,
+      pendingGroupBootstrap: null,
       selectedGroupId,
       selectedSessionId,
       selectedBotSessionId,
@@ -89,6 +90,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set((state) => ({ expandedBotSectionKey: { ...state.expandedBotSectionKey, [botId]: sectionKey } })),
   selectBotSession: (sessionId) => set({ selectedBotSessionId: sessionId }),
   bumpHistoryRefresh: () => set((state) => ({ historyRefreshNonce: state.historyRefreshNonce + 1 })),
+  setPendingGroupBootstrap: (value) => set({ pendingGroupBootstrap: value }),
+  clearPendingGroupBootstrap: (runId) =>
+    set((state) =>
+      !state.pendingGroupBootstrap || (runId && state.pendingGroupBootstrap.run.runId !== runId)
+        ? state
+        : { pendingGroupBootstrap: null },
+    ),
   setSessionTabForGroup: (groupId, tab) =>
     set((state) => ({ sessionTabsByGroup: { ...state.sessionTabsByGroup, [groupId]: tab } })),
   setSessionSearchText: (v) => set({ sessionSearchText: v }),

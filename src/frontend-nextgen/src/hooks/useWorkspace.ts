@@ -1,4 +1,6 @@
+import { getCapabilities } from '@/capabilities';
 import { getAvailableViews, type WorkspaceView } from '@/domain/collaboration/availableViews';
+import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotSessions } from '@/pages/Workspace/hooks/useBotSessions';
 import { useFriendBots } from '@/pages/Workspace/hooks/useFriendBots';
@@ -13,9 +15,9 @@ import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { toast } from 'sonner';
 import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
+import { useHumanIdentity } from './useHumanIdentity';
 import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
-
 export interface UseWorkspaceOptions {
   /**
    * 副屏 onAction(send_message) 的自定义回流。
@@ -44,18 +46,14 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   } = useWorkspaceStore();
   const [supportState, setSupportState] = useState<SupportChatState>({ phase: 'idle', error: null });
   const [draft, setDraft] = useState('');
+  const { identity: humanIdentity } = useHumanIdentity();
   const panelRef = useRef<PanelHandle>(null);
-  // 主屏输入框 ref(SenderRef⊇BridgeInputRef):经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框生效;单聊/群聊均原生 Sender(forwardRef)绑定。design D2/O1。
   const inputRef = useRef<SenderRef | null>(null);
-  // 主→副通道用全局单例 ChatBridge（services/workspace/chatBridge.ts，installGlobal:true）：
-  // 它既是 <ChatLayout.Panel bridge> 的 emitPanelEvent 通道，也是 aixcore 卡片沙箱 window.aixBridge 的真桥来源。
-  // useChatBridge 集中在下方注册一次，不在 useBotChat 内接——避免 support/bot 两个 useChat 在同一桥上 last-wins 覆盖（design D2）。
   const provider = useMemo(() => workspaceService.createProvider(), []);
   useWorkspaceIdentityBootstrap();
 
   // IdentityView[] → Identity[]（IdentityBar 仍以 prop 驱动，不感知 Service/Store 类型）
   const identities = useMemo(() => identityViews.map(mapIdentityViewToIdentity), [identityViews]);
-
   const activeIdentityView = useMemo(
     () => identityViews.find((i) => i.id === activeIdentityId) ?? null,
     [identityViews, activeIdentityId],
@@ -67,8 +65,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
 
   // view 钳制安全网:setIdentities 初始装载或身份列表变化导致 view 越界时回退到首个可用 tab。
   useEffect(() => {
-    // 身份尚未加载完成时 availableViews 仅为「协作群」安全默认值，
-    // 若此时钳制会把 URL 直连的单聊 tab 误改到协作群，刷新后丢失原 session。
     if (!activeIdentityView) return;
     if (availableViews.length === 0) return;
     if (!availableViews.includes(view)) setView(availableViews[0]);
@@ -77,13 +73,16 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const isTestUser = isTestUserIdentity(activeIdentityId);
   const isUserIdentity = activeIdentityView?.kind === 'user';
   const { chatBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
-  const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(activeIdentityId, isUserIdentity);
+  const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(
+    activeIdentityId,
+    isUserIdentity,
+    view !== 'group',
+  );
   const allChatBots = useMemo(
     () => [...chatBots, ...friendBots.filter((b) => !chatBots.some((m) => m.botId === b.botId))],
     [chatBots, friendBots],
   );
   const expandedBotIdList = useMemo(() => Object.keys(expandedBotIds), [expandedBotIds]);
-
   const botSessions = useBotSessions(allChatBots, expandedBotIdList, activeIdentityId);
   const selectedChatBot = useMemo(
     () => allChatBots.find((b) => b.botId === botSessions.selectedSession?.botId) ?? null,
@@ -123,21 +122,20 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     panelRef.current?.closePanelForce();
   }, [activeTargetId]);
 
+  const brand = getCapabilities().getProductBrand().value; // 产品名经 capability 解析（Open=Avernet；internal=TeamClaw），不硬编码
   useEffect(() => {
     if (!isSupportTarget) return;
     provider.connect().catch((error) => {
-      toast.error(error instanceof Error ? error.message : 'TeamClaw 客服连接失败');
+      toast.error(error instanceof Error ? error.message : `${brand.name} 客服连接失败`);
     });
     return () => provider.disconnect();
-  }, [isSupportTarget, provider]);
+  }, [isSupportTarget, provider, brand.name]);
 
-  // 切换身份:先持久化,再走 store.setActiveIdentity 触发 view 钳制。
   const handleSelectIdentity = (id: string) => {
     workspaceService.persistIdentity(id);
     setActiveIdentity(id);
   };
 
-  // 测试用户发送:经客服 provider.request;真实用户的 bot 单聊由 useBotChat 承接,不走此入口。
   const sendMessage = (content: string) => {
     const normalizedContent = content.trim();
     if (!normalizedContent || chat.isRequesting) return;
@@ -147,12 +145,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
       targetId: activeTargetId,
       userMessage: {
         content: normalizedContent,
-        extra: {
-          displayTime: new Date().toLocaleTimeString('zh-CN', {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-        },
+        extra: { displayTime: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) },
       },
     });
   };
@@ -160,10 +153,9 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const stopReply = () => {
     if (!chat.isRequesting) return;
     chat.abort();
-    toast.info('已停止 TeamClaw 客服回复');
+    toast.info(`已停止 ${brand.name} 客服回复`);
   };
 
-  // 副屏 onAction 回流：fill_input → setDraft；send_message → 注入或真实发送。
   const handlePanelAction = (action: PanelAction) => {
     if (action.type === 'fill_input') {
       setDraft(action.content);
@@ -176,7 +168,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     sendMessage(action.content);
   };
 
-  // 真实用户 bot 单聊目标(供 ChatPanel 渲染头部);纯映射下沉 workspaceIdentityMapper。
   const botChatTarget = useMemo<ConversationTarget | null>(() => {
     if (isTestUser)
       return {
@@ -193,8 +184,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     return buildBotChatTarget(selectedChatBot);
   }, [isTestUser, selectedChatBot]);
 
-  // 副屏 <AixUI> 消息按当前活跃聊天直发 chat.onRequest，绕开全局单例桥 last-wins
-  //（避免协作群 execute 串到单聊 bot）。与 useChatBridge 桥路径等价（同 chat + buildSingleChatBridgeRequest）。
   const submitPanelMessage = useCallback(
     (content: string) => {
       const activeChat = isSupportTarget ? chat : botChat.chat;
@@ -203,9 +192,16 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     [isSupportTarget, chat, botChat.chat, activeTargetId],
   );
 
+  const { appendAssistantMessage, streamAssistantMessage } = useTaskPreflightAssistant({
+    chat: isSupportTarget ? chat : botChat.chat,
+    sessionKey: isSupportTarget ? activeTargetId : botSessions.selectedSession?.sessionId,
+  });
+
   return {
     identities,
+    currentUserAvatarUrl: humanIdentity?.avatarUrl,
     activeIdentityId,
+    activeIdentity: activeIdentityView,
     setActiveIdentityId: handleSelectIdentity,
     search,
     setSearch,
@@ -240,6 +236,8 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     sendMessage,
     stopReply,
     submitPanelMessage,
+    appendAssistantMessage,
+    streamAssistantMessage,
     handlePanelAction,
     reconnect: () => isSupportTarget && chat.reconnect(),
     openHelp: () => toast.info('帮助中心将由宿主资源能力注入'),

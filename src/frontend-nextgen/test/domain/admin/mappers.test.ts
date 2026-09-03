@@ -124,6 +124,8 @@ describe('mapWorkOrderDto', () => {
     expect(item.itemType).toBe('UNKNOWN');
     expect(item.status).toBe('UNKNOWN');
     expect(item.isRead).toBe(false);
+    // 空 content → contentRaw 不填充
+    expect(item.contentRaw).toBeUndefined();
   });
 
   it('maps unknown enum values to UNKNOWN and records warning', () => {
@@ -167,8 +169,22 @@ describe('mapWorkOrderDto', () => {
     expect(item.applicantUserId).toBe('146836');
     expect(item.applicantName).toBe('146836');
     expect(item.applyReason).toBe('test');
-    // content 合成为一行展示文案（不重复申请人）
+    // content 合成为一行展示文案（不重复申请人）；列表文案 content 不变
     expect(item.content).toBe('申请加入空间「测试空间2」');
+    // 详情 content 为对象 → 抽屉改 JSON 原样展示：contentRaw = pretty JSON
+    expect(item.contentRaw).toBe(
+      JSON.stringify(
+        {
+          space_id: 6,
+          space_name: '测试空间2',
+          applicant_user_id: '146836',
+          applicant_name: '146836',
+          reason: 'test',
+        },
+        null,
+        2,
+      ),
+    );
     expect(item.status).toBe('PENDING');
     expect(item.canApprove).toBe(false);
   });
@@ -176,6 +192,8 @@ describe('mapWorkOrderDto', () => {
   it('列表 content 为字符串时原样透传、不触发对象解析', () => {
     const { item } = mapWorkOrderDto({ ...workOrderDto });
     expect(item.content).toBe('用户「张三」申请加入空间「风控团队」');
+    // 字符串 content（列表 VO）不进对象分支 → contentRaw 不填充
+    expect(item.contentRaw).toBeUndefined();
     expect(item.applicantName).toBeUndefined();
     expect(item.applyReason).toBe('申请加入空间参与 Skill 建设');
   });
@@ -196,8 +214,10 @@ describe('mapWorkOrderDto', () => {
       biz_type: 'SPACE_JOIN',
       biz_id: '8',
     });
-    // legacy_value 已是后端合成好的展示文案，直接透传（不再走到 space_name/reason 合成分支返回空）
+    // legacy_value 已是后端合成好的展示文案，直接透传（不再走到 space_name/reason 分支返回空）
     expect(item.content).toBe('你加入空间「系统智能」的申请已通过。');
+    // content 为 { legacy_value } 对象 → contentRaw = pretty JSON（抽屉 JSON 展示）
+    expect(item.contentRaw).toBe(JSON.stringify({ legacy_value: '你加入空间「系统智能」的申请已通过。' }, null, 2));
     // 详情 VO 用 work_order_status，mapper 需识别（旧实现只读 status → UNKNOWN）
     expect(item.status).toBe('APPROVED');
     expect(item.statusLabel).toBe('已通过');

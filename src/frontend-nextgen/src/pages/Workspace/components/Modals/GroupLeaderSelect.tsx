@@ -32,7 +32,7 @@ export function GroupLeaderSelect({
 
   return (
     <div>
-      <label className="mb-2 block text-[13px] font-bold text-[var(--color-muted)]" htmlFor={id}>
+      <label className="mb-2 block text-xs font-semibold text-muted-foreground" htmlFor={id}>
         {label}
       </label>
       <Popover open={open} onOpenChange={setOpen}>
@@ -42,16 +42,14 @@ export function GroupLeaderSelect({
             type="button"
             variant="secondary"
             aria-label={label}
-            className="h-10 w-full justify-between rounded-xl border-[var(--color-border)] bg-white px-3 text-left"
+            className="h-9 w-full justify-between rounded-md border-border bg-background px-3 text-left"
           >
-            <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-[var(--color-muted)]')}>
+            <span className={cn('flex min-w-0 flex-1 items-center gap-2', !selected && 'text-muted-foreground')}>
               {selected ? (
                 <>
-                  <span className="max-w-44 truncate text-sm text-[var(--color-fg)]">{selected.name}</span>
+                  <span className="max-w-44 truncate text-sm text-foreground">{selected.name}</span>
                   {selected.current && (
-                    <span className="rounded-full bg-[var(--color-primary-soft)] px-1.5 py-0.5 text-[10px] text-[var(--color-primary)]">
-                      当前
-                    </span>
+                    <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                   )}
                 </>
               ) : (
@@ -59,14 +57,14 @@ export function GroupLeaderSelect({
               )}
             </span>
             <ChevronDown
-              className={cn('h-4 w-4 shrink-0 text-[var(--color-muted)] transition-transform', open && 'rotate-180')}
+              className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
               aria-hidden
             />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1">
           {options.length === 0 ? (
-            <div className="px-3 py-3 text-center text-xs text-[var(--color-muted)]">请先选择成员 Bot</div>
+            <div className="px-3 py-3 text-center text-xs text-muted-foreground">请先选择成员 Bot</div>
           ) : (
             <div className="app-scrollbar max-h-60 space-y-0.5 overflow-y-auto">
               {options.map((option) => {
@@ -80,9 +78,7 @@ export function GroupLeaderSelect({
                     variant="ghost"
                     className={cn(
                       'h-auto w-full justify-start gap-2 rounded-md border-0 px-2 py-2 text-left',
-                      optionSelected
-                        ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-                        : 'text-[var(--color-fg)] hover:bg-[var(--color-panel-muted)]',
+                      optionSelected ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted',
                     )}
                     onClick={() => {
                       onChange(option.id);
@@ -91,9 +87,7 @@ export function GroupLeaderSelect({
                   >
                     <span className="max-w-40 truncate">{option.name}</span>
                     {option.current && (
-                      <span className="rounded-full bg-[var(--color-primary-soft)] px-1.5 py-0.5 text-[10px] text-[var(--color-primary)]">
-                        当前
-                      </span>
+                      <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">当前</span>
                     )}
                     {optionSelected && <Check className="ml-auto h-3.5 w-3.5" aria-hidden />}
                   </Button>
