@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from injector import inject
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, case, func, or_
 
 from agentclaw.community.core.repository.protocols.task import TaskGraphRepositoryProtocol
 from agentclaw.community.core.task.domain.errors import GraphVersionConflictError
@@ -568,8 +568,11 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
         search_word: str | None = None,
         status: str | None = None,
     ) -> "tuple[list[BbsTaskOverviewRecord], int]":
-        """列 BBS 接力任务(run_mode='bbs')的一页(1-based):``task_node_run_info`` ⋈ ``task_node``
+        """列 BBS 接力任务的一页(1-based):``task_node_run_info`` ⋈ ``task_node``
         (task_id+node_id),再按 distinct task_id 批量补 ``task_info.owner_bot_id``→publisher(缺失→None)。
+
+        BBS 判定(二选一 OR):① ``run_mode='bbs'``;② ``extend_props``(JSON)的 ``actual_run_mode='bbs'``
+        (BBS 经理-员工群派发时 scoped 节点 ``run_mode='coop_group'`` 但 ``actual_run_mode='bbs'``)。
         只读投影;返回 ``(records, total)``——``total`` 为**过滤后**行数,``records`` 为当前页
         (按 ``task_node_run_info.id`` 降序(最新优先)稳定切片,LIMIT/OFFSET;页越界 → 空列表,``total`` 仍真实)。
 
@@ -587,21 +590,39 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
             TaskNodeRunInfoModel.task_id == TaskNodeModel.task_id,
             TaskNodeRunInfoModel.node_id == TaskNodeModel.node_id,
         )
-        filters: list = [
-            TaskNodeRunInfoModel.run_mode == "bbs",
-            TaskNodeModel.is_deleted.is_(False),
-        ]
-        if status is not None:
-            filters.append(TaskNodeModel.status == status)
-        if search_word is not None:
-            pat = f"%{search_word.lower()}%"
-            filters.append(
-                or_(
-                    func.lower(TaskNodeModel.task_spec).like(pat),
-                    func.lower(TaskNodeRunInfoModel.extend_props).like(pat),
-                )
-            )
         with self._db.orm_session() as db:
+            # BBS 任务判定(二选一):① task_node_run_info.run_mode='bbs';
+            # ② extend_props(JSON)的 actual_run_mode='bbs'。后者覆盖 BBS 经理-员工群派发——scoped
+            # 节点 run_mode='coop_group' 但 extend_props.actual_run_mode='bbs'(见 bbs_modal_executor.notify
+            # 落库),原 run_mode 单判会漏这批。跨方言 JSON 提取:json_valid 护栏(非 JSON/NULL → NULL);
+            # 非 sqlite 需 json_unquote(MySQL JSON_EXTRACT 返回带引号标量,SQLite json_extract 已去引号)。
+            dialect = db.get_bind().dialect.name
+            actual_run_mode_val = case(
+                (
+                    func.json_valid(TaskNodeRunInfoModel.extend_props) == 1,
+                    func.json_extract(TaskNodeRunInfoModel.extend_props, "$.actual_run_mode"),
+                ),
+                else_=None,
+            )
+            if dialect != "sqlite":
+                actual_run_mode_val = func.json_unquote(actual_run_mode_val)
+            filters: list = [
+                or_(
+                    TaskNodeRunInfoModel.run_mode == "bbs",
+                    actual_run_mode_val == "bbs",
+                ),
+                TaskNodeModel.is_deleted.is_(False),
+            ]
+            if status is not None:
+                filters.append(TaskNodeModel.status == status)
+            if search_word is not None:
+                pat = f"%{search_word.lower()}%"
+                filters.append(
+                    or_(
+                        func.lower(TaskNodeModel.task_spec).like(pat),
+                        func.lower(TaskNodeRunInfoModel.extend_props).like(pat),
+                    )
+                )
             total = (
                 db.query(func.count(TaskNodeRunInfoModel.task_id))
                 .join(TaskNodeModel, join_clause)

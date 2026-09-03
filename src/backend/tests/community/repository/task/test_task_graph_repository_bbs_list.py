@@ -158,6 +158,47 @@ def test_list_bbs_tasks_overview_empty_when_no_bbs(db):
     assert TaskGraphRepository(db).list_bbs_tasks_overview() == ([], 0)
 
 
+# ── BBS 判定二选一:run_mode='bbs' 或 extend_props.actual_run_mode='bbs'(经理-员工群派发留痕)──
+
+
+def test_list_bbs_tasks_overview_includes_coop_group_with_actual_run_mode_bbs(db):
+    """scoped 节点经 BBS 经理-员工群派发:run_mode='coop_group' 但 extend_props.actual_run_mode='bbs'
+    (见 bbs_modal_executor.notify 落库)→ 应被 /bbs/list 命中(新增的第二判定条件)。"""
+    _seed_task(
+        db, task_id="bbs-coop-1", node_id="n1", run_mode="coop_group",
+        extend_props={"assignee_name": "Alice", "actual_run_mode": "bbs"},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview()
+
+    assert total == 1
+    assert [r.task_id for r in rows] == ["bbs-coop-1"]
+
+
+def test_list_bbs_tasks_overview_excludes_coop_group_with_non_bbs_actual_run_mode(db):
+    """extend_props.actual_run_mode='single_bot'(singlebot_2_group 落库留痕)不应被算作 BBS 任务。"""
+    _seed_task(
+        db, task_id="coop-1", node_id="n1", run_mode="coop_group",
+        extend_props={"assignee_name": "Alice", "actual_run_mode": "single_bot"},
+    )
+
+    assert TaskGraphRepository(db).list_bbs_tasks_overview() == ([], 0)
+
+
+def test_list_bbs_tasks_overview_unions_run_mode_bbs_and_actual_run_mode_bbs(db):
+    """两种 BBS 判定都命中,各自计入 total 与页(run_mode='bbs' ⋃ actual_run_mode='bbs')。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs")
+    _seed_task(
+        db, task_id="bbs-coop-1", node_id="n2", run_mode="coop_group",
+        extend_props={"assignee_name": "Bob", "actual_run_mode": "bbs"},
+    )
+
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview()
+
+    assert total == 2
+    assert {r.task_id for r in rows} == {"bbs-1", "bbs-coop-1"}
+
+
 def test_list_bbs_tasks_overview_publisher_none_when_task_info_missing(db):
     # run_info(bbs) + node 存在,但无 task_info 行 → publisher=None(不报错);owner_user_id / publisher_name 也 None。
     _seed_task(db, task_id="orphan-1", node_id="n1", run_mode="bbs", with_task_info=False)
