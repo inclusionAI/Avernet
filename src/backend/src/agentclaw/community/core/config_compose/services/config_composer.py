@@ -194,6 +194,16 @@ class ConfigComposer:
         composes for ARCA at runtime, and a map would state a delivery that
         does not happen. A collector that cannot answer (the bare/unit
         collector) owns nothing for the platform.
+
+        ``cli_tools`` is written like the other four, deliberately. Before
+        ownership followed the operation the map left it out, so that an
+        absent key kept the CLI contract's own removal rule in force (A5);
+        with ownership decided per operation there is no per-category
+        reason to single it out, and the reviewer's rule is that an
+        operation sets every category. Nothing composes a ``cli_tools``
+        list yet, so a ``platform`` value here rides beside an absent
+        array — the teclaw CLI contract, not this map, says what the engine
+        does with that until the composer populates the list.
         """
         if req.engine_type != "teclaw":
             return None
