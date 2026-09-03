@@ -2,18 +2,24 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AccessSection - 接入方式（双接入命令卡）
+ * AccessSection - 接入方式（OpenClaw / DeepSeek Harness 接入命令卡）
  *
  * 页面文案和布局以 GitHub 最新 BcnHome 为基线；登录态用 useRegisterToken 的真实 token 替换，未登录显示 <YOUR_TOKEN>。
  */
 
-import Button from '@/components/Button';
 import { useExt } from '@/capabilities';
+import Button from '@/components/Button';
 import { AppExt } from '@/shell';
+import { getServers } from '@/utils/env';
 import { Check, Copy } from 'lucide-react';
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { useRegisterToken } from '../hooks/useRegisterToken';
+import {
+  DSH_CLI_INSTALL_COMMAND,
+  normalizeBcnEndpoint,
+  renderDshConnectCommand,
+} from '../utils/accessCommands';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -35,21 +41,36 @@ function fallbackCopyText(text: string): boolean {
 }
 
 const AccessSection: React.FC = () => {
-  const { bcnConnectCmdTemplate, bcnAutoConnectCmdTemplate } =
-    useExt(AppExt).resources;
+  const {
+    bcnConnectCmdTemplate,
+    bcnAutoConnectCmdTemplate,
+    dshConnectCmdTemplate,
+  } = useExt(AppExt).resources;
   const { token, isLoading } = useRegisterToken();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const bcnEndpoint = dshConnectCmdTemplate
+    ? normalizeBcnEndpoint(getServers().BCN)
+    : null;
 
   const ways = [
     {
-      title: '用户自助接入',
-      description: '复制以下命令并执行，一键接入本地 openclaw。',
+      title: 'OpenClaw 用户自助接入',
+      description: '复制以下命令并执行，一键接入本地 OpenClaw。',
       template: bcnConnectCmdTemplate,
+      isDsh: false,
     },
     {
-      title: 'Bot 自动接入',
-      description: '将以下指令发送给你的 openclaw。',
+      title: 'OpenClaw Bot 自动接入',
+      description: '将以下指令发送给你的 OpenClaw。',
       template: bcnAutoConnectCmdTemplate,
+      isDsh: false,
+    },
+    {
+      title: 'DeepSeek Harness 一键接入',
+      description:
+        '复制以下命令并执行。命令会检测本机是否安装 dsh；未安装时给出安装提示，检测到后自动安装 BCN 插件、配置 web profile 并完成 onboarding。',
+      template: dshConnectCmdTemplate,
+      isDsh: true,
     },
   ].filter((w) => w.template);
 
@@ -90,10 +111,16 @@ const AccessSection: React.FC = () => {
 
       <div className="grid gap-5 lg:grid-cols-2">
         {ways.map((item, index) => {
-          const command = (item.template as string).replace(
-            '{token}',
-            token ?? TOKEN_PLACEHOLDER,
-          );
+          const command = item.isDsh
+            ? renderDshConnectCommand(
+                item.template as string,
+                bcnEndpoint,
+                token,
+              )
+            : (item.template as string).replace(
+                '{token}',
+                token ?? TOKEN_PLACEHOLDER,
+              );
           return (
             <div
               key={item.title}
@@ -105,6 +132,21 @@ const AccessSection: React.FC = () => {
               <p className="mt-3 text-sm leading-7 text-[#52606d]">
                 {item.description}
               </p>
+              {item.isDsh && !bcnEndpoint && (
+                <p className="mt-2 text-xs text-amber-700">
+                  当前环境没有配置可用的 BCN endpoint，暂时无法生成 DSH
+                  接入指令。
+                </p>
+              )}
+              {item.isDsh && bcnEndpoint && (
+                <p className="mt-2 text-xs text-[#8b95a5]">
+                  若终端提示未找到 dsh，请先执行{' '}
+                  <code className="text-[#52606d]">
+                    {DSH_CLI_INSTALL_COMMAND}
+                  </code>{' '}
+                  安装 DSH CLI，再重新执行接入命令。
+                </p>
+              )}
               <div className="relative mt-4 rounded-2xl bg-[#0f172a] px-4 py-4 pr-14">
                 <code className="block whitespace-pre-wrap break-all font-mono text-xs leading-6 text-[#c7d2fe]">
                   {command}
@@ -115,7 +157,7 @@ const AccessSection: React.FC = () => {
                   ghost
                   size="icon"
                   onClick={() => handleCopy(item.title, command)}
-                  disabled={isLoading}
+                  disabled={isLoading || (item.isDsh && !bcnEndpoint)}
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 text-white/70 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制指令"
                 >

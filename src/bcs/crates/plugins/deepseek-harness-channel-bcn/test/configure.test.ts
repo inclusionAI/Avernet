@@ -132,3 +132,22 @@ async function createProfile(profile: string, patch: string): Promise<string> {
   await writeFile(join(profileDir, 'cordis.patch.yml'), patch);
   return dshHome;
 }
+
+test('install script explains how to install DSH when the CLI is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-bcn-missing-cli-'));
+  const installer = new URL('../install-dsh.sh', import.meta.url);
+  const result = spawnSync('/bin/bash', [installer.pathname,
+    '--endpoint', 'http://127.0.0.1:21000/',
+    '--profile', 'missing-cli',
+  ], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${root}:/usr/bin:/bin`,
+      BCN_ONBOARDING_TOKEN: 'registration-secret',
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.match(`${result.stdout}${result.stderr}`, /npm install --global @deepseek-ai\/dsh@0\.1\.1-rc\.2/);
+  assert.doesNotMatch(`${result.stdout}${result.stderr}`, /registration-secret/);
+});
