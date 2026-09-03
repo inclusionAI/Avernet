@@ -54,10 +54,16 @@ class _NotBound(RuntimeError):
 class _Sync:
     def __init__(self, result: Any) -> None:
         self.result = result
-        self.calls: list[list] = []
+        self.calls: list[str] = []
+
+    def deliver_manifest_apply(self):
+        self.calls.append("deliver_manifest_apply")
+        return self.result
 
     def sync_symlinks(self, symlinks, **_):
-        self.calls.append(symlinks)
+        # A runtime edit's delivery: the redeliver must not take it, because
+        # it composes for the occasion that leaves every category the engine's.
+        self.calls.append("sync_symlinks")
         return self.result
 
 
@@ -100,7 +106,7 @@ def test_the_factory_binds_the_platform_ports_and_the_redeliver() -> None:
     strategy = factory.for_engine("teclaw")
     assert strategy.ports().upload_service == "store"
     assert _run(strategy.finish(make_context(engine_type="teclaw"), _report())) is None
-    assert sync.calls == [[]]
+    assert sync.calls == ["deliver_manifest_apply"]
 
 
 # ── finish: the four combinations ──────────────────────────────────────────
@@ -117,7 +123,7 @@ def test_on_and_bound_redelivers_once() -> None:
     redeliver, sync, resolved = _redeliver(bound=True)
     ctx = make_context(engine_type="teclaw", owner_id="u_owner")
     assert _run(_strategy(on=True, redeliver=redeliver).finish(ctx, _report())) is None
-    assert sync.calls == [[]]
+    assert sync.calls == ["deliver_manifest_apply"]
     # Resolved as the owner's bot, the identity the binding was made under.
     assert resolved == [("b_1", "u_owner")]
 
@@ -134,7 +140,7 @@ def test_on_and_a_failed_delivery_is_a_note_not_a_raise() -> None:
     ctx = make_context(engine_type="teclaw")
     note = _run(_strategy(on=True, redeliver=redeliver).finish(ctx, _report()))
     assert note is not None and "HTTP 503" in note
-    assert sync.calls == [[]]
+    assert sync.calls == ["deliver_manifest_apply"]
 
 
 def test_off_is_a_no_op_even_when_bound() -> None:

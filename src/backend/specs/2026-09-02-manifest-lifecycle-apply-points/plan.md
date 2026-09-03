@@ -40,14 +40,13 @@ apply service ── strategy_for(bot) ──► build_materialisers(**strategy.
 
 teclaw store path (switch on)
   materialiser.write ──► ManagedFilesStore.put(bot, category, rel, bytes) ──► OSS object under the bot's `_manifest` prefix
-  composer(teclaw)   ──► collector.identity_files/resources/skills ──► ManagedFilesReader.refs(bot, category) when ownership==platform
-                     ──► artifact.ownership = {mcp: platform, identity_files|resources|skills: platform|engine}
+  composer(teclaw)   ──► collector.identity_files/resources/skills ──► ManagedFilesReader.refs(bot, category) when the platform owns the compose
+                     ──► artifact.ownership = all platform (MANIFEST_APPLY; PROVISION with a manifest) | all engine but mcp (RUNTIME)
 
 creation (teclaw, switch on)   record ─► apply(PRE, all) ─► provision(composes from the store's listing) ─► wait ACTIVE ─► READY
 creation (ARCA)                apply(PRE=script) ─► create+provision ─► wait ACTIVE ─► apply(ON) ─► READY     (unchanged)
 
 PUT ─► manifest_service.put ─► start_apply(trigger=put, ALL_PHASES) ─► response.apply
-startup-script PUT/DELETE/GET ─► manifest_service.write_through_script / script_body ─► legacy path when no manifest
 ```
 
 ## Key decisions
@@ -123,11 +122,15 @@ caller is unchanged.
 `ownership` object whose values are `platform` or `engine`, with the semantics
 in its description.
 
-`ComposeRequest` gains `platform_managed: frozenset[str] | None` (a
-carry-along, `compare=False`). The teclaw producer and the teclaw device-sync
-service fill it through one injected `PlatformManagedCategoriesReader`
+`ComposeRequest` gains `occasion: ComposeOccasion` (`RUNTIME` by default,
+`PROVISION` from eager provisioning, `MANIFEST_APPLY` from the closing
+redeliver). The collector asks one injected `PlatformOwnershipReader`
 (protocol in `core/config_compose/protocols.py`, implemented in the manifest
-package: the categories the stored manifest declares, when the switch is on).
+package) whether the platform owns the compose: yes for `MANIFEST_APPLY` and
+for `PROVISION` on a bot with a manifest, when the switch is on; no otherwise.
+The composer writes every category `platform` or every category `engine`
+from that one answer (`mcp` always `platform`). Revision 5; revision 3 keyed
+the map on the categories the stored manifest declared.
 The composer writes the map for teclaw requests only; the collector's teclaw
 branches for identity, resources and skills read the store through a
 `ManagedFilesReader` when the category is `platform`, and return today's
@@ -170,11 +173,13 @@ The poll's `_creation_state` takes the sequence: under `RECORD_APPLY_PROVISION`,
 `user_config.bot_config_manifest.teclaw_platform_managed`. Documented in the
 config reference and the module README with the condition for flipping it.
 
-### K-8 `PUT`, the warnings, the write-through
+### K-8 `PUT` and the warnings
 
 As in revision 2 (`ConfigManifestApplyStarted`, `declares_script`, the
 not-ACTIVE warning — now conditional on the strategy having `ON_CONTAINER`
-constructs — `write_through_script`, `script_body`, the splice helper).
+constructs). The write-through alias (`write_through_script`, `script_body`,
+the splice helper) is withdrawn in revision 5: the legacy `/startup-script`
+routes stay as they were.
 
 ### K-9 What is deliberately not touched
 
@@ -196,8 +201,8 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | `core/bot_config_manifest/managed_files/{store.py,ports.py,reader.py}` | `ManagedFilesStore`; `StoreIdentityPort`, `StoreResourcePort`, `StoreSkillPackagePort`; the composer-facing reader |
 | `core/bot_config_manifest/managed_files/README.md` | Context boundary |
 | ~~the index table, its repository, protocol and DDL~~ | Dropped in rev 4 |
-| `core/bot_config_manifest/schema/splice.py` | The `script` splice |
-| `core/config_compose/protocols.py` additions | `PlatformManagedCategoriesReader`, `ManagedFilesReader` |
+| ~~`core/bot_config_manifest/schema/splice.py`~~ | Withdrawn in rev 5 |
+| `core/config_compose/protocols.py` additions | `PlatformOwnershipReader`, `ManagedFilesReader` |
 | `tests/…` | Listed per task |
 
 ### Changed
@@ -205,15 +210,15 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | File | Change |
 | --- | --- |
 | `kernel/bot_config/artifact.py`, `artifact.schema.json` | `ownership`; omission; schema |
-| `core/config_compose/models.py`, `services/config_composer.py`, `services/collector.py` | `platform_managed` on the request; the map; store-backed teclaw branches |
-| `core/service_bot/services/deploy/external_compose_producer.py`, `devices/services/teclaw_device_sync.py` | Fill `platform_managed` through the reader |
+| `core/config_compose/models.py`, `services/config_composer.py`, `services/collector.py` | `ComposeOccasion` on the request; the map by operation; store-backed teclaw branches |
+| `core/service_bot/services/deploy/external_compose_producer.py`, `devices/services/teclaw_device_sync.py`, `bot_management/services/teclaw_provision_service.py` | Name the occasion: `PROVISION` from provisioning, `MANIFEST_APPLY` from `deliver_manifest_apply` |
 | `core/skill_center/services/direct_activation_service.py`, its protocol in `api/` | `project` parameter |
 | `core/bot_management/services/bot_service.py`, `create_flow.py` | `provision` option; `provision_bot`; `complete_manifest_creation(provision=)` |
-| `core/bot_config_manifest/services/config_manifest_apply_service.py` | Strategy selection; ports from the strategy; `finish`; `write_through_script` lives in the manifest service |
+| `core/bot_config_manifest/services/config_manifest_apply_service.py` | Strategy selection; ports from the strategy; `finish` |
 | `core/bot_config_manifest/apply/order.py` | `steps_for` delegates; ARCA default phases |
 | `core/bot_config_manifest/create_job.py`, `creation.py`, `adapters/.../create_with_manifest.py` | Sequence-aware job and poll; refusal removed |
-| `core/bot_config_manifest/services/config_manifest_service.py`, protocol, `api/` | `write_through_script`, `script_body`, `declares_script` |
-| `adapters/http/openapi_v1/bots/{config_manifest.py,config_manifest_support.py,schemas.py,router.py,startup_script_support.py}` | `PUT` apply + `apply` field + warnings; write-through arms |
+| `core/bot_config_manifest/services/config_manifest_service.py`, protocol, `api/` | `declares_script` |
+| `adapters/http/openapi_v1/bots/{config_manifest.py,config_manifest_support.py,schemas.py}` | `PUT` apply + `apply` field + warnings |
 | `di/modules/{bot_management_module,manifest_fetch_module,service_bot_module,skill_center_module}.py` | Strategy factory; store; reader bindings; switch |
 | `docs/bot-config-manifest/engine-convergence-contract.zh-CN.md` | The addendum (§9) |
 | `docs/bot-config-manifest/{user-manual,work-items,work-items.zh-CN}.md`, `core/bot_config_manifest/README.md`, `docs/arch` config reference | Docs |
@@ -255,9 +260,9 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 - **Record-only activation** — `project=False` records and never projects;
   `project=True` unchanged.
 - **Ownership map and composer** — `to_dict` omits when unset; schema accepts;
-  teclaw compose emits `platform` / `engine` per declared category and reads
-  the store; ARCA compose carries no map; a bot without a manifest gets
-  `engine` for the file categories.
+  teclaw compose emits all-`platform` for a manifest apply's redeliver and a
+  manifest bot's first artifact, and all-`engine` (but `mcp`) for a runtime
+  edit; only the former reads the store; ARCA compose carries no map.
 - **Closing redeliver** — one dispatch call after a teclaw-on apply with a
   binding; none without; none with the switch off; a failing redeliver is a
   report note.
@@ -266,8 +271,8 @@ constructs — `write_through_script`, `script_body`, the splice helper).
   only after terminal, no phase B, re-entrant at every step; the provisioner
   hands an artifact with refs and the map; the poll's states under both
   sequences; ARCA job tests unedited.
-- **`PUT`, write-through, §2.12, regression** — as in revision 2, plus the
-  teclaw-on variant of the ordering pin.
+- **`PUT`, §2.12, regression** — as in revision 2, plus the teclaw-on
+  variant of the ordering pin.
 - **Architecture gates** — module boundaries (new dependency rows), service
   API conformance (new protocol members), HTTP-only adapter, authorization
   inventory, oversized modules, no module-level service instances.
@@ -280,3 +285,4 @@ constructs — `write_through_script`, `script_body`, the splice helper).
 | **rev 2** | Restart and republish deferred; teclaw creation as "the same job". |
 | **rev 3** | The delivery-strategy seam; teclaw as store + index + artifact behind a switch; the ownership map; record, apply, provision. |
 | **rev 4** | Review: the index table is dropped; the object key layout is the record, listed by prefix. |
+| **rev 5** | Review: ownership follows the operation (`ComposeOccasion`), not the declared categories; the `/startup-script` write-through alias is withdrawn. |

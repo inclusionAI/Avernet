@@ -1,29 +1,20 @@
 """What the teclaw composer reads from the managed-files store (W8).
 
-Two questions, one object. *Which categories does the platform assert for this
-bot?* — the categories its stored manifest declares, as artifact field names,
-when the platform-managed switch is on; otherwise none. *What files does the
-platform hold for them?* — store-relative refs from the store's listing, in
-the shapes the collector already yields, so the composer embeds them the way
-it embeds everything else.
-
-The document is parsed the same way apply parses it (``yaml.safe_load`` plus
-the orchestrator's ``declared_entries``), so "declared" means exactly what it
-means at apply time: a declared-empty category is declared.
+Two questions, one object. *Does the platform own this compose?* — yes for
+the closing redeliver of a manifest apply and for the first artifact of a
+bot that carries a manifest, when the platform-managed switch is on; no for
+a runtime edit, for another engine family, and while the switch is off.
+*What files does the platform hold for the bot?* — store-relative refs from
+the store's listing, in the shapes the collector already yields, so the
+composer embeds them the way it embeds everything else.
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Collection, Optional
+from typing import Callable, Collection
 
-import yaml
-
-from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
-    declared_entries,
-)
 from agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol import (
     BotConfigManifestServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
 from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     BOT_DATA_STORE,
     OWNER_ENTITY_TYPE,
@@ -39,27 +30,16 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
 from agentclaw.community.core.config_compose.models import (
     CollectedFile,
     CollectedSkill,
+    ComposeOccasion,
     ComposeRequest,
 )
-from agentclaw.community.kernel.bot_config import OwnershipCategory
-from agentclaw.community.log import get_logger
-
-logger = get_logger()
-
-#: Manifest category → artifact category.
-ARTIFACT_FIELD_OF: dict[ManifestCategory, OwnershipCategory] = {
-    ManifestCategory.IDENTITY: OwnershipCategory.IDENTITY_FILES,
-    ManifestCategory.RESOURCES: OwnershipCategory.RESOURCES,
-    ManifestCategory.SKILLS: OwnershipCategory.SKILLS,
-    ManifestCategory.MCP: OwnershipCategory.MCP,
-}
 #: The engine family this store serves. The reader answers for it alone, so
 #: the collector never has to know which engine a compose is for.
 SERVED_ENGINE = "teclaw"
 
 
 class ManagedFilesComposeReader:
-    """Implements ``PlatformManagedCategoriesReader`` and ``ManagedFilesReader``."""
+    """Implements ``PlatformOwnershipReader`` and ``ManagedFilesReader``."""
 
     def __init__(
         self,
@@ -72,38 +52,25 @@ class ManagedFilesComposeReader:
         self._manifests = manifest_service_provider
         self._platform_managed = platform_managed
 
-    # ── PlatformManagedCategoriesReader ──────────────────────────────────
+    # ── PlatformOwnershipReader ──────────────────────────────────────────
 
-    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]:
+    def platform_owns(self, req: ComposeRequest) -> bool:
+        """Ownership follows the operation (engine contract §9.2).
+
+        A manifest apply's closing redeliver is the platform's: it has just
+        written every category into its own state. The first artifact of a
+        new container is the platform's when the bot carries a manifest —
+        the creation job applied it before provisioning — and the engine's
+        for a bot created without one, so a template's own files are not
+        told to go. A runtime edit is always the engine's.
+        """
         if req.engine_type != SERVED_ENGINE or not self._platform_managed():
-            return frozenset()
-        parsed = self._parsed(req)
-        if parsed is None:
-            return frozenset()
-        # MCP is not a *file* category and is not decided here: on teclaw the
-        # artifact has carried the whole MCP set since W12, so the composer
-        # marks it the platform's unconditionally. This answer is about the
-        # three categories whose bytes the platform may or may not hold.
-        return frozenset(
-            field
-            for category, field in ARTIFACT_FIELD_OF.items()
-            if category is not ManifestCategory.MCP
-            and declared_entries(parsed, category) is not None
-        )
-
-    def _parsed(self, req: ComposeRequest) -> Optional[dict[str, Any]]:
-        record = self._manifests().get(entity_id=req.entity_id, bot_id=req.bot_id)
-        if record is None:
-            return None
-        try:
-            parsed = yaml.safe_load(record.document)
-        except yaml.YAMLError:
-            logger.warning(
-                "[managed_files.reader] stored manifest does not parse: bot_id=%s",
-                req.bot_id,
-            )
-            return None
-        return parsed if isinstance(parsed, dict) else None
+            return False
+        if req.occasion is ComposeOccasion.MANIFEST_APPLY:
+            return True
+        if req.occasion is ComposeOccasion.PROVISION:
+            return self._manifests().get(entity_id=req.entity_id, bot_id=req.bot_id) is not None
+        return False
 
     # ── ManagedFilesReader ───────────────────────────────────────────────
 
@@ -177,4 +144,4 @@ def _scope(req: ComposeRequest) -> ManagedFileScope:
     )
 
 
-__all__ = ["ARTIFACT_FIELD_OF", "SERVED_ENGINE", "ManagedFilesComposeReader"]
+__all__ = ["SERVED_ENGINE", "ManagedFilesComposeReader"]

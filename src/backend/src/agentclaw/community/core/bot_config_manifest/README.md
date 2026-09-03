@@ -419,14 +419,18 @@ families** (spec D-3). On ARCA that was already so. On teclaw the artifact is
 the delivery, so the platform holds its own copy of every manifest-delivered
 file: bytes in the bot-data object store under the promotion key layout with a
 `_manifest` segment, no index table beside them — the key layout is the record
-(`managed_files/`, see its README). The teclaw composer lists that prefix for
-every category the platform asserts and writes the artifact's **`ownership`**
-map (`platform` / `engine` per category; `mcp` always `platform`; ARCA
-artifacts carry no map) — the engine contract's §9. A local skill the manifest
-installs rides as a `SkillRef` with a store address (R-O3) — plus its files
-as resources refs when `resources` is the platform's too, never in a list the
-map says the engine owns; the collector emits it only while the bot has the
-skill active.
+(`managed_files/`, see its README). The teclaw composer writes the artifact's
+**`ownership`** map — the engine contract's §9 — and **ownership follows the
+operation**, not the bot's declarations (`ComposeOccasion` on the compose
+request): the closing redeliver of a manifest apply, and the first artifact
+of a bot that carries a manifest, are the platform's for every category, and
+the composer lists the store for the file categories; every runtime edit — a
+skill or resource upload, an MCP edit, a channel change, a publish build — is
+the engine's for every category and reads no managed file. `mcp` is the
+platform's on every occasion (the artifact has carried the whole MCP set
+since W12); ARCA artifacts carry no map. A local skill the manifest installs
+rides as a `SkillRef` with a store address (R-O3) plus its files as resources
+refs; the collector emits it only while the bot has the skill active.
 
 **The switch.** `user_config.bot_config_manifest.teclaw_platform_managed`
 (default `false`), read once at boot by `DeliveryStrategyFactory` and nowhere
@@ -434,9 +438,9 @@ else, strict about booleans. It stays off until the teclaw engine implements
 the `ownership` map (R-O1/R-O2/R-O3); off, teclaw runs the shape it ran before
 W8 and the only artifact change is an all-`engine` map. **Before flipping it on
 an existing deployment, explicitly apply each teclaw bot's manifest once** so
-the store carries its files: the composer asserts `platform` from the stored
-manifest, and an empty prefix under an asserted category means "remove the
-area" to an engine that honours the map.
+the store carries its files: the next apply's redeliver asserts `platform`
+for every category, and an empty prefix under an asserted category means
+"remove the area" to an engine that honours the map.
 
 **`PUT` starts an apply** (§2.6): the document is stored and validated exactly
 as before, then both phases are started under trigger `put`; the response's
@@ -447,12 +451,13 @@ the note that those will be recorded as failed. Restart and republish are
 **not** apply points in this iteration (spec D-1): a change to the git repo a
 manifest ref points at is picked up by an explicit apply or the next `PUT`.
 
-**The alias view** (§2.2): on a bot with a manifest the legacy
-`…/startup-script` routes are a view of its `script` section —
-`write_through_script` splices the section (`schema/splice.py`, a textual
-splice that keeps every other byte), stores through the same validation and
-writes the row with the substituted body; `script_body` answers `GET`. A bot
-without a manifest is served exactly as before.
+**The legacy `…/startup-script` routes are untouched.** The manifest is a
+layer the startup script does not know about (review decision on
+inclusionAI/Avernet#1836): the routes read and write the
+`ac_bot_startup_script` row as before, and a manifest that declares `script`
+materialises into that same row on apply. An edit made through the legacy
+route on a bot whose manifest declares `script` is therefore replaced by the
+next apply — the manifest is the source of truth for what it declares.
 
 **Trigger vocabulary** (`apply/triggers.py`): `explicit`, `put`,
 `create:pre_container`, `create:on_container`. The apply record's column is 32

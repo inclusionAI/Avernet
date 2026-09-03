@@ -17,7 +17,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     category_of,
     name_of,
 )
-from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.config_compose.models import ComposeOccasion, ComposeRequest
 
 from ._fakes import FakeObjectStorage
 
@@ -213,17 +213,35 @@ def _reader(store, document, switch=True):
     )
 
 
-def test_platform_managed_is_the_declared_file_categories_when_the_switch_is_on() -> None:
+def _occasion(occasion: ComposeOccasion, engine_type: str = "teclaw") -> ComposeRequest:
+    return ComposeRequest(
+        entity_id="u1", bot_id="bot7", user_id="u1", engine_type=engine_type, entity_type="staff",
+        occasion=occasion,
+    )
+
+
+def test_ownership_follows_the_operation_when_the_switch_is_on() -> None:
     store, _ = _store()
-    doc = "schema_version: 1\nmanifest:\n  identity: []\n  resources:\n    - path: kb/a.md\n      content: hi\n  mcp: []\n"
-    assert _reader(store, doc).platform_managed(_REQ) == frozenset({"identity_files", "resources"})
+    doc = "schema_version: 1\nmanifest:\n  identity: []\n"
+    apply, provision, runtime = (
+        _occasion(ComposeOccasion.MANIFEST_APPLY),
+        _occasion(ComposeOccasion.PROVISION),
+        _occasion(ComposeOccasion.RUNTIME),
+    )
+    # A manifest apply's redeliver is the platform's, manifest or no manifest
+    # (the apply that just ran is what the store holds).
+    assert _reader(store, doc).platform_owns(apply) is True
+    assert _reader(store, None).platform_owns(apply) is True
+    # The first artifact is the platform's only for a bot that carries a manifest.
+    assert _reader(store, doc).platform_owns(provision) is True
+    assert _reader(store, None).platform_owns(provision) is False
+    # A runtime edit is the engine's, manifest or no manifest.
+    assert _reader(store, doc).platform_owns(runtime) is False
     # The engine decision is the reader's: another family gets nothing, switch or no switch.
-    arca = ComposeRequest(entity_id="u1", bot_id="bot7", user_id="u1", engine_type="openclaw", entity_type="staff")
-    assert _reader(store, doc).platform_managed(arca) == frozenset()
-    assert _reader(store, doc, switch=False).platform_managed(_REQ) == frozenset()
-    assert _reader(store, None).platform_managed(_REQ) == frozenset()
-    assert _reader(store, "schema_version: 1\n").platform_managed(_REQ) == frozenset()
-    assert _reader(store, ": not yaml [").platform_managed(_REQ) == frozenset()
+    assert _reader(store, doc).platform_owns(_occasion(ComposeOccasion.MANIFEST_APPLY, "openclaw")) is False
+    # And the switch gates everything.
+    assert _reader(store, doc, switch=False).platform_owns(apply) is False
+    assert _reader(store, doc, switch=False).platform_owns(provision) is False
 
 
 def test_the_reader_yields_collector_shaped_refs_from_the_store() -> None:

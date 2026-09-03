@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Any, Collection, Protocol, runtime_checkable
 
-from agentclaw.community.kernel.bot_config import OwnershipCategory
 from agentclaw.community.core.config_compose.models import (
     CollectedFile,
     CollectedSkill,
@@ -25,24 +24,26 @@ from agentclaw.community.core.config_compose.models import (
 __all__ = [
     "ComposeInputCollector",
     "ManagedFilesReader",
-    "PlatformManagedCategoriesReader",
+    "PlatformOwnershipReader",
 ]
 
 
 @runtime_checkable
-class PlatformManagedCategoriesReader(Protocol):
-    """Which artifact categories the platform asserts for a bot (W8).
+class PlatformOwnershipReader(Protocol):
+    """Whether the platform is the source of truth for a compose's categories (W8).
 
-    Answered from the bot's stored manifest and the platform-managed switch:
-    the file categories the manifest declares (``IDENTITY_FILES``,
-    ``RESOURCES``, ``SKILLS``), or the empty set for an engine the reader does
-    not serve, when the switch is off, or when the bot has no manifest. The
-    composer turns the answer into the artifact's ``ownership`` map and into
-    which source it reads the file categories from. The engine decision is
-    the reader's: the collector asks without knowing the engine.
+    Ownership follows the *operation*, not the bot's declarations: it is the
+    platform's for the closing redeliver of a manifest apply and for the
+    first artifact of a bot that carries a manifest, and the engine's for
+    every runtime edit — a skill or resource upload, an MCP edit, a publish
+    build. The reader also answers ``False`` for an engine family it does not
+    serve and while the platform-managed switch is off. The composer turns the
+    answer into the artifact's ``ownership`` map and into which source the
+    file categories are read from. The engine decision is the reader's: the
+    collector asks without knowing the engine.
     """
 
-    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]: ...
+    def platform_owns(self, req: ComposeRequest) -> bool: ...
 
 
 @runtime_checkable
@@ -51,7 +52,7 @@ class ManagedFilesReader(Protocol):
 
     Store-relative refs, in the shape the collector already yields, read from
     the managed-files store rather than from the running container. The
-    composer consults it only for a category the platform asserts.
+    composer consults it only when the platform owns the compose.
     """
 
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]: ...

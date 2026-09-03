@@ -126,34 +126,6 @@ class BotConfigManifestServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def write_through_script(
-        self,
-        *,
-        entity_id: str,
-        bot_id: str,
-        body: Optional[str],
-        modifier: str,
-        active_engine: Optional[str],
-        bot_type: Optional[str],
-    ) -> Optional[ManifestWriteResult]:
-        """The legacy startup-script write, through the manifest (W8, §2.2).
-
-        ``None`` when the bot has no manifest — the caller takes the legacy
-        path. Otherwise the document's ``script`` section is replaced by
-        ``body`` (removed for ``None``), the document is stored through the
-        same validation as any write, and the startup-script row is written
-        with the body the materialiser would write. A refusal propagates and
-        leaves both untouched.
-        """
-        ...
-
-    @abstractmethod
-    def script_body(self, *, entity_id: str, bot_id: str) -> Optional[str]:
-        """The declared ``script.body``, or ``None`` when the manifest is absent
-        or declares no script."""
-        ...
-
-    @abstractmethod
     def validate(
         self,
         *,

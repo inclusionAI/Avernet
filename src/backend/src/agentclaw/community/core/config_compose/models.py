@@ -8,18 +8,45 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, TypeVar
 
 
 __all__ = [
     "McpComposeInput",
     "StdioLaunch",
+    "ComposeOccasion",
     "ComposeRequest",
     "CollectedSkill",
     "CollectedFile",
 ]
 
 _T = TypeVar("_T")
+
+
+class ComposeOccasion(StrEnum):
+    """What a compose is *for* — which decides who owns the artifact's categories (W8).
+
+    Ownership is a property of the operation, not of the bot: a manifest
+    apply makes the platform the source of truth for every category, and any
+    other operation leaves them the engine's. The composer reads this value
+    and nothing else to write the artifact's ``ownership`` map.
+    """
+
+    RUNTIME = "runtime"
+    """A runtime edit or a publish build: a skill or resource upload, an MCP
+    edit, a channel change, the publish flow. The engine is the source of
+    truth for every category. The default."""
+
+    PROVISION = "provision"
+    """The first artifact for a new container. The platform is the source of
+    truth when the bot carries a manifest — the creation job applied it into
+    platform state before provisioning — and the engine otherwise."""
+
+    MANIFEST_APPLY = "manifest_apply"
+    """The closing redeliver of a manifest apply: the platform has just
+    written every category into its own state, and the artifact carries it.
+    The platform is the source of truth for every category."""
 
 
 @dataclass(frozen=True)
@@ -56,6 +83,12 @@ class ComposeRequest:
     engine_type: str
     entity_type: str = "staff"
     version: int | None = None  # set for a published snapshot; None for live/draft
+    occasion: ComposeOccasion = ComposeOccasion.RUNTIME
+    """What this compose is for — see :class:`ComposeOccasion`. Part of the
+    request's identity, unlike the two carry-alongs below: the same bot
+    composed for a manifest apply and for a skill upload yields different
+    artifacts."""
+
     effective_mcps: tuple[dict[str, Any], ...] | None = field(
         default=None, compare=False
     )

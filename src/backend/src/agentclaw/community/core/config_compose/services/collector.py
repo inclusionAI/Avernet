@@ -57,7 +57,6 @@ from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
     get_bolt_base_dir,
 )
-from agentclaw.community.kernel.bot_config import OwnershipCategory
 from agentclaw.community.log import get_logger
 
 
@@ -164,38 +163,32 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # endpoint that never existed. Injectable for tests.
         self._local_mcp_registry = local_mcp_registry or LocalMCPRegistry()
         # W8: the platform's own copy of a teclaw bot's manifest-delivered
-        # files, and which categories the platform asserts for the bot. None
-        # (the bare/unit collector) means the platform asserts nothing, and
-        # every teclaw branch below answers as it did before W8.
+        # files, and whether the platform owns a given compose. None (the
+        # bare/unit collector) means the engine owns every compose, and every
+        # teclaw branch below answers as it did before W8.
         self._managed_files = managed_files_reader
 
-    # ── platform-managed categories (W8) ────────────────────────────────
-    def platform_managed(self, req: ComposeRequest) -> frozenset[OwnershipCategory]:
-        """The artifact categories the platform asserts for this bot.
+    # ── platform ownership (W8) ─────────────────────────────────────────
+    def platform_owns(self, req: ComposeRequest) -> bool:
+        """Whether the platform is the source of truth for this compose.
 
         Read once per compose from the managed-files reader, which decides
-        for its own engine family; empty when no reader is bound (the
-        bare/unit collector), for an engine the reader does not serve, for a
-        bot without a manifest, and while the platform-managed switch is off.
-        The composer turns it into the artifact's ``ownership`` map; the three
-        file-category branches below read the store for a category in it and
-        answer as before for one that is not. The collector itself never
-        names an engine.
+        for its own engine family and from the compose's occasion; ``False``
+        when no reader is bound (the bare/unit collector), for an engine the
+        reader does not serve, for a runtime edit, and while the
+        platform-managed switch is off. The composer turns it into the
+        artifact's ``ownership`` map; the three file-category branches below
+        read the store when it holds and answer as before W8 when it does
+        not. The collector itself never names an engine.
         """
         if self._managed_files is None:
-            return frozenset()
+            return False
         reader = self._managed_files
-        return req.memoized(
-            "platform_managed", lambda: frozenset(reader.platform_managed(req))
-        )
+        return req.memoized("platform_owns", lambda: bool(reader.platform_owns(req)))
 
-    def _managed(
-        self, req: ComposeRequest, category: OwnershipCategory
-    ) -> ManagedFilesReader | None:
-        """The reader, when ``category`` is the platform's for this bot."""
-        if category in self.platform_managed(req):
-            return self._managed_files
-        return None
+    def _managed(self, req: ComposeRequest) -> ManagedFilesReader | None:
+        """The reader, when the platform owns this compose."""
+        return self._managed_files if self.platform_owns(req) else None
 
     # ── skills ──────────────────────────────────────────────────────────
     def skills(self, req: ComposeRequest) -> list[CollectedSkill]:
@@ -266,8 +259,8 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                     )
                 )
             # local:// (user upload) intentionally skipped — engine-owned; see
-            # docstring — unless the platform holds the package (W8, below).
-        managed = self._managed(req, OwnershipCategory.SKILLS)
+            # docstring — unless the platform owns the compose (W8, below).
+        managed = self._managed(req)
         if managed is not None:
             # The platform's copies of the bot's local packages: a ``SkillRef``
             # per package the store holds *and* the bot has active. The store
@@ -643,26 +636,21 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         ]
 
     def _teclaw_resources(self, req: ComposeRequest) -> list[CollectedFile]:
-        """teclaw: the platform's resources when it asserts the category (W8).
+        """teclaw: the platform's resources when it owns the compose (W8).
 
-        When the platform asserts ``resources`` *and* ``skills``, the files of
-        every platform-held local skill the bot has active ride here too,
-        beside their ``SkillRef`` — the shape the publish gather produces. When
-        only ``skills`` is the platform's, the ``SkillRef`` alone carries the
-        package (engine contract R-O3): a resources list the map says the
-        engine owns must not carry files the engine would then ignore.
-        Nothing when the platform asserts neither, as before W8.
+        The files of every platform-held local skill the bot has active ride
+        here too, beside their ``SkillRef`` — the shape the publish gather
+        produces (engine contract R-O3). Nothing when the engine owns the
+        compose, as before W8.
         """
-        managed = self._managed(req, OwnershipCategory.RESOURCES)
+        managed = self._managed(req)
         if managed is None:
             return []
         collected: list[CollectedFile] = list(managed.resources(req))
-        managed_skills = self._managed(req, OwnershipCategory.SKILLS)
-        if managed_skills is not None:
-            active = req.memoized("active_skill_rows", lambda: self._active_skill_rows(req))
-            names = self._active_local_names(active)
-            if names:
-                collected.extend(managed_skills.skill_files(req, names))
+        active = req.memoized("active_skill_rows", lambda: self._active_skill_rows(req))
+        names = self._active_local_names(active)
+        if names:
+            collected.extend(managed.skill_files(req, names))
         return collected
 
     # ── identity files ──────────────────────────────────────────────────
@@ -690,8 +678,8 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # /identity namespace): draft compose carries none; they are gathered from
         # the engine at promotion, like resources.
         if req.engine_type == "teclaw":
-            # W8: the platform's copies when it asserts the category.
-            managed = self._managed(req, OwnershipCategory.IDENTITY_FILES)
+            # W8: the platform's copies when it owns the compose.
+            managed = self._managed(req)
             return list(managed.identity_files(req)) if managed is not None else []
 
         from agentclaw.community.core.services.identity import VALID_IDENTITY_FILES

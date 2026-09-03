@@ -82,9 +82,6 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     generate_bot_id,
     validate_bot_name,
 )
-from agentclaw.community.api.bot_config_manifest_service import (
-    BotConfigManifestServiceProtocol,
-)
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
@@ -1346,36 +1343,17 @@ async def get_bot_startup_script(
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
     ),
-    manifest_service: BotConfigManifestServiceProtocol = Injected(
-        BotConfigManifestServiceProtocol
-    ),
 ) -> Envelope[StartupScript]:
     """Read a bot's startup script.
 
     A bot that has never had one reads as an empty script, not an error. An
     unsupported bot still answers here — with supported false and a reason —
     so a caller can discover why before trying to write.
-
-    **The alias rule (W8).** On a bot whose configuration manifest declares a
-    `script`, this answers with the manifest's body: the manifest is the
-    source of truth and this endpoint is a view of its `script` section.
-    Otherwise the stored row, exactly as before.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
-    declared = manifest_service.script_body(entity_id=entity_id, bot_id=bot_id)
-    declared_by = (
-        manifest_service.get(entity_id=entity_id, bot_id=bot_id)
-        if declared is not None
-        else None
-    )
-    return envelope(
-        _startup_script_payload(
-            bot_id, record, state, reason, manifest_body=declared, manifest_record=declared_by
-        ),
-        request,
-    )
+    return envelope(_startup_script_payload(bot_id, record, state, reason), request)
 
 
 @router.put(
@@ -1395,9 +1373,6 @@ async def update_bot_startup_script(
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
     ),
-    manifest_service: BotConfigManifestServiceProtocol = Injected(
-        BotConfigManifestServiceProtocol
-    ),
 ) -> Envelope[StartupScript]:
     """Set or replace a bot's startup script.
 
@@ -1409,14 +1384,6 @@ async def update_bot_startup_script(
 
     Refused for a bot whose container cannot run one: storing it would be a
     silent no-op the caller could not distinguish from success.
-
-    **The alias rule (W8).** On a bot that carries a configuration manifest,
-    the write goes *through* the manifest: the document's `script` section is
-    rewritten to this body (added when absent), stored through the same
-    validation as `PUT …/config-manifest`, and the row follows it — so
-    `GET …/config-manifest` and this endpoint agree, and the next apply finds
-    the script already in place. A bot without a manifest is written exactly
-    as before.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     # Desktop bots are refused by ``resolve_support`` itself, not by a guard
@@ -1426,32 +1393,18 @@ async def update_bot_startup_script(
     entity_id, state, reason = _startup_script_target(bot, startup_script_service)
     if state != SUPPORTED:
         raise StartupScriptUnsupportedError(reason)
-    # From the verified caller, never the body — and naming the application
-    # when one is acting, not the user it acted for.
-    modifier = _audit_actor(caller, owner_id)
-    written = manifest_service.write_through_script(
+    record = startup_script_service.put(
         entity_id=entity_id,
         bot_id=bot_id,
-        body=body.script,
-        modifier=modifier,
-        active_engine=bot.get("active_engine"),
-        bot_type=bot.get("bot_type"),
+        script=body.script,
+        # From the verified caller, never the body — and naming the application
+        # when one is acting, not the user it acted for.
+        modifier=_audit_actor(caller, owner_id),
     )
-    if written is None:
-        record = startup_script_service.put(
-            entity_id=entity_id, bot_id=bot_id, script=body.script, modifier=modifier
-        )
-    else:
-        # The manifest arm wrote the row itself; read it back for the audit
-        # fields rather than shaping a record by hand.
-        record = startup_script_service.get(entity_id=entity_id, bot_id=bot_id)
     _withdraw_the_write_if_the_bot_was_deleted(
         bot_id, entity_id, owner_id, bot_service, startup_script_service
     )
-    return envelope(
-        _startup_script_payload(bot_id, record, SUPPORTED, "", manifest_body=body.script),
-        request,
-    )
+    return envelope(_startup_script_payload(bot_id, record, SUPPORTED, ""), request)
 
 
 @router.delete(
@@ -1465,13 +1418,9 @@ async def delete_bot_startup_script(
     bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
-    caller: ActingCallerDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     startup_script_service: BotStartupScriptServiceProtocol = Injected(
         BotStartupScriptServiceProtocol
-    ),
-    manifest_service: BotConfigManifestServiceProtocol = Injected(
-        BotConfigManifestServiceProtocol
     ),
 ) -> Envelope[Deleted]:
     """Clear a bot's startup script. Idempotent.
@@ -1480,25 +1429,12 @@ async def delete_bot_startup_script(
     PUT for which starts do and do not recompose. Clearing does not reach an
     already-running container, and does not reach a targeted device restart or
     a scale-out replica until the bot is next restarted or republished.
-
-    **The alias rule (W8).** On a bot that carries a configuration manifest,
-    the document's `script` section is removed and stored, and the row is
-    cleared with it. A bot without a manifest is cleared exactly as before.
     """
     bot = bot_service.get_bot(bot_id, owner_id)  # ownership/tenant guard
     entity_id = bot.get("entity_id")
     if not entity_id:
         raise BotNotFoundError("bot has no associated entity")
-    removed = manifest_service.write_through_script(
-        entity_id=entity_id,
-        bot_id=bot_id,
-        body=None,
-        modifier=_audit_actor(caller, owner_id),
-        active_engine=bot.get("active_engine"),
-        bot_type=bot.get("bot_type"),
-    )
-    if removed is None:
-        startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
+    startup_script_service.delete(entity_id=entity_id, bot_id=bot_id)
     return deleted_envelope(request)
 
 

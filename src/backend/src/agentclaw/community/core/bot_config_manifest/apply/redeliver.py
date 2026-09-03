@@ -3,8 +3,9 @@
 After every category has been written into platform state, the running
 container — if there is one — is handed the whole artifact once, through the
 same whole-artifact delivery every runtime edit on teclaw takes
-(``TeclawDeviceSyncService.sync_symlinks``, which ignores its argument and
-recomposes). A bot with no live binding is not an error: provisioning will
+(``TeclawDeviceSyncService.deliver_manifest_apply``, which recomposes for
+the ``MANIFEST_APPLY`` occasion so the artifact says the platform owns every
+category). A bot with no live binding is not an error: provisioning will
 compose the first artifact from the state just written, which is the point of
 the ``RECORD_APPLY_PROVISION`` sequence.
 
@@ -25,7 +26,9 @@ logger = get_logger()
 #: ``(bot_id, owner_id) -> DeviceContext``; raises ``not_bound`` when the bot
 #: has no active binding.
 ResolveDeviceContext = Callable[[str, str], Any]
-#: ``DeviceContext -> DeviceSync`` — the dispatcher's ``dispatch``.
+#: ``DeviceContext -> TeclawDeviceSyncService`` — the dispatcher's
+#: ``dispatch``, which answers the teclaw service for a teclaw device; the
+#: redeliver calls its ``deliver_manifest_apply``.
 DispatchDeviceSync = Callable[[Any], Any]
 
 
@@ -61,7 +64,7 @@ class TeclawRedeliver:
         # Blocking HTTP to the container, off the event loop like every other
         # device write the materialisers make.
         result = await asyncio.to_thread(
-            lambda: self._dispatch(device).sync_symlinks([])
+            lambda: self._dispatch(device).deliver_manifest_apply()
         )
         if isinstance(result, dict) and result.get("success") is False:
             message = str(result.get("message") or "delivery failed")

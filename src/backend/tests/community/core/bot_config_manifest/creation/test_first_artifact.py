@@ -287,8 +287,11 @@ def test_the_first_artifact_carries_the_manifest(world):
     assert result.binding_id == 77
     artifact: dict[str, Any] = baas.create_teclaw_bot.call_args.kwargs["config_artifact"]
 
+    # The first artifact of a bot that carries a manifest is the platform's
+    # for every category (ownership follows the operation, contract §9.2).
     assert artifact["ownership"] == {
-        "mcp": "platform", "skills": "platform", "resources": "platform", "identity_files": "platform"
+        "mcp": "platform", "skills": "platform", "resources": "platform",
+        "identity_files": "platform", "cli_tools": "platform",
     }
     assert artifact["identity_files"] == [
         {"name": "RULES.md", "store": "bot-data", "path": f"{_REF_ROOT}/identity/RULES.md"}

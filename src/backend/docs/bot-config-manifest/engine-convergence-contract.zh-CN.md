@@ -282,10 +282,14 @@ W8 之后平台是 manifest 所应用内容的**真相源**（两个引擎系一
 | `engine` | **该类目由引擎管理。**忽略 artifact 里的列表，保持引擎自己的状态 | P2 |
 | 缺席（整个对象缺席，或某个类目缺席） | **W8 之前的行为不变。**这是 A5 的用武之地：没实现本节的引擎照旧运行 | —— |
 
-平台侧的规则：bot 的 manifest **声明**了某个类目 ⇒ 该类目标 `platform`；没声明 ⇒
-`engine`。`mcp` 永远是 `platform`（这只是把今天的语义写明，不是变化）。一个没有
-manifest 的 bot 拿到的 artifact 与今天逐字节相同，只多这一个对象且三个文件类目
-全为 `engine`。
+平台侧的规则：**`ownership` 跟着操作走，不跟着 manifest 的声明走。**manifest
+apply 结束时的整包重投、以及带 manifest 的 bot 的第一份 artifact（创建 job 先 apply
+再开容器），**所有类目**都是 `platform`——artifact 里的列表就是完整期望状态；
+其他任何操作触发的组装（上传 skill、上传资源、改 MCP、改渠道、发布构建）**所有
+类目**都是 `engine`——引擎自己的状态是真相。`mcp` 在任何操作下都是 `platform`
+（artifact 自 W12 起每次都带完整 MCP 集合，引擎没有自己的 MCP 状态可保留；这只是
+把今天的语义写明，不是变化）。一个没有 manifest 的 bot 拿到的 artifact 与今天逐字节
+相同，只多这一个对象且除 `mcp` 外全为 `engine`。
 
 ### 9.3 对引擎的三条要求
 

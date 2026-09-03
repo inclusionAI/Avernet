@@ -331,8 +331,10 @@ token**（类 GitLab 的 Project/Deploy Token，天生单仓库有效）；托�
 | `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除；仍被引用时引用条目在下次 apply 记 `failed` |
 
 兼容性：既有 `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
-（#935）保留，成为配置清单文档 `script` 部分的别名视图（write-through），行为
-不变。鉴权沿用 `_GRANT_CHECKED` + `ADMISSION` 模式。
+（#935）保留，行为不变。**不**成为配置清单文档 `script` 部分的别名视图——W8 评审
+（inclusionAI/Avernet#1836）决定清单是启动脚本不感知的上层：老端点只读写自己的
+那一行，清单声明的 `script` 在 apply 时物化进同一行，后者覆盖前者。鉴权沿用
+`_GRANT_CHECKED` + `ADMISSION` 模式。
 
 ## 7. 可观测性
 

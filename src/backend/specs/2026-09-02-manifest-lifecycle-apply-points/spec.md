@@ -35,9 +35,9 @@ the platform is asserting and which it leaves to the engine. Until the teclaw
 engine supports that map, a deployment switch keeps teclaw on today's per-file
 path.
 
-The legacy `/startup-script` endpoints become an alias view of the manifest's
-`script` field on bots that have a manifest, so an edit through the old surface
-is never reverted by the next apply (§2.2).
+The legacy `/startup-script` endpoints are untouched (revision 5): the
+manifest is a layer the startup script does not know about, and a manifest
+that declares `script` materialises into the same row on apply.
 
 ## Motivation
 
@@ -66,8 +66,10 @@ Three earlier decisions are restated rather than re-derived:
   record.** A lifecycle apply that fails leaves the lifecycle it rode on
   untouched.
 - **§3.2 — a declared category is overwritten to equal the declaration; an
-  undeclared category is untouched.** The ownership map is this rule on the
-  wire.
+  undeclared category is untouched.** On teclaw the ownership map carries
+  this to the engine per *operation* (revision 5): a manifest apply's
+  artifact is the platform's for every category, a runtime edit's is the
+  engine's.
 
 ## What the code allows, checked before writing this
 
@@ -109,9 +111,9 @@ Three earlier decisions are restated rather than re-derived:
   engine supports the ownership map, and nothing regresses while it is off.
 - As the teclaw engine owner, I can read one contract section that says what
   the ownership map means and what the engine must do with it.
-- As an operator who still uses `PUT …/startup-script`, my edit on a bot that
-  has a manifest becomes the manifest's `script` and is not undone by the next
-  apply.
+- As an operator who still uses `PUT …/startup-script`, the endpoint behaves
+  exactly as before; on a bot whose manifest declares `script`, the manifest
+  is the source of truth and the next apply restores it.
 - As a bot owner, a manifest problem at any point costs me entries in the
   apply report, never the lifecycle operation itself.
 
@@ -158,11 +160,14 @@ Three earlier decisions are restated rather than re-derived:
       remove everything; `engine` means the engine owns the category and
       ignores the list; absent means today's behaviour.
 - [ ] The teclaw composer emits the map on every artifact it composes for a
-      bot: `platform` for `mcp` always (today's semantics made explicit),
-      `platform` for `identity_files`, `resources` and `skills` when the
-      switch is on and the bot's stored manifest declares that category,
-      `engine` otherwise. A bot without a manifest gets `engine` for the three
-      file categories, which is today's artifact plus the map.
+      bot, and ownership follows the operation (revision 5): every category
+      is `platform` on the closing redeliver of a manifest apply and on the
+      first artifact of a bot that carries a manifest, when the switch is on;
+      every category is `engine` on any other compose — a skill or resource
+      upload, an MCP edit, a channel change, a publish build — and while the
+      switch is off. `mcp` is `platform` on every occasion (today's semantics
+      made explicit). A bot without a manifest gets `engine` for every other
+      category, which is today's artifact plus the map.
 - [ ] ARCA artifacts do not carry the map; nothing on ARCA reads it.
 - [ ] A contract addendum for the teclaw owner is added to
       `engine-convergence-contract.zh-CN.md`: the map and its semantics, file
@@ -236,22 +241,14 @@ Three earlier decisions are restated rather than re-derived:
       that it names no restart, republish or payload-rebuild call.
 - [ ] `DELETE …/config-manifest` is unchanged.
 
-### The legacy `/startup-script` endpoints write through (§2.2)
+### The legacy `/startup-script` endpoints are untouched (revision 5)
 
-- [ ] On a bot **with** a stored manifest, `PUT …/startup-script` rewrites the
-      document's top-level `script` section to the submitted body, leaving
-      every other byte as it was, stores it through the same validation, then
-      writes the row with the body the materialiser would write (placeholders
-      substituted). `GET …/config-manifest` and `GET …/startup-script` agree,
-      and the next apply plans the script `unchanged`.
-- [ ] On a bot **with** a manifest, `DELETE …/startup-script` removes the
-      section, stores the result, and clears the row.
-- [ ] On a bot **with** a manifest that declares `script`, `GET` returns the
-      manifest's body; otherwise the row.
-- [ ] On a bot **without** a manifest all three endpoints behave byte-for-byte
-      as today; their existing tests pass unedited.
-- [ ] The rewrite proves itself by parsing back to the submitted body, byte for
-      byte, with a quoted-scalar fallback; a validation failure changes nothing.
+- [ ] All three endpoints behave byte-for-byte as today on every bot; their
+      existing tests pass unedited. The manifest service exposes nothing to
+      them, and they inject nothing from the manifest layer.
+- [ ] A manifest that declares `script` materialises into the same row on
+      apply, as before; the manifest is the source of truth for what it
+      declares.
 
 ### Ordering, records, and what apply never does
 
@@ -302,11 +299,14 @@ a live bot converges by one whole-artifact redeliver rather than by a per-path
 diff against the container. This replaces the design's §3.1 note that a live
 teclaw bot is converged through the per-file channel.
 
-**D-4 — The ownership map is the wire form of §3.2's declared / undeclared
-rule.** The engine cannot otherwise distinguish "the platform asserts this
-category is empty" from "the platform has nothing to say", so it has to guess.
-The map removes the guess, and its absence preserves today's behaviour, which
-is what lets it ship ahead of the engine.
+**D-4 — The ownership map is decided per operation.** The engine cannot
+otherwise distinguish "the platform asserts this category is empty" from "the
+platform has nothing to say", so it has to guess. The map removes the guess:
+a manifest apply's artifact (and the first artifact of a bot with a manifest)
+says the platform owns every category; any other operation's artifact says the
+engine does. Its absence preserves today's behaviour, which is what lets it
+ship ahead of the engine. (Revision 5; revision 3 keyed it on which categories
+the stored manifest declared.)
 
 **D-5 — A deployment switch gates the teclaw platform-managed path.** Off,
 teclaw runs today's per-file shape. On, the store path. The switch is read by
@@ -326,12 +326,10 @@ family. Adding a family is a strategy, not a fork of five materialisers.
 **D-8 — `PUT` starts an apply; it does not run one.** A `PUT` that could not
 start an apply still stores.
 
-**D-9 — The legacy endpoint writes the row itself on the manifest arm.** Its
-contract is synchronous and its tests read the repository straight after.
-
-**D-10 — The document rewrite is a textual splice, not a re-serialisation.**
-W1 stores the document verbatim; the splice replaces the `script` section
-only and proves itself by parsing the result back.
+**D-9 — The legacy `/startup-script` endpoints do not know the manifest
+exists.** Revision 3's write-through alias (and its splice, D-10) is withdrawn
+in review: the manifest is the upper layer, and the startup script is one of
+the entities it materialises into, not a view of it.
 
 ## In Scope
 
@@ -344,7 +342,6 @@ only and proves itself by parsing the result back.
 - The deferred-provision option on `create_bot` and the provision call.
 - Lifting W13's teclaw refusal.
 - `PUT` starting an apply and reporting it.
-- The `/startup-script` write-through.
 - The ordering test, docs, the work-items W8 progress block.
 
 ## Out of Scope
@@ -381,3 +378,4 @@ in a live redeliver, and the store-backed `SkillRef`, per the contract addendum.
 | **rev 1** | Four apply points: `PUT`, an activation listener, a publish-build wait, teclaw creation on the ARCA shape. |
 | **rev 2** | Restart and republish deferred by the owner. |
 | **rev 3** | The delivery-strategy seam; the platform as source of truth on teclaw (D-3); the ownership map (D-4); the switch (D-5); teclaw creation as record, apply, provision (D-6). The "same job on teclaw" statement of rev 1 and rev 2 withdrawn. |
+| **rev 5** | Review of inclusionAI/Avernet#1836: ownership follows the operation, not the declared categories (D-4); the `/startup-script` write-through alias withdrawn (D-9, D-10). |

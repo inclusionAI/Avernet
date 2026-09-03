@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+from agentclaw.community.core.config_compose.models import ComposeOccasion
 from agentclaw.community.core.devices.services.teclaw_device_sync import (
     TECLAW_BOT_APPLY_PATH,
     TeclawDeviceSyncService,
@@ -151,6 +152,22 @@ def test_compose_scopes_by_entity_id_and_stays_distinct_from_owner_id():
     assert req.bot_id == "bot7"
     assert req.engine_type == "teclaw"
     assert req.entity_type == "staff"
+
+
+def test_a_runtime_edit_composes_for_the_default_occasion_and_a_manifest_apply_says_so():
+    """Ownership follows the operation (W8): every runtime edit composes for
+    ``RUNTIME``; the closing redeliver of a manifest apply is the one call
+    that composes for ``MANIFEST_APPLY``."""
+    service, m = _make_service()
+
+    service.sync_symlinks([])
+    assert m["composer"].compose.call_args.args[0].occasion is ComposeOccasion.RUNTIME
+
+    result = service.deliver_manifest_apply()
+    assert result == {"success": True, "message": "teclaw artifact delivered"}
+    req = m["composer"].compose.call_args.args[0]
+    assert req.occasion is ComposeOccasion.MANIFEST_APPLY
+    assert req.bot_id == "bot7"
 
 
 def test_an_already_resolved_mcp_set_rides_on_the_compose_request():

@@ -4,8 +4,9 @@ Spec: `spec.md` · Plan: `plan.md` · Issue #1476.
 
 > **Revision 3.** Seven groups, twenty-two tasks. A is the seam and the
 > vocabulary; B the artifact contract; C the teclaw store path; D creation;
-> E `PUT`; F the alias view; G docs and the sweep. A→C→D is the critical chain;
-> B is needed by C's composer task; E and F are independent of everything but A.
+> E `PUT`; F the alias view (withdrawn in review, rev 5); G docs and the sweep.
+> A→C→D is the critical chain; B is needed by C's composer task; E and F are
+> independent of everything but A.
 
 Conventions every task assumes:
 
@@ -147,8 +148,9 @@ Conventions every task assumes:
         removes both; `list`; `purge` removes every row and object for a bot.
   - [x] Keys follow the promotion layout with a `_manifest` segment.
   - [x] The reader implements `ManagedFilesReader` and
-        `PlatformManagedCategoriesReader` (declared categories when the switch
-        is on, else empty).
+        `PlatformOwnershipReader` (rev 5: the platform owns a manifest apply's
+        redeliver and a manifest bot's first artifact when the switch is on;
+        nothing else).
   - [x] Tests against a fake `ObjectStoragePlugin` and SQLite.
 - **Depends on:** Task 7
 
@@ -307,9 +309,14 @@ Conventions every task assumes:
 
 ---
 
-## Group F — The alias view
+## Group F — The alias view (withdrawn, rev 5)
 
-## [x] Task 18: The splice helper
+> Landed as below, then withdrawn in review of inclusionAI/Avernet#1836: the
+> manifest is a layer the startup script does not know about. The three tasks
+> are kept for the record; their code and tests are removed, and the legacy
+> routes are byte-for-byte what they were before W8.
+
+## [x] Task 18: The splice helper (withdrawn)
 - **Files:** `schema/splice.py` (new), `tests/community/core/bot_config_manifest/test_script_splice.py` (new)
 - **Done when:** as revision 2's Task 6 — with one deviation: `|+` is never
   rendered (its trailing blank lines are indistinguishable from the document's
@@ -317,7 +324,7 @@ Conventions every task assumes:
   a CRLF body take the JSON-quoted form, which reads back identically.
 - **Depends on:** —
 
-## [x] Task 19: `write_through_script` and `script_body`
+## [x] Task 19: `write_through_script` and `script_body` (withdrawn)
 - **Files:** `services/config_manifest_service.py`, its protocol (`api/` re-exports
   the protocol unchanged; DI resolves the lazy script-service provider the
   bot-management module already binds),
@@ -325,7 +332,7 @@ Conventions every task assumes:
 - **Done when:** as revision 2's Task 7.
 - **Depends on:** Task 18
 
-## [x] Task 20: The three startup-script routes
+## [x] Task 20: The three startup-script routes (withdrawn)
 - **Files:** `adapters/http/openapi_v1/bots/{router.py,startup_script_support.py}`,
   `tests/community/endpoints/test_openapi_startup_script.py`,
   `tests/community/adapters/http/openapi_v1/test_bots_endpoints.py`
@@ -350,7 +357,7 @@ Conventions every task assumes:
 - **Done when:**
   - [x] README: "Lifecycle apply points and the delivery seam (W8)" — the
         strategy, the two families side by side, the switch and when to flip
-        it, the store and index, the closing redeliver, the alias view, the
+        it, the store, the closing redeliver, ownership by operation, the
         trigger vocabulary, the deferrals.
   - [x] User manual §4.6, §5.5, §7, and a new teclaw subsection (first
         artifact, whole-artifact convergence, the switch).

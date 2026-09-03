@@ -738,13 +738,11 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 脚本不会丢**，只是要等下一次开设备。它**不会**在一个已经跑着的容器里被重新执行。
 报告里那一条的 `note` 就是这么说的。
 
-**老端点还能用**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` 继续
-工作。对**有清单**的 bot，它是清单 `script` 字段的**别名视图**（write-through，
-W8 已落地）——`PUT` 先把清单文档顶层的 `script` 段改写成你提交的正文（其他字节
-一个不动），按同一套校验存回去，再写启动脚本那一行，所以 `GET …/config-manifest`
-和 `GET …/startup-script` 永远一致，下一次 apply 会把它判为 `unchanged`；`DELETE`
-删掉这一段并清掉那一行；`GET` 返回清单里声明的正文。对**没有清单**的 bot，行为
-与今天逐字节一致。
+**老端点还能用，且不感知清单**：`GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script`
+继续读写 `ac_bot_startup_script` 那一行，行为与今天逐字节一致——清单是上层，
+启动脚本这一层不知道它的存在（W8 评审决定）。清单声明的 `script` 在 apply 时
+物化进同一行，所以在**清单声明了 `script`** 的 bot 上，通过老端点改的脚本会被
+下一次 apply 覆盖回清单声明的内容：清单是它所声明内容的真相源，要改就改清单。
 
 ### 5.6 暂不开放：`engine_config` 与 `cli_tools`
 
@@ -864,9 +862,11 @@ teclaw 引擎不是「容器起来再逐文件写」，而是**靠一份 artifac
 清单，引擎自己按引用去对象存储拉文件。所以在 teclaw 上，清单的 apply 是把每个
 类目**物化进平台状态**：`mcp` 与 `skills` 进数据库；`identity`、`resources` 与本地
 skill 的包文件进平台自己的托管副本（bot-data 对象存储 + 一张索引表）。artifact 由
-平台状态组装，天然就带着清单的结果，并附一个 `ownership` 映射告诉引擎哪些类目由
-平台断言（`platform`：列表就是完整期望状态，空列表 = 区域清空）、哪些留给引擎
-（`engine`）。
+平台状态组装，天然就带着清单的结果，并附一个 `ownership` 映射告诉引擎这份
+artifact 由谁断言——**跟着操作走**：apply 结束时的整包重投、以及带清单的 bot 的
+第一份 artifact，所有类目都是 `platform`（列表就是完整期望状态，空列表 = 区域
+清空）；上传 skill、上传资源、改 MCP 等其他操作触发的组装，所有类目都是 `engine`
+（引擎自己的状态是真相；`mcp` 除外，它任何时候都是 `platform`）。
 
 - **创建**：先只写 bot 记录，对着它跑那唯一一个 apply 阶段，再开容器——容器拿到的
   **第一份** artifact 已经是清单的结果。轮询状态会从 `CREATING` → `APPLYING` →
@@ -1181,7 +1181,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | `PUT /openapi/v1/bots/source-credentials/{name}` | 注册/轮换租户级凭证 |
 | `GET /openapi/v1/bots/source-credentials[/{name}]` | 列表/单个，**仅掩码元数据** |
 | `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除；仍被引用时下次 apply 该条目 `failed` |
-| `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点；对有清单的 bot 是 `script` 的别名视图 |
+| `GET/PUT/DELETE /openapi/v1/bots/{bot_id}/startup-script` | #935 老端点，不感知清单；清单声明的 `script` 在 apply 时写进同一行 |
 | 用清单创建 bot | 异步创建 API，见 §4.5（端点路径以实现为准） |
 
 ---

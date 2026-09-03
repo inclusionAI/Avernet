@@ -12,7 +12,7 @@ without a client.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
@@ -96,28 +96,14 @@ def _startup_script_payload(
     record: Any,
     state: str,
     reason: str,
-    manifest_body: Optional[str] = None,
-    manifest_record: Any = None,
 ) -> StartupScript:
-    """Shape a stored record — or its absence — as the response model.
-
-    ``record`` is the startup-script row (or ``None``). On a bot with a
-    manifest the alias view answers with the manifest instead (W8, §2.2):
-    ``manifest_body`` is the manifest's own ``script.body`` and
-    ``manifest_record`` the manifest row, whose modifier and timestamp become
-    the audit fields — so the body is never stamped with the author of an
-    older script row. Without a manifest both are ``None`` and the script
-    row answers, as before W8.
-    """
-    from_manifest = manifest_body is not None
-    script = manifest_body if from_manifest else (record.script if record is not None else "")
-    audit = manifest_record if from_manifest and manifest_record is not None else record
+    """Shape a stored record — or its absence — as the response model."""
     return StartupScript(
         bot_id=bot_id,
-        script=script,
-        size_bytes=len(script.encode("utf-8")),
-        updated_by=audit.modifier if audit is not None else "",
-        updated_at=audit.gmt_modified if audit is not None else None,
+        script=record.script if record is not None else "",
+        size_bytes=record.size_bytes if record is not None else 0,
+        updated_by=record.modifier if record is not None else "",
+        updated_at=record.gmt_modified if record is not None else None,
         supported=state == SUPPORTED,
         unsupported_reason=reason,
     )
