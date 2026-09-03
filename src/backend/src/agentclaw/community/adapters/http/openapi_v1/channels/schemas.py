@@ -9,12 +9,57 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ChannelType = Literal["dingding"]
 ChannelStatus = Literal["active", "inactive"]
 ChannelStage = Literal["draft"]
+ChannelBindingMode = Literal["plugin", "bcn_gateway"]
+GroupChatScope = Literal["per_sender", "conversation_shared"]
+OutboundVisibility = Literal["full_transcript", "lead_only"]
+
+# 模式校验矩阵：字段只属于一种绑定模式（见设计 spec §3.2）。
+_PLUGIN_ONLY_FIELDS: tuple[str, ...] = (
+    "card_template_key",
+    "dm_policy",
+    "allowlist",
+    "reply_to_message",
+    "aix_enable",
+    "include_sender_name",
+)
+_BCN_ONLY_FIELDS: tuple[str, ...] = ("group_chat_scope", "outbound_visibility")
+
+
+def validate_mode_matrix(
+    mode: str,
+    *,
+    robot_code: str | None,
+    fields_set: set[str],
+) -> None:
+    """Reject fields that do not belong to the channel's binding mode.
+
+    Shared by the create-side pydantic validator and the router's update-side
+    check (the update side knows the stored mode, which the body alone cannot).
+    """
+    if mode == "bcn_gateway":
+        if not (robot_code or "").strip():
+            raise ValueError(
+                "robot_code is required when binding_mode is 'bcn_gateway'"
+            )
+        rejected = sorted(set(_PLUGIN_ONLY_FIELDS) & fields_set)
+        if rejected:
+            raise ValueError(
+                "fields only valid for plugin channels were provided: "
+                + ", ".join(rejected)
+            )
+    else:
+        rejected = sorted(set(_BCN_ONLY_FIELDS) & fields_set)
+        if rejected:
+            raise ValueError(
+                "fields only valid for bcn_gateway channels were provided: "
+                + ", ".join(rejected)
+            )
 
 
 class DingTalkChannelConfigCreate(BaseModel):
@@ -55,6 +100,14 @@ class DingTalkChannelConfigCreate(BaseModel):
     )
     include_sender_name: bool = Field(
         default=True, description="Whether the sender's name enters Bot context."
+    )
+    group_chat_scope: GroupChatScope | None = Field(
+        default=None,
+        description="Group-session scoping; only valid when binding_mode is 'bcn_gateway'.",
+    )
+    outbound_visibility: OutboundVisibility | None = Field(
+        default=None,
+        description="Outbound transcript visibility; only valid when binding_mode is 'bcn_gateway'.",
     )
 
 
@@ -100,6 +153,14 @@ class DingTalkChannelConfigUpdate(BaseModel):
         default=None,
         description="Whether sender names enter Bot context; omit to keep.",
     )
+    group_chat_scope: GroupChatScope | None = Field(
+        default=None,
+        description="New group-session scoping; omit to keep. bcn_gateway channels only.",
+    )
+    outbound_visibility: OutboundVisibility | None = Field(
+        default=None,
+        description="New outbound visibility; omit to keep. bcn_gateway channels only.",
+    )
 
 
 class DingTalkChannelConfig(BaseModel):
@@ -137,6 +198,14 @@ class DingTalkChannelConfig(BaseModel):
     include_sender_name: bool = Field(
         default=True, description="Whether the sender's name enters Bot context."
     )
+    group_chat_scope: GroupChatScope | None = Field(
+        default=None,
+        description="Group-session scoping when binding_mode is 'bcn_gateway'; null otherwise.",
+    )
+    outbound_visibility: OutboundVisibility | None = Field(
+        default=None,
+        description="Outbound visibility when binding_mode is 'bcn_gateway'; null otherwise.",
+    )
 
 
 class ChannelCreate(BaseModel):
@@ -147,6 +216,23 @@ class ChannelCreate(BaseModel):
     type: ChannelType = Field(
         description="Channel provider; only 'dingding' is supported."
     )
+    binding_mode: ChannelBindingMode = Field(
+        default="plugin",
+        description=(
+            "How the Channel connects: 'plugin' writes openclaw.json direct "
+            "config; 'bcn_gateway' syncs a BCS binding (per-sender sessions)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_binding_mode_matrix(self) -> "ChannelCreate":
+        validate_mode_matrix(
+            self.binding_mode,
+            robot_code=self.config.robot_code,
+            fields_set=self.config.model_fields_set,
+        )
+        return self
+
     description: str | None = Field(
         default=None, description="Optional human-readable purpose of the Channel."
     )
@@ -162,6 +248,10 @@ class ChannelUpdate(BaseModel):
 
     description: str | None = Field(
         default=None, description="New description; null clears it, omit to keep."
+    )
+    binding_mode: ChannelBindingMode | None = Field(
+        default=None,
+        description="Must equal the stored mode; the binding mode is immutable after creation.",
     )
     config: DingTalkChannelConfigUpdate | None = Field(
         default=None,
@@ -185,6 +275,10 @@ class Channel(BaseModel):
     id: int = Field(description="Numeric Channel identifier assigned by the Backend.")
     type: ChannelType = Field(
         description="Channel provider; currently always 'dingding'."
+    )
+    binding_mode: ChannelBindingMode = Field(
+        default="plugin",
+        description="How the Channel connects: 'plugin' or 'bcn_gateway'.",
     )
     description: str | None = Field(description="Human-readable purpose, if set.")
     bot_id: str = Field(description="Bot this Channel is bound to.")

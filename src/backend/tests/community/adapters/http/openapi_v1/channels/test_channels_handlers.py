@@ -461,3 +461,64 @@ def test_read_contract_never_defines_client_secret():
     config_properties = channel_schema["$defs"][config_ref]["properties"]
     assert "client_secret" not in config_properties
     assert "has_client_secret" in config_properties
+
+
+# ── binding_mode 契约 ──────────────────────────────────────────────
+
+def test_create_defaults_to_plugin_mode():
+    channel = ChannelCreate(
+        type="dingding",
+        config={"client_id": "client-1", "client_secret": "secret-1"},
+    )
+    assert channel.binding_mode == "plugin"
+
+
+def test_create_accepts_minimal_bcn_gateway_config():
+    channel = ChannelCreate(
+        type="dingding",
+        binding_mode="bcn_gateway",
+        config={
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "robot_code": "robot-1",
+        },
+    )
+    assert channel.binding_mode == "bcn_gateway"
+
+
+def test_create_requires_robot_code_for_bcn_gateway_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        )
+    assert "robot_code" in str(exc.value)
+
+
+def test_create_rejects_plugin_fields_for_bcn_gateway_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+                "dm_policy": "open",
+            },
+        )
+    assert "dm_policy" in str(exc.value)
+
+
+def test_create_rejects_bcn_fields_for_plugin_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "group_chat_scope": "per_sender",
+            },
+        )
+    assert "group_chat_scope" in str(exc.value)
