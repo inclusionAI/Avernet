@@ -23,7 +23,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderEventType,
     WorkOrderMessageContent,
-    WorkOrderTitleKey,
     notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
@@ -105,11 +104,6 @@ class _WorkOrderCreationRepository:
                     )
 
             notifications = []
-            persisted_title = (
-                title
-                if event_type == WorkOrderEventType.SPACE_JOIN_APPLIED.value
-                else notification_title_for(event_type, title)
-            )
             for user_id in recipients:
                 notification = self._Notification(
                     work_order_id=work_order_id,
@@ -118,7 +112,7 @@ class _WorkOrderCreationRepository:
                     event_type=event_type,
                     biz_type=biz_type,
                     biz_id=biz_id,
-                    title=persisted_title,
+                    title=notification_title_for(event_type, title),
                     content=content,
                     env=env,
                 )
@@ -260,7 +254,7 @@ class _WorkOrderCreationRepository:
             )
             db.add(row)
             db.flush()
-            title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
+            title = "空间加入申请待审批"
             content = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
                 applicant_name=applicant_name, space_name=space.name
             )
@@ -281,7 +275,9 @@ class _WorkOrderCreationRepository:
                         event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
                         biz_type=WorkOrderBizType.SPACE_JOIN.value,
                         biz_id=str(space_id),
-                        title=title,
+                        title=notification_title_for(
+                            WorkOrderEventType.SPACE_JOIN_APPLIED.value, title
+                        ),
                         content=content,
                         env=env,
                     )

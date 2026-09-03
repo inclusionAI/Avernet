@@ -50,7 +50,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
-    WorkOrderTitleKey,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -1046,7 +1045,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
 
     notification = pending[0].notification
-    assert notification.title == "SPACE_JOIN_PENDING"
+    assert notification.title == "空间加入申请待审批"
     assert repository.count_unread(recipient_user_id="owner-1", env="dev") == 1
     owner_badge = repository.get_notification_badge_summary(
         recipient_user_id="owner-1", env="dev"
@@ -1168,7 +1167,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
     assert applicant_total == 1
     applicant_notification = applicant_items[0].notification
-    assert applicant_notification.title == "SPACE_JOIN_APPROVED"
+    assert applicant_notification.title == "空间加入申请已处理"
     assert applicant_notification.content == approved_notification.content
     assert (
         repository.list_items(
@@ -1294,7 +1293,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     )
     assert (
         applicant_items[0].notification.title
-        == "SPACE_JOIN_REJECTED"
+        == "空间加入申请已处理"
     )
     assert applicant_items[0].notification.content == "custom rejected content"
 
@@ -1332,33 +1331,6 @@ def test_badge_counts_distinct_pending_work_orders(db) -> None:
     assert summary.unread_count == 2
     assert summary.pending_approval_count == 1
     assert summary.badge_count == 1
-
-
-def test_space_join_event_persists_stable_title_key(db) -> None:
-    repository = WorkOrderRepository(db, _skill_editor_requests(db))
-
-    created = repository.create_work_order_event(
-        event_category=NotificationCategory.APPROVAL,
-        biz_type=WorkOrderBizType.SPACE_JOIN.value,
-        biz_id="space-join-1",
-        event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
-        applicant_user_id="applicant-space",
-        approver_user_ids=["reviewer-space"],
-        recipient_user_ids=[],
-        title=WorkOrderTitleKey.SPACE_JOIN_PENDING.value,
-        content="pending",
-        apply_reason=None,
-        biz_data=None,
-        env="dev",
-    )
-
-    with db.orm_session() as session:
-        assert (
-            session.query(WorkOrderNotificationModel.title)
-            .filter(WorkOrderNotificationModel.id == created.notification_ids[0])
-            .scalar()
-            == WorkOrderTitleKey.SPACE_JOIN_PENDING.value
-        )
 
 
 def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
