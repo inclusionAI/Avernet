@@ -25,6 +25,7 @@ from engine.community.core.session.models import (
     SessionListRequest,
     SessionUpdateRequest,
 )
+from engine.community.core.aicoding.workspace_service import WorkspaceService
 from engine.community.core.session_favorite import get_session_favorite_repository
 from engine.community.shared.utils import decode_session_key
 
@@ -44,6 +45,30 @@ def _get_session_api(engine: Optional[str] = None):
             f"Unsupported engine type: {engine}. Only '{manager.engine}' is supported."
         )
     return manager.session
+
+
+def _validated_cwd(cwd: Optional[str]) -> Optional[str]:
+    """Canonicalise a caller-supplied ``cwd`` and hold it to the allowed roots.
+
+    ``cwd`` reaches the ``claude_code`` relay as the directory a session is bound
+    to, and that session runs with ``permissionMode: bypassPermissions``. The
+    relay's own ``validateDirPath`` only asks whether the path is absolute and
+    is an existing directory — ``/etc`` satisfies both — so without this gate a
+    caller of the create/update routes could bind the agent anywhere on the
+    device it can read. Every other caller-supplied ``cwd`` on this engine is
+    already held to ``AICODING_CWD_ALLOW_ROOTS`` /
+    ``CONTAINER_WORKSPACE_BASE``; these two routes are brought under the same
+    rule rather than being given a weaker one.
+
+    Prefix-and-format only (:meth:`_validate_cwd_prefix`), not
+    :meth:`validate_cwd`: existence is the relay's to enforce at bind time, and
+    requiring it here would reject a directory the engine process cannot stat
+    but the relay can. ``ValueError`` is the caller's error — the routes turn it
+    into a 400 *before* their ``except Exception`` can bury it as a 500.
+    """
+    if not cwd:
+        return cwd
+    return WorkspaceService._validate_cwd_prefix(cwd)
 
 
 def _fmt_dt(dt) -> str:
@@ -145,13 +170,20 @@ async def list_sessions(
 @router.post("")
 async def create_session(body: CreateSessionBody) -> ApiResponse:
     warning = check_capability(Capability.SESSION_CREATE)
+    # Outside the try: this route's ``except Exception`` maps everything to 500,
+    # which would turn a rejected cwd into a server error instead of a 400.
+    try:
+        cwd = _validated_cwd(body.cwd)
+    except ValueError as e:
+        log.warning("[create_session] cwd 拒绝: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
     try:
         api = _get_session_api(body.engine)
         log.info(f"[create_session] 收到请求: title={body.title}, user_id={body.user_id}, agent_id={body.agent_id}, model={body.model}, runtime={body.runtime}, cwd={body.cwd}, engine={body.engine}, uuid={body.uuid}")
         session = await api.create(SessionCreateRequest(
             title=body.title, user_id=body.user_id or "default", agent_id=body.agent_id, model=body.model,
             runtime=body.runtime,
-            cwd=body.cwd,
+            cwd=cwd,
             uuid=body.uuid,
             extInfo=body.extInfo,
             payload=body.payload,
@@ -301,9 +333,17 @@ async def update_session(
             parsed_ext_info = json.loads(ext_info)
         except (json.JSONDecodeError, TypeError):
             raise HTTPException(status_code=400, detail="ext_info must be valid JSON")
-    log.info(f"[update_session] 收到请求: session_id={session_id}, title={title}, model={model}, runtime={runtime}, permission_mode={permission_mode}, engine={engine}")
+    log.info(f"[update_session] 收到请求: session_id={session_id}, title={title}, model={model}, runtime={runtime}, cwd={cwd}, permission_mode={permission_mode}, engine={engine}")
     warning = check_capability(Capability.SESSION_UPDATE)
     session_id = decode_session_key(session_id)
+    # Same gate as create, and for the same reason: the public create route
+    # reaches this one for a friend bot, whose requested fields are applied
+    # through /update rather than the create body.
+    try:
+        cwd = _validated_cwd(cwd)
+    except ValueError as e:
+        log.warning("[update_session] cwd 拒绝: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     try:
         api = _get_session_api(engine)

@@ -149,10 +149,13 @@ class SessionCreate(BaseModel):
     # engine's to choose.
     cwd: str | None = Field(
         default=None,
-        description="Optional working directory for the session on the bot's "
-        "device. Left unset, the bot's engine picks its own default. A bot "
-        "whose engine does not model a working directory ignores this and "
-        "reports `cwd` empty on the created session.",
+        description="Optional absolute working directory for the session on the "
+        "bot's device. Left unset, the bot's engine picks its own default. The "
+        "device holds this to its own configured workspace roots and refuses "
+        "anything outside them, so a path the bot is not allowed to run in "
+        "fails the request rather than being silently relocated. A bot whose "
+        "engine does not model a working directory ignores this and reports "
+        "`cwd` empty on the created session.",
     )
 
 

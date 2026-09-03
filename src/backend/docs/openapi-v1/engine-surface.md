@@ -165,6 +165,18 @@ Two things about this group are not the shape a reader would assume:
   that models no working directory), so the answer says which happened.
   Rebinding an *established* session's directory is the operation that would
   still be silently dropped, and it keeps its 422. _Decided 2026-09-03._
+- **The device polices the `cwd`, not the backend.** A session's directory is
+  where an agent runs, and on the `claude_code` engine that agent runs with
+  permissions bypassed — so the value is held to the device's own configured
+  workspace roots (`AICODING_CWD_ALLOW_ROOTS` / `CONTAINER_WORKSPACE_BASE`),
+  canonicalised first so `..` cannot walk out. That check lives on the engine
+  because the roots are the device's configuration, not the backend's; Backend
+  owning a copy would be the engine-filesystem-path coupling `AGENTS.md`
+  forbids. A refused directory currently surfaces as the group's generic `502`
+  rather than a `400`, because the relay maps every engine 4xx that is not 404
+  or 501 to `EngineUpstreamError` — the request is safely refused, but the
+  status under-describes it. Narrowing that mapping is a separate change.
+  _Decided 2026-09-03._
 
 ### engine (4) — engine `/api/engine`
 
