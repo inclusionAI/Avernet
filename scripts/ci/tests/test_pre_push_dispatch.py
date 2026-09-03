@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -56,6 +57,7 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
 
     assert "src/bcs/scripts/ci_test.sh" in result.stdout
@@ -75,8 +77,29 @@ def test_bcs_change_dispatches_unit_and_singlebox_coverage(tmp_path: Path):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
     )
 
     assert "scripts/ci/singlebox_coverage.sh" in result.stdout
     assert "scripts/ci/verify_singlebox_coverage_artifacts.py" in result.stdout
     assert "src/bcs/scripts/ci_test.sh" not in result.stdout
+
+    base = _git(repository, "rev-parse", "HEAD")
+    dsh_plugin = repository / "src/bcs/crates/plugins/deepseek-harness-channel-bcn/package.json"
+    dsh_plugin.parent.mkdir(parents=True)
+    dsh_plugin.write_text('{"name":"test"}\n', encoding="utf-8")
+    _git(repository, "add", ".")
+    _git(repository, "commit", "-m", "add DSH BCN plugin")
+
+    result = subprocess.run(
+        [str(dispatcher), "--base", base, "--head", "HEAD", "--dry-run"],
+        cwd=repository,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "OCB_PRE_PUSH_RUN_CI": "1"},
+    )
+
+    assert "deepseek-harness-channel-bcn install --ignore-scripts --no-package-lock" in result.stdout
+    assert "deepseek-harness-channel-bcn run ci" in result.stdout

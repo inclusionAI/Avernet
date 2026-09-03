@@ -3,9 +3,8 @@
 `crates/plugins/*` contains BCS-owned plugin implementations.
 
 Most children are Rust crates that implement infrastructure plugin contracts
-from `crates/plugin-api/*`. `openclaw-channel-bcn` is the exception: it is a
-TypeScript OpenClaw channel plugin that adapts OpenClaw bots to BCS over the
-BCS WebSocket protocol.
+from `crates/plugin-api/*`. The channel packages are TypeScript delivery
+adapters that connect external Bot runtimes to BCS over the BCN protocol.
 
 ## Current Crates
 
@@ -19,6 +18,8 @@ BCS WebSocket protocol.
 - `bcs-llm-openai-compatible`: optional OpenAI-compatible LLM judge client.
 - `openclaw-channel-bcn`: OpenClaw channel plugin package for connecting
   OpenClaw bot runtimes to BCS.
+- `deepseek-harness-channel-bcn`: DeepSeek Harness Cordis bundle for connecting
+  DSH agents to BCS with Bot WebSocket V2.
 
 ## Dependency Rule
 
@@ -29,10 +30,9 @@ BCS WebSocket protocol.
 - Plugins implement infrastructure capabilities only. They must not own BCS
   business persistence semantics such as friendship rules, actor visibility, or
   registry lifecycle policy.
-- `openclaw-channel-bcn` is not a Rust infrastructure plugin-api
-  implementation. Keep its package/runtime identity stable
-  (`@avernet-plugin/openclaw-channel-bcn`, plugin id `openclaw-channel-bcn`)
-  and do not add it to the Cargo workspace.
+- The TypeScript channel packages are not Rust infrastructure plugin-api
+  implementations. Keep their package/runtime identities stable and do not add
+  them to the Cargo workspace.
 
 ## Composition Root
 

@@ -77,6 +77,12 @@ jobs:
           mapfile -t files < <(git diff --name-only "${BCS_BASE_REF}" -- src/bcs || true)
           n=${#files[@]}
           echo "bcs-changed-files-count=${n}" >> "$GITHUB_OUTPUT"
+          mapfile -t dsh_bcn_files < <(printf '%s\n' "${files[@]}" | grep '^src/bcs/crates/plugins/deepseek-harness-channel-bcn/' || true)
+          if [ "${#dsh_bcn_files[@]}" -gt 0 ]; then
+            echo "dsh-bcn-changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dsh-bcn-changed=false" >> "$GITHUB_OUTPUT"
+          fi
           if [ "$n" -eq 0 ]; then
             echo "skip-bcs=true" >> "$GITHUB_OUTPUT"
             echo "No changes under src/bcs vs ${BCS_BASE_REF}; skipping BCS tests."
@@ -85,6 +91,19 @@ jobs:
             echo "Detected ${n} changed file(s) under src/bcs vs ${BCS_BASE_REF}."
             printf '%s\n' "${files[@]}" | sed 's/^/  - /'
           fi
+
+      - name: Set up Node.js for DeepSeek Harness BCN plugin
+        if: steps.changes.outputs.dsh-bcn-changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test DeepSeek Harness BCN plugin
+        if: steps.changes.outputs.dsh-bcn-changed == 'true'
+        working-directory: ${{ github.workspace }}/src/bcs/crates/plugins/deepseek-harness-channel-bcn
+        run: |
+          npm install --ignore-scripts --no-package-lock
+          npm run ci
 
       - name: Install system dependencies
         if: steps.changes.outputs.skip-bcs != 'true'
