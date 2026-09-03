@@ -184,6 +184,17 @@ internal_dependencies:
 
 ### Change impact
 
+`SpaceSkillEditorRequestService` is an additional consumer of the existing
+`StaffDeptPlugin` profile lookup: newly created Skill editor-request approval
+notifications persist the applicant as `「花名」(工号)` when the directory returns
+a nickname. The production composition supplies the corporate directory
+implementation; community and local implementations, a missing nickname, and
+`StaffProfileLookupError` all degrade to the previous work-number-only display
+without blocking the approval request. This is write-time presentation data
+only: public APIs, list reads, and already persisted notifications remain
+unchanged. Contract coverage verifies lookup and fallback, while repository
+coverage verifies the exact persisted notification text.
+
 `SkillPackageValidator` is the pure package boundary shared by Local upload and
 future Draft/materialization workflows. It owns safe relative paths, archive
 limits, wrapper normalization, the single `SKILL.md` rule, manifest validation,
