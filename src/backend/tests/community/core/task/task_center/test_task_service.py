@@ -358,9 +358,9 @@ class TestBbsEscalationNoMarket:
             "result": {"success": False, "fail_detail": "缺x"},
         })))
         graph = svc.query_task_dashboard("t3")
-        # 验收 FAIL→节点 DONE,不升 BBS、不重派。
+        # 动态任务验收 FAIL→节点 HUNG，并进入 BBS 恢复态。
         _c1 = svc._get_node(graph, "c1")
-        assert _c1.status == Status.DONE
+        assert _c1.status == Status.HUNG
         assert _c1.run_info.acceptance_result is not None
         assert _c1.run_info.acceptance_result.verdict == AcceptanceVerdict.FAILED  # verdict 不改
 

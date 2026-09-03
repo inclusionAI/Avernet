@@ -141,7 +141,10 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         node_run_graph=None
     )
 
-    graph.add_task_nodes([bbs_task_node], task_id)
+    # BBS is a recovery execution under a HUNG root. Creating the scoped node
+    # must not make the parent look actively planned before the relay completes;
+    # on_bbs_report is the single path that resumes parent planning.
+    graph.add_task_nodes([bbs_task_node], task_id, mark_parent_planning=False)
     logger.info("[task][bbs_mode] add_node, task_id=%s, nodes=%s", task_id, bbs_task_node)
     edges = [
         (task_id, bbs_task_node.node_id),

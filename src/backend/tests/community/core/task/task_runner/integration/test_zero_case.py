@@ -1,11 +1,14 @@
 from pathlib import Path
 
-# 源 integration 目录(与本测试目录同在 backend/ 下,经 __file__ 定位,不依赖 cwd)。
+# 源 task_runner 目录(与本测试目录同在 backend/ 下,经 __file__ 定位,不依赖 cwd)。
 _BASE = (Path(__file__).resolve().parents[6]
-         / "src" / "agentclaw" / "community" / "core" / "task" / "task_runner" / "integration")
-_FILES = ["ports.py", "translators.py", "open_api_bot_adapter.py", "bcs_http_adapter.py",
-          "bcs_token_provider.py", "prompt_formatter.py", "task_executor.py",
-          "task_executor_result_poller.py", "__init__.py"]
+         / "src" / "agentclaw" / "community" / "core" / "task" / "task_runner")
+_FILES = [
+    "client/ports.py", "client/translators.py", "client/open_api_bot_adapter.py",
+    "client/bcs_http_adapter.py", "client/bcs_token_provider.py", "client/prompt_formatter.py",
+    "client/__init__.py", "modal_executor/task_executor.py",
+    "modal_executor/task_executor_result_poller.py", "modal_executor/bbs_modal_executor.py",
+]
 _FORBIDDEN = ["N_overview", "N_market", "N_aggregate", "N_verify", "N_report", "N_practice", "n_root", "dim_"]
 
 

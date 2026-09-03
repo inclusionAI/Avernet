@@ -15,14 +15,17 @@ from agentclaw.community.core.task.task_runner.client.double.double_bcs_bot_iden
     _DoubleBcsBotIdentityResolver,
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import PromptFormatterImpl
-from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
-from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
-    TaskExecutorResultPoller,
-)
+
 
 
 def build_integration(*, double: bool, sink, runner=None, poller_thread: bool = True,
                       identity_resolver=None, on_bbs_report=None) -> TaskExecutor:
+    # Lazy imports keep the client package importable from modal_executor modules
+    # without creating a client -> modal_executor -> client cycle.
+    from agentclaw.community.core.task.task_runner.modal_executor.task_executor import TaskExecutor
+    from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+        TaskExecutorResultPoller,
+    )
     """组合根:double(singlebox)/real(corp 覆写)。返装配好的 TaskExecutor(poller 可选起线程)。
     on_bbs_report:引擎收口回调;corp 适配器接线时应透传引擎 on_bbs_report,确保 bbs 接力走引擎收敛(不退 else 直写)。"""
     if double:

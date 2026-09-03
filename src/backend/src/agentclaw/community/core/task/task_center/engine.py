@@ -278,10 +278,10 @@ class ExecutionEngine:
                 "None" if self._bcs is None else type(self._bcs).__name__,
             )
             return None
-        from community.core.task.task_runner.modal_executor.task_executor import (
+        from agentclaw.community.core.task.task_runner.modal_executor.task_executor import (
             TaskExecutor,
         )
-        from community.core.task.task_runner.modal_executor.task_executor_result_poller import (
+        from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
             TaskExecutorResultPoller,
         )
         from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
@@ -2421,6 +2421,7 @@ class ExecutionEngine:
             "[task][prepare] task=%s 待派发节点=%s dispatch_started_at=%s",
             task_id,
             [n.node_id for n in pending],
+            dispatch_started_at,
         )
         dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []

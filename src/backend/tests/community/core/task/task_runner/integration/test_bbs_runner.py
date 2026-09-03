@@ -138,6 +138,7 @@ class _FakeGraph:
         self.bbs_owner: str | None = None   # 当前根 bbs_owner 值(claim 设,收口/except 清)
         self.cleared = False                 # bbs_owner 被清回 None 标记(收口 finally / except 释放)
         self.added_nodes = []                # notify 创建的 scoped BBS 节点
+        self.root_status = Status.HUNG       # BBS 创建前根节点的恢复态
 
     def claim_bbs_owner(self, task_id, bot_id):
         self.claimed = bot_id
@@ -149,9 +150,12 @@ class _FakeGraph:
             self.bbs_owner = None
             self.cleared = True
 
-    def add_task_nodes(self, nodes, task_id):
-        # notify 新增 bbs scoped 节点:轻量记账即可(snapshot 取自 execution_graph 真实图)
+    def add_task_nodes(self, nodes, task_id, *, mark_parent_planning=True):
+        # Mirror TaskGraphService's parent-state side effect so this test catches
+        # accidental HUNG -> PLANNING transitions in the BBS runner.
         self.added_nodes.extend(nodes)
+        if mark_parent_planning:
+            self.root_status = Status.PLANNING
         return MagicMock(success=True)
 
     def add_relations(self, task_id, edges):
@@ -185,6 +189,25 @@ class _FakeOnBbsReport:
 
 
 _GOAL = "整理基础架构方向架构师名册"
+
+
+def test_notify_keeps_hung_root_until_bbs_report():
+    """Creating the BBS scoped node must not resume root planning early."""
+    graph = _FakeGraph()
+    bot = _FakeBot(rates={"A": 80})
+    bcn = _FakeBcn(_roster("A"))
+
+    _run(notify(
+        _execution_graph("t-hung-root"),
+        bcn=bcn,
+        bot=bot,
+        graph=graph,
+        backend_url="http://x",
+        on_bbs_report=_FakeOnBbsReport(graph),
+    ))
+
+    assert graph.root_status == Status.HUNG
+    assert len(graph.added_nodes) == 1
 
 
 def test_notify_selects_highest_completion_rate_and_claims_and_sends():
