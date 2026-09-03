@@ -698,16 +698,27 @@ async def test_record_only_skill_activation_writes_desired_state_on_a_pending_bo
 
 
 @pytest.mark.asyncio
-async def test_the_default_still_refuses_a_pending_bot():
+async def test_record_only_skips_the_runtime_where_the_default_reports_it_pending():
+    """On a bot that is not ready the default commits desired state and
+    reports the projection *pending* (the runtime is not consulted either
+    way); record-only says the runtime was not required at all, which is
+    what the teclaw strategy means: the artifact is the projection."""
     repository = _Repository()
     service = DirectActivationService(
         repository, _PendingBotsForRecordOnly(), _Skills(), _NeverProjects(),
         _Authorization(), _Audit(), _McpCenter(allowed=True), _Reader(),
         _PlatformDefaultMcpPolicy(),
     )
-    with pytest.raises(LocalSkillNotReadyError):
-        await service.activate_mcp(
-            server_code="github", bot_id="bot-1", owner_id="true-owner",
-            actor_id="true-owner",
-        )
-    assert repository.install_mcp_calls == []
+    by_default = await service.activate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner",
+    )
+    assert by_default["runtime_projection"]["status"] == "PENDING"
+    assert by_default["runtime_projection"]["issues"][0]["code"] == "BOT_RUNTIME_NOT_READY"
+    record_only = await service.activate_mcp(
+        server_code="github", bot_id="bot-1", owner_id="true-owner",
+        actor_id="true-owner", project=False,
+    )
+    assert record_only["runtime_projection"]["status"] == "SKIPPED"
+    assert record_only["runtime_projection"]["reason"] == "RUNTIME_NOT_REQUIRED"
+    assert [c["server_code"] for c in repository.install_mcp_calls] == ["github", "github"]
