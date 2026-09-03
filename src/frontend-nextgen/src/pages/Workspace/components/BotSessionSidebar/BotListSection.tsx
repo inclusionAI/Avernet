@@ -20,6 +20,7 @@ interface BotListSectionProps {
   favoriteSessionPageMetaByBotId?: Record<string, BotSessionPageMeta>;
   selectedBotSessionId: string | null;
   onToggleBotExpanded: (botId: string, sectionKey?: string) => void;
+  onSelectBot: (bot: ChatBotView) => void;
   onSelectSession: (botId: string, sessionId: string) => void;
   onCreateSession: (botId: string) => void;
   onDeleteSession: (botId: string, sessionId: string) => Promise<boolean>;
@@ -46,6 +47,7 @@ export function BotListSection({
   favoriteSessionPageMetaByBotId,
   selectedBotSessionId,
   onToggleBotExpanded,
+  onSelectBot,
   onSelectSession,
   onCreateSession,
   onDeleteSession,
@@ -105,6 +107,7 @@ export function BotListSection({
                   favoriteSessionMeta={favoriteSessionPageMetaByBotId?.[bot.botId]}
                   selectedBotSessionId={selectedBotSessionId}
                   onToggleBotExpanded={(botId) => onToggleBotExpanded(botId, sectionKey)}
+                  onSelectBot={onSelectBot}
                   onSelectSession={onSelectSession}
                   onCreateSession={onCreateSession}
                   onDeleteSession={onDeleteSession}

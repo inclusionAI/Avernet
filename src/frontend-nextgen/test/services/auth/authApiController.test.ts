@@ -59,7 +59,12 @@ describe('authApiController', () => {
   });
 
   it('信封形状但 code 非 2xx 段(HTTP 200 异常形态)按业务失败 reject', async () => {
-    (request as jest.Mock).mockResolvedValue({ code: 40100, message: 'Authentication is required', data: null, request_id: 'r' });
+    (request as jest.Mock).mockResolvedValue({
+      code: 40100,
+      message: 'Authentication is required',
+      data: null,
+      request_id: 'r',
+    });
     await expect(getCurrentAuthUser()).rejects.toThrow('Authentication is required');
   });
 });

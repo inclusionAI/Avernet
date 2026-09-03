@@ -1,3 +1,4 @@
+import { Card } from '@/components/ui/Card';
 import { IconButton } from '@/components/ui/IconButton';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
@@ -21,7 +22,7 @@ export default function SquareSearchBar({
 }: SquareSearchBarProps) {
   const label = resource === 'bot' ? (mode === 'smart' ? '描述你需要的职责或能力' : '搜索 Bot 名称') : '搜索协作群名称';
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 md:flex-row md:items-center">
+    <Card className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
       {resource === 'bot' && onModeChange && (
         <Segmented
           value={mode}
@@ -51,6 +52,6 @@ export default function SquareSearchBar({
           />
         )}
       </div>
-    </div>
+    </Card>
   );
 }

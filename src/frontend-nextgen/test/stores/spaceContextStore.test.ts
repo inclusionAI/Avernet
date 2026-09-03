@@ -60,6 +60,19 @@ describe('spaceContextStore', () => {
     expect(useSpaceContextStore.getState().currentSpaceId).toBe(10001);
   });
 
+  it('setSpaces ID 不变时复用旧 currentSpace 引用，避免下游级联重渲染', () => {
+    const teamClone: Space = { ...team, spaceName: '风控团队' }; // 值相同但不同引用
+    useSpaceContextStore.getState().setSpaces([personal, team]);
+    useSpaceContextStore.getState().setCurrentSpaceId(10001);
+    const refBefore = useSpaceContextStore.getState().currentSpace;
+    expect(refBefore).toBe(team);
+    // 重拉列表（新数组、新对象引用但 ID/值相同）→ currentSpace 引用不应变
+    useSpaceContextStore.getState().setSpaces([personal, teamClone]);
+    const refAfter = useSpaceContextStore.getState().currentSpace;
+    expect(refAfter).toBe(refBefore); // 引用稳定
+    expect(refAfter?.spaceName).toBe('风控团队');
+  });
+
   it('setInitialized / reset 清零', () => {
     useSpaceContextStore.getState().setInitialized(true);
     expect(useSpaceContextStore.getState().initialized).toBe(true);

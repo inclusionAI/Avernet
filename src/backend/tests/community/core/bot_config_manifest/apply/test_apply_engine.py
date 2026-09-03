@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
+from agentclaw.community.core.bot_config_manifest.apply.order import steps_for
 from agentclaw.community.core.bot_config_manifest.apply.orchestrator import (
     ApplyOrchestrator,
 )
@@ -71,7 +72,8 @@ def _engine(scripts=None, activations=None, auth=None):
             package_validator=real_validator(),
             entry_fetcher=_dummy_entry_fetcher(),
             resource_service=FakeResourceFileService(),
-        )
+        ),
+        steps=steps_for
     )
 
 
@@ -557,6 +559,7 @@ def test_the_report_payload_names_every_field_it_emits():
         "started_at",
         "finished_at",
         "sources",
+        "notes",
         "categories",
         "entries",
     }
@@ -802,7 +805,8 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
                 fetcher, FakeManifestContent(), FakeCredentials()
             ),
             resource_service=FakeResourceFileService(),
-        )
+        ),
+        steps=steps_for
     )
 
     report = await _apply(

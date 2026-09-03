@@ -56,7 +56,7 @@ def _ready_center_store():
 def _collector(*, skill_set_service=None, mcp_config_service=None,
                resource_repository=None,
                identity_service=None, channel_repo=None,
-               local_mcp_registry=None):
+               local_mcp_registry=None, managed_files_reader=None):
     center_store = _ready_center_store()
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
@@ -71,6 +71,7 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
         # would read the repo's bundled local-mcp-servers.yaml off disk and make
         # every test here depend on that file's contents.
         local_mcp_registry=local_mcp_registry or _registry_over({}),
+        managed_files_reader=managed_files_reader,
     )
 
 

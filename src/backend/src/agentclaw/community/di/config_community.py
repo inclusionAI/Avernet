@@ -149,6 +149,21 @@ class CommunitySecretConfig:
 
 
 @dataclass(frozen=True)
+class CommunityLLMHarnessConfig:
+    """Community-only OpenAI-compatible Harness LLM settings.
+
+    Values come from the community ``llm`` YAML block, whose shipped values are
+    environment placeholders. Internal production profiles never resolve this
+    type or its provider.
+    """
+
+    base_url: str = ""
+    secret_name: str = "LLM_AUTH_TOKEN"
+    model: str = "glm-5.2"
+    timeout_ms: int = 180_000
+
+
+@dataclass(frozen=True)
 class OutboundRuleEntryConfig:
     """One outbound-header rule from the ``outbound_rules.header_rules`` YAML list.
 

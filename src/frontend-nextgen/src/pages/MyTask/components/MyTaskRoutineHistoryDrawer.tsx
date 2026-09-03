@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import {
   Drawer,
   DrawerContent,
@@ -60,9 +61,9 @@ export function MyTaskRoutineHistoryDrawer({
           </DrawerDescription>
         </DrawerHeader>
         {historyError && historyRuns.length > 0 ? (
-          <div className="mb-3 rounded-lg border border-[var(--color-warning-soft)] bg-[var(--color-warning-soft)]/40 px-3 py-2 text-sm text-[var(--color-warning)]">
+          <Card className="mb-3 border-warning/20 bg-warning/10 px-3 py-2 text-sm text-warning shadow-none">
             {historyError}
-          </div>
+          </Card>
         ) : null}
         <div className="overflow-hidden rounded-xl border border-[var(--color-border)]">
           <div className="app-scrollbar overflow-x-auto">
@@ -123,11 +124,14 @@ export function MyTaskRoutineHistoryDrawer({
                         <div className="text-xs text-[var(--color-fg)]">{item.taskName ?? '—'}</div>
                       </Td>
                       <Td>
-                        <div className="flex justify-end" onClick={(event) => event.stopPropagation()}>
+                        <div className="flex justify-end">
                           <Button
                             variant="secondary"
                             size="sm"
-                            onClick={() => onOpenRoutineFromHistory(item.botId, item.routineId)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onOpenRoutineFromHistory(item.botId, item.routineId);
+                            }}
                           >
                             查看实例
                           </Button>

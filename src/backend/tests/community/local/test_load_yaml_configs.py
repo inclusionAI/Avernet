@@ -33,6 +33,22 @@ class TestLoadYamlConfigsOverlaySelection:
         assert provider.overlay_name == "application-singlebox.yaml"
         assert config.user_config["app"]["title"] == "AgentClaw Single Box"
 
+    def test_community_llm_environment_is_expanded(self, monkeypatch):
+        monkeypatch.setenv(
+            "LLM_BASE_URL", "https://llm.example/compatible-mode/v1"
+        )
+        monkeypatch.setenv("LLM_BALANCED_MODEL", "glm-5.2")
+        monkeypatch.setenv("LLM_DEFAULT_TIMEOUT_MS", "600000")
+
+        llm = _load_yaml_configs("application-community.yaml")["user_config"]["llm"]
+
+        assert llm == {
+            "base_url": "https://llm.example/compatible-mode/v1",
+            "secret_name": "LLM_AUTH_TOKEN",
+            "model": "glm-5.2",
+            "timeout_ms": "600000",
+        }
+
     def test_provider_rejects_physical_overlay_name_as_public_input(self):
         with pytest.raises(ValueError, match="Unknown YAML config profile"):
             YamlConfigProvider("application-singlebox.yaml")

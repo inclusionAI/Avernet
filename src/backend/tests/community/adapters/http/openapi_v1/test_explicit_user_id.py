@@ -450,8 +450,9 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: ``POST /openapi/v1/bots`` itself.
 #: Directory download adds one more bot-path-addressed resource operation.
 #: Space Skill Version Copy adds one account-level operation; it is addressed by
-#: Space and Skill version rather than by Bot.
-_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 103}
+#: Space and Skill version rather than by Bot. Human Chat adds eleven Bot-path
+#: operations while retaining separate caller and Bot-owner identities.
+_BOT_ID_PLACEMENT = {"path": 167, "query": 1, "none": 103}
 
 
 def _schema() -> dict:
@@ -598,8 +599,9 @@ def test_the_pinned_number_of_operations_take_it():
     # reason the ordinary create does: they spend that user's quota and read
     # that user's rows, and neither is admissible to an application caller.
     # Directory download adds one more user-scoped resource operation.
-    # Space Skill Version Copy adds one more user-scoped operation.
-    assert len(taking) == 230
+    # Space Skill Version Copy adds one more user-scoped operation. The isolated
+    # Human Chat surface adds eleven caller-owned operations: 230 → 241.
+    assert len(taking) == 241
 
 
 def test_the_exempt_operations_take_none():

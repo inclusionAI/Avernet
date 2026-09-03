@@ -81,17 +81,19 @@ export function useGroupCollaborationPicker(
     let cancelled = false;
     setIsLoadingFriends(true);
     setError(undefined);
-    void collaborationCandidateService.listFriends(actorId, { offset: 0, limit: PAGE_SIZE }).then((res) => {
-      if (cancelled) return;
-      setIsLoadingFriends(false);
-      if (res.ok) {
-        setFriends(res.data.items);
-        setFriendsHasMore(res.data.hasMore);
-        friendsOffsetRef.current = res.data.offset;
-      } else {
-        setError(res.error.friendlyMessage);
-      }
-    });
+    void collaborationCandidateService
+      .listFriends(actorId, { offset: 0, limit: PAGE_SIZE, detailSource: 'collaboration' })
+      .then((res) => {
+        if (cancelled) return;
+        setIsLoadingFriends(false);
+        if (res.ok) {
+          setFriends(res.data.items);
+          setFriendsHasMore(res.data.hasMore);
+          friendsOffsetRef.current = res.data.offset;
+        } else {
+          setError(res.error.friendlyMessage);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -163,7 +165,11 @@ export function useGroupCollaborationPicker(
       (loadingFriends ? friendsOffsetRef.current : loadingMine ? mineOffsetRef.current : candidatesOffsetRef.current) +
       PAGE_SIZE;
     const request = loadingFriends
-      ? collaborationCandidateService.listFriends(actorId, { offset: nextOffset, limit: PAGE_SIZE })
+      ? collaborationCandidateService.listFriends(actorId, {
+          offset: nextOffset,
+          limit: PAGE_SIZE,
+          detailSource: 'collaboration',
+        })
       : loadingMine
       ? collaborationCandidateService.listMine({ offset: nextOffset, limit: PAGE_SIZE })
       : collaborationCandidateService.listCandidates(actorId, {

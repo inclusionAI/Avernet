@@ -2129,3 +2129,4 @@ def test_startup_script_audit_names_the_application_not_the_delegating_user():
     actor = _audit_actor(app, "alice")
     assert actor != "alice", "an app's write must not read as the user's own"
     assert "7" in actor and "alice" in actor, "name the app, keep who it acted for"
+

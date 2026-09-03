@@ -1,5 +1,7 @@
 import { cn } from '@/utils/cn';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useState } from 'react';
+import { Input } from './Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './Select';
 
 export interface PaginationProps {
@@ -15,10 +17,12 @@ export interface PaginationProps {
   onPageSizeChange?: (pageSize: number) => void;
   /** 每页条数可选项 */
   pageSizeOptions?: number[];
+  /** 是否显示「跳至 X 页」输入框（Enter 或 Go 触发，越界钳制到末页） */
+  showQuickJumper?: boolean;
   className?: string;
 }
 
-/** 简单分页器：上一页/下一页 + 当前页/总页数 */
+/** 简单分页器：上一页/下一页 + 当前页/总页数，可选每页条数选择与跳页输入 */
 export function Pagination({
   current,
   pageSize,
@@ -26,12 +30,23 @@ export function Pagination({
   onChange,
   onPageSizeChange,
   pageSizeOptions = [10, 20, 50],
+  showQuickJumper = false,
   className,
 }: PaginationProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const canPrev = current > 1;
   const canNext = current < totalPages;
   const showPageSizePicker = pageSizeOptions.length > 1 && Boolean(onPageSizeChange);
+  const [jumpValue, setJumpValue] = useState('');
+
+  const jumpToPage = () => {
+    const target = Number(jumpValue);
+    setJumpValue('');
+    if (!Number.isInteger(target) || target < 1) return;
+    const clamped = Math.min(target, totalPages);
+    // 目标即当前页时不触发回调，避免重复请求
+    if (clamped !== current) onChange(clamped);
+  };
 
   if (total === 0) return null;
 
@@ -48,8 +63,9 @@ export function Pagination({
             onValueChange={(value) => {
               const nextPageSize = Number(value);
               if (Number.isFinite(nextPageSize) && nextPageSize > 0) {
+                // 页码重置归调用方负责（如 MyTask 在 handler 内 setPage(1)）；
+                // 组件不代调 onChange(1)，避免回调驱动型消费方闭包旧 pageSize 造成重复请求竞态。
                 onPageSizeChange?.(nextPageSize);
-                onChange(1);
               }
             }}
           >
@@ -86,6 +102,29 @@ export function Pagination({
           <ChevronRight className="size-4" />
         </button>
       </div>
+      {showQuickJumper ? (
+        <div className="flex items-center gap-1 text-foreground">
+          <span>跳至</span>
+          <Input
+            aria-label="跳至页码"
+            inputMode="numeric"
+            className="h-7 w-12 rounded-md px-0 text-center"
+            value={jumpValue}
+            onChange={(e) => setJumpValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') jumpToPage();
+            }}
+          />
+          <span>页</span>
+          <button
+            type="button"
+            className="inline-flex h-7 items-center justify-center rounded-md border border-border px-2 text-foreground transition-colors hover:bg-muted"
+            onClick={jumpToPage}
+          >
+            Go
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

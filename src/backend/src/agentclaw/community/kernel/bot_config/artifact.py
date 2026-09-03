@@ -34,6 +34,8 @@ Module rules (kernel is the lowest layer):
 """
 from __future__ import annotations
 
+from enum import StrEnum
+
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -58,6 +60,25 @@ from typing import Any
 # this contract's evolution. "Does this artifact carry cli_tools?" is answered by
 # probing for the key, never by the version number.
 SCHEMA_VERSION = 4
+
+# The two values ``BotConfigArtifact.ownership`` admits (W8). Spelled once.
+OWNERSHIP_PLATFORM = "platform"
+OWNERSHIP_ENGINE = "engine"
+
+
+class OwnershipCategory(StrEnum):
+    """The categories the ``ownership`` map may name — the artifact's own
+    field names, so a map key and the list it governs are spelled once."""
+
+    MCP = "mcp"
+    SKILLS = "skills"
+    RESOURCES = "resources"
+    IDENTITY_FILES = "identity_files"
+    CLI_TOOLS = "cli_tools"
+
+
+#: The category names the map may carry, as plain strings, in the enum's order.
+OWNERSHIP_CATEGORIES: tuple[str, ...] = tuple(c.value for c in OwnershipCategory)
 
 
 @dataclass(frozen=True)
@@ -232,6 +253,25 @@ class BotConfigArtifact:
     # artifact is a full snapshot of platform state, never a manifest diff. At
     # that point ``[]`` simply means "this bot has no platform-delivered tools".
     cli_tools: list[CliToolRef] | None = None
+    # W8 (#1476): which categories the **platform** is asserting in this
+    # artifact, and which it leaves to the engine. Category name (``mcp``,
+    # ``skills``, ``resources``, ``identity_files``, ``cli_tools``) to
+    # ``"platform"`` or ``"engine"``:
+    #
+    # * ``platform`` — the list in this artifact is the complete desired state
+    #   for the category's area (engine contract §5); an empty list means
+    #   "remove everything in the area".
+    # * ``engine`` — the engine owns the category; it ignores the list here
+    #   and keeps what it has.
+    # * absent (the whole map, or one category) — the engine's pre-W8
+    #   behaviour, which is what lets the map ship ahead of engine support
+    #   under the ignore-unknown-fields rule (A5). ``None`` leaves the key off
+    #   the wire so existing artifacts stay byte-identical (see ``to_dict``).
+    #
+    # The map is the wire form of the manifest's "declared / undeclared
+    # category" rule (work-items §3.2): the platform marks a category
+    # ``platform`` exactly when the bot's manifest declares it.
+    ownership: dict[str, str] | None = None
     stores: dict[str, StoreRef] = field(default_factory=dict)
     engine_overrides: dict[str, Any] = field(default_factory=dict)
     engine_ext: dict[str, Any] = field(default_factory=dict)
@@ -263,6 +303,10 @@ class BotConfigArtifact:
                     server.pop(key, None)
         if self.cli_tools is None:
             data.pop("cli_tools", None)
+        # Same principle: an artifact that asserts no ownership carries no map,
+        # so every artifact built before W8 is byte-identical on the wire.
+        if self.ownership is None:
+            data.pop("ownership", None)
         return data
 
     @classmethod
@@ -286,6 +330,11 @@ class BotConfigArtifact:
                 [CliToolRef(**t) for t in data["cli_tools"]]
                 if data.get("cli_tools") is not None
                 else None
+            ),
+            # Absent stays absent, for the reason ``cli_tools`` gives: reading
+            # a pre-W8 artifact must not manufacture an ownership claim.
+            ownership=(
+                dict(data["ownership"]) if data.get("ownership") is not None else None
             ),
             stores={k: StoreRef(**v) for k, v in data.get("stores", {}).items()},
             engine_overrides=dict(data.get("engine_overrides", {})),

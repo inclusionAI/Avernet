@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
+    converter_creation,
+    router,
+)
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
     EngineDeviceNotReadyError,
@@ -170,6 +173,48 @@ def test_create_session_fills_user_id_from_the_principal(client, relay):
     assert relay.calls[1]["path"] == "/api/sessions"
 
 
+def test_create_session_reconciles_openclaw_lowercased_cloud_user_id(client, relay):
+    relative_id = "session:ABC-123:user:CloudUser"
+    canonical_id = "agent:main:session:abc-123:user:clouduser"
+    relay.results = [
+        EngineResult(data={**ENGINE_SESSION, "id": relative_id}),
+        EngineResult(data=[{**ENGINE_SESSION, "id": canonical_id}]),
+    ]
+
+    resp = client.post(_base(), json={"title": "Cloud"})
+
+    assert resp.status_code == 201, resp.json()
+    assert resp.json()["data"]["session_id"] == canonical_id
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "created_id", "expected"),
+    [
+        ("Opaque-ID", "Opaque-ID", True),
+        ("opaque-id", "Opaque-ID", False),
+        (
+            "agent:main:session:abc-123:user:clouduser",
+            "session:ABC-123:user:CloudUser",
+            True,
+        ),
+        (
+            "agent:other:session:abc-123:user:clouduser",
+            "agent:main:session:ABC-123:user:CloudUser",
+            False,
+        ),
+        (
+            "session:abc-123:user:clouduser",
+            "session:ABC-123:user:CloudUser",
+            False,
+        ),
+    ],
+)
+def test_create_session_reconciliation_matches_only_managed_openclaw_keys(
+    candidate_id, created_id, expected
+):
+    assert converter_creation._matches(candidate_id, created_id) is expected
+
+
 def test_create_session_other_engine_does_not_add_reconciliation_call(client, relay):
     relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
         bot_id=BOT, bot_type="personal", active_engine="claude_code", owner_id=OWNER,
@@ -183,13 +228,17 @@ def test_create_session_other_engine_does_not_add_reconciliation_call(client, re
 
 
 def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
-    client, relay
+    client, relay, monkeypatch
 ):
+    monkeypatch.setattr(converter_creation, "_DELAYS", (0.0, 0.0, 0.0))
     relay.results = [EngineResult(data=ENGINE_SESSION)]
     original_call = relay.call
+    list_attempts = 0
 
     async def fail_only_list(**kwargs):
+        nonlocal list_attempts
         if kwargs["method"] == "GET":
+            list_attempts += 1
             raise EngineUpstreamError("list temporarily unavailable")
         return await original_call(**kwargs)
 
@@ -199,6 +248,7 @@ def test_create_session_keeps_success_when_openclaw_reconciliation_fails(
 
     assert resp.status_code == 201, resp.json()
     assert resp.json()["data"]["session_id"] == SESSION_ID
+    assert list_attempts == 3
 
 
 def test_create_rejects_an_agent_one_engine_would_silently_drop(client, relay):

@@ -2,6 +2,37 @@
 通用工具函数
 """
 import base64
+import re
+
+_MANAGED_SESSION_KEY = re.compile(
+    r"^(?:agent:([^:]+):)?(session:[^:]+:user:[^:]+)$",
+    re.IGNORECASE,
+)
+
+
+def normalize_managed_session_lookup_key(session_key: str) -> str:
+    """Normalize only the relative session key returned by OCB create."""
+    match = _MANAGED_SESSION_KEY.fullmatch(session_key)
+    if match is not None and match.group(1) is None:
+        return session_key.lower()
+    return session_key
+
+
+def managed_session_keys_equal(candidate: str, requested: str) -> bool:
+    """Match relative OCB keys with their agent-scoped OpenClaw form."""
+    if candidate == requested:
+        return True
+
+    candidate_match = _MANAGED_SESSION_KEY.fullmatch(candidate)
+    requested_match = _MANAGED_SESSION_KEY.fullmatch(requested)
+    if candidate_match is None or requested_match is None:
+        return False
+
+    candidate_agent, candidate_relative = candidate_match.groups()
+    requested_agent, requested_relative = requested_match.groups()
+    if (candidate_agent is None) == (requested_agent is None):
+        return False
+    return candidate_relative.lower() == requested_relative.lower()
 
 
 def encode_session_key(session_key: str) -> str:

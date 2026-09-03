@@ -56,20 +56,13 @@ const TaskEscortDashboardView: React.FC<DashboardViewProps> = ({
         ) : (
           <div className="divide-y divide-[var(--color-border)]">
             {workflowTypes.map((wf) => (
-              <div
+              <Button
                 key={wf.workflow_id}
-                className="cursor-pointer px-3 py-2.5 transition-colors hover:bg-[var(--color-panel-muted)] focus-visible:outline-2 focus-visible:outline-[var(--color-primary)]"
+                variant="ghost"
+                className="h-auto w-full justify-start rounded-none px-3 py-2.5 text-left hover:bg-[var(--color-panel-muted)]"
                 onClick={() => onNavigate(wf.workflow_id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onNavigate(wf.workflow_id);
-                  }
-                }}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex w-full items-center gap-2">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-medium">{wf.workflow_title || wf.workflow_id}</div>
                     <div className="truncate text-[10px] text-[var(--color-muted)]">{wf.workflow_id}</div>
@@ -80,7 +73,7 @@ const TaskEscortDashboardView: React.FC<DashboardViewProps> = ({
                     </Badge>
                   )}
                 </div>
-                <div className="ml-0 mt-1 flex items-center gap-2 text-[10px]">
+                <div className="ml-0 mt-1 flex w-full items-center gap-2 text-[10px]">
                   <span className="text-[var(--color-muted)]">{wf.run_count} 总计</span>
                   {isLiveRunStatus(wf.last_status) && (
                     <span className="inline-flex items-center text-[var(--color-primary)]">
@@ -92,7 +85,7 @@ const TaskEscortDashboardView: React.FC<DashboardViewProps> = ({
                     {formatTimeShort(wf.last_run_at ?? wf.updated_at)}
                   </span>
                 </div>
-              </div>
+              </Button>
             ))}
           </div>
         )}

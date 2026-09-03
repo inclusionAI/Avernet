@@ -278,3 +278,52 @@ describe('页面刷新 / 重进管理区保持选中空间', () => {
     expect(s.initialized).toBe(true);
   });
 });
+
+describe('ensurePersonalSpaceOnAppEntry', () => {
+  // 单飞标记为模块级状态：isolateModules 取全新实例，各用例互不污染
+  // （隔离注册表是全新求值，需在其中 require 被测模块及其 mock 的 adminService 引用；CVM 下不可用动态 import）。
+  function freshModule() {
+    jest.resetModules();
+    let mod!: typeof import('@/hooks/useSpaceContext');
+    let svc!: typeof import('@/services/admin').adminService;
+    jest.isolateModules(() => {
+      mod = require('@/hooks/useSpaceContext') as typeof import('@/hooks/useSpaceContext');
+      svc = (require('@/services/admin') as typeof import('@/services/admin')).adminService;
+    });
+    return { mod, svc };
+  }
+  const mockedEnsure = (svc: typeof import('@/services/admin').adminService) =>
+    svc.ensurePersonalSpace as unknown as jest.MockedFunction<typeof svc.ensurePersonalSpace>;
+
+  it('进入项目即初始化个人空间一次（不等进入管理区域）', async () => {
+    const { mod, svc } = await freshModule();
+    mockedEnsure(svc).mockResolvedValue({ data: true });
+    await mod.ensurePersonalSpaceOnAppEntry();
+    expect(mockedEnsure(svc)).toHaveBeenCalledTimes(1);
+  });
+
+  it('单飞：同一页面加载内并发/顺序重复调用只发一次请求', async () => {
+    const { mod, svc } = await freshModule();
+    let resolveFirst!: (v: Awaited<ReturnType<typeof import('@/services/admin').adminService.ensurePersonalSpace>>) => void;
+    mockedEnsure(svc).mockImplementationOnce(
+      () =>
+        new Promise((res) => {
+          resolveFirst = res;
+        }),
+    );
+    const p1 = mod.ensurePersonalSpaceOnAppEntry(); // 进行中即被单飞吸收
+    const p2 = mod.ensurePersonalSpaceOnAppEntry();
+    resolveFirst({ data: true });
+    await Promise.all([p1, p2]);
+    await mod.ensurePersonalSpaceOnAppEntry(); // 成功后重复调用仍不重发
+    expect(mockedEnsure(svc)).toHaveBeenCalledTimes(1);
+  });
+
+  it('失败静默：不重抛，且本页不重试（进入管理区域时 initSpaceContext 的 ensure 分支兜底）', async () => {
+    const { mod, svc } = await freshModule();
+    mockedEnsure(svc).mockResolvedValue({ error: { message: '初始化失败', apiPath: '/spaces' } });
+    await expect(mod.ensurePersonalSpaceOnAppEntry()).resolves.toBeUndefined();
+    await mod.ensurePersonalSpaceOnAppEntry();
+    expect(mockedEnsure(svc)).toHaveBeenCalledTimes(1);
+  });
+});

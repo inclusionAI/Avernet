@@ -5,6 +5,7 @@ import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { buildToastKey, extractFriendlyErrorMessage, formatApiPath } from '@/utils/requestErrorHandler';
 import { retryOnTransient } from '@/utils/retryRequest';
 import { extractLoginUrl, isAceLoginResponse } from './aceLoginBody';
+import { resolveAuthFailureDisposition } from './authFailurePolicy';
 
 export interface BackendRequestOptions {
   method?: string;
@@ -94,7 +95,8 @@ export function triggerLoginPrompt(): void {
 /**
  * legacy-agentclaw 只是告诉 dev server / Tern proxy 走旧 AgentClaw 路由。
  * 请求本身必须保持同源相对路径，不能在浏览器里直连 agentclaw-pre：
- * - 本地开发仍显示/发送同源的 /api/... 路径；
+ * - 本地开发要显示/发送为「PRE 网关同源地址 + /api/...」（内部域名以
+ *   config.local.ts / internal runtime 为准，Open Core 侧不出现具体域名）；
  * - 由 config.local.ts / internal runtime 的代理转发到真实后端。
  */
 function resolveBackendUrl(url: string): string {
@@ -140,17 +142,10 @@ async function readResponseData(
 }
 
 /**
- * BCS(阿里云)未鉴权错误体判定:`{code:40100,...,data:{error_code:'unauthenticated'}}`。
- * 仅用于 oauth-provider 策略的会话过期反应口(add-external-oauth-login 8.9);
- * ace-gateway 不认此形状(内部以 ACE 替换登录体探测,见 `isAceLoginResponse`)。
+ * BCS(阿里云)未鉴权错误体与处置决策已上移共用:体判定 `isEnvelopeUnauthenticated`(./types.ts,双方言),
+ * 处置决策 `resolveAuthFailureDisposition`(./authFailurePolicy.ts)——oauth-provider 策略下未登录失败
+ * 统一「登记弹窗信号 + 静默上抛」,不逐条投递默认错误 toast;ace-gateway 一律维持既有 BackendRequestError 路径。
  */
-function isUnauthenticatedErrorBody(data: unknown): boolean {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    (data as { data?: { error_code?: unknown } }).data?.error_code === 'unauthenticated'
-  );
-}
 
 async function executeBackendRequest<T>(url: string, options: BackendRequestOptions): Promise<T> {
   const resolvedUrl = resolveBackendUrl(url);
@@ -171,15 +166,12 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
   const responseData = await readResponseData(response, options.responseType);
 
   if (!response.ok) {
-    // 会话过期反应口(add-external-oauth-login 8.9):外部 oauth 策略下业务 401 + BCS unauthenticated 体
-    // → 登记弹窗信号(单飞)并抛 AceLoginRedirectError 阻止 stale 渲染;不投递通用错误 toast
-    // (会话过期后的失败请求统一导向登录弹窗,而非逐条报错)。ace-gateway 维持既有 BackendRequestError 路径。
-    if (
-      response.status === 401 &&
-      isUnauthenticatedErrorBody(responseData) &&
-      useLoginStrategyStore.getState().loginStrategy === 'oauth-provider'
-    ) {
-      triggerLoginPrompt();
+    // 未登录处置决策(见 authFailurePolicy):外部 oauth 策略下,未登录失败(HTTP 401 / 信封未登录体)
+    // 已在策略内单飞登记弹窗信号 → 静默上抛 AceLoginRedirectError 阻止 stale 渲染,不逐条报错
+    // (spec: 会话过期/未登录场景统一导向登录弹窗);已确认未登录后的其余失败也静默,登录前的接口
+    // 错误提示是噪音。两者均仍抛错,调用方可感知失败。ace-gateway 维持既有 BackendRequestError 路径。
+    const authDisposition = resolveAuthFailureDisposition({ status: response.status, data: responseData });
+    if (authDisposition === 'login-prompt-silent') {
       throw new AceLoginRedirectError();
     }
     const apiPath = formatApiPath(requestUrl);
@@ -188,7 +180,10 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     const toastKey = buildToastKey({ apiPath, operation, message });
     // 默认提示投递(由顶层观察者 useErrorNotifyObserver 兜底发起):Service 层只 enqueue 上抛,不直接 toast,
     // 守 `src/services` 禁 toast/DOM。Hook 可在 catch 中 cancel(toastKey) 静默,或经 safeReportError 跳过重复。
-    useErrorNotifyStore.getState().enqueue({ toastKey, message, apiPath, operation });
+    // 未登录(`silent`)时跳过投递,仅保留 alreadyHandled 标记供下游 safeReportError 亦不再补发。
+    if (authDisposition !== 'silent') {
+      useErrorNotifyStore.getState().enqueue({ toastKey, message, apiPath, operation });
+    }
     throw new BackendRequestError(message, {
       status: response.status,
       data: responseData,
@@ -212,6 +207,12 @@ async function executeBackendRequest<T>(url: string, options: BackendRequestOpti
     }
     triggerAceLoginRedirect(loginUrl);
     throw new AceLoginRedirectError(loginUrl);
+  }
+
+  // 网关误包形态(HTTP 2xx 但信封 code 落未登录段,如 40100/401000):与 !response.ok 的未登录路径
+  // 同处置——登记弹窗信号(单飞)+ 静默上抛,避免误包体被无校验调用方当成功数据渲染或逐条报错。
+  if (resolveAuthFailureDisposition({ data: responseData }) === 'login-prompt-silent') {
+    throw new AceLoginRedirectError();
   }
 
   return responseData as T;

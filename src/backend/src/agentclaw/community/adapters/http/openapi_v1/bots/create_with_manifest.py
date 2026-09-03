@@ -52,15 +52,20 @@ from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
     SkillSetServiceFactoryProtocol,
 )
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    CreationSequence,
+)
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
     ApplyStatus,
 )
 from agentclaw.community.core.bot_config_manifest.create_job import (
     AUTHORIZATION_WINDOW_ELAPSED,
+    BOT_COULD_NOT_BE_PROVISIONED,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
+    CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
@@ -291,10 +296,19 @@ async def get_bot_create_with_manifest_status(
     bot = bot_repo.get_by_id_and_entity(bot_id, entity_id)
     report = apply_service.last_apply(entity_id=entity_id, bot_id=bot_id)
 
+    # Which order this bot's creation ran in (W8): with a record, the bot's
+    # own engine decides; before one exists the answer does not matter, since
+    # every state without a bot reads the same under both sequences.
+    sequence = (
+        apply_service.delivery_for_bot(bot).creation_sequence
+        if bot is not None
+        else CreationSequence.CREATE_BETWEEN_PHASES
+    )
     status = _creation_state(
         bot=bot,
         report=report,
         job=lambda: manifest_seam.find_job(entity_id=entity_id, bot_id=bot_id),
+        sequence=sequence,
     )
     if status is None:
         raise BotNotFoundError(
@@ -313,7 +327,7 @@ async def get_bot_create_with_manifest_status(
             if state is CreationState.AWAITING_AUTHORIZATION
             else "",
             bot=_to_bot(bot) if bot is not None and _bot_is_shown(state) else None,
-            apply=apply_payload(report) if _report_is_shown(state, report) else None,
+            apply=apply_payload(report) if _report_is_shown(state, report, sequence) else None,
             message=_message(state, job),
         ),
         request,
@@ -328,8 +342,16 @@ def _creation_state(
     bot: Optional[dict],
     report: Optional[ApplyReport],
     job: Callable[[], Optional[TaskRecord]],
+    sequence: CreationSequence = CreationSequence.CREATE_BETWEEN_PHASES,
 ) -> Optional[tuple[CreationState, Optional[TaskRecord]]]:
     """Map durable rows to a state. ``None`` means there is nothing here (404).
+
+    ``sequence`` (W8) names which of the creation's own records is the terminal
+    one: the post-container phase's under ``CREATE_BETWEEN_PHASES``, the single
+    pre-container phase's under ``RECORD_APPLY_PROVISION`` — where that phase
+    runs against the record and *before* the container, so its terminal
+    record with a bot that is not yet running reads as `CREATING`, not as an
+    outcome.
 
     ``job`` is a *callable* rather than a record, and that is the read's cost
     model made structural: looking a task up by its idempotency key is served by
@@ -346,17 +368,24 @@ def _creation_state(
             return (CreationState.AWAITING_AUTHORIZATION, record)
         return (_bot_less_terminal(record), record)
 
-    # The bot exists, and the post-container phase is the only record that
-    # answers how far the creation got. Phase A's is written *before* the bot,
-    # and a later `explicit` apply belongs to a bot that is already configured —
-    # both read the same as no record here.
-    if report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER:
+    # The bot exists, and the sequence's terminal phase is the only record that
+    # answers how far the creation got. Under ``CREATE_BETWEEN_PHASES`` phase A's is
+    # written *before* the bot, and a later `explicit` apply belongs to a bot
+    # that is already configured — both read the same as no record here.
+    if report is not None and report.trigger == _terminal_trigger(sequence):
         if report.status is ApplyStatus.RUNNING:
             return (CreationState.APPLYING, None)
-        if report.status is ApplyStatus.SUCCEEDED:
-            return (CreationState.READY, None)
-        # PARTIAL and FAILED alike: the bot is up, part of the manifest is not.
-        return (CreationState.APPLY_FAILED, None)
+        if sequence is CreationSequence.CREATE_BETWEEN_PHASES or _bot_is_running(bot):
+            # Under ``CREATE_BETWEEN_PHASES`` this record exists only once the bot is
+            # up; under ``RECORD_APPLY_PROVISION`` it is the outcome once the
+            # bot is up. PARTIAL and FAILED alike: part of the manifest is not.
+            if report.status is ApplyStatus.SUCCEEDED:
+                return (CreationState.READY, None)
+            return (CreationState.APPLY_FAILED, None)
+        # ``RECORD_APPLY_PROVISION``, the phase finished, the container not up:
+        # still being provisioned from what the phase wrote, or never coming.
+        # The job's row below tells the two apart, exactly as it does for a
+        # bot with no record of its own.
 
     # The second textual ``job()``, never a second call: the ``bot is None``
     # branch above returns on every path, so exactly one of the two runs.
@@ -397,6 +426,13 @@ def _creation_state(
     return (CreationState.CREATING, record)
 
 
+def _terminal_trigger(sequence: CreationSequence) -> str:
+    """The creation's own terminal record, per sequence (W8)."""
+    if sequence is CreationSequence.RECORD_APPLY_PROVISION:
+        return CREATE_PRE_CONTAINER_TRIGGER
+    return CREATE_ON_CONTAINER_TRIGGER
+
+
 def _bot_less_terminal(record) -> CreationState:
     """Declined, or never answered. Two states, because they are two events.
 
@@ -408,8 +444,15 @@ def _bot_less_terminal(record) -> CreationState:
     """
     if record.status is TaskStatus.TIMED_OUT:
         return CreationState.AUTHORIZATION_EXPIRED
-    if (record.last_error or "") == AUTHORIZATION_WINDOW_ELAPSED:
+    last_error = record.last_error or ""
+    if last_error == AUTHORIZATION_WINDOW_ELAPSED:
         return CreationState.AUTHORIZATION_EXPIRED
+    if last_error.startswith(BOT_COULD_NOT_BE_PROVISIONED):
+        # W8: under ``RECORD_APPLY_PROVISION`` a provisioning failure soft-deletes
+        # the record the job had written, so the poll sees no bot beside a
+        # terminal job — the shape of a decline, which it is not: the user
+        # authorized, and the platform could not provision.
+        return CreationState.CREATE_FAILED
     return CreationState.AUTHORIZATION_REJECTED
 
 
@@ -433,7 +476,11 @@ def _bot_is_shown(state: CreationState) -> bool:
     return state in (CreationState.READY, CreationState.APPLY_FAILED)
 
 
-def _report_is_shown(state: CreationState, report) -> bool:
+def _report_is_shown(
+    state: CreationState,
+    report,
+    sequence: CreationSequence = CreationSequence.CREATE_BETWEEN_PHASES,
+) -> bool:
     """Only the creation's own report, and only where it means something.
 
     The newest apply record is not always the creation's: an `explicit` apply
@@ -443,7 +490,7 @@ def _report_is_shown(state: CreationState, report) -> bool:
     """
     if state not in (CreationState.READY, CreationState.APPLY_FAILED):
         return False
-    return report is not None and report.trigger == CREATE_ON_CONTAINER_TRIGGER
+    return report is not None and report.trigger == _terminal_trigger(sequence)
 
 
 def _handle(job, field: str) -> str:

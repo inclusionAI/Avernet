@@ -29,6 +29,9 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     router as sessions_router,
 )
+from agentclaw.community.adapters.http.openapi_v1.human_chat import (
+    router as human_chat_router,
+)
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
@@ -127,7 +130,7 @@ def grants() -> FakeGrants:
 def app_client(relay, grants, friendships, expert):
     """A client whose credential names an application and no end user."""
 
-    def _build(caller: Any = None):
+    def _build(caller: Any = None, router=sessions_router):
         class _M(Module):
             def configure(self, binder):
                 binder.bind(EngineRuntimeRelayProtocol, to=relay)
@@ -136,7 +139,7 @@ def app_client(relay, grants, friendships, expert):
                 binder.bind(ExpertChatServiceProtocol, to=expert)
 
         app = FastAPI()
-        app.include_router(sessions_router)
+        app.include_router(router)
         app.dependency_overrides[require_principal] = lambda: (
             caller if caller is not None else app_only_caller()
         )
@@ -155,6 +158,24 @@ def app_client(relay, grants, friendships, expert):
 
 def _sessions(client, **params):
     return client.get(f"/openapi/v1/bots/{BOT}/sessions", params=params)
+
+
+def test_granted_application_can_use_human_chat(
+    app_client, grants, friendships, expert
+):
+    """The grant admits the app; BCN still adjudicates its delegating user."""
+    grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
+    friendships.allowed = True
+    client = app_client(router=human_chat_router)
+
+    response = client.get(
+        f"/openapi/v1/bots/{BOT}/human-chat/sessions",
+        params={"owner_id": OWNER},
+    )
+
+    assert response.status_code == 200, response.json()
+    assert friendships.calls[0]["human_id"] == COLLAB
+    assert any(call[0] == "list_chat_sessions" for call in expert.calls)
 
 
 # ── the invariant ────────────────────────────────────────────────────────────

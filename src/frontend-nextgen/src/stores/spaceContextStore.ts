@@ -40,7 +40,10 @@ export const useSpaceContextStore = create<SpaceContextStoreState>((set) => ({
   setSpaces: (spaces) =>
     set((state) => {
       const nextId = findSpace(spaces, state.currentSpaceId) ? state.currentSpaceId : undefined;
-      return { spaces, currentSpaceId: nextId, currentSpace: findSpace(spaces, nextId) };
+      // 空间 ID 不变时复用旧 currentSpace 引用，避免 refreshSpaceContext 重拉列表后
+      // 产生新对象引用 → 下游 useMemo/useCallback 级联 → 误触发 skills 列表请求。
+      const sameSpace = nextId === state.currentSpaceId ? state.currentSpace : undefined;
+      return { spaces, currentSpaceId: nextId, currentSpace: sameSpace ?? findSpace(spaces, nextId) };
     }),
   setLoading: (loading) => set({ loading }),
   setError: (error) => set({ error }),

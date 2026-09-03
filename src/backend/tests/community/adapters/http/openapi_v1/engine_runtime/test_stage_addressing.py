@@ -23,6 +23,10 @@ from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
+from agentclaw.community.adapters.http.openapi_v1.converter_human_chat_policy import (
+    BASE as HUMAN_CHAT_BASE,
+    OPERATIONS as HUMAN_CHAT_OPERATIONS,
+)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     router as sessions_router,
 )
@@ -203,6 +207,10 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("get", "/openapi/v1/bots/{bot_id}/mcps"),
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
+}
+_OWNER_ADDRESSED_ELSEWHERE |= {
+    (method.lower(), HUMAN_CHAT_BASE + suffix)
+    for method, suffix in HUMAN_CHAT_OPERATIONS
 }
 
 

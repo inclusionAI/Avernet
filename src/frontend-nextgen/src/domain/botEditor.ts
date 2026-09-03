@@ -5,7 +5,8 @@ export interface BotEditorSkill {
   name: string;
   description?: string;
   version?: string;
-  source?: 'local' | 'market' | 'workshop';
+  source?: 'local' | 'teamclaw-market' | 'skillcenter-market' | 'workshop';
+  homepageUrl?: string;
   active: boolean;
 }
 

@@ -146,8 +146,9 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             </div>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              {/* 与群搜索框一致：侧栏搜索统一 h-9（PR255 视觉规范），基础 Input 默认 h-8 */}
               <Input
-                className="pl-9"
+                className="h-9 pl-9"
                 value={sessionSearchText}
                 onChange={(event) => onSessionSearchTextChange(event.target.value)}
                 placeholder="搜索会话标题"

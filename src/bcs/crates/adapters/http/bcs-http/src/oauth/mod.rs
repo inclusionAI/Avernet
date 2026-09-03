@@ -220,7 +220,7 @@ impl AuthService for OAuthRouteState {
 
         info!(provider = %request.provider, user_id = %claims.sub, "OAuth login successful");
         Ok(AuthRedirect {
-            location: "/?login=success".to_string(),
+            location: self.config.success_redirect_location().to_string(),
             set_cookie: session_cookie(&jwt, self.config.cookie_secure),
         })
     }
@@ -483,7 +483,7 @@ pub async fn callback_handler(
     (
         StatusCode::FOUND,
         [
-            ("location", "/?login=success".to_string()),
+            ("location", state.config.success_redirect_location().to_string()),
             ("set-cookie", cookie),
         ],
     )
@@ -788,6 +788,7 @@ mod tests {
                 base_url: "https://bcs.example.com".to_string(),
                 cookie_secure: false,
                 env: "test".to_string(),
+                success_redirect_path: "/".to_string(),
             },
             None,
         );
@@ -816,7 +817,7 @@ mod tests {
             .await
             .expect("complete login");
 
-        assert_eq!(result.location, "/?login=success");
+        assert_eq!(result.location, "/");
         assert!(result.set_cookie.starts_with("bcs_session="));
         assert!(result.set_cookie.contains("HttpOnly"));
         assert!(result.set_cookie.contains("SameSite=Lax"));
@@ -840,6 +841,7 @@ mod tests {
                 base_url: "https://bcs.example.com".to_string(),
                 cookie_secure: false,
                 env: "test".to_string(),
+                success_redirect_path: "/".to_string(),
             },
             None,
         );
@@ -871,6 +873,7 @@ mod tests {
                 base_url: "https://bcs.example.com".to_string(),
                 cookie_secure: false,
                 env: "test".to_string(),
+                success_redirect_path: "/".to_string(),
             },
             None,
         );

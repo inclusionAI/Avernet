@@ -2,11 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AddBotGuideModal - 顶栏「创建 Bot」接入引导弹窗（双接入方式）
+ * AddBotGuideModal - 顶栏「创建 Bot」接入引导弹窗
  *
- * 两种接入方式对应 capabilities 契约模板（差异类型 G，含 `{token}` 占位）：
+ * 各接入方式对应 capabilities 契约模板（差异类型 G，含 `{token}` 占位）：
  * - 用户自助接入 → AppExt.resources.bcnConnectCmdTemplate
  * - Bot 自动接入 → AppExt.resources.bcnAutoConnectCmdTemplate
+ * - DeepSeek Harness → AppExt.resources.dshConnectCmdTemplate
  * 登录态用 useRegisterToken 的真实 token 替换占位；未登录显示 <YOUR_TOKEN>。
  *
  * 注：本落地弹窗像素级还原设计稿，使用设计稿精确十六进制色与 bespoke 控件
@@ -21,7 +22,13 @@ import {
   ModalTitle,
 } from '@/components/ui/modal';
 import { useRegisterToken } from '@/pages/BcnHome/hooks/useRegisterToken';
+import {
+  DSH_CLI_INSTALL_COMMAND,
+  normalizeBcnEndpoint,
+  renderDshConnectCommand,
+} from '@/pages/BcnHome/utils/accessCommands';
 import { AppExt } from '@/shell';
+import { getServers } from '@/utils/env';
 import { Bot, Check, Copy, Terminal } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -31,7 +38,7 @@ interface AddBotGuideModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type AccessMethod = 'manual' | 'guide';
+type AccessMethod = 'manual' | 'guide' | 'dsh';
 
 const TOKEN_PLACEHOLDER = '<YOUR_TOKEN>';
 
@@ -60,11 +67,17 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
   open,
   onOpenChange,
 }) => {
-  const { bcnConnectCmdTemplate, bcnAutoConnectCmdTemplate } =
-    useExt(AppExt).resources;
+  const {
+    bcnConnectCmdTemplate,
+    bcnAutoConnectCmdTemplate,
+    dshConnectCmdTemplate,
+  } = useExt(AppExt).resources;
   const { token, isLoading, fetchToken } = useRegisterToken();
   const [method, setMethod] = useState<AccessMethod>('manual');
   const [copied, setCopied] = useState(false);
+  const bcnEndpoint = dshConnectCmdTemplate
+    ? normalizeBcnEndpoint(getServers().BCN)
+    : null;
 
   // 打开弹窗时拉取注册 token（注入接入指令）
   useEffect(() => {
@@ -72,9 +85,15 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
   }, [open, fetchToken]);
 
   const template =
-    method === 'manual' ? bcnConnectCmdTemplate : bcnAutoConnectCmdTemplate;
+    method === 'manual'
+      ? bcnConnectCmdTemplate
+      : method === 'guide'
+      ? bcnAutoConnectCmdTemplate
+      : dshConnectCmdTemplate;
   const command = template
-    ? template.replace('{token}', token ?? TOKEN_PLACEHOLDER)
+    ? method === 'dsh'
+      ? renderDshConnectCommand(template, bcnEndpoint, token)
+      : template.replace('{token}', token ?? TOKEN_PLACEHOLDER)
     : null;
 
   const handleCopy = async () => {
@@ -112,7 +131,7 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               接入方式
             </ModalTitle>
             <ModalDescription className="mt-2 text-sm text-[#8b95a5]">
-              选择一种接入方式，将你的 openclaw 接入 Avernet 协作网络。
+              选择一种接入方式，将本地 Bot 接入 Avernet 协作网络。
             </ModalDescription>
           </div>
 
@@ -140,13 +159,26 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
             >
               Bot 自动接入
             </button>
+            <button
+              type="button"
+              onClick={() => setMethod('dsh')}
+              className={`flex-1 rounded-lg py-2 text-xs font-semibold transition-colors ${
+                method === 'dsh'
+                  ? 'bg-white text-[#1d4ed8] shadow-sm'
+                  : 'text-[#8b95a5]'
+              }`}
+            >
+              DeepSeek Harness
+            </button>
           </div>
 
           <div className="space-y-4">
             {/* 方式说明卡 */}
             <div className="flex items-start gap-3 rounded-xl border border-[#e5e9f2] bg-[#f8fafc] px-4 py-4">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#e8f0fe] text-[#1d4ed8]">
-                {method === 'manual' ? (
+                {method === 'dsh' ? (
+                  <Terminal className="h-4 w-4" />
+                ) : method === 'manual' ? (
                   <Terminal className="h-4 w-4" />
                 ) : (
                   <Bot className="h-4 w-4" />
@@ -154,10 +186,16 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               </div>
               <div>
                 <p className="text-sm font-medium text-[#1a2332]">
-                  {method === 'manual' ? '用户自助接入' : 'Bot 自动接入'}
+                  {method === 'dsh'
+                    ? 'DeepSeek Harness 一键接入'
+                    : method === 'manual'
+                    ? '用户自助接入'
+                    : 'Bot 自动接入'}
                 </p>
                 <p className="mt-1 text-xs leading-5 text-[#52606d]">
-                  {method === 'manual'
+                  {method === 'dsh'
+                    ? '命令会先检测本机 dsh；未安装时提示安装，检测到后自动安装 BCN 插件、配置 web profile 并完成 onboarding。'
+                    : method === 'manual'
                     ? '复制以下命令并执行，一键接入本地 openclaw。'
                     : '将以下指令发送给你的 openclaw。'}
                 </p>
@@ -173,7 +211,7 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
                 <button
                   type="button"
                   onClick={handleCopy}
-                  disabled={!token}
+                  disabled={!token || (method === 'dsh' && !bcnEndpoint)}
                   className="absolute right-3 top-3 rounded-lg bg-white/10 p-2 transition-colors hover:bg-white/20 disabled:opacity-50"
                   title="复制"
                 >
@@ -188,9 +226,26 @@ const AddBotGuideModal: React.FC<AddBotGuideModalProps> = ({
               <p className="text-xs text-[#8b95a5]">暂无可用的接入指令。</p>
             )}
 
+            {method === 'dsh' && !bcnEndpoint && (
+              <p className="text-xs text-amber-700">
+                当前环境没有配置可用的 BCN endpoint，暂时无法生成 DSH 接入指令。
+              </p>
+            )}
+
+            {method === 'dsh' && bcnEndpoint && (
+              <p className="text-xs text-[#8b95a5]">
+                若终端提示未找到 dsh，请先执行{' '}
+                <code className="text-[#52606d]">
+                  {DSH_CLI_INSTALL_COMMAND}
+                </code>{' '}
+                安装 DSH CLI，再重新执行接入命令。
+              </p>
+            )}
+
             {!token && !isLoading && (
               <p className="text-xs text-[#8b95a5]">
-                指令中的 <code className="text-[#52606d]">{TOKEN_PLACEHOLDER}</code>{' '}
+                指令中的{' '}
+                <code className="text-[#52606d]">{TOKEN_PLACEHOLDER}</code>{' '}
                 为占位；登录后将自动填充你的专属注册 token（有效期 6 小时）。
               </p>
             )}

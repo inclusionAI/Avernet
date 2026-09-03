@@ -27,7 +27,6 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCapabilities,
 )
 
-
 @dataclass(frozen=True)
 class ApplyContext:
     """The identity and addressing one apply runs under.

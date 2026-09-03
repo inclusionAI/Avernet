@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.config_compose.models import ComposeOccasion, ComposeRequest
 from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
     ArtifactBuildRequest,
 )
@@ -105,6 +105,26 @@ def test_compose_request_maps_bot_row_fields() -> None:
         "staff_u1", "bot7", "u1", "teclaw", "staff",
     )
     assert req.version == 9
+    # A publish build is a runtime compose (W8): every category the engine's.
+    assert req.occasion is ComposeOccasion.RUNTIME
+
+
+def test_the_build_request_names_the_compose_occasion():
+    """Eager provisioning says ``PROVISION`` and the composer sees it (W8):
+    that is how the first artifact of a bot with a manifest comes out the
+    platform's rather than the engine's."""
+    composer = _StubComposer(_artifact())
+    producer = ExternalComposeProducer(composer=composer)
+
+    producer.produce_artifact(
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "bot7", "owner_id": "u1", "active_engine": "teclaw"},
+            version=None,
+            compose_occasion=ComposeOccasion.PROVISION,
+        )
+    )
+
+    assert composer.calls[0].occasion is ComposeOccasion.PROVISION
 
 
 class _ExtProducer(ExternalComposeProducer):

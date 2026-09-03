@@ -83,6 +83,9 @@ def carry_forward(
         finished_at=report.finished_at,
         categories=categories,
         sources=tuple(carried.sources) + tuple(report.sources),
+        # Apply-level notes ride along too: a redeliver that failed after phase
+        # A must not vanish because phase B carried it forward.
+        notes=tuple(carried.notes) + tuple(report.notes),
     )
 
 

@@ -23,6 +23,26 @@ export interface SpaceSkillDto extends BackendUnknownRecord {
   name: string;
   description?: string;
   status?: string;
+  latest_published_version?: { version?: number; name?: string };
+}
+export interface SkillCenterSkillDto extends BackendUnknownRecord {
+  skillCode?: string;
+  skillName?: string;
+  description?: string;
+  latestVersionNumber?: string | number;
+  homepageUrl?: string;
+}
+export interface SkillCenterReferenceDto extends BackendUnknownRecord {
+  reference_id: string;
+  status:
+    | 'QUEUED'
+    | 'RESOLVING_VERSION'
+    | 'MATERIALIZING'
+    | 'ADDING_TO_SKILL_SET'
+    | 'PROJECTING_RUNTIME'
+    | 'COMPLETED'
+    | 'FAILED';
+  error_message?: string | null;
 }
 export interface ResourceDto extends BackendUnknownRecord {
   path: string;
@@ -175,11 +195,49 @@ export const botEditorController = {
       page_size: 100,
       sort: 'latest',
     }),
-  listSpaceSkills: (spaceId: string) =>
-    request<BackendApiPage<SpaceSkillDto>>(`/openapi/v1/bots/spaces/${encodeURIComponent(spaceId)}/skills`, 'GET', {
-      page_no: 1,
-      page_size: 100,
-    }),
+  listSkillCenterSkills: () =>
+    request<BackendApiPage<SkillCenterSkillDto>>(
+      '/openapi/v1/bots/market/skill-center/skills',
+      'POST',
+      {},
+      {
+        keyword: '',
+        pageNum: 1,
+        pageSize: 20,
+        sortBy: 'latest',
+        tagList: [],
+        creatorName: null,
+        creatorWorkNo: null,
+        belongTo: null,
+        isOfficial: null,
+        isRecommended: null,
+      },
+    ),
+  listConsumableSpaceSkills: (spaceId: string, page = 1, pageSize = 100) =>
+    request<BackendApiPage<SpaceSkillDto>>(
+      `/openapi/v1/bots/spaces/${encodeURIComponent(spaceId)}/skills/consumable`,
+      'GET',
+      {
+        page,
+        page_size: pageSize,
+      },
+    ),
+  createSkillCenterReferences: (botId: string, setId: string, skillCodes: string[]) =>
+    backendRequest<BackendApiEnvelope<{ request_id: string; reference_ids: string[] }>>(
+      path(botId, `skill-sets/${setId}/skill-center-references`),
+      {
+        method: 'POST',
+        params: userScopedParams(),
+        data: { skill_codes: skillCodes },
+        headers: { 'Idempotency-Key': globalThis.crypto?.randomUUID?.() ?? `${botId}-${setId}-${Date.now()}` },
+      },
+    ),
+  listSkillCenterReferences: (botId: string, setId: string, requestId: string) =>
+    request<BackendApiPage<SkillCenterReferenceDto>>(
+      path(botId, `skill-sets/${setId}/skill-center-references`),
+      'GET',
+      { request_id: requestId, page: 1, page_size: 20 },
+    ),
   setMcpActive: (botId: string, serverCode: string, active: boolean) =>
     request<BotMcpDto>(
       path(botId, `mcps/${encodeURIComponent(serverCode)}/${active ? 'activate' : 'deactivate'}`),
@@ -228,6 +286,12 @@ export const botEditorController = {
     }),
   downloadResource: (botId: string, resourcePath: string) =>
     backendRequest<Blob>(path(botId, 'resources/download'), {
+      method: 'GET',
+      params: userScopedParams({ path: resourcePath }),
+      responseType: 'blob',
+    }),
+  downloadResourceDirectory: (botId: string, resourcePath: string) =>
+    backendRequest<Blob>(path(botId, 'resources/download-dir'), {
       method: 'GET',
       params: userScopedParams({ path: resourcePath }),
       responseType: 'blob',

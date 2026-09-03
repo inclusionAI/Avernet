@@ -31,7 +31,8 @@
     },
     "bot_config_manifest": {
       "content_store_dir": "./data/manifest_content",
-      "fetch_transport_allowlist": []
+      "fetch_transport_allowlist": [],
+      "teclaw_platform_managed": false
     },
     "bot_oss_config": {
       "bucket_name": "agentclaw",
@@ -93,6 +94,12 @@
     },
     "health_check": {
       "bcs_url": "http://localhost:21000"
+    },
+    "llm": {
+      "base_url": "${LLM_BASE_URL:-}",
+      "model": "${LLM_BALANCED_MODEL:-glm-5.2}",
+      "secret_name": "LLM_AUTH_TOKEN",
+      "timeout_ms": "${LLM_DEFAULT_TIMEOUT_MS:-180000}"
     },
     "mcp": {
       "registry_config_path": ""
@@ -247,8 +254,8 @@
       "token": ""
     },
     "llm_harness": {
-      "base_url": "",
-      "secret_name": ""
+      "base_url": "${LLM_BASE_URL:-}",
+      "secret_name": "LLM_AUTH_TOKEN"
     },
     "masa_agent_eval": {
       "base_url": "http://localhost:8080",

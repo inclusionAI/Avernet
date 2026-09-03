@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
 import BotCard from '@/components/BotWorkshop/BotCard';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
@@ -16,6 +17,7 @@ import React, { useState } from 'react';
 const BotWorkshopPage: React.FC = () => {
   const workshop = useBotWorkshop();
   const [publicationBot, setPublicationBot] = useState<BotDomain>();
+  const showBotLogs = getCapabilities().getLoginStrategy().value === 'ace-gateway';
   return (
     <main className="app-scrollbar h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[1600px] space-y-5 p-4 sm:p-6 2xl:p-8">
@@ -73,7 +75,7 @@ const BotWorkshopPage: React.FC = () => {
             <div data-testid="bot-workshop-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {workshop.items.map((bot) => (
                 <BotCard
-                  key={bot.entityKey}
+                  key={bot.cardId ?? bot.entityKey}
                   bot={bot}
                   onView={() => workshop.openDetail(bot)}
                   onConversation={workshop.openConversation}
@@ -82,8 +84,8 @@ const BotWorkshopPage: React.FC = () => {
                   onEdit={() => workshop.openDetail(bot, 'edit')}
                   onAction={workshop.runAction}
                   onClaimLock={workshop.claimLock}
-                  logAction={workshop.logActionFor(bot)}
-                  onOpenLogs={workshop.openLogs}
+                  logAction={showBotLogs ? workshop.logActionFor(bot) : undefined}
+                  onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
                   onChangeSpace={workshop.canChangeSpace(bot) ? workshop.openSpaceChange : undefined}
                   onAuthorize={workshop.collaborationModeFor(bot) ? workshop.openAuthorize : undefined}
                   collaborationMode={workshop.collaborationModeFor(bot)}
@@ -102,6 +104,7 @@ const BotWorkshopPage: React.FC = () => {
                 pageSize={workshop.pageSize}
                 total={workshop.total}
                 onChange={workshop.setPage}
+                onPageSizeChange={workshop.setPageSize}
                 className="justify-end"
               />
             ) : null}

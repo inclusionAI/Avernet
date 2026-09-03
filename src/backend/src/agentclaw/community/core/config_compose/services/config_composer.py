@@ -21,9 +21,15 @@ Explicitly **not** its job:
 from __future__ import annotations
 
 from agentclaw.community.core.config_compose.models import ComposeRequest
-from agentclaw.community.core.config_compose.protocols import ComposeInputCollector
+from agentclaw.community.core.config_compose.protocols import (
+    ComposeInputCollector,
+    PlatformOwnershipReader,
+)
 from agentclaw.community.core.config_compose.services.mcporter_composer import McporterComposer
 from agentclaw.community.kernel.bot_config import (
+    OWNERSHIP_ENGINE,
+    OWNERSHIP_PLATFORM,
+    OwnershipCategory,
     SCHEMA_VERSION,
     BotConfigArtifact,
     FileRef,
@@ -37,7 +43,6 @@ from agentclaw.community.log import get_logger
 logger = get_logger()
 
 __all__ = ["ConfigComposer"]
-
 
 class ConfigComposer:
     """Aggregates a bot's config-contributing state into a BotConfigArtifact."""
@@ -169,8 +174,50 @@ class ConfigComposer:
             stores=stores,
             engine_overrides=engine_overrides,
             version=req.version,
+            ownership=self._ownership(req),
             # engine_ext intentionally left default ({}) — owned by the producer.
         )
+
+    def _ownership(self, req: ComposeRequest) -> dict[str, str] | None:
+        """The artifact's ``ownership`` map (W8, contract §9) — teclaw only.
+
+        Ownership follows the operation. When the collector says the platform
+        owns this compose — the closing redeliver of a manifest apply, or the
+        first artifact of a bot that carries a manifest, with the
+        platform-managed switch on — every category is the platform's: the
+        lists in this artifact are the complete desired state. Otherwise
+        every category is the engine's, which is what the engine did with
+        each of them before the map existed. ``mcp`` is the one category
+        that is the platform's on every occasion: the artifact has carried
+        the whole MCP set on every compose since W12, so there is no engine
+        state for it to keep. An ARCA artifact carries no map: nothing
+        composes for ARCA at runtime, and a map would state a delivery that
+        does not happen. A collector that cannot answer (the bare/unit
+        collector) owns nothing for the platform.
+
+        ``cli_tools`` is written like the other four, deliberately. Before
+        ownership followed the operation the map left it out, so that an
+        absent key kept the CLI contract's own removal rule in force (A5);
+        with ownership decided per operation there is no per-category
+        reason to single it out, and the reviewer's rule is that an
+        operation sets every category. Nothing composes a ``cli_tools``
+        list yet, so a ``platform`` value here rides beside an absent
+        array — the teclaw CLI contract, not this map, says what the engine
+        does with that until the composer populates the list.
+        """
+        if req.engine_type != "teclaw":
+            return None
+        owned = isinstance(self._collector, PlatformOwnershipReader) and bool(
+            self._collector.platform_owns(req)
+        )
+        return {
+            category.value: (
+                OWNERSHIP_PLATFORM
+                if owned or category is OwnershipCategory.MCP
+                else OWNERSHIP_ENGINE
+            )
+            for category in OwnershipCategory
+        }
 
     def store_key_for(self, host_path: str) -> str:
         """Canonical object key for a bot-data file: ``bot-data base + '/' + relpath``.

@@ -1,12 +1,10 @@
-import { getCapabilities } from '@/capabilities';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
-import { initSpaceContext } from '@/hooks/useSpaceContext';
+import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
 import { identityService } from '@/services/workspace/identityService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history, useLocation } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
-import type { AccountUser } from './AccountBadge';
 import { AppHeader } from './AppHeader';
 import { AppSidebar } from './AppSidebar';
 import { SidebarNavList } from './SidebarNavList';
@@ -20,7 +18,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [area, setArea] = useState<NavigationArea>(activeItem?.area ?? 'work');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<AccountUser | undefined>();
   const isDesktop = useMinWidth(1024);
 
   useEffect(() => {
@@ -40,26 +37,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setMobileNavOpen(false);
   };
 
+  // 挂载（进入项目）即初始化一次个人空间：不等进管理区域，幂等单飞、失败静默（详见 useSpaceContext）。
+  useEffect(() => {
+    void ensurePersonalSpaceOnAppEntry();
+  }, []);
   // 只有进入「管理」区域时才初始化空间上下文；工作区域不需要加载空间列表。
   useEffect(() => {
     if (area === 'manage') void initSpaceContext();
   }, [area]);
 
-  // 挂载即解析当前登录身份（listMyBots human[0] → workspaceStore.identities），
+  // 挂载即触发身份加载（listMyBots → workspaceStore.identities，由 useHumanIdentity 写回 store），
   // 供全局 AccountBadge 消费。单飞复用 identityService，与 /work init 共用 inflight，零重复请求。
-  // 幂等：单飞进行中/已成功时跳过；失败静默（AccountBadge 走 error 态）。
+  // 失败静默（AccountBadge 走 error 态）。
   //
-  // 关键：currentUser 必须经 capability 契约（getHumanIdentity）解析，而非直接透传后端 DTO。
-  // 内部 overlay 可提供独立头像兜底；直接透传后端 DTO 会绕过 capability，因此统一从契约读取。
+  // 关键：currentUser 经 useHumanIdentity 反应式派生（内部走 capability 契约 getHumanIdentity，不直接
+  // 透传后端 DTO），不在加载回调里一次性快照 —— Open Core（oauth-provider）下 /auth/user（AppLayout
+  // boot 的 checkAuth）与 mine 并跑，早于 auth 落位 captured 的 mine 兜底身份会被冻结进顶栏，
+  // 登录后头像/花名不一致（此前需切 tab 触发 re-render 才纠正）。
   useEffect(() => {
-    void identityService.loadIdentities().then((res) => {
-      if (res.ok) {
-        useWorkspaceStore.getState().setIdentities(res.data.identities, res.data.defaultActiveId);
-        const identity = getCapabilities().getHumanIdentity().value;
-        setCurrentUser(identity ? { displayName: identity.displayName, avatarUrl: identity.avatarUrl } : undefined);
-      }
-    });
+    void identityService.loadIdentities();
   }, []);
+  const { identity } = useHumanIdentity();
+  const currentUser = useMemo(
+    () => (identity ? { displayName: identity.displayName, avatarUrl: identity.avatarUrl } : undefined),
+    [identity],
+  );
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">

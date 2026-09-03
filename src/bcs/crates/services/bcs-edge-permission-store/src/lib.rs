@@ -1034,7 +1034,7 @@ impl BotActorConfigRepoPort for DbBotActorConfigStore {
 fn row_to_permission_request(row: &DbRow) -> ServiceResult<PermissionRequest> {
     // decided_at is a DB-managed timestamp (TEXT/`timestamp NULL`); parse the
     // stored instant back to epoch ms. `None` ⇒ not yet decided.
-    let decided_at = optional_string(row, "decided_at")?
+    let decided_at = optional_timestamp_text(row, "decided_at")?
         .and_then(|s| parse_timestamp_epoch_ms(&s));
     Ok(PermissionRequest {
         request_id: required_string(row, "request_id")?,
@@ -1194,6 +1194,17 @@ fn required_string(row: &DbRow, column: &'static str) -> ServiceResult<String> {
 
 fn optional_string(row: &DbRow, column: &'static str) -> ServiceResult<Option<String>> {
     row.get_string(column).map_err(|err| service_db_error(column, err))
+}
+
+fn optional_timestamp_text(row: &DbRow, column: &'static str) -> ServiceResult<Option<String>> {
+    match row.get(column) {
+        None | Some(DbValue::Null) => Ok(None),
+        Some(DbValue::String(value)) => Ok(Some(value.clone())),
+        Some(DbValue::Bytes(value)) => String::from_utf8(value.clone())
+            .map(Some)
+            .map_err(|err| service_db_error(column, DbError::Conversion(format!("column '{}' is not valid UTF-8: {}", column, err)))),
+        Some(other) => Err(service_db_error(column, DbError::Conversion(format!("column '{}' is not a timestamp string: {:?}", column, other)))),
+    }
 }
 
 fn required_u64(row: &DbRow, column: &'static str) -> ServiceResult<u64> {
@@ -1387,6 +1398,32 @@ mod tests {
         // Empty / unparseable / pre-epoch → None (NULL upstream becomes None).
         assert_eq!(parse_timestamp_epoch_ms(""), None);
         assert_eq!(parse_timestamp_epoch_ms("not-a-date"), None);
+    }
+
+    #[test]
+    fn permission_request_decided_at_accepts_bytes_timestamp() {
+        let mut columns = std::collections::BTreeMap::new();
+        columns.insert("request_id".to_string(), DbValue::from("req-1"));
+        columns.insert("edge_id".to_string(), DbValue::Null);
+        columns.insert("env".to_string(), DbValue::from("dev"));
+        columns.insert("from_id".to_string(), DbValue::from("human_1"));
+        columns.insert("to_id".to_string(), DbValue::from("x:bot"));
+        columns.insert("request_kind".to_string(), DbValue::from("connect"));
+        columns.insert("requested_ref_id".to_string(), DbValue::Null);
+        columns.insert("requested_rules".to_string(), DbValue::Null);
+        columns.insert("message".to_string(), DbValue::Null);
+        columns.insert("status".to_string(), DbValue::from("approved"));
+        columns.insert("decision_reason".to_string(), DbValue::Null);
+        columns.insert("created_by".to_string(), DbValue::from("human_1"));
+        columns.insert("decided_by".to_string(), DbValue::from("auto"));
+        columns.insert(
+            "decided_at".to_string(),
+            DbValue::from(b"2026-09-02 13:41:55".to_vec()),
+        );
+        let row = DbRow::new(columns);
+
+        let request = row_to_permission_request(&row).expect("permission request row");
+        assert_eq!(request.decided_at, Some(1_788_356_515_000));
     }
 
     async fn sqlite_store() -> DbEdgeGrantStore {

@@ -193,7 +193,7 @@ artifact 长这样」可解释，你们不需要为它们做任何事。
 
 ## 7. 状态：逐条结论
 
-**2026-08-31 更新：本文档的开放问题已全部关闭。**
+**2026-08-31 更新：本文档的开放问题已全部关闭。2026-09-02：新增 §9 `ownership`，待确认。**
 
 | | 结论 |
 | --- | --- |
@@ -206,6 +206,7 @@ artifact 长这样」可解释，你们不需要为它们做任何事。
 | **`cli_tools` 的引擎侧行为** | 见 `teclaw-cli-contract.zh-CN.md` §3.4 —— 那是**要求**，不是问题 |
 | `engine_config` 首启行为（T3） | ➖ 移出第一期范围，问题不会出现 |
 | 目录型 `ResourceRef`（T5） | ➖ 可选优化，不排期 |
+| **`ownership`（§9，W8）** | ⏳ **待 teclaw 确认** R-O1 / R-O2 / R-O3。确认前平台开关关闭，artifact 行为不变 |
 
 **这份契约的分量，写明一次：**平台侧之所以采纳整包替换语义，**正是因为** teclaw 已经
 这么做。如果这一点是错的，平台侧整个收敛策略都得推翻。所以 A1 不是一条我们希望你们
@@ -234,6 +235,96 @@ artifact 长这样」可解释，你们不需要为它们做任何事。
 
 ---
 
+## 9. 平台管理的类目：`ownership`（W8 新增，待 teclaw 确认）
+
+> **2026-09-02 新增。**本节是 W8（#1476）带来的**唯一**一处 artifact 契约变化，
+> 与 `cli_tools` 一样直接进入 `schema_version` 4，靠 A5 兼容。它把 §6 的 P1/P2
+> ——「声明的类目收敛到等于声明；没声明的完全不碰」——**写到线上**。
+
+### 9.1 为什么需要它
+
+今天的 artifact 对 `identity_files` / `resources` 只能表达「一个列表」，表达不了
+「这个列表是平台的完整期望状态」还是「平台对这个类目没有意见」。于是引擎只能猜：
+草稿 artifact 一直带着空的 `identity_files` / `resources` 重投给运行中的 bot，而
+bot 的文件没有丢——说明引擎把空列表当成「别动」。这与 A1 的字面（空 = 全删）并不
+一致，也让平台**无法**在 artifact 里表达「manifest 声明 `identity: []`」。
+
+W8 之后平台是 manifest 所应用内容的**真相源**（两个引擎系一致）：manifest 声明的
+文件类目由平台物化进 OSS（`bot-data` store）并在 artifact 里以 `{store, path}`
+引用下发——**首份 artifact 就带着**，之后每次 manifest 变更都整包重投。要让引擎
+分得清「平台在断言」与「平台没意见」，需要一个显式标记。
+
+### 9.2 字段
+
+顶层新增可选对象 `ownership`，键是类目字段名，值二选一：
+
+```json
+{
+  "schema_version": 4,
+  "ownership": {
+    "mcp": "platform",
+    "skills": "platform",
+    "resources": "platform",
+    "identity_files": "engine"
+  },
+  "identity_files": [],
+  "resources": [{ "name": "kb/faq.md", "store": "bot-data",
+                  "path": "staff_u1/bot7_manifest/teclaw/workspace/kb/faq.md" }],
+  "skills": [{ "name": "order-lookup", "scope": "user", "store": "bot-data",
+               "path": "staff_u1/bot7_manifest/teclaw/workspace/skills-local/order-lookup" }],
+  "...": "..."
+}
+```
+
+| 值 | 含义 | 对应 §6 |
+| --- | --- | --- |
+| `platform` | **本次 artifact 里该类目的列表就是完整期望状态。**按 §5 的区域做 A1 替换；空列表 = 区域内全部移除 | P1 / P3 |
+| `engine` | **该类目由引擎管理。**忽略 artifact 里的列表，保持引擎自己的状态 | P2 |
+| 缺席（整个对象缺席，或某个类目缺席） | **W8 之前的行为不变。**这是 A5 的用武之地：没实现本节的引擎照旧运行 | —— |
+
+平台侧的规则：**`ownership` 跟着操作走，不跟着 manifest 的声明走。**manifest
+apply 结束时的整包重投、以及带 manifest 的 bot 的第一份 artifact（创建 job 先 apply
+再开容器），**所有类目**都是 `platform`——artifact 里的列表就是完整期望状态；
+其他任何操作触发的组装（上传 skill、上传资源、改 MCP、改渠道、发布构建）**所有
+类目**都是 `engine`——引擎自己的状态是真相。`mcp` 在任何操作下都是 `platform`
+（artifact 自 W12 起每次都带完整 MCP 集合，引擎没有自己的 MCP 状态可保留；这只是
+把今天的语义写明，不是变化）。一个没有 manifest 的 bot 拿到的 artifact 与今天逐字节
+相同，只多这一个对象且除 `mcp` 外全为 `engine`。
+
+### 9.3 对引擎的三条要求
+
+- [ ] **R-O1 `ownership` 语义。**按 9.2 的表执行；未知类目键忽略（A5）。
+- [ ] **R-O2 运行中容器的整包重投要落文件。**今天只有新容器在启动时按引用从 store
+  拉文件；W8 之后 `PUT manifest` 会向**运行中的** bot 重投带 `identity_files` /
+  `resources` / `skills` 引用的 artifact，引擎必须按 §5 的区域把它们落地并收敛
+  （多的删、少的拉），且仍满足 A3（重复投递无副作用）。
+- [ ] **R-O3 store 后端的本地 skill。**一个 manifest 安装的本地 skill 在 `skills` 里
+  是一条 `SkillRef{scope: "user", store: "bot-data", path: <包目录前缀>}`（`scope`
+  沿用 artifact 既有的 `shared | user` 词汇；新的是它有了 store 地址）。引擎按
+  `path` 前缀从 store 拉整个包目录；`skills` 区域（active skill set）的 A1 替换同样
+  适用于它。**仅当 `resources` 也是 `platform` 时**，包内文件还会同时以 `resources`
+  引用出现在 `workspace/skills-local/<name>/…` 下（发布 gather 的形状）；`resources`
+  为 `engine` 时列表里不会有它们——一个引擎会忽略的列表不带任何平台断言的文件。
+
+### 9.4 平台侧的开关
+
+引擎支持以上三条之前，平台的 `teclaw_platform_managed` 开关默认**关闭**：关闭时
+teclaw 的 manifest 走 W8 之前的逐文件通道，artifact 与今天逐字节相同（只多一个
+全为 `engine` 的 `ownership`，A5 保证无害）。开关打开的条件就是本节 9.3 三条被
+确认。
+
+### 9.5 自查（追加到 §8）
+
+- [ ] `ownership.identity_files = "platform"` 且列表为空时，identity 区域内除
+  `MEMORY.md` / `IDENTITY.md` 外的文件**确实被移除**（A2 仍然成立）。
+- [ ] `ownership.resources = "engine"` 时，artifact 里的 `resources` 列表**不产生任何
+  效果**，容器里的工作区文件一个不少。
+- [ ] 缺少 `ownership` 的 artifact 行为与 W8 之前**完全一致**。
+- [ ] 向运行中的容器重投带文件引用的 artifact，文件按区域落地并收敛（R-O2）。
+- [ ] `skills` 里 `scope: "user"` 且带 `store` 地址的引用被拉取为完整包目录并激活（R-O3）。
+
+---
+
 ## 附：相关文档
 
 | 文档 | 内容 |
@@ -244,3 +335,4 @@ artifact 长这样」可解释，你们不需要为它们做任何事。
 | `manifest-schema.zh-CN.md` | 用户侧 manifest 的 schema |
 | `work-items.zh-CN.md` §3.2 / W12 | 本契约的平台侧论证与实现工作项（§3.2 = 本文 §6 的 P 条） |
 | `kernel/bot_config/artifact.py` | `BotConfigArtifact` 的代码定义 |
+| `specs/2026-09-02-manifest-lifecycle-apply-points/` | W8 的 spec / plan：§9 的平台侧论证（D-3、D-4、D-5） |

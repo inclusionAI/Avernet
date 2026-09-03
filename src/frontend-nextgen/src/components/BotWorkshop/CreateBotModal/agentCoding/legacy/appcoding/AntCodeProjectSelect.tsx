@@ -20,6 +20,19 @@ export interface AntCodeProjectOptionProps {
   onSelect: (project: AntCodeProject) => void;
 }
 
+export function sortAntCodeProjects(projects: AntCodeProject[]): AntCodeProject[] {
+  return [...projects].sort((left, right) => {
+    const leftRestricted = left.accessLevel === 0 ? 1 : 0;
+    const rightRestricted = right.accessLevel === 0 ? 1 : 0;
+
+    if (leftRestricted !== rightRestricted) {
+      return leftRestricted - rightRestricted;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
 export function AntCodeProjectOption({ project, disabled = false, onSelect }: AntCodeProjectOptionProps) {
   const isRestricted = project.accessLevel === 0;
   return (
@@ -29,27 +42,23 @@ export function AntCodeProjectOption({ project, disabled = false, onSelect }: An
       onClick={() => onSelect(project)}
       disabled={disabled || isRestricted}
       className={cn(
-        'h-auto min-h-0 w-full justify-start rounded-none border-0 border-b border-slate-100 bg-transparent px-3 py-2 text-left font-normal shadow-none transition-colors last:border-b-0',
+        'h-auto min-h-0 w-full flex-col items-stretch justify-start gap-0 rounded-none border-0 border-b border-slate-100 bg-transparent px-3 py-2 text-left font-normal shadow-none transition-colors last:border-b-0',
         disabled || isRestricted ? 'cursor-not-allowed bg-slate-50/80 opacity-70' : 'cursor-pointer hover:bg-slate-50',
       )}
     >
-      <div className="flex items-start gap-2 min-w-0">
-        <div className="min-w-0 flex-1 text-sm font-medium text-slate-700 truncate leading-5">{project.name}</div>
-        {isRestricted && (
+      <div className="flex min-w-0 items-start gap-2">
+        <div className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-slate-700">{project.name}</div>
+        {isRestricted ? (
           <Badge
             tone="neutral"
-            className={cn(
-              'pointer-events-none shrink-0 self-start whitespace-nowrap rounded-full select-none',
-              'border-amber-200/70 bg-amber-50/70 px-2 py-0 text-[10px] font-medium',
-              'leading-4 text-amber-700 shadow-none',
-            )}
+            className="pointer-events-none shrink-0 self-start whitespace-nowrap rounded-full border-amber-200/70 bg-amber-50/70 px-2 py-0 text-[10px] font-medium leading-4 text-amber-700 shadow-none"
           >
             无权限
           </Badge>
-        )}
+        ) : null}
       </div>
-      {project.description && <div className="text-xs text-slate-400 truncate mt-0.5">{project.description}</div>}
-      <div className="text-xs text-slate-400 truncate mt-0.5 font-mono">{project.web_url}</div>
+      {project.description ? <div className="mt-0.5 truncate text-xs text-slate-400">{project.description}</div> : null}
+      <div className="mt-0.5 truncate font-mono text-xs text-slate-400">{project.web_url}</div>
     </Button>
   );
 }
@@ -147,7 +156,7 @@ export function AntCodeProjectSelect({
         if (currentVersion !== requestVersionRef.current) {
           return;
         }
-        setResults(data);
+        setResults(sortAntCodeProjects(data));
       } catch (error) {
         console.error('[AntCodeProjectSelect] Search failed:', error);
         // 只有非过时请求才清空结果

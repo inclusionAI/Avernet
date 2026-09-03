@@ -1,6 +1,7 @@
 import BotAvatar from '@/components/BotWorkshop/BotAvatar';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
@@ -142,7 +143,7 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
         )}
       </div>
       <div className="border-t border-border p-4">
-        <div className="flex items-center gap-2 rounded-2xl border border-input bg-background p-2">
+        <Card className="flex items-center gap-2 rounded-2xl p-2 shadow-none">
           <Input
             value={draft}
             disabled={!session}
@@ -160,7 +161,7 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
             leftIcon={debug.chat.isRequesting ? <Square className="size-4" /> : <Send className="size-4" />}
             onClick={debug.chat.isRequesting ? debug.stop : send}
           />
-        </div>
+        </Card>
       </div>
     </aside>
   );

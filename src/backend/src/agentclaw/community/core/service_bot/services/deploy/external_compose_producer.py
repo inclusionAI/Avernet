@@ -22,7 +22,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Protocol
 
-from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.config_compose.models import ComposeOccasion, ComposeRequest
 from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
     ArtifactBuildRequest,
 )
@@ -61,17 +61,27 @@ class ExternalComposeProducer(DeployArtifactProducer):
         """Produce the deployable artifact: compose (+ inject ``engine_ext``) and pin
         the composed dict onto ``ext.config_artifact``.
 
+        ``request.compose_occasion`` is what the compose is for (W8): a
+        publish build is a runtime compose and leaves every category the
+        engine's; eager provisioning passes ``PROVISION`` so the first
+        artifact of a bot that carries a manifest says the platform owns them.
+
         The artifact is **refs-only** ({store, path} pointers; bytes persisted
         separately), so there's nothing to materialize and no fingerprint to keep —
         we pin the dict straight onto ``ext`` (mirrors ARCA's ``migration_path`` key).
         The verify/online publish stages — and eager teclaw provisioning — read
         ``ext.config_artifact`` and hand it to ``create_teclaw_bot`` (non-mount).
         """
-        artifact = self._compose_with_engine_ext(dict(request.bot), request.version)
+        artifact = self._compose_with_engine_ext(
+            dict(request.bot), request.version, request.compose_occasion
+        )
         return DeployArtifact(success=True, ext={"config_artifact": artifact.to_dict()})
 
     def _compose_with_engine_ext(
-        self, bot: dict[str, Any], version: int | None
+        self,
+        bot: dict[str, Any],
+        version: int | None,
+        occasion: ComposeOccasion = ComposeOccasion.RUNTIME,
     ) -> BotConfigArtifact:
         """Compose the artifact and inject the (producer-owned) opaque ``engine_ext``.
 
@@ -81,7 +91,7 @@ class ExternalComposeProducer(DeployArtifactProducer):
         fetched here at build and frozen into the version — carried verbatim, never
         interpreted.
         """
-        artifact = self._composer.compose(self._compose_request(bot, version))
+        artifact = self._composer.compose(self._compose_request(bot, version, occasion))
         # Enrich the engine's opaque payload with the backend-owned identity + stage
         # keys. ``bot_id`` / ``owner_id`` / ``bot_name`` come from the same bot-row
         # fields ``_compose_request`` reads; build is always the draft stage
@@ -97,7 +107,9 @@ class ExternalComposeProducer(DeployArtifactProducer):
         return dataclasses.replace(artifact, engine_ext=engine_ext)
 
     @staticmethod
-    def _compose_request(bot: dict[str, Any], version: int | None) -> ComposeRequest:
+    def _compose_request(
+        bot: dict[str, Any], version: int | None, occasion: ComposeOccasion
+    ) -> ComposeRequest:
         """Adapt the publish-flow ``bot`` row → a ``ComposeRequest`` for the composer.
 
         ``bot`` is the ``BotService.get_bot`` row (an ``ac_bots`` record), so the
@@ -113,6 +125,7 @@ class ExternalComposeProducer(DeployArtifactProducer):
             engine_type=bot.get("active_engine", ""),
             entity_type=bot.get("entity_type", "staff"),
             version=version,
+            occasion=occasion,
         )
 
     def _fetch_engine_ext(self, bot: dict[str, Any]) -> dict[str, Any]:

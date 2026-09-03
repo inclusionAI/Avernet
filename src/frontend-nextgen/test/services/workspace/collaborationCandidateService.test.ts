@@ -1,14 +1,17 @@
 /** @jest-environment node */
 import * as botsController from '@/services/backendApi/bots/botController';
 import * as botController from '@/services/backendApi/collaboration/collaborationBotController';
+import * as friendConnectionController from '@/services/backendApi/collaboration/collaborationFriendConnectionController';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/collaboration/collaborationBotController');
 jest.mock('@/services/backendApi/bots/botController');
+jest.mock('@/services/backendApi/collaboration/collaborationFriendConnectionController');
 
 const bc = botController as unknown as Record<string, jest.Mock<any>>;
 const bots = botsController as unknown as Record<string, jest.Mock<any>>;
+const connections = friendConnectionController as unknown as Record<string, jest.Mock<any>>;
 
 beforeEach(() => {
   jest.resetAllMocks();
@@ -41,15 +44,16 @@ describe('collaborationCandidateService', () => {
     expect(res.ok && res.data.hasMore).toBe(false);
   });
 
-  it('listFriends loads friendship relations and enriches bot details', async () => {
-    bc.listBotFriendships.mockResolvedValue({
+  it('listFriends loads Bot actor friend connections and enriches bot details', async () => {
+    connections.listFriendConnections.mockResolvedValue({
       code: 20000,
       data: {
         items: [
-          { bot_uuid: 'actor-1', friend_bot_uuid: 'b1:actor-1', created_at: 1 },
-          { bot_uuid: 'actor-1', friend_bot_uuid: 'b2:actor-1', created_at: 2 },
-          { bot_uuid: 'actor-1', friend_bot_uuid: 'b1:actor-1', created_at: 3 },
+          { actor: { type: 'bot', id: 'b1:actor-1' }, name: 'Alpha' },
+          { actor: { type: 'bot', id: 'b2:actor-1' }, name: 'Beta' },
+          { actor: { type: 'bot', id: 'b1:actor-1' }, name: 'Alpha duplicate' },
         ],
+        total: 2,
       },
     });
     bots.listBotMetadata.mockResolvedValue({
@@ -63,11 +67,15 @@ describe('collaborationCandidateService', () => {
       },
     });
 
-    const res = await collaborationCandidateService.listFriends('actor-1');
+    const res = await collaborationCandidateService.listFriends('actor-1:327325', { actorType: 'bot' });
 
-    expect(bc.listBotFriendships).toHaveBeenCalledWith('actor-1', { offset: 0, limit: 50 });
+    expect(connections.listFriendConnections).toHaveBeenCalledWith({
+      actor_type: 'bot',
+      actor_id: 'actor-1:327325',
+    });
+    expect(bc.listBotFriendships).not.toHaveBeenCalled();
     expect(bots.listBotMetadata).toHaveBeenCalledWith(
-      { user_id: 'actor-1', page: 1, page_size: 2 },
+      { user_id: '327325', page: 1, page_size: 2 },
       {
         bots: [
           { bot_id: 'b1', owner_id: 'actor-1' },
@@ -106,11 +114,93 @@ describe('collaborationCandidateService', () => {
     });
   });
 
-  it('listFriends tolerates friendships without bot details and stays empty', async () => {
-    bc.listBotFriendships.mockResolvedValue({
+  it('listFriends sends the Human staff id without the human_ prefix', async () => {
+    connections.listFriendConnections.mockResolvedValue({
       code: 20000,
       data: {
-        items: [{ bot_uuid: 'actor-1', friend_bot_uuid: 'b1:actor-1', created_at: 1 }],
+        items: [{ actor: { type: 'bot', id: 'b1:327325' } }],
+        total: 1,
+      },
+    });
+    bots.listBotMetadata.mockResolvedValue({
+      code: 200000,
+      data: {
+        items: [{ bot_id: 'b1', owner_id: '327325', bot_name: '蒜蓉粉丝虾', status: 'online', engine: 'OpenAI' }],
+        total: 1,
+      },
+    });
+
+    const res = await collaborationCandidateService.listFriends('human_327325', {
+      actorType: 'human',
+      offset: 0,
+      limit: 100,
+    });
+
+    expect(connections.listFriendConnections).toHaveBeenCalledWith({
+      actor_type: 'human',
+      actor_id: '327325',
+    });
+    expect(bc.listBotFriendships).not.toHaveBeenCalled();
+    expect(bots.listBotMetadata).toHaveBeenCalledWith(
+      { user_id: '327325', page: 1, page_size: 1 },
+      { bots: [{ bot_id: 'b1', owner_id: '327325' }] },
+    );
+    expect(res.ok && res.data.items[0]).toMatchObject({
+      id: 'b1:327325',
+      name: '蒜蓉粉丝虾',
+      engine: 'OpenAI',
+    });
+  });
+
+  it('listFriends uses collaboration bot query for collaboration details', async () => {
+    connections.listFriendConnections.mockResolvedValue({
+      code: 20000,
+      data: {
+        items: [{ actor: { type: 'bot', id: 'b1:327325' } }, { actor: { type: 'bot', id: 'b2:327325' } }],
+        total: 2,
+      },
+    });
+    bc.queryCollaborationBots.mockResolvedValue({
+      code: 20000,
+      data: {
+        items: [
+          {
+            kind: 'bot',
+            bot_id: 'b1:327325',
+            name: '协作 Alpha',
+            status: 'online',
+            reachability: 'reachable',
+            visibility: 'public',
+          },
+        ],
+        total: 1,
+      },
+    });
+
+    const res = await collaborationCandidateService.listFriends('human_327325', {
+      actorType: 'human',
+      detailSource: 'collaboration',
+    });
+
+    expect(bc.queryCollaborationBots).toHaveBeenCalledWith({ bot_ids: ['b1:327325', 'b2:327325'] });
+    expect(bots.listBotMetadata).not.toHaveBeenCalled();
+    expect(res.ok && res.data.items).toEqual([
+      expect.objectContaining({ id: 'b1:327325', name: '协作 Alpha', isFriend: true }),
+      expect.objectContaining({
+        id: 'b2:327325',
+        name: 'b2:327325',
+        online: false,
+        detailsResolved: false,
+      }),
+    ]);
+  });
+
+  it('listFriends keeps connection name when bot details are unavailable', async () => {
+    connections.listFriendConnections.mockResolvedValue({
+      code: 20000,
+      data: {
+        items: [{ actor: { type: 'bot', id: 'b1:actor-1' }, name: 'Alpha' }],
+        total: 1,
       },
     });
     bots.listBotMetadata.mockResolvedValue({
@@ -118,15 +208,15 @@ describe('collaborationCandidateService', () => {
       data: { items: [], total: 0 },
     });
 
-    const res = await collaborationCandidateService.listFriends('actor-1');
+    const res = await collaborationCandidateService.listFriends('actor-1', { actorType: 'bot' });
 
-    expect(res.ok && res.data.items).toEqual([]);
+    expect(res.ok && res.data.items[0]).toMatchObject({ id: 'b1:actor-1', name: 'Alpha' });
     expect(res.ok && res.data.hasMore).toBe(false);
   });
 
-  it('maps friendship load failures to friendly messages', async () => {
-    bc.listBotFriendships.mockRejectedValue(new Error('network'));
-    const res = await collaborationCandidateService.listFriends('actor-1');
+  it('maps friend connection load failures to friendly messages', async () => {
+    connections.listFriendConnections.mockRejectedValue(new Error('network'));
+    const res = await collaborationCandidateService.listFriends('actor-1', { actorType: 'bot' });
     expect(res).toMatchObject({
       ok: false,
       error: { code: 'COLLABORATION_FRIENDS_LOAD_FAILED' },

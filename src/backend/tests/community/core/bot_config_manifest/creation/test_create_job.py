@@ -11,8 +11,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+import pytest
+
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.create_job import (
+    BOT_COULD_NOT_BE_PROVISIONED,
     CREATE_JOB_TASK_TYPE,
     CREATE_QUEUE_DEADLINE_MARGIN_SECONDS,
     DEFAULT_CREATE_DEADLINE_SECONDS,
@@ -595,3 +598,218 @@ def test_an_apply_already_in_flight_is_waited_out_not_failed():
     )
 
     assert isinstance(handler.handle(dict(_PAYLOAD)), Reschedule)
+
+
+# ── RECORD_APPLY_PROVISION: the record first, one phase, then provisioning (W8) ──
+
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (  # noqa: E402
+    CreationSequence,
+)
+
+_TECLAW_PAYLOAD = {**_PAYLOAD, "spec": {"engine_type": "teclaw", "bot_type": "personal"}}
+
+
+class _RecordingBotService:
+    """``provision_bot`` as the job sees it: binds the record, or refuses."""
+
+    def __init__(self, bots: "_Bots", *, refuse: bool = False) -> None:
+        self._bots = bots
+        self.refuse = refuse
+        self.calls: list[dict] = []
+
+    def provision_bot(self, bot_id, user_id, nick_name, **kw):
+        self.calls.append({"bot_id": bot_id, "user_id": user_id, **kw})
+        if self.refuse:
+            raise RuntimeError("no capacity")
+        self._bots.record = {**self._bots.record, "binding_id": 9, "status": "PENDING"}
+        return self._bots.record
+
+
+class _RecordingSeam(_Seam):
+    def __init__(self, applies, **kw) -> None:
+        super().__init__(applies, **kw)
+        self.pre_container_kwargs: list[dict] = []
+        self.discard_kwargs: list[dict] = []
+
+    def apply_pre_container(self, **kwargs):
+        self.pre_container_kwargs.append(kwargs)
+        return super().apply_pre_container(**kwargs)
+
+    def discard(self, **kwargs):
+        self.discard_kwargs.append(kwargs)
+        return super().discard(**kwargs)
+
+
+def _record_first(
+    *, passport_status="ISSUED", applies=None, bots=None, refuse=False, discard_succeeds=True,
+    complete_raises=False,
+):
+    applies = applies or _Applies()
+    seam = _RecordingSeam(applies, discard_succeeds=discard_succeeds)
+    bots = bots or _Bots()
+    created: list[tuple[dict, dict]] = []
+
+    def complete(payload, **kw):
+        created.append((payload, kw))
+        if complete_raises:
+            raise RuntimeError("the record could not be written")
+        bots.record = {
+            "bot_id": "b_1", "entity_id": "u_owner", "owner_id": "u_owner",
+            "status": "PENDING", "binding_id": None, "active_engine": "teclaw",
+            "ext": {"passport": {"agent_code": "agent-b1", "status": "ISSUED"}},
+        }
+
+    service = _RecordingBotService(bots, refuse=refuse)
+    handler = BotCreateWithManifestHandler(
+        manifest_seam_provider=lambda: seam,
+        apply_service_provider=lambda: applies,
+        bot_repository_provider=lambda: bots,
+        complete_authorization=complete,
+        passport_plugin_provider=lambda: _Passport(passport_status),
+        bot_service_provider=lambda: service,
+        auth_relationship_provider=lambda: _Relationships(),
+        creation_sequence=lambda engine: (
+            CreationSequence.RECORD_APPLY_PROVISION if engine == "teclaw" else CreationSequence.CREATE_BETWEEN_PHASES
+        ),
+    )
+    return handler, applies, seam, bots, created, service
+
+
+def test_record_first_walks_record_phase_provision_active_complete():
+    handler, applies, seam, bots, created, service = _record_first()
+    p = dict(_TECLAW_PAYLOAD)
+
+    # 1. authorized → the record, unprovisioned; nothing applied yet.
+    assert isinstance(handler.handle(p), Reschedule)
+    assert created == [(p, {"provision": False})]
+    assert seam.pre_container_calls == 0 and service.calls == []
+
+    # 2. record, no binding, no phase → the phase runs against the real record.
+    assert isinstance(handler.handle(p), Reschedule)
+    assert seam.pre_container_calls == 1
+    assert seam.pre_container_kwargs[0]["bot"] is bots.record
+    assert service.calls == []
+
+    # 3. phase running → wait; nothing provisioned.
+    assert isinstance(handler.handle(p), Reschedule)
+    assert service.calls == []
+
+    # 4. phase terminal → provision, once.
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    assert isinstance(handler.handle(p), Reschedule)
+    assert [c["bot_id"] for c in service.calls] == ["b_1"]
+    assert bots.record["binding_id"] == 9
+
+    # 5. bound, container coming up → wait; bound and ACTIVE → done, and phase B
+    #    is never started.
+    assert isinstance(handler.handle(p), Reschedule)
+    bots.record = {**bots.record, "status": "ACTIVE"}
+    assert isinstance(handler.handle(p), Complete)
+    assert applies.started == [], "no post-container phase under this sequence"
+    assert len(created) == 1 and len(service.calls) == 1
+
+
+def test_record_first_every_step_is_safe_to_run_twice():
+    handler, applies, seam, bots, created, service = _record_first()
+    p = dict(_TECLAW_PAYLOAD)
+    handler.handle(p)
+    handler.handle(p)  # record exists → phase starts once
+    handler.handle(p)
+    assert len(created) == 1 and seam.pre_container_calls == 1
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    handler.handle(p)
+    handler.handle(p)
+    assert len(service.calls) == 1, "a re-claimed task provisioned twice"
+
+
+def test_record_first_a_failed_phase_still_provisions():
+    handler, applies, _seam, bots, _created, service = _record_first()
+    p = dict(_TECLAW_PAYLOAD)
+    handler.handle(p)
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.FAILED)
+    handler.handle(p)
+    assert len(service.calls) == 1
+
+
+def test_record_first_provisioning_failure_is_terminal_and_discards():
+    handler, applies, seam, _bots, _created, service = _record_first(refuse=True)
+    p = dict(_TECLAW_PAYLOAD)
+    handler.handle(p)
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    outcome = handler.handle(p)
+    assert isinstance(outcome, Fail) and outcome.error.startswith(BOT_COULD_NOT_BE_PROVISIONED)
+    # The record is soft-deleted by the service: the rows the phase wrote are
+    # orphans, and the job is the only thing that can reach them.
+    assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": "u_owner"}]
+
+
+def test_create_between_phases_discards_without_touching_the_store():
+    handler, _applies, seam, _bots, created, _service = _record_first(passport_status="REJECTED")
+    assert isinstance(handler.handle(dict(_PAYLOAD)), Fail)  # claude_code → CREATE_BETWEEN_PHASES
+    assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": None}]
+    assert not created
+
+
+def test_record_first_a_declined_creation_purges_the_store_too():
+    handler, _applies, seam, _bots, created, _service = _record_first(passport_status="REJECTED")
+    assert isinstance(handler.handle(dict(_TECLAW_PAYLOAD)), Fail)
+    assert seam.discard_kwargs == [{"entity_id": "u_owner", "bot_id": "b_1", "owner_id": "u_owner"}]
+    assert not created
+
+
+def test_create_between_phases_is_untouched_by_the_sequence_wiring():
+    handler, applies, seam, _bots, created, service = _record_first()
+    p = dict(_PAYLOAD)  # claude_code → CREATE_BETWEEN_PHASES
+    handler.handle(p)
+    assert seam.pre_container_calls == 1 and not created, "today's order: the phase first"
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    handler.handle(p)
+    assert created and created[0][1] == {}, "the default call shape, provisioning inline"
+    assert service.calls == []
+
+
+def test_record_first_a_failed_record_write_is_retried_not_discarded():
+    """The record write is idempotent on ``bot_id``, so a raise here is the
+    worker's implicit retry with backoff — not the terminal discard that
+    ``provision_bot`` needs (the service soft-deletes the record there)."""
+    handler, _applies, seam, _bots, created, service = _record_first(complete_raises=True)
+    p = dict(_TECLAW_PAYLOAD)
+    with pytest.raises(RuntimeError, match="could not be written"):
+        handler.handle(p)
+    assert len(created) == 1 and created[0][1] == {"provision": False}
+    assert seam.discards == 0 and service.calls == []
+
+
+def test_record_first_a_provisioning_failure_is_terminal_even_when_the_discard_does_not_land():
+    """A reschedule here would re-create the soft-deleted bot under the same id."""
+    handler, applies, seam, _bots, _created, _service = _record_first(refuse=True, discard_succeeds=False)
+    p = dict(_TECLAW_PAYLOAD)
+    handler.handle(p)
+    applies.latest = _Report(CREATE_PRE_CONTAINER_TRIGGER, ApplyStatus.SUCCEEDED)
+    outcome = handler.handle(p)
+    assert isinstance(outcome, Fail) and outcome.error.startswith(BOT_COULD_NOT_BE_PROVISIONED)
+    assert seam.discards == 1
+
+
+def test_a_frozen_sequence_in_the_payload_wins_over_the_live_switch():
+    """The sequence the creation started under is the one it finishes under."""
+    handler, applies, seam, bots, created, service = _record_first()
+    # A claude_code payload would route CREATE_BETWEEN_PHASES live; the frozen field says otherwise.
+    p = {**_PAYLOAD, "creation_sequence": CreationSequence.RECORD_APPLY_PROVISION.value}
+    handler.handle(p)
+    assert created and created[0][1] == {"provision": False}
+    assert seam.pre_container_calls == 0
+    # And the other way round: a teclaw payload frozen as CREATE_BETWEEN_PHASES runs today's order.
+    handler, applies, seam, bots, created, service = _record_first()
+    p = {**_TECLAW_PAYLOAD, "creation_sequence": CreationSequence.CREATE_BETWEEN_PHASES.value}
+    handler.handle(p)
+    assert seam.pre_container_calls == 1 and not created
+
+
+def test_the_payload_builder_freezes_the_sequence_only_when_given():
+    from agentclaw.community.core.bot_config_manifest.create_job import build_create_job_payload
+
+    base = dict(bot_id="b", entity_id="e", user_id="u", tenant="", env="dev", document_owner="u",
+                spec={}, iframe_url=None, redirect_url=None, window_seconds=60)
+    assert "creation_sequence" not in build_create_job_payload(**base)
+    assert build_create_job_payload(**base, creation_sequence="record_apply_provision")["creation_sequence"] == "record_apply_provision"

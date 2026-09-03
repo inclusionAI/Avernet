@@ -48,6 +48,12 @@ export interface TaskNodeView {
   groupName?: string | null;
   sessionId?: string | null;
   assignee?: string | null;
+  /** run_info.assignee_name:绕过群执行时 assignee 常为 bcs 群 id,用此可读 bot 名展示执行者。 */
+  assigneeName?: string | null;
+  /** 派发未命中事件(extend_props.miss_events):非空表示该节点未真正分配 bot,不应回退任务归属 bot 当执行人。 */
+  missEvents?: string[];
+  /** 节点挂起原因(extend_props.hung_reason):MISS+HUNG 时配合状态展示。 */
+  hungReason?: string | null;
   hasSubTask: boolean;
   subTaskId?: string | null;
   taskSpec?: {
@@ -78,6 +84,11 @@ export interface DagEdgeView {
   label?: string;
 }
 
+export interface TaskOutputDimension {
+  key: string;
+  content: string;
+}
+
 export interface TaskView {
   id: string;
   name: string;
@@ -101,6 +112,8 @@ export interface TaskView {
   mainSessionName?: string | null;
   /** 任务根节点(data.tasks[0].run_info)产物的渲染源：剥 HTTP 信封后按 markdown 渲染，用于「产物」Tab。 */
   rootOutputRender?: string | null;
+  /** 根节点 output 按顶层维度拆分的可读内容(结构化产物展示为多张维度卡片)。 */
+  rootOutputDimensions?: TaskOutputDimension[];
   progress: {
     total: number;
     pending: number;

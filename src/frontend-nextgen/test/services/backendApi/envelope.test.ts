@@ -1,4 +1,9 @@
-import { isEnvelopeFailure, isEnvelopeSuccess, isEnvelopeSuccessAnyDialect } from '@/services/backendApi/types';
+import {
+  isEnvelopeFailure,
+  isEnvelopeSuccess,
+  isEnvelopeSuccessAnyDialect,
+  isEnvelopeUnauthenticated,
+} from '@/services/backendApi/types';
 import { describe, expect, it } from '@jest/globals';
 
 /**
@@ -107,5 +112,46 @@ describe('backendApi envelope 双方言判定(6 位全局紧致 / 6∪5 位并�
       expect(inFive).toBe(false);
       expect(inSix).toBe(false);
     }
+  });
+});
+
+/**
+ * 未登录信封判定(external-oauth-login「未登录静默与统一登录处置」):双方言并集,
+ * BCS 显式 error_code 形态 + 网关误包 401 段形态(python 6 位 401000–401999 / BCS 5 位 40100–40199)。
+ */
+describe('backendApi envelope 未登录判定(isEnvelopeUnauthenticated)', () => {
+  it('BCS 显式形态 data.error_code=unauthenticated 判为未登录(既有 401 反应口契约)', () => {
+    expect(
+      isEnvelopeUnauthenticated({
+        code: 40100,
+        message: 'Authentication is required',
+        data: { error_code: 'unauthenticated' },
+      }),
+    ).toBe(true);
+  });
+
+  it('网关误包形态:code 落 401 段即未登录(5 位 40100–40199 / 6 位 401000–401999)', () => {
+    expect(isEnvelopeUnauthenticated({ code: 40100, message: 'x', data: null })).toBe(true);
+    expect(isEnvelopeUnauthenticated({ code: 40199, message: 'x', data: null })).toBe(true);
+    expect(isEnvelopeUnauthenticated({ code: 401000, message: '未登录', data: null })).toBe(true);
+    expect(isEnvelopeUnauthenticated({ code: 401999, message: '未登录', data: null })).toBe(true);
+    expect(isEnvelopeUnauthenticated({ code: '40100', message: 'x', data: null })).toBe(true); // 字符串宽松匹配
+  });
+
+  it('非 401 段错误码不判为未登录(403/404/5xx 等)', () => {
+    expect(isEnvelopeUnauthenticated({ code: 40300, message: 'forbidden', data: { error_code: 'forbidden' } })).toBe(
+      false,
+    );
+    expect(isEnvelopeUnauthenticated({ code: 403000, message: 'forbidden', data: null })).toBe(false);
+    expect(isEnvelopeUnauthenticated({ code: 502201, message: 'x', data: null })).toBe(false);
+    expect(isEnvelopeUnauthenticated({ code: 50000, message: 'x', data: null })).toBe(false);
+  });
+
+  it('成功信封与非信封数据不判为未登录', () => {
+    expect(isEnvelopeUnauthenticated({ code: 200000, message: 'OK', data: { a: 1 } })).toBe(false);
+    expect(isEnvelopeUnauthenticated({ code: 20000, message: 'OK', data: null })).toBe(false); // BCS 5 位成功段
+    expect(isEnvelopeUnauthenticated(null)).toBe(false);
+    expect(isEnvelopeUnauthenticated(undefined)).toBe(false);
+    expect(isEnvelopeUnauthenticated('plain')).toBe(false);
   });
 });

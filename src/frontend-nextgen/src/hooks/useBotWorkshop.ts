@@ -1,12 +1,13 @@
 import { getCapabilities } from '@/capabilities';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
+import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { useVisibleInterval } from '@/hooks/useVisibleInterval';
 import { botHealthCheckService } from '@/services/botHealthCheck';
 import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
-import { workspaceService } from '@/services/workspace';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -15,7 +16,6 @@ import { toast } from 'sonner';
 import { useAgentCodingTemplates } from './useAgentCodingTemplates';
 import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
-
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -29,58 +29,71 @@ export function useBotWorkshop() {
   const loadSequence = useRef(0);
   const [creating, setCreating] = useState(false);
   const { keyword, engine, deployment, serviceMode, page, pageSize } = state;
-  const agentCodingTemplates = useAgentCodingTemplates(state.createScenario === 'cloud');
+  const canUseAgentCoding = getCapabilities()
+    .getBotEngineOptions()
+    .value.some(({ value }) => value === 'aicoding');
+  const agentCodingTemplates = useAgentCodingTemplates(state.createScenario === 'cloud' && canUseAgentCoding);
+  const navigation = useBotWorkshopNavigation();
   const currentUser = getCapabilities().getCurrentOpenApiUserId({ activeIdentityId });
   const currentOpenApiUserId = currentUser.status === 'available' ? currentUser.value?.trim() || undefined : undefined;
-  const load = useCallback(async () => {
-    if (!requestIdentity.ready || !spaceInitialized || !spaceId) return;
-    const sequence = ++loadSequence.current;
-    state.setResult({
-      items: state.items,
-      total: state.total,
-      hasMore: state.hasMore,
-      loading: true,
-      error: undefined,
-    });
-    try {
-      const result = await botWorkshopService.list({
-        currentUserId: currentOpenApiUserId,
-        spaceId,
-        keyword,
-        engine,
-        deployment,
-        serviceMode,
-        page,
-        pageSize,
-      });
-      if (sequence !== loadSequence.current) return;
-      state.setResult({
-        items: result.items,
-        total: result.total,
-        hasMore: result.hasMore,
-        loading: false,
-        error: undefined,
-      });
-    } catch (error) {
-      if (sequence !== loadSequence.current) return;
-      const message = error instanceof Error ? error.message : 'Bot 列表加载失败';
-      state.setResult({ items: [], total: undefined, hasMore: undefined, loading: false, error: message });
-    }
-  }, [
-    currentOpenApiUserId,
-    deployment,
-    engine,
-    keyword,
-    page,
-    pageSize,
-    requestIdentity.ready,
-    serviceMode,
-    spaceId,
-    spaceInitialized,
-  ]);
+  const load = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!requestIdentity.ready || !spaceInitialized || !spaceId) return;
+      const sequence = ++loadSequence.current;
+      if (!options?.silent) {
+        const current = useBotWorkshopStore.getState();
+        state.setResult({
+          items: current.items,
+          total: current.total,
+          hasMore: current.hasMore,
+          loading: true,
+          error: undefined,
+        });
+      }
+      try {
+        const result = await botWorkshopService.list({
+          currentUserId: currentOpenApiUserId,
+          spaceId,
+          keyword,
+          engine,
+          deployment,
+          serviceMode,
+          page,
+          pageSize,
+        });
+        if (sequence !== loadSequence.current) return;
+        state.setResult({
+          items: result.items,
+          total: result.total,
+          hasMore: result.hasMore,
+          loading: false,
+          error: undefined,
+        });
+      } catch (error) {
+        if (sequence !== loadSequence.current) return;
+        if (options?.silent) return;
+        const message = error instanceof Error ? error.message : 'Bot 列表加载失败';
+        state.setResult({ items: [], total: undefined, hasMore: undefined, loading: false, error: message });
+      }
+    },
+    [
+      currentOpenApiUserId,
+      deployment,
+      engine,
+      keyword,
+      page,
+      pageSize,
+      requestIdentity.ready,
+      serviceMode,
+      spaceId,
+      spaceInitialized,
+    ],
+  );
   useEffect(() => {
     void load();
   }, [load]);
+  const refreshVisibleList = useCallback(() => void load({ silent: true }), [load]);
+  useVisibleInterval(refreshVisibleList, 30_000, requestIdentity.ready && spaceInitialized && Boolean(spaceId));
   const handleCreated = useCallback(
     async (bot: BotDomain) => {
       state.setCreateScenario(undefined);
@@ -163,41 +176,13 @@ export function useBotWorkshop() {
     },
     [load],
   );
-  const openDetail = useCallback((botOrId: BotDomain | string, type: 'view' | 'edit' = 'view') => {
-    const id = typeof botOrId === 'string' ? botOrId : botOrId.id;
-    const bot = typeof botOrId === 'string' ? undefined : botOrId;
-    const params = new URLSearchParams({ type, id });
-    if (bot) params.set('runtime_stage', resolveBotRuntimeStage(bot.lifecycle));
-    history.push(`/bot-workshop/detail?${params.toString()}`);
-  }, []);
-
-  const openConversation = useCallback((bot: BotDomain) => {
-    const current = useWorkspaceStore.getState();
-    const user = current.identities.find((identity) => identity.kind === 'user');
-    if (!user) {
-      toast.error('用户身份未加载完成，请稍后重试');
-      return;
-    }
-    const botId = bot.id.includes(':') || !bot.ownerId ? bot.id : `${bot.id}:${bot.ownerId}`;
-    workspaceService.persistIdentity(user.id);
-    current.setActiveIdentityId(user.id);
-    const workspace = useWorkspaceStore.getState();
-    workspace.setView('chat');
-    workspace.selectBotSession(null);
-    if (!workspace.expandedBotIds[botId]) workspace.toggleBotExpanded(botId);
-    workspace.setBotExpandedSection(botId, 'mine');
-    const params = new URLSearchParams({ tab: 'chat', bot: botId });
-    history.push(`/workspace?${params.toString()}`);
-  }, []);
-
   return {
     ...state,
     spaceId,
     loading: requestIdentity.loading || spaceLoading || !spaceInitialized || state.loading,
     error: requestIdentity.error ?? spaceError ?? state.error,
     retry: load,
-    openDetail,
-    openConversation,
+    ...navigation,
     getHealthCheckAvailability: (bot: BotDomain) =>
       botHealthCheckService.resolveAvailability(bot, currentOpenApiUserId),
     openHealthCheck,

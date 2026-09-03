@@ -21,6 +21,7 @@ export interface BotWorkshopState {
   setDeployment: (value?: BotDeployment) => void;
   setServiceMode: (value?: BotServiceMode) => void;
   setPage: (value: number) => void;
+  setPageSize: (value: number) => void;
   setCreateScenario: (value?: BotCreateScenario) => void;
   setQueryState: (
     value: Partial<Pick<BotWorkshopState, 'spaceId' | 'keyword' | 'engine' | 'deployment' | 'serviceMode' | 'page'>>,
@@ -51,6 +52,7 @@ export const useBotWorkshopStore = create<BotWorkshopState>((set) => ({
   setDeployment: (deployment) => set({ deployment, page: 1 }),
   setServiceMode: (serviceMode) => set({ serviceMode, page: 1 }),
   setPage: (page) => set({ page }),
+  setPageSize: (pageSize) => set({ pageSize, page: 1 }),
   setCreateScenario: (createScenario) => set({ createScenario }),
   setQueryState: (value) => set(value),
   setResult: (value) => set(value),

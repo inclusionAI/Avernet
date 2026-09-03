@@ -208,8 +208,11 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
 )
 from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
+from agentclaw.community.core.bot_config_manifest.apply.delivery import (
+    TeclawPlatformBindings,
+)
+from agentclaw.community.core.bot_config_manifest.managed_files import ManagedFilesStore
 from agentclaw.community.di import config as cfg
-from agentclaw.community.di.modules.config_module import read_user_config
 from agentclaw.community.log import get_logger
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -736,6 +739,9 @@ class BotManagementModule(Module):
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+        manifest_config: cfg.BotConfigManifestConfig,
+        teclaw_bindings: TeclawPlatformBindings,
     ) -> BotConfigManifestApplyService:
         return BotConfigManifestApplyService(
             manifest_service,
@@ -753,6 +759,13 @@ class BotManagementModule(Module):
             git_client_provider,
             task_queue_provider,
             bot_repository,
+            # W8: the delivery seam. The engine authority is the same factory
+            # the capability resolver and the creation seam take; the switch is
+            # the config cluster's, read once here.
+            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+            teclaw_platform_managed=manifest_config.teclaw_platform_managed,
+            teclaw_platform_ports_provider=teclaw_bindings.platform_ports,
+            redeliver=teclaw_bindings.redeliver,
         )
 
     @singleton
@@ -766,45 +779,27 @@ class BotManagementModule(Module):
 
     @singleton
     @provider
-    def bot_create_with_manifest_config(self) -> cfg.BotCreateWithManifestConfig:
-        """W13's creation policy, read through ``config_module``'s public seam.
-
-        Parsed here rather than in ``config_module`` for the reason
-        ``manifest_fetch_module`` does the same: the read goes through the one
-        seam, and the parsing lives with the graph that consumes it.
-        """
-        return cfg.BotCreateWithManifestConfig.from_block(
-            read_user_config().get("bot_create_with_manifest") or {}
-        )
-
-    @singleton
-    @provider
     @inject
     def bot_creation_manifest_seam(
         self,
+        injector: Injector,
         manifest_service: BotConfigManifestServiceProtocol,
         apply_service: BotConfigManifestApplyService,
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
-        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
         task_queue_provider: Callable[[], TaskQueueService],
         create_with_manifest_config: cfg.BotCreateWithManifestConfig,
     ) -> BotCreationManifestSeam:
         """The operations bot creation asks of the manifest layer.
 
-        ``is_teclaw`` comes from the same factory the capability resolver takes,
-        so "runs in a teclaw container" has one definition rather than a
-        hand-rolled comparison here.
-
-        The job's two operations are bound here rather than imported by the
-        seam: ``create_job`` imports ``creation`` for the phase triggers, so the
-        dependency has to run one way. The queue itself stays behind the same
-        lazy provider the apply service uses.
+        The job's two operations are bound here rather than imported by the seam:
+        ``create_job`` imports ``creation`` for the phase triggers, so the
+        dependency has to run one way. The queue stays behind the same lazy
+        provider the apply service uses.
         """
         return BotCreationManifestSeam(
             manifest_service=manifest_service,
             apply_service=apply_service,
             script_service_provider=script_service_provider,
-            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
             start_job=lambda **fields: enqueue_create_job(
                 task_queue_provider(), **fields
             ),
@@ -814,6 +809,10 @@ class BotManagementModule(Module):
             authorization_window_seconds=(
                 create_with_manifest_config.authorization_window_seconds
             ),
+            purge_managed_files=lambda owner_id, bot_id: injector.get(
+                ManagedFilesStore
+            ).purge_owner_bot(owner_id, bot_id),
+            creation_sequence=lambda e: apply_service.delivery_for_engine(e).creation_sequence,
         )
 
     @singleton
@@ -833,12 +832,13 @@ class BotManagementModule(Module):
         creation graph it reaches into is large.
         """
 
-        def _complete(job_payload: dict) -> None:
+        def _complete(job_payload: dict, *, provision: bool = True) -> None:
             complete_manifest_creation(
                 job_payload,
                 bot_service=injector.get(BotService),
                 passport_plugin=passport_plugin,
                 auth_rel_plugin=auth_rel_plugin,
+                provision=provision,
             )
 
         return BotCreateWithManifestHandler(
@@ -854,6 +854,10 @@ class BotManagementModule(Module):
             # actually landed, because completion writes it *after* the bot
             # record and a failure there would otherwise never be retried.
             auth_relationship_provider=lambda: auth_rel_plugin,
+            # W8: the strategy decides the order a creation runs in.
+            creation_sequence=lambda engine: injector.get(
+                BotConfigManifestApplyService
+            ).delivery_for_engine(engine).creation_sequence,
         )
 
     @singleton

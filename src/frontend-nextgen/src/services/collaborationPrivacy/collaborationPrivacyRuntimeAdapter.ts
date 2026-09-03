@@ -141,6 +141,13 @@ function createPublicationResult(command: PublicationCommand, result: BcsPublish
     return { status: 'pending', publication };
   }
 
+  if (result.state === 'SKIPPED') {
+    // 跳过审批直接通过:工单已直接放行,无审批链接,按本次请求配置生效。
+    const config: PublicConfig =
+      result.visibility === 'private' ? { scope: 'none', organizationPaths: [] } : structuredClone(command.config);
+    return { status: 'completed', config };
+  }
+
   if (result.state !== 'COMPLETED') {
     throw new Error('公开范围接口返回了无法识别的终态');
   }

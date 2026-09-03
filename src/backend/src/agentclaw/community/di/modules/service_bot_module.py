@@ -62,6 +62,9 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
 from agentclaw.community.core.common_config import CommonConfigService, CommonWhiteListService
+from agentclaw.community.core.bot_config_manifest.managed_files import (
+    ManagedFilesComposeReader,
+)
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,
 )
@@ -462,6 +465,9 @@ class ServiceBotModule(Module):
             identity_service=injector.get(IdentityService),
             overrides_reader=injector.get(ChannelEngineOverridesReader),
             center_store=injector.get(CanonicalCenterVersionStore),
+            # W8: the platform's copy of a teclaw bot's manifest-delivered
+            # files, and which categories it asserts (manifest_fetch_module).
+            managed_files_reader=injector.get(ManagedFilesComposeReader),
         )
 
     @singleton

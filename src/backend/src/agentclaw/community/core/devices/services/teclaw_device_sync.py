@@ -42,7 +42,7 @@ import dataclasses
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Optional
 
-from agentclaw.community.core.config_compose.models import ComposeRequest
+from agentclaw.community.core.config_compose.models import ComposeOccasion, ComposeRequest
 from agentclaw.community.core.devices.services.device_sync import DeviceSync
 from agentclaw.community.core.service_bot.services.deploy.engine_ext_stage import (
     enrich_engine_ext,
@@ -155,6 +155,20 @@ class TeclawDeviceSyncService(DeviceSync):
             desired_skills=desired_skills,
         )
 
+    def deliver_manifest_apply(self) -> dict[str, Any]:
+        """The closing redeliver of a manifest apply (W8).
+
+        The same whole-artifact delivery as every other method here, composed
+        for the ``MANIFEST_APPLY`` occasion: the platform has just written
+        every category into its own state, so the artifact's ``ownership``
+        map says the platform owns every category and the file categories
+        are read from the platform's store. A runtime edit composes for the
+        default occasion and leaves them the engine's.
+        """
+        return self._compose_and_deliver(
+            caller="deliver_manifest_apply", occasion=ComposeOccasion.MANIFEST_APPLY
+        )
+
     def sync_bot_config(
         self,
         bot_id: str,
@@ -200,8 +214,13 @@ class TeclawDeviceSyncService(DeviceSync):
         caller: str,
         effective_mcps: Optional[list[dict[str, Any]]] = None,
         desired_skills: Optional[list[dict[str, Any]]] = None,
+        occasion: ComposeOccasion = ComposeOccasion.RUNTIME,
     ) -> dict[str, Any]:
         """Compose this bot's whole artifact and POST it to its container.
+
+        ``occasion`` is what the compose is for (W8): a runtime edit by
+        default, which leaves every category the engine's; the closing
+        redeliver of a manifest apply says so and makes them the platform's.
 
         ``effective_mcps`` is the bot's effective MCP set when the caller
         already resolved it (capability projection does, before it decides
@@ -221,6 +240,7 @@ class TeclawDeviceSyncService(DeviceSync):
                     user_id=self._user_id,
                     engine_type=self._engine_type,
                     entity_type=self._entity_type,
+                    occasion=occasion,
                     effective_mcps=(
                         None if effective_mcps is None else tuple(effective_mcps)
                     ),

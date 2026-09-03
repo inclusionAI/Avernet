@@ -42,19 +42,11 @@ function Tags({ space, isCurrent }: { space: Space; isCurrent?: boolean }) {
 }
 
 function Stat({ label, value }: { label: string; value: number | string }) {
-  // 数字（成员）用 base+tabular-nums；字符串（更新时间/创建者花名）用 sm+truncate，避免长名撑破列宽。
-  const isNumeric = typeof value === 'number';
+  const displayValue = value || '-';
   return (
-    <div className="flex flex-1 flex-col justify-center gap-1 px-4 first:pl-0 last:pr-0">
-      <span className="text-xs font-medium text-muted-foreground">{label}</span>
-      <span
-        className={cn(
-          'truncate font-semibold leading-none text-foreground',
-          isNumeric ? 'text-base tabular-nums' : 'text-sm',
-        )}
-      >
-        {isNumeric ? value : value || '-'}
-      </span>
+    <div className="flex flex-1 flex-col justify-center gap-1 px-4">
+      <span className="text-[rgb(113,113,122)]">{label}</span>
+      <span className="truncate">{displayValue}</span>
     </div>
   );
 }
@@ -72,8 +64,8 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
     <>
       <section
         className={cn(
-          'group flex h-full flex-col gap-4 rounded-lg border border-border bg-card p-6 shadow-sm transition-all duration-200 ease-out',
-          cardClickable && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md hover:border-primary/40',
+          'group flex h-full flex-col gap-4 rounded-lg border border-border bg-card p-4 transition-all duration-200 ease-out',
+          cardClickable && 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md',
           isCurrent && 'border-primary ring-1 ring-primary/20',
         )}
         onClick={cardClickable ? () => onOpenDetail?.(space) : undefined}
@@ -91,20 +83,20 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
           <div className="flex min-w-0 items-center gap-3">
             <span
               className={cn(
-                'inline-flex size-9 shrink-0 items-center justify-center rounded-lg transition-colors',
+                'inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-border transition-colors',
                 space.spaceType === 'PERSONAL' ? 'bg-muted' : 'bg-primary/10 group-hover:bg-primary/15',
               )}
               aria-hidden
             >
-              <Icon size={18} className={iconColor} />
+              <Icon size={12} className={iconColor} />
             </span>
-            <span className="truncate text-lg font-semibold text-foreground">{space.spaceName}</span>
+            <span className="truncate text-[14px] font-semibold leading-5 text-foreground">{space.spaceName}</span>
           </div>
           <Tags space={space} isCurrent={isCurrent} />
         </div>
 
         {/* 统计块：成员 / 更新时间 / 创建者（直接展示花名，无类型条件） */}
-        <div className="flex items-center divide-x divide-border rounded-lg bg-muted/60 px-4 py-3">
+        <div className="flex items-center divide-x divide-border py-1">
           <Stat label="成员" value={space.memberCount} />
           <Stat label="更新时间" value={formatRelativeTime(space.gmtModified)} />
           <Stat label="创建者" value={space.creatorUserName ?? ''} />
@@ -115,8 +107,8 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
           {joinable && (
             <Button
               size="sm"
-              variant="primary"
-              className="w-full"
+              variant="secondary"
+              className="w-full text-xs font-semibold"
               onClick={(e) => {
                 e.stopPropagation();
                 setJoinOpen(true);
@@ -126,7 +118,7 @@ export function SpaceCard({ space, isCurrent, onOpenDetail, onRequestJoin }: Spa
             </Button>
           )}
           {applying && (
-            <Button size="sm" variant="primary" className="w-full" disabled>
+            <Button size="sm" variant="secondary" className="w-full text-xs font-semibold" disabled>
               申请中
             </Button>
           )}

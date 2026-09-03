@@ -1,6 +1,7 @@
 import { getCapabilities } from '@/capabilities';
 import { getAvailableViews, type WorkspaceView } from '@/domain/collaboration/availableViews';
 import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
+import { useAgentCodingBotSelection } from '@/pages/Workspace/hooks/useAgentCodingBotSelection';
 import { useBotChat } from '@/pages/Workspace/hooks/useBotChat';
 import { useBotSessions } from '@/pages/Workspace/hooks/useBotSessions';
 import { useFriendBots } from '@/pages/Workspace/hooks/useFriendBots';
@@ -28,7 +29,6 @@ export interface UseWorkspaceOptions {
    */
   onPanelSend?: (content: string) => void;
 }
-
 export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const {
     activeIdentityId,
@@ -51,8 +51,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const inputRef = useRef<SenderRef | null>(null);
   const provider = useMemo(() => workspaceService.createProvider(), []);
   useWorkspaceIdentityBootstrap();
-
-  // IdentityView[] → Identity[]（IdentityBar 仍以 prop 驱动，不感知 Service/Store 类型）
   const identities = useMemo(() => identityViews.map(mapIdentityViewToIdentity), [identityViews]);
   const activeIdentityView = useMemo(
     () => identityViews.find((i) => i.id === activeIdentityId) ?? null,
@@ -62,14 +60,11 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     () => getAvailableViews(activeIdentityView ? { id: activeIdentityView.id, kind: activeIdentityView.kind } : null),
     [activeIdentityView],
   );
-
-  // view 钳制安全网:setIdentities 初始装载或身份列表变化导致 view 越界时回退到首个可用 tab。
   useEffect(() => {
     if (!activeIdentityView) return;
     if (availableViews.length === 0) return;
     if (!availableViews.includes(view)) setView(availableViews[0]);
   }, [activeIdentityView, availableViews, view, setView]);
-
   const isTestUser = isTestUserIdentity(activeIdentityId);
   const isUserIdentity = activeIdentityView?.kind === 'user';
   const { chatBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
@@ -89,9 +84,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     [allChatBots, botSessions.selectedSession],
   );
   const botChat = useBotChat(selectedChatBot, botSessions.selectedSession, panelRef);
-
   const isSupportTarget = isTestUser && activeTargetId === TEST_USER_SUPPORT_TARGET_ID;
-
   const chat = useChat({
     provider,
     conversationKey: isTestUser ? activeTargetId ?? undefined : undefined,
@@ -101,7 +94,6 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     panelRef,
   });
 
-  // 集中注册 submit/abort/inputRef 到全局单例桥(断点 B):按活跃方选 chat;buildRequestParams 产顶层 content(根因 A,见 singleChatBridgeRequest)。
   useChatBridge({
     bridge: chatBridge,
     chat: isSupportTarget ? chat : botChat.chat,
@@ -130,6 +122,11 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     });
     return () => provider.disconnect();
   }, [isSupportTarget, provider, brand.name]);
+
+  const { selectedAgentCodingBot, onSelectAgentCodingBot, onToggleBotExpanded } = useAgentCodingBotSelection({
+    activeIdentityId,
+    toggleBotExpanded: botSessions.toggleBotExpanded,
+  });
 
   const handleSelectIdentity = (id: string) => {
     workspaceService.persistIdentity(id);
@@ -216,12 +213,14 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     isFriendBotsLoading,
     expandedBotIds,
     expandedBotSectionKey,
-    toggleBotExpanded: botSessions.toggleBotExpanded,
+    toggleBotExpanded: onToggleBotExpanded,
     botSessions,
     botChat,
     botChatTarget,
+    selectedAgentCodingBot,
+    onSelectAgentCodingBot,
+    onToggleBotExpanded,
     isTestUser,
-    // 测试用户客服链路
     supportMessages: chat.messages,
     supportIsRequesting: chat.isRequesting,
     supportIsLoadingMessages: chat.isDefaultMessagesRequesting,

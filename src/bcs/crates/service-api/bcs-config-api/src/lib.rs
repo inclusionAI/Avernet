@@ -1036,6 +1036,13 @@ pub struct OAuthSettings {
     /// derived from `base_url` (https → secure). Set `false` for local HTTP dev.
     #[serde(default)]
     pub cookie_secure: Option<bool>,
+    /// Path to redirect to after a successful login (the `Location` emitted by
+    /// `/auth/callback/{provider}` and the OpenAPI v1 login flow). Defaults to
+    /// `/`. Must be a relative path starting with a single `/`; an absolute URL
+    /// or protocol-relative `//host` is rejected at load time (open-redirect
+    /// guard). A query string is allowed, e.g. `/?login=success`.
+    #[serde(default = "default_oauth_success_redirect_path")]
+    pub success_redirect_path: String,
     /// OAuth provider instances keyed by instance name, deserialized from
     /// `[auth.oauth.providers.<name>]`. The key is the instance name used as the
     /// `HashMap` key, the `/auth/url` entry, and the `{provider}` in
@@ -1100,6 +1107,17 @@ impl OAuthSettings {
     /// the set of valid kinds lives in the bootstrap factory — so it is
     /// validated there; this keeps the contract crate free of impl knowledge.
     pub fn validate(&self) -> Result<(), String> {
+        // success_redirect_path must be a same-origin relative path: a leading
+        // single `/` only. An absolute URL (http://host) or a protocol-relative
+        // `//host` would let a misconfigured value redirect users off-site
+        // right after they authenticate, so reject it at load time.
+        let redirect = self.success_redirect_path.trim();
+        if !redirect.starts_with('/') || redirect.starts_with("//") {
+            return Err(format!(
+                "auth.oauth.success_redirect_path must be a relative path starting with a single '/' (got {:?})",
+                self.success_redirect_path
+            ));
+        }
         for (name, p) in &self.providers {
             if name.is_empty() {
                 return Err("auth.oauth.providers has an empty instance name".to_string());
@@ -1121,6 +1139,10 @@ impl OAuthSettings {
 
 fn default_oauth_idle_timeout_minutes() -> u64 {
     30
+}
+
+fn default_oauth_success_redirect_path() -> String {
+    "/".to_string()
 }
 
 // ---------------------------------------------------------------------------

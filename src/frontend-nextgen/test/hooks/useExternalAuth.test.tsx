@@ -63,7 +63,12 @@ describe('useExternalAuth', () => {
     mockedRequest.mockRejectedValue({
       response: {
         status: 401,
-        data: { code: 40100, message: 'Authentication is required', data: { error_code: 'unauthenticated' }, request_id: 'r' },
+        data: {
+          code: 40100,
+          message: 'Authentication is required',
+          data: { error_code: 'unauthenticated' },
+          request_id: 'r',
+        },
       },
     });
     const { result } = renderHook(() => useExternalAuth());
