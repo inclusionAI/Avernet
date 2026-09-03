@@ -281,14 +281,14 @@ user_config:
         value: "${MODEL_KEY:-}"
         placeholder: "${API-KEY}"
 
-  # Harness-internal LLM utility. Left unset = disabled (feature-off). The
-  # harness is an internal dev/diagnostic tool; a community deployment that wants
-  # it sets its own OpenAI-compatible endpoint + secret name here. The token is
-  # resolved from secret_name through the configured SecretResolver.
-  # TODO(community):
-  #   llm:
-  #     base_url: "https://your-openai-compatible-endpoint"
-  #     secret_name: "AGENTCLAW_SECRET_..."
+  # Harness-internal OpenAI-compatible LLM utility. Empty endpoint/token keeps
+  # the feature disabled. The token value stays outside YAML and is resolved
+  # from LLM_AUTH_TOKEN through the community environment SecretResolver.
+  llm:
+    base_url: "${LLM_BASE_URL:-}"
+    secret_name: "LLM_AUTH_TOKEN"
+    model: "${LLM_BALANCED_MODEL:-glm-5.2}"
+    timeout_ms: "${LLM_DEFAULT_TIMEOUT_MS:-180000}"
   bcn:
     base_url: "${BCS_URL}"
     base_url_pre: "${BCS_URL}"

@@ -253,6 +253,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.health import (
             CommunityHealthModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.harness import (
+            CommunityHarnessModule,
+        )
         from agentclaw.community.di.modules.infrastructure.community.identity import (
             CommunityIdentityModule,
         )
@@ -310,6 +313,7 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityObjectStorageModule(),
             CommunityIdentityModule(),
             CommunityHealthModule(),
+            CommunityHarnessModule(),
             CommunityTracerModule(),
             CommunityOutboundRulesModule(),
             CommunityDRMModule(),
