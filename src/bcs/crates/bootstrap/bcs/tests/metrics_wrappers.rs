@@ -101,6 +101,16 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
             .delivered
     );
     let bot_delivery =
+        MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake { delivered: true }), env.clone());
+    assert_eq!(
+        bot_delivery
+            .abort(bot_abort_delivery_cmd())
+            .await
+            .unwrap()
+            .aborted_run_ids,
+        vec!["run-wrapper"]
+    );
+    let bot_delivery =
         MetricsBotDeliveryPort::new(Arc::new(BotDeliveryFake { delivered: false }), env.clone());
     assert!(
         !bot_delivery
@@ -150,6 +160,7 @@ async fn metrics_wrappers_record_expected_labels_and_preserve_results() {
         "source=\"bot_ws\",operation=\"task_complete\",result=\"success\"",
         "source=\"http\",operation=\"direct_chat\",result=\"success\"",
         "target=\"bot\",delivery_kind=\"send\",result=\"delivered\",error_code=\"none\"",
+        "target=\"bot\",delivery_kind=\"abort\",result=\"delivered\",error_code=\"none\"",
         "target=\"bot\",delivery_kind=\"task_dispatch\",result=\"failed\",error_code=\"not_connected\"",
         "target=\"frontend\",delivery_kind=\"workbench_event\",result=\"no_receivers\",error_code=\"none\"",
         "target=\"bot\",delivery_kind=\"send\",result=\"blocked\",error_code=\"policy_blocked\"",
@@ -482,6 +493,16 @@ impl BotDeliveryPort for BotDeliveryFake {
                 .then(|| ServiceError::BotNotConnected("bot-target".to_string())),
         })
     }
+
+    async fn abort(
+        &self,
+        cmd: BotAbortDeliveryCommand,
+    ) -> ServiceResult<BotAbortDeliveryResult> {
+        Ok(BotAbortDeliveryResult {
+            target_bot_id: cmd.target_bot_id().to_string(),
+            aborted_run_ids: vec!["run-wrapper".to_string()],
+        })
+    }
 }
 
 struct FrontendDeliveryFake {
@@ -691,6 +712,20 @@ fn bot_delivery_cmd(delivery_kind: BotDeliveryKind) -> BotDeliveryCommand {
         delivery_kind,
         provider_transport: Default::default(),
         provider_bypass_headers: Vec::new(),
+    }
+}
+
+fn bot_abort_delivery_cmd() -> BotAbortDeliveryCommand {
+    BotAbortDeliveryCommand {
+        target: BotDeliveryTarget::WebSocket {
+            bot_id: "bot-target".to_string(),
+        },
+        command_id: "abort-wrapper".to_string(),
+        group_id: "group-wrapper".to_string(),
+        session_id: "session-wrapper".to_string(),
+        run_id: Some("run-wrapper".to_string()),
+        provider_bypass_headers: Vec::new(),
+        timeout_ms: 1_000,
     }
 }
 
