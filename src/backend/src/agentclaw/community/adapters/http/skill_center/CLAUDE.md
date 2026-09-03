@@ -171,11 +171,11 @@ backend 统一产出（OSS 散目录 + tar.gz + meta），但 **engine 怎么拿
 
 ---
 
-## 五、VM 重建后的软链自动恢复（DeviceActivatedEvent）
+## 五、运行时启动与重启后的软链自动恢复
 
 **文件**：`core/skill_center/services/skill_symlink_listener.py`
 
-agentbox（桌面版）VM 重建（`upper.img` 删除）或首次启动后，软链会随上层文件系统重置而丢失。`DeviceActivatedEvent` 提供了一条**事件驱动的全量恢复链路**，在 VM 进入 active 状态时主动下发当前 Bot 的全部已激活 skill 软链。
+运行时首次启动或重建后，软链可能尚未建立或已随上层文件系统重置。首次 `PENDING -> ACTIVE` 由 `DeviceActivatedEvent` 触发；BaaS 重启发布成功由 `RuntimeProjectionRequestedEvent` 触发。两者进入同一个监听器，按 Installation 等控制面期望态执行完整 Runtime Projection。
 
 ### 触发时机
 
@@ -184,17 +184,18 @@ agentbox（桌面版）VM 重建（`upper.img` 删除）或首次启动后，软
 | Bot 首次创建 | `desktop_bot_service` 启动流程 | VM 进入 active 状态时发布 `DeviceActivatedEvent` |
 | VM 重启 | `desktop_bot_service` 健康检查回调 | 同上 |
 | VM 重建（`upper.img` 删除） | `desktop_bot_service` 重建后激活 | 同上 |
+| BaaS Bot 重启发布成功 | `BaasRestartPublishPollHandler` | 发布 `RuntimeProjectionRequestedEvent`，不重放其他激活副作用 |
 
 ### 实现路径
 
-1. `SkillSymlinkListener.startup()` 将 `self.handle` 订阅到事件总线的 `DeviceActivatedEvent`（幂等订阅，避免重复绑定）。
+1. `SkillSymlinkListener.startup()` 将 `self.handle` 幂等订阅到 `DeviceActivatedEvent` 和 `RuntimeProjectionRequestedEvent`。
 2. `SkillSymlinkListener.handle(event)` 接收到事件后：
    - 通过 `bot_repo.get_by_binding_id(event.binding_id)` 找到对应 Bot。
-   - 通过 `skill_set_factory.create()` + `get_symlink_mappings()` 获取该 Bot **全部已激活 skill** 的 `source → target` 软链映射。
-   - 调用 `device_sync.sync_symlinks(symlinks)` 一次性推送到 VM。
-3. 异常被捕获并记日志，不阻塞设备激活流程。
+   - 调用 `BotRuntimeProjector.project(scope=ProjectionScope.everything())`，从 Installation 等 SSOT 重新解析 Skill、MCP、CLI、Passport 的完整期望态。
+   - Projector 根据 Engine 与当前 Layout 选择实际交付路径；监听器本身不按 Legacy/Pool 分支。
+3. `PENDING` / `DEGRADED` 与异常都维持 best-effort 语义，不回滚已成功的设备启动或重启。仅当 DI 未提供 Projector 时，才回退到历史 `get_symlink_mappings() → sync_symlinks()` 兼容路径。
 
-> **关键结论**：agentbox VM 重建后，只要进入 active 状态，软链会自动全量恢复，用户无需手动重新激活 skill。若 `SkillSymlinkListener` 因异常未执行，可让用户重新激活 skill / 重启 Bot 触发 `SkillSetService._sync_symlinks_to_device_if_needed` 主动重推。
+> **关键结论**：运行时首次激活或 BaaS 重启发布成功后，系统都会按当前控制面期望态尝试一次完整投影；该动作是 best-effort，不改变同步 SkillSet 接口或任务终态语义。
 
 ---
 
@@ -226,7 +227,7 @@ device 层正处于 agentbox/arca 双链路拆分迁移中（背景见 `docs/sup
 | `core/repository/implementations/skill_center/capability_desired_state.py` | `CapabilityDesiredStateRepository` — 期望态 UoW；`tables/` 子包是 Installation/排除表 SQL 的唯一属地 |
 | `core/skill_center/services/skill_set_service.py` | `get_symlink_mappings()`（激活写路径已收敛到 desired-state 控制面） |
 | `core/skill_center/services/skill_service.py` | `upload_skill()`、`activate_skill()` 单个软链操作 |
-| `core/skill_center/services/skill_symlink_listener.py` | `SkillSymlinkListener` — 订阅 `DeviceActivatedEvent`，VM 激活后自动全量下发软链 |
+| `core/skill_center/services/skill_symlink_listener.py` | `SkillSymlinkListener` — 订阅激活/重投影事件，运行时就绪后按当前期望态执行全量投影 |
 | `core/skill_center/services/git_sync.py` | `GitSyncService` — git 来源同步（startup / sync_bootstrap / periodic / OSS） |
 | `core/skill_center/services/skill_center_sync_service.py` | `SkillCenterSyncService` — center:// 来源同步 |
 | `core/skill_center/factories.py` | `SkillSetServiceFactory` / `SkillServiceFactory`，Factory 层解析路径 |

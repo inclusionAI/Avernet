@@ -1,6 +1,7 @@
 """Skills Pool 控制面业务边界的 DI 装配测试。"""
 
 from dataclasses import replace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -55,14 +56,19 @@ from agentclaw.community.core.skills_pool.types import (
 )
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.events.types import RuntimeProjectionRequestedEvent
 from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
+)
+from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ProjectionScope,
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.di import DeployProfile, build_injector
+from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
 from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
 
@@ -242,6 +248,46 @@ def test_skill_symlink_listener_uses_public_desktop_layout_state(
         migration_generation=None,
     )
     assert authority(bot) == "legacy"
+
+
+def test_skill_symlink_listener_projects_everything_for_runtime_ready_events() -> None:
+    runtime_reconciler = MagicMock()
+    bot_repo = MagicMock()
+    bot_repo.get_by_binding_id.return_value = {
+        "bot_id": "service-1",
+        "owner_id": "owner-1",
+        "bot_type": "service",
+    }
+    resolver = MagicMock()
+    resolver.resolve_for_bot.return_value.binding_id = 42
+    layout_repository = MagicMock()
+    module = SkillCenterModule()
+    listener = module.skill_symlink_listener(
+        bot_repo=bot_repo,
+        skill_set_factory=MagicMock(),
+        resolver=resolver,
+        device_sync_dispatcher=MagicMock(),
+        layout_repository=layout_repository,
+        skills_pool_wakeup=MagicMock(),
+        runtime_reconciler=runtime_reconciler,
+    )
+
+    listener.handle(
+        RuntimeProjectionRequestedEvent(
+            device_id="device-1",
+            binding_id=42,
+            entity_id="owner-1",
+            entity_type="staff",
+            device_provider="baas",
+        )
+    )
+
+    runtime_reconciler.project.assert_called_once_with(
+        bot_id="service-1",
+        owner_id="owner-1",
+        scope=ProjectionScope.everything(),
+    )
+    layout_repository.get.assert_not_called()
 
 
 @pytest.mark.parametrize("template_type", ("personalCoding", "applicationCoding"))

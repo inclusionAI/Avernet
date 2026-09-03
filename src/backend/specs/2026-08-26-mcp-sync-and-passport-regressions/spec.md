@@ -576,16 +576,19 @@ duplicative with it, not load-bearing for it.
 > it must *not* run — *"The Device callback publishes one event; it must not
 > also sync MCP."*
 >
-> Ownership moved to the event path: `report_device_alive` publishes
-> `DeviceActivatedEvent`, `SkillSymlinkListener` handles it, and its
-> `project(scope=ProjectionScope.everything())` is the **only** production
-> path that writes per-MCP configuration to a newly active container. The
-> other full-detail push (`device_service.py:1529`) sits inside the dead
-> method.
+> Ownership moved to the runtime-ready event path. First activation publishes
+> `DeviceActivatedEvent`; a successful BaaS restart publishes the narrower
+> `RuntimeProjectionRequestedEvent` so unrelated activation consumers are not
+> replayed. `SkillSymlinkListener` handles both and calls
+> `project(scope=ProjectionScope.everything())`. This is the general,
+> layout-neutral full-projection path for a newly active or restarted
+> container. AICoding's confirmed-template-update flow retains its narrower
+> authorization/Skill compensation; the other historical full-detail push
+> (`device_service.py:1529`) sits inside the dead method.
 >
 > So the projector's whole-set push on that path is load-bearing, not
 > duplicative — which is why `claim_all_mcp` survives with exactly one
-> caller. Every other path is mutation-triggered and names its own delta.
+> listener. Every direct mutation path names its own delta.
 
 **Skill-carried MCP dependencies.** `RuntimeProjectionResolver` folds each
 skill's `mcp_dependencies` into `mcp_server_codes`, so those codes reach the

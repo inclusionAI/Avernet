@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import (
+    DeviceActivatedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 
 
 class TestDeviceActivatedEvent:
@@ -31,3 +34,18 @@ class TestDeviceActivatedEvent:
             device_provider="local",
         )
         assert event.sandbox_id is None
+
+
+def test_runtime_projection_requested_event_carries_binding_identity() -> None:
+    event = RuntimeProjectionRequestedEvent(
+        device_id="device-1",
+        binding_id=42,
+        entity_id="owner-1",
+        entity_type="staff",
+        device_provider="baas",
+        sandbox_id="sandbox-1",
+    )
+
+    assert event.binding_id == 42
+    assert event.device_provider == "baas"
+    assert event.sandbox_id == "sandbox-1"

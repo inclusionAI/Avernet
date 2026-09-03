@@ -30,6 +30,24 @@ class DeviceActivatedEvent:
 
 
 @dataclass(frozen=True)
+class RuntimeProjectionRequestedEvent:
+    """Request a best-effort projection of current Bot desired state.
+
+    Unlike ``DeviceActivatedEvent``, this event does not announce a binding
+    lifecycle transition.  It is emitted after a runtime restart succeeds so
+    projection consumers can rebuild runtime state without replaying unrelated
+    activation side effects.
+    """
+
+    device_id: str
+    binding_id: int
+    entity_id: str
+    entity_type: str
+    device_provider: str
+    sandbox_id: str | None = None
+
+
+@dataclass(frozen=True)
 class DeviceAliveEvent:
     """A validated PENDING device reported alive before its ACTIVE commit.
 
