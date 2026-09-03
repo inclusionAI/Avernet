@@ -135,6 +135,7 @@ def _build(db):
             package_validator=real_validator(),
             entry_fetcher=fetcher(),
             resource_service=FakeResourceFileService(),
+            cli_tool_service=object(),
         )
 
     applies = BotConfigManifestApplyService(
@@ -150,6 +151,7 @@ def _build(db):
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=fetcher,
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=bots,

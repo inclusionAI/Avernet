@@ -29,6 +29,9 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
         SkillPackageUploadPort,
     )
+    from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+        CliToolService,
+    )
     from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
         BotStartupScriptServiceProtocol,
     )
@@ -199,6 +202,7 @@ def build_materialisers(
     package_validator: "SkillPackageValidator",
     entry_fetcher: "EntryFetcher",
     resource_service: "ManifestResourcePort",
+    cli_tool_service: "CliToolService",
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 
@@ -208,17 +212,22 @@ def build_materialisers(
     exists for that class of thing) and pull the bot-configuration graph into
     anything that merely wants the ordering table.
 
-    **W4 registered two, W5 four, W6 five.** The map is keyed by each
+    **W4 registered two, W5 four, W6 five, W9 six.** The map is keyed by each
     materialiser's own ``construct`` rather than by a name written here — so
     a materialiser cannot be registered under the wrong key. The fetch-side
     dependencies (``package_validator``, ``entry_fetcher``) exist because the
     two W5 categories materialise fetched bytes: the validator is the upload
     path's own gate, the entry fetcher is the W2/W3/W11 funnel, and neither
-    belongs inside the engine. ``resources`` arrives with W6, ``engine_config``
-    when X2/T3 lets it back in, and ``cli_tools`` with W9. Until then a
-    document declaring one of those takes the orchestrator's no-materialiser
-    path: an expected state, not a gap.
+    belongs inside the engine. ``cli_tools`` (W9) takes neither: it is handed one
+    dependency, the service both *it* and the management API call, which already
+    holds the family's delivery port — so the family difference stays where W6
+    put it. ``engine_config`` arrives when X2/T3 lets it back in; until then a
+    document declaring it takes the orchestrator's no-materialiser path: an
+    expected state, not a gap.
     """
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.cli_tools import (
+        CliToolsMaterialiser,
+    )
     from agentclaw.community.core.bot_config_manifest.apply.materialisers.identity import (
         IdentityMaterialiser,
     )
@@ -247,6 +256,7 @@ def build_materialisers(
             entry_fetcher,
         ),
         ResourcesMaterialiser(resource_service, entry_fetcher),
+        CliToolsMaterialiser(cli_tool_service),
     )
     return {m.construct: m for m in materialisers}
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any, Collection, Protocol, runtime_checkable
 
 from agentclaw.community.core.config_compose.models import (
+    CollectedCliTool,
     CollectedFile,
     CollectedSkill,
     ComposeRequest,
@@ -92,6 +93,16 @@ class ComposeInputCollector(Protocol):
 
     def identity_files(self, req: ComposeRequest) -> list[CollectedFile]:
         """User/platform-authored identity files (NOT engine-generated ones)."""
+        ...
+
+    def cli_tools(self, req: ComposeRequest) -> list[CollectedCliTool]:
+        """Platform-managed command-line tools, from ``ac_bot_cli_tool`` (W9).
+
+        Read from the platform's own table on **every** compose, not from a
+        managed-files store and not from the container: this category is always
+        platform-managed, like ``mcp``, so there is no engine-owned reading of
+        it to fall back to and no switch to consult.
+        """
         ...
 
     def engine_overrides(self, req: ComposeRequest) -> dict[str, Any]:

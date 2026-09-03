@@ -25,6 +25,16 @@ engine-relative ``/workspace`` · ``/identity`` form.
 
 Regenerable dependency/build directories (``node_modules``) are excluded from the
 sweep — see ``_EXCLUDED_DIR_SEGMENTS``.
+
+**CLI tools are the exception to all of the above, and deliberately.** The
+container does not own them: the platform fetched them, pinned them, verified
+them and kept its own copy (W9), so a promotion **copies** each tool object into
+the new stage's prefix rather than reading it back out of the engine. Nothing is
+downloaded, the copy is server-side where the object store offers one, and the
+``md5`` and ``version`` on each ref come from ``ac_bot_cli_tool`` rather than
+being recomputed — the platform hashed those exact bytes when it installed them.
+Gathering them from the engine would also be circular on the one path that
+matters: a bot created from a manifest has tools before it has a container.
 """
 from __future__ import annotations
 
@@ -32,7 +42,16 @@ import asyncio
 from dataclasses import dataclass, field
 
 from agentclaw.community.log import get_logger
+from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+    BOT_DATA_STORE,
+    CliToolScope,
+    CliToolStore,
+    CliToolStoreError,
+)
 from agentclaw.community.core.devices.services.device_filesystem import DeviceFileSystem
+from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+    BotCliToolRepositoryProtocol,
+)
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
 
 logger = get_logger()
@@ -77,6 +96,10 @@ class PromotedRefs:
 
     resources: list[dict[str, str]] = field(default_factory=list)
     identity_files: list[dict[str, str]] = field(default_factory=list)
+    #: ``{name, store, path, md5, version}`` per ``cliToolRef`` (W9). Two fields
+    #: more than the file refs, both read from the metadata table: ``md5`` is the
+    #: engine's change test and ``version`` is metadata it ignores.
+    cli_tools: list[dict[str, object]] = field(default_factory=list)
 
 
 class TeclawFilePromotion:
@@ -84,8 +107,20 @@ class TeclawFilePromotion:
 
     NAMESPACES = _NAMESPACES
 
-    def __init__(self, *, oss_storage: ObjectStoragePlugin) -> None:
+    def __init__(
+        self,
+        *,
+        oss_storage: ObjectStoragePlugin,
+        cli_tool_repository: BotCliToolRepositoryProtocol | None = None,
+        cli_tool_store: CliToolStore | None = None,
+    ) -> None:
         self._oss = oss_storage
+        # W9. Optional together: a build wired without them promotes files as
+        # before and carries no tool refs, which is the correct answer for a
+        # deployment that has not enabled the category rather than a silent
+        # half-promotion.
+        self._cli_tools = cli_tool_repository
+        self._cli_tool_store = cli_tool_store
 
     async def stage_files(
         self,
@@ -101,10 +136,15 @@ class TeclawFilePromotion:
         """Read the source bot's ``/workspace`` + ``/identity`` files via
         ``device_fs`` and write each to a stage-scoped OSS key; return the refs.
 
+        The bot's CLI tools ride along, but by a different mechanism: they are
+        **copied** from the platform's own prefix rather than read from the
+        engine, because the platform is the side that holds them.
+
         Raises:
             TeclawFilePromotionError: a listed file could not be read (the source
                 container is the source of truth, so a missing read is a hard
-                failure, not a silent skip), or its OSS put failed.
+                failure, not a silent skip), its OSS put failed, or a tool object
+                could not be copied.
         """
         store_base = f"teclaw/{env}/bolt_data"
         # Stage-scoped per-bot segment isolates each publish snapshot.
@@ -169,12 +209,72 @@ class TeclawFilePromotion:
                 target = out.resources if ns == WORKSPACE_NS else out.identity_files
                 target.append(ref)
 
+        out.cli_tools = self._promote_cli_tools(
+            env=env, entity_type=entity_type, entity_id=entity_id,
+            bot_id=bot_id, publish_id=publish_id, stage=stage,
+        )
+
         logger.info(
             "[TeclawFilePromotion] staged bot=%s publish_id=%s stage=%s: "
-            "%d resource(s), %d identity file(s)",
+            "%d resource(s), %d identity file(s), %d cli tool(s)",
             bot_id, publish_id, stage, len(out.resources), len(out.identity_files),
+            len(out.cli_tools),
         )
         return out
+
+    def _promote_cli_tools(
+        self,
+        *,
+        env: str,
+        entity_type: str,
+        entity_id: str,
+        bot_id: str,
+        publish_id: int,
+        stage: str,
+    ) -> list[dict[str, object]]:
+        """Copy each recorded tool object into the stage's prefix; return refs.
+
+        Iterates the **metadata table**, never the engine — a test asserts the
+        engine is not called here at all. The source is each row's recorded
+        ``oss_key`` rather than a recomputed one, so a tool written under an
+        earlier store base still promotes.
+
+        A failed copy raises rather than dropping the tool: a published artifact
+        that silently lost a command is worse than a build that stopped.
+        """
+        if self._cli_tools is None or self._cli_tool_store is None:
+            return []
+        scope = CliToolScope(
+            entity_type=entity_type, entity_id=entity_id, bot_id=bot_id
+        )
+        refs: list[dict[str, object]] = []
+        for record in self._cli_tools.list(
+            env=env, entity_id=entity_id, bot_id=bot_id
+        ):
+            try:
+                staged = self._cli_tool_store.copy_to_stage(
+                    scope,
+                    name=record.name,
+                    source_key=record.oss_key,
+                    publish_id=publish_id,
+                    stage=stage,
+                )
+            except CliToolStoreError as error:
+                raise TeclawFilePromotionError(
+                    f"teclaw promotion: could not stage CLI tool {record.name!r}: "
+                    f"{error}"
+                ) from error
+            refs.append({
+                "name": record.name,
+                "store": BOT_DATA_STORE,
+                "path": staged.ref_path,
+                # From the table, not recomputed: the platform hashed these exact
+                # bytes when it installed them, and the engine uses the md5 as a
+                # change test rather than an integrity gate.
+                "md5": record.md5,
+                "version": record.version,
+            })
+        return refs
 
 
 __all__ = ["TeclawFilePromotion", "TeclawFilePromotionError", "PromotedRefs"]

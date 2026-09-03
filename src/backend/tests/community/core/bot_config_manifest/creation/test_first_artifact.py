@@ -197,6 +197,7 @@ def _build(db):
             package_validator=validator,
             entry_fetcher=fetcher(),
             resource_service=StoreResourcePort(store),
+            cli_tool_service=object(),
         )
 
     queue = _InlineQueue()
@@ -213,6 +214,7 @@ def _build(db):
         package_validator_provider=lambda: validator,
         entry_fetcher_provider=fetcher,
         resource_service_provider=lambda: None,
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),

@@ -451,7 +451,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Directory download adds one more bot-path-addressed resource operation.
 #: Space Skill Version Copy adds one account-level operation; it is addressed by
 #: Space and Skill version rather than by Bot.
-_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 103}
+#:
+#: W9 (#1477) adds the three ``cli-tools`` operations — install, list and
+#: delete. All three are bot-path-addressed like the config-manifest group they
+#: sit beside, so ``path`` 156 → 159 and nothing else moves.
+_BOT_ID_PLACEMENT = {"path": 159, "query": 1, "none": 103}
 
 
 def _schema() -> dict:
@@ -599,7 +603,11 @@ def test_the_pinned_number_of_operations_take_it():
     # that user's rows, and neither is admissible to an application caller.
     # Directory download adds one more user-scoped resource operation.
     # Space Skill Version Copy adds one more user-scoped operation.
-    assert len(taking) == 230
+    # W9's three cli-tools operations (#1477) are user-scoped for the reason the
+    # config-manifest group beside them is: they may address a *shared* bot, so
+    # the owner arrives on the wire while the caller stays the acting user —
+    # which is what ``installed_by`` records: 230 → 233.
+    assert len(taking) == 233
 
 
 def test_the_exempt_operations_take_none():

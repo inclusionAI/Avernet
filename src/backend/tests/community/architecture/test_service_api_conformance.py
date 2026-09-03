@@ -61,6 +61,12 @@ from agentclaw.community.api.bot_inventory_service import BotInventoryServicePro
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
 )
+from agentclaw.community.api.bot_cli_tool_service import (
+    BotCliToolServiceProtocol,
+)
+from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+    BotCliToolService,
+)
 from agentclaw.community.api.bot_config_manifest_apply_service import (
     BotConfigManifestApplyServiceProtocol,
 )
@@ -276,6 +282,7 @@ _PAIRS = [
     (BotConfigManifestServiceProtocol, BotConfigManifestService),
     (SourceCredentialServiceProtocol, SourceCredentialService),
     (BotConfigManifestApplyServiceProtocol, BotConfigManifestApplyService),
+    (BotCliToolServiceProtocol, BotCliToolService),
     (BotSpaceServiceProtocol, BotSpaceService),
     (LocalBotWorkflowServiceProtocol, LocalBotWorkflowService),
     (BotDormantActivateServiceProtocol, ActivateBotService),

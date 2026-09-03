@@ -194,6 +194,7 @@ class BotCreationManifestSeam:
         find_job: Callable[..., Optional[TaskRecord]],
         authorization_window_seconds: int,
         purge_managed_files: Optional[Callable[[str, str], int]] = None,
+        purge_cli_tools: Optional[Callable[[str, str], int]] = None,
         creation_sequence: Optional[Callable[[Optional[str]], CreationSequence]] = None,
     ) -> None:
         self._manifests = manifest_service
@@ -205,6 +206,13 @@ class BotCreationManifestSeam:
         # purge, for a creation that ends without a bot after its pre-container
         # phase wrote platform state. None means no store is bound.
         self._purge_managed_files = purge_managed_files
+        # W9: ``(entity_id, bot_id) -> objects removed``. Unlike the managed-files
+        # purge above it runs under **either** sequence, because ``cli_tools`` is
+        # PRE_CONTAINER on teclaw whatever the switch says and is always
+        # platform-managed — so a creation that ends without a bot can have
+        # written tool rows either way. It reaches no engine, which is correct
+        # rather than a shortcut: there is no container to remove a tool from.
+        self._purge_cli_tools = purge_cli_tools
         # W8: the delivery strategy's sequence for an engine, frozen into the
         # job's payload at submission. None (the pre-W8 wiring) freezes nothing
         # and the job asks the live strategy on each run.
@@ -380,7 +388,10 @@ class BotCreationManifestSeam:
         With ``owner_id`` (W8) the managed-files store is purged as well: under
         the ``RECORD_APPLY_PROVISION`` sequence the pre-container phase writes
         platform files for a bot that, if creation then ends without one, has
-        no record for ordinary deletion to reach.
+        no record for ordinary deletion to reach. W9's CLI tools are purged
+        under **either** sequence, for the same reason stated differently: that
+        category is always platform-managed, so its rows — and the objects they
+        alone name — can exist whichever way the creation ran.
 
         Called when a creation ends **without a bot** — declined or expired. Both
         deletes are idempotent, and both are needed: the manifest row is keyed by
@@ -412,6 +423,11 @@ class BotCreationManifestSeam:
             purge = self._purge_managed_files
             deletes.append(
                 ("managed files", lambda: purge(owner_id, bot_id))
+            )
+        if self._purge_cli_tools is not None:
+            purge_tools = self._purge_cli_tools
+            deletes.append(
+                ("cli tools", lambda: purge_tools(entity_id, bot_id))
             )
         for what, delete in deletes:
             try:

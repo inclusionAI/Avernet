@@ -237,6 +237,17 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     # is configured is part of working on it, and a report carries no secret.
     ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"): Check(PermissionLevel.MEMBER),
+    # W9's CLI tools take the config-manifest group's bars, because they are
+    # the same area reached a different way: a manifest apply converges exactly
+    # this set. Reading what a bot has is part of working on it; installing an
+    # executable on someone's bot is an ADMIN act. No EDIT_LOCK — like the
+    # manifest beside them, these are not drafted.
+    ("GET", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.MEMBER),
+    ("POST", "/openapi/v1/bots/{bot_id}/cli-tools"): Check(PermissionLevel.ADMIN),
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/cli-tools/{name}",
+    ): Check(PermissionLevel.ADMIN),
     ("GET", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/channels"): Check(PermissionLevel.ADMIN, EDIT_LOCK),
     ("DELETE", "/openapi/v1/bots/{bot_id}/channels/{channel_id}"): Check(PermissionLevel.ADMIN, EDIT_LOCK),

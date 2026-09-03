@@ -561,3 +561,67 @@ async def test_an_object_that_will_not_delete_is_logged_not_raised() -> None:
     outcome = await service.remove(_CTX, "mycli")
     assert outcome.op is CliToolOp.REMOVED
     assert repo.rows == {}
+
+
+# ── creation cleanup ──────────────────────────────────────────────────────
+
+
+def test_the_purger_drops_the_rows_and_the_objects_without_an_engine() -> None:
+    """A W13 creation that ended without a bot has no container, so asking an
+    engine would be asking about something that never existed. The rows'
+    ``oss_key``s are collected by the delete itself: that column lives only on
+    those rows, so a caller that deleted first could never enumerate what it
+    had just orphaned."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+        CliToolPurger,
+    )
+
+    oss = FakeObjectStorage()
+    repo = FakeCliToolRepo()
+    store = CliToolStore(object_storage=oss, store_base=lambda: _BASE)
+    for name in ("a", "b"):
+        repo.upsert(
+            env="dev", entity_id="u1", bot_id="bot7", name=name,
+            source="https://x", digest=_DIGEST, subpath=None, md5="m",
+            size_bytes=1, version=None, oss_key=f"{_LIVE}/{name}",
+            installed_by="manifest", modifier="u2",
+        )
+        oss.objects[f"{_LIVE}/{name}"] = _TOOL
+
+    purger = CliToolPurger(repo=repo, store=store)
+    assert purger("u1", "bot7") == 2
+    assert repo.rows == {} and oss.objects == {}
+
+
+def test_the_purger_leaves_no_row_behind_when_an_object_will_not_delete() -> None:
+    """The caller is already on a path that is ending; one unreachable object
+    must not hide the rest of the cleanup."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+        CliToolPurger,
+    )
+
+    oss = FakeObjectStorage(fail_deletes=True)
+    repo = FakeCliToolRepo()
+    repo.upsert(
+        env="dev", entity_id="u1", bot_id="bot7", name="a", source="https://x",
+        digest=_DIGEST, subpath=None, md5="m", size_bytes=1, version=None,
+        oss_key=f"{_LIVE}/a", installed_by="manifest", modifier="u2",
+    )
+    purger = CliToolPurger(
+        repo=repo, store=CliToolStore(object_storage=oss, store_base=lambda: _BASE)
+    )
+    assert purger("u1", "bot7") == 0
+    assert repo.rows == {}
+
+
+@pytest.mark.asyncio
+async def test_a_manifest_apply_removes_a_tool_a_person_installed() -> None:
+    """Full override does not respect provenance, and ``installed_by`` is what
+    lets a report say so rather than the removal being silent."""
+    service, repo, delivery, _, _ = _service()
+    await service.install(_CTX, _decl(name="by-hand"), installed_by="u2")
+    outcomes = await service.replace_all(_CTX, [], installed_by="manifest")
+
+    assert [(o.name, o.op) for o in outcomes] == [("by-hand", CliToolOp.REMOVED)]
+    assert outcomes[0].record.installed_by == "u2"
+    assert delivery.deleted == ["by-hand"] and repo.rows == {}

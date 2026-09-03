@@ -39,7 +39,7 @@ import asyncio
 import hashlib
 import tempfile
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
@@ -83,6 +83,7 @@ from agentclaw.community.core.repository.protocols.bot.cli_tool import (
     BotCliToolRepositoryProtocol,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
@@ -369,4 +370,45 @@ class CliToolService:
             )
 
 
-__all__ = ["FETCH_CATEGORY", "CliToolService"]
+class CliToolPurger:
+    """Drop a bot's tool rows and the objects behind them, with no engine call.
+
+    The creation-cleanup entry point, and deliberately **not**
+    :meth:`CliToolService.remove_all`: it runs when a W13 creation ended
+    *without a bot*, so there is no container to remove a tool from and asking
+    an engine would be asking about something that never existed. It is also
+    synchronous, because the discard path that calls it is.
+
+    The rows' ``oss_key``s are collected by the delete itself: that column lives
+    only on those rows, so a caller that deleted first could never enumerate
+    what it had just orphaned.
+    """
+
+    def __init__(
+        self, *, repo: BotCliToolRepositoryProtocol, store: CliToolStore
+    ) -> None:
+        self._repo = repo
+        self._store = store
+
+    def __call__(self, entity_id: str, bot_id: str) -> int:
+        """Objects removed. Never raises — the caller is already ending."""
+        keys = self._repo.delete_all(
+            env=get_current_env(), entity_id=entity_id, bot_id=bot_id
+        )
+        return self._store.purge(keys)
+
+
+#: How the DI graph hands this service around: a factory keyed by engine
+#: family, because the family is the only thing that differs — the table, the
+#: object store and the fetch funnel are shared, and the family decides which
+#: delivery port sits inside. Named rather than spelled structurally at each
+#: binding site so the injector's key is one object, not two equal ones.
+CliToolServiceFactory = Callable[[str], CliToolService]
+
+
+__all__ = [
+    "FETCH_CATEGORY",
+    "CliToolPurger",
+    "CliToolService",
+    "CliToolServiceFactory",
+]

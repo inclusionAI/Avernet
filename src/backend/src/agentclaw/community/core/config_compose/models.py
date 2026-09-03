@@ -168,6 +168,27 @@ class CollectedFile:
 
 
 @dataclass(frozen=True)
+class CollectedCliTool:
+    """A platform-managed CLI tool gathered for composing (W9).
+
+    Unlike a resource or an identity file, this ref carries two fields beyond
+    ``{store, path}``. ``md5`` is the engine's **change test** — same md5 as the
+    tool already in the container means skip the re-download — and it is the
+    platform's own, computed over the delivered executable after unpacking and
+    selection rather than over the archive. ``version`` is audit metadata the
+    engine ignores. Both are read from ``ac_bot_cli_tool`` rather than recomputed:
+    the platform hashed those exact bytes when it installed them, and hashing an
+    object again at compose time would be a second answer to a settled question.
+    """
+
+    name: str
+    store: str
+    path: str
+    md5: str
+    version: str | None = None
+
+
+@dataclass(frozen=True)
 class McpComposeInput:
     """One MCP server's already-merged config, ready to compose.
 

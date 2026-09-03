@@ -33,7 +33,7 @@ manifest:                      # 声明式部分，所有引擎
   skills: [ … ]                # §3.3
   engine_config: { … }         # §3.4
   identity: [ … ]              # §3.5
-  cli_tools: [ … ]             # §3.7（schema 已定稿，交付排期按业务优先级后置）
+  cli_tools: [ … ]             # §3.7，命令行工具（W9 已交付；始终平台托管）
 
 script:                        # 命令式部分，能力门控（teclaw / desktop 拒绝）
   body: |                      # §3.6，即 #935 的 startup script
@@ -63,7 +63,7 @@ script:                        # 命令式部分，能力门控（teclaw / deskt
 | `resources` | **仅被声明的 `path` 子树**；声明的 `path` 之外一律不碰——workspace 是 bot 的工作区，不是清单的 |
 | `mcp` | **已启用的 server 集合** |
 | `engine_config` | **被声明的顶层键**（逐键覆盖，§3.4） |
-| `cli_tools` | 平台工具目录中**由清单下发**的工具集合（镜像自带命令不在内） |
+| `cli_tools` | 这个 bot **由平台安装**的工具集合（`ac_bot_cli_tool` 里的行；镜像自带命令不在内）。移除是按表算的，不看引擎的清单 |
 
 **类别是 all-or-nothing 写入的**：被声明的类别里只要有任何一条无法物化，
 该类别**完全不覆盖**（关于它的一切保持原样），逐条结果照常记进 apply
@@ -378,7 +378,7 @@ manifest:
 | skills | 本地 skill 记录（现 skills upload 同源服务） | 现有 skill 交付 / NAS | `skills[]`（`SkillRef, scope=user`） |
 | engine_config | engine config（`EngineConfigServiceProtocol.write_bot_config`） | 现有 provider-blind 写 | 同一条 provider-blind 写（既有 `config/teclaw.json` 文件通道，**非 artifact 字段**；创建时序确认 T3） |
 | identity | identity 文件记录（现 `openapi_v1/identity` 同源服务） | 现有 identity 交付 | `identity_files[]`（`FileRef`） |
-| cli_tools | **新实体**（无现状对应） | 平台工具目录（NAS）+ PATH 注入 | `cli_tools[]`（`{name, store, path, md5, version}`，artifact `schema_version` 4 → 5；规格见 `teclaw-cli-contract.zh-CN.md`），沙箱策略待 teclaw 表态 |
+| cli_tools | `ac_bot_cli_tool` + 平台在对象存储里的字节副本（W9 新增） | 引擎的 `install` 端点（按命令名调用；落点、可执行位、暴露给 agent 都在这一次调用内由引擎完成） | `cli_tools[]`（`{name, store, path, md5, version}`，artifact `schema_version` **保持 4**；规格见 `teclaw-cli-contract.zh-CN.md`） |
 | script | script 存储（#935 现状） | `after_create_cmd_hook` 启动链 | **不支持，写入时拒绝** |
 
 ### 3.1 `mcp` — MCP servers
@@ -591,9 +591,14 @@ script:
 
 ### 3.7 `cli_tools` — 给模型调用的命令行工具
 
-> schema 已定稿；**交付排期按业务优先级后置**（业务反馈优先级低于目录
-> 资源）。设计动机：把仓库内 `bcs-cli` 的手工模式（二进制挂 PATH +
-> SKILL.md 教用法）产品化、声明化。
+> **W9（#1477）已交付。**设计动机：把仓库内 `bcs-cli` 的手工模式（二进制
+> 挂 PATH + SKILL.md 教用法）产品化、声明化。
+>
+> 本类目**始终由平台托管**（与 `mcp` 同列），与 `teclaw_platform_managed`
+> 开关无关：平台自己取源、验签、留一份字节副本，表里那行就是期望状态。
+> 除清单外，还有一组同源的管理 API：`POST` / `GET` /
+> `DELETE /openapi/v1/bots/{bot_id}/cli-tools`。两个入口调的是同一个组件，
+> 因此对同一份声明给出同样的拒绝理由。
 
 ```yaml
 cli_tools:
@@ -629,14 +634,30 @@ cli_tools:
   写进交付契约，供引擎在落地前校验字节完整性（teclaw 侧的字段定义见
   `teclaw-cli-contract.zh-CN.md` §3.2/§3.3.1）。用户侧的钉扎手段仍然只有
   `digest`（sha256）。
-- **落点与 PATH**：平台定义引擎无关的逻辑「工具目录」，工具落入其中并由
-  平台保证其在 agent 进程的 PATH 上——用户不感知物理路径。
-- **用法认知不归本类目**：安装只保证「命令在 PATH 上」；模型如何知道并
+- **交付的是一个自包含的可执行文件**：平台不下发同包的其他文件，需要同包
+  辅助程序的工具请打成静态二进制（同上一条）。
+- **落点归引擎，不归平台**：平台按**命令名**调用引擎的 `install`，由引擎决定
+  目录、置可执行位、并把它暴露给 agent——这一切在那一次调用内完成。后端**不
+  知道**工具落在哪里，两个方向上都没有容器路径穿过这个边界；平台也不发
+  `chmod`、不跑 shell 命令。各引擎的目录常量记在
+  `engine-requirements.zh-CN.md`。
+- **v1 里 agent 怎么找到工具（重要，且是一项已知代价）**：早先此处写的是
+  「平台保证工具在 agent 进程的 PATH 上、用户不感知物理路径」。**那是不准确
+  的，现已更正**：v1 不做 PATH 注入。工具落点由默认技能集里的一个 skill 告诉
+  agent，agent **以绝对路径调用**。
+  代价要说清楚：`mycli --help` 这样直接敲命令名**不工作**；每次调用都依赖那个
+  skill 被读到；一个脚本内部 shell 调同目录的另一个工具**也找不到**。
+  之所以敢把 PATH 推后：把目录加进 PATH 是**引擎侧**的改动，不牵动 schema、
+  管理 API、`ac_bot_cli_tool` 表或 artifact 契约中的任何一个字段——真做的
+  时候，本节这段描述是唯一要改的东西。
+- **用法认知不归本类目**：安装只保证「这个 bot 有这个命令」；模型如何知道并
   正确使用它，走用户自己声明的 identity（`TOOLS.md` 是合法类型）或配套
   skill——`bcs-cli` 的「二进制 + SKILL.md」双件套即推荐姿势。
-- **能力门控**：ARCA 系支持（PATH 注入点见 engine-requirements A2）；
-  **teclaw 按 `teclaw-cli-contract.zh-CN.md` 实现**（artifact 新增
-  `cli_tools`，`schema_version` 4 → 5）；其余形态见能力矩阵。
+- **能力门控**：ARCA 系与 teclaw 均支持；desktop 与未知引擎拒绝。ARCA 走引擎
+  的 CLI 端点装进运行中的容器；teclaw 由**编排出的 artifact 承载**
+  （`cli_tools` refs 指向平台在对象存储里的那份副本），没有单独的上传调用。
+  artifact 的 `schema_version` **保持 4**——`cli_tools` 自 v4 起就是可选字段，
+  平台开始填它不构成契约破坏（详见 `teclaw-cli-contract.zh-CN.md`）。
 
 ## 4. 变量替换
 
@@ -712,7 +733,6 @@ report。
 
 | 构造 | 为什么还不能 apply | 何时解禁 |
 | --- | --- | --- |
-| 类别 `cli_tools`（§3.7） | 交付按业务优先级后置：没有物化器、没有 PATH 下发、artifact 里也还没有对应字段 | 该工作项落地 |
 | 类别 `engine_config`（§3.4） | 按跨引擎确认的结论移出第一期 | 其物化器回来时 |
 | `from` 指向**命名源**（§2.3） | 命名源解析属于 git/命名源工作项 | 该工作项落地 |
 | **git 源**（§2.2，含内联 git `source`） | 同上——git 解析器属于同一工作项 | 该工作项落地 |

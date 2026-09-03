@@ -66,20 +66,41 @@ def test_an_unsupported_construct_always_carries_a_reason():
         ManifestCategory.RESOURCES,
         ManifestCategory.SKILLS,
         ManifestCategory.IDENTITY,
+        # W9: materialised through ``CliToolService`` — the one component the
+        # management API installs through too.
+        ManifestCategory.CLI_TOOLS,
     ],
 )
 def test_the_first_wave_categories_are_supported(category):
     assert _resolve().supports(category)
 
 
-@pytest.mark.parametrize(
-    "category", [ManifestCategory.CLI_TOOLS, ManifestCategory.ENGINE_CONFIG]
-)
+@pytest.mark.parametrize("category", [ManifestCategory.ENGINE_CONFIG])
 def test_the_categories_with_no_materializer_are_refused(category):
-    """Both rows of the first-wave table: expressible, and nothing applies them."""
+    """What is left of the first-wave table: expressible, nothing applies it."""
     caps = _resolve()
     assert not caps.supports(category)
     assert caps.reason_for(category)
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code", "teclaw"])
+def test_cli_tools_is_supported_on_both_engine_families(engine):
+    """ARCA installs into the live container, teclaw carries the refs in its
+    artifact. Both are delivered, so both are supported."""
+    assert _resolve(engine=engine).supports(ManifestCategory.CLI_TOOLS)
+
+
+def test_cli_tools_is_refused_on_a_desktop_bot():
+    """The deployment-wide refusal still wins over the per-construct one."""
+    caps = _resolve(bot_type="desktop")
+    assert not caps.supports(ManifestCategory.CLI_TOOLS)
+    assert "desktop" in caps.reason_for(ManifestCategory.CLI_TOOLS)
+
+
+def test_cli_tools_is_refused_on_an_unknown_engine():
+    caps = _resolve(engine="not-an-engine")
+    assert not caps.supports(ManifestCategory.CLI_TOOLS)
+    assert caps.reason_for(ManifestCategory.CLI_TOOLS)
 
 
 @pytest.mark.parametrize("source", [SourceForm.GIT, SourceForm.NAMED])

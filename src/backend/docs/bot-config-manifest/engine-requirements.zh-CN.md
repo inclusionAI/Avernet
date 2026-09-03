@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | backend（平台） | **主体**：配置清单文档存储 + API、平台侧 apply、guarded fetcher、能力表、apply report | 全部在平台侧 |
 | teclaw | **仅 `cli_tools` 一项新增**（T1/T2/T4 已确认；T3 移出第一期，T5 可选） | 组装管线不动、不加出网要求；artifact 新增一个 `cli_tools` 字段，**`schema_version` 不升版** |
-| ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | **零改动**（2 项确认，见 §4） | 声明式走平台实体 + 现有交付；script 走 #935 现状；cli_tools 需确认 PATH 注入点（A2） |
+| ARCA 系引擎（openclaw / claude_code / aicoding / hermes / moltis） | 声明式**零改动**；`cli_tools` 需新增三个按命令名寻址的端点（A2） | 声明式走平台实体 + 现有交付；script 走 #935 现状；cli_tools 的落点与可执行位由引擎在 `install` 内完成 |
 | BaaS | **零改动** | 启动链、hook 派发均不变 |
 | 业务方 | 回答 §6 的确认清单 | 决定 v1 边界是否够用 |
 
@@ -29,10 +29,10 @@ skill / identity 之后完全相同。
 
 | 形态 | manifest（五类） | cli_tools | script | 备注 |
 | --- | --- | --- | --- | --- |
-| openclaw / aicoding / hermes / moltis @ ARCA/BaaS（ARCA, SIGMA, POOLAB, DOCKER） | ✅ 全部 | ✅（排期后置；PATH 注入点见 A2） | ✅ | 现状主流形态 |
+| openclaw / aicoding / hermes / moltis @ ARCA/BaaS（ARCA, SIGMA, POOLAB, DOCKER） | ✅ 全部 | ✅（W9 已交付；引擎端点见 A2） | ✅ | 现状主流形态 |
 | claude_code @ ARCA/BaaS | ✅（identity 仅 `CLAUDE.md`） | ✅（同上） | ✅ | identity 合法集按引擎校验 |
 | teclaw @ TECLAW | ✅ 全部（engine_config 移出第一期） | ✅ **已确认**（2026-08-31；契约见 `teclaw-cli-contract.zh-CN.md`） | ❌ 写入拒绝（teclaw owner 再次确认，2026-08-31） | 经 artifact 组装生效 |
-| desktop | ✅（平台侧 apply 可行，交付按其现状通道） | 待定（随 O2） | ❌ 写入拒绝（#935 现状口径） | 需 desktop owner 确认交付路径，见 O2 |
+| desktop | ✅（平台侧 apply 可行，交付按其现状通道） | ❌ 写入拒绝（全局 desktop 拒绝优先于逐类目判定） | ❌ 写入拒绝（#935 现状口径） | 需 desktop owner 确认交付路径，见 O2 |
 | LOCAL / singlebox | ✅ | 待定 | ❌ 写入拒绝 | #935 的静默坑（hook 不派发）在新判定中变为显式拒绝 |
 | ARCA-direct 遗留 bot | ✅ | 待定 | ❌ 写入拒绝 | 同上，静默不执行 → 显式拒绝 |
 | 未知引擎 | ❌ | ❌ | ❌ | fail closed |
@@ -100,12 +100,36 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   重建后天然满足；若存在依赖「对活容器 push」的实体类别，需与 backend 一起
   确认其在启动链中的时点（backend 实现注意项 design §10.1，由 backend
   先行内部确认）。
-- **A2（`cli_tools` 的 PATH 注入点，随该类目排期）**：平台工具目录需要
-  出现在 agent 进程的 PATH 上。已知先例：singlebox 的
-  `bots_dynamic_start_openclaw` 把 `bcs-cli` 所在目录加进 openclaw
-  gateway 的 PATH（`scripts/modules/bots.sh`）。需与各引擎确认其 gateway
-  进程环境的标准注入点（启动脚本 / supervisor 环境 / gateway 配置），
-  由 backend 牵头逐引擎核对。
+- **A2（`cli_tools` 的落点与暴露，W9 已改写为下面这套）**：早先此项的问法是
+  「平台工具目录在哪个注入点进 agent 进程的 PATH」——即把落点当成平台侧的答案、
+  逐引擎去谈。**W9 把它反过来了**：落点是**引擎的**，平台不参与。
+
+  引擎需要提供三个按**命令名**寻址的端点（后端通过各 bot 的 engine adapter
+  调用，与 runtime-layout probe、cron relay 走的是同一条通道）：
+
+  | 端点 | 请求体 | 语义 |
+  | --- | --- | --- |
+  | `POST /api/cli/install` | `{name, size_bytes, content_b64}` | 「让这个 bot 有 `name` 这个命令」。**目录、可执行位、以及让 agent 能用到它，全在这一次调用里由引擎完成。**平台不发 `chmod`、不跑 shell |
+  | `POST /api/cli/delete` | `{name}` | 移除该命令；本来就没有也算成功 |
+  | `GET /api/cli/list` | — | 引擎认为这个 bot 有哪些命令。**仅供漂移观测**，平台的表才是「已安装」的定义 |
+
+  约定：非 2xx 抛错、200 但 envelope 里 `success: false` 同样算拒绝——引擎装
+  不上的工具，平台**绝不**记成已安装。404 的含义是「这个引擎构建没有 CLI
+  端点」，不是「工具不存在」（平台从不按路径问工具）。字节以 base64 走
+  JSON body：`DeviceAdapterTransport` 是 core 能绑定也能测试的唯一引擎通道，
+  逐文件写用的 multipart 通道其 ARCA 分支是 corp-only。
+
+  **目录常量归引擎**，平台代码里没有它的副本。openclaw 侧的建议值是
+  `/home/admin/.openclaw/cli`；每个 ARCA 引擎有自己的一份，默认技能集本来就是
+  按引擎分的，所以「告诉 agent 去哪找」这件事天然也按引擎走。
+
+  **v1 不做 PATH 注入**，这是一项明确的取舍：agent 由默认技能集里的一个 skill
+  被告知落点，并以**绝对路径**调用。代价是 `mycli --help` 不工作、每次调用都
+  依赖那个 skill 被读到、脚本内 shell 调同目录的另一个工具也找不到。
+  之所以敢推后：把目录加进 PATH 是**引擎侧**改动，不牵动 schema、管理 API、
+  `ac_bot_cli_tool` 表或 artifact 契约中的任何字段。已知先例仍然有效——
+  singlebox 的 `bots_dynamic_start_openclaw` 把 `bcs-cli` 所在目录加进
+  openclaw gateway 的 PATH（`scripts/modules/bots.sh`）。
 
 可选（v2，非本期承诺）：容器内 op CLI（`install-skill` 等意图层命令，封装
 对本机引擎适配器 API 的调用 + 就绪等待 + 重试），提升 script 用户的体验。

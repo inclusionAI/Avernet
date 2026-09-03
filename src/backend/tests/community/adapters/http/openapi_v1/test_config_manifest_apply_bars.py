@@ -61,7 +61,10 @@ _CATEGORY_WRITE_PATHS: dict[str, tuple[str, ...]] = {
         "/openapi/v1/bots/{bot_id}/resources",
     ),
     "engine_config": ("/openapi/v1/bots/{bot_id}/engine-config",),
-    "cli_tools": (),
+    "cli_tools": (
+        "/openapi/v1/bots/{bot_id}/cli-tools",
+        "/openapi/v1/bots/{bot_id}/cli-tools/{name}",
+    ),
 }
 
 #: Modes that admit no more callers than apply's own.
@@ -134,6 +137,7 @@ def test_apply_declares_the_bar_w10_settled():
             package_validator=object(),
             entry_fetcher=object(),
             resource_service=object(),
+            cli_tool_service=object(),
         )
     ),
 )
@@ -191,6 +195,7 @@ def test_apply_admission_mode_is_no_wider_than_the_categories_it_writes():
         package_validator=object(),
         entry_fetcher=object(),
         resource_service=object(),
+        cli_tool_service=object(),
     ):
         for path in _CATEGORY_WRITE_PATHS[construct.value]:
             for (method, candidate), mode in ADMISSION.items():

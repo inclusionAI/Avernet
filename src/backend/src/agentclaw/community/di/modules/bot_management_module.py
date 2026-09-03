@@ -105,6 +105,7 @@ from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
 )
@@ -736,6 +737,7 @@ class BotManagementModule(Module):
         # W6's resources materialiser and W7's git transport, from the same
         # module and lazy for the same reason.
         resource_service_provider: Callable[[], ManifestResourcePort],
+        cli_tool_service_factory: CliToolServiceFactory,  # W9, keyed by family
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],
         bot_repository: BotRepository,
@@ -756,6 +758,7 @@ class BotManagementModule(Module):
             package_validator_provider,
             entry_fetcher_provider,
             resource_service_provider,
+            cli_tool_service_factory,
             git_client_provider,
             task_queue_provider,
             bot_repository,
@@ -809,9 +812,8 @@ class BotManagementModule(Module):
             authorization_window_seconds=(
                 create_with_manifest_config.authorization_window_seconds
             ),
-            purge_managed_files=lambda owner_id, bot_id: injector.get(
-                ManagedFilesStore
-            ).purge_owner_bot(owner_id, bot_id),
+            purge_managed_files=lambda o, b: injector.get(ManagedFilesStore).purge_owner_bot(o, b),
+            purge_cli_tools=injector.get(CliToolPurger),
             creation_sequence=lambda e: apply_service.delivery_for_engine(e).creation_sequence,
         )
 

@@ -119,6 +119,7 @@ def test_every_registered_materialiser_has_a_place_in_the_order():
             package_validator=object(),
             entry_fetcher=object(),
             resource_service=object(),
+            cli_tool_service=object(),
         )
     )
     assert registered <= ordered

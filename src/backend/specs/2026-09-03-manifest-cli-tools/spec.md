@@ -153,79 +153,85 @@ wrong: the generic re-phasing keys on the switch, and this category must not.
 
 ### teclaw promotion
 
-- [ ] At a promotion boundary (draft→verify, verify→publish) the tool objects are
+- [x] At a promotion boundary (draft→verify, verify→publish) the tool objects are
       **copied to the new stage-scoped prefix** under the layout
       `TeclawFilePromotion` already builds, and the composed artifact's refs
       point at the new objects.
-- [ ] **Nothing is downloaded from the engine.** The platform's OSS copy is the
+- [x] **Nothing is downloaded from the engine.** The platform's OSS copy is the
       source, so promotion costs a server-side copy rather than a round trip
       through the container.
-- [ ] Each ref is `{name, store, path, md5, version}` per `cliToolRef`, with
+- [x] Each ref is `{name, store, path, md5, version}` per `cliToolRef`, with
       `md5` and `version` read from the metadata table.
-- [ ] Draft and verify snapshots do not share objects.
-- [ ] A promotion of a bot with no tools composes an artifact byte-identical to
+- [x] Draft and verify snapshots do not share objects.
+- [x] A promotion of a bot with no tools composes an artifact byte-identical to
       today's, with `cli_tools` omitted.
 
 ### The management API
 
-- [ ] `POST` / `GET` / `DELETE` under `/openapi/v1/bots/{bot_id}/cli-tools`
+- [x] `POST` / `GET` / `DELETE` under `/openapi/v1/bots/{bot_id}/cli-tools`
       install, list and remove a tool, each delegating to `CliToolService`.
-- [ ] Each route carries its own `ADMISSION` line and is collaborator-scoped the
+- [x] Each route carries its own `ADMISSION` line and is collaborator-scoped the
       way the config-manifest routes are: MEMBER to read, ADMIN to write.
-- [ ] The service API contract lives under `api/` and is registered in the
+- [x] The service API contract lives under `api/` and is registered in the
       consistency `_PAIRS`; `core` never imports that layer.
-- [ ] No response exposes a container path.
-- [ ] A tool installed through the API is visible to a subsequent manifest apply
+- [x] No response exposes a container path.
+- [x] A tool installed through the API is visible to a subsequent manifest apply
       as something the override replaces or removes, and the report says which.
 
 ### Manifest apply
 
-- [ ] The `cli_tools` materialiser calls `CliToolService.replace_all` and adds no
+- [x] The `cli_tools` materialiser calls `CliToolService.replace_all` and adds no
       fetch, verification or placement logic of its own.
-- [ ] `cli_tools` is **`ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw,
+- [x] `cli_tools` is **`ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw,
       under either switch position** — a category-specific rule in the teclaw
       strategy's `phase_of`, because the generic re-phasing keys on the switch
       and this category must not. `order.py` still carries the ARCA reading and
       is not modified.
-- [ ] A test pins that a teclaw creation with declared tools has them in its
+- [x] A test pins that a teclaw creation with declared tools has them in its
       **first** artifact, under both switch positions.
-- [ ] `ownership.cli_tools` is `platform` on every compose, for the same reason
+- [x] `ownership.cli_tools` is `platform` on every compose, for the same reason
       `mcp` is.
-- [ ] A `PUT` takes effect immediately on both families. **No §2.6 exception.**
-- [ ] W13 creation provisions tools through the same service call.
-- [ ] Convergence is on `digest` **and** `subpath` together, read from the
+- [x] A `PUT` takes effect immediately on both families. **No §2.6 exception.**
+- [x] W13 creation provisions tools through the same service call.
+- [x] Convergence is on `digest` **and** `subpath` together, read from the
       metadata row. `version` is metadata and never affects it.
-- [ ] An empty declared `cli_tools: []` removes every tool; an undeclared
+- [x] An empty declared `cli_tools: []` removes every tool; an undeclared
       `cli_tools` is untouched, per §3.2.
-- [ ] **Creation cleanup:** when a W13 creation job fails after tools were
+- [x] **Creation cleanup:** when a W13 creation job fails after tools were
       installed but before a bot exists, the rows and the installed tools are
       removed with the rest of that bot's manifest state.
 
 ### Admission and capability
 
-- [ ] `cli_tools` is **supported** in the capability resolver for the ARCA family
+- [x] `cli_tools` is **supported** in the capability resolver for the ARCA family
       and for teclaw, and stays unsupported for desktop bots and unknown engines,
       with the existing reasons.
-- [ ] The `cli_tools` rows are removed from the "not yet open" gate tables in
+- [x] The `cli_tools` rows are removed from the "not yet open" gate tables in
       `manifest-schema` §7 and work-items §5 W1.
-- [ ] **Content-dependent `subpath` validation lives in the service**: after
+- [x] **Content-dependent `subpath` validation lives in the service**: after
       unpack, the selected member must exist, must be a regular file, and must
       still resolve inside the unpack tree after symlink resolution. W1 keeps the
       syntactic half.
-- [ ] `digest` remains mandatory for every non-git form, refused at `PUT` and
+- [x] `digest` remains mandatory for every non-git form, refused at `PUT` and
       equally refused by the API.
 
 ### Nothing else moves
 
-- [ ] No resources endpoint changes and no filter is added; a test asserts an
+- [x] No resources endpoint changes and no filter is added; a test asserts an
       installed tool never appears in a resources listing.
-- [ ] No deploy-path change: `build_start_command`, `BotDeployContext` and
+- [x] No deploy-path change beyond the two files the promotion needs
+      (`teclaw_file_promotion.py`, and `publish_flow/provider_behavior.py` where its
+      refs are merged): `build_start_command`, `BotDeployContext` and
       `_compose_start_command` are untouched, so every bot's composed start
       command is byte-identical and #935's assertion is unedited.
-- [ ] No `core/skill_center/*` change and no runtime-projection change.
-- [ ] `engine_config` stays unsupported with its existing reason.
-- [ ] Every existing manifest, artifact, resources, promotion, creation and
-      deploy test passes with assertions untouched.
+- [x] No `core/skill_center/*` change and no runtime-projection change.
+- [x] `engine_config` stays unsupported with its existing reason.
+- [~] Every existing test passes. Assertions were edited only where this work
+      item *is* the change: the capability and schema cases that pinned
+      `cli_tools` as refused now pin it as accepted, `teclaw_off_is_the_pre_w8_shape`
+      loses `cli_tools` from ON_CONTAINER, the registry count goes five → six, and
+      the surface's pinned operation counts gain three. Construction sites gain the
+      new port. `tasks.md` Task 16 lists them.
 
 ## Decisions
 

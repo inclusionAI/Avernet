@@ -225,6 +225,7 @@ def _build(db, *, scripts=None):
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),

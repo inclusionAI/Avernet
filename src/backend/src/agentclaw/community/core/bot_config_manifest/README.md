@@ -40,11 +40,12 @@ form* with no resolver fails in exactly the same way. That is why
 `capabilities.py` answers per **construct** (category, section, source form)
 rather than per bot or per category.
 
-As of the first wave the unsupported constructs are:
+As of the first wave the unsupported constructs are (`cli_tools` left this
+table when W9 materialised it — the surface accepts it because something now
+applies it):
 
 | Construct | Why nothing can apply it | Unblocked by |
 | --- | --- | --- |
-| category `cli_tools` | delivery deferred by business priority — no materializer, and nothing puts a tool on PATH | its work item |
 | category `engine_config` | moved out of the first wave, so the fetch-free materializer covers only `mcp` and `script` | its materializer returning |
 | `from` naming a **named source** | named sources are resolved by W7 | W7 |
 | a **git** source | same resolver, same work item | W7 |
@@ -562,6 +563,13 @@ provides:
   - verify_amd64_elf  # W9: "can this machine run them", which the digest does not answer
   - select_subpath
   - FetchContext  # exactly what a fetch reads off its caller's context (W9 gave it a second caller)
+  - BotCliToolService  # W9: the bot_id-addressed surface the HTTP routes bind to
+  - BotCliToolServiceProtocol
+  - CliToolsMaterialiser
+  - CliToolNotFoundError
+  - CliToolConflictError
+  - CliToolRefusedError
+  - CliToolUnsupportedError
   - BotConfigManifestApplyService
   - BotConfigManifestApplyServiceProtocol
   - BotConfigManifestApplyRecord

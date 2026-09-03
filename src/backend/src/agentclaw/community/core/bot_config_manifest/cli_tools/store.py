@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Sequence
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.object_storage import (
@@ -229,6 +229,27 @@ class CliToolStore:
             if not self._oss.put_object(dest_key, content):
                 raise CliToolStoreError(f"object store put failed for {dest_key!r}")
         return StoredCliTool(name=name, ref_path=ref_path, store_key=dest_key)
+
+    def purge(self, keys: Sequence[str]) -> int:
+        """Remove several recorded objects; return how many landed.
+
+        For the one caller that has keys and no bot: a W13 creation that failed
+        after its pre-container phase installed tools. There is no container to
+        ask and no bot record for ordinary deletion to reach, so the rows'
+        ``oss_key``s — collected by the repository's ``delete_all`` — are all
+        that can ever find these objects. A failure is logged and counted out
+        rather than raised: the caller is already on a path that is ending, and
+        one unreachable object must not hide the rest of the cleanup.
+        """
+        removed = 0
+        for key in keys:
+            try:
+                self.delete(key=key)
+            except CliToolStoreError as error:
+                logger.warning("[cli_tools] object left behind at %s: %s", key, error)
+            else:
+                removed += 1
+        return removed
 
     def delete(self, *, key: str) -> None:
         """Remove one recorded object; one that is not there is already removed.

@@ -37,7 +37,7 @@
 | **D3** reconcile 校验 — *已解决* | #1468 | **W6** resources | #1474 |
 | **D4** 启动前下发 — *推迟* | #1508 | **W7** 命名源 + git 源 | #1475 |
 | **W1** manifest 文档 | #1469 | **W8** 生命周期 apply 点 | #1476 |
-| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools`（推迟 — *artifact 形状已落地*） | #1477 |
+| **W2** 带防护的 fetcher | #1470 | **W9** `cli_tools` ✅ | #1477 |
 | **W3** 源凭证 | #1471 | **W10** 服务层缝 — *已合入* | #1509 |
 | | | **W11** 平台侧物化与留存 | #1510 |
 | | | **W12** 跨引擎语义契约 — *已完成* | #1684 |
@@ -1216,7 +1216,6 @@ deadline 把它判为 `AUTHORIZATION_EXPIRED`；显式 apply 照常给出 `202`�
 
   | 构造 | 为什么没有东西能 apply 它 | 何时解禁 |
   | --- | --- | --- |
-  | 类目 `cli_tools` | W9 推迟且未排期——没有物化器、没有 PATH 下发、artifact 里也没有对应字段 | W9 落地 |
   | 类目 `engine_config` | 按 X2/T3 决策（§4）移出第一期，所以 W4 的免拉取物化器只剩 `mcp` 与 `script` | 它的物化器回来 |
   | `from` 指向**命名源** | 命名源由 W7 解析，而 W7 可能被砍出 v1；W5 明确排除它们 | W7 落地 |
   | **git** 源 | 同上——git 解析器属于 W7 | W7 落地 |
@@ -1840,30 +1839,36 @@ startup-script 别名视图。逐条验收：
   teclaw 文件在发布时的 gather；关闭步骤重投失败在报告 `notes` 之外的健康面；
   ARCA 的绑定前端口。
 
-#### W9 — `cli_tools` —— 已推迟 · #1477
+#### W9 — `cli_tools` —— ✅ 已交付 · #1477
 
 **Owner.** `totalfrank` · 0.25 天 · 第 4 天 · 设计（§7）
 
 
 **目标。**模型可以调用的命令行工具，以声明方式安装。
 
-**状态。**schema 已定稿（§3.7）；交付在设计中就按业务优先级后置。未排期。
+**状态。**✅ 已交付。**始终由平台托管**（与 `mcp` 同列），与
+`teclaw_platform_managed` 开关无关。
 
-> **进度：artifact 形状已提前落地，其余未开工**（PR #1734，与 W12 同一个 PR —— 那次
-> 是顺着 W12 的交付把 `artifact.schema.json` 一起对齐了，属于**有意为之的例外**，不是
-> §8「每项一个 PR」的新惯例）。接手本项的人，从这里开始：
->
 > | | 状态 |
 > | --- | --- |
-> | `artifact.schema.json` 的 `cliToolRef` + 可选 `cli_tools` | ✅ 已合入 |
-> | `artifact.py` 的 `CliToolRef`；`to_dict` 未声明时省略该键、`from_dict` 不把缺席读成 `[]` | ✅ 已合入，有测试钉住 |
-> | `README.zh-CN.md` 三处「artifact schema 不变」的表述 | ✅ 已调和 |
+> | `artifact.schema.json` 的 `cliToolRef` + 可选 `cli_tools` | ✅ 早于本项合入（PR #1734，随 W12） |
+> | `artifact.py` 的 `CliToolRef`；`to_dict` 未声明时省略该键、`from_dict` 不把缺席读成 `[]` | ✅ 同上，有测试钉住 |
 > | `SCHEMA_VERSION` 4 → 5 | ➖ **已决定不做**（2026-08-31）—— `cli_tools` 直接进 v4，靠「未知字段忽略」兼容 |
-> | manifest schema `cli_tools`（§3.7）的落地、校验、物化器 | ❌ 未开工 |
-> | 拉取 / `sha256` 强校验 / 解包 / 取 `subpath` / 算 `md5` / 写 store | ❌ 未开工 |
-> | ELF 头校验、`${BOT_ARCH}` → `amd64` | ❌ 未开工 |
-> | ARCA 侧的 PATH 方案 + 默认技能集里的用法 skill | ❌ 未开工 |
+> | `ac_bot_cli_tool` 表 + record + repository | ✅ |
+> | 平台自留一份字节副本（对象存储）+ 发布阶段的服务端拷贝 | ✅ |
+> | 拉取 / `sha256` 强校验 / 解包 / 取 `subpath` / 算 `md5` / 写 store / 下发 / 记录 | ✅ `CliToolService` 一处实现，两个调用方 |
+> | ELF 头 + `e_machine` 校验（`${BOT_ARCH}` → `amd64` 早已随 W1 落地） | ✅ |
+> | 管理 API `POST`/`GET`/`DELETE …/cli-tools`（读 MEMBER、写 ADMIN） | ✅ |
+> | 清单物化器（全量覆盖，移除按表算）+ 能力解禁 | ✅ |
+> | teclaw：artifact `cli_tools` refs + 发布时的对象拷贝 | ✅ |
+> | ARCA：引擎的三个按命令名寻址的端点（`install`/`delete`/`list`） | ⏳ **引擎侧待实现**，契约见 `engine-requirements.zh-CN.md` A2 |
+> | ARCA 侧的 PATH 注入 + 默认技能集里的用法 skill | ➖ **v1 明确不做**：agent 由 skill 告知落点、以绝对路径调用，代价写在 schema §3.7 与用户手册 §5.6 |
 > | `bcs-cli` 接进来当第一个消费者 | ❌ 未开工 |
+>
+> **落点归引擎，不归平台。**早先的设计把「平台工具目录 + PATH 注入」当成平台侧的
+> 答案，逐引擎去谈注入点；最终反过来了：平台按**命令名**调用引擎的 `install`，
+> 目录、可执行位、暴露给 agent 全在那一次调用内完成。平台代码里没有目录常量、
+> 不发 `chmod`、不跑 shell 命令。
 >
 > **`SCHEMA_VERSION` 不升版，这是终局决定，不是待办。**与 teclaw owner 定于
 > 2026-08-31：`cli_tools` 直接作为新增字段进入 v4 artifact，兼容性由引擎侧

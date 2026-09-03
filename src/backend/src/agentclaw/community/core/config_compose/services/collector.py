@@ -30,11 +30,16 @@ from agentclaw.community.core.channel.services.engine_overrides_reader import (
     ChannelEngineOverridesReader,
 )
 from agentclaw.community.core.config_compose.models import (
+    CollectedCliTool,
     CollectedFile,
     CollectedSkill,
     ComposeRequest,
     McpComposeInput,
     StdioLaunch,
+)
+from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+    BOT_DATA_STORE as CLI_TOOL_STORE,
+    CliToolScope,
 )
 from agentclaw.community.core.config_compose.protocols import (
     ComposeInputCollector,
@@ -58,9 +63,13 @@ from agentclaw.community.core.workspace.path_factory import (
     get_bolt_base_dir,
 )
 from agentclaw.community.log import get_logger
+from agentclaw.community.utils.env_utils import get_current_env
 
 
 if TYPE_CHECKING:
+    from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+        BotCliToolRepositoryProtocol,
+    )
     # Deferred: importing IdentityService eagerly triggers an identity↔harness
     # import cycle. The collector is constructed via an explicit @provider (not
     # @inject), so this annotation is never resolved at runtime.
@@ -146,6 +155,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         center_store: CanonicalCenterVersionStore,
         local_mcp_registry: LocalMCPRegistry | None = None,
         managed_files_reader: ManagedFilesReader | None = None,
+        cli_tool_repository: "BotCliToolRepositoryProtocol | None" = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
         self._mcp_config_service = mcp_config_service
@@ -167,6 +177,11 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # bare/unit collector) means the engine owns every compose, and every
         # teclaw branch below answers as it did before W8.
         self._managed_files = managed_files_reader
+        # W9: ``ac_bot_cli_tool``. Optional for the same reason the reader above
+        # is — the bare/unit collector has no repository — and a compose without
+        # one yields no tools, which composes an artifact with the key absent,
+        # exactly as before W9.
+        self._cli_tool_repository = cli_tool_repository
 
     # ── platform ownership (W8) ─────────────────────────────────────────
     def platform_owns(self, req: ComposeRequest) -> bool:
@@ -700,6 +715,40 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         return collected
 
     # ── engine overrides ────────────────────────────────────────────────
+    def cli_tools(self, req: ComposeRequest) -> list[CollectedCliTool]:
+        """The bot's platform-managed CLI tools, from the platform's own table.
+
+        Always the table, on every occasion: this category is platform-managed
+        independent of the switch, like ``mcp``, so there is no engine-owned
+        reading to fall back to. That is also what lets a *live* CLI install on
+        teclaw work — the artifact composed right after it references the tool
+        because the row is already there.
+
+        The ref path is built from the bot's coordinates rather than from the
+        row's ``oss_key``, because the artifact's ``bot-data`` store carries the
+        *current* base and a ref must be relative to it. A tool whose object was
+        written under an earlier base is therefore not found under the current
+        one, and the next install writes it again — the same rule W8's
+        managed-files store states for a file.
+        """
+        if self._cli_tool_repository is None:
+            return []
+        scope = CliToolScope(
+            entity_type=req.entity_type, entity_id=req.entity_id, bot_id=req.bot_id
+        )
+        return [
+            CollectedCliTool(
+                name=record.name,
+                store=CLI_TOOL_STORE,
+                path=f"{scope.rel_root}/{record.name}",
+                md5=record.md5,
+                version=record.version,
+            )
+            for record in self._cli_tool_repository.list(
+                env=get_current_env(), entity_id=req.entity_id, bot_id=req.bot_id
+            )
+        ]
+
     def engine_overrides(self, req: ComposeRequest) -> dict[str, Any]:
         """Per-bot engine override knobs — currently only DingTalk channels.
 

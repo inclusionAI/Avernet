@@ -54,6 +54,12 @@ from agentclaw.community.api.bot_config_manifest_service import (
 from agentclaw.community.api.bot_config_manifest_apply_service import (
     ManifestApplyInProgressError,
 )
+from agentclaw.community.api.bot_cli_tool_service import (
+    CliToolConflictError,
+    CliToolNotFoundError,
+    CliToolRefusedError,
+    CliToolUnsupportedError,
+)
 from agentclaw.community.adapters.http.openapi_v1.errors import (
     BotAccessRefusedError,
     BotEditLockCheckError,
@@ -660,6 +666,15 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     # Unregistered, ``@envelope_errors`` re-raised it and the caller got a 500
     # where the route's own documentation promises a 409.
     ManifestApplyInProgressError: (409, "An apply is already running for this bot"),
+    # W9's CLI tools. ``Refused`` is 422 rather than 400 for the reason the
+    # manifest's own validation error is: the request was well-formed and the
+    # platform refused what it *named* — an unmatched digest, an absent archive
+    # member, a binary for another architecture, or an engine that would not
+    # take it. The message is fixed; the reason rides the envelope's detail.
+    CliToolNotFoundError: (404, "Not found"),
+    CliToolConflictError: (409, "The bot already has a CLI tool with this name"),
+    CliToolUnsupportedError: (409, "This bot's engine cannot take CLI tools"),
+    CliToolRefusedError: (422, "The CLI tool could not be installed"),
     # Identity domain errors — ValueError subclasses raised by IdentityService
     # validate_entity_type / validate_file_type.
     InvalidIdentityEntityTypeError: (400, "Invalid entity type"),
@@ -816,6 +831,9 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     SkillParameterValidationError: 422101,
     ManifestValidationError: 422109,
     ManifestApplyInProgressError: 409109,
+    CliToolConflictError: 409110,
+    CliToolUnsupportedError: 409111,
+    CliToolRefusedError: 422110,
     LocalSkillRuntimeSyncError: 502102,
     SkillRuntimeNameConflictError: 409106,
     SkillEngineNotSupportedError: 409107,

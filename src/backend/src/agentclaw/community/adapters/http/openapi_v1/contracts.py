@@ -274,6 +274,26 @@ CONFIG_MANIFEST_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
     },
 }
 
+#: The install operation's failure table (W9). A CLI tool is an executable the
+#: platform distributes on a caller's behalf, so the ways it can be refused are
+#: worth publishing rather than collapsing into a 400.
+CLI_TOOL_WRITE_RESPONSES: dict[int | str, dict[str, object]] = {
+    **USER_SCOPED_403,
+    409: {
+        "model": ErrorEnvelope,
+        "description": "The bot already has a CLI tool by that name.",
+        **error_example(409, "The bot already has a CLI tool with this name"),
+    },
+    422: {
+        "model": ErrorEnvelope,
+        "description": "The declaration, the fetched bytes or the engine "
+        "refused the install — an unpinned digest, a source that did not match "
+        "it, an archive member that is not there, a binary built for another "
+        "architecture, or an engine that would not take it.",
+        **error_example(422, "The CLI tool could not be installed"),
+    },
+}
+
 # For the nine groups whose every route is user-scoped, applied at assembly.
 USER_SCOPED_ERROR_RESPONSES: dict[int | str, dict[str, object]] = {
     **ERROR_RESPONSES,

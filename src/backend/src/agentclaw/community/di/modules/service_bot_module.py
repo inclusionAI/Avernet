@@ -150,6 +150,10 @@ from agentclaw.community.core.workspace.engines import create_engine_sandbox_reg
 from agentclaw.community.core.workspace.path_factory import (
     WorkspacePathFactory,
 )
+from agentclaw.community.core.bot_config_manifest.cli_tools.store import CliToolStore
+from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+    BotCliToolRepositoryProtocol,
+)
 from agentclaw.community.core.storage.path import (
     get_skills_repo_path,
     get_teclaw_bolt_data_prefix,
@@ -599,7 +603,17 @@ class ServiceBotModule(Module):
             device_binding_repo=device_binding_repo,
             resolver=resolver,
             device_fs_dispatcher=device_fs_dispatcher,
-            teclaw_file_promotion=TeclawFilePromotion(oss_storage=oss_storage),
+            teclaw_file_promotion=TeclawFilePromotion(
+                oss_storage=oss_storage,
+                # W9: a promotion copies the bot's tool objects into the new
+                # stage's prefix from the platform's own record, rather than
+                # reading them back out of the engine.
+                cli_tool_repository=injector.get(BotCliToolRepositoryProtocol),
+                cli_tool_store=CliToolStore(
+                    object_storage=oss_storage,
+                    store_base=get_teclaw_bolt_data_prefix,
+                ),
+            ),
             channel_overrides_reader=channel_overrides_reader,
             task_queue_service=task_queue_service,
             publish_operation_repo=publish_operation_repo,

@@ -72,6 +72,7 @@ def _engine(scripts=None, activations=None, auth=None):
             package_validator=real_validator(),
             entry_fetcher=_dummy_entry_fetcher(),
             resource_service=FakeResourceFileService(),
+            cli_tool_service=object(),
         ),
         steps=steps_for
     )
@@ -329,22 +330,23 @@ async def test_applying_one_category_leaves_the_others_alone():
 
 @pytest.mark.asyncio
 async def test_a_category_with_no_materialiser_fails_and_writes_nothing():
-    """Post-W6 categories are an expected state, not a crash.
+    """A category nothing can apply is an expected state, not a crash.
 
-    Every entry fails with a readable reason, the category is aborted so nothing
-    is destroyed, and the categories that *do* have materialisers still apply.
+    Every entry fails with a readable reason, the category is aborted so
+    nothing is destroyed, and the categories that *do* have materialisers still
+    apply.
 
-    Declared with ``cli_tools``, the sparse construct after W6: the test was
-    written against ``skills`` in W4's era and moved forward with each wave
-    that materialises its previous subject — W5 took skills, W6 resources.
-    W9 will move it forward again.
+    Declared with ``engine_config``, the sparse construct after W9: the test
+    was written against ``skills`` in W4's era and has moved forward with each
+    wave that materialises its previous subject — W5 took skills, W6 resources,
+    W9 cli_tools. X2/T3 will move it forward again.
     """
     scripts = FakeStartupScriptService()
     report = await _apply(
         _engine(scripts),
         """schema_version: 1
 manifest:
-  cli_tools:
+  engine_config:
     - name: jq
       source: https://cdn.example.com/jq
       digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -357,12 +359,12 @@ script:
     assert _outcomes(report)["script"] is EntryOutcome.CREATED
     assert report.status is ApplyStatus.PARTIAL
 
-    cli_tools = next(
-        c for c in report.categories if c.construct is ManifestCategory.CLI_TOOLS
+    engine_config = next(
+        c for c in report.categories if c.construct is ManifestCategory.ENGINE_CONFIG
     )
-    assert cli_tools.aborted is True
-    assert cli_tools.removals == ()
-    reason = cli_tools.entries[0].reason or ""
+    assert engine_config.aborted is True
+    assert engine_config.removals == ()
+    reason = engine_config.entries[0].reason or ""
     assert "materializer" in reason
 
 
@@ -805,6 +807,7 @@ async def test_a_fetching_document_applies_all_four_categories_in_order():
                 fetcher, FakeManifestContent(), FakeCredentials()
             ),
             resource_service=FakeResourceFileService(),
+            cli_tool_service=object(),
         ),
         steps=steps_for
     )

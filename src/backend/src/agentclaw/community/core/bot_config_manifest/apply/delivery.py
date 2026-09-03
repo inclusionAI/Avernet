@@ -47,6 +47,10 @@ from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
 from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
     SkillPackageUploadPort,
 )
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+    CliToolService,
+)
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
@@ -108,6 +112,10 @@ class MaterialiserPorts:
     package_validator: SkillPackageValidator
     entry_fetcher: EntryFetcher
     resource_service: ManifestResourcePort
+    #: W9. One field for a whole category, because the service already holds
+    #: the family's delivery port — so the ``cli_tools`` materialiser takes one
+    #: dependency and the family difference stays here, where W6 put it.
+    cli_tool_service: CliToolService
 
     def as_kwargs(self) -> dict[str, Any]:
         return {
@@ -120,6 +128,7 @@ class MaterialiserPorts:
             "package_validator": self.package_validator,
             "entry_fetcher": self.entry_fetcher,
             "resource_service": self.resource_service,
+            "cli_tool_service": self.cli_tool_service,
         }
 
 
@@ -272,6 +281,17 @@ class TeclawDelivery(DeliveryStrategy):
             # phase is kept as the table says so a declared script still walks
             # the orchestrator's no-support path and is reported, not skipped.
             return step.phase
+        if step.construct == ManifestCategory.CLI_TOOLS:
+            # The artifact is teclaw's delivery and it is composed before
+            # provisioning, so this category is PRE_CONTAINER whatever the
+            # switch says. It has to be stated per category rather than left to
+            # the generic re-phasing below, because that keys on the switch and
+            # this one is always platform-managed — like ``mcp``, and for the
+            # same reason (spec D-6, D-8). The distinction is invisible on an
+            # existing bot, where the two phases run back to back; it decides
+            # something on exactly one path, the W13 creation whose
+            # switch-on sequence has no phase B at all.
+            return ApplyPhase.PRE_CONTAINER
         if self._platform_managed:
             return ApplyPhase.PRE_CONTAINER
         return ApplyPhase.ON_CONTAINER

@@ -137,6 +137,21 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
         "GET",
         "/openapi/v1/bots/{bot_id}/config-manifest/last-apply",
     ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    # W9's CLI tools sit beside the config manifest and for the same reason:
+    # collaborator-scoped (MEMBER to read, ADMIN to write), so the owner arrives
+    # on the wire and the grant is checked against that addressed owner.
+    (
+        "POST",
+        "/openapi/v1/bots/{bot_id}/cli-tools",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "GET",
+        "/openapi/v1/bots/{bot_id}/cli-tools",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
+    (
+        "DELETE",
+        "/openapi/v1/bots/{bot_id}/cli-tools/{name}",
+    ): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     (
         "GET",
         "/openapi/v1/bots/{bot_id}/skill-sets",
