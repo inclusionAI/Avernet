@@ -8,7 +8,7 @@ from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria, Context, Goal, Metadata, RuntimeInfo, Status,
     TaskExecutionGraph, TaskNode, TaskNodePatch, TaskSpec,
 )
-from agentclaw.community.core.task.task_runner.client.bbs_runner import (
+from agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor import (
     _bid_prompt, _parse_bid, notify,
 )
 
@@ -234,7 +234,7 @@ def test_notify_empty_roster_returns_silently():
 
 
 def test_notify_retries_roster_failure_and_only_filters_claim(monkeypatch):
-    import agentclaw.community.core.task.task_runner.client.bbs_runner as module
+    import agentclaw.community.core.task.task_runner.modal_executor.bbs_modal_executor as module
 
     monkeypatch.setattr(module, "_ROSTER_RETRY_DELAY", 0)
     bcn = _FlakyBcn(_roster("A"), failures=1)

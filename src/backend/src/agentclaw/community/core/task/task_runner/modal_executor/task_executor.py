@@ -992,7 +992,7 @@ class TaskExecutor:
     async def run_bbs(self, execution_graph) -> None:
         """升 BBS 可恢复态后主动 bid→select→claim→dispatch(委托 bbs_runner)。
         延迟导入 bbs_runner 避免顶层循环依赖;bbs_runner 自身 best-effort 不抛。"""
-        from agentclaw.community.core.task.task_runner.client import bbs_runner
+        from agentclaw.community.core.task.task_runner.modal_executor import bbs_modal_executor as bbs_runner
 
         await bbs_runner.notify(
             execution_graph=execution_graph,
