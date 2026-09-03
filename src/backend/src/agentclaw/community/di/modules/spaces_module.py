@@ -84,6 +84,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionStore,
 )
 from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
     SpaceSkillVersionQueryService,
 )
@@ -182,9 +183,10 @@ class SpacesModule(Module):
         self,
         access: CoreSpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        staff_dept: StaffDeptPlugin,
     ) -> SpaceSkillGrantServiceProtocol:
         """Assemble Grant policy with environment resolution at the DI boundary."""
-        return SpaceSkillGrantService(access, repository, get_current_env)
+        return SpaceSkillGrantService(access, repository, staff_dept, get_current_env)
 
     @singleton
     @provider

@@ -15,6 +15,7 @@ from agentclaw.community.core.skill_center.services.space_skill_grant_service im
     SpaceSkillGrantService,
 )
 from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin, StaffProfileInfo
 
 
 def _consumer():
@@ -24,7 +25,11 @@ def _consumer():
         SimpleNamespace(role=SpaceRole.MEMBER),
     )
     repository = MagicMock()
-    service = SpaceSkillGrantService(access, repository, lambda: "test")
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="owner-1", nick_name="Owner"
+    )
+    service = SpaceSkillGrantService(access, repository, staff_dept, lambda: "test")
     assert isinstance(service, SpaceSkillGrantServiceProtocol)
     return service, repository
 
@@ -40,6 +45,7 @@ def test_consumer_reads_actor_permissions_through_the_repository_contract():
     result = service.list_grants(space_id=7, skill_id=9, actor_id="owner-1")
 
     assert result["actor"]["permissions"]["manage_grants"] is True
+    assert result["owner"]["display_name"] == "Owner"
     repository.list_grants.assert_called_once_with(
         space_id=7, skill_id=9, actor_id="owner-1", env="test"
     )
