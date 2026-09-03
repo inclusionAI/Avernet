@@ -219,7 +219,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             # 故此处仅落 scoped 接力节点终态(其自身执行产出,属 runner 回投)+ 保持根 HUNG(可恢复态,
             # 等下段重 claim/升 BBS);不驱动收敛(需 engine 收口)、不直写根 output/extend_props.output。
             logger.warning(
-                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 根 HUNG,"
+                "[task][bbs_mode] on_bbs_report 未接入 task=%s:仅落 scoped 终态 + 保持根 HUNG,"
                 "不驱动收敛、不写根 output(排查 engine._build_executor/build_integration 漏传 on_bbs_report)",
                 task_id,
             )
@@ -228,7 +228,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
                 TaskNodePatch(
                     task_id=task_id,
                     node_id=task_id,
-                    status=Status.PLANNING,
+                    extend_props_patch={"bbs_owner": None},
                 )
             )
         logger.info("[task][bbs_mode] finish_rely_task, task_id=%s, task_result=%s", task_id, task_result)
@@ -240,7 +240,9 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
             TaskNodePatch(
                 task_id=task_id,
                 node_id=task_id,
-                status=Status.PLANNING,
+                # BBS dispatch failure releases the claim but must preserve the
+                # root HUNG recovery state. PLANNING would surface as EXECUTING
+                # and falsely make a terminal child set look active again.
                 extend_props_patch={"bbs_owner": None},
             )
         )

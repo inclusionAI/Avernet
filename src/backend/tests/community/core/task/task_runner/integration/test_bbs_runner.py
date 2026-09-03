@@ -299,7 +299,7 @@ def test_notify_without_callback_never_writes_root_output():
     绝不改根节点 output(根 output 仅由 plan 算 gap / runner 执行完成 pull·push 收敛写入)。
 
     回归 root.run_info.output == bbs output 的污染 bug:else 旧实现把 bbs task_result 直写根
-    output_patch/extend_props.output。修复后根 patch 仅 status=PLANNING,无 output 写入。
+    output_patch/extend_props.output。修复后根 patch 仅释放 bbs_owner,保持 HUNG,无 output 写入。
     """
     roster = _roster("W")
     bot = _FakeBot(rates={"W": 80})
@@ -312,8 +312,9 @@ def test_notify_without_callback_never_writes_root_output():
     root_patches = [p for p in graph.patches if p.node_id == "t6"]
     assert len(root_patches) == 1, f"应只写一次根 patch,实际 {len(root_patches)}"
     rp = root_patches[0]
-    # 不变量:根节点只允许改状态,不改 output
-    assert rp.status == Status.PLANNING
+    # 不变量:根节点只释放 claim,不改状态或 output
+    assert rp.status is None
+    assert rp.extend_props_patch == {"bbs_owner": None}
     assert rp.output_patch is None, f"else 路径违规直写根 output_patch={rp.output_patch}"
     assert rp.extend_props_patch is None or "output" not in rp.extend_props_patch, (
         f"else 路径违规直写根 extend_props.output={rp.extend_props_patch}"
