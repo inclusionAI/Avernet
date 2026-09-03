@@ -278,6 +278,17 @@ class WorkOrderMessageContent(StrEnum):
     )
 
 
+def skill_collaborator_applicant_display(
+    *, applicant_user_id: str, applicant_name: str
+) -> str:
+    """Format the stable identity shown in a Skill editor request."""
+
+    normalized_name = applicant_name.strip()
+    if not normalized_name or normalized_name == applicant_user_id:
+        return f"「{applicant_user_id}」"
+    return f"「{normalized_name}」({applicant_user_id})"
+
+
 class WorkOrderApproverRecord(BaseModel):
     id: int
     work_order_id: int

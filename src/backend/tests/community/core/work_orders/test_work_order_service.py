@@ -39,6 +39,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventStatus,
     WorkOrderEventCreatedResult,
     WorkOrderItemType,
+    WorkOrderListItem,
     WorkOrderNotificationDetail,
     WorkOrderNotificationDraft,
     WorkOrderNotificationBadgeSummary,
@@ -731,6 +732,58 @@ def test_list_items_forwards_filters_and_normalizes_pagination() -> None:
         offset=20,
         limit=10,
     )
+
+
+def test_list_items_refreshes_historical_skill_editor_request_copy() -> None:
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.return_value = StaffProfileInfo(
+        work_no="200177", nick_name="张三"
+    )
+    service, repository, _, _, _ = _service(staff_dept=staff_dept)
+    work_order = _work_order().model_copy(
+        update={
+            "biz_type": WorkOrderBizType.SKILL_COLLABORATOR,
+            "biz_id": "1123982",
+            "applicant_user_id": "200177",
+            "biz_data": json.dumps({"skill_name": "qa"}),
+        }
+    )
+    notification = _notification().model_copy(
+        update={
+            "event_type": WorkOrderEventType.SKILL_COLLABORATOR_APPLIED,
+            "biz_type": WorkOrderBizType.SKILL_COLLABORATOR,
+            "biz_id": "1123982",
+            "content": "用户「200177」申请共同编辑 Skill「qa」，请及时处理。",
+        }
+    )
+    repository.list_items.return_value = (
+        1,
+        [
+            WorkOrderListItem(
+                work_order=work_order,
+                notification=notification,
+                can_approve=True,
+            )
+        ],
+    )
+
+    _, items = service.list_items(
+        actor_id="owner-1",
+        query_type=WorkOrderQueryType.PENDING_FOR_ME,
+        item_type=WorkOrderItemType.APPROVAL,
+        page_no=1,
+        page_size=10,
+    )
+
+    assert items[0].notification is not None
+    assert (
+        items[0].notification.content
+        == "用户「张三」(200177)申请共同编辑 Skill「qa」，请及时处理。"
+    )
+    assert (
+        notification.content == "用户「200177」申请共同编辑 Skill「qa」，请及时处理。"
+    )
+    staff_dept.get_profile_by_work_no.assert_called_once_with(work_no="200177")
 
 
 def test_get_detail_resolves_reviewer_name_from_staff_directory() -> None:
