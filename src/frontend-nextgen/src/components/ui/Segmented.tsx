@@ -14,11 +14,21 @@ interface SegmentedProps<T extends string> {
   options: Option<T>[];
   onChange: (value: T) => void;
   className?: string;
+  activeOptionClassName?: string;
+  inactiveOptionClassName?: string;
 }
 
 /** 分段控件：禁用项的原因通过统一 Tooltip 呈现，不使用 title；支持 icon 项与等宽不换行。
- *  选中态用 bg-background/text-primary（修复暗色——旧值 bg-white/text-color-primary 在暗色下错配）。 */
-export function Segmented<T extends string>({ value, options, onChange, className }: SegmentedProps<T>) {
+ *  默认选中态用 bg-background/text-primary；业务场景可通过 activeOptionClassName
+ *  强化选中态的品牌表达，未选中态通过 inactiveOptionClassName 定制。 */
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  className,
+  activeOptionClassName,
+  inactiveOptionClassName,
+}: SegmentedProps<T>) {
   return (
     <TooltipProvider>
       <div className={cn('flex items-center rounded-lg bg-muted p-0.5', className)}>
@@ -32,7 +42,9 @@ export function Segmented<T extends string>({ value, options, onChange, classNam
               onClick={() => onChange(option.value)}
               className={cn(
                 'flex-1 whitespace-nowrap border-0',
+                value !== option.value && inactiveOptionClassName,
                 value === option.value && 'bg-background text-primary shadow-sm hover:bg-background',
+                value === option.value && activeOptionClassName,
               )}
             >
               {option.icon ? <span className="flex items-center">{option.icon}</span> : null}

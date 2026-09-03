@@ -99,6 +99,7 @@ consumes:
   - "SecretResolver"
   - "SkillCenterClient"
   - "SkillCenterGateway"
+  - "StaffDeptPlugin"
   - "SpaceSkillSourcePlugin"
   - "SkillRepoSyncPlugin"
   - "WorkspacePathFactory"
@@ -113,7 +114,6 @@ consumes:
   - "SkillVersionRepositoryProtocol"
   - "SkillVersionMaterializationRepositoryProtocol"
   - "SpaceSkillPublicationRepositoryProtocol"
-  - "SkillVersionScannerProtocol"
   - "HttpClient"
   - "ServiceArtifactLineageReaderProtocol"
 internal_dependencies:
@@ -176,6 +176,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.plugin_api.space_skill_source
+  - agentclaw.community.plugin_api.staff_dept
   - agentclaw.community.utils
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.env_utils
@@ -200,8 +201,12 @@ write intent and integrity manifest live under the derived sibling
 Those objects protect immutable writes and validate completeness; they are not
 a publication state. Only `ac_skill_version.status=PUBLISHED`, owned by
 `SkillVersionMaterializer` after exact download/hash, strict package validation,
-Scanner metadata, MCP dependency and Store verification all succeed, expresses
-domain readiness. Publication and SC Reference producers consume the public
+scope-owned metadata, MCP dependency and Store verification all succeed, expresses
+domain readiness. SC Public and Team/Space exact downloads trust the MCP facts
+already established by SkillCenter publication: both consume upstream
+`mcpServices` and skip a second remote Scanner pass. Local/Repo scan flows remain
+owned by their existing services and are not changed by this trust boundary.
+Publication and SC Reference producers consume the public
 Materializer Service API; Runtime reads consume only PUBLISHED Versions through
 `SkillVersionResolver`.
 

@@ -9,11 +9,9 @@ reversal buys one thing: a single source. There is no second declaration to
 drift, and no way for a route to disagree with the table because a route has
 nothing to say.
 
-What replaces the lost redundancy is that **omission is not survivable**. An
-operation absent from this table cannot be constructed — ``PublicAPIRoute``
-raises while its module is importing — so the application does not start, and a
-missing row is never mistaken for "no check needed". A CI assertion catches the
-same mistake one step later; this catches it before anything runs.
+**Omission is not survivable**: ``PublicAPIRoute`` rejects an absent operation
+while its module imports, so a missing row never becomes "no check needed".
+A CI assertion catches the same mistake one step later.
 
 Two modes are permanent
 -----------------------
@@ -546,6 +544,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("Space membership and exact Canonical Version visibility, adjudicated by the Version service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/files/{path:path}"):
         NoCheck("Space membership and exact Canonical file visibility, adjudicated by the Version service"),
+    ("POST", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/versions/{version}/copy"):
+        NoCheck("Skill Owner or Manager, Offline state, exact Version and idempotency, adjudicated by the Skill service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files"):
         NoCheck("Space membership and Draft visibility, adjudicated by the Skill service"),
     ("GET", "/openapi/v1/bots/spaces/{space_id}/skills/{skill_id}/draft/files/{path:path}"):

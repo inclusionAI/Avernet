@@ -1,13 +1,13 @@
 // Admin 方角小标签（admin 视觉交互指南 §2.2/§7.1）。
 // 不复用 ui Badge（其默认 rounded-full 胶囊形与方角 tag 不符），admin 模块内部复用。
-// 颜色只走语义 token：蓝统一 var(--color-primary)（见 admin-polish-audit 决策 A），紫 brand / 绿 success / 橙 warning。禁裸 RGB，暗色自适配。
+// 颜色只走 shadcn 语义 token：蓝统一 primary（--primary=#165dff，见 showcase-patterns §0/§2.4），紫 brand / 绿 success / 橙 warning。禁裸 RGB 与 --color-* 遗产，暗色自适配。
 import { cn } from '@/utils/cn';
 import React from 'react';
 
 export type TagTone = 'blue' | 'purple' | 'green' | 'orange';
 
 const TONES: Record<TagTone, string> = {
-  blue: 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]',
+  blue: 'bg-primary/10 text-primary',
   purple: 'bg-brand/10 text-brand',
   green: 'bg-success/10 text-success',
   orange: 'bg-warning/10 text-warning',

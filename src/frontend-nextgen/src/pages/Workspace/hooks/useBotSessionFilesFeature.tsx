@@ -60,6 +60,21 @@ export function useBotSessionFilesFeature(
     [insertChips],
   );
 
+  const addReadyUploadsToSession = useCallback(() => {
+    const readyTasks = upload.tasks.filter((task) => task.phase === 'ready' && task.resourceId);
+    if (readyTasks.length === 0) {
+      toast.warning('暂无已完成上传的文件可添加');
+      return;
+    }
+    senderRef.current?.insertFileChips?.(
+      readyTasks.map((task) => ({ resource_id: task.resourceId as string, display_name: task.name })),
+    );
+    senderRef.current?.focus?.();
+    readyTasks.forEach((task) => upload.removeTask(task.localId));
+    setUploadOpen(false);
+    toast.success(`已添加 ${readyTasks.length} 个文件至会话`);
+  }, [upload.removeTask, upload.tasks]);
+
   const handleSelectSkill = useCallback((skillName: string) => {
     senderRef.current?.insert(`/${skillName} `, 'end');
     senderRef.current?.focus?.();
@@ -86,7 +101,7 @@ export function useBotSessionFilesFeature(
         id: `__file__${f.resourceId}`,
         name: f.displayName,
         description: '引用到输入框',
-        icon: <FileIcon className="h-3.5 w-3.5 text-[var(--color-muted)]" />,
+        icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
         data: { resource_id: f.resourceId, display_name: f.displayName },
         preventInsert: true,
         onSelect: () => handleReference(f),
@@ -100,7 +115,7 @@ export function useBotSessionFilesFeature(
         id: `__skill__${s.skillId}`,
         name: s.name,
         description: s.description || (s.active ? '已激活' : '未激活'),
-        icon: <Zap className="h-3.5 w-3.5 text-[var(--color-muted)]" />,
+        icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
         data: { skill_id: s.skillId },
       })),
     [skillsState.skills],
@@ -117,7 +132,7 @@ export function useBotSessionFilesFeature(
               id: '__skill_entry__',
               name: 'skill',
               description: '唤起技能面板',
-              icon: <Zap className="h-3.5 w-3.5 text-[var(--color-muted)]" />,
+              icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
               preventInsert: true,
               subConfig: {
                 label: '技能',
@@ -140,7 +155,7 @@ export function useBotSessionFilesFeature(
               id: '__file_entry__',
               name: 'file',
               description: '引用本会话已上传的文件',
-              icon: <FileIcon className="h-3.5 w-3.5 text-[var(--color-muted)]" />,
+              icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
               preventInsert: true,
               subConfig: {
                 label: '文件',
@@ -161,7 +176,7 @@ export function useBotSessionFilesFeature(
               id: '__clear__',
               name: 'clear',
               description: '清空当前会话上下文',
-              icon: <Eraser className="h-3.5 w-3.5 text-[var(--color-muted)]" />,
+              icon: <Eraser className="h-3.5 w-3.5 text-muted-foreground" />,
               preventInsert: true,
               onSelect: () => void onClear(),
             },
@@ -192,6 +207,7 @@ export function useBotSessionFilesFeature(
         submit={async () => {
           await upload.submit();
         }}
+        onAddToSession={addReadyUploadsToSession}
         removeTask={upload.removeTask}
       />
       <BotSessionFilesModal

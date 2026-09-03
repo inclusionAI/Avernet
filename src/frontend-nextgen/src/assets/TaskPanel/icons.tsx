@@ -109,8 +109,10 @@ export function NodeStatusDot({ status, size = 12 }: { status: string; size?: nu
       ? C.warning
       : status === 'failed'
       ? C.danger
-      : status === 'skipped'
-      ? C.textMuted
+      : status === 'hung'
+      ? C.primary
+      : status === 'cancelled'
+      ? C.border
       : C.textMuted; // pending
   return (
     <span
@@ -164,8 +166,10 @@ export function NodeStatusIcon({ status, size = 20 }: { status: string; size?: n
       ? '执行中'
       : status === 'failed'
       ? '执行失败'
-      : status === 'skipped'
-      ? '已跳过'
+      : status === 'hung'
+      ? '任务挂起'
+      : status === 'cancelled'
+      ? '已取消'
       : '待执行';
 
   const icon =
@@ -175,7 +179,9 @@ export function NodeStatusIcon({ status, size = 20 }: { status: string; size?: n
       <Loading size={Math.round(size * 0.8)} color={C.warning} />
     ) : status === 'failed' ? (
       <CloseCircle size={size} color={C.danger} />
-    ) : status === 'skipped' ? (
+    ) : status === 'hung' ? (
+      <Clock size={size} color={C.primary} />
+    ) : status === 'cancelled' ? (
       <MinusCircle size={size} color={C.textMuted} />
     ) : (
       <NodeStatusDot status={status} size={size} />

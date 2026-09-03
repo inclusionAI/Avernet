@@ -8,8 +8,8 @@
  */
 import type { Envelope, ExecuteTaskRequest, ExecuteTaskResponse, TaskListItem } from '@/services/tasks/taskModel';
 import { backendRequest } from '../httpClient';
-
-const DEFAULT_BASE = '';
+import type { BackendApiPage } from '../types';
+const DEFAULT_BASE = ''; // 相对路径 → 走 dev 代理/gateway 统一出口
 
 export async function executeTask(
   req: ExecuteTaskRequest,
@@ -36,8 +36,17 @@ export async function dashboardTask(
   });
 }
 
+/**
+ * GET /api/v1/collaboration/tasks/list 查询参数。
+ * - user_id：必填，按用户过滤；
+ * - status：可选，精确匹配（后端 Status 枚举值，运行时态）；
+ * - page / page_size：可选，服务端分页（1-based，page_size ≤ 100）。
+ *   两者必须同时传或同时缺省：同时传 → data 为 Page{total,items}；都不传 → data 为全量数组（兼容历史契约）。
+ *   注：status 过滤值是后端运行时态(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED)，
+ *   与列表返回的产品态(DEFINED/EXECUTING/REVIEWING…)词汇表不同，故前端状态 Tab 过滤仍在客户端做。
+ */
 export interface ListTasksParams {
-  owner_user_id: string;
+  user_id: string;
   status?: string;
   page?: number;
   page_size?: number;
@@ -46,10 +55,10 @@ export interface ListTasksParams {
 export async function listTasks(
   params: ListTasksParams,
   baseUrl: string = DEFAULT_BASE,
-): Promise<Envelope<TaskListItem[]>> {
+): Promise<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>> {
   const path = '/api/v1/collaboration/tasks/list';
   const url = baseUrl ? `${baseUrl.replace(/\/+$/, '')}${path}` : path;
-  return backendRequest<Envelope<TaskListItem[]>>(url, {
+  return backendRequest<Envelope<BackendApiPage<TaskListItem> | TaskListItem[]>>(url, {
     method: 'GET',
     params: params as unknown as Record<string, unknown>,
   });

@@ -75,7 +75,17 @@ const DrawerContent = React.forwardRef<React.ElementRef<typeof DialogPrimitive.C
               </Button>
             </DialogPrimitive.Close>
           ) : null}
-          <div className={cn('min-h-0 flex-1 overflow-y-auto p-6', bodyClassName)}>{children}</div>
+          <div
+            className={cn(
+              'min-h-0 flex-1 overflow-y-auto p-6',
+              // 关闭按钮 absolute right-3 top-3 + h-9 占据顶部 12~48px,默认正文下移 56px 避开重叠;
+              // bodyClassName 在其后,调用方传 p-0 / pt-* 仍可覆盖。
+              showClose && 'pt-14',
+              bodyClassName,
+            )}
+          >
+            {children}
+          </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     );

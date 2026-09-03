@@ -48,7 +48,12 @@ class _FakeSkillsPort:
 async def test_ensure_center_skills_serializes_and_builds_result():
     port = _FakeSkillsPort(ensure_center_skills={
         "ok": [{"skill_uuid": "u1", "version": "1"}],
-        "failed": [{"skill_uuid": "u2", "version": "2", "reason": "NAS missing"}],
+        "failed": [{
+            "skill_uuid": "u2",
+            "version": "2",
+            "reason": "Center missing",
+            "code": "CENTER_VERSION_NOT_FOUND",
+        }],
     })
     adapter = OpenClawSkillsAdapter(port)
     req = CenterEnsureRequest(items=[
@@ -63,7 +68,8 @@ async def test_ensure_center_skills_serializes_and_builds_result():
     ]
     # built DTOs
     assert [(i.skill_uuid, i.version) for i in result.ok] == [("u1", "1")]
-    assert result.failed[0].reason == "NAS missing"
+    assert result.failed[0].reason == "Center missing"
+    assert result.failed[0].code == "CENTER_VERSION_NOT_FOUND"
 
 
 async def test_sync_symlinks_serializes_and_builds_result():

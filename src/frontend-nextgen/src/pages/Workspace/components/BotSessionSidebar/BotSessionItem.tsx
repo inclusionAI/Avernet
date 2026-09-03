@@ -96,16 +96,27 @@ export const BotSessionItem = React.memo(function BotSessionItem({
       <SessionCard
         title={session.title}
         subtitle={session.messageCount > 0 ? `${session.messageCount} 条消息` : '暂无消息'}
-        dateText={formatMonthDayTime(session.gmtCreate)}
+        dateText={formatMonthDayTime(session.gmtModified || session.gmtCreate)}
         selected={selected}
         onSelect={() => onSelect(session.sessionId)}
         trailing={
-          <div className="flex items-center gap-0.5 self-start" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
             <Popover open={menuOpen} onOpenChange={setMenuOpen}>
               <PopoverTrigger asChild>
-                <IconButton label="会话操作" size="sm" icon={<MoreHorizontal className="h-4 w-4" />} />
+                <IconButton label="会话更多操作" size="sm" icon={<MoreHorizontal className="h-4 w-4" />} />
               </PopoverTrigger>
               <PopoverContent align="end" className="w-44 p-1">
+                <Button
+                  variant="ghost"
+                  disabled={favoriteToggling}
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
+                  onClick={() => void handleToggleFavorite()}
+                >
+                  <Star
+                    className={cn('h-3.5 w-3.5', favorite ? 'fill-warning text-warning' : 'text-muted-foreground')}
+                  />
+                  {favorite ? '取消收藏' : '收藏会话'}
+                </Button>
                 <Button
                   variant="ghost"
                   className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
@@ -117,17 +128,6 @@ export const BotSessionItem = React.memo(function BotSessionItem({
                 <Button
                   variant="ghost"
                   className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                  disabled={favoriteToggling}
-                  onClick={() => void handleToggleFavorite()}
-                >
-                  <Star
-                    className={cn('h-3.5 w-3.5', favorite && 'fill-[var(--color-warning)] text-[var(--color-warning)]')}
-                  />
-                  {favorite ? '取消收藏' : '收藏会话'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
                   onClick={startClear}
                 >
                   <Eraser className="h-3.5 w-3.5" />
@@ -135,7 +135,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
                 </Button>
                 <Button
                   variant="ghost"
-                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-[var(--color-error)]"
+                  className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs text-destructive"
                   onClick={startDelete}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -158,7 +158,7 @@ export const BotSessionItem = React.memo(function BotSessionItem({
               取消
             </Button>
             <Button
-              variant="primary"
+              variant="default"
               size="sm"
               onClick={() => void confirmRename()}
               disabled={renaming || !titleDraft.trim()}

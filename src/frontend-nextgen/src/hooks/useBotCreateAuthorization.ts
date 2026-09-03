@@ -1,6 +1,7 @@
 import type { BotCreateAuthorization, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 export type BotCreateAuthorizationView = BotCreateAuthorization & { message?: string; error?: string };
 
@@ -16,10 +17,19 @@ export function useBotCreateAuthorization(onCreated: (bot: BotDomain) => Promise
       if (polling || terminal) return;
       polling = true;
       try {
-        const result = await botWorkshopService.pollCreateAuthorization(authorization.botId, authorization.request);
+        const result = await botWorkshopService.pollCreateAuthorization(
+          authorization.botId,
+          authorization.request,
+          authorization.agentCoding,
+        );
         if (!active) return;
         if (result.status === 'ISSUED' && result.bot) {
           setAuthorization(undefined);
+          if (result.afterCreateFailures?.length) {
+            const actions = result.afterCreateFailures.map((failure) => failure.key).join('、');
+            console.warn('[BotCreateAuthorization] after-create actions failed:', result.afterCreateFailures);
+            toast.warning(`Bot 已创建，但后续配置未全部完成：${actions}`);
+          }
           await onCreated(result.bot);
           return;
         }

@@ -1,4 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
+import { extractLoginUrl, isAceLoginResponse } from '@/services/backendApi/aceLoginBody';
 import type { SessionParticipantMode } from '@/services/backendApi/collaboration/sessionController';
 import {
   addSessionParticipant,
@@ -12,6 +13,7 @@ import {
   updateSession,
   updateSessionMemberMode,
 } from '@/services/backendApi/collaboration/sessionController';
+import { triggerAceLoginRedirect } from '@/services/backendApi/httpClient';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { DomainError, DomainResult } from './identityService';
 import { mapBcsSessionItem, mapSessionListItem, type BcsSessionRaw } from './mappers';
@@ -56,9 +58,12 @@ export interface VisibleSessionsOpts {
 export const sessionService = {
   async createNewSession(groupId: string, title?: string, contextQuery?: string): Promise<DomainResult<SessionView>> {
     try {
+      // acting_bot_id 传当前角色 id（human_xxx 或 botId:ownerId），让后端以该身份创建会话。
+      const actingBotId = useWorkspaceStore.getState().activeIdentityId || undefined;
       const resp = await createSession(groupId, {
         title: title || undefined,
         input: contextQuery ? { query: contextQuery } : undefined,
+        ...(actingBotId ? { acting_bot_id: actingBotId } : {}),
       });
       return { ok: true, data: mapSessionListItem(resp.data!) };
     } catch (err) {
@@ -111,6 +116,12 @@ export const sessionService = {
     );
     if (!resp.ok) return [];
     const json = await resp.json().catch(() => null);
+    // raw-fetch 旁路打团队网关:未登录时网关放回 ACE 登录体(HTTP 200,绕过 httpClient),登记单飞跳转后返回空。
+    if (isAceLoginResponse(json)) {
+      const loginUrl = extractLoginUrl(json);
+      triggerAceLoginRedirect(loginUrl);
+      return [];
+    }
     const data = json?.data ?? json;
     const items = Array.isArray(data) ? data : data?.items ?? [];
     return (items as BcsSessionRaw[]).map((s) => mapBcsSessionItem(s, groupId));

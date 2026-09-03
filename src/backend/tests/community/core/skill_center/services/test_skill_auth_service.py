@@ -6,10 +6,18 @@ import pytest
 from agentclaw.community.core.skill_center.services.skill_auth_service import SkillAuthService
 
 
-def _make_svc(*, skill_repo=None, skill_set_repo=None, mcp_center=None, mcp_auth_service=None):
+def _make_svc(
+    *,
+    skill_repo=None,
+    skill_set_repo=None,
+    skill_version_repo=None,
+    mcp_center=None,
+    mcp_auth_service=None,
+):
     return SkillAuthService(
         skill_repo=skill_repo or MagicMock(),
         skill_set_repo=skill_set_repo or MagicMock(),
+        skill_version_repo=skill_version_repo or MagicMock(),
         mcp_center=mcp_center or MagicMock(),
         mcp_auth_service=mcp_auth_service or MagicMock(),
     )
@@ -71,6 +79,37 @@ class TestCheckSkillPermission:
         result = svc.check_skill_permission(user_id="user1", skill_id="1")
         assert result["authorized"] is True
         assert result["mcp_details"] == {}
+
+    def test_center_skill_reads_latest_published_version_dependencies(self):
+        skill_repo = MagicMock()
+        skill_repo.get_by_id.return_value = {
+            "id": "7",
+            "name": "center-skill",
+            "git_path": "center://center-skill",
+            "mcp_dependencies": [],
+        }
+        versions = MagicMock()
+        versions.list_latest_published.return_value = (
+            {
+                "metadata_json": (
+                    '{"mcp_dependencies":[{"code":"mcp.center"}]}'
+                )
+            },
+        )
+        auth = MagicMock()
+        auth.check_mcp_permission_detail.return_value = {"has_permission": True}
+
+        result = _make_svc(
+            skill_repo=skill_repo,
+            skill_version_repo=versions,
+            mcp_auth_service=auth,
+        ).check_skill_permission("owner", "7")
+
+        assert result["authorized"] is True
+        assert result["mcp_details"] == {"mcp.center": {"has_permission": True}}
+        versions.list_latest_published.assert_called_once_with(
+            env="dev", skill_ids=(7,)
+        )
 
     def test_all_authorized(self):
         skill_repo = MagicMock()

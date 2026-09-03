@@ -68,7 +68,7 @@ class ClawBotService(BotService):
     Different sessionKeys can be multiplexed on the same connection.
     Same sessionKey concurrent requests will be rejected by AsyncChatClient.
 
-    binding_info is required (resolved by BotBindingResolver upstream).
+    binding_info is required (resolved via BotServicePlugin.get_binding upstream).
     """
 
     # ── 构造 ─────────────────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ class ClawBotService(BotService):
             bot_id: Bot identifier in format "real_bot_id:entity_id".
             session_id: Optional session identifier to reuse.
             metadata: Optional session metadata.
-            binding_info: Cached binding info (required, use BotBindingResolver).
+            binding_info: Cached binding info (required, resolved via BotServicePlugin.get_binding).
             context: Optional request context.
             run_id: Optional run ID for correlating session with run record.
 
@@ -134,7 +134,7 @@ class ClawBotService(BotService):
         if binding_info is None:
             raise BotServiceError(
                 "ClawBotService requires binding_info to create session. "
-                "Use BotBindingResolver to resolve binding info before calling create_session."
+                "Resolve binding info via BotServicePlugin.get_binding before calling create_session."
             )
 
         sandbox_id = binding_info.sandbox_id

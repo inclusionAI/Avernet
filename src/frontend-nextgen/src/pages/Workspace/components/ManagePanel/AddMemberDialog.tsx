@@ -60,7 +60,7 @@ export function AddMemberDialog({ open, existingIds, activeIdentity, onClose, on
     <Modal open={open} onOpenChange={(next) => !submitting && !next && onClose()}>
       <ModalContent size="lg" closeLabel="关闭添加成员弹窗">
         <ModalHeader>
-          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-[var(--color-fg)]">
+          <ModalTitle className="m-0 flex items-center gap-2 text-base font-semibold text-foreground">
             添加成员
             <Badge tone="neutral">已选 {selectedIds.length}</Badge>
           </ModalTitle>

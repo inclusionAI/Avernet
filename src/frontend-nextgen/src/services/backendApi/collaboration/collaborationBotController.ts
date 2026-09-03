@@ -19,17 +19,25 @@ export interface CollaborationBotDto {
   status?: 'online' | 'hidden' | 'offline';
   reachability?: 'reachable' | 'unreachable';
   visibility?: 'public' | 'protected' | 'private';
-  /** 任务认领开关（每天自动扫描任务广场并认领可执行任务）。 */
-  task_claim_mode?: boolean;
-  /** Dream Model 开关（每天基于用户数据挖掘潜在任务并推送）。 */
-  task_dream_mode?: boolean;
+  user_visibility?: 'public' | 'protected' | 'private';
   agent_code?: string;
   created_at?: number;
   created_by?: string;
   env?: string;
+  /** Bot 类型原始枚举值，与通用 /openapi/v1/bots 目录接口保持一致。 */
+  bot_type?: string;
   provider?: { name: string; provider_id: string };
+  /** 由通用 /openapi/v1/bots 目录接口补充的引擎标识。 */
+  engine?: string;
   updated_at?: number;
   descriptor?: CollaborationBotDescriptorDto;
+  /** 由已发布的 Bot 属性接口/目录透传；缺失时不得用默认值伪造真实策略。 */
+  friend_ext?: Record<string, unknown>;
+  friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
+  /** 任务认领开关：开启后该 Bot 可被任务派发消费；由 mine 接口回填。 */
+  task_claim_mode?: boolean;
+  /** 任务发现(Dream)开关：任务发现模块专用，与任务执行阶段无关。 */
+  task_dream_mode?: boolean;
 }
 
 export interface CollaborationFriendshipDto {
@@ -60,11 +68,14 @@ export interface CollaborationBotPatchBody {
   name?: string;
   visibility?: 'public' | 'protected' | 'private';
   status?: 'online' | 'hidden';
-  /** 任务认领开关。 */
-  task_claim_mode?: boolean;
-  /** Dream Model 开关。 */
-  task_dream_mode?: boolean;
   descriptor?: Partial<CollaborationBotDescriptorDto>;
+  /** 好友相关扩展对象为整体替换语义，调用方必须先合并当前值。 */
+  friend_ext?: Record<string, unknown>;
+  friend_check_in_strategy?: 'OPEN' | 'APPROVAL' | 'DEPT_FREE';
+  /** 更新任务认领开关（true=授权并参与任务派发消费）。 */
+  task_claim_mode?: boolean;
+  /** 更新任务发现(Dream)开关。 */
+  task_dream_mode?: boolean;
 }
 
 export interface ListMyBotsParams {
@@ -101,7 +112,7 @@ export async function listMyBots(params: ListMyBotsParams = {}, signal?: AbortSi
   });
 }
 
-// 更新当前用户管理的 Bot 协作字段；仅维护 Gateway Swagger 已确认的 PATCH DTO。
+// 更新当前用户管理的 Bot 协作字段；好友策略字段来自已部署 Avernet owner-scoped PATCH DTO。
 export function patchCollaborationBot(bot_id: string, body: CollaborationBotPatchBody, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<CollaborationBotDto>>(COLLABORATION_BOT_ENDPOINTS.detail(bot_id), {
     method: 'PATCH',
@@ -121,6 +132,7 @@ export function queryCollaborationBots(body: QueryCollaborationBotsRequest | Que
   return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationBotDto>>>(COLLABORATION_BOT_ENDPOINTS.query, {
     method: 'POST',
     data: body,
+    injectUserId: false,
   });
 }
 
@@ -133,10 +145,10 @@ export function listBotFriendships(bot_id: string, params: ListBotFriendshipsPar
 }
 
 // 按视角 Bot 查询可协作候选 Bot；purpose=collaboration 时包含公开 Bot 与已接受好友。
-export function listBotCandidates(bot_id: string, params: ListBotCandidatesParams = {}) {
+export function listBotCandidates(bot_id: string, params: ListBotCandidatesParams = {}, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BackendApiPage<CollaborationCandidateDto>>>(
     COLLABORATION_BOT_ENDPOINTS.candidates(bot_id),
-    { method: 'GET', params: params as Record<string, unknown> },
+    { method: 'GET', params: params as Record<string, unknown>, injectUserId: false, signal },
   );
 }
 

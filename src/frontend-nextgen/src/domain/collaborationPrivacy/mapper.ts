@@ -38,12 +38,14 @@ export interface CollaborationPrivacyOverviewTransport {
 const scopes: PublicScope[] = ['none', 'all', 'restricted'];
 const approvalModes: FriendApprovalMode[] = ['none', 'all', 'partial_exempt'];
 const statuses: CollaborationStatus[] = ['online', 'hidden', 'offline'];
-function asScope(value?: string): PublicScope { return scopes.includes(value as PublicScope) ? value as PublicScope : 'none'; }
+function asScope(value?: string): PublicScope {
+  return scopes.includes(value as PublicScope) ? (value as PublicScope) : 'none';
+}
 function asApprovalMode(value?: string): FriendApprovalMode {
-  return approvalModes.includes(value as FriendApprovalMode) ? value as FriendApprovalMode : 'none';
+  return approvalModes.includes(value as FriendApprovalMode) ? (value as FriendApprovalMode) : 'none';
 }
 function asStatus(value?: string): CollaborationStatus {
-  return statuses.includes(value as CollaborationStatus) ? value as CollaborationStatus : 'offline';
+  return statuses.includes(value as CollaborationStatus) ? (value as CollaborationStatus) : 'offline';
 }
 function required(value: string | undefined, label: string): string {
   if (!value?.trim()) throw new Error(`Mock 数据缺少 ${label}`);
@@ -93,6 +95,7 @@ export function mapOverviewTransport(transport: CollaborationPrivacyOverviewTran
         collaborationStatus: asStatus(bot.collaboration_status),
         profilePublic: Boolean(bot.profile_public),
         taskClaimingEnabled: Boolean(bot.task_claiming_enabled),
+        taskClaimStatus: Boolean(bot.task_claiming_enabled) ? 'authorized' : 'unauthorized',
         dreamModelEnabled: Boolean(bot.dream_model_enabled),
         publication,
         pendingPublications,

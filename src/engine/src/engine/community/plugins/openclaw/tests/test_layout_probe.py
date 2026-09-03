@@ -86,6 +86,41 @@ def test_ready_requires_real_bridge_mount_and_readable_repo(tmp_path):
     }
     assert result.evidence["checks"]["pool_repo_mounted"] is True
     assert result.evidence["checks"]["legacy_repo_bridge_valid"] is True
+    assert result.evidence["supported_mapping_contract_versions"] == [
+        "skills-pool-mapping-v2"
+    ]
+    assert result.evidence["center_mount"] == {
+        "status": "NOT_READY",
+        "reason": "center_mount_missing",
+        "restart_required": True,
+    }
+
+
+def test_ready_advertises_v3_only_when_center_mount_is_ready(tmp_path):
+    home, _, _, pool_repo = _ready_home(tmp_path)
+    pool_center = home / ".openclaw/workspace/skills-pool/skill-center"
+    pool_center.mkdir()
+
+    result = inspect_runtime_layout(
+        engine="openclaw",
+        expected_contract_version=LAYOUT_CONTRACT_VERSION,
+        home=home,
+        repo_is_mounted=lambda path: path == pool_repo,
+        center_is_mounted=lambda path: path == pool_center,
+    )
+
+    assert result.status is RuntimeLayoutInspectionStatus.READY
+    assert result.evidence["supported_mapping_contract_versions"] == [
+        "skills-pool-mapping-v2",
+        "skills-pool-mapping-v3",
+    ]
+    assert result.evidence["checks"]["pool_center_mounted"] is True
+    assert result.evidence["checks"]["pool_center_readable"] is True
+    assert result.evidence["center_mount"] == {
+        "status": "READY",
+        "reason": None,
+        "restart_required": False,
+    }
 
 
 def test_active_marker_requires_direct_pool_mappings_and_absent_storage_entries(

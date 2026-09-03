@@ -12,6 +12,10 @@ export interface UseGroupSessionsResult {
   sessions: SessionView[];
   /** 多群展开展示使用：每个已加载群的会话（已按 search 过滤；收藏过滤在 GroupItem 按群独立处理）。 */
   sessionsByGroupId: Record<string, SessionView[]>;
+  hasMoreSessionsByGroupId: Record<string, boolean>;
+  isLoadingMoreSessionsByGroupId: Record<string, boolean>;
+  totalSessionsByGroupId: Record<string, number>;
+  loadMoreSessions: (groupId: string) => Promise<void>;
   isSessionsLoading: boolean;
   selectedSessionId: string | null;
   selectedSession: SessionView | null;
@@ -62,11 +66,17 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
   const activeIdentityId = useWorkspaceStore((s) => s.activeIdentityId);
 
   // 会话集合与加载/缓存机制委托内部子 Hook（本 Hook 聚焦编排与 CRUD）。
-  const { rawByGroupId, isLoading, applyMapUpdate, updateGroupSessions, reloadGroup } = useSessionMap(
-    groupId,
-    expandedGroupIds,
-    activeIdentityId,
-  );
+  const {
+    rawByGroupId,
+    isLoading,
+    applyMapUpdate,
+    updateGroupSessions,
+    reloadGroup,
+    hasMoreByGroupId,
+    isLoadingMoreByGroupId,
+    totalByGroupId,
+    loadMoreSessions,
+  } = useSessionMap(groupId, expandedGroupIds, activeIdentityId);
 
   // 会话成员详情补齐与 mode 更新(从本 Hook 拆出以控体积,详见 useSessionMemberSync)。
   // 注意：useSessionMemberSync 需要选中会话的 participants 长度作为依赖，
@@ -214,6 +224,10 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
   return {
     sessions,
     sessionsByGroupId,
+    hasMoreSessionsByGroupId: hasMoreByGroupId,
+    isLoadingMoreSessionsByGroupId: isLoadingMoreByGroupId,
+    totalSessionsByGroupId: totalByGroupId,
+    loadMoreSessions,
     isSessionsLoading: isLoading,
     selectedSessionId,
     selectedSession,

@@ -29,6 +29,9 @@ from agentclaw.community.core.service_bot.services.baas_service import BaasServi
 from agentclaw.community.core.skill_center.bot_runtime_projector_protocol import (
     BotRuntimeProjectorProtocol,
 )
+from agentclaw.community.core.skill_center.runtime_layout_probe_service_protocol import (
+    RuntimeLayoutProbeServiceProtocol,
+)
 from agentclaw.community.core.service_bot.services.deploy.producer import (
     DeployArtifactProducerRouter,
 )
@@ -198,6 +201,7 @@ class PublishFlowService(
         task_queue_service: TaskQueueService,
         publish_operation_repo: PublishOperationRepository,
         runtime_projector: BotRuntimeProjectorProtocol,
+        runtime_layout_probe: RuntimeLayoutProbeServiceProtocol,
     ):
         """Initialize the flow processing service.
 
@@ -287,6 +291,7 @@ class PublishFlowService(
             producer_router=producer_router,
             provider_behaviors=self._provider_behaviors,
             runtime_projector=runtime_projector,
+            runtime_layout_probe=runtime_layout_probe,
         )
 
         # Durable task queue: backend-driven advances (build+verify release, online

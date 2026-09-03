@@ -43,8 +43,8 @@ it('adds selected collaborator bots from the friend tab', async () => {
     />,
   );
 
-  expect(screen.getByRole('button', { name: '我的好友' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: '我的 Bot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '好友 Bot' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '已管理 Bot' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '可协作 Bot' })).toBeInTheDocument();
 
   fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));

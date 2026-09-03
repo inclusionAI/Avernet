@@ -713,10 +713,10 @@ def _template_bot(bot_id: str, row_id: int) -> dict:
 
 
 @pytest.mark.unit
-def test_page_slice_attaches_projected_template_config() -> None:
+def test_page_slice_attaches_template_config_verbatim() -> None:
     # Three template-backed bots, page_size=2 -> the port sees only the
-    # returned page's template-backed ids, and the stored ext is projected
-    # (token stripped) before it reaches the read model.
+    # returned page's template-backed ids, and the stored ext is attached
+    # verbatim (2026-09-01 passthrough decision — secrets echo to the owner).
     stub = _StubTemplatePort(
         {
             "b1": {"devflow_workflow": "w1", "token": "raw-secret"},
@@ -746,8 +746,8 @@ def test_page_slice_attaches_projected_template_config() -> None:
     assert len(stub.calls) == 1
     assert set(stub.calls[0]) == {"b1", "b2"}
     assert items[0].template_type == "applicationCoding"
-    assert items[0].template_config == {"devflow_workflow": "w1"}
-    assert items[1].template_config == {"template_key": "normalCC"}
+    assert items[0].template_config == {"devflow_workflow": "w1", "token": "raw-secret"}
+    assert items[1].template_config == {"template_key": "normalCC", "runtime": "codefuse"}
 
 
 @pytest.mark.unit

@@ -10,7 +10,7 @@ beforeEach(() => {
 });
 
 describe('botChatController', () => {
-  it('通过 bot scope 列出日志并显式透传 user_id', async () => {
+  it('通过 Gateway Bot scope 列出日志并显式透传 user_id', async () => {
     backendRequest.mockResolvedValue({ code: 200000, message: 'OK', data: { sessions: [] } } as never);
     await listBotChats('bot/a', { user_id: 'user-demo', owner_id: 'owner', session_key: 'agent:main' });
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/bots/bot%2Fa/chats', {

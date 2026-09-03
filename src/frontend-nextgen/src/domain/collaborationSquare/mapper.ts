@@ -10,6 +10,7 @@ import type {
 
 export interface PublicBotTransport {
   bot_id: string;
+  bot_uuid?: string;
   bot_name: string;
   owner_name: string;
   description?: string;
@@ -18,6 +19,7 @@ export interface PublicBotTransport {
 }
 export interface BotProfileTransport {
   bot_id: string;
+  bot_uuid?: string;
   bot_name: string;
   owner_name: string;
   description?: string;
@@ -66,9 +68,14 @@ export interface CollaborationBotTransport {
 
 export interface PublicBotCatalogTransport {
   bot_id?: string;
+  bot_uuid?: string;
+  entity_id?: string;
   description?: string;
   name?: string;
   owner_name?: string;
+  is_friend?: boolean;
+  /** 智能搜索 Discovery 返回的推荐理由；short_profile 用于卡片「Profile」行。 */
+  recommendation?: { short_profile?: string };
 }
 
 export interface CollaborationGroupDetailTransport {
@@ -101,6 +108,8 @@ export interface CollaborationGroupDetailTransport {
   member_list_visibility?: string;
   count_only?: boolean;
   can_create_session?: boolean;
+  /** 协作策略：chat / manager_worker / state_machine。公开群目录响应为顶层字段，兼容历史嵌套形态。 */
+  strategy?: string;
   collaboration?: { strategy?: string };
 }
 
@@ -123,7 +132,7 @@ function mapRelationshipStatus(value?: string): PublicBot['relationshipStatus'] 
 /** Map the confirmed public/catalog Bot DTOs into the page domain model. */
 export function mapCollaborationBotDto(value: CollaborationBotTransport): PublicBot {
   return {
-    id: nonEmpty(value.bot_id, value.bot_uuid),
+    id: nonEmpty(value.bot_uuid, value.bot_id),
     name: nonEmpty(value.name, value.bot_name) || '未命名 Bot',
     ownerName: nonEmpty(value.owner_name, value.owner?.name) || '未公开',
     description: nonEmpty(value.description, value.summary),
@@ -132,17 +141,35 @@ export function mapCollaborationBotDto(value: CollaborationBotTransport): Public
   };
 }
 
+/** Resolve the Bot actor id expected by the friend-connection endpoint. */
+export function resolveFriendRequestBotId(
+  value: Pick<PublicBotCatalogTransport, 'bot_id' | 'bot_uuid' | 'entity_id'>,
+): string {
+  const explicitBotUuid = value.bot_uuid?.trim();
+  if (explicitBotUuid) return explicitBotUuid;
+
+  const botId = value.bot_id?.trim() ?? '';
+  const entityId = value.entity_id?.trim() ?? '';
+  return botId && entityId ? `${botId}:${entityId}` : botId;
+}
+
 /** Map only the fields confirmed by the Bot Catalog Search contract. */
-export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport): PublicBot | null {
-  const id = value.bot_id?.trim() ?? '';
+export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerUserId?: string): PublicBot | null {
+  const id = value.bot_uuid?.trim() || value.bot_id?.trim() || '';
   if (!id) return null;
+  const friendRequestBotId = resolveFriendRequestBotId(value);
+  const shortProfile = value.recommendation?.short_profile?.trim() || undefined;
+  const isOwnedByViewer = Boolean(viewerUserId?.trim() && value.entity_id?.trim() === viewerUserId.trim());
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
     ownerName: value.owner_name?.trim() || '未公开',
     description: value.description?.trim() ?? '',
     capabilities: [],
-    relationshipStatus: 'none',
+    relationshipStatus: value.is_friend === true ? 'friend' : 'none',
+    ...(isOwnedByViewer ? { isOwnedByViewer: true } : {}),
+    ...(friendRequestBotId && friendRequestBotId !== id ? { friendRequestBotId } : {}),
+    ...(shortProfile ? { shortProfile } : {}),
   };
 }
 
@@ -156,15 +183,16 @@ export function mapPublicGroupCatalogDto(value: CollaborationGroupDetailTranspor
   const ownerUser = participants.find(
     (item) => item.actor_kind === 'human' && item.actor_id === value.originator_actor_id,
   );
-  const strategy = value.collaboration?.strategy;
+  const strategy = value.strategy ?? value.collaboration?.strategy;
   const typeLabel =
-    strategy === 'manager_worker' ? '主从协作群' : strategy === 'state_machine' ? '流程协作群' : '自由协作群';
+    strategy === 'manager_worker' ? '任务协作' : strategy === 'state_machine' ? '自定义协同' : '自由聊天';
   const memberCount = value.participant_count ?? value.member_count ?? participants.length;
   return {
     id,
     name: nonEmpty(value.name, value.group_name) || '未命名协作群',
     ownerBotName: nonEmpty(ownerBot?.name, value.owner_bot_name) || '未公开',
     ownerUserName: nonEmpty(ownerUser?.name, value.owner_user_name) || '未公开',
+    driverBotUuid: value.driver_bot_uuid ?? '',
     typeLabel,
     memberCount: Number.isFinite(memberCount) ? Math.max(0, memberCount) : 0,
     goal: nonEmpty(value.goal, value.context),
@@ -243,7 +271,7 @@ export function mapBotTransport(value: PublicBotTransport): PublicBot {
 
 export function mapBotProfileTransport(value: BotProfileTransport): PublicBotProfile {
   return {
-    id: value.bot_id,
+    id: nonEmpty(value.bot_uuid, value.bot_id),
     name: value.bot_name,
     ownerName: value.owner_name,
     description: value.description ?? '',

@@ -10,10 +10,11 @@ import type { DagNodeView, TaskNodeView, TaskView } from './types';
 
 export const TaskProgressTab: React.FC<{
   task: TaskView;
+  userId?: string;
   onOpenSubTask?: (subTaskId: string) => void;
   /** 打开群会话视图（左侧并列下钻面板） */
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ task, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ task, userId, onOpenSubTask, onOpenGroupSession }) => {
   const [view, setView] = useState<'node' | 'dag'>('node');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -74,6 +75,8 @@ export const TaskProgressTab: React.FC<{
         {view === 'node' ? (
           <NodeListView
             nodes={task.nodes}
+            ownerBotId={task.ownerBotId}
+            userId={userId}
             onViewNodeDetail={openDetail}
             onOpenSubTask={onOpenSubTask}
             onOpenGroupSession={onOpenGroupSession}

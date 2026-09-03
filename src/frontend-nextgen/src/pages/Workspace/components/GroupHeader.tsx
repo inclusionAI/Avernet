@@ -50,7 +50,6 @@ export function GroupHeader({
   supportState,
   connectionStatus,
   onReconnect,
-  canManageGroup,
   activePanel,
   onTogglePanel,
   onRequestShareGroup,
@@ -80,19 +79,19 @@ export function GroupHeader({
 
   return (
     <>
-      <header className="flex h-16 items-center gap-3 border-b border-[var(--color-border)] bg-white px-5">
+      <header className="flex h-16 items-center gap-3 border-b border-border bg-card px-5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h2 className="m-0 truncate text-sm font-semibold text-[var(--color-fg)]">
+            <h2 className="m-0 truncate text-sm font-semibold text-foreground">
               {selectedGroup?.name ?? '未选择协作群'}
             </h2>
             <Badge tone={copy.tone}>{copy.label}</Badge>
             {selectedSession && (
-              <span className="truncate text-xs text-[var(--color-muted)]"># {selectedSession.title}</span>
+              <span className="truncate text-xs text-muted-foreground"># {selectedSession.title}</span>
             )}
           </div>
-          <p className="m-0 mt-0.5 truncate text-xs text-[var(--color-muted)]">
-            {memberCount > 0 ? `${memberCount} 位成员` : '协作群 · 群组对话'}
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
+            {memberCount > 0 ? `${memberCount} 个成员` : '协作群 · 群组对话'}
           </p>
         </div>
 
@@ -125,7 +124,8 @@ export function GroupHeader({
             />
           )}
           {/* 管理按钮：选中会话时进入「会话管理」(对会话成员可见,与侧栏会话「…」菜单一致);
-              未选会话时回退「协作群管理」(仅群管理者可见)。避免选中会话后仍误开群编辑面板。 */}
+              未选会话时回退「协作群管理」——群详情（含权限判定）在打开管理面板时按需拉取，
+              非管理者打开后展示只读视图，避免选中群即触发 GET /groups/{id} 详情请求。 */}
           {selectedSession && selectedGroup ? (
             <IconButton
               label={activePanel === 'sessionManage' ? '关闭会话管理' : '管理会话'}
@@ -134,7 +134,7 @@ export function GroupHeader({
               variant={activePanel === 'sessionManage' ? 'primary' : 'ghost'}
               onClick={() => onTogglePanel(activePanel === 'sessionManage' ? 'none' : 'sessionManage')}
             />
-          ) : canManageGroup.allowed && selectedGroup ? (
+          ) : selectedGroup ? (
             <IconButton
               label={activePanel === 'manage' ? '关闭管理面板' : '管理协作群'}
               icon={<Settings2 className="h-4 w-4" aria-hidden />}

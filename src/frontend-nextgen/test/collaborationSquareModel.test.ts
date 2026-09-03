@@ -2,10 +2,19 @@ import {
   filterPublicBots,
   filterPublicGroups,
   mapBotProfileTransport,
+  mapCollaborationBotDto,
   mapGroupMembersTransport,
+  mapPublicBotCatalogDto,
   mapPublicGroupCatalogDto,
   parseSquareDeepLink,
+  resolveFriendRequestBotId,
 } from '../src/domain/collaborationSquare/mapper';
+import {
+  TASK_STATUS_CONFIG,
+  getPublicTaskStatusPresentation,
+  type PlazaTaskStatus,
+  type SquareResource,
+} from '../src/domain/collaborationSquare/types';
 
 const bots = [
   {
@@ -71,6 +80,89 @@ describe('collaboration square model', () => {
     expect(JSON.stringify(members)).not.toContain('prod');
   });
 
+  test('通用协作 Bot 与画像 Mapper 优先保留后端 Bot UUID，缺失时回退 Bot ID', () => {
+    expect(mapCollaborationBotDto({ bot_id: '20260825_mbu0ey8f', bot_uuid: '20260825_mbu0ey8f:447147' })).toEqual(
+      expect.objectContaining({ id: '20260825_mbu0ey8f:447147' }),
+    );
+    expect(
+      mapBotProfileTransport({ bot_id: 'default', bot_uuid: 'default:447147', bot_name: '助手', owner_name: 'Owner' }),
+    ).toEqual(expect.objectContaining({ id: 'default:447147' }));
+    expect(mapBotProfileTransport({ bot_id: 'default', bot_name: '助手', owner_name: 'Owner' }).id).toBe('default');
+  });
+
+  test('Bot Catalog 使用 bot_uuid 作为页面与操作 canonical id，并消费 Search 返回的 is_friend', () => {
+    expect(
+      resolveFriendRequestBotId({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147', entity_id: '366656' }),
+    ).toBe('20260825_mbu0ey8f:447147');
+    expect(resolveFriendRequestBotId({ bot_id: 'default', entity_id: '366656' })).toBe('default:366656');
+    expect(resolveFriendRequestBotId({ bot_id: 'default' })).toBe('default');
+    expect(
+      mapPublicBotCatalogDto({
+        bot_id: 'default',
+        bot_uuid: '20260825_mbu0ey8f:447147',
+        entity_id: '366656',
+        is_friend: true,
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        id: '20260825_mbu0ey8f:447147',
+        relationshipStatus: 'friend',
+      }),
+    );
+
+    expect(
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147', is_friend: false }),
+    ).toEqual(expect.objectContaining({ relationshipStatus: 'none' }));
+
+    // 智能搜索 Discovery 的 recommendation.short_profile 映射为卡片 shortProfile。
+    expect(
+      mapPublicBotCatalogDto({
+        bot_id: 'default',
+        bot_uuid: '20260825_mbu0ey8f:447147',
+        recommendation: { short_profile: '用于测试目的的专用 Bot' },
+      }),
+    ).toEqual(expect.objectContaining({ shortProfile: '用于测试目的的专用 Bot' }));
+    expect(
+      mapPublicBotCatalogDto({ bot_id: 'default', bot_uuid: '20260825_mbu0ey8f:447147' })?.shortProfile,
+    ).toBeUndefined();
+
+    expect(
+      mapPublicBotCatalogDto({
+        bot_id: '20260410_kt9ermvn',
+        entity_id: '431368',
+        name: '公开 Bot',
+        owner_name: 'Owner',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        id: '20260410_kt9ermvn',
+        friendRequestBotId: '20260410_kt9ermvn:431368',
+      }),
+    );
+
+    expect(
+      mapPublicBotCatalogDto(
+        {
+          bot_id: 'owned-bot',
+          entity_id: '151220',
+          name: '我的公开 Bot',
+          owner_name: '当前用户',
+          is_friend: false,
+        },
+        ' 151220 ',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        id: 'owned-bot',
+        relationshipStatus: 'none',
+        isOwnedByViewer: true,
+      }),
+    );
+    const otherBot = mapPublicBotCatalogDto({ bot_id: 'other-bot', entity_id: '151221', is_friend: false }, '151220');
+    expect(otherBot).toEqual(expect.objectContaining({ relationshipStatus: 'none' }));
+    expect(otherBot).not.toHaveProperty('isOwnedByViewer');
+  });
+
   test('公开群目录 Mapper 丢弃非公开、非 normal 和无 ID 的条目', () => {
     expect(mapPublicGroupCatalogDto({ group_id: '', visibility: 'public', kind: 'normal' })).toBeNull();
     expect(mapPublicGroupCatalogDto({ group_id: 'private', visibility: 'private', kind: 'normal' })).toBeNull();
@@ -97,7 +189,7 @@ describe('collaboration square model', () => {
       expect.objectContaining({
         ownerBotName: '未公开',
         ownerUserName: '未公开',
-        typeLabel: '主从协作群',
+        typeLabel: '任务协作',
         memberListVisibility: 'count_only',
         canCreateSession: true,
       }),
@@ -106,9 +198,56 @@ describe('collaboration square model', () => {
     expect(JSON.stringify(group)).not.toContain('未知主理者');
   });
 
+  test('typeLabel 从顶层 strategy 字段映射：chat→自由聊天 / manager_worker→任务协作 / state_machine→自定义协同', () => {
+    const base = {
+      group_id: 'group-1',
+      name: '公开协作群',
+      visibility: 'public',
+      kind: 'normal',
+      status: 'active',
+    };
+    expect(mapPublicGroupCatalogDto({ ...base, strategy: 'chat' })?.typeLabel).toBe('自由聊天');
+    expect(mapPublicGroupCatalogDto({ ...base, strategy: 'manager_worker' })?.typeLabel).toBe('任务协作');
+    expect(mapPublicGroupCatalogDto({ ...base, strategy: 'state_machine' })?.typeLabel).toBe('自定义协同');
+    // 缺省 strategy → 默认自由聊天
+    expect(mapPublicGroupCatalogDto({ ...base })?.typeLabel).toBe('自由聊天');
+    // 顶层 strategy 优先于嵌套 collaboration.strategy
+    expect(
+      mapPublicGroupCatalogDto({ ...base, strategy: 'state_machine', collaboration: { strategy: 'chat' } })?.typeLabel,
+    ).toBe('自定义协同');
+  });
+
   test('深链只接受当前资源类型和非空 id', () => {
     expect(parseSquareDeepLink('?resource=bot&id=b1', 'bot')).toEqual({ resource: 'bot', id: 'b1' });
     expect(parseSquareDeepLink('?resource=group&id=g1', 'bot')).toBeNull();
     expect(parseSquareDeepLink('?resource=bot&id=', 'bot')).toBeNull();
+  });
+});
+
+describe('collaboration square task plaza model', () => {
+  test('SquareResource 覆盖 bot/group/task 三态', () => {
+    // 编译期断言：联合类型必须接受 'task'，否则 tsc 报错。
+    const resources: SquareResource[] = ['bot', 'group', 'task'];
+    expect(resources).toContain('task');
+  });
+
+  test('PlazaTaskStatus 为四种广场只读状态', () => {
+    // 编译期断言：PlazaTaskStatus 必须恰好是这四个值。
+    const statuses: PlazaTaskStatus[] = ['pending_claim', 'claimed', 'reviewing', 'completed'];
+    expect(Object.keys(TASK_STATUS_CONFIG).sort()).toEqual([...statuses].sort());
+  });
+
+  test('TASK_STATUS_CONFIG 四态文案与 tone 固定映射', () => {
+    expect(TASK_STATUS_CONFIG.pending_claim).toEqual({ label: '待认领', tone: 'warning' });
+    expect(TASK_STATUS_CONFIG.claimed).toEqual({ label: '已认领', tone: 'brand' });
+    expect(TASK_STATUS_CONFIG.reviewing).toEqual({ label: '待验收', tone: 'info' });
+    expect(TASK_STATUS_CONFIG.completed).toEqual({ label: '已完成', tone: 'success' });
+  });
+
+  test('getPublicTaskStatusPresentation 返回与 TASK_STATUS_CONFIG 一致的 label/tone', () => {
+    const statuses: PlazaTaskStatus[] = ['pending_claim', 'claimed', 'reviewing', 'completed'];
+    for (const status of statuses) {
+      expect(getPublicTaskStatusPresentation(status)).toEqual(TASK_STATUS_CONFIG[status]);
+    }
   });
 });

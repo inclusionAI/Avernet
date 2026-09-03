@@ -129,7 +129,7 @@ class BotWebSocketClient:
         self,
         timeout: float = 10.0,
         disable_ssl_verify: bool = True,
-        open_timeout: float = 5.0,
+        open_timeout: float = 10.0,
         max_size: int = 10 * 2**20,
     ) -> dict[str, Any]:
         """连接到服务器并完成握手

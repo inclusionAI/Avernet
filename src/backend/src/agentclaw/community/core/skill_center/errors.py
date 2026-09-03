@@ -7,6 +7,10 @@ class SkillOfflineError(Exception):
     """A new consumption write addressed a recoverably Offline Skill."""
 
 
+class SkillNotOfflineError(Exception):
+    """A Version Copy command requires the source Skill to be Offline."""
+
+
 class SkillOfflineBlockedError(Exception):
     """Offline could not prove that every destructive blocker is absent."""
 

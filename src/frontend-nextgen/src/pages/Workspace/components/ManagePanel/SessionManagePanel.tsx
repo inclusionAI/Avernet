@@ -31,10 +31,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
-  // 会话级权限判断：driver/manager 可删除会话，其他成员可退出会话。
-  const isSessionDriverOrManager = session.participants.some(
-    (p) => p.actorId === activeIdentity?.id && (p.role === 'driver' || p.role === 'manager'),
-  );
+  // 会话级权限判断：driver/manager 或会话创建者可删除会话，其他成员可退出会话。
+  // 参考 open-claw：isCreator（createdBy === 当前身份）|| isDriver/Manager（participants role）。
+  const isCreator = !!session.createdBy && !!activeIdentity && session.createdBy === activeIdentity.id;
+  const isSessionDriverOrManager =
+    isCreator ||
+    session.participants.some((p) => p.actorId === activeIdentity?.id && (p.role === 'driver' || p.role === 'manager'));
 
   const handleAddMany = async (actorIds: string[]) => {
     let success = 0;
@@ -59,7 +61,7 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
   };
 
   return (
-    <aside className="flex h-full flex-col bg-white">
+    <aside className="flex h-full flex-col bg-background">
       <ManagePanelHeader
         title="会话管理"
         description="查看会话基础信息与参与成员，维护当前会话的协作范围。"
@@ -68,17 +70,17 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
         onClose={onClose}
       />
 
-      <div className="app-scrollbar flex-1 overflow-y-auto p-5">
-        <div className="space-y-4">
-          <Card className="rounded-2xl bg-white p-4 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-2">
+      <div className="app-scrollbar flex-1 overflow-y-auto p-4">
+        <div className="space-y-3">
+          <Card className="rounded-lg bg-card p-3 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-2">
               <Badge tone="primary">{session.kind === 'service_invocation' ? '服务调用' : '聊天会话'}</Badge>
               <Badge tone={session.status === 'running' ? 'success' : 'neutral'}>
                 {session.status === 'running' ? '进行中' : '已完成'}
               </Badge>
             </div>
             <label className="block">
-              <span className="mb-1.5 block text-xs text-[var(--color-muted)]">会话标题</span>
+              <span className="mb-1.5 block text-xs text-muted-foreground">会话标题</span>
               <div className="flex gap-2">
                 <Input value={title} onChange={(event) => setTitle(event.target.value)} />
                 <Button variant="secondary" size="sm" onClick={handleSaveTitle}>
@@ -86,16 +88,16 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                 </Button>
               </div>
             </label>
-            <div className="mt-4 rounded-xl bg-[var(--color-panel-strong)] px-3 py-2.5">
-              <p className="m-0 text-[11px] font-medium text-[var(--color-muted)]">成员数量</p>
-              <p className="m-0 mt-1 text-sm font-medium text-[var(--color-fg)]">
+            <div className="mt-3 rounded-lg bg-muted px-3 py-2">
+              <p className="m-0 text-[11px] font-medium text-muted-foreground">成员数量</p>
+              <p className="m-0 mt-1 text-sm font-medium text-foreground">
                 {session.participantCount || session.participants.length}
               </p>
             </div>
           </Card>
 
-          <Card className="rounded-2xl bg-white p-4 shadow-sm">
-            <p className="m-0 mb-3 text-sm font-semibold text-[var(--color-fg)]">会话成员管理</p>
+          <Card className="rounded-lg bg-card p-3 shadow-sm">
+            <p className="m-0 mb-2 text-sm font-semibold text-foreground">会话成员管理</p>
             <MemberList
               participants={session.participants}
               participantCount={session.participantCount}
@@ -109,18 +111,18 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
             />
           </Card>
 
-          <Card className="rounded-2xl bg-white p-4 shadow-sm">
-            <p className="m-0 mb-3 text-sm font-semibold text-[var(--color-fg)]">操作</p>
-            <div className="flex flex-col gap-3">
+          <Card className="rounded-lg bg-card p-3 shadow-sm">
+            <p className="m-0 mb-2 text-sm font-semibold text-foreground">操作</p>
+            <div className="flex flex-col gap-2">
               <Button
                 variant="ghost"
                 onClick={() => void handleShare()}
-                className="h-auto w-full justify-start rounded-xl border border-[var(--color-primary)]/25 bg-white px-4 py-2.5 text-left text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)] hover:text-[var(--color-primary)]"
+                className="h-auto w-full justify-start rounded-lg border border-primary/25 bg-background px-3 py-2 text-left text-sm text-primary hover:bg-primary/10 hover:text-primary"
               >
                 <LinkIcon className="h-4 w-4 shrink-0" />
                 <span className="flex flex-col items-start">
                   <span>分享会话</span>
-                  <span className="text-[11px] font-normal text-[var(--color-muted)]">
+                  <span className="text-[11px] font-normal text-muted-foreground">
                     生成会话邀请链接，供成员通过链接加入
                   </span>
                 </span>
@@ -135,14 +137,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                 >
                   <Button
                     variant="ghost"
-                    className="h-auto w-full justify-start rounded-xl border border-[var(--color-error-soft)] bg-white px-4 py-2.5 text-left text-sm text-[var(--color-error)] hover:bg-[var(--color-error-soft)]/60"
+                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">
                       <span>删除会话</span>
-                      <span className="text-[11px] font-normal text-[var(--color-muted)]">
-                        此操作不可恢复，请谨慎操作
-                      </span>
+                      <span className="text-[11px] font-normal text-muted-foreground">此操作不可恢复，请谨慎操作</span>
                     </span>
                   </Button>
                 </ConfirmDialog>
@@ -161,14 +161,12 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
                   <Button
                     variant="ghost"
                     disabled={!activeIdentity}
-                    className="h-auto w-full justify-start rounded-xl border border-[var(--color-error-soft)] bg-white px-4 py-2.5 text-left text-sm text-[var(--color-error)] hover:bg-[var(--color-error-soft)]/60"
+                    className="h-auto w-full justify-start rounded-lg border border-destructive/30 bg-background px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
                   >
                     <LogOut className="h-4 w-4 shrink-0" />
                     <span className="flex flex-col items-start">
                       <span>退出会话</span>
-                      <span className="text-[11px] font-normal text-[var(--color-muted)]">
-                        退出后将不再接收该会话消息
-                      </span>
+                      <span className="text-[11px] font-normal text-muted-foreground">退出后将不再接收该会话消息</span>
                     </span>
                   </Button>
                 </ConfirmDialog>

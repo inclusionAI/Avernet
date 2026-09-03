@@ -48,7 +48,8 @@ export const NODE_STATUS_TONES: Record<string, NodeStatusTone> = {
   running: { stroke: C.warning, fill: '#FFF7E8' },
   failed: { stroke: C.danger, fill: '#FFECE8' },
   pending: { stroke: C.textMuted, fill: '#F2F3F5' },
-  skipped: { stroke: C.border, fill: '#F7F8FA' },
+  hung: { stroke: C.primary, fill: C.primaryBg },
+  cancelled: { stroke: C.border, fill: '#F7F8FA' },
 };
 
 /** 任务类型 / 来源 label 映射 */

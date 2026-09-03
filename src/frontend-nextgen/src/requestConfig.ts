@@ -1,15 +1,114 @@
 import type { RuntimeRequestConfig } from '@/adapters/request';
 import { defaultRequestAdapter } from '@/adapters/request';
+import { isEnvelopeFailure } from '@/services/backendApi/types';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { getPlatform } from '@/utils/platform';
-import { extractErrorMessage, formatApiPath, normalizeRequestError } from '@/utils/requestErrorHandler';
+import {
+  buildToastKey,
+  extractErrorMessage,
+  extractFriendlyErrorMessage,
+  formatApiPath,
+  getErrorStatus,
+} from '@/utils/requestErrorHandler';
 import type { RequestConfig } from '@umijs/max';
 
 export interface TeamClawRequestConfig extends RuntimeRequestConfig {
   skipErrorHandler?: boolean;
+  /** 操作语义标签,参与 toastKey 去重键组成(同通道 B `backendRequest`)。 */
+  operation?: string;
 }
 
-function isBusinessFailure(data: unknown): data is { success: false } {
-  return typeof data === 'object' && data !== null && (data as { success?: unknown }).success === false;
+/**
+ * 通道 A(umi request)协议层抛出的标准化失败错误,挂去重键与 alreadyHandled,供下游守卫去重。
+ * 与通道 B 的 `BackendRequestError` 同构(都有 message/apiPath/toastKey/alreadyHandled),
+ * 使 Hook 的 `safeReportError(err)` 可对两通道错误统一处理。
+ */
+export class RequestProtocolError extends Error {
+  status?: number;
+  apiPath: string;
+  toastKey: string;
+  alreadyHandled: true;
+  data?: unknown;
+
+  constructor(message: string, options: { status?: number; apiPath: string; toastKey: string; data?: unknown }) {
+    super(message);
+    this.name = 'RequestProtocolError';
+    this.status = options.status;
+    this.apiPath = options.apiPath;
+    this.toastKey = options.toastKey;
+    this.data = options.data;
+    this.alreadyHandled = true;
+  }
+}
+
+interface ReportFailureInput {
+  apiPath: string;
+  message: string;
+  operation?: string;
+  status?: number;
+  data?: unknown;
+}
+
+/**
+ * 投递默认提示(`errorNotifyStore.enqueue`)+ 抛 `RequestProtocolError`(挂 toastKey/alreadyHandled)。
+ * 守分层:不直接 toast(由顶层观察者 `useErrorNotifyObserver` 消费);与通道 B 一致仅 enqueue 上抛。
+ */
+export function reportProtocolFailure(input: ReportFailureInput): never {
+  const toastKey = buildToastKey({ apiPath: input.apiPath, operation: input.operation, message: input.message });
+  useErrorNotifyStore.getState().enqueue({
+    toastKey,
+    message: input.message,
+    apiPath: input.apiPath,
+    operation: input.operation,
+  });
+  throw new RequestProtocolError(input.message, {
+    status: input.status,
+    apiPath: input.apiPath,
+    toastKey,
+    data: input.data,
+  });
+}
+
+/**
+ * 响应拦截器:HTTP 2xx 但业务失败(`code` 信封判定)→ 投递默认提示并抛错(**reject**),不再静默 resolve。
+ *
+ * 语义依据 umi-request(axios):2xx 才进 responseInterceptor;此处抛错会 reject 并路由到 `teamclawErrorHandler`
+ * (后者检测 `RequestProtocolError` 不重复投递)。`skipErrorHandler` 透传不处理(调用方自管)。
+ */
+export function teamclawResponseInterceptor(response: any): any {
+  const config = response?.config ?? {};
+  if (config.skipErrorHandler) return response;
+  if (!isEnvelopeFailure(response?.data)) return response;
+  const apiPath = formatApiPath(config.url);
+  const message = extractErrorMessage(response.data, '请求失败');
+  reportProtocolFailure({
+    apiPath,
+    message,
+    operation: config.operation,
+    status: response?.status,
+    data: response?.data,
+  });
+}
+
+/**
+ * 错误处理器:HTTP/网络错误(及拦截器抛出的业务失败)的统一收口。
+ * - 已由拦截器报告的 `RequestProtocolError`:不重复投递,原样上抛(保持 reject)。
+ * - 原始 HTTP/网络错误:投递默认提示 + 上抛 `RequestProtocolError`(修正既有"裸 return 即静默吞没")。
+ * - `skipErrorHandler`:不投递不抛错,交 umi 以原 error reject(调用方自管)。
+ */
+export function teamclawErrorHandler(error: unknown, opts?: { skipErrorHandler?: boolean }): void {
+  if (opts?.skipErrorHandler) return;
+  if (error instanceof RequestProtocolError) throw error; // 已报告:不重复投递。
+  const config = (error as { config?: Record<string, unknown> })?.config ?? {};
+  const requestUrl = (config.url as string | undefined) ?? (error as { url?: string })?.url;
+  const apiPath = formatApiPath(requestUrl);
+  reportProtocolFailure({
+    apiPath,
+    message: extractFriendlyErrorMessage(error, '请求失败'),
+    operation: config.operation as string | undefined,
+    status: getErrorStatus(error),
+    data: (error as { response?: { data?: unknown } })?.response?.data,
+  });
 }
 
 export const request: RequestConfig = {
@@ -25,31 +124,8 @@ export const request: RequestConfig = {
       };
     },
   ],
-  responseInterceptors: [
-    (response: any) => {
-      if (isBusinessFailure(response.data) && !response.config?.skipErrorHandler) {
-        const apiPath = formatApiPath(response.config?.url);
-        const message = extractErrorMessage(response.data, '请求失败');
-        // requestConfig 只做标准化，不弹 toast，避免协议层绑定 UI 反馈。
-        return {
-          ...response,
-          data: {
-            ...response.data,
-            normalizedError: { apiPath, message },
-          },
-        };
-      }
-      return response;
-    },
-  ],
+  responseInterceptors: [teamclawResponseInterceptor],
   errorConfig: {
-    errorHandler(error: unknown, opts?: { skipErrorHandler?: boolean }) {
-      if (opts?.skipErrorHandler) return;
-      const requestUrl =
-        typeof error === 'object' && error && 'config' in error
-          ? (error as { config?: { url?: string } }).config?.url
-          : undefined;
-      normalizeRequestError(error, requestUrl);
-    },
+    errorHandler: teamclawErrorHandler,
   },
 };

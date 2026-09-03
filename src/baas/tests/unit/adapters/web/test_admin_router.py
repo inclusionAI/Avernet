@@ -16,10 +16,16 @@ from fastapi.testclient import TestClient
 from secbaas.community.adapters.web.routers.admin.publish_admin_router import (
     ForceSuccessRequest,
     ForceSuccessResponse,
+    UpdateBotStatusRequest,
+    UpdateBotStatusResponse,
     _to_response,
+    _to_update_bot_status_response,
     router,
 )
-from secbaas.community.api.publish_manage import PublishNotFoundError
+from secbaas.community.api.publish_manage import (
+    PublishNotFoundError,
+    UpdateBotStatusResult,
+)
 from secbaas.community.core.service.publish_manage import ForceSuccessResult
 from tests.unit.adapters.web.conftest import iter_api_routes
 
@@ -40,6 +46,24 @@ def _get_admin_dep_callable(router):
             # The force-success route's dependency name is "admin_service"
             return dep.call
     raise RuntimeError("force-success route not found in router")
+
+
+def _get_endpoint_dep_callable(router, *, path_contains: str):
+    """Extract the Provide[...] callable used as the dependency for the
+    admin route whose path contains ``path_contains``.
+
+    Each endpoint defines its own ``Depends(Provide[...])`` at module import
+    time — a different _Marker instance per route. We must use the exact
+    same object instance that was captured at route definition time.
+    """
+    for r in iter_api_routes(router):
+        if path_contains in r.path:
+            for dep in r.dependant.dependencies:
+                # The admin route's dependency name is "admin_service"
+                return dep.call
+    raise RuntimeError(
+        f"admin route containing path {path_contains!r} not found in router"
+    )
 
 
 # ============== TestClient Fixture ==============
@@ -396,3 +420,337 @@ class TestForceSuccessEndpoint:
         assert body["data"]["batches_updated"] == 0
         assert body["data"]["records_updated"] == 0
         assert body["data"]["devices_updated"] == 0
+
+
+# ============== UpdateBotStatusRequest Model ==============
+
+
+class TestUpdateBotStatusRequest:
+    """UpdateBotStatusRequest input validation."""
+
+    def test_valid_request_construction(self):
+        req = UpdateBotStatusRequest(status="STOPPED", operator="ops.alice")
+        assert req.status == "STOPPED"
+        assert req.operator == "ops.alice"
+
+    def test_empty_status_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"status": "", "operator": "ops.alice"},
+        )
+        assert resp.status_code == 422
+
+    def test_status_too_long_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"status": "x" * 33, "operator": "ops.alice"},
+        )
+        assert resp.status_code == 422
+
+    def test_status_boundary_max_len_ok(self, client):
+        status = "x" * 32
+        mock_result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status=status,
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": status, "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+
+    def test_empty_operator_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"status": "STOPPED", "operator": ""},
+        )
+        assert resp.status_code == 422
+
+    def test_operator_too_long_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"status": "STOPPED", "operator": "x" * 129},
+        )
+        assert resp.status_code == 422
+
+    def test_operator_boundary_max_len_ok(self, client):
+        operator = "x" * 128
+        mock_result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": "STOPPED", "operator": operator},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+
+    def test_missing_status_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"operator": "ops.alice"},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_operator_returns_422(self, client):
+        resp = client.post(
+            "/api/v1/admin/bots/123/status",
+            json={"status": "STOPPED"},
+        )
+        assert resp.status_code == 422
+
+
+# ============== UpdateBotStatusResponse Model ==============
+
+
+class TestUpdateBotStatusResponse:
+    """UpdateBotStatusResponse model validation."""
+
+    def test_response_construction(self):
+        resp = UpdateBotStatusResponse(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        assert resp.bot_id == 123
+        assert resp.bot_uuid == "bot-abc-123"
+        assert resp.previous_status == "ACTIVE"
+        assert resp.new_status == "STOPPED"
+
+
+# ============== _to_update_bot_status_response Helper ==============
+
+
+class TestToUpdateBotStatusResponse:
+    """_to_update_bot_status_response converts UpdateBotStatusResult."""
+
+    def test_converts_all_fields(self):
+        result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        resp = _to_update_bot_status_response(result)
+
+        assert isinstance(resp, UpdateBotStatusResponse)
+        assert resp.bot_id == 123
+        assert resp.bot_uuid == "bot-abc-123"
+        assert resp.previous_status == "ACTIVE"
+        assert resp.new_status == "STOPPED"
+
+    def test_converts_other_values(self):
+        result = UpdateBotStatusResult(
+            bot_id=999,
+            bot_uuid="abc-def-456",
+            previous_status="PENDING",
+            new_status="ACTIVE",
+        )
+        resp = _to_update_bot_status_response(result)
+
+        assert resp.bot_id == 999
+        assert resp.bot_uuid == "abc-def-456"
+        assert resp.previous_status == "PENDING"
+        assert resp.new_status == "ACTIVE"
+
+
+# ============== update_bot_status_endpoint ==============
+
+
+class TestUpdateBotStatusEndpoint:
+    """Tests for POST /api/v1/admin/bots/{bot_id}/status endpoint."""
+
+    def test_happy_path_returns_200_with_response_data(self, client):
+        mock_result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["code"] == 0
+        assert body["message"] == "success"
+        assert body["data"]["bot_id"] == 123
+        assert body["data"]["bot_uuid"] == "bot-abc-123"
+        assert body["data"]["previous_status"] == "ACTIVE"
+        assert body["data"]["new_status"] == "STOPPED"
+
+    def test_calls_update_bot_status_with_correct_args(self, client):
+        mock_result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        mock_admin_svc.update_bot_status.assert_awaited_once_with(
+            bot_id=123,
+            status="STOPPED",
+            operator="ops.alice",
+        )
+        kwargs = mock_admin_svc.update_bot_status.await_args.kwargs
+        assert "tenant" not in kwargs
+        assert "env" not in kwargs
+
+    def test_publish_not_found_propagates_as_404(self, client):
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.side_effect = PublishNotFoundError(
+            "Bot 123 not found"
+        )
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 404
+        body = resp.json()
+        assert "Bot 123 not found" in body["detail"]
+
+    def test_nonexistent_bot_id_returns_404(self, client):
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.side_effect = PublishNotFoundError(
+            "Bot 9999 not found"
+        )
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/9999/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 404
+        body = resp.json()
+        assert "Bot 9999 not found" in body["detail"]
+
+    def test_response_data_has_exactly_four_keys(self, client):
+        mock_result = UpdateBotStatusResult(
+            bot_id=123,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                "/api/v1/admin/bots/123/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert set(data.keys()) == {
+            "bot_id",
+            "bot_uuid",
+            "previous_status",
+            "new_status",
+        }
+
+    @pytest.mark.parametrize("bot_id", [123, 9999])
+    def test_endpoint_uses_bot_id_path_param(self, client, bot_id):
+        mock_result = UpdateBotStatusResult(
+            bot_id=bot_id,
+            bot_uuid="bot-abc-123",
+            previous_status="ACTIVE",
+            new_status="STOPPED",
+        )
+        mock_admin_svc = AsyncMock()
+        mock_admin_svc.update_bot_status.return_value = mock_result
+
+        dep_callable = _get_endpoint_dep_callable(
+            client.app.router, path_contains="/bots/{bot_id}/status"
+        )
+        client.app.dependency_overrides[dep_callable] = lambda: mock_admin_svc
+        try:
+            resp = client.post(
+                f"/api/v1/admin/bots/{bot_id}/status",
+                json={"status": "STOPPED", "operator": "ops.alice"},
+            )
+        finally:
+            del client.app.dependency_overrides[dep_callable]
+
+        assert resp.status_code == 200
+        assert resp.json()["data"]["bot_id"] == bot_id
+        mock_admin_svc.update_bot_status.assert_awaited_once_with(
+            bot_id=bot_id,
+            status="STOPPED",
+            operator="ops.alice",
+        )

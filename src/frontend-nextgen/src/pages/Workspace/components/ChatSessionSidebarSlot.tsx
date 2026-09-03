@@ -6,6 +6,7 @@ import {
   BotSessionSidebar,
   type BotSessionSidebarProps,
 } from '@/pages/Workspace/components/BotSessionSidebar';
+import type { ChatBotView } from '@/services/workspace/botSessionService';
 
 interface ChatSessionSidebarSlotProps {
   /** Reactive workspace model（chatBots / friendBots / botSessions 等会话侧栏所需数据）。 */
@@ -13,11 +14,14 @@ interface ChatSessionSidebarSlotProps {
   view: WorkspaceView;
   onViewChange: (v: WorkspaceView) => void;
   availableViews: WorkspaceView[];
-  /** <lg 会话列表抽屉开关。≥lg 内流侧栏始终渲染，抽屉仅 <lg 由 IdentityBar 的「打开会话列表」触发。 */
+  /** <lg 会话列表抽屉开关。≥lg 内流侧栏始终渲染，抽屉仅 <lg 由移动端顶部的「打开会话列表」触发。 */
   mobileListOpen: boolean;
   onMobileListClose: () => void;
   onOpenCreateGroup: () => void;
   onOpenAddFriend: () => void;
+  onOpenPermissions: () => void;
+  userAvatarUrl?: string;
+  onManageBot?: (bot: ChatBotView) => void;
 }
 
 /**
@@ -33,12 +37,20 @@ export function ChatSessionSidebarSlot({
   onMobileListClose,
   onOpenCreateGroup,
   onOpenAddFriend,
+  onOpenPermissions,
+  userAvatarUrl,
+  onManageBot,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
   const botSidebarProps: BotSessionSidebarProps = {
     view,
     onViewChange,
     availableViews,
+    identities: workspace.identities,
+    activeIdentityId: workspace.activeIdentityId,
+    onChangeIdentity: workspace.setActiveIdentityId,
+    onOpenPermissions,
+    userAvatarUrl,
     chatBots: workspace.chatBots,
     friendBots: workspace.friendBots,
     isMyBotsLoading: workspace.isMyBotsLoading,
@@ -46,6 +58,9 @@ export function ChatSessionSidebarSlot({
     expandedBotIds: workspace.expandedBotIds,
     expandedBotSectionKey: workspace.expandedBotSectionKey,
     sessionsByBotId: botSessions.sessionsByBotId,
+    favoriteSessionsByBotId: botSessions.favoriteSessionsByBotId,
+    sessionPageMetaByBotId: botSessions.sessionPageMetaByBotId,
+    favoriteSessionPageMetaByBotId: botSessions.favoriteSessionPageMetaByBotId,
     isSessionsLoading: botSessions.isSessionsLoading,
     selectedBotSessionId: botSessions.selectedBotSessionId,
     onToggleBotExpanded: workspace.toggleBotExpanded,
@@ -71,6 +86,8 @@ export function ChatSessionSidebarSlot({
     },
     onToggleFavorite: (botId, sessionId) => botSessions.toggleFavorite(botId, sessionId),
     onLoadFavorites: (botId) => botSessions.loadFavoriteSessions(botId),
+    onLoadMoreSessions: botSessions.loadMoreSessions,
+    onManageBot,
     onCreateGroup: onOpenCreateGroup,
     onAddFriend: onOpenAddFriend,
   };

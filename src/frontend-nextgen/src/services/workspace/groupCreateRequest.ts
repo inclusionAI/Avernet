@@ -6,6 +6,7 @@ export interface CreateGroupInput {
   deliveryPolicy?: 'send_to_driver' | 'inject_observers';
   definitionYaml?: string;
   driverBotUuid: string;
+  originator: string;
   participants: Array<{ actor_id: string }>;
   context?: string;
   participantBindings?: Array<{ binding: string; actor_ids: string[] }>;
@@ -30,6 +31,7 @@ export function buildCreateGroupBody(input: CreateGroupInput): CreateGroupBody {
     context: input.context,
     participants,
     driver_bot_uuid: input.driverBotUuid,
+    originator: input.originator,
   };
   if (input.strategy === 'chat') {
     return {

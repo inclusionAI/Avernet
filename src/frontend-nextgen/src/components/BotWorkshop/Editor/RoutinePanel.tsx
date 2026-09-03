@@ -124,15 +124,7 @@ export function RoutinePanel({
           </Card>
         ))
       ) : (
-        <Empty
-          title="暂无定时任务"
-          description="创建一个 Cron 任务，让 Bot 自动执行周期性工作。"
-          action={
-            <Button disabled={!editable} onClick={() => edit()}>
-              新建任务
-            </Button>
-          }
-        />
+        <Empty title="暂无定时任务" description="创建一个 Cron 任务，让 Bot 自动执行周期性工作。" />
       )}
       <Modal open={open} onOpenChange={setOpen}>
         <ModalContent size="lg">

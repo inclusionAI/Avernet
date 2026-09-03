@@ -2330,6 +2330,7 @@ async fn bot_coordination_accepts_mcporter_tool_result_for_matching_run() {
         "mcporter-manager",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::McporterMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: Some("mcporter".to_string()),
             tool_name_mapping: Default::default(),
@@ -2405,6 +2406,7 @@ async fn bot_coordination_accepts_native_mcp_intent_for_matching_run() {
         "manager-v2",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: Default::default(),
@@ -2488,6 +2490,7 @@ async fn bot_coordination_accepts_mapped_native_mcp_tool_result() {
         "mapped-native-mcp-manager",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: [(
@@ -2571,6 +2574,7 @@ async fn bot_coordination_rejects_unmapped_native_mcp_tool_result() {
         "unmapped-native-mcp-manager",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: [(
@@ -2640,6 +2644,7 @@ async fn bot_coordination_rejects_native_mcp_tool_result_with_mismatched_canonic
         "mismatched-native-mcp-manager",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: [(
@@ -2708,6 +2713,7 @@ async fn bot_coordination_rejects_native_tool_with_mcp_server() {
         "native-tool-bot",
         Some(ProviderCoordinationConfig {
             mode: CoordinationMode::NativeTool,
+            worker_send_task_message_enabled: true,
             mcp_server: None,
             mcporter_command: None,
             tool_name_mapping: Default::default(),

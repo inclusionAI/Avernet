@@ -15,7 +15,10 @@ import asyncio
 import copy
 import hashlib
 import json
+import os
+import shlex
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import replace
@@ -973,6 +976,8 @@ class BotBuildService:
             build_plan: EngineBuildPlan | None,
             command_name: str,
             error_message: str,
+            device_id: str | None = None,
+            device_source_root: str | None = None,
             chown: str | None = None,
             timeout_seconds: float | None = None,
     ) -> None:
@@ -995,6 +1000,23 @@ class BotBuildService:
                     admin_is_file = source_file.is_file()
                 except PermissionError:
                     if not self._sudo_is_file(source_file, timeout_seconds):
+                        # NFS root_squash: host sudo (root -> nobody) still
+                        # cannot read the uid-1000-owned sandbox file. As a
+                        # last resort, read it from inside the source bot's
+                        # BaaS container (runs as the file owner uid 1000),
+                        # bypassing root_squash. Only when a device is
+                        # available (publish/migrate path); restore_draft
+                        # reads host artifacts and never reaches here.
+                        if device_id and device_source_root:
+                            if self._sync_extra_include_file_via_device(
+                                device_id=device_id,
+                                device_source_root=device_source_root,
+                                rel_path=normalized,
+                                target_file=target_dir / normalized,
+                                chown=chown,
+                                timeout_seconds=timeout_seconds,
+                            ):
+                                continue
                         logger.info(
                             "[BotBuildService._sync_extra_include_files] "
                             "Skip unreadable extra include file (admin cannot "
@@ -1045,6 +1067,102 @@ class BotBuildService:
                     exc,
                     exc_info=True,
                 )
+
+    def _sync_extra_include_file_via_device(
+            self,
+            *,
+            device_id: str,
+            device_source_root: str,
+            rel_path: str,
+            target_file: Path,
+            chown: str | None = None,
+            timeout_seconds: float | None = None,
+    ) -> bool:
+        """Read an extra-include file from the source bot's BaaS container
+        and write it into the migration target.
+
+        Fallback for ``_sync_extra_include_files`` when the host-side
+        ``sudo`` copy cannot read the file because NFS ``root_squash`` maps
+        root to ``nobody`` on sandbox-owned files (uid 1000 / mode 0600).
+        ``exec_shell_new`` runs ``cat`` *inside* the BaaS bot container as
+        the file owner (uid 1000), so it reads its own file and we capture
+        ``stdout`` -- the same pattern ``_generate_mcp_config`` uses to read
+        ``mcporter.json``. The captured content is staged through a local
+        temp file and copied by ``sudo rsync`` to the target, mirroring the
+        host copy path (incl. ``--chown``) so the artifact stays consistent.
+
+        Returns True on success, False on any failure so the caller degrades
+        to skipping the file (never blocks publish/restore).
+        """
+        device_path = f"{device_source_root.rstrip('/')}/{rel_path}"
+        cmd = f"cat {shlex.quote(device_path)}"
+        try:
+            result = self._device_service.exec_shell_new(
+                device_id=device_id,
+                shell_cmd=cmd,
+            )
+        except Exception as exc:  # noqa: BLE001 - best-effort fallback
+            logger.warning(
+                "[BotBuildService._sync_extra_include_file_via_device] "
+                "exec_shell_new failed for %s on device %s: %s",
+                device_path, device_id, exc, exc_info=True,
+            )
+            return False
+
+        if result.exit_code != 0:
+            logger.info(
+                "[BotBuildService._sync_extra_include_file_via_device] "
+                "container cat failed (exit=%s) for %s: stderr=%s",
+                result.exit_code, device_path, result.stderr,
+            )
+            return False
+
+        content = result.stdout if result.stdout is not None else ""
+        # Stage captured content to a local temp file, then ``sudo rsync`` it
+        # into the NFS target (root reads the local temp freely; writing to
+        # the target works the same as the primary migration rsync).
+        # Failure-safe: bind tmp_path first so a mkstemp failure is handled by
+        # the except below and the finally never references an unbound name.
+        # The whole block is best-effort: any error returns False -> the caller
+        # degrades to skipping this file (publish/restore never blocked).
+        tmp_path = None
+        try:
+            tmp_fd, tmp_path = tempfile.mkstemp(
+                suffix=f".{Path(rel_path).name}",
+                prefix="extra_include_",
+            )
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                fh.write(content)
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            rsync_cmd = ["sudo", "rsync", "-av"]
+            if chown:
+                rsync_cmd.append(f"--chown={chown}")
+            rsync_cmd.extend([tmp_path, str(target_file)])
+            self._run_local_command(
+                cmd=rsync_cmd,
+                command_name="rsync extra include (device)",
+                error_message="rsync extra include file (device) failed",
+                timeout_seconds=timeout_seconds,
+            )
+            logger.info(
+                "[BotBuildService._sync_extra_include_file_via_device] "
+                "synced %s via device container (file owner uid) to %s",
+                device_path, target_file,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 - best-effort fallback
+            logger.warning(
+                "[BotBuildService._sync_extra_include_file_via_device] "
+                "failed to stage/copy %s to %s: %s",
+                device_path, target_file, exc, exc_info=True,
+            )
+            return False
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def _migrate_bot_instance(
         self,
@@ -1138,12 +1256,27 @@ class BotBuildService:
                 error_message="rsync migration failed",
             )
 
+            # Device-side fallback for extra-include files that are unreadable
+            # on the NAS merge area due to NFS root_squash (uid-1000-owned
+            # sessions/cron-tasks.json). Only the publish/migrate path has the
+            # source bot's BaaS container online to cat the file as its owner.
+            # Defensive: provider.get_base_path() must never abort the
+            # migrate; on any failure degrade to "no device fallback" (old
+            # skip behavior) rather than fail the whole publish.
+            try:
+                device_source_root = (
+                    str(provider.get_base_path()) if provider else None
+                )
+            except Exception:
+                device_source_root = None
             self._sync_extra_include_files(
                 source_dir=source_dir,
                 target_dir=target_dir,
                 build_plan=build_plan,
                 command_name="rsync extra include",
                 error_message="rsync extra include file failed",
+                device_id=device_id,
+                device_source_root=device_source_root,
             )
 
             # 额外同步目录：例如 claude_code 需要把 source_dir 同级的 .claude

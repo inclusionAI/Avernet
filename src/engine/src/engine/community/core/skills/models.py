@@ -170,6 +170,7 @@ class CenterEnsureFailure:
     skill_uuid: str
     version: str
     reason: str
+    code: str | None = None
 
 
 @dataclass

@@ -30,9 +30,18 @@ export function useSessionFiles(sessionId: string | null, participants?: Partici
     }
     setIsLoading(true);
     try {
-      const res = await sessionFileService.loadFiles(sessionId, participants, { limit: 100, offset: 0 });
+      // status=ready：仅拉取已就绪文件，避免 pending 文件计入并造成列表数量与展示不一致。
+      const res = await sessionFileService.loadFiles(sessionId, participants, {
+        limit: 100,
+        offset: 0,
+        status: 'ready',
+      });
       if (res.ok) {
-        setFiles(res.data.items);
+        // 文件接口仅返回上传者 actor_id，用 bots/query 批量反查展示名，未命中的回退 actor_id 兜底。
+        const nameMap = await sessionFileService.resolveActorNames(res.data.items.map((f) => f.ownerActorId));
+        setFiles(
+          res.data.items.map((f) => (nameMap[f.ownerActorId] ? { ...f, ownerName: nameMap[f.ownerActorId] } : f)),
+        );
         setTotal(res.data.total);
       } else {
         toast.error(res.error.friendlyMessage);

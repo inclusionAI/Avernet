@@ -33,6 +33,8 @@ export interface BotDomain {
   name: string;
   description?: string;
   spaceId?: string;
+  /** 授权能力只跟随接口返回的 Bot 所属空间类型，不从 Bot 类型或部署形态推断。 */
+  spaceKind: BotOwnership;
   ownership: BotOwnership;
   deployment: BotDeployment;
   serviceMode: BotServiceMode;
@@ -52,6 +54,7 @@ export interface BotDomain {
 }
 
 export interface BotListQuery {
+  currentUserId?: string;
   spaceId?: string;
   keyword?: string;
   engine?: string;
@@ -72,6 +75,24 @@ export interface BotListResult {
 
 export type BotCreateScenario = 'local' | 'cloud';
 
+export interface AgentCodingTemplateDraft {
+  key: string;
+  versionId: string;
+  name: string;
+  description?: string;
+  engine: string;
+  templateType: string;
+  source: 'official' | 'market';
+  fields: Array<Record<string, unknown>>;
+  config: Record<string, unknown>;
+}
+
+export interface AgentCodingDraft {
+  kind: 'applicationCoding' | 'template';
+  template?: AgentCodingTemplateDraft;
+  values: Record<string, unknown>;
+}
+
 export interface BotCreateInput {
   scenario: BotCreateScenario;
   name: string;
@@ -81,6 +102,7 @@ export interface BotCreateInput {
   ownership: BotOwnership;
   serviceMode: BotServiceMode;
   initialize: boolean;
+  agentCoding?: AgentCodingDraft;
 }
 
 export interface BotCreateSpace {
@@ -97,6 +119,15 @@ export interface AvernetBotCreateRequest {
   cluster_name: 'ACRA' | 'ANDC';
   bot_type: 'personal' | 'service';
   space_id?: string;
+  engine_properties?: {
+    template_type?: string;
+    template_config?: {
+      template_key?: string;
+      template_version_id?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
 }
 
 export interface BotCreateAuthorization {
@@ -105,14 +136,23 @@ export interface BotCreateAuthorization {
   iframeUrl: string;
   redirectUrl: string;
   request: AvernetBotCreateRequest;
+  agentCoding?: AgentCodingDraft;
 }
 
-export type BotCreateResult = { type: 'created'; bot: BotDomain } | BotCreateAuthorization;
+export type BotCreateResult =
+  | { type: 'created'; bot: BotDomain }
+  | {
+      type: 'created_with_pending_after_create';
+      bot: BotDomain;
+      afterCreateFailures: Array<{ key: string; retryable: boolean; message: string }>;
+    }
+  | BotCreateAuthorization;
 
 export interface BotCreateAuthorizationPollResult {
   status: string;
   message?: string;
   bot?: BotDomain;
+  afterCreateFailures?: Array<{ key: string; retryable: boolean; message: string }>;
 }
 
 export type BotAction =
@@ -129,6 +169,8 @@ export type BotAction =
   | 'claim-lock'
   | 'authorize'
   | 'health-check';
+
+export type BotInventoryAction = 'view' | 'chat' | 'edit' | 'delete' | 'restart' | 'engine_restart' | 'upgrade';
 
 export interface BotActionAvailability {
   action: BotAction;

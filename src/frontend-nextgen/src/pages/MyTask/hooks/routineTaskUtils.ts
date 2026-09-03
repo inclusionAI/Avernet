@@ -14,7 +14,7 @@ export function getRunSortTime(item: ScheduledRoutineRunRecord) {
 }
 
 export function getRoutineSortKey(item: ScheduledRoutineRecord) {
-  return [item.botName || item.botId, item.name || item.id, item.id].join('::');
+  return [item.botName || item.botId, item.name || item.id, item.id, item.runtimeStage ?? ''].join('::');
 }
 
 export function buildErrorMessage(errors: string[]) {
@@ -23,12 +23,22 @@ export function buildErrorMessage(errors: string[]) {
   return `${errors[0]}（另有 ${errors.length - 1} 项失败）`;
 }
 
-export function makeRoutineKey(botId: string, routineId: string) {
-  return `${botId}::${routineId}`;
+/**
+ * 行 key 三段式 botId::routineId::runtimeStage —— owner 聚合接口里同一 definition
+ * 跨 draft/verify/online 会出多行，必须以 stage 区分。run/历史记录侧拿不到 stage，
+ * 生成的是两段式 key，靠 isSameRoutineKey 的模糊匹配对齐。
+ */
+export function makeRoutineKey(botId: string, routineId: string, runtimeStage?: string) {
+  return runtimeStage ? `${botId}::${routineId}::${runtimeStage}` : `${botId}::${routineId}`;
 }
 
 export function isSameRoutineKey(item: ScheduledRoutineRecord, routineKey: string | null) {
-  return Boolean(routineKey) && makeRoutineKey(item.botId, item.id) === routineKey;
+  if (!routineKey) return false;
+  // 三段精确命中（带 stage 的点击选中）优先；两段模糊命中兜底（从历史记录跳转等无 stage 场景）。
+  return (
+    makeRoutineKey(item.botId, item.id, item.runtimeStage) === routineKey ||
+    makeRoutineKey(item.botId, item.id) === routineKey
+  );
 }
 
 function normalizeBotId(botId: string) {

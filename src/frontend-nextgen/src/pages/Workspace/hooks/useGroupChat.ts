@@ -1,5 +1,5 @@
 import type { SessionView } from '@/domain/collaboration';
-import { queryAndRegisterManifestLibraryCdn } from '@/services/bcs/libraryCdnInjector';
+import { useTaskPreflightAssistant } from '@/hooks/useTaskPreflightAssistant';
 import { chatBridge } from '@/services/workspace/chatBridge';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import { createGroupChatProvider, type GroupChatState } from '@/services/workspace/groupChatProvider';
@@ -15,6 +15,8 @@ import {
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
+import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
+import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 
 /**
  * useGroupChat —— 协作群对话 Hook。
@@ -25,20 +27,18 @@ import {
  * - 暴露 `send/stop/reconnect` 命令，仅在 Hook 内做最小裁剪（trim、isRequesting 短路）
  * - 不拼装会话显示字段（业务字段层由调用方 / 组件负责）
  *
- * 消息加载：每次切换会话（sessionId 变化）时显式调用 provider.loadHistory()
- * （即 GET /openapi/v1/collaboration/sessions/{sid}/messages），将完整 ChatMessage
- * 直接灌入 SDK chat.messages，绕过 SDK defaultMessages 的字段裁剪（保留 createdAt 等）。
- *
- * Provider 生命周期：mount 或 sessionId 变更 → connect；unmount 或 sessionId 变更 → disconnect。
- * 入参为 SessionView（而非裸 sessionId）：BCS connect 帧需要 group_id，与 sessionId 一并注入 Provider。
+ * Provider 连接、history hydration 与 WS 暂存由 useManifestHistoryLoader 统一协调；
+ * SessionView 同时提供 BCS 所需的 group_id 和 session_id。
  */
 export function useGroupChat(session: SessionView | null) {
   const identityId = useWorkspaceStore((s) => s.activeIdentityId);
+  const activeIdentity = useWorkspaceStore(
+    (s) => s.identities.find((identity) => identity.id === s.activeIdentityId) ?? null,
+  );
   const historyRefreshNonce = useWorkspaceStore((s) => s.historyRefreshNonce);
   const sessionId = session?.sessionId ?? null;
   const groupId = session?.groupId ?? null;
 
-  // 副屏命令式 handle（命令式 openTab/closePanelForce；对齐单聊 useWorkspace 的 panelRef）。
   const panelRef = useRef<PanelHandle>(null);
   // 主屏输入框 ref（SenderRef）：经 useChatBridge.setInputRef 注册到全局桥,卡片填输入框时
   // bridge.getInputRef().insert(text) 生效。SenderRef ⊇ BridgeInputRef,见下方 useChatBridge 调用 as 转换。
@@ -54,7 +54,6 @@ export function useGroupChat(session: SessionView | null) {
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
   // Provider 依赖 sessionId + groupId + identityId；任一缺失则不创建（Hook 进入空闲态）。
-  // wsOrigin 部署态直连网关（绕过 tern cors proxy 的 WS 盲区）；dev 返回 undefined 走同源 dev proxy。
   const provider = useMemo(() => {
     if (!sessionId || !groupId || !identityId) return null;
     return createGroupChatProvider({ sessionId, groupId, identityId, wsOrigin: resolveGroupWsOrigin() });
@@ -70,6 +69,12 @@ export function useGroupChat(session: SessionView | null) {
     placeholderMessage: '',
     panelRef,
   });
+  const groupBootstrapProcessing = useGroupBootstrapProcessing({
+    groupId,
+    sessionId,
+    messages: chat.messages,
+    supportPhase: supportState.phase,
+  });
 
   // 集中注册 submit/abort/getMessages 到全局单例桥，使 aixcore 卡片沙箱的 bridge.sendMessage 经
   // ChatBridge.submit → 此处注册的 handler → chat.onRequest 注入对话流（断点 B 修复）。
@@ -81,25 +86,13 @@ export function useGroupChat(session: SessionView | null) {
     chat,
     panelRef,
     inputRef: inputRef as RefObject<BridgeInputRef | null>,
-    buildRequestParams: (content, extra) => buildGroupChatBridgeRequest(sessionId ?? '', content, extra),
+    buildRequestParams: (content, extra) =>
+      buildGroupChatBridgeRequest(sessionId ?? '', content, extra, {
+        senderId: activeIdentity?.id ?? undefined,
+        senderName: activeIdentity?.displayName ?? undefined,
+        senderAvatarUrl: activeIdentity?.avatarUrl,
+      }),
   });
-
-  // Provider 生命周期：仅在 sessionId 真正变化时 connect，stop 旧会话 disconnect。
-  const prevSessionIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!provider || !sessionId) return;
-    if (prevSessionIdRef.current === sessionId) return;
-    prevSessionIdRef.current = sessionId;
-    // 切换会话：清空副屏 tab，避免旧会话副屏残留。
-    panelRef.current?.closePanelForce();
-    provider.connect().catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : '协作连接失败');
-    });
-    return () => {
-      prevSessionIdRef.current = null;
-      void provider.disconnect();
-    };
-  }, [provider, sessionId]);
 
   // 订阅 Provider 阶段状态 + WebSocket 连接状态。
   useEffect(() => {
@@ -114,41 +107,28 @@ export function useGroupChat(session: SessionView | null) {
     };
   }, [provider]);
 
-  // 副屏方式②数据桥：进入协作群会话即拉 BCS manifest，写 window.aixLibraryCdnMap，
-  // 供引擎 resolveBusinessEntry 把 <AixUI component="lib.X"> 的 lib 名解析成 CDN URL（对应 ocb GroupChatPage）。
-  // 不阻塞会话主流程（拉取失败引擎侧方式②不可用，不影响消息收发与方式①③）。
-  useEffect(() => {
-    if (!sessionId) return;
-    void queryAndRegisterManifestLibraryCdn();
-  }, [sessionId]);
-
-  // 每次切换会话（sessionId 或 provider 变化）显式拉取历史消息并灌入 SDK chat。
-  // loadHistory 内部调用 GET /openapi/v1/collaboration/sessions/{sid}/messages，
-  // 并在加载期间切换 supportState.phase（loading-history → ready/idle）供 UI 展示骨架。
+  // 切换会话时清理旧会话副屏；连接、history hydration 与 WS 暂存由
+  // useManifestHistoryLoader 作为同一个可取消初始化流程统一管理。
   useEffect(() => {
     if (!provider || !sessionId) return;
-    let cancelled = false;
-    // 切换会话：重置向上翻页状态，避免旧会话的 hasMore / loading 残留到新会话。
-    setHasMoreHistory(false);
-    setIsLoadingMoreHistory(false);
-    provider
-      .loadHistory()
-      .then((history: ChatMessage[]) => {
-        if (cancelled) return;
-        chat.setMessages(history);
-        if (!cancelled) setHasMoreHistory(provider.hasMoreHistory);
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        toast.error(error instanceof Error ? error.message : '加载历史消息失败');
-      });
-    return () => {
-      cancelled = true;
-    };
-    // chat.setMessages 来自 useChat，回调引用稳定（useCallback）；不纳入依赖避免重复触发。
-    // historyRefreshNonce：点击会话 tab 时递增，即使是同一会话也强制重新拉取历史。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, sessionId, historyRefreshNonce]);
+    panelRef.current?.closePanelForce();
+  }, [provider, sessionId]);
+
+  useManifestHistoryLoader({
+    provider,
+    sessionId,
+    historyRefreshNonce,
+    setHasMoreHistory,
+    setIsLoadingMoreHistory,
+    setMessages: chat.setMessages,
+  });
+
+  // 重新进入会话时合并本地持久化的前置 assistant 消息（已抽入 useTaskPreflightAssistant）。
+  const { appendAssistantMessage, streamAssistantMessage } = useTaskPreflightAssistant({
+    chat,
+    sessionKey: sessionId ?? undefined,
+    mergePersistedHistory: true,
+  });
 
   const send = (text: string, mentions?: string[], attachments?: SessionMessageAttachment[]) => {
     const hasText = text.trim().length > 0;
@@ -165,7 +145,11 @@ export function useGroupChat(session: SessionView | null) {
       ...(attachments && attachments.length > 0 ? { attachments } : {}),
       userMessage: {
         content: trimmed,
-        extra: buildGroupUserMessageExtra(echoAttachments),
+        extra: buildGroupUserMessageExtra(echoAttachments, {
+          senderId: activeIdentity?.id ?? undefined,
+          senderName: activeIdentity?.displayName ?? undefined,
+          senderAvatarUrl: activeIdentity?.avatarUrl,
+        }),
       },
     });
   };
@@ -184,16 +168,18 @@ export function useGroupChat(session: SessionView | null) {
     }
   };
 
-  // 重新加载会话历史：直连 provider.loadHistory() 并把结果灌进 SDK chat.messages。
-  // 组件不直接调 Provider；error 状态下 GroupChatPane 的「重新加载历史」走此出口。
   const reloadHistory = async () => {
     if (!provider || !sessionId) return;
+    provider.beginHistoryHydration();
     try {
+      if (!provider.isConnected) await provider.connect();
       const history: ChatMessage[] = await provider.loadHistory();
       chat.setMessages(history);
       setHasMoreHistory(provider.hasMoreHistory);
       setIsLoadingMoreHistory(false);
+      provider.enterLiveMode();
     } catch (error: unknown) {
+      provider.enterLiveMode();
       toast.error(error instanceof Error ? error.message : '加载历史消息失败');
     }
   };
@@ -222,12 +208,23 @@ export function useGroupChat(session: SessionView | null) {
       setIsLoadingMoreHistory(false);
     }
   };
-  // 副屏 <AixUI> 直发 chat.onRequest 绕开全局桥 last-wins（修复群 execute 串到单聊 bot），等价桥路径 + isInject 静默。
   const submitPanelMessage = useCallback(
     (content: string) => {
-      if (sessionId) chat.onRequest(buildGroupChatBridgeRequest(sessionId, content, { isInject: true }));
+      if (sessionId)
+        chat.onRequest(
+          buildGroupChatBridgeRequest(
+            sessionId,
+            content,
+            { isInject: true },
+            {
+              senderId: activeIdentity?.id ?? undefined,
+              senderName: activeIdentity?.displayName ?? undefined,
+              senderAvatarUrl: activeIdentity?.avatarUrl,
+            },
+          ),
+        );
     },
-    [chat, sessionId],
+    [activeIdentity, chat, sessionId],
   );
 
   return {
@@ -240,10 +237,13 @@ export function useGroupChat(session: SessionView | null) {
     send,
     stop,
     submitPanelMessage,
+    appendAssistantMessage,
+    streamAssistantMessage,
     reconnect,
     reloadHistory,
     hasMoreHistory,
     isLoadingMoreHistory,
     loadMoreHistory,
+    groupBootstrapProcessing,
   };
 }

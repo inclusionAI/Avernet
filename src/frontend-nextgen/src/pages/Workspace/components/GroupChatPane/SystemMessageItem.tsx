@@ -37,7 +37,7 @@ export function SystemMessageItem({ message }: { message: ChatMessage }) {
 
   return (
     <div className="flex min-w-0 max-w-full items-center justify-center gap-1 pb-3">
-      {time && <span className="shrink-0 text-[11px] text-[var(--color-muted)]">{time}</span>}
+      {time && <span className="shrink-0 text-[11px] text-muted-foreground">{time}</span>}
       <TooltipProvider delayDuration={250}>
         <Tooltip>
           <TooltipTrigger asChild>

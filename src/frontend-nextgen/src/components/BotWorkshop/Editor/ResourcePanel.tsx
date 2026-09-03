@@ -77,7 +77,7 @@ export function ResourcePanel({
         <CardHeader className="flex-wrap">
           <div className="min-w-0 flex-1">
             <CardTitle>容器文件目录</CardTitle>
-            <p className="mt-1 text-xs text-[var(--color-muted)]">
+            <p className="mt-1 text-xs text-muted-foreground">
               展示 Bot 工作区根目录；列表、建目录和删除均使用资源 OpenAPI。
             </p>
           </div>
@@ -110,7 +110,7 @@ export function ResourcePanel({
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-3 text-xs text-[var(--color-muted)]">
+          <div className="mb-3 text-xs text-muted-foreground">
             当前上传位置：/{directory || '根目录'}（点击目录可切换）
           </div>
           {resources.length ? (
@@ -151,14 +151,14 @@ export function ResourcePanel({
                           }
                         }}
                       />
-                      <Folder className="size-4 text-[var(--color-warning)]" />
+                      <Folder className="size-4 text-warning" />
                     </div>
                   ) : (
-                    <File className="size-4 text-[var(--color-muted)]" />
+                    <File className="size-4 text-muted-foreground" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{item.name}</div>
-                    <div className="truncate text-xs text-[var(--color-muted)]">
+                    <div className="truncate text-xs text-muted-foreground">
                       {item.path}
                       {item.type === 'file' && item.size !== undefined ? ` · ${formatBytes(item.size)}` : ''}
                     </div>

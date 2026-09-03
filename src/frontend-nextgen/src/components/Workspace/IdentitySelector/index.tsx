@@ -1,0 +1,173 @@
+import { Button, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import type { Identity } from '@/services/workspace/workspaceModel';
+import { cn } from '@/utils/cn';
+import { ChevronDown, Info, ShieldCheck } from 'lucide-react';
+import { useState } from 'react';
+import { IdentityAvatar, IdentityDetails, IdentitySection } from './IdentitySelectorParts';
+
+interface WorkspaceIdentitySelectorProps {
+  identities: Identity[];
+  activeId: string | null;
+  onChange: (id: string) => void;
+  onOpenPermissions?: () => void;
+  /** 顶栏右侧当前用户头像；所有用户身份复用该头像，Bot 仍使用自身头像。 */
+  userAvatarUrl?: string;
+  layout?: 'default' | 'sidebar';
+}
+
+/** Workspace 业务层身份选择器：只消费已映射的 Identity，不直接读取 Store 或调用接口。 */
+export function WorkspaceIdentitySelector({
+  identities,
+  activeId,
+  onChange,
+  onOpenPermissions,
+  userAvatarUrl,
+  layout = 'default',
+}: WorkspaceIdentitySelectorProps) {
+  const [open, setOpen] = useState(false);
+  const activeIdentity = identities.find((identity) => identity.id === activeId) ?? identities[0] ?? null;
+  const userIdentities = identities.filter((identity) => identity.kind === 'user');
+  const botIdentities = identities.filter((identity) => identity.kind === 'bot');
+  const sidebarLayout = layout === 'sidebar';
+
+  return (
+    <div className="space-y-1">
+      {!sidebarLayout ? (
+        <TooltipProvider delayDuration={300}>
+          <div className="flex items-center gap-1 px-1 text-xs font-medium text-foreground">
+            <span>当前协作身份</span>
+            {identities.length > 1 ? (
+              <span className="text-[10px] font-normal text-muted-foreground">可切换其他协作身份</span>
+            ) : null}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  role="img"
+                  aria-label="协作身份说明"
+                  tabIndex={0}
+                  className="inline-flex cursor-help items-center text-muted-foreground"
+                >
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+      ) : null}
+      {activeIdentity ? (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant={sidebarLayout ? 'ghost' : 'outline'}
+              aria-expanded={open}
+              aria-label={`当前协作身份：${activeIdentity.name}`}
+              className={cn(
+                'h-auto min-h-10 w-full justify-between gap-2 py-1 text-left',
+                sidebarLayout ? 'rounded-md px-0 hover:bg-accent/60' : 'rounded-lg px-2',
+              )}
+            >
+              <IdentityAvatar identity={activeIdentity} size="sm" userAvatarUrl={userAvatarUrl} />
+              <IdentityDetails identity={activeIdentity} />
+              {sidebarLayout ? (
+                <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-foreground">
+                  切换身份
+                  <ChevronDown
+                    className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')}
+                  />
+                </span>
+              ) : (
+                <ChevronDown
+                  className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
+                />
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-[320px] max-w-[calc(100vw-24px)] p-2"
+            onOpenAutoFocus={(event) => {
+              // 不将焦点自动落到说明图标，避免打开身份列表时立即触发 Tooltip。
+              event.preventDefault();
+            }}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2 border-b border-border px-2.5 pb-2">
+              <div className="flex min-w-0 items-center gap-1">
+                <p className="text-xs font-medium text-foreground">切换协作身份</p>
+                <TooltipProvider delayDuration={300}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span
+                        role="img"
+                        aria-label="协作身份说明"
+                        tabIndex={0}
+                        className="inline-flex cursor-help items-center text-muted-foreground"
+                      >
+                        <Info className="h-3.5 w-3.5" aria-hidden />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              {onOpenPermissions ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label="进入协作权限设置"
+                  className="h-7 shrink-0 gap-1 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setOpen(false);
+                    onOpenPermissions();
+                  }}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden />
+                  协作权限
+                </Button>
+              ) : null}
+            </div>
+            <div className="app-scrollbar max-h-80 space-y-3 overflow-y-auto">
+              <IdentitySection
+                title="用户身份"
+                identities={userIdentities}
+                activeId={activeId}
+                onSelect={(id) => {
+                  onChange(id);
+                  setOpen(false);
+                }}
+                userAvatarUrl={userAvatarUrl}
+              />
+              <IdentitySection
+                title="Bot 身份"
+                identities={botIdentities}
+                activeId={activeId}
+                onSelect={(id) => {
+                  onChange(id);
+                  setOpen(false);
+                }}
+                userAvatarUrl={userAvatarUrl}
+              />
+              {identities.length === 0 ? (
+                <p className="px-2.5 py-4 text-center text-xs text-muted-foreground">暂无可协作身份</p>
+              ) : null}
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : (
+        <div
+          className={cn(
+            'px-3 py-3 text-center text-xs text-muted-foreground',
+            !sidebarLayout && 'rounded-lg border border-dashed border-border',
+          )}
+        >
+          暂无可协作身份
+        </div>
+      )}
+    </div>
+  );
+}

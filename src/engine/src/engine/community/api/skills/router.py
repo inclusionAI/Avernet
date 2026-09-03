@@ -435,7 +435,12 @@ async def ensure_center_skills(body: CenterEnsureRequestSchema) -> ApiResponse:
                 {"skill_uuid": x.skill_uuid, "version": x.version} for x in result.ok
             ],
             "failed": [
-                {"skill_uuid": x.skill_uuid, "version": x.version, "reason": x.reason}
+                {
+                    "skill_uuid": x.skill_uuid,
+                    "version": x.version,
+                    "reason": x.reason,
+                    **({"code": x.code} if x.code is not None else {}),
+                }
                 for x in result.failed
             ],
         },

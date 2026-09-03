@@ -22,6 +22,7 @@ export function buildGroupChatPayload(params: GroupChatRequest, groupId: string,
   const payload: GroupChatInput = {
     query: params.content,
     groupId,
+    sessionId: params.sessionId,
     senderId: resolveUserId(identityId),
     botUuid: params.botUuid ?? toHumanBotUuid(identityId),
   };

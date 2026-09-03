@@ -38,6 +38,9 @@ from agentclaw.community.core.config_compose.services.mcporter_composer import (
 from agentclaw.community.core.service_bot.services.deploy.external_compose_producer import (
     ExternalComposeProducer,
 )
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 from agentclaw.community.kernel.bot_config import SCHEMA_VERSION, BotConfigArtifact, StoreRef
 
 
@@ -285,7 +288,11 @@ def test_frozen_artifact_bytes_conform_to_schema() -> None:
     # Base ExternalComposeProducer injects engine_ext={} (the teclaw subclass would
     # source a real opaque payload via EngineExtClient — covered in its own suite).
     producer = ExternalComposeProducer(composer=_StubComposer(composed))
-    result = producer.produce_artifact({"bot_id": "bot7", "entity_id": "staff_u1"}, 7)
+    result = producer.produce_artifact(
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "bot7", "entity_id": "staff_u1"}, version=7
+        )
+    )
 
     assert result.success is True
     pinned = result.ext["config_artifact"]
@@ -307,7 +314,11 @@ def test_frozen_artifact_with_opaque_engine_ext_still_conforms() -> None:
             return {"memory_ref": "oss://ws/MEMORY.md", "nested": {"x": [1, 2]}}
 
     producer = _ExtProducer(composer=_StubComposer(composed))
-    result = producer.produce_artifact({"bot_id": "bot7", "entity_id": "staff_u1"}, 1)
+    result = producer.produce_artifact(
+        ArtifactBuildRequest.create(
+            bot={"bot_id": "bot7", "entity_id": "staff_u1"}, version=1
+        )
+    )
 
     pinned = result.ext["config_artifact"]
     jsonschema.validate(instance=pinned, schema=_schema())

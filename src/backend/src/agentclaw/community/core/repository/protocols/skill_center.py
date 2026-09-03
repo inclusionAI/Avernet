@@ -330,6 +330,13 @@ class SkillVersionRepositoryProtocol(Protocol):
         """Return the addressed PUBLISHED row, never MATERIALIZING."""
         ...
 
+    @abstractmethod
+    def get_published_by_ordinal(
+        self, *, env: str, skill_id: int, version_ordinal: int
+    ) -> SkillVersionRecord | None:
+        """Return one exact PUBLISHED business Version for Copy."""
+        ...
+
 
 @runtime_checkable
 class SkillVersionMaterializationRepositoryProtocol(Protocol):

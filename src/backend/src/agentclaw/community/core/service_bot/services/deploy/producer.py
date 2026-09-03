@@ -12,11 +12,16 @@ The selector mirrors ``DeviceServiceRouter``: the DI composition root assembles
 the ``device_provider -> producer`` map; the router does pure dispatch with a
 default fallback and reads no environment (Rule 14: config-driven assembly).
 """
+
 from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
+
+from agentclaw.community.core.service_bot.services.deploy.artifact_build_request import (
+    ArtifactBuildRequest,
+)
 
 
 @dataclass
@@ -38,12 +43,17 @@ class DeployArtifact:
 class DeployArtifactProducer(abc.ABC):
     """Strategy that produces (and pins) the deployable artifact at build."""
 
+    requires_runtime_layout_observation: ClassVar[bool] = False
+
     @abc.abstractmethod
-    def produce_artifact(
-        self, bot: dict[str, Any], version: int | None
-    ) -> DeployArtifact:
-        """Produce and pin the deployable artifact. ``version`` is the publish
-        snapshot version, or ``None`` for an unversioned (eager-provision) compose."""
+    def produce_artifact(self, request: ArtifactBuildRequest) -> DeployArtifact:
+        """Produce and pin the artifact described by ``request``.
+
+        ``request.version`` is the publish snapshot version, or ``None`` for an
+        unversioned (eager-provision) compose.  Filesystem snapshot producers
+        declare ``requires_runtime_layout_observation`` and validate the fresh
+        observation before consuming any engine-specific path.
+        """
         raise NotImplementedError
 
 

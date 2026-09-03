@@ -449,10 +449,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: the request that allocates one, so it joins ``none`` (101 → 102) beside
 #: ``POST /openapi/v1/bots`` itself.
 #:
-#: Directory download adds one more bot-path-addressed resource operation;
-#: the account-level user→app authorizations (grant, list, withdraw under
-#: ``/org/user/authorized-apps``) address no bot: ``none`` 102 → 105.
-_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 105}
+#: Directory download adds one more bot-path-addressed resource operation.
+#: Space Skill Version Copy adds one account-level operation; it is addressed by
+#: Space and Skill version rather than by Bot. The account-level user→app
+#: authorizations (grant, list, withdraw under ``/org/user/authorized-apps``)
+#: address no bot either: ``none`` 102 → 106.
+_BOT_ID_PLACEMENT = {"path": 156, "query": 1, "none": 106}
 
 
 def _schema() -> dict:
@@ -598,10 +600,11 @@ def test_the_pinned_number_of_operations_take_it():
     # and its status poll: 226 → 228. Both name the end user for the same
     # reason the ordinary create does: they spend that user's quota and read
     # that user's rows, and neither is admissible to an application caller.
-    # Directory download adds one more user-scoped resource operation, and the
-    # account-level user→app authorizations (grant, list, withdraw under
-    # /org/user/authorized-apps) add three more: 228 → 232.
-    assert len(taking) == 232
+    # Directory download adds one more user-scoped resource operation.
+    # Space Skill Version Copy adds one more user-scoped operation.
+    # The account-level user→app authorizations (grant, list, withdraw under
+    # /org/user/authorized-apps) add three more: 228 → 233.
+    assert len(taking) == 233
 
 
 def test_the_exempt_operations_take_none():

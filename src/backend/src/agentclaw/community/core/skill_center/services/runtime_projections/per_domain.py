@@ -20,7 +20,10 @@ from agentclaw.community.core.skill_center.runtime_resolver import RuntimeSkillP
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
-from agentclaw.community.core.skills_pool.mapping_intent import mapping_contract_for
+from agentclaw.community.core.skills_pool.mapping_intent import (
+    MAPPING_CONTRACT_V3,
+    mapping_contract_for,
+)
 from agentclaw.community.core.skills_pool.models import (
     MappingApplyMode,
     MappingProjectionStatus,
@@ -279,6 +282,19 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
                 supported_versions = probe.evidence.get(
                     "supported_mapping_contract_versions"
                 )
+                center_mount = probe.evidence.get("center_mount")
+                if (
+                    isinstance(center_mount, dict)
+                    and center_mount.get("restart_required") is True
+                    and (
+                        not isinstance(supported_versions, list)
+                        or MAPPING_CONTRACT_V3 not in supported_versions
+                    )
+                ):
+                    return RuntimeProjectionResult.pending(
+                        code="CENTER_RUNTIME_RESTART_REQUIRED",
+                        reason="Bot 尚未加载 Skill Center 目录，请重启 Bot 后重试",
+                    )
             contract = mapping_contract_for(contract_mappings, supported_versions)
             raw_published = await self._pool_runtime.publish_mappings(
                 bot_id=bot_id,

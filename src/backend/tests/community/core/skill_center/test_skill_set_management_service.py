@@ -739,6 +739,23 @@ class _CenterRuntimePool(_RuntimePool):
         )
 
 
+class _CenterMountMissingRuntimePool(_CenterRuntimePool):
+    async def probe(self, **_kwargs):
+        self.probe_calls.append(_kwargs)
+        return SimpleNamespace(
+            evidence={
+                "supported_mapping_contract_versions": [
+                    "skills-pool-mapping-v2"
+                ],
+                "center_mount": {
+                    "status": "NOT_READY",
+                    "reason": "center_mount_missing",
+                    "restart_required": True,
+                },
+            }
+        )
+
+
 class _CenterRuntimeSkills:
     def list_bot_installed_assets(self, **_kwargs):
         return [
@@ -2626,6 +2643,34 @@ async def test_runtime_reconcile_requires_and_uses_mapping_v3_for_center():
             "skill_uuid": "00000000-0000-4000-8000-000000000007",
         "sc_version_number": "3.0.0",
     }
+
+
+@pytest.mark.asyncio
+async def test_center_projection_requests_bot_restart_when_mount_is_missing():
+    pool = _CenterMountMissingRuntimePool()
+    runtime = BotRuntimeProjector(
+        factory=_RuntimeFactory(),
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_CenterRuntimeSkills()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    result = await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
+
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "CENTER_RUNTIME_RESTART_REQUIRED"
+    assert result.issues[0].reason == (
+        "Bot 尚未加载 Skill Center 目录，请重启 Bot 后重试"
+    )
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio

@@ -23,16 +23,16 @@ interface UnsupportedPreviewProps {
 
 function UnsupportedPreview({ onDownload }: UnsupportedPreviewProps) {
   return (
-    <div className="flex h-full min-h-[280px] flex-col items-center justify-center text-center text-[var(--color-muted)]">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-panel-strong)] text-[var(--color-muted)]">
+    <div className="flex h-full min-h-[280px] flex-col items-center justify-center text-center text-muted-foreground">
+      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-muted text-muted-foreground">
         <FileText className="h-6 w-6" aria-hidden />
       </div>
-      <p className="m-0 text-sm font-semibold text-[var(--color-fg)]">该文件类型暂不支持预览</p>
+      <p className="m-0 text-sm font-semibold text-foreground">该文件类型暂不支持预览</p>
       <p className="mt-2 text-sm leading-6">请下载后使用对应软件查看</p>
       <Button
         size="md"
         variant="secondary"
-        className="mt-5 bg-[var(--color-panel-muted)] text-[var(--color-fg)] hover:bg-[var(--color-panel-strong)]"
+        className="mt-5 bg-muted/50 text-foreground hover:bg-muted"
         leftIcon={<Download className="h-3.5 w-3.5" aria-hidden />}
         onClick={onDownload}
       >
@@ -54,16 +54,16 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
   }
   if (preview.status === 'loading') {
     return (
-      <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-3 text-[var(--color-muted)]">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--color-primary)] border-t-transparent" />
+      <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-3 text-muted-foreground">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
         <span className="text-sm">正在加载预览…</span>
       </div>
     );
   }
   if (preview.status === 'error') {
     return (
-      <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-2 text-[var(--color-muted)]">
-        <p className="m-0 text-sm font-semibold text-[var(--color-error)]">预览加载失败</p>
+      <div className="flex h-full min-h-[280px] flex-col items-center justify-center gap-2 text-muted-foreground">
+        <p className="m-0 text-sm font-semibold text-destructive">预览加载失败</p>
         <p className="m-0 text-xs">{preview.errorMessage ?? '请稍后重试或下载文件查看。'}</p>
       </div>
     );
@@ -75,7 +75,7 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
         <img
           src={preview.contentUrl}
           alt={file.name}
-          className="max-h-full max-w-full rounded-xl border border-[var(--color-border)] object-contain"
+          className="max-h-full max-w-full rounded-xl border border-border object-contain"
         />
       </div>
     );
@@ -87,7 +87,7 @@ function PreviewBody({ file, preview, onDownload }: PreviewBodyProps) {
         <iframe
           title={file.name}
           src={preview.contentUrl}
-          className="h-full w-full rounded-xl border border-[var(--color-border)] bg-white"
+          className="h-full w-full rounded-xl border border-border bg-background"
         />
       </div>
     );
@@ -106,16 +106,16 @@ interface PreviewPaneProps {
 
 export function PreviewPane({ file, filesStateEmpty, preview, onDownload, onShare }: PreviewPaneProps) {
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-[var(--color-card)]">
+    <div className="flex min-w-0 flex-1 flex-col bg-card">
       {file ? (
         <>
-          <header className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] px-5 py-3.5">
+          <header className="flex items-center justify-between gap-3 border-b border-border px-3 py-3 sm:px-5 sm:py-3.5">
             <div className="flex min-w-0 items-center gap-2">
-              <h3 className="m-0 truncate text-sm font-semibold text-[var(--color-fg)]">{file.name}</h3>
+              <h3 className="m-0 truncate text-sm font-semibold text-foreground">{file.name}</h3>
               {preview.kind !== 'other' && (
                 <Badge tone={KIND_META[preview.kind].tone}>{KIND_META[preview.kind].label}</Badge>
               )}
-              <span className="shrink-0 text-[11px] tabular-nums text-[var(--color-muted)]">
+              <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
                 {formatFileSize(file.size)}
               </span>
             </div>
@@ -141,17 +141,17 @@ export function PreviewPane({ file, filesStateEmpty, preview, onDownload, onShar
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-auto p-3 sm:p-4">
             <PreviewBody file={file} preview={preview} onDownload={onDownload} />
           </div>
         </>
       ) : (
-        <div className="flex min-h-0 flex-1 items-center justify-center px-8 text-center">
-          <div className="flex max-w-sm flex-col items-center text-[var(--color-muted)]">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--color-primary-soft)] text-[var(--color-primary)]">
+        <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center sm:px-8">
+          <div className="flex max-w-sm flex-col items-center text-muted-foreground">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <FolderOpen className="h-6 w-6" aria-hidden />
             </div>
-            <p className="m-0 text-sm font-semibold text-[var(--color-fg)]">
+            <p className="m-0 text-sm font-semibold text-foreground">
               {filesStateEmpty ? '会话内暂时没有文件' : '选择一个文件开始预览'}
             </p>
             <p className="mt-2 text-sm leading-6">

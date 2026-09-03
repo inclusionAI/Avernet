@@ -433,6 +433,42 @@ async def get_space_skill_offline_impact(
 
 
 @router.post(
+    "/{space_id}/skills/{skill_id}/versions/{version}/copy",
+    status_code=201,
+    response_model=Envelope[SpaceSkillDetail],
+    dependencies=_REFUSES_APP_ONLY,
+)
+@envelope_errors
+async def copy_offline_space_skill_version(
+    space_id: SpaceIdPath,
+    skill_id: SkillIdPath,
+    version: VersionPath,
+    request: Request,
+    user_id: UserIdDep,
+    idempotency_key: IdempotencyKeyHeader,
+    commands: SpaceSkillApplicationServiceProtocol = Injected(
+        SpaceSkillApplicationServiceProtocol
+    ),
+    queries: SpaceSkillQueryServiceProtocol = Injected(SpaceSkillQueryServiceProtocol),
+) -> Envelope[SpaceSkillDetail]:
+    outcome = await run_in_threadpool(
+        commands.copy_published_version,
+        space_id=space_id,
+        skill_id=skill_id,
+        version_ordinal=version,
+        actor_id=user_id,
+        request_id=idempotency_key,
+    )
+    detail = await run_in_threadpool(
+        queries.get_space_skill,
+        space_id=space_id,
+        skill_id=outcome.skill_id,
+        actor_id=user_id,
+    )
+    return created(_space_skill_detail(detail), request)
+
+
+@router.post(
     "/{space_id}/skills/{skill_id}/offline",
     response_model=Envelope[SkillOfflineResult],
     dependencies=_REFUSES_APP_ONLY,

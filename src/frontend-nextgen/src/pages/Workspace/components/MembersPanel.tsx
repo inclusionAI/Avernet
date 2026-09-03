@@ -38,7 +38,7 @@ function Avatar({ participant }: { participant: ParticipantView }) {
   const symbol = participant.name?.trim().charAt(0) || '?';
   if (participant.kind === 'bot') {
     return (
-      <div className="grid size-8 flex-none place-items-center rounded-full bg-zinc-900 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+      <div className="grid size-8 flex-none place-items-center rounded-full bg-zinc-900 text-xs font-medium text-primary-foreground dark:bg-zinc-100 dark:text-zinc-900">
         {symbol}
       </div>
     );
@@ -68,11 +68,11 @@ function ParticipantRow({
   }));
 
   return (
-    <div data-row={participant.actorId} className="flex items-center gap-3 px-4 py-2.5">
+    <div data-row={participant.actorId} className="flex items-center gap-2 px-3 py-2">
       <Avatar participant={participant} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium text-[var(--color-fg)]">{participant.name}</span>
+          <span className="truncate text-sm font-medium text-foreground">{participant.name}</span>
           <Badge tone={ROLE_BADGE_TONE[participant.role]}>{ROLE_LABEL[participant.role]}</Badge>
         </div>
       </div>
@@ -115,12 +115,12 @@ export function MembersPanel({
   const renderedParticipants = groupParticipants.map((p) => sessionByActorId.get(p.actorId) ?? p);
 
   return (
-    <aside className={cn('flex h-full flex-col bg-[var(--color-panel)]')}>
-      <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+    <aside className={cn('flex h-full flex-col bg-background')}>
+      <header className="flex items-center justify-between border-b border-border px-3 py-2.5">
         <div className="min-w-0">
-          <h2 className="m-0 truncate text-sm font-semibold text-[var(--color-fg)]">成员管理</h2>
-          <p className="m-0 mt-0.5 truncate text-xs text-[var(--color-muted)]">
-            {group.name} · {renderedParticipants.length} 位成员
+          <h2 className="m-0 truncate text-sm font-semibold text-foreground">成员管理</h2>
+          <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">
+            {group.name} · {renderedParticipants.length} 个成员
           </p>
         </div>
         <IconButton
@@ -134,9 +134,9 @@ export function MembersPanel({
 
       <div className="flex-1 overflow-y-auto">
         {renderedParticipants.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-[var(--color-muted)]">暂无成员</p>
+          <p className="px-4 py-6 text-center text-sm text-muted-foreground">暂无成员</p>
         ) : (
-          <div className="divide-y divide-[var(--color-border)]">
+          <div className="divide-y divide-border">
             {renderedParticipants.map((p) => (
               <ParticipantRow
                 key={p.actorId}

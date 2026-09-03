@@ -51,9 +51,11 @@ describe('collaboration square BOT runtime wiring', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       '/openapi/v1/bots/catalog/search?search=%E7%9C%9F%E5%AE%9E&page=1&page_size=20',
     );
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/bots'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/bots'),
+      ),
+    ).toBe(false);
   });
 
   it('surfaces an ACE unauthenticated response and never falls back to BOT Mock data', async () => {
@@ -71,9 +73,11 @@ describe('collaboration square BOT runtime wiring', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/bots'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/bots'),
+      ),
+    ).toBe(false);
   });
 
   it('uses the real Bot Catalog Discovery endpoint without requesting Search or BOT Mock routes', async () => {
@@ -108,10 +112,16 @@ describe('collaboration square BOT runtime wiring', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(
       '/openapi/v1/bots/catalog/discover?keyword=%E6%95%B4%E7%90%86%E4%BC%9A%E8%AE%AE%E7%BA%AA%E8%A6%81&top_k=20&min_score=0.1&runtime_state=online',
     );
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/openapi/v1/bots/catalog/search'))).toBe(false);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/bots'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/openapi/v1/bots/catalog/search'),
+      ),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/bots'),
+      ),
+    ).toBe(false);
   });
 
   it('surfaces a Discovery protocol error and never falls back to Search or BOT Mock data', async () => {
@@ -128,10 +138,16 @@ describe('collaboration square BOT runtime wiring', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/openapi/v1/bots/catalog/search'))).toBe(false);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/bots'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/openapi/v1/bots/catalog/search'),
+      ),
+    ).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/bots'),
+      ),
+    ).toBe(false);
   });
 
   it('uses the real Human to Bot friend request endpoint without requesting BOT Mock routes', async () => {
@@ -155,10 +171,17 @@ describe('collaboration square BOT runtime wiring', () => {
     expect(fetchMock.mock.calls[0][1]).toEqual(
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ to_actor: { type: 'bot', id: 'bot-real-1' } }),
+        body: JSON.stringify({
+          to_actor: { type: 'bot', id: 'bot-real-1' },
+          from_actor: { type: 'human', id: '327325' },
+        }),
       }),
     );
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square'))).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square'),
+      ),
+    ).toBe(false);
   });
 
   it('uses the real private Bot session endpoint and only consumes its session_id', async () => {
@@ -188,7 +211,11 @@ describe('collaboration square BOT runtime wiring', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/openapi/v1/bots/bot-real-1/sessions?user_id=327325&owner_id=2088');
     expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: '{}' }));
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square'))).toBe(false);
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square'),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -228,13 +255,21 @@ describe('collaboration square public group runtime wiring', () => {
       [expect.objectContaining({ id: 'group-real-1', name: '公开协作群' })],
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // listGroups 先取公开群，再经 bots/query 反查群主名（resolveBotNames），故此处共 2 次真实请求。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toBe(
-      '/openapi/v1/collaboration/groups?visibility=public&kind=normal&q=%E5%85%AC%E5%BC%80&offset=0&limit=20',
+      '/openapi/v1/collaboration/public-groups?q=%E5%85%AC%E5%BC%80&offset=0&limit=20',
     );
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/groups'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/openapi/v1/collaboration/bots/query'),
+      ),
+    ).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/groups'),
+      ),
+    ).toBe(false);
   });
 
   it('surfaces a Group ACE response and never falls back to Group Mock data', async () => {
@@ -252,8 +287,10 @@ describe('collaboration square public group runtime wiring', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/mock/collaboration-square/groups'))).toBe(
-      false,
-    );
+    expect(
+      fetchMock.mock.calls.some(([url]: [unknown, ...unknown[]]) =>
+        String(url).includes('/api/mock/collaboration-square/groups'),
+      ),
+    ).toBe(false);
   });
 });

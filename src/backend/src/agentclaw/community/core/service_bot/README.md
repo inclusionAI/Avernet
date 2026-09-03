@@ -16,6 +16,11 @@ provides:
   - "BaasService"
   - "ServiceSkillsManifestBuilder"
   - "ResolvedSharedCorpusDelivery"
+  - "ArtifactBuildRequest"
+  - "ServiceArtifactLayoutObservation"
+  - "ServiceArtifactResolvedLayout"
+  - "ServiceArtifactBuildError"
+  - "ServiceArtifactBuildErrorCode"
   - "ServiceArtifactLineageReader"
   - "ServiceEditLockService"
   - "ServiceBot SQLAlchemy models"
@@ -23,6 +28,7 @@ consumes:
   - "BotManagement"
   - "DeviceService + repo"
   - "SkillsPool layout state"
+  - "RuntimeLayoutProbeServiceProtocol"
   - "SystemConfig"
   - "PassportPlugin"
 internal_dependencies:
@@ -71,8 +77,11 @@ internal_dependencies:
 ### Change impact
 
 Publication path is the user-visible go-live for bots — bugs here block customers from publishing.
-Service artifacts freeze the persisted Skills Pool layout state at build time;
-changes to the Skills Pool contract or repository therefore affect publication
+Service artifacts freeze the persisted Skills Pool policy state plus fresh
+Engine-observed filesystem evidence at build time. OCB remains the sole owner
+of Repo/Center mounts; ``shared_corpora`` is an artifact exclusion and audit
+contract, never a BaaS mount instruction. Changes to the Skills Pool probe,
+mapping contract or historical manifest reader therefore affect publication
 compatibility and must be reviewed together with this module.
 
 ## Publish operation ledger (#197)

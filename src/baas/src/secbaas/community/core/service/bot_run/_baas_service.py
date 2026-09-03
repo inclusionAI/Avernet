@@ -177,7 +177,7 @@ class BaasBotService(BotService):
             bot_id: BaaS bot UUID (used directly as bot_uuid for resolution).
             session_id: Optional session identifier to reuse.
             metadata: Session metadata.
-            binding_info: Binding info (resolved by BotBindingResolver).
+            binding_info: Binding info (resolved via BotServicePlugin.get_binding).
                          baas_session_id will be set on this object after persistence.
             context: Request context with identity info (api_key_prefix, tenant, etc.).
             run_id: Optional run ID for correlating session with run record.

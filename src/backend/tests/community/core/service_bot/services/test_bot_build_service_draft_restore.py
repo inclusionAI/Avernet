@@ -1,4 +1,5 @@
 
+import shutil
 import subprocess
 from unittest.mock import MagicMock
 
@@ -7,6 +8,8 @@ import pytest
 from agentclaw.community.core.service_bot.services import bot_build_service as module
 from agentclaw.community.core.service_bot.services.bot_build_service import BotBuildService
 from agentclaw.community.core.workspace.engine_sandbox import EngineBuildPlan
+
+from agentclaw.community.kernel.device_dto import CommandResult
 
 
 def test_restore_draft_arca_rsyncs_versioned_artifact_into_draft_nas(monkeypatch, tmp_path):
@@ -429,3 +432,180 @@ def test_sync_extra_include_files_logs_and_continues_on_invalid_path(tmp_path, c
 
     svc._run_local_command.assert_not_called()
     assert "Failed to sync extra include file" in caplog.text
+
+# ---------------------------------------------------------------------------
+# Device-container fallback (_sync_extra_include_file_via_device) for
+# extra-include files unreadable on the NAS merge area due to NFS root_squash
+# (uid-1000-owned sessions/cron-tasks.json). The host sudo copy sees root
+# squashed to nobody; the file is instead `cat`-ed from the source bot's BaaS
+# container (uid 1000 owner), matching the _generate_mcp_config pattern.
+# ---------------------------------------------------------------------------
+
+
+def _extra_include_plan():
+    return EngineBuildPlan(
+        engine_type="aicoding",
+        source_root_name=".aicoding",
+        migration_subpath="aicoding",
+        workspace_subdir="workspace",
+        mcp_config_relpath="workspace/config/mcporter.json",
+        skill_source_relpath="workspace/skills",
+        skill_target_relpath="workspace/skills",
+        rsync_excludes=["sessions"],
+        extra_include_files=["sessions/cron-tasks.json"],
+    )
+
+
+def _fake_rsync_copy(**kwargs):
+    """Simulate `sudo rsync src dst` so tests can assert landed content."""
+    cmd = kwargs["cmd"]
+    shutil.copyfile(cmd[-2], cmd[-1])
+
+
+class _UnreadableSourceFile:
+    """Stand-in for a NAS sandbox file the service uid cannot stat: exists()
+    / is_file() raise PermissionError (NFS root_squash, uid-1000/0600).
+
+    ``source_dir / rel`` returns self so the whole unreadable path is one
+    object that triggers the PermissionError branch in _sync_extra_include_files.
+    """
+
+    def __truediv__(self, other):
+        return self
+
+    def exists(self):
+        raise PermissionError("simulated EACCES")
+
+    def is_file(self):
+        raise PermissionError("simulated EACCES")
+
+    def __str__(self):
+        return "/host/.merge_nas/bot/.aicoding/sessions/cron-tasks.json"
+
+
+def test_sync_extra_include_file_via_device_reads_from_container(tmp_path):
+    svc = object.__new__(BotBuildService)
+    svc._device_service = MagicMock()
+    svc._device_service.exec_shell_new.return_value = CommandResult(
+        stdout='{"tasks":[]}', exit_code=0, stderr="",
+    )
+    svc._run_local_command = MagicMock(side_effect=_fake_rsync_copy)
+
+    target_file = tmp_path / "target" / "sessions" / "cron-tasks.json"
+
+    ok = svc._sync_extra_include_file_via_device(
+        device_id="dev-1",
+        device_source_root="/home/admin/.aicoding",
+        rel_path="sessions/cron-tasks.json",
+        target_file=target_file,
+        chown="1000:1000",
+        timeout_seconds=42,
+    )
+
+    assert ok is True
+    esn = svc._device_service.exec_shell_new.call_args.kwargs
+    assert esn["device_id"] == "dev-1"
+    assert esn["shell_cmd"] == "cat /home/admin/.aicoding/sessions/cron-tasks.json"
+    rsync_cmd = svc._run_local_command.call_args.kwargs["cmd"]
+    assert rsync_cmd[:4] == ["sudo", "rsync", "-av", "--chown=1000:1000"]
+    assert rsync_cmd[-1] == str(target_file)
+    assert svc._run_local_command.call_args.kwargs["timeout_seconds"] == 42
+    assert target_file.read_text() == '{"tasks":[]}'
+
+
+def test_sync_extra_include_file_via_device_returns_false_when_cat_fails(tmp_path):
+    svc = object.__new__(BotBuildService)
+    svc._device_service = MagicMock()
+    svc._device_service.exec_shell_new.return_value = CommandResult(
+        stdout="", exit_code=1, stderr="No such file or directory",
+    )
+    svc._run_local_command = MagicMock()
+
+    ok = svc._sync_extra_include_file_via_device(
+        device_id="dev-1",
+        device_source_root="/home/admin/.aicoding",
+        rel_path="sessions/cron-tasks.json",
+        target_file=tmp_path / "target" / "sessions" / "cron-tasks.json",
+    )
+
+    assert ok is False
+    svc._device_service.exec_shell_new.assert_called_once()
+    svc._run_local_command.assert_not_called()
+
+
+def test_sync_extra_include_files_falls_back_to_device_on_root_squash(tmp_path):
+    """Host admin + root probe both fail (NFS root_squash): the file is rescued
+    from the source bot container (uid 1000 owner) instead of being skipped."""
+    plan = _extra_include_plan()
+    target_dir = tmp_path / "target"
+
+    svc = object.__new__(BotBuildService)
+    svc._device_service = MagicMock()
+    svc._device_service.exec_shell_new.return_value = CommandResult(
+        stdout='{"tasks":[1]}', exit_code=0, stderr="",
+    )
+    svc._run_local_command = MagicMock(side_effect=_fake_rsync_copy)
+    svc._sudo_is_file = MagicMock(return_value=False)  # root probe fails (squashed)
+
+    svc._sync_extra_include_files(
+        source_dir=_UnreadableSourceFile(),  # admin stat -> PermissionError
+        target_dir=target_dir,
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+        device_id="dev-1",
+        device_source_root="/home/admin/.aicoding",
+    )
+
+    assert svc._device_service.exec_shell_new.call_count == 1
+    assert svc._device_service.exec_shell_new.call_args.kwargs["device_id"] == "dev-1"
+    assert (target_dir / "sessions" / "cron-tasks.json").read_text() == '{"tasks":[1]}'
+
+
+def test_sync_extra_include_files_skip_when_no_device_and_root_probe_fails(tmp_path, caplog):
+    """restore_draft path has no device: unreadable file is still skipped (old behavior)."""
+    plan = _extra_include_plan()
+    svc = object.__new__(BotBuildService)
+    svc._run_local_command = MagicMock()
+    svc._sudo_is_file = MagicMock(return_value=False)
+    caplog.set_level("INFO")
+
+    svc._sync_extra_include_files(
+        source_dir=_UnreadableSourceFile(),
+        target_dir=tmp_path / "target",
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+    )
+
+    svc._run_local_command.assert_not_called()
+    # no device available -> graceful skip (remaining old behavior)
+    assert "Skip unreadable extra include file" in caplog.text
+
+
+
+def test_sync_extra_include_files_device_exec_failure_does_not_block(tmp_path, caplog):
+    """A failure inside the device fallback (device not ACTIVE, RPC error, ...)
+    must NOT abort the publish: the file is skipped gracefully and the method
+    returns normally (best-effort, never raises)."""
+    plan = _extra_include_plan()
+    caplog.set_level("INFO")
+    svc = object.__new__(BotBuildService)
+    svc._device_service = MagicMock()
+    svc._device_service.exec_shell_new.side_effect = RuntimeError("device offline")
+    svc._run_local_command = MagicMock()
+    svc._sudo_is_file = MagicMock(return_value=False)
+
+    # must not raise
+    svc._sync_extra_include_files(
+        source_dir=_UnreadableSourceFile(),
+        target_dir=tmp_path / "target",
+        build_plan=plan,
+        command_name="rsync extra include",
+        error_message="rsync extra include file failed",
+        device_id="dev-1",
+        device_source_root="/home/admin/.aicoding",
+    )
+
+    svc._run_local_command.assert_not_called()  # host copy never attempted
+    assert "Skip unreadable extra include file" in caplog.text

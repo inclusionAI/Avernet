@@ -36,14 +36,14 @@ export function UnderlineTabs<T extends string>({
               'relative h-[54px] justify-center px-1 text-sm transition-colors hover:bg-transparent',
               active
                 ? 'font-medium text-foreground hover:text-foreground'
-                : 'font-normal text-muted-foreground hover:text-[var(--color-primary)]',
+                : 'font-normal text-muted-foreground hover:text-primary',
             )}
           >
             <span className="flex h-full items-center">{opt.label}</span>
             {/* 下划线始终渲染，inactive 时 scale-x-0 收起，切换时中心展开 */}
             <span
               className={cn(
-                'absolute inset-x-0 bottom-0 h-[3px] rounded-t-full bg-[var(--color-primary)]',
+                'absolute inset-x-0 bottom-0 h-[3px] rounded-t-full bg-primary',
                 'transition-transform duration-200 ease-out',
                 active ? 'scale-x-100' : 'scale-x-0',
               )}
@@ -81,7 +81,7 @@ export function CardTabs<T extends string>({
             className={cn(
               'h-10 justify-center px-4 text-sm rounded-lg border transition-colors',
               active
-                ? 'border-border bg-card font-medium text-[var(--color-primary)] shadow-sm hover:bg-card'
+                ? 'border-border bg-card font-medium text-primary shadow-sm hover:bg-card'
                 : 'border-border bg-muted/60 font-normal text-muted-foreground hover:bg-muted hover:text-foreground',
             )}
           >

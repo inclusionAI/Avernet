@@ -9,12 +9,12 @@ from __future__ import annotations
 from typing import Any
 
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.eval_env import EvalSessionLogProtocol
+from secbaas.community.spi.eval_env import EvalSessionLog
 
 logger = get_logger("core-bot-run")
 
 
-class RealEvalSessionLog(EvalSessionLogProtocol):
+class RealEvalSessionLog(EvalSessionLog):
     """评测会话日志的 Real 实现。
 
     记录评测会话日志并向 metadata 注入评测观测字段。

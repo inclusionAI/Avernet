@@ -19,15 +19,13 @@ export function GroupMembersModal({ open, group, members, loading, onClose }: Gr
           <ModalTitle>{group ? `${group.name} · 公开成员` : '公开成员'}</ModalTitle>
           <ModalDescription>成员详情仅展示名称、身份类型和角色。</ModalDescription>
         </ModalHeader>
-        {group?.memberListVisibility === 'count_only' ? (
-          <p className="m-0 text-sm leading-6 text-[var(--color-muted)]">
-            该协作群仅公开成员数量，共 {group.memberCount} 位成员。
-          </p>
-        ) : loading ? (
+        {loading ? (
           <div aria-label="正在加载成员">
             <Skeleton.ListItem />
             <Skeleton.ListItem />
           </div>
+        ) : members.length === 0 ? (
+          <p className="m-0 text-sm leading-6 text-[var(--color-muted)]">暂无成员信息。</p>
         ) : (
           <div className="space-y-2">
             {members.map((member) => (

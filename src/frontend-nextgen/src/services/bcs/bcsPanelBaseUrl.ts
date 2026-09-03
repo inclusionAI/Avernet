@@ -1,10 +1,9 @@
 // @sdd: BCS 状态机副屏取数基址注入纯逻辑（无 SDK/React 依赖，便于单测）。
 //
-// 背景：远程 CDN UMD（@alipay/bcn-panel-asset v1.2.0，bench `src/StateMachineRunView`）与
-// 本地 fallback 副屏（src/assets/BcsWorkflowPanel/StateMachineRunView）共用同一份
-// resolveBaseUrl 契约：
+// 背景：远程 CDN UMD（@alipay/bcn-panel-asset v1.2.0，bench `src/StateMachineRunView`）
+// 经 manifest 加载（bcsPanel 库），其 resolveBaseUrl 契约：
 //   props.apiBaseUrl || props.baseUrl || props.data?.apiBaseUrl || props.data?.baseUrl || 默认
-// 远程 UMD 的默认值为 `/bcnproxy`，本地 fallback 已改为 `/api/v1/collaboration`。部署态 Tern
+// 远程 UMD 的默认值为 `/bcnproxy`，故 CDN 加载时需注入 `/api/v1/collaboration`。部署态 Tern
 // 同源反代表（config/internal/runtime/config.ts tern.proxy）只登记了 `/api/v1/collaboration`
 // （→ teamclawgw-{pre,prod}），无 `/bcnproxy` 条目——故经 CDN 加载时若不注入 apiBaseUrl，
 // 远程 UMD 会回退其 `/bcnproxy` 默认，相对路径落到前端站本身被 CORB 拦截。

@@ -6,7 +6,7 @@ range over every Set a Bot has and answer what its Installation table should say
 
 from __future__ import annotations
 
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
 from agentclaw.community.core.models.skill import (
@@ -25,7 +25,25 @@ from agentclaw.community.core.repository.implementations.skill_center.tables imp
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
 )
+from agentclaw.community.core.skill_center.errors import (
+    SkillSetControlPlaneConflictError,
+)
 from agentclaw.community.utils.env_utils import get_current_env
+
+
+CENTER_MEMBERSHIP_IDENTITY_MISSING = "CENTER_MEMBERSHIP_IDENTITY_MISSING"
+
+
+def center_membership_skill_uuid(skill: Skill) -> str | None:
+    """Return the stable Membership identity required by a Center Skill."""
+    if not str(skill.git_path or "").startswith("center://"):
+        return None
+    skill_uuid = str(skill.skill_uuid or "").strip()
+    if not skill_uuid:
+        raise SkillSetControlPlaneConflictError(
+            CENTER_MEMBERSHIP_IDENTITY_MISSING
+        )
+    return skill_uuid
 
 
 def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
@@ -36,6 +54,25 @@ def set_member_skill_ids(scope, session, *, skill_set_id: int) -> set[int]:
     the highest PUBLISHED version, everything else joins by ``skill_id``.
     """
     env = get_current_env()
+
+    malformed_center = (
+        scope(session.query(SkillSetSkill.id), SkillSetSkill)
+        .join(Skill, SkillSetSkill.skill_id == Skill.id)
+        .filter(
+            SkillSetSkill.skill_set_id == skill_set_id,
+            SkillSetSkill.env == env,
+            Skill.git_path.like("center://%"),
+            or_(
+                SkillSetSkill.skill_uuid.is_(None),
+                func.trim(SkillSetSkill.skill_uuid) == "",
+            ),
+        )
+        .first()
+    )
+    if malformed_center is not None:
+        raise SkillSetControlPlaneConflictError(
+            CENTER_MEMBERSHIP_IDENTITY_MISSING
+        )
 
     def ids(query) -> set[int]:
         return {int(row[0]) for row in query.all()}

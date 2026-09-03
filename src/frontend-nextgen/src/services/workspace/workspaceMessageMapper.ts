@@ -1,5 +1,6 @@
 import type { PrivateSessionRawMessage } from '@/services/backendApi/privateChat/privateSessionController';
 import type { Block, ChatMessage, MessageRole, TextBlock, ToolExecutionBlock, ToolStep } from '@tc-chat/core';
+import { imageAttachmentsToBlocks, type MessageImageAttachment } from './messageBlockBuilder';
 import {
   extractMessageContent,
   isToolError,
@@ -20,8 +21,18 @@ function normalizeRole(role?: string): MessageRole | null {
   return null;
 }
 
+function getRawAttachments(message: PrivateSessionRawMessage): MessageImageAttachment[] {
+  return Array.isArray(message.attachments)
+    ? (message.attachments.filter((item) => item && typeof item === 'object') as MessageImageAttachment[])
+    : [];
+}
+
+function buildImageBlocks(attachments: MessageImageAttachment[] | undefined): Block[] {
+  return imageAttachmentsToBlocks(attachments);
+}
+
 function buildHistoryBlocks(group: PrivateSessionRawMessage[]): Block[] {
-  const blocks: Block[] = [];
+  const blocks: Block[] = group.flatMap((message) => buildImageBlocks(getRawAttachments(message)));
   let currentToolBlock: ToolExecutionBlock | null = null;
   let currentTextBlock: { type: 'text'; content: string } | null = null;
   const seenToolIds = new Set<string>();
@@ -92,7 +103,12 @@ function getHistoryGroupKey(message: PrivateSessionRawMessage): string | undefin
 export function mapPrivateHistoryMessages(rawMessages: PrivateSessionRawMessage[]): ChatMessage[] {
   const messages = rawMessages.filter((message) => {
     const content = extractMessageContent(message.content);
-    return Boolean(content || message.blocks?.length || Object.keys(message.metadata ?? {}).length);
+    return Boolean(
+      content ||
+        message.blocks?.length ||
+        Object.keys(message.metadata ?? {}).length ||
+        (Array.isArray(message.attachments) && message.attachments.length > 0),
+    );
   });
   const result: ChatMessage[] = [];
   let index = 0;
@@ -115,7 +131,10 @@ export function mapPrivateHistoryMessages(rawMessages: PrivateSessionRawMessage[
         createdAt,
         blocks: message.blocks?.length
           ? (message.blocks as unknown as Block[])
-          : ([{ type: 'text', content }] as TextBlock[]),
+          : [
+              ...buildImageBlocks(getRawAttachments(message)),
+              ...(content ? ([{ type: 'text', content }] as TextBlock[]) : []),
+            ],
       });
       index += 1;
       continue;
@@ -133,9 +152,10 @@ export function mapPrivateHistoryMessages(rawMessages: PrivateSessionRawMessage[
         createdAt,
         blocks: message.blocks?.length
           ? (message.blocks as unknown as Block[])
-          : content
-          ? ([{ type: 'text', content }] as TextBlock[])
-          : undefined,
+          : [
+              ...buildImageBlocks(getRawAttachments(message)),
+              ...(content ? ([{ type: 'text', content }] as TextBlock[]) : []),
+            ],
       });
       index += 1;
       continue;
@@ -165,7 +185,9 @@ export function mapPrivateHistoryMessages(rawMessages: PrivateSessionRawMessage[
       content,
       status: 'history',
       createdAt,
-      blocks: first.blocks?.length ? (first.blocks as unknown as Block[]) : buildHistoryBlocks(group),
+      blocks: first.blocks?.length
+        ? [...buildImageBlocks(getRawAttachments(first)), ...(first.blocks as unknown as Block[])]
+        : buildHistoryBlocks(group),
     });
   }
 

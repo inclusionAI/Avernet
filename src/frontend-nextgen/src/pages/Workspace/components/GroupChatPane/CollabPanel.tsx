@@ -16,19 +16,21 @@ import { BotControlRow } from './BotControlRow';
 import { LeaveBar } from './LeaveBar';
 
 /** 「未加入当前会话」提示条（human absent / 用户协作未加入态共用,对齐 open-claw 图三样式）。 */
-function JoinBar({ joining, onJoin }: { joining: boolean; onJoin: () => void }) {
+function JoinBar({ joining, onJoin, humanName }: { joining: boolean; onJoin: () => void; humanName: string }) {
   return (
     <div className="flex items-center justify-between py-1.5">
       <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-panel-strong)]">
-          <UserPlus className="h-4 w-4 text-[var(--color-muted)]" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+          <UserPlus className="h-4 w-4 text-muted-foreground" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-[var(--color-fg)]">未加入当前会话</p>
-          <p className="mt-0.5 text-xs leading-tight text-[var(--color-muted)]">以用户身份加入当前会话后可直接发言</p>
+          <p className="text-sm font-medium leading-tight text-foreground">未加入当前会话</p>
+          <p className="mt-0.5 text-xs leading-tight text-muted-foreground">
+            以用户身份加入当前会话后，{humanName}可直接发言
+          </p>
         </div>
       </div>
-      <Button size="sm" variant="primary" disabled={joining} onClick={onJoin} className="shrink-0">
+      <Button size="sm" variant="default" disabled={joining} onClick={onJoin} className="shrink-0">
         {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : '加入当前会话'}
       </Button>
     </div>
@@ -48,17 +50,17 @@ function HumanJoinedRow({
   return (
     <div className="flex items-center justify-between py-1.5">
       <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-primary-soft)]">
-          <UserPlus className="h-4 w-4 text-[var(--color-primary)]" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+          <UserPlus className="h-4 w-4 text-primary" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-medium leading-tight text-[var(--color-fg)]">{humanName}</p>
-          <p className="mt-0.5 line-clamp-2 text-xs leading-tight text-[var(--color-muted)]">
-            当前为 Bot 视角，用户已加入当前会话后请点击右侧“去发言”，切换到用户视角继续发言。
+          <p className="text-sm font-medium leading-tight text-foreground">{humanName}</p>
+          <p className="mt-0.5 line-clamp-2 text-xs leading-tight text-muted-foreground">
+            当前为 Bot 视角，{humanName}已加入当前会话；点击右侧“去发言”切换到该身份继续发言。
           </p>
         </div>
       </div>
-      <Button size="sm" variant="primary" disabled={!canSwitchToHuman} onClick={onSwitchToHuman} className="shrink-0">
+      <Button size="sm" variant="default" disabled={!canSwitchToHuman} onClick={onSwitchToHuman} className="shrink-0">
         去发言
       </Button>
     </div>
@@ -71,18 +73,20 @@ function JoinConfirmDialog({
   onOpenChange,
   joining,
   onConfirm,
+  humanName,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   joining: boolean;
   onConfirm: () => void;
+  humanName: string;
 }) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>加入当前会话</AlertDialogTitle>
-          <AlertDialogDescription>加入后你将以用户身份参与本会话协作，可以直接发言。</AlertDialogDescription>
+          <AlertDialogDescription>加入后，{humanName}将参与本会话协作，可以直接发言。</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
@@ -119,7 +123,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
       void panel.leaveSession().finally(() => setLeaving(false));
     };
     return (
-      <div className="border-t border-[var(--color-border)] bg-white px-6 pb-2 pt-2">
+      <div className="border-t border-border bg-background px-3 pb-2 pt-2 sm:px-6">
         <LeaveBar humanName={panel.humanName} onLeave={handleLeave} leaving={leaving} />
       </div>
     );
@@ -128,8 +132,8 @@ export function CollabPanel({ panel }: CollabPanelProps) {
   // human 视角 absent:仅显示加入条(第三张设计图)。
   if (panel.humanAbsentOnly) {
     return (
-      <div className="border-t border-[var(--color-border)] bg-white px-6 pb-3 pt-2">
-        <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} />
+      <div className="border-t border-border bg-background px-3 pb-3 pt-2 sm:px-6">
+        <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} humanName={panel.humanName} />
         <JoinConfirmDialog
           open={confirmJoin}
           onOpenChange={setConfirmJoin}
@@ -139,6 +143,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
               if (ok) setConfirmJoin(false);
             });
           }}
+          humanName={panel.humanName}
         />
       </div>
     );
@@ -151,7 +156,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
   };
 
   return (
-    <div className="border-t border-[var(--color-border)] bg-white px-6 pb-3 pt-2" data-testid="collab-panel">
+    <div className="border-t border-border bg-background px-3 pb-3 pt-2 sm:px-6" data-testid="collab-panel">
       <div className="w-56">
         <Segmented
           value={tab}
@@ -172,7 +177,7 @@ export function CollabPanel({ panel }: CollabPanelProps) {
               onModeChange={(m) => void panel.setBotMode(m)}
             />
           ) : (
-            <p className="py-1.5 text-xs text-[var(--color-muted)]">当前会话暂不可控制 Bot 发言模式。</p>
+            <p className="py-1.5 text-xs text-muted-foreground">当前会话暂不可控制 Bot 发言模式。</p>
           )
         ) : panel.humanJoined ? (
           <HumanJoinedRow
@@ -181,10 +186,16 @@ export function CollabPanel({ panel }: CollabPanelProps) {
             onSwitchToHuman={panel.switchToHuman}
           />
         ) : (
-          <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} />
+          <JoinBar joining={panel.joining} onJoin={() => setConfirmJoin(true)} humanName={panel.humanName} />
         )}
       </div>
-      <JoinConfirmDialog open={confirmJoin} onOpenChange={setConfirmJoin} joining={panel.joining} onConfirm={join} />
+      <JoinConfirmDialog
+        open={confirmJoin}
+        onOpenChange={setConfirmJoin}
+        joining={panel.joining}
+        onConfirm={join}
+        humanName={panel.humanName}
+      />
     </div>
   );
 }

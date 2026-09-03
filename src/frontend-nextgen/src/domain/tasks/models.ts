@@ -20,6 +20,11 @@ export interface TaskExecConfig {
   MAX_LOOP?: number;
   MAX_HARNESS?: number;
   BBS_MAX_DEPTH?: number;
+  /** 会话/群/父任务上下文(扁平)。新规范从 execution_config 读取;历史记录读 task_spec.context.extend_props.teamclaw_context 兼容。 */
+  main_session_id?: string;
+  main_session_name?: string;
+  source_group_id?: string;
+  parent_task_id?: string | null;
   [key: string]: unknown;
 }
 
@@ -67,6 +72,10 @@ export interface TaskListItem {
   owner_bot_id: string;
   execution_config: {
     task_type: TaskType;
+    main_session_id?: string;
+    main_session_name?: string;
+    source_group_id?: string;
+    parent_task_id?: string | null;
     [key: string]: unknown;
   };
   task_spec: TaskSpec;

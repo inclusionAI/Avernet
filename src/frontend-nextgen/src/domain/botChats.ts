@@ -67,3 +67,9 @@ export interface BotChatContext {
   userId: string;
   ownerId?: string;
 }
+
+export interface BotChatDetailSelection {
+  traceId: string;
+  sessionId?: string;
+  botId?: string;
+}

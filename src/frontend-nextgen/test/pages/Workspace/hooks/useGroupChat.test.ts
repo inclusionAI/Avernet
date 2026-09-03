@@ -129,6 +129,8 @@ beforeEach(() => {
     request: fn().mockResolvedValue(undefined),
     stop: fn(),
     abort: fn(),
+    beginHistoryHydration: fn(),
+    enterLiveMode: fn(),
     hasMoreHistory: false,
     isLoadingMoreHistory: false,
     subscribeToSupportState: jest.fn<any>(() => jest.fn<any>()),
@@ -176,6 +178,47 @@ it('mount calls provider.loadHistory and sets messages into chat', async () => {
   renderHook(() => useGroupChat(session));
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalled());
   await waitFor(() => expect(mockChat.setMessages).toHaveBeenCalledWith(fakeMessages));
+  expect(mockProvider.beginHistoryHydration.mock.invocationCallOrder[0]).toBeLessThan(
+    mockProvider.connect.mock.invocationCallOrder[0],
+  );
+  expect(mockProvider.enterLiveMode).toHaveBeenCalled();
+});
+
+it('leaves hydration buffering when initialization fails so retry can start cleanly', async () => {
+  mockProvider.loadHistory.mockRejectedValue(new Error('history failed'));
+
+  renderHook(() => useGroupChat(session));
+
+  await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalled());
+  await waitFor(() => expect(mockProvider.enterLiveMode).toHaveBeenCalled());
+});
+
+it('exposes group bootstrap processing until the matching run message appears', async () => {
+  useWorkspaceStore.getState().setPendingGroupBootstrap({
+    groupId: 'g1',
+    sessionId: 's1',
+    run: {
+      runId: 'run-manager',
+      botUuid: 'manager-bot',
+      activityKind: 'group_bootstrap',
+      state: 'running',
+      startedAt: '2026-08-31T00:00:00Z',
+    },
+  });
+  const { result, rerender } = renderHook(() => useGroupChat(session));
+  expect(result.current.groupBootstrapProcessing).toBe(true);
+
+  mockChat.messages = [
+    {
+      id: 'bcs-run:run-manager:manager-bot',
+      role: 'assistant',
+      content: '开始处理',
+      status: 'streaming',
+      extra: { runId: 'run-manager', botUuid: 'manager-bot' },
+    },
+  ];
+  rerender();
+  await waitFor(() => expect(useWorkspaceStore.getState().pendingGroupBootstrap).toBeNull());
 });
 
 it('historyRefreshNonce 递增时（重复点击同一会话）重新拉取历史消息', async () => {
@@ -183,8 +226,8 @@ it('historyRefreshNonce 递增时（重复点击同一会话）重新拉取历�
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(1));
   act(() => useWorkspaceStore.getState().bumpHistoryRefresh());
   await waitFor(() => expect(mockProvider.loadHistory).toHaveBeenCalledTimes(2));
-  // 同一会话重载历史不应触发重连
-  expect(mockProvider.connect).toHaveBeenCalledTimes(1);
+  // 重载也使用同一可取消初始化流程，确保 history 与 WS 事件有确定顺序。
+  expect(mockProvider.connect).toHaveBeenCalledTimes(2);
 });
 
 it('send calls chat.onRequest with sessionId and trimmed text', () => {

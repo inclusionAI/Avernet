@@ -27,14 +27,14 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
   };
 
   return (
-    <div className="rounded-xl bg-[var(--color-panel-muted)] p-5">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
-        <div className="flex items-center gap-2">
+    <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-panel-muted)] p-4 shadow-sm sm:p-5">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+        <div className="flex min-w-0 items-center gap-2 2xl:col-span-2">
           <span className="whitespace-nowrap text-sm text-[var(--color-muted)]">时间：</span>
-          <div className="flex items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-2">
             <Input
               aria-label="开始时间"
-              className="w-[178px] border-0 bg-transparent px-1 focus:ring-0"
+              className="min-w-0 flex-1 border-0 bg-transparent px-1 focus:ring-0"
               type="datetime-local"
               value={value.fromDate}
               onChange={(event) => onChange('fromDate', event.target.value)}
@@ -43,7 +43,7 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
             <span className="text-xs text-[var(--color-muted)]">~</span>
             <Input
               aria-label="结束时间"
-              className="w-[178px] border-0 bg-transparent px-1 focus:ring-0"
+              className="min-w-0 flex-1 border-0 bg-transparent px-1 focus:ring-0"
               type="datetime-local"
               value={value.toDate}
               onChange={(event) => onChange('toDate', event.target.value)}
@@ -52,10 +52,10 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
           </div>
         </div>
         {fields.map((field) => (
-          <label key={field.key} className="flex items-center gap-2 text-sm text-[var(--color-muted)]">
+          <label key={field.key} className="flex min-w-0 items-center gap-2 text-sm text-[var(--color-muted)]">
             <span className="whitespace-nowrap">{field.label}：</span>
             <Input
-              className={field.className ?? 'w-48'}
+              className={field.className ? `${field.className} max-w-full flex-1` : 'min-w-0 flex-1'}
               value={value[field.key]}
               placeholder={field.key === 'keyword' ? 'Input/Output' : '请输入'}
               onChange={(event) => onChange(field.key, event.target.value)}
@@ -63,7 +63,7 @@ export function BotChatFilters({ value, loading, onChange, onQuery, onReset }: P
             />
           </label>
         ))}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2 md:col-span-2 xl:col-span-4 2xl:col-span-1">
           <Button loading={loading} leftIcon={<Search className="size-4" />} onClick={onQuery}>
             查询
           </Button>

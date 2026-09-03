@@ -21,13 +21,22 @@ export const botAdvancedConfigService = {
       status: item.status,
       clientId: item.config.client_id,
       hasSecret: item.config.has_client_secret,
+      enableStreamingCards: Boolean(item.config.enable_streaming_cards),
+      cardTemplateId: item.config.card_template_id ?? undefined,
+      cardTemplateKey: item.config.card_template_key ?? undefined,
     }));
   },
   createChannel: (botId: string, input: BotChannelInput) =>
     botEditorController.createChannel(botId, {
       type: 'dingding',
       description: input.description || null,
-      config: { client_id: input.clientId, client_secret: input.clientSecret },
+      config: {
+        client_id: input.clientId,
+        client_secret: input.clientSecret,
+        enable_streaming_cards: input.enableStreamingCards,
+        card_template_id: input.cardTemplateId.trim() || null,
+        card_template_key: input.cardTemplateKey.trim() || null,
+      },
     }),
   setChannelStatus: (botId: string, channel: BotChannel) =>
     botEditorController.setChannelStatus(botId, channel.id, channel.status === 'active' ? 'inactive' : 'active'),
