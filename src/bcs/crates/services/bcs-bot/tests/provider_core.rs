@@ -106,6 +106,7 @@ async fn register_provider_persists_mcporter_coordination_config() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::McporterMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: Some("mcporter".to_string()),
                 tool_name_mapping: Default::default(),
@@ -119,6 +120,23 @@ async fn register_provider_persists_mcporter_coordination_config() {
     assert_eq!(config["coordination"]["mode"], "mcporter_mcp");
     assert_eq!(config["coordination"]["mcp_server"], "bcs");
     assert_eq!(config["coordination"]["mcporter_command"], "mcporter");
+    assert!(config["coordination"]
+        .get("worker_send_task_message_enabled")
+        .is_none());
+}
+
+#[test]
+fn provider_coordination_defaults_worker_send_task_message_to_enabled() {
+    let config: ProviderCoordinationConfig = serde_json::from_value(serde_json::json!({
+        "mode": "native_tool"
+    }))
+    .expect("coordination config should deserialize without the optional field");
+    assert!(config.worker_send_task_message_enabled);
+
+    let mut disabled = config;
+    disabled.worker_send_task_message_enabled = false;
+    let serialized = serde_json::to_value(disabled).expect("coordination config should serialize");
+    assert_eq!(serialized["worker_send_task_message_enabled"], false);
 }
 
 #[tokio::test]
@@ -137,6 +155,7 @@ async fn register_provider_persists_native_mcp_tool_name_mapping() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("mcp.ant.agentclawscs.bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: [
@@ -187,6 +206,7 @@ async fn register_provider_rejects_non_native_mcp_tool_name_mapping() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::McporterMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: Some("mcporter".to_string()),
                 tool_name_mapping: [(
@@ -219,6 +239,7 @@ async fn register_provider_rejects_too_many_tool_name_mappings() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping,
@@ -243,6 +264,7 @@ async fn register_provider_rejects_invalid_provider_tool_name() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: [(" provider-tool".to_string(), "bcs_assign_task".to_string())]
@@ -269,6 +291,7 @@ async fn register_provider_rejects_unsupported_canonical_tool_name() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::NativeMcp,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: [("provider-tool".to_string(), "unknown-tool".to_string())]
@@ -295,6 +318,7 @@ async fn register_provider_rejects_native_tool_with_mcp_fields() {
             None,
             Some(ProviderCoordinationConfig {
                 mode: CoordinationMode::NativeTool,
+                worker_send_task_message_enabled: true,
                 mcp_server: Some("bcs".to_string()),
                 mcporter_command: None,
                 tool_name_mapping: Default::default(),
@@ -314,6 +338,7 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
         ProviderAuthMode::StaticBearer,
         ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: false,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: [(
@@ -348,6 +373,7 @@ async fn provider_bot_resolves_coordination_surface_from_provider_config() {
         .expect("resolve coordination surface");
 
     assert_eq!(surface.mode, CoordinationMode::NativeMcp);
+    assert!(!surface.worker_send_task_message_enabled);
     assert_eq!(surface.mcp_server.as_deref(), Some("bcs"));
     assert_eq!(surface.mcporter_command, None);
     assert_eq!(
@@ -380,6 +406,7 @@ async fn websocket_plugin_bot_resolves_native_tool_surface() {
         .expect("resolve coordination surface");
 
     assert_eq!(surface.mode, CoordinationMode::NativeTool);
+    assert!(surface.worker_send_task_message_enabled);
     assert_eq!(surface.mcp_server, None);
     assert_eq!(surface.mcporter_command, None);
     assert!(surface.tool_name_mapping.is_empty());
@@ -455,6 +482,7 @@ async fn update_provider_normalizes_organization_management_and_preserves_other_
         ProviderAuthMode::StaticBearer,
         ProviderCoordinationConfig {
             mode: CoordinationMode::NativeMcp,
+            worker_send_task_message_enabled: true,
             mcp_server: Some("bcs".to_string()),
             mcporter_command: None,
             tool_name_mapping: Default::default(),
