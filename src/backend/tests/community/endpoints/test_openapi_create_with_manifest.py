@@ -924,6 +924,20 @@ def _stand_in_for_teclaw_platform_managed(world) -> list[str]:
     applies = bind_overrides(
         world, BotConfigManifestApplyServiceProtocol, {}, also_bind=(BotConfigManifestApplyService,)
     )
+    # The managed-files store keeps no index: the object store's listing is
+    # the record, so the mock plugin has to remember what was put into it.
+    from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+
+    objects: dict[str, bytes] = {}
+    oss = world.get(ObjectStoragePlugin)
+    oss.put_object.side_effect = lambda key, content: (
+        objects.__setitem__(key, content if isinstance(content, bytes) else content.encode()) or True
+    )
+    oss.get_object.side_effect = objects.get
+    oss.delete_object.side_effect = lambda key: objects.pop(key, None) is not None or True
+    oss.list_objects.side_effect = lambda prefix, max_keys=1000: sorted(
+        k for k in objects if k.startswith(prefix)
+    )[:max_keys]
     bindings = world.get(TeclawPlatformBindings)
     applies._strategies = DeliveryStrategyFactory(
         is_teclaw=lambda engine: engine == "teclaw",
