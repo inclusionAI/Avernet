@@ -117,21 +117,18 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         return
     logger.info("[task][bbs_mode] bid winner is=%s, task_id=%s", winner_bot_id, task_id)
 
-    msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id,
-                    title=winner.get("title", ""), goal=winner.get("goal", ""))
-
     _group_enabled = _singlebot_2_group_switch(graph, task_id)
     actual_run_mode = "coop_group" if (_group_enabled and group_executor is not None) else "bbs"
 
-    # 先增加一个bbs节点,RUNNING
+    # 先增加一个bbs节点,PENDING
     bbs_task_node = TaskNode(
         node_id=f"bbs-{uuid.uuid4().hex[:8]}",
         task_id=task_id,
-        status=Status.RUNNING,
+        status=Status.PENDING,
         task_spec=TaskSpec(
-            metadata=Metadata(task_id=task_id, title=winner.get("title", msg), instruction=""),
+            metadata=Metadata(task_id=task_id, title=winner.get("title"), instruction=""),
             context=Context(background=""),
-            goal=Goal(objective=winner.get("goal", msg), acceptances=[]),
+            goal=Goal(objective=winner.get("goal"), acceptances=[]),
         ),
         run_info=RuntimeInfo(
             run_mode=actual_run_mode,
@@ -153,9 +150,13 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     graph.add_relations(task_id, edges)
     logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
 
+    # 任务msg
+    msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id, bbs_task_node.task_id, bbs_task_node.node_id,
+                    title=winner.get("title", ""), goal=winner.get("goal", ""), )
+
     # 执行bbs，执行完后再更新
     try:
-        logger.info("[task][bbs_mode] begin_rely_task, task_id=%s", task_id)
+        logger.info("[task][bbs_mode] begin_rely_task, task_id=%s, msg=%s", task_id, msg)
         if _group_enabled and group_executor is not None:
             _owner_user_id = _resolve_owner_user_id_from_graph(graph, task_id)
             logger.info(
@@ -196,7 +197,7 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
         _scoped_patch = TaskNodePatch(
             task_id=task_id,
             node_id=bbs_task_node.node_id,
-            status=Status.SUCCESS,
+            status=Status.RUNNING,
             # assignee=持有者身份:on_bbs_report 持有者校验要求 bbs_owner==patch.assignee
             # (claim_bbs_owner 已置根 bbs_owner=winner_bot_id;此处同源补齐,校验才放行)。
             assignee=winner_bot_id,
@@ -402,7 +403,7 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
     )
 
 
-def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str,
+def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, task_id: str, node_id: str,
               *, title: str = "", goal: str = "") -> str:
     """给胜出 bot 的任务消息:内联任务态快照,skill 据快照归纳剩余事项(免读 dashboard)→ attach → 执行 → result。
 
@@ -410,10 +411,32 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str,
     ``title``/``goal`` 为胜出 bot bid 时承诺能完成的这部分事项的标题/目标,带入执行消息(置顶)让 bot
     按其中标的子任务范围执行,而非仅据全量快照自行裁剪。
     """
+
+    report_instruction = """
+  curl -X POST \
+    'https://agentclawengine-pre.alipay.com/api/v1/collaboration/tasks/callback/report' \
+    -H 'Content-Type: application/json' \
+    -d '{
+      "task_id": "71502914-0caf-4866-952c-49d60d159607",
+      "node_id": "bbs-b614056c",
+      "status": "SUCCESS",
+      "output": "存储行业尽调报告已完成,覆盖全部 5 项验收标准……",
+      "acceptance_result": {
+        "verdict": "DONE",
+        "acceptances_metric": [
+          {"id": "ac1", "passed": true, "summary": "投资价值已明确,给出 ★★★★☆ 评级"}
+        ],
+        "gaps": []
+      },
+      "extend_props": {}
+    }'
+    """
+
     snapshot = _build_task_snapshot(execution_graph)
-    parts = ["请为我执行一下任务。\n"]
+    parts = [f"我自主判断要接力执行的任务信息如下：task_id={task_id}, node_id={node_id} \n"]
+    parts.append("执行步骤：1、执行任务 2、通过post接口上报结果\n")
+    parts.append(f"上报方法参考如下示例：\n {report_instruction} \n")
     if title or goal:
-        parts.append("**你计划能完成的事项如下):\n")
         if title:
             parts.append(f"- title: {title}\n")
         if goal:
@@ -422,7 +445,7 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str,
         "**任务态快照已内联**(下方 JSON):含根 goal(objective+acceptances)、instruction、background、"
         "done_children(已 DONE 子节点+产出)、gaps、loop_round。**直接据快照归纳剩余事项**"
         "(剩余 = goal.acceptances 全集 − done_children 产出并集,再按 gaps 细化),无需先读 dashboard;\n"
-        "然后请为我完成基于剩余事项\n"
+        f"注意：执行完之之后，一定要主动上报执行结果。\n"
         f"任务态快照如下：\n{json.dumps(snapshot, ensure_ascii=False)}"
     )
     return "".join(parts)

@@ -1231,6 +1231,9 @@ class ExecutionEngine:
             ok = False
         finally:
             node.run_info.run_mode = "bbs"
+            # 清掉临时 single_bot 派发(单 bot→group 旁路)在 extend_props 泄漏的 actual_run_mode,
+            # 否则 effective_run_mode() 优先读 actual_run_mode 仍判 single_bot,致 dashboard 误显单人。
+            node.run_info.extend_props["actual_run_mode"] = "bbs"
         with self._lock_for(task_id):
             if not ok:
                 # 真派发失败:不回 PENDING/不清 assignee,直接 no-op 翻 RUNNING(bbs 路径仍由兜底推进),
@@ -1241,6 +1244,7 @@ class ExecutionEngine:
                         status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
                         extend_props_patch={
                             "dispatching": None,
+                            "actual_run_mode": "bbs",
                             "dispatch_error": "bbs_rnd_dispatch_fallback_noop",
                             "bbs_status": "claimed_by_rnd",
                         },
@@ -1252,7 +1256,7 @@ class ExecutionEngine:
                     TaskNodePatch(
                         task_id=task_id, node_id=node_id,
                         status=Status.RUNNING, run_mode="bbs", assignee=rnd_bot_id,
-                        extend_props_patch={"dispatching": None, "bbs_status": "claimed_by_rnd"},
+                        extend_props_patch={"dispatching": None, "actual_run_mode": "bbs", "bbs_status": "claimed_by_rnd"},
                     )
                 )
         logger.info(

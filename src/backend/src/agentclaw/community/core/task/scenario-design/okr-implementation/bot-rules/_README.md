@@ -1,6 +1,6 @@
 # OKR-Implementation 各 Bot Rule(V2)
 
-对齐 `plans/okr-implementation-relay.yaml`(串行 relay V2)。9 个 role bot 各一份 rule。
+对齐 `task_plan/plans/okr-implementation-relay.yaml`(串行 relay V2)。9 个 role bot 各一份 rule。
 链: 8azkbtgs 入口(图前)→ whd6nx7x(营销策略专家,单独①)→ 策略生成群(whd6nx7x driver + 6snfeiq0 + roqtqqkx ②)
 → 风险评估群(7q4cbeze + jbadndne ③)→ f7wfi27d(自动研发 ④)→ 9rgd70li(审核 ⑤)→ k9c2slro(实施 ⑥)→ notify ⑦。
 
