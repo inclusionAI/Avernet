@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
 import hashlib
 import json
 import logging
 import time
-from typing import Callable
 from urllib.parse import urlsplit
 
 from agentclaw.community.core.skill_center.canonical_center_store import (
@@ -128,14 +126,12 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
         http: HttpClient,
         validator: SkillPackageValidator,
         store: CanonicalCenterVersionStore,
-        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._versions = versions
         self._gateway = gateway
         self._http = http
         self._validator = validator
         self._store = store
-        self._clock = clock
 
     def materialize(
         self, request: SkillVersionMaterializationRequest
@@ -267,7 +263,6 @@ class SkillVersionMaterializer(SkillVersionMaterializerProtocol):
                 name=package.name,
                 metadata_json=metadata_json,
                 description=package.description,
-                published_at=self._clock(),
             )
             finish_stage()
             self._log_success(
