@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Any
 
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import RuntimeStage
@@ -21,10 +22,26 @@ _LIMIT = 20
 # deployment, so keep the same three-attempt bound but allow up to two seconds
 # for convergence.
 _DELAYS = (0.0, 0.5, 1.5)
+_MANAGED_SESSION_KEY = re.compile(
+    r"^(?:agent:([^:]+):)?(session:[^:]+:user:[^:]+)$",
+    re.IGNORECASE,
+)
 
 
 def _matches(candidate_id: str, created_id: str) -> bool:
-    return candidate_id == created_id or candidate_id.endswith(f":{created_id}")
+    if candidate_id == created_id:
+        return True
+
+    candidate_match = _MANAGED_SESSION_KEY.fullmatch(candidate_id)
+    created_match = _MANAGED_SESSION_KEY.fullmatch(created_id)
+    if candidate_match is None or created_match is None:
+        return False
+
+    candidate_agent, candidate_relative = candidate_match.groups()
+    created_agent, created_relative = created_match.groups()
+    if (candidate_agent is None) == (created_agent is None):
+        return False
+    return candidate_relative.lower() == created_relative.lower()
 
 
 async def reconcile_created_session(

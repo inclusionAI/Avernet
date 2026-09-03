@@ -26,7 +26,10 @@ from engine.community.core.session.models import (
     SessionUpdateRequest,
 )
 from engine.community.core.session_favorite import get_session_favorite_repository
-from engine.community.shared.utils import decode_session_key
+from engine.community.shared.utils import (
+    decode_session_key,
+    managed_session_keys_equal,
+)
 
 log = logging.getLogger("web-sessions")
 
@@ -186,7 +189,7 @@ async def get_session(session_id: str, engine: Optional[str] = None) -> ApiRespo
             (
                 s
                 for s in sessions
-                if s.id == session_id
+                if managed_session_keys_equal(s.id, session_id)
             ),
             None,
         )

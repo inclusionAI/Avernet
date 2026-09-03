@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import router
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     converter_creation,
+    router,
 )
 from agentclaw.community.core.engine_runtime.errors import (
     EngineCapabilityUnsupportedError,
@@ -171,6 +171,48 @@ def test_create_session_fills_user_id_from_the_principal(client, relay):
     assert data["gmt_modified"] == ENGINE_SESSION["gmt_modified"]
     assert relay.calls[1]["method"] == "GET"
     assert relay.calls[1]["path"] == "/api/sessions"
+
+
+def test_create_session_reconciles_openclaw_lowercased_cloud_user_id(client, relay):
+    relative_id = "session:ABC-123:user:CloudUser"
+    canonical_id = "agent:main:session:abc-123:user:clouduser"
+    relay.results = [
+        EngineResult(data={**ENGINE_SESSION, "id": relative_id}),
+        EngineResult(data=[{**ENGINE_SESSION, "id": canonical_id}]),
+    ]
+
+    resp = client.post(_base(), json={"title": "Cloud"})
+
+    assert resp.status_code == 201, resp.json()
+    assert resp.json()["data"]["session_id"] == canonical_id
+
+
+@pytest.mark.parametrize(
+    ("candidate_id", "created_id", "expected"),
+    [
+        ("Opaque-ID", "Opaque-ID", True),
+        ("opaque-id", "Opaque-ID", False),
+        (
+            "agent:main:session:abc-123:user:clouduser",
+            "session:ABC-123:user:CloudUser",
+            True,
+        ),
+        (
+            "agent:other:session:abc-123:user:clouduser",
+            "agent:main:session:ABC-123:user:CloudUser",
+            False,
+        ),
+        (
+            "session:abc-123:user:clouduser",
+            "session:ABC-123:user:CloudUser",
+            False,
+        ),
+    ],
+)
+def test_create_session_reconciliation_matches_only_managed_openclaw_keys(
+    candidate_id, created_id, expected
+):
+    assert converter_creation._matches(candidate_id, created_id) is expected
 
 
 def test_create_session_other_engine_does_not_add_reconciliation_call(client, relay):
