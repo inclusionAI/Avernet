@@ -1,6 +1,6 @@
 # OKR 实现接力剧本(串行 relay V2)
 
-> 对应模板 `plans/okr-implementation-relay.yaml`。链:
+> 对应模板 `task_plan/plans/okr-implementation-relay.yaml`。链:
 >
 > 入口(20260828_8azkbtgs,图前:分析 OKR→决定找营销策略专家)
 > → ①营销策略专家(20260828_whd6nx7x,单独)
