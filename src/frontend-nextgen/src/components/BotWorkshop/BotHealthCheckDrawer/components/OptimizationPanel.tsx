@@ -13,7 +13,7 @@ interface OptimizationPanelProps {
 export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
   const status = dimension.status;
   const isScanning = status === 'scanning';
-  const isFailed = status === 'error';
+  const isFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
   const patches = dimension.patches ?? [];
   const hasDimData = dimension.checkItems && dimension.checkItems.length > 0;
 

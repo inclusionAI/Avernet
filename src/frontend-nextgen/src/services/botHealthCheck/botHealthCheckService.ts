@@ -234,20 +234,22 @@ function parseCheckItems(value: unknown): BotHealthCheckItem[] | undefined {
           : ['scanning', 'running', 'patching', 'pending'].includes(rawStatus.toLowerCase())
           ? 'scanning'
           : 'unknown';
+      const resultDetail =
+        pickString(record.result_detail) ?? pickString(record.resultDetail) ?? pickString(record.detail) ?? null;
       return {
         name,
         checkItem: pickString(record.check_item) ?? name,
         note: pickString(record.note),
         status,
         result,
-        resultDetail:
-          pickString(record.result_detail) ?? pickString(record.resultDetail) ?? pickString(record.detail) ?? null,
+        resultDetail,
         score: pickNumber(record.score ?? record.health_score ?? record.value),
         repairSuggestion:
           pickString(record.repair_suggestion) ?? pickString(record.repairSuggestion) ?? pickString(record.suggestion),
         riskLevel: pickString(record.risk_level) ?? pickString(record.riskLevel),
         evidence: normalizeEvidence(record.evidence),
         conclusion:
+          resultDetail ??
           pickString(record.conclusion) ??
           pickString(record.description) ??
           pickString(record.message) ??
@@ -338,6 +340,7 @@ function mapDimension(item: HarnessDimReportItemDto): BotHealthDimension {
     description: dimensionDescriptions[key],
     score,
     grade,
+    scanStatus: pickString(item.status) ?? null,
     status: inferStatus(item.status, grade, score),
     checkedCount: stats.checked,
     passedCount: stats.passed,
@@ -398,6 +401,7 @@ function buildPlaceholderDimension(key: BotHealthDimensionKey): BotHealthDimensi
     description: dimensionDescriptions[key],
     score: null,
     grade: null,
+    scanStatus: null,
     status: 'passed',
     checkedCount: 0,
     passedCount: 0,

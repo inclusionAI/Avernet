@@ -28,7 +28,9 @@ export function EnvironmentPanel({
   onViewHistoryDetail,
   onReDiagnose,
 }: EnvironmentPanelProps) {
-  const dimStyle = DIM_STATUS_STYLES[dimension.status] ?? { label: '未知', tone: 'neutral' as const };
+  const scanFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
+  const dimStyle =
+    DIM_STATUS_STYLES[scanFailed ? 'failed' : dimension.status] ?? { label: '未知', tone: 'neutral' as const };
   const hasCheckItems = (dimension.checkItems?.length ?? 0) > 0;
   const showBadge = dimension.key === 'configuration' || hasCheckItems;
 

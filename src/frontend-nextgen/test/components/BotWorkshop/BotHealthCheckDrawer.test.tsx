@@ -164,4 +164,43 @@ describe('BotHealthCheckDrawer', () => {
     fireEvent.click(screen.getAllByRole('button', { name: '查看详情' })[0]);
     expect(screen.getByText('体检详情')).toBeInTheDocument();
   });
+
+  test('completed low-score diagnosis shows its optimization instead of an unknown execution failure', () => {
+    const dimension = buildDimension('configuration', '配置健康度', 'full:L1', 30);
+    dimension.status = 'error';
+    dimension.scanStatus = 'completed';
+    dimension.failedReason = null;
+    dimension.patches = [
+      {
+        patch_id: 7,
+        name: '补充安全边界',
+        description: '完善 AGENTS.md 的操作限制',
+        is_applied: false,
+      },
+    ];
+
+    render(
+      <BotHealthCheckDrawer
+        open
+        botName="低分 Bot"
+        summary={{
+          botId: 'b1',
+          entityId: 'u1',
+          overallStatus: 'critical',
+          healthScore: 30,
+          dimensions: [dimension],
+          history: [],
+        }}
+        loading={false}
+        checking={false}
+        onOpenChange={noop}
+        onRefresh={noop}
+        onRunDiagnose={noop}
+      />,
+    );
+
+    expect(screen.getByText('异常')).toBeInTheDocument();
+    expect(screen.getByText('补充安全边界')).toBeInTheDocument();
+    expect(screen.queryByText('检测失败：未知原因')).not.toBeInTheDocument();
+  });
 });

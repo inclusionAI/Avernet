@@ -104,7 +104,7 @@ export const DIM_STATUS_STYLES: Record<
   completed: { label: '已完成', tone: 'success' },
   failed: { label: '检测失败', tone: 'error' },
   warning: { label: '需关注', tone: 'warning' },
-  error: { label: '检测失败', tone: 'error' },
+  error: { label: '异常', tone: 'error' },
   unknown: { label: '未知', tone: 'neutral' },
 };
 

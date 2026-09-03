@@ -95,6 +95,8 @@ export interface BotHealthDimension {
   description?: string;
   score?: number | null;
   grade?: string | null;
+  /** 后端诊断任务状态，与健康质量状态 status 分开保存 */
+  scanStatus?: string | null;
   status: BotHealthItemStatus;
   checkedCount?: number;
   passedCount?: number;
