@@ -99,9 +99,8 @@ nodes:
       handoff: $.profit_accounting.output.handoff
     output:
       handoff: $.result
-      bbs_needed: $.result.bbs_needed
     task: |
-      你接店主Bot利润核算与授权划界后的方案。执行投放:发券/传单/展位/推送已执行并记实施记录。发现能力缺口(如到店核销防重复领工具)标明,不假装已完成无系统回执的操作。若发现现有工具无法支撑活动实施,请在产出中明确 bbs_needed=true,并把业务事实、影响和需要补齐的能力写清楚,交给后续 BBS 节点,不要替研发角色预写技术实现方案。
+      你接店主Bot利润核算与授权划界后的方案。执行投放:发券/传单/展位/推送已执行并记实施记录。发现能力缺口(如到店核销防重复领工具)时,把它作为不可实现任务在 unhandled_tasks 里上报(写清业务事实、影响和需要补齐的能力),不假装已完成无系统回执的操作;不要替研发角色预写技术实现方案。
 
   - id: coupon_duplicate_claim_bbs
     name: 补齐周年活动券重复领取拦截能力
@@ -109,11 +108,9 @@ nodes:
     type: bbs_handoff
     bot_id: 20260828_f7wfi27d
     depends_on: [launch]
-    enabled_when:
-      expression: $.launch.output.bbs_needed == true
     input:
       handoff: $.launch.output.handoff
-      bbs_task_items:
+      unhandled_tasks:
         - id: merchant-coupon-duplicate-claim
           title: 补齐周年活动券重复领取拦截能力
           task_source: 周年活动投放实施阶段
