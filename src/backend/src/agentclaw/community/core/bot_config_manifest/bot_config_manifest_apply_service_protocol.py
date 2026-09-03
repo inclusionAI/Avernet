@@ -26,8 +26,9 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
+from agentclaw.community.core.bot_config_manifest.apply.delivery import DeliveryStrategy
 from agentclaw.community.core.bot_config_manifest.apply.order import (
     ALL_PHASES,
     ApplyPhase,
@@ -37,11 +38,6 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
     ApplyStatus,
 )
-
-if TYPE_CHECKING:  # pragma: no cover
-    from agentclaw.community.core.bot_config_manifest.apply.delivery import (
-        DeliveryStrategy,
-    )
 
 
 class ManifestApplyInProgressError(RuntimeError):
@@ -197,7 +193,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def delivery_for_engine(self, engine_type: Optional[str]) -> "DeliveryStrategy":
+    def delivery_for_engine(self, engine_type: Optional[str]) -> DeliveryStrategy:
         """The delivery strategy bots of this engine apply through (W8).
 
         What a caller asks it: the creation sequence (the W13 job and its poll),
@@ -208,7 +204,7 @@ class BotConfigManifestApplyServiceProtocol(Protocol):
         ...
 
     @abstractmethod
-    def delivery_for_bot(self, bot: dict) -> "DeliveryStrategy":
+    def delivery_for_bot(self, bot: dict) -> DeliveryStrategy:
         """``delivery_for_engine`` for a bot record."""
         ...
 
