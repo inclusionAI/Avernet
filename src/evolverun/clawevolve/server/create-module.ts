@@ -30,6 +30,7 @@ export type ClawevolveModuleOptions = {
   dispatchTaskLogArchive?: EvolveRouterDeps["dispatchTaskLogArchive"];
   cancelExecution?: EvolveRouterDeps["cancelExecution"];
   artifactStore?: ObjectStore;
+  artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   artifactBucket?: string;
   clawInsight?: ClawInsightInternalApi;
   publicBaseUrl?: string;
@@ -101,6 +102,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     benchTemplateRepo: benchTemplate,
     benchRunRepo: benchRun,
     artifactStore: options.artifactStore,
+    artifactUrlStore: options.artifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
   });
 

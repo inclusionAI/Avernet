@@ -22,6 +22,7 @@ const dispatch = vi.fn();
 const dispatchTaskLogArchive = vi.fn();
 const cancelExecution = vi.fn();
 const createSignedUrl = vi.fn();
+const getObject = vi.fn();
 
 beforeEach(async () => {
   db = new SqliteDatabase(new Database(":memory:"));
@@ -43,10 +44,12 @@ beforeEach(async () => {
   cancelExecution.mockResolvedValue({ transport: "message" });
   createSignedUrl.mockReset();
   createSignedUrl.mockResolvedValue("https://oss.example.test/signed");
+  getObject.mockReset();
   const app = express();
   app.use(express.json());
   app.use("/api/evolve", createEvolveRouter(repo, {
     dispatch, dispatchTaskLogArchive, cancelExecution, improvementRepo, benchDomainRepo, benchTemplateRepo, benchRunRepo,
+    artifactStore: { getObject, createSignedUrl },
     artifactUrlStore: { createSignedUrl },
   }));
   const startedServer = await new Promise<ReturnType<express.Application["listen"]>>((resolve) => {
@@ -2399,6 +2402,35 @@ describe("ClawEvolve step protocol", () => {
     const response = await fetch(`${baseUrl}/api/evolve/tasks/EV-DIFF/steps/STEP-DIFF/diff`);
     expect(response.status).toBe(422);
     await expect(response.json()).resolves.not.toEqual({ error: "Optimize Step 不存在" });
+  });
+
+  it("reads an Optimize Diff from the injected artifact store", async () => {
+    const content = Buffer.from("diff --git a/a.txt b/a.txt\n+new line\n");
+    const sha256 = (await import("node:crypto")).createHash("sha256").update(content).digest("hex");
+    await repo.createTask({
+      taskId: "EV-DIFF-OBJECT", taskType: "optimize", userId: "owner-1", botId: "bot-1",
+      taskName: "Diff object", remark: null, configJson: "{}", createdBy: "owner-1",
+    });
+    await repo.createStep({
+      stepId: "STEP-DIFF-OBJECT", taskId: "EV-DIFF-OBJECT", stepType: "optimize", stepNo: 1,
+      roundNo: 1, command: "/clawevolve-workflow --stage optimize",
+    });
+    await repo.updateStepStatus("STEP-DIFF-OBJECT", { status: "succeeded", output: {
+      diff: { artifact: {
+        kind: "diff",
+        ref: "oss://clawevolve-artifacts/evolution/EV-DIFF-OBJECT/rounds/round-001/diff.patch",
+        size: content.byteLength,
+        sha256,
+        contentType: "text/x-diff; charset=utf-8",
+      } },
+    } });
+    getObject.mockResolvedValue({ content, etag: null, contentType: "text/x-diff; charset=utf-8" });
+
+    const response = await fetch(`${baseUrl}/api/evolve/tasks/EV-DIFF-OBJECT/steps/STEP-DIFF-OBJECT/diff`);
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe(content.toString("utf8"));
+    expect(getObject).toHaveBeenCalledWith("evolution/EV-DIFF-OBJECT/rounds/round-001/diff.patch");
   });
 });
 
