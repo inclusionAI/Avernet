@@ -715,7 +715,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
                 )
         return collected
 
-    # ── engine overrides ────────────────────────────────────────────────
+    # ── cli tools ───────────────────────────────────────────────────────
     def cli_tools(self, req: ComposeRequest) -> list[CollectedCliTool]:
         """The bot's platform-managed CLI tools, from the platform's own table.
 
@@ -757,6 +757,7 @@ class ConfigComposerInputCollector(ComposeInputCollector):
             )
         ]
 
+    # ── engine overrides ────────────────────────────────────────────────
     def engine_overrides(self, req: ComposeRequest) -> dict[str, Any]:
         """Per-bot engine override knobs — currently only DingTalk channels.
 

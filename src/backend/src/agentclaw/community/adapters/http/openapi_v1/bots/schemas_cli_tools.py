@@ -104,8 +104,8 @@ class CliTool(BaseModel):
         "the user id that did. A manifest apply is a full override and will "
         "remove a tool installed here that it does not declare."
     )
-    gmt_modified: datetime | None = Field(
-        default=None, description="When the record last changed."
+    gmt_modified: datetime = Field(
+        description="When the record last changed."
     )
 
 
