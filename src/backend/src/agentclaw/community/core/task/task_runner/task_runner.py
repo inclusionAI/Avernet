@@ -16,7 +16,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 logger = logging.getLogger(__name__)
 
@@ -128,15 +127,6 @@ class TaskRunner:
             "无真群/无 poller,任务将卡 RUNNING 不收敛。排查: grep [task][engine] execution_backend 不装配",
             gid)
         return gid
-
-    async def trigger_workflow(self, *, bot_id: str, message: str,
-                               metadata: dict[str, Any] | None = None) -> BotSendResult:
-        """Single-bot workflow trigger: send the message, return run_id + session_id."""
-        if self._execution_backend is not None:
-            return await self._execution_backend.trigger_workflow(
-                bot_id=bot_id, message=message, metadata=metadata)
-        logger.warning("[task][task_runner] trigger_workflow 退桩(无 execution_backend)→ 造假 run_id,单 bot 不真实发起")
-        return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
 
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""

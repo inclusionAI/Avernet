@@ -33,15 +33,6 @@ def _executor_with_backends():
     return ex
 
 
-def test_trigger_workflow_returns_session_id_and_registers_handle():
-    runner = TaskRunner(graph=None, execution_backend=_executor_with_backends())
-    res = asyncio.new_event_loop().run_until_complete(
-        runner.trigger_workflow(bot_id="b1", message="/wf 1 2", metadata={"biz_task_id": "t1"})
-    )
-    assert isinstance(res, BotSendResult)
-    assert res.run_id == "r" and res.session_id == "ws-session"
-
-
 def test_get_group_session_reads_stashed_then_fetches_latest():
     ex = _executor_with_backends()
     runner = TaskRunner(graph=None, execution_backend=ex)
@@ -49,11 +40,3 @@ def test_get_group_session_reads_stashed_then_fetches_latest():
     assert loop.run_until_complete(runner.get_group_session("g_stash")) == "stashed"
     # absent in _group_meta -> GET /groups/{id} 响应的 latest_running_session_id 取最近 session
     assert loop.run_until_complete(runner.get_group_session("g_new")) == "latest-for-g_new"
-
-
-def test_runner_stub_when_no_backend():
-    runner = TaskRunner(graph=None)  # no backend
-    loop = asyncio.new_event_loop()
-    res = loop.run_until_complete(runner.trigger_workflow(bot_id="b", message="m"))
-    assert isinstance(res, BotSendResult) and res.session_id is None
-    assert loop.run_until_complete(runner.get_group_session("any")) is None

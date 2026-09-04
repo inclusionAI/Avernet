@@ -30,7 +30,6 @@ from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter impor
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
 )
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle,
     SingleBotHandle,
@@ -918,25 +917,6 @@ class TaskExecutor(TaskExecutorBbsMixin):
             "session_id": res.session_id,
         }
         return res.group_id
-
-    async def trigger_workflow(
-        self, *, bot_id: str, message: str, metadata: dict[str, Any] | None = None
-    ) -> BotSendResult:
-        """Single-bot workflow trigger: send + register a SingleBotHandle; return BotSendResult."""
-        sent = await self._bot.send_message(
-            bot_id=bot_id, message=message, metadata=metadata or {}
-        )
-        biz_task_id = (metadata or {}).get("biz_task_id", "")
-        self._poller.register(
-            SingleBotHandle(
-                loop_task_id=f"{biz_task_id}::{biz_task_id}",  # root node_id == task_id
-                run_id=sent.run_id,
-                bot_id=bot_id,
-                registered_at=time.monotonic(),
-                session_id=sent.session_id,
-            )
-        )
-        return sent
 
     async def get_group_session(self, group_id: str) -> str | None:
         """取群的最近一个 session:建群响应若已带 session_id 则用之;否则经
