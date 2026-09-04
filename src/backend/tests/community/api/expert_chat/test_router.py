@@ -1,6 +1,8 @@
 """Tests for ExpertChat API router."""
+import logging
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from fastapi_injector import attach_injector
@@ -16,6 +18,9 @@ from agentclaw.community.core.expert_chat.errors import (
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_service import (
     ExpertChatService,
+)
+from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
+    ExpertChatInstanceService,
 )
 
 
@@ -117,6 +122,140 @@ def client_with_mock(mock_expert_chat_service):
 
     client = TestClient(app)
     yield client, mock_expert_chat_service
+
+
+@pytest.fixture
+def caller_connection_client():
+    """Create a focused caller-connection client with a mockable Service API."""
+    from agentclaw.community.adapters.http.expert_chat import router as expert_chat_router
+    from agentclaw.community.adapters.http.auth.dependencies import get_current_user
+    from agentclaw.community.api.expert_chat_instance_service import (
+        ExpertChatInstanceServiceProtocol,
+    )
+    from agentclaw.community.plugin_api.auth import AuthenticatedIdentity
+
+    app = FastAPI()
+    app.include_router(expert_chat_router)
+
+    instance_service = MagicMock(spec=ExpertChatInstanceService)
+    instance_service.get_authorized_caller_connection = AsyncMock()
+
+    class _TestModule(Module):
+        def configure(self, binder):
+            binder.bind(
+                ExpertChatInstanceServiceProtocol, to=instance_service
+            )
+
+    attach_injector(app, Injector([_TestModule()]))
+
+    mock_user = MagicMock(spec=AuthenticatedIdentity)
+    mock_user.staffId = "caller_user"
+    mock_user.operatorName = "Caller User"
+    mock_user.nickName = "Caller User"
+    mock_user.tenantId = "test_tenant"
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    with TestClient(app) as client:
+        yield client, instance_service, mock_user
+
+
+class TestCallerConnection:
+    """Router adaptation and safe boundary logging for caller instances."""
+
+    @staticmethod
+    def _post(client):
+        return client.post(
+            "/api/v1/expert-chats/caller-connection",
+            params={
+                "bot_id": "caller_bot",
+                "owner_id": "caller_owner",
+                "user_id": "caller_user",
+                "force_upgrade": "true",
+            },
+        )
+
+    def test_passes_actor_role_and_logs_safe_success(
+        self, caller_connection_client, caplog
+    ):
+        client, instance_service, _ = caller_connection_client
+        instance_service.get_authorized_caller_connection.return_value = {
+            "instance": {"ext": {"connection": "SENSITIVE_CONNECTION"}},
+            "connection": {"token": "SENSITIVE_TOKEN"},
+            "need_poll": False,
+        }
+
+        with caplog.at_level(logging.INFO), patch(
+            "agentclaw.community.adapters.http.expert_chat.router.super_admin",
+            return_value=frozenset(),
+        ):
+            response = self._post(client)
+
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+        instance_service.get_authorized_caller_connection.assert_awaited_once_with(
+            operator_id="caller_user",
+            user_id="caller_user",
+            bot_id="caller_bot",
+            owner_id="caller_owner",
+            is_super_admin=False,
+            force_upgrade=True,
+        )
+        logs = caplog.text
+        assert "event=expert_chat.caller_connection.request" in logs
+        assert "event=expert_chat.caller_connection.success" in logs
+        assert "authorized_as=self" in logs
+        assert "need_poll=False" in logs
+        assert "SENSITIVE_CONNECTION" not in logs
+        assert "SENSITIVE_TOKEN" not in logs
+        assert "Authorization" not in logs
+        assert "Cookie" not in logs
+
+    @pytest.mark.parametrize(
+        ("operator_id", "reason", "expected_code"),
+        [
+            ("anonymous", "missing_operator", 400),
+            ("caller_user", "instance_not_found", 403),
+        ],
+    )
+    def test_logs_safe_denial(
+        self, caller_connection_client, caplog, operator_id, reason, expected_code
+    ):
+        client, instance_service, mock_user = caller_connection_client
+        mock_user.staffId = operator_id
+        error = ChatPermissionError("SENSITIVE_SECRET")
+        error.reason = reason
+        instance_service.get_authorized_caller_connection.side_effect = error
+
+        with caplog.at_level(logging.INFO):
+            response = self._post(client)
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == expected_code
+        assert "event=expert_chat.caller_connection.request" in caplog.text
+        assert "event=expert_chat.caller_connection.denied" in caplog.text
+        assert f"reason={reason}" in caplog.text
+        assert "SENSITIVE_SECRET" not in caplog.text
+        if expected_code == 400:
+            instance_service.get_authorized_caller_connection.assert_not_awaited()
+        else:
+            instance_service.get_authorized_caller_connection.assert_awaited_once()
+
+    def test_logs_exception_type_without_secret(
+        self, caller_connection_client, caplog
+    ):
+        client, instance_service, _ = caller_connection_client
+        instance_service.get_authorized_caller_connection.side_effect = RuntimeError(
+            "SENSITIVE_CREDENTIAL"
+        )
+
+        with caplog.at_level(logging.INFO):
+            response = self._post(client)
+
+        assert response.status_code == 200
+        assert response.json()["error_code"] == 5999
+        assert "event=expert_chat.caller_connection.failed" in caplog.text
+        assert "exception_type=RuntimeError" in caplog.text
+        assert "SENSITIVE_CREDENTIAL" not in caplog.text
 
 
 class TestAddChatBot:
