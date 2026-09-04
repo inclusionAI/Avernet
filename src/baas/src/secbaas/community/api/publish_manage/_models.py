@@ -400,6 +400,14 @@ class DrainResult(BaseModel):
     timeout_reached: bool = Field(
         default=False, description="Whether timeout was reached"
     )
+    verdict: str | None = Field(
+        default=None,
+        description=(
+            "ActiveSessionVerdict that drove this drain decision "
+            "(clear/active/unknown). None preserves backward compatibility "
+            "for callers that construct DrainResult directly."
+        ),
+    )
 
 
 class ProgressSummary(BaseModel):
