@@ -100,7 +100,6 @@ SessionIdPath = Annotated[
     ),
 ]
 
-
 #: One extra item is requested beyond the page, purely to learn whether more
 #: exist. Neither engine route reports a total, and ``Page.total`` is required —
 #: so for this group the total is derived from the window rather than invented,
@@ -213,6 +212,8 @@ async def list_sessions(
         bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
     )
     params: dict[str, Any] = _window(page)
+    if owner_id == user_id:
+        params.update(user_id=user_id, source="all_but_others")
     if agent_id:
         params["agent_id"] = agent_id
     # Both filters are applied upstream, *before* the engine paginates — so

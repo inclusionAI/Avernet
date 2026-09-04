@@ -96,12 +96,16 @@ class TestListSessions:
         assert body["data"][0]["id"] == "sess-1"
 
     def test_query_params_forwarded(self, client, mock_session_api):
-        resp = client.get("/api/sessions?user_id=u1&agent_id=a1&limit=5&offset=10")
+        resp = client.get(
+            "/api/sessions?user_id=u1&agent_id=a1&source=all_but_others"
+            "&limit=5&offset=10"
+        )
         assert resp.status_code == 200
         call_args = mock_session_api.list.call_args[0][0]
         assert call_args.user_id == "u1"
         assert call_args.agent_id == "a1"
         assert call_args.session_key is None
+        assert call_args.source == "all_but_others"
         assert call_args.limit == 5
         assert call_args.offset == 10
 
@@ -110,6 +114,12 @@ class TestListSessions:
         assert resp.status_code == 200
         call_args = mock_session_api.list.call_args[0][0]
         assert call_args.session_key == "session:target"
+
+    def test_unknown_source_is_forwarded_without_http_validation(self, client, mock_session_api):
+        resp = client.get("/api/sessions?source=unsupported")
+
+        assert resp.status_code == 200
+        assert mock_session_api.list.call_args[0][0].source == "unsupported"
 
     def test_service_error_returns_500(self, client, mock_session_api):
         mock_session_api.list.side_effect = RuntimeError("db error")

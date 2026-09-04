@@ -7,6 +7,7 @@ from typing import Any
 
 from engine.community.kernel.frames import EventFrame, ResponseFrame
 from engine.community.plugin_api.openclaw.plugin import OpenClawPlugin
+from engine.community.shared.utils import filter_openclaw_sessions_by_source
 
 
 @dataclass
@@ -156,8 +157,15 @@ class LocalOpenClawPluginImpl(OpenClawPlugin):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        user_id: str | None = None,
+        source: str | None = None,
     ) -> list[dict]:
         items = list(self._sessions.values())
+        items = filter_openclaw_sessions_by_source(
+            items,
+            source=source,
+            user_id=user_id,
+        )
         requested_session_key = session_key if session_key and session_key.strip() else None
         if requested_session_key is not None:
             # Keep local mode aligned with production: filter before pagination.

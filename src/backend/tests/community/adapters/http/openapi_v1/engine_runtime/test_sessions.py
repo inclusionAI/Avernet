@@ -65,6 +65,12 @@ def test_list_sessions(client, relay):
     assert data["total"] == 1
     assert data["items"][0]["session_id"] == SESSION_ID
     assert relay.paths == ["/api/sessions"]
+    assert relay.calls[0]["params"] == {
+        "offset": 0,
+        "limit": 21,
+        "user_id": OWNER,
+        "source": "all_but_others",
+    }
 
 
 def test_list_sessions_hides_openclaw_internal_title_suffix(client, relay):
@@ -90,10 +96,34 @@ def test_list_filters_are_forwarded_to_the_engine(client, relay, filter_name):
     assert relay.calls[0]["params"][filter_name] == "v"
 
 
-def test_list_omits_filters_the_caller_did_not_send(client, relay):
+def test_list_omits_optional_client_filters_the_caller_did_not_send(client, relay):
     relay.results = [EngineResult(data=[ENGINE_SESSION])]
     ok(client.get(_base()))
-    assert set(relay.calls[0]["params"]) == {"offset", "limit"}
+    assert set(relay.calls[0]["params"]) == {
+        "offset", "limit", "user_id", "source",
+    }
+
+
+def test_list_with_explicit_current_owner_adds_the_owner_source_filter(client, relay):
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+
+    ok(client.get(_base(), params={"owner_id": OWNER}))
+
+    assert relay.calls[0]["params"]["user_id"] == OWNER
+    assert relay.calls[0]["params"]["source"] == "all_but_others"
+
+
+def test_list_for_collaborators_does_not_add_the_owner_source_filter(
+    make_client, relay
+):
+    relay.set_bot_type("service")
+    relay.add_operator("u2")
+    collaborator = make_client(router, caller="u2")
+    relay.results = [EngineResult(data=[ENGINE_SESSION])]
+
+    ok(collaborator.get(_base(), params={"owner_id": OWNER}))
+
+    assert relay.calls[0]["params"] == {"offset": 0, "limit": 21}
 
 
 def test_list_does_not_publish_engine_only_fields(client, relay):
@@ -361,7 +391,12 @@ def test_a_late_page_is_fetched_from_the_engine_not_sliced_locally(client, relay
     """
     relay.results = [EngineResult(data=_sessions(3))]
     data = ok(client.get(_base(), params={"page": 400, "page_size": 3}))
-    assert relay.calls[0]["params"] == {"offset": 1197, "limit": 4}
+    assert relay.calls[0]["params"] == {
+        "offset": 1197,
+        "limit": 4,
+        "user_id": OWNER,
+        "source": "all_but_others",
+    }
     assert [i["session_id"] for i in data["items"]] == ["s0", "s1", "s2"]
 
 
@@ -610,7 +645,12 @@ def test_the_session_window_stays_page_sized(client, relay):
     is a page size and must not grow with the offset."""
     relay.results = [EngineResult(data=[ENGINE_SESSION])]
     ok(client.get(_base(), params={"page": 3, "page_size": 50}))
-    assert relay.calls[0]["params"] == {"offset": 100, "limit": 51}
+    assert relay.calls[0]["params"] == {
+        "offset": 100,
+        "limit": 51,
+        "user_id": OWNER,
+        "source": "all_but_others",
+    }
 
 
 # ── the operator gate ────────────────────────────────────────────────────────

@@ -116,6 +116,7 @@ async def list_sessions(
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     session_key: str | None = None,
+    source: str | None = None,
     limit: int = 20,
     offset: int = 0,
     engine: Optional[str] = None,
@@ -128,6 +129,7 @@ async def list_sessions(
             user_id=user_id,
             agent_id=agent_id,
             session_key=session_key,
+            source=source,
             limit=limit,
             offset=offset,
         ))

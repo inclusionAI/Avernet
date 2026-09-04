@@ -114,8 +114,19 @@ def _err(message: str = "gateway error") -> ResponseFrame:
 class TestSessionsList:
     """Orchestration tests for sessions_list (port-level raw dict asserts)."""
 
-    def _sessions_payload(self, sessions: list[dict]) -> ResponseFrame:
-        return _ok({"sessions": sessions})
+    def _sessions_payload(
+        self,
+        sessions: list[dict],
+        *,
+        total_count: int | None = None,
+        has_more: bool | None = None,
+    ) -> ResponseFrame:
+        payload: dict[str, Any] = {"sessions": sessions}
+        if total_count is not None:
+            payload["totalCount"] = total_count
+        if has_more is not None:
+            payload["hasMore"] = has_more
+        return _ok(payload)
 
     def _history_payload(self, messages: list[dict]) -> ResponseFrame:
         return _ok({"messages": messages})
@@ -280,6 +291,156 @@ class TestSessionsList:
         assert history_calls[0][1]["sessionKey"] == "s2"
         assert history_calls[1][1]["sessionKey"] == "s3"
 
+    async def test_source_filter_is_applied_before_pagination_and_history(self):
+        sessions = [
+            {"key": "session:other-1:user:u2", "label": "Other 1"},
+            {"key": "session:own-1:user:u1", "label": "Own 1"},
+            {
+                "key": "agent:main:session:other-2:user:u2",
+                "label": "Other 2",
+            },
+            {"key": "agent:main:dingtalk:direct:u2", "label": "DingTalk"},
+            {
+                "key": "agent:main:session:own-2:user:U1",
+                "label": "Own 2",
+            },
+        ]
+        impl, client = _make_impl({
+            "sessions.list": [
+                self._sessions_payload(
+                    sessions[:3], total_count=5, has_more=True
+                ),
+                self._sessions_payload(
+                    sessions, total_count=5, has_more=False
+                ),
+            ],
+            "chat.history": self._history_payload([]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            source="all_but_others",
+            user_id="u1",
+            offset=1,
+            limit=2,
+        )
+
+        assert [session["key"] for session in result] == [
+            "agent:main:dingtalk:direct:u2",
+            "agent:main:session:own-2:user:U1",
+        ]
+        history_calls = [call for call in client.calls if call[0] == "chat.history"]
+        assert [call[1]["sessionKey"] for call in history_calls] == [
+            "agent:main:dingtalk:direct:u2",
+            "agent:main:session:own-2:user:U1",
+        ]
+        list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert [call[1]["limit"] for call in list_calls] == [3, 5]
+
+    async def test_source_filter_stops_when_the_requested_window_is_full(self):
+        sessions = [
+            {"key": "session:own-1:user:u1", "label": "Own 1"},
+            {"key": "agent:main:dingtalk:direct:u2", "label": "DingTalk"},
+            {"key": "agent:main:session:own-2:user:u1", "label": "Own 2"},
+        ]
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload(
+                sessions, total_count=100, has_more=True
+            ),
+            "chat.history": self._history_payload([]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            source="all_but_others",
+            user_id="u1",
+            offset=1,
+            limit=2,
+        )
+
+        assert [session["key"] for session in result] == [
+            "agent:main:dingtalk:direct:u2",
+            "agent:main:session:own-2:user:u1",
+        ]
+        list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert [call[1]["limit"] for call in list_calls] == [3]
+
+    async def test_source_filter_expands_the_gateway_prefix_progressively(self):
+        first_page = [
+            {"key": "session:other:user:u2", "label": "Other"},
+            {"key": "session:own-1:user:u1", "label": "Own 1"},
+            {"key": "session:own-2:user:u1", "label": "Own 2"},
+        ]
+        expanded_page = [
+            *first_page,
+            {"key": "session:own-3:user:u1", "label": "Own 3"},
+            {"key": "session:own-4:user:u1", "label": "Own 4"},
+            {"key": "session:own-5:user:u1", "label": "Own 5"},
+        ]
+        impl, client = _make_impl({
+            "sessions.list": [
+                self._sessions_payload(
+                    first_page, total_count=10_000, has_more=True
+                ),
+                self._sessions_payload(
+                    expanded_page, total_count=10_000, has_more=True
+                ),
+            ],
+            "chat.history": self._history_payload([]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            source="all_but_others",
+            user_id="u1",
+            limit=3,
+        )
+
+        assert [session["key"] for session in result] == [
+            "session:own-1:user:u1",
+            "session:own-2:user:u1",
+            "session:own-3:user:u1",
+        ]
+        list_calls = [call for call in client.calls if call[0] == "sessions.list"]
+        assert [call[1]["limit"] for call in list_calls] == [3, 6]
+
+    @pytest.mark.parametrize("source", ["mine", "others", "", "unsupported"])
+    async def test_unsupported_source_returns_no_sessions(self, source: str):
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload([
+                {"key": "session:own:user:u1", "label": "Own"},
+            ]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            source=source,
+            user_id="u1",
+        )
+
+        assert result == []
+        assert client.calls == []
+
+    async def test_all_but_others_without_user_returns_no_sessions(self):
+        impl, client = _make_impl({
+            "sessions.list": self._sessions_payload([
+                {"key": "agent:main:main", "label": "Main"},
+            ]),
+            "providers.available": self._providers_payload(),
+        })
+
+        result = await impl.sessions_list(
+            token="tok",
+            source="all_but_others",
+        )
+
+        assert result == []
+        assert client.calls == []
+
     async def test_session_key_filter_applied_before_pagination(self):
         sessions = [
             {"key": f"s{i}", "label": f"Session {i}", "model": None}
@@ -297,7 +458,11 @@ class TestSessionsList:
 
         assert [session["key"] for session in result] == ["s20"]
         sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
-        assert sessions_list_calls == [("sessions.list", {"search": "s20"}, None)]
+        assert sessions_list_calls == [(
+            "sessions.list",
+            {"limit": 1, "search": "s20"},
+            None,
+        )]
         history_calls = [call for call in client.calls if call[0] == "chat.history"]
         assert [call[1]["sessionKey"] for call in history_calls] == ["s20"]
 
@@ -315,7 +480,11 @@ class TestSessionsList:
 
         assert [session["key"] for session in result] == ["target"]
         sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
-        assert sessions_list_calls == [("sessions.list", {"search": "target"}, None)]
+        assert sessions_list_calls == [(
+            "sessions.list",
+            {"limit": 50, "search": "target"},
+            None,
+        )]
 
     async def test_session_key_filter_accepts_cloud_create_relative_key(self):
         canonical = "agent:main:session:abc-123:user:clouduser"
@@ -336,7 +505,7 @@ class TestSessionsList:
         sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
         assert sessions_list_calls == [(
             "sessions.list",
-            {"search": "session:abc-123:user:clouduser"},
+            {"limit": 50, "search": "session:abc-123:user:clouduser"},
             None,
         )]
 
@@ -370,7 +539,7 @@ class TestSessionsList:
 
         assert [session["key"] for session in result] == ["s1"]
         sessions_list_calls = [call for call in client.calls if call[0] == "sessions.list"]
-        assert sessions_list_calls == [("sessions.list", {}, None)]
+        assert sessions_list_calls == [("sessions.list", {"limit": 2}, None)]
 
     async def test_model_normalization_present(self):
         """_normalized_model is set for each returned session dict."""
@@ -478,8 +647,7 @@ class TestSessionsList:
         assert len(result) == 1
         assert result[0]["key"] == "s1"
 
-    async def test_sessions_list_sends_correct_rpc(self):
-        """sessions.list is called with an empty params dict {}."""
+    async def test_sessions_list_sends_requested_window_as_gateway_limit(self):
         impl, client = _make_impl({
             "sessions.list": _ok([]),
             "providers.available": self._providers_payload(),
@@ -487,7 +655,7 @@ class TestSessionsList:
         await impl.sessions_list(token="tok")
         sl_calls = [c for c in client.calls if c[0] == "sessions.list"]
         assert len(sl_calls) == 1
-        assert sl_calls[0][1] == {}
+        assert sl_calls[0][1] == {"limit": 50}
 
 
 # ── session_create ────────────────────────────────────────────────────────────

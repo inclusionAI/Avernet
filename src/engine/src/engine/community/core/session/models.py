@@ -54,6 +54,7 @@ class SessionListRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     session_key: str | None = None
+    source: str | None = None
     status: Literal["active", "archived", "all"] = "active"
     limit: int = 20
     offset: int = 0

@@ -90,10 +90,26 @@ async def test_local_openclaw_plugin_stateful_ports_and_error_branches():
     # Session/chat history lifecycle.
     await plugin.session_create("s1", label="one", model="m1")
     await plugin.session_create("s2", label="two", model="m2")
+    await plugin.session_create("session:own:user:u1", label="own")
+    await plugin.session_create("session:other:user:u2", label="other")
+    await plugin.session_create("agent:main:dingtalk:direct:u2", label="dingtalk")
     assert [s["key"] for s in await plugin.sessions_list(offset=1, limit=1)] == ["s2"]
     assert [s["key"] for s in await plugin.sessions_list(session_key="s2", limit=1)] == ["s2"]
     assert await plugin.sessions_list(session_key="missing") == []
     assert [s["key"] for s in await plugin.sessions_list(session_key="   ", limit=1)] == ["s1"]
+    assert [
+        s["key"]
+        for s in await plugin.sessions_list(
+            source="all_but_others",
+            user_id="u1",
+        )
+    ] == [
+        "s1",
+        "s2",
+        "session:own:user:u1",
+        "agent:main:dingtalk:direct:u2",
+    ]
+    assert await plugin.sessions_list(source="others", user_id="u1") == []
     await plugin.session_patch_then_get("s1", label="patched")
     assert (await plugin.sessions_list())[0]["label"] == "patched"
     await plugin.session_patch_then_get("new", model="m3")

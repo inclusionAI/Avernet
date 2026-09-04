@@ -149,6 +149,8 @@ class _FakeSessionPort:
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        user_id: str | None = None,
+        source: str | None = None,
     ) -> list[dict]:
         self.sessions_list_calls.append(
             {
@@ -157,6 +159,8 @@ class _FakeSessionPort:
                 "limit": limit,
                 "agent_id": agent_id,
                 "session_key": session_key,
+                "user_id": user_id,
+                "source": source,
             }
         )
         # Mirror the real port: request filtering happens before pagination.
@@ -281,6 +285,19 @@ async def test_list_forwards_session_key_to_port():
     await adapter.list(SessionListRequest(session_key="session:target"))
 
     assert port.sessions_list_calls[0]["session_key"] == "session:target"
+
+
+@pytest.mark.asyncio
+async def test_list_forwards_source_context_to_port():
+    port = _FakeSessionPort()
+    adapter = OpenClawSessionAdapter(port)
+
+    await adapter.list(
+        SessionListRequest(user_id="u1", source="all_but_others")
+    )
+
+    assert port.sessions_list_calls[0]["user_id"] == "u1"
+    assert port.sessions_list_calls[0]["source"] == "all_but_others"
 
 
 @pytest.mark.asyncio
