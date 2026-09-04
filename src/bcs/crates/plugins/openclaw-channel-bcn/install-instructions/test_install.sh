@@ -69,10 +69,13 @@ test_default_install_writes_openclaw_bcs_url() {
     run_install_with_fake_tools "$workspace"
 
     [ -f "${workspace}/openclaw.json" ] || fail "openclaw.json was not created"
-    local bcs_url
+    local bcs_url heartbeat
     bcs_url="$(jq -r '.channels.bcs.bcsUrl // empty' "${workspace}/openclaw.json")"
+    heartbeat="$(jq -r '.channels.bcs.heartbeatIntervalMs // empty' "${workspace}/openclaw.json")"
     [ "$bcs_url" = "ws://127.0.0.1:21000/ws/bot" ] ||
         fail "expected default bcsUrl, got ${bcs_url:-<empty>}"
+    [ "$heartbeat" = "30000" ] ||
+        fail "expected default heartbeat, got ${heartbeat:-<empty>}"
 
     rm -rf "$tmp"
 }
@@ -97,13 +100,16 @@ JSON
 
     run_install_with_fake_tools "$workspace"
 
-    local bcs_url gateway_port
+    local bcs_url gateway_port heartbeat
     bcs_url="$(jq -r '.channels.bcs.bcsUrl // empty' "${workspace}/openclaw.json")"
     gateway_port="$(jq -r '.gateway.port // empty' "${workspace}/openclaw.json")"
+    heartbeat="$(jq -r '.channels.bcs.heartbeatIntervalMs // empty' "${workspace}/openclaw.json")"
     [ "$bcs_url" = "ws://127.0.0.1:21000/ws/bot" ] ||
         fail "expected existing config to get default bcsUrl, got ${bcs_url:-<empty>}"
     [ "$gateway_port" = "18789" ] ||
         fail "expected existing gateway port to be preserved, got ${gateway_port:-<empty>}"
+    [ "$heartbeat" = "30000" ] ||
+        fail "expected existing config to get default heartbeat, got ${heartbeat:-<empty>}"
 
     rm -rf "$tmp"
 }
