@@ -89,6 +89,12 @@ def _node_output(svc: TaskGraphService, node_id: str) -> dict:
 
 # ===== start_run 三模态 =====
 class TestStartRun:
+    def test_empty_batch_is_noop(self, svc):
+        runner = TaskRunner(svc)
+
+        assert _run(runner.start_run([])) == []
+        assert runner._run_log == []
+
     def test_single_bot_dispatched(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"], run_mode="single_bot", assignee="bot_market")
