@@ -47,7 +47,7 @@ use bcs_service_api::port::repo::{
     BotActorConfigRepoPort, EdgeGrantRepoPort, PermissionProfileRepoPort,
     PermissionRequestRepoPort,
 };
-use bcs_service_api::{ServiceError, ServiceResult};
+use bcs_service_api::{EdgePermissionFriendSyncService, ServiceError, ServiceResult};
 use bcs_user_directory_api::{UserDirectoryLookupContext, UserDirectoryPlugin};
 
 /// Generate a fresh external request id (a bare UUID v4, simple form — no
@@ -131,6 +131,11 @@ fn actor_kind_of(id: &str) -> ActorKind {
     } else {
         ActorKind::Bot
     }
+}
+
+fn is_lock_wait_timeout(err: &ServiceError) -> bool {
+    let message = err.to_string();
+    message.contains("1205") || message.to_ascii_lowercase().contains("lock wait timeout")
 }
 
 fn normalize_policy_value(value: &str) -> String {
@@ -1031,6 +1036,37 @@ impl DbConnectService {
         Ok((edge_ids, default_refs))
     }
 
+    async fn build_connect_edges_with_profile_retry(
+        &self,
+        caller: &str,
+        to_bot: &str,
+        caller_kind: ActorKind,
+        target_kind: ActorKind,
+    ) -> ServiceResult<(Vec<u64>, [u64; 2])> {
+        let mut attempts = 0;
+        loop {
+            match self
+                .build_connect_edges(caller, to_bot, caller_kind, target_kind)
+                .await
+            {
+                Ok(result) => return Ok(result),
+                Err(err) if is_lock_wait_timeout(&err) && attempts < 2 => {
+                    attempts += 1;
+                    warn!(
+                        caller = %caller,
+                        to_bot = %to_bot,
+                        env = %self.env,
+                        attempt = attempts,
+                        error = %err,
+                        "retrying edge-permission friend-edge sync after lock wait timeout"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(20 * attempts)).await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
     /// Resolve a bot's default profile id, preferring the edge-grant cache and
     /// falling back to the profile store. Errors if still missing after an
     /// `ensure_default_profile` (caller's responsibility to ensure first).
@@ -1122,6 +1158,58 @@ impl DbConnectService {
         }
 
         Ok(request_ids)
+    }
+}
+
+#[async_trait]
+impl EdgePermissionFriendSyncService for DbConnectService {
+    async fn sync_add_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        if a == b {
+            warn!(actor = %a, env = %self.env, "skip edge-permission friendship sync for self friendship");
+            return Ok(());
+        }
+
+        let a_kind = actor_kind_of(a);
+        let b_kind = actor_kind_of(b);
+        let (caller, target, caller_kind, target_kind) = match (a_kind, b_kind) {
+            (ActorKind::Human, ActorKind::Bot) => (a, b, a_kind, b_kind),
+            (ActorKind::Bot, ActorKind::Human) => (b, a, b_kind, a_kind),
+            (ActorKind::Bot, ActorKind::Bot) => (a, b, a_kind, b_kind),
+            (ActorKind::Human, ActorKind::Human) => {
+                warn!(left = %a, right = %b, env = %self.env, "skip edge-permission friendship sync for unsupported human-human friendship");
+                return Ok(());
+            }
+        };
+
+        if caller_kind == ActorKind::Human
+            && self.edge_grants.has_friend_edge(caller, target, &self.env).await
+        {
+            return Ok(());
+        }
+
+        self.build_connect_edges_with_profile_retry(caller, target, caller_kind, target_kind)
+            .await?;
+        Ok(())
+    }
+
+    async fn sync_remove_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        if a == b {
+            return Ok(());
+        }
+
+        let a_kind = actor_kind_of(a);
+        let b_kind = actor_kind_of(b);
+        let (caller, target) = match (a_kind, b_kind) {
+            (ActorKind::Human, ActorKind::Bot) => (a, b),
+            (ActorKind::Bot, ActorKind::Human) => (b, a),
+            (ActorKind::Bot, ActorKind::Bot) => (a, b),
+            (ActorKind::Human, ActorKind::Human) => {
+                warn!(left = %a, right = %b, env = %self.env, "skip edge-permission friendship removal sync for unsupported human-human friendship");
+                return Ok(());
+            }
+        };
+
+        self.revoke_friend(caller, target).await.map(|_| ())
     }
 }
 
@@ -1506,6 +1594,16 @@ mod tests {
         requests: &Arc<dyn PermissionRequestRepoPort>,
         bot_config: &Arc<dyn BotActorConfigRepoPort>,
     ) -> DbConnectService {
+        service_in_env(edge_grants, profiles, requests, bot_config, "dev")
+    }
+
+    fn service_in_env(
+        edge_grants: &Arc<dyn EdgeGrantRepoPort>,
+        profiles: &Arc<dyn PermissionProfileRepoPort>,
+        requests: &Arc<dyn PermissionRequestRepoPort>,
+        bot_config: &Arc<dyn BotActorConfigRepoPort>,
+        env: &str,
+    ) -> DbConnectService {
         DbConnectService::new(
             edge_grants.clone(),
             profiles.clone(),
@@ -1513,7 +1611,7 @@ mod tests {
             bot_config.clone(),
             None,
             Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
-            "dev".to_string(),
+            env.to_string(),
         )
     }
 
@@ -2676,6 +2774,87 @@ mod tests {
         svc.cancel(&rid).await.expect("idempotent cancel ok");
         let r2 = rq.get(&rid, "dev").await.expect("request still exists");
         assert_eq!(r2.status, RequestStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn sync_add_friendship_bot_to_bot_writes_two_default_edges_idempotently() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        svc.sync_add_friendship("x:syncA", "x:syncB").await.expect("sync add");
+        svc.sync_add_friendship("x:syncA", "x:syncB").await.expect("sync add idempotent");
+
+        let a_to_b = eg.list_active_grants("x:syncA", "x:syncB", "dev").await;
+        let b_to_a = eg.list_active_grants("x:syncB", "x:syncA", "dev").await;
+        assert_eq!(a_to_b.len(), 1);
+        assert_eq!(b_to_a.len(), 1);
+        assert_eq!(
+            a_to_b[0].grant_ref_id,
+            pp.get_active_default("x:syncB", "dev").await.unwrap().permission_profile_id
+        );
+        assert_eq!(
+            b_to_a[0].grant_ref_id,
+            pp.get_active_default("x:syncA", "dev").await.unwrap().permission_profile_id
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_add_friendship_normalizes_bot_human_to_human_bot_edge() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        svc.sync_add_friendship("x:human_target", "human_1").await.expect("sync add");
+
+        let human_to_bot = eg.list_active_grants("human_1", "x:human_target", "dev").await;
+        let bot_to_human = eg.list_active_grants("x:human_target", "human_1", "dev").await;
+        assert_eq!(human_to_bot.len(), 1);
+        assert!(bot_to_human.is_empty(), "Bot→Human edge must not be created");
+        assert_eq!(
+            human_to_bot[0].grant_ref_id,
+            pp.get_active_default("x:human_target", "dev").await.unwrap().permission_profile_id
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_add_friendship_uses_service_env() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service_in_env(&eg, &pp, &rq, &bc, "pre");
+
+        svc.sync_add_friendship("x:envA", "x:envB").await.expect("sync add");
+
+        assert!(eg.has_friend_edge("x:envA", "x:envB", "pre").await);
+        assert!(!eg.has_friend_edge("x:envA", "x:envB", "dev").await);
+        assert!(pp.get_active_default("x:envA", "pre").await.is_some());
+        assert!(pp.get_active_default("x:envA", "dev").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn sync_remove_friendship_revokes_only_default_friend_edges() {
+        let (eg, pp, rq, bc, _db) = assemble().await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        svc.sync_add_friendship("human_1", "x:sync_keep").await.expect("sync add");
+        eg.insert_grant(EdgeGrant {
+            edge_id: 0,
+            env: "dev".to_string(),
+            from_id: "human_1".to_string(),
+            to_id: "x:sync_keep".to_string(),
+            grant_kind: GrantKind::PermissionProfile,
+            grant_ref_id: 4002,
+            rules: None,
+            status: EdgeStatus::Approved,
+            originator_policy_type: OriginatorPolicyType::Any,
+            originator_policy_data: None,
+        })
+        .await
+        .expect("insert non-friend edge");
+
+        svc.sync_remove_friendship("human_1", "x:sync_keep").await.expect("sync remove");
+
+        assert!(!eg.has_friend_edge("human_1", "x:sync_keep", "dev").await);
+        let active = eg.list_active_grants("human_1", "x:sync_keep", "dev").await;
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].grant_ref_id, 4002);
     }
 
     #[tokio::test]
