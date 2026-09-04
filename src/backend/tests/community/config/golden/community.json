@@ -200,7 +200,8 @@
       "base_url_pre": "",
       "raw": {
         "base_url": "${BCS_FUSE_URL:-}"
-      }
+      },
+      "worker_id_with_owner": false
     },
     "bot_chat": {
       "langfuse_base_url": "",

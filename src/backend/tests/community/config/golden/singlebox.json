@@ -267,7 +267,8 @@
       "base_url_pre": "",
       "raw": {
         "base_url": "https://bcsfuse-pre.teamclaw.com"
-      }
+      },
+      "worker_id_with_owner": false
     },
     "bot_chat": {
       "langfuse_base_url": "",

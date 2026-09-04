@@ -384,7 +384,9 @@ class BotPublicService(BotPublicServiceProtocol):
             base_url = self._bcsfuse_config.base_url_pre
         return base_url.rstrip("/")
 
-    def _sync_bcsfuse_runtime_state(self, bot_id: str, public: str) -> None:
+    def _sync_bcsfuse_runtime_state(
+        self, bot_id: str, owner_id: str, public: str
+    ) -> None:
         """Best-effort sync bot visibility to BCSFuse runtime state."""
         base_url = self._resolve_bcsfuse_base_url()
         if not base_url:
@@ -397,7 +399,12 @@ class BotPublicService(BotPublicServiceProtocol):
             return
 
         runtime_state = "online" if public == "1" else "offline"
-        url = f"{base_url}/v1/workers/{bot_id}/{runtime_state}"
+        worker_id = (
+            f"{bot_id}:{owner_id}"
+            if self._bcsfuse_config.worker_id_with_owner is True
+            else bot_id
+        )
+        url = f"{base_url}/v1/workers/{worker_id}/{runtime_state}"
         request = Request(url, data=b"", method="PUT")
         request.add_header("Content-Type", "application/json")
 
@@ -405,8 +412,9 @@ class BotPublicService(BotPublicServiceProtocol):
             with urlopen(request, timeout=15) as response:
                 logger.info(
                     "[_sync_bcsfuse_runtime_state] Synced BCSFuse runtime state: "
-                    "bot_id=%s runtime_state=%s status=%s",
+                    "bot_id=%s worker_id=%s runtime_state=%s status=%s",
                     bot_id,
+                    worker_id,
                     runtime_state,
                     getattr(response, "status", "unknown"),
                 )
@@ -414,8 +422,9 @@ class BotPublicService(BotPublicServiceProtocol):
             body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             logger.warning(
                 "[_sync_bcsfuse_runtime_state] BCSFuse HTTP error ignored: "
-                "bot_id=%s runtime_state=%s status=%s body=%s",
+                "bot_id=%s worker_id=%s runtime_state=%s status=%s body=%s",
                 bot_id,
+                worker_id,
                 runtime_state,
                 exc.code,
                 body,
@@ -423,16 +432,18 @@ class BotPublicService(BotPublicServiceProtocol):
         except URLError as exc:
             logger.warning(
                 "[_sync_bcsfuse_runtime_state] BCSFuse URL error ignored: "
-                "bot_id=%s runtime_state=%s reason=%s",
+                "bot_id=%s worker_id=%s runtime_state=%s reason=%s",
                 bot_id,
+                worker_id,
                 runtime_state,
                 exc.reason,
             )
         except Exception as exc:
             logger.warning(
                 "[_sync_bcsfuse_runtime_state] BCSFuse sync failed but ignored: "
-                "bot_id=%s runtime_state=%s error=%s",
+                "bot_id=%s worker_id=%s runtime_state=%s error=%s",
                 bot_id,
+                worker_id,
                 runtime_state,
                 exc,
             )
@@ -728,7 +739,7 @@ class BotPublicService(BotPublicServiceProtocol):
         self._sync_access_mode_and_relations(
             bot_id, owner_id, access_mode, public,
         )
-        self._sync_bcsfuse_runtime_state(bot_id, public)
+        self._sync_bcsfuse_runtime_state(bot_id, owner_id, public)
         logger.info(
             "[bot_service.public_bot] %s: bot_id=%s public=%s "
             "owner=%s operator=%s",
@@ -1076,7 +1087,7 @@ class BotPublicService(BotPublicServiceProtocol):
             self._sync_access_mode_and_relations_or_raise(
                 bot_id, owner_id, access_mode, public_value,
             )
-            self._sync_bcsfuse_runtime_state(bot_id, public_value)
+            self._sync_bcsfuse_runtime_state(bot_id, owner_id, public_value)
             logger.info(f"[bot_service.handle_public_approval_callback] Approval agreed: bot_id={bot_id}, public={public_value}")
             return {"success": True, "public": public_value, "message": "Public status updated"}
         elif last_operate_upper == "DISAGREE":

@@ -127,7 +127,8 @@
     "bcsfuse": {
       "base_url": "",
       "base_url_pre": "",
-      "raw": {}
+      "raw": {},
+      "worker_id_with_owner": false
     },
     "bot_chat": {
       "langfuse_base_url": "",

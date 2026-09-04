@@ -770,6 +770,35 @@ class TestPublicBotBCSFuseSync:
     @patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen")
     @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService._sync_access_mode_and_relations")
     @patch("agentclaw.community.utils.env_utils.is_local_mode", return_value=True)
+    def test_public_uses_owner_qualified_bcsfuse_worker_id_when_configured(
+        self, _mock_local, _mock_sync_rel, mock_urlopen
+    ):
+        bot_repo = MagicMock()
+        bot = _make_bot(public="0", ext={"permission_owner": "caller"})
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {**bot, "public": "1"}
+
+        response = MagicMock()
+        response.__enter__.return_value = response
+        response.status = 200
+        mock_urlopen.return_value = response
+
+        svc = _make_service(
+            bot_repository=bot_repo,
+            bcsfuse_config=MagicMock(
+                base_url="http://bcsfuse.test",
+                base_url_pre="http://bcsfuse.pre.test",
+                worker_id_with_owner=True,
+            ),
+        )
+        svc.public_bot("bot1", "owner1", "1", "caller", "0", _make_operator())
+
+        request = mock_urlopen.call_args.args[0]
+        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1:owner1/online"
+
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.urlopen")
+    @patch("agentclaw.community.core.bot_public.services.bot_public_service.BotPublicService._sync_access_mode_and_relations")
+    @patch("agentclaw.community.utils.env_utils.is_local_mode", return_value=True)
     def test_unpublish_calls_bcsfuse_offline_best_effort(self, _mock_local, mock_sync_rel, mock_urlopen):
         bot_repo = MagicMock()
         bot = _make_bot(public="1", ext={"permission_owner": "caller"})
@@ -1007,7 +1036,14 @@ class TestHandlePublicApprovalCallback:
         })
         bot_repo.get_by_id_and_owner.return_value = bot
         bot_repo.update_by_owner.return_value = {**bot}
-        svc = _make_service(bot_repository=bot_repo, bcsfuse_config=MagicMock(base_url="http://bcsfuse.test", base_url_pre="http://bcsfuse.pre.test"))
+        svc = _make_service(
+            bot_repository=bot_repo,
+            bcsfuse_config=MagicMock(
+                base_url="http://bcsfuse.test",
+                base_url_pre="http://bcsfuse.pre.test",
+                worker_id_with_owner=True,
+            ),
+        )
 
         with (
             patch.object(svc, "_sync_access_mode_and_relations_or_raise"),
@@ -1021,7 +1057,7 @@ class TestHandlePublicApprovalCallback:
 
         assert result["success"] is True
         request = mock_urlopen.call_args.args[0]
-        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1/online"
+        assert request.full_url == "http://bcsfuse.test/v1/workers/bot1:owner1/online"
 
     def test_agree_bcsfuse_failure_does_not_block_callback(self):
         bot_repo = MagicMock()

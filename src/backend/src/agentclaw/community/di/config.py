@@ -443,6 +443,7 @@ class BcsFuseConfig:
 
     base_url: str = ""
     base_url_pre: str = ""
+    worker_id_with_owner: bool = False
     raw: dict[str, Any] = field(default_factory=dict)
 
 

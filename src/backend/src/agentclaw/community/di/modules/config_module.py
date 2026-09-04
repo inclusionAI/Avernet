@@ -507,6 +507,13 @@ class ConfigModule(Module):
         return cfg.BcsFuseConfig(
             base_url=user_block.get("base_url", defaults.base_url),
             base_url_pre=user_block.get("base_url_pre", defaults.base_url_pre),
+            worker_id_with_owner=_coerce(
+                user_block,
+                "worker_id_with_owner",
+                _as_bool,
+                defaults.worker_id_with_owner,
+                "bcsfuse",
+            ),
             raw=user_block,
         )
 
