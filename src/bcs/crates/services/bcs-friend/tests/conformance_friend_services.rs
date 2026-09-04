@@ -168,6 +168,38 @@ async fn friend_request_core_accepts_reverse_pending_request_and_adds_friendship
 }
 
 #[tokio::test]
+async fn friend_request_core_keeps_request_pending_when_friendship_write_fails() {
+    let request_repo = Arc::new(MemoryFriendRequestRepo::new());
+    let requests = FriendRequestCore::with_repo(
+        request_repo.clone(),
+        Arc::new(FriendCore::with_repo(Arc::new(FailingFriendRepo))),
+        Arc::new(StaticRegistry::new(&[
+            ("alice", "protected", ActorKind::Bot),
+            ("bob", "protected", ActorKind::Bot),
+        ])),
+    );
+    let request = requests
+        .create_request("alice", "bob")
+        .await
+        .expect("create request");
+
+    let result = requests.accept_request(&request.id).await;
+
+    assert!(matches!(
+        result,
+        Err(ServiceError::InternalError(message)) if message == "friend store unavailable"
+    ));
+    assert_eq!(
+        request_repo
+            .get_request(&request.id)
+            .await
+            .expect("request remains readable")
+            .status,
+        FriendRequestStatus::Pending
+    );
+}
+
+#[tokio::test]
 async fn friend_request_core_reject_and_cancel_preserve_terminal_requests() {
     let (_friend, requests, repo) = core_fixture(&[
         ("alice", "protected", ActorKind::Bot),

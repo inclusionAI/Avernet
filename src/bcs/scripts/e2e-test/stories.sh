@@ -309,19 +309,22 @@ _story_register_and_onboard_owned_agent() {
 #
 # Flow:
 #   Befriend a public agent -> request access to a protected agent -> accept it
-#   -> submit another protected request -> reject it -> inspect friends via API
-#   and CLI.
+#   -> submit another protected request -> reject it -> observe and retry a
+#   persistence failure -> inspect friends via API and CLI.
 #
 # Critical assertions:
 #   - Public friendship becomes visible without a pending approval step.
 #   - Protected requests expose a concrete pending request that can be accepted.
 #   - A rejected request never creates a friendship.
+#   - A failed friendship write is visible, remains retryable, and never exposes
+#     a relationship before persistence recovers.
 #   - API and CLI friend lists contain the expected agents after each decision.
 story_user_builds_trusted_team() {
     info "Story: agents establish, accept, reject, and inspect trust relationships"
     test_friend_auto_accept_public
     test_friend_request_accept_protected
     test_friend_request_reject_protected
+    test_friendship_insert_ignore_failure_is_visible_and_retryable
     test_list_friends
     test_friend_flow_via_cli
 }
