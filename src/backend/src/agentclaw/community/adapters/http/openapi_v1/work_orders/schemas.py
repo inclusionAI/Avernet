@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer
 
 from agentclaw.community.adapters.http.openapi_v1.enums import _DocumentedEnum
 
@@ -116,24 +116,6 @@ class CreateWorkOrderEventRequest(BaseModel):
         default=None,
         description="JSON object stored as notification content without business reshaping.",
     )
-
-    @field_validator("content", mode="before")
-    @classmethod
-    def validate_content(cls, value: Any) -> dict[str, Any] | None:
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            raise ValueError("缺少必填字段text")
-        workitem_name = value.get("workitem_name")
-        has_workitem_name = isinstance(workitem_name, str) and bool(workitem_name.strip())
-        if "text" not in value:
-            if has_workitem_name:
-                return value
-            raise ValueError("缺少必填字段text")
-        text = value["text"]
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError("缺少必填字段text")
-        return value
     apply_reason: str | None = Field(
         default=None,
         max_length=512,

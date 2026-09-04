@@ -329,8 +329,12 @@ def test_create_work_order_event_accepts_json_objects(
     "content",
     [
         None,
+        {},
         {"text": "display"},
         {"text": "display", "legacy_value": "legacy"},
+        {"message": "成员已加入空间", "space_id": 7},
+        {"display_content": "...", "metadata": {"source": "bcs"}},
+        {"review_remark": "审批备注"},
         {"workitem_name": "历史任务"},
     ],
 )
@@ -365,16 +369,6 @@ def test_create_work_order_event_accepts_supported_content(content, client, work
         [],
         123,
         True,
-        {},
-        {"legacy_value": "历史内容"},
-        {"text": ""},
-        {"text": "   "},
-        {"text": None},
-        {"text": 123},
-        {"text": None, "workitem_name": "历史任务"},
-        {"workitem_name": ""},
-        {"workitem_name": "   "},
-        {"workitem_name": 123},
     ],
 )
 def test_create_work_order_event_rejects_invalid_content(content, client, work_order_service):
@@ -391,7 +385,7 @@ def test_create_work_order_event_rejects_invalid_content(content, client, work_o
     response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
 
     assert response.status_code == 422
-    assert "缺少必填字段text" in response.text
+    assert "Invalid request" in response.text
     work_order_service.create_work_order_event.assert_not_called()
 
 
