@@ -138,6 +138,21 @@ fn is_lock_wait_timeout(err: &ServiceError) -> bool {
     message.contains("1205") || message.to_ascii_lowercase().contains("lock wait timeout")
 }
 
+fn normalize_friend_sync_pair<'a>(
+    a: &'a str,
+    b: &'a str,
+) -> ServiceResult<Option<(&'a str, &'a str, ActorKind, ActorKind)>> {
+    if a == b {
+        return Err(ServiceError::CannotAddSelf);
+    }
+    match (actor_kind_of(a), actor_kind_of(b)) {
+        (ActorKind::Human, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Human, ActorKind::Bot))),
+        (ActorKind::Bot, ActorKind::Human) => Ok(Some((b, a, ActorKind::Human, ActorKind::Bot))),
+        (ActorKind::Bot, ActorKind::Bot) => Ok(Some((a, b, ActorKind::Bot, ActorKind::Bot))),
+        (ActorKind::Human, ActorKind::Human) => Ok(None),
+    }
+}
+
 fn normalize_policy_value(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -150,11 +165,12 @@ fn is_private_visibility(value: &str) -> bool {
     matches!(normalize_policy_value(value).as_str(), "private")
 }
 
-fn bot_friend_ext_no_check_scope_friend_deps(
+fn bot_friend_ext_scope_friend_deps(
     friend_ext: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
 ) -> HashSet<String> {
     friend_ext
-        .get("no_check_scope_friend_deps")
+        .get(key)
         .and_then(|value| value.as_array())
         .map(|items| {
             items
@@ -166,6 +182,24 @@ fn bot_friend_ext_no_check_scope_friend_deps(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn bot_friend_ext_no_check_scope_friend_deps(
+    friend_ext: &serde_json::Map<String, serde_json::Value>,
+) -> HashSet<String> {
+    bot_friend_ext_scope_friend_deps(friend_ext, "no_check_scope_friend_deps")
+}
+
+fn bot_friend_ext_view_scope_user_friend_deps(
+    friend_ext: &serde_json::Map<String, serde_json::Value>,
+) -> HashSet<String> {
+    bot_friend_ext_scope_friend_deps(friend_ext, "view_scope_user_friend_deps")
+}
+
+fn bot_friend_ext_view_scope_agent_friend_deps(
+    friend_ext: &serde_json::Map<String, serde_json::Value>,
+) -> HashSet<String> {
+    bot_friend_ext_scope_friend_deps(friend_ext, "view_scope_agent_friend_deps")
 }
 
 fn user_directory_lookup_context(request_auth: Option<&RequestAuthHeaders>) -> UserDirectoryLookupContext {
@@ -265,6 +299,31 @@ impl ConnectService for DbConnectService {
             return Err(ServiceError::Forbidden(format!(
                 "bot '{to_bot}' is not human-addable"
             )));
+        }
+
+        if caller_kind == ActorKind::Human && normalize_policy_value(&cfg.user_visibility) == "protected" {
+            let user_friend_scope = bot_friend_ext_view_scope_user_friend_deps(&cfg.friend_ext);
+            if !user_friend_scope.is_empty()
+                && !self
+                    .actor_department_matches_friend_scope(caller, &user_friend_scope, request_auth.as_ref())
+                    .await
+            {
+                return Err(ServiceError::Forbidden(format!(
+                    "caller '{caller}' is not within target bot '{to_bot}' friend scope"
+                )));
+            }
+        }
+        if caller_kind == ActorKind::Bot && normalize_policy_value(&cfg.visibility) == "protected" {
+            let agent_friend_scope = bot_friend_ext_view_scope_agent_friend_deps(&cfg.friend_ext);
+            if !agent_friend_scope.is_empty()
+                && !self
+                    .actor_department_matches_friend_scope(caller, &agent_friend_scope, request_auth.as_ref())
+                    .await
+            {
+                return Err(ServiceError::Forbidden(format!(
+                    "bot owner '{caller}' is not within target bot '{to_bot}' friend scope"
+                )));
+            }
         }
 
         let friend_strategy = normalize_policy_value(&cfg.friend_check_in_strategy);
@@ -801,6 +860,23 @@ impl DbConnectService {
             .any(|allowed| department_matches_allowlist_entry(&caller_department, allowed))
     }
 
+    async fn actor_department_matches_friend_scope(
+        &self,
+        actor: &str,
+        allowed_departments: &HashSet<String>,
+        request_auth: Option<&RequestAuthHeaders>,
+    ) -> bool {
+        if allowed_departments.is_empty() {
+            return false;
+        }
+        let Some(actor_department) = self.resolve_user_department_code(actor, request_auth).await else {
+            return false;
+        };
+        allowed_departments
+            .iter()
+            .any(|allowed| department_matches_allowlist_entry(&actor_department, allowed))
+    }
+
     fn target_notification_recipients(
         &self,
         cfg: &bcs_domain::edge_permission::BotActorConfig,
@@ -1215,6 +1291,31 @@ impl EdgePermissionFriendSyncService for DbConnectService {
 
 // ---- AdmissionService (T14) ----------------------------------------------
 
+#[async_trait]
+impl EdgePermissionFriendSyncService for DbConnectService {
+    async fn sync_add_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        let Some((caller, target, caller_kind, target_kind)) = normalize_friend_sync_pair(a, b)? else {
+            warn!(left = %a, right = %b, env = %self.env, "skip human-human friendship edge-permission sync");
+            return Ok(());
+        };
+        if self.edge_grants.has_friend_edge(caller, target, &self.env).await {
+            return Ok(());
+        }
+        self.build_connect_edges(caller, target, caller_kind, target_kind)
+            .await
+            .map(|_| ())
+    }
+
+    async fn sync_remove_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        let Some((caller, target, _, _)) = normalize_friend_sync_pair(a, b)? else {
+            return Ok(());
+        };
+        <Self as ConnectService>::revoke_friend(self, caller, target)
+            .await
+            .map(|_| ())
+    }
+}
+
 /// DB-backed [`AdmissionService`] implementation (spec §4.3 + §4.5 + §6.2).
 ///
 /// Unlike [`DbConnectService`] (which owns its env because `ConnectService`
@@ -1567,7 +1668,9 @@ mod tests {
                 name TEXT NOT NULL DEFAULT '', \
                 visibility TEXT NOT NULL DEFAULT 'public', \
                 user_visibility TEXT NOT NULL DEFAULT 'protected', \
+                friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL', \
                 bot_info TEXT DEFAULT NULL, \
+                friend_ext TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
                 is_deleted INTEGER NOT NULL DEFAULT 0, \
@@ -1813,20 +1916,23 @@ mod tests {
         created_by: Option<&str>,
         friend_ext: serde_json::Map<String, serde_json::Value>,
     ) {
+        let friend_ext_json = serde_json::to_string(&friend_ext).expect("friend_ext json");
         let bot_info = serde_json::json!({
             "friend_check_in_strategy": friend_check_in_strategy,
             "friend_ext": friend_ext,
         });
         db.execute(DbStatement::with_params(
             "INSERT INTO bcs_bots \
-             (bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by) \
-             VALUES (?, 'dev', ?, ?, ?, ?, ?, ?)",
+             (bot_uuid, env, name, visibility, user_visibility, friend_check_in_strategy, bot_info, friend_ext, status, created_by) \
+             VALUES (?, 'dev', ?, ?, ?, ?, ?, ?, ?, ?)",
             vec![
                 DbValue::from(bot_uuid),
                 DbValue::from(bot_uuid),
                 DbValue::from(visibility),
                 DbValue::from(user_visibility),
+                DbValue::from(friend_check_in_strategy),
                 DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
+                DbValue::from(friend_ext_json),
                 DbValue::from(status),
                 match created_by {
                     Some(v) => DbValue::from(v),
@@ -1846,6 +1952,43 @@ mod tests {
         // of None — the direction gate in create_connect rejects invalid dirs,
         // not actor_kind_of.
         assert_eq!(actor_kind_of("plainbot"), ActorKind::Bot);
+    }
+
+    #[tokio::test]
+    async fn edge_permission_friend_sync_adds_and_removes_bot_friend_edges() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:syncA", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        seed_bot(&db, "x:syncB", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        svc.sync_add_friendship("x:syncA", "x:syncB")
+            .await
+            .expect("sync add");
+
+        assert!(eg.has_friend_edge("x:syncA", "x:syncB", "dev").await);
+        assert_eq!(eg.list_active_grants("x:syncA", "x:syncB", "dev").await.len(), 1);
+        assert_eq!(eg.list_active_grants("x:syncB", "x:syncA", "dev").await.len(), 1);
+
+        svc.sync_remove_friendship("x:syncA", "x:syncB")
+            .await
+            .expect("sync remove");
+
+        assert!(!eg.has_friend_edge("x:syncA", "x:syncB", "dev").await);
+    }
+
+    #[tokio::test]
+    async fn edge_permission_friend_sync_normalizes_human_bot_direction() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(&db, "x:syncBot", "protected", "protected", "APPROVAL", "online", Some("85020")).await;
+        let svc = service(&eg, &pp, &rq, &bc);
+
+        svc.sync_add_friendship("x:syncBot", "human_1")
+            .await
+            .expect("sync add");
+
+        assert!(eg.has_friend_edge("human_1", "x:syncBot", "dev").await);
+        assert_eq!(eg.list_active_grants("human_1", "x:syncBot", "dev").await.len(), 1);
+        assert!(eg.list_active_grants("x:syncBot", "human_1", "dev").await.is_empty());
     }
 
     #[tokio::test]
@@ -1993,6 +2136,173 @@ mod tests {
         assert_eq!(res.edge_ids.len(), 1);
         assert!(eg.has_friend_edge("human_1", "x:privuvis", "dev").await);
     }
+
+    #[tokio::test]
+    async fn human_protected_view_scope_user_friend_deps_allows_matching_department() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "view_scope_user_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:user_scope_hit",
+            "protected",
+            "protected",
+            "OPEN",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("human_1", "x:user_scope_hit", None, None)
+            .await
+            .expect("protected user scope hit should auto-approve when OPEN");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 1);
+        assert_eq!(res.request_ids.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn human_protected_view_scope_user_friend_deps_blocks_out_of_scope_department() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "view_scope_user_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:user_scope_miss",
+            "protected",
+            "protected",
+            "OPEN",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "1".to_string(),
+                "蚂蚁集团-其他事业群-销售部".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let err = svc
+            .create_connect("human_1", "x:user_scope_miss", None, None)
+            .await
+            .expect_err("out-of-scope human applicant should be rejected");
+        assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn bot_protected_view_scope_agent_friend_deps_allows_matching_owner_department() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "x:applicant",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "view_scope_agent_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:target_scope_hit",
+            "protected",
+            "protected",
+            "OPEN",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "owner_1".to_string(),
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施-系统智能".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let res = svc
+            .create_connect("x:applicant", "x:target_scope_hit", None, None)
+            .await
+            .expect("protected agent scope hit should auto-approve when OPEN");
+        assert_eq!(res.status, ConnectStatus::Approved);
+        assert!(res.auto_accepted);
+        assert_eq!(res.edge_ids.len(), 2);
+        assert_eq!(res.request_ids.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn bot_protected_view_scope_agent_friend_deps_blocks_out_of_scope_owner_department() {
+        let (eg, pp, rq, bc, db) = assemble().await;
+        seed_bot(
+            &db,
+            "x:applicant",
+            "protected",
+            "protected",
+            "APPROVAL",
+            "online",
+            Some("owner_1"),
+        )
+        .await;
+        let mut target_friend_ext = serde_json::Map::new();
+        target_friend_ext.insert(
+            "view_scope_agent_friend_deps".to_string(),
+            serde_json::Value::Array(vec![serde_json::Value::String(
+                "蚂蚁集团-大安全-大安全技术部-AI基础设施".to_string(),
+            )]),
+        );
+        seed_bot_with_friend_ext(
+            &db,
+            "x:target_scope_miss",
+            "protected",
+            "protected",
+            "OPEN",
+            "online",
+            Some("85020"),
+            target_friend_ext,
+        )
+        .await;
+        let departments = Arc::new(StaticUserDirectoryPlugin {
+            departments: Arc::new(std::collections::HashMap::from([(
+                "owner_1".to_string(),
+                "蚂蚁集团-其他事业群-销售部".to_string(),
+            )])),
+        });
+        let svc = service_with_departments(&eg, &pp, &rq, &bc, departments);
+        let err = svc
+            .create_connect("x:applicant", "x:target_scope_miss", None, None)
+            .await
+            .expect_err("out-of-scope bot owner should be rejected");
+        assert!(matches!(err, ServiceError::Forbidden(_)), "got {err:?}");
+    }
+
 
     #[tokio::test]
     async fn public_auto_bot_returns_approved_edge() {

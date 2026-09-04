@@ -995,7 +995,7 @@ impl DbBotActorConfigStore {
     /// SELECT the decision columns for `(bot_uuid, env)`. Excludes soft-deleted
     /// rows, mirroring the bot store read (`COALESCE(is_deleted, 0) = 0`).
     const SELECT_BOT_CONFIG_SQL: &'static str =
-        "SELECT bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by \
+        "SELECT bot_uuid, env, name, visibility, user_visibility, friend_check_in_strategy, friend_ext, bot_info, status, created_by \
          FROM bcs_bots \
          WHERE bot_uuid = ? AND env = ? AND COALESCE(is_deleted, 0) = 0 LIMIT 1";
 }
@@ -1153,23 +1153,27 @@ fn row_to_edge_grant(row: &DbRow) -> ServiceResult<EdgeGrant> {
 /// `created_by` is `NULL` for legacy bots. `user_visibility` is read from its
 /// own `bcs_bots.user_visibility` column — the same column the internal-
 /// attributes PATCH writes — so friend-gating sees the value the operator
-/// actually set (rather than a `bot_info` default that no write path populates).
-/// `bot_info` still carries `friend_check_in_strategy` / `friend_ext`.
+/// actually set.
+/// `friend_check_in_strategy` is read from its dedicated column so the
+/// friend-connect policy does not depend on `bot_info` JSON projection order.
+/// `friend_ext` is read from the dedicated `bcs_bots.friend_ext` column, with
+/// a legacy `bot_info.friend_ext` fallback for older rows.
 fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
     let bot_info = optional_string(row, "bot_info")?
         .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
         .unwrap_or_default();
     let user_visibility = optional_string(row, "user_visibility")?
         .unwrap_or_else(|| "protected".to_string());
-    let friend_check_in_strategy = bot_info
-        .get("friend_check_in_strategy")
-        .and_then(|value| value.as_str())
-        .unwrap_or("APPROVAL")
-        .to_string();
-    let friend_ext = bot_info
-        .get("friend_ext")
-        .and_then(|value| value.as_object())
-        .cloned()
+    let friend_check_in_strategy = optional_string(row, "friend_check_in_strategy")?
+        .unwrap_or_else(|| "APPROVAL".to_string());
+    let friend_ext = optional_string(row, "friend_ext")?
+        .and_then(|value| serde_json::from_str::<serde_json::Value>(&value).ok())
+        .and_then(|value| value.as_object().cloned())
+        .or_else(|| {
+            bot_info
+                .get("friend_ext")
+                .and_then(|value| value.as_object().cloned())
+        })
         .unwrap_or_default();
     Ok(BotActorConfig {
         bot_id: required_string(row, "bot_uuid")?,
@@ -1837,7 +1841,9 @@ mod tests {
                 name TEXT NOT NULL DEFAULT '', \
                 visibility TEXT NOT NULL DEFAULT 'public', \
                 user_visibility TEXT NOT NULL DEFAULT 'protected', \
+                friend_check_in_strategy TEXT NOT NULL DEFAULT 'APPROVAL', \
                 bot_info TEXT DEFAULT NULL, \
+                friend_ext TEXT DEFAULT NULL, \
                 status TEXT NOT NULL DEFAULT 'online', \
                 created_by TEXT, \
                 is_deleted INTEGER NOT NULL DEFAULT 0, \
@@ -1884,6 +1890,7 @@ mod tests {
         created_by: Option<&str>,
         friend_ext: serde_json::Map<String, serde_json::Value>,
     ) {
+        let friend_ext_json = serde_json::to_string(&friend_ext).expect("friend_ext json");
         let bot_info = serde_json::json!({
             "friend_check_in_strategy": friend_check_in_strategy,
             "friend_ext": friend_ext,
@@ -1893,15 +1900,17 @@ mod tests {
                 "seed_bot",
                 DbStatement::with_params(
                     "INSERT INTO bcs_bots \
-                     (bot_uuid, env, name, visibility, user_visibility, bot_info, status, created_by) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (bot_uuid, env, name, visibility, user_visibility, friend_check_in_strategy, bot_info, friend_ext, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     vec![
                         DbValue::from(bot_uuid),
                         DbValue::from(env),
                         DbValue::from(bot_uuid),
                         DbValue::from(visibility),
                         DbValue::from(user_visibility),
+                        DbValue::from(friend_check_in_strategy),
                         DbValue::from(serde_json::to_string(&bot_info).expect("bot_info json")),
+                        DbValue::from(friend_ext_json),
                         DbValue::from(status),
                         match created_by {
                             Some(v) => DbValue::from(v),
@@ -1943,6 +1952,40 @@ mod tests {
         assert_eq!(cfg.status, "online");
         assert_eq!(cfg.created_by.as_deref(), Some("85020"));
     }
+    #[tokio::test]
+    async fn bot_actor_config_reads_friend_strategy_from_column() {
+        let store = bot_config_store().await;
+        store
+            .execute(
+                "seed_bot_column_strategy",
+                DbStatement::with_params(
+                    "INSERT INTO bcs_bots \
+                     (bot_uuid, env, name, visibility, user_visibility, friend_check_in_strategy, bot_info, friend_ext, status, created_by) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    vec![
+                        DbValue::from("column-strategy-bot"),
+                        DbValue::from("dev"),
+                        DbValue::from("column-strategy-bot"),
+                        DbValue::from("protected"),
+                        DbValue::from("public"),
+                        DbValue::from("OPEN"),
+                        DbValue::from(r#"{"friend_ext": {"scope": "bot_info"}}"#),
+                        DbValue::from(r#"{"scope": "column"}"#),
+                        DbValue::from("online"),
+                        DbValue::Null,
+                    ],
+                ),
+            )
+            .await
+            .expect("seed bot with column strategy");
+
+        let cfg = store
+            .get("column-strategy-bot", "dev")
+            .await
+            .expect("bot exists");
+        assert_eq!(cfg.friend_check_in_strategy, "OPEN");
+        assert_eq!(cfg.friend_ext["scope"], "column");
+    }
 
     #[tokio::test]
     async fn bot_actor_config_missing_returns_none_and_legacy_owner() {
@@ -1953,7 +1996,8 @@ mod tests {
         seed_bot(&store, "bot_b", "prod", "protected", "private", "DEPT_FREE", "hidden", None).await;
         assert!(store.get("bot_b", "dev").await.is_none());
         // Same env row reads back; user_visibility comes from its column,
-        // friend_* still come from bot_info.
+        // friend_check_in_strategy comes from its dedicated column, and
+        // friend_ext now comes from its dedicated column with bot_info fallback.
         let cfg = store.get("bot_b", "prod").await.expect("bot exists in prod");
         assert_eq!(cfg.user_visibility, "private");
         assert_eq!(cfg.friend_check_in_strategy, "DEPT_FREE");
