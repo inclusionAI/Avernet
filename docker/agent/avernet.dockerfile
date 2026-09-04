@@ -261,12 +261,18 @@ COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
 COPY docker/agent/start_openclaw.sh /usr/local/bin/start_openclaw.sh
 COPY docker/agent/start_claude_code.sh /usr/local/bin/start_claude_code.sh
 
+# OpenClaw gateway process wrapper for [program:openclaw]
+# (avernet-supervisord.conf): derives a V8 old-space limit from the cgroup
+# memory limit (5/8 of it), then execs `openclaw gateway run --verbose`.
+COPY docker/agent/start_openclaw_gateway.sh /usr/local/bin/start_openclaw_gateway.sh
+
 # Entrypoint: pre-init, config generation from template, then execs supervisord.
 COPY docker/agent/avernet-entrypoint.sh /usr/local/bin/avernet-entrypoint
 RUN chmod +x /usr/local/bin/avernet-entrypoint \
              /usr/local/bin/start_service.sh \
              /usr/local/bin/start_openclaw.sh \
              /usr/local/bin/start_claude_code.sh \
+             /usr/local/bin/start_openclaw_gateway.sh \
              /usr/local/bin/util.sh
 
 EXPOSE 20003 18789 18900
