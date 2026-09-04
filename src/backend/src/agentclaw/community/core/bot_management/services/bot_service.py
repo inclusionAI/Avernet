@@ -3422,12 +3422,23 @@ class BotService(BotServiceProtocol):
             active_engine in ("claude_code", "aicoding")
             and template_type == "personalCoding"
         )
+        is_claude_code_standard = (
+            active_engine == "claude_code"
+            and template_type in (None, "", "normalCC")
+        )
+        if is_claude_code_standard and template_type != "normalCC":
+            template_type_state = "none" if template_type is None else "empty"
+            logger.info(
+                "[bot_service._should_register_bcn_provider] "
+                "event=legacy_claude_code_missing_template_type "
+                "active_engine=claude_code "
+                f"template_type_state={template_type_state} "
+                "fallback_template_type=normalCC"
+            )
+
         return (
             is_coding_personal
-            or (
-                active_engine == "claude_code"
-                and template_type == "normalCC"
-            )
+            or is_claude_code_standard
             or active_engine == "teclaw"
             or (active_engine == "openclaw" and bot_type in ("service", "personal"))
         )
@@ -3454,7 +3465,7 @@ class BotService(BotServiceProtocol):
         """Bot 创建/启动时把自己注册到 BCN 为 Provider (下行链路).
 
         当前在以下场景调用 (由 create / start 判定):
-          - active_engine == "claude_code" 且 template_type == "normalCC"
+          - active_engine == "claude_code" 且 template_type 为 "normalCC"、None 或空字符串
           - active_engine == "claude_code" 且 template_type == "personalCoding"
           - active_engine == "aicoding" 且 template_type == "personalCoding"
           - active_engine == "teclaw"
