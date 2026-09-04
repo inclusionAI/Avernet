@@ -160,7 +160,9 @@ async def delete(
     service: ChannelServiceProtocol = Injected(ChannelServiceProtocol),
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> UpdateStatusResponse:
-    service.delete(channel_id=channel_id)
+    # 与公开 API 的 delete 同路：remove_channel 会 best-effort 清理 bcn_gateway
+    # 行的 BCS 绑定，裸 delete 只删行、会孤儿化绑定。
+    await service.remove_channel(channel_id)
     return UpdateStatusResponse(success=True, message='成功')
 
 

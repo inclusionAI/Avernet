@@ -91,6 +91,7 @@ def _make_service(
         device_fs_dispatcher=dispatcher or MagicMock(),
         bot_service=bot_svc,
         device_sync_dispatcher=device_sync_dispatcher or MagicMock(),
+        bcs_client=MagicMock(),
     )
 
 
