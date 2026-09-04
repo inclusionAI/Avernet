@@ -28,6 +28,10 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
     StageQuery,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
+    FriendUserIdQuery,
+    authorize_friend_chat,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     envelope,
@@ -38,11 +42,18 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.gating import (
     resolve_operable_bot,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.errors import EngineResourceNotFoundError
 from agentclaw.community.di import Injected
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
-router = APIRouter(prefix="/openapi/v1/bots/{bot_id}/models", tags=["models"], route_class=PublicAPIRoute)
+router = APIRouter(
+    prefix="/openapi/v1/bots/{bot_id}/models",
+    tags=["models"],
+    route_class=PublicAPIRoute,
+)
 
 #: The path parameter naming the model an operation addresses.
 ModelIdPath = Annotated[
@@ -71,20 +82,41 @@ async def list_models(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(
+        HumanBotFriendshipServiceProtocol
+    ),
 ) -> Envelope[Page[Model]]:
     """List the models this bot's engine can route to."""
+    if f_user_id is not None:
+        if stage is not RuntimeStage.DRAFT:
+            raise EngineResourceNotFoundError(
+                "friend models are available only in draft"
+            )
+        await authorize_friend_chat(
+            request=request,
+            bot_id=bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            friend_user_id=f_user_id,
+            friendships=friendships,
+        )
     facts = await resolve_operable_bot(
         relay,
         bot_id,
-        caller_id=user_id,
+        caller_id=owner_id if f_user_id is not None else user_id,
         owner_id=owner_id,
         stage=stage.value,
         surface="models",
     )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
-        method="GET", path="/api/models",
+        bot_id=bot_id,
+        owner_id=owner_id,
+        facts=facts,
+        stage=stage.value,
+        method="GET",
+        path="/api/models",
     )
     # The engine wraps this one: data is {"models": [...], "total": n}, not a
     # bare list. Reading it as a list yields an empty page on every call against
@@ -109,7 +141,11 @@ async def get_model(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
+    friendships: HumanBotFriendshipServiceProtocol = Injected(
+        HumanBotFriendshipServiceProtocol
+    ),
 ) -> Envelope[Model]:
     """Get one model by id.
 
@@ -123,16 +159,32 @@ async def get_model(
     # A model id never contains a dot segment.
     if any(part in ("..", ".") for part in model_id.split("/")):
         raise EngineResourceNotFoundError("invalid model id")
+    if f_user_id is not None:
+        if stage is not RuntimeStage.DRAFT:
+            raise EngineResourceNotFoundError(
+                "friend models are available only in draft"
+            )
+        await authorize_friend_chat(
+            request=request,
+            bot_id=bot_id,
+            caller_id=user_id,
+            owner_id=owner_id,
+            friend_user_id=f_user_id,
+            friendships=friendships,
+        )
     facts = await resolve_operable_bot(
         relay,
         bot_id,
-        caller_id=user_id,
+        caller_id=owner_id if f_user_id is not None else user_id,
         owner_id=owner_id,
         stage=stage.value,
         surface="models",
     )
     result = await relay.call(
-        bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        facts=facts,
+        stage=stage.value,
         method="GET",
         path=f"/api/models/{model_id}",
     )

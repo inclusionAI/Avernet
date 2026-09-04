@@ -67,4 +67,20 @@ class Connection(BaseModel):
     )
 
 
-__all__ = ["Connection", "Socket"]
+class FriendConnection(BaseModel):
+    """ExpertChat connection material for an explicitly addressed session."""
+
+    session_id: str = Field(
+        description="The opaque Human-to-Agent session id whose connection was requested."
+    )
+    need_poll: bool = Field(
+        default=False,
+        description="Whether the caller must retry while the Bot runtime becomes ready.",
+    )
+    connection: dict[str, object] | None = Field(
+        default=None,
+        description="ExpertChat connection material, or null while need_poll is true.",
+    )
+
+
+__all__ = ["Connection", "FriendConnection", "Socket"]

@@ -65,7 +65,6 @@ from typing import Annotated, Any, Callable, get_args, get_origin, get_type_hint
 from fastapi import APIRouter, Depends
 from fastapi.routing import APIRoute
 from agentclaw.community.core.bot_collaborator.models import PermissionLevel
-from agentclaw.community.adapters.http.openapi_v1.converter_human_chat_policy import authorization_rows
 
 
 class _EditLock:
@@ -674,7 +673,7 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/auth-status"): INHERITED,
     ("GET", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
     ("PUT", "/openapi/v1/bots/{bot_id}/engine-config"): INHERITED,
-    **authorization_rows(NoCheck),}
+}
 
 
 #: Operations whose router exists but which ``build_public_router`` does not

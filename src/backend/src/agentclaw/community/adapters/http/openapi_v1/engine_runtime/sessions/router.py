@@ -8,7 +8,6 @@ see ``engine_runtime/gating.py`` and ``core/engine_runtime/gate.py``.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -24,7 +23,6 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     PageParamsDep,
 )
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import (
-    Message,
     MessagePage,
     Session,
     SessionCreate,
@@ -55,6 +53,9 @@ from agentclaw.community.adapters.http.openapi_v1.engine_runtime.params import (
     OwnerIdDep,
     StageQuery,
 )
+from agentclaw.community.adapters.http.openapi_v1.engine_runtime.friend_chat import (
+    FriendUserIdQuery, authorize_friend_chat,
+)
 from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import (
     created,
@@ -75,13 +76,9 @@ from agentclaw.community.core.engine_runtime.errors import (
     EngineUpstreamError,
 )
 from agentclaw.community.core.resources.service import FileTooLargeError
-from agentclaw.community.core.bot_management.services.bot_service import BotNotFoundError
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
     ConnectionError as ExpertConnectionError,
-)
-from agentclaw.community.core.bot_chat.bcn_friendship import (
-    FriendshipSourceUnavailableError,
 )
 from agentclaw.community.core.session_resources.types import SessionResourceRecord
 from agentclaw.community.di import Injected
@@ -116,15 +113,6 @@ _LOOKAHEAD = 1
 #: turned into device load.
 _MAX_HISTORY_DEPTH = 5000
 
-def _friend_auth_headers(request: Request) -> dict[str, str]:
-    """Forward only identity/trace headers needed by BCN's trusted boundary."""
-    return {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower() in {"authorization", "cookie", "x-request-id", "x-trace-id"}
-    }
-
-
 async def _resolve_session_backend(
     *,
     relay: EngineRuntimeRelayProtocol,
@@ -134,15 +122,11 @@ async def _resolve_session_backend(
     bot_id: str,
     user_id: str,
     owner_id: str,
+    friend_user_id: str | None,
     stage: RuntimeStage,
 ):
-    """Return Bot facts for the unchanged owner path, or ``None`` for friend.
-
-    A friend is considered only after the existing owner/collaborator gate has
-    returned its masked not-found answer. BCN failures fail closed; they never
-    fall back to Backend's legacy friend tables.
-    """
-    try:
+    """Select the unchanged operator backend or explicit friend backend."""
+    if friend_user_id is None:
         return await resolve_operable_bot(
             relay,
             bot_id,
@@ -151,28 +135,13 @@ async def _resolve_session_backend(
             stage=stage.value,
             surface="sessions",
         )
-    except BotNotFoundError as owner_error:
-        if stage is not RuntimeStage.DRAFT:
-            raise owner_error
-        try:
-            allowed = await asyncio.to_thread(
-                friendships.is_friend,
-                human_id=user_id,
-                bot_id=bot_id,
-                owner_id=owner_id,
-                request_headers=_friend_auth_headers(request),
-            )
-        except FriendshipSourceUnavailableError as error:
-            raise EngineDeviceNotReadyError(
-                "friendship authorization is temporarily unavailable"
-            ) from error
-        if not allowed:
-            raise owner_error
-        # Preserve ExpertChat's existing ownership/runtime implementation. The
-        # row is an interaction-list projection, not friendship authority;
-        # BCN was checked immediately above on every OpenAPI request.
-        await asyncio.to_thread(expert.add_chat_bot, user_id, bot_id, owner_id)
-        return None
+    if stage is not RuntimeStage.DRAFT:
+        raise EngineResourceNotFoundError("friend chat is available only in draft")
+    await authorize_friend_chat(
+        request=request, bot_id=bot_id, caller_id=user_id, owner_id=owner_id,
+        friend_user_id=friend_user_id, friendships=friendships, expert=expert,
+    )
+    return None
 
 
 def _raise_expert_error(error: Exception) -> None:
@@ -192,6 +161,7 @@ async def list_sessions(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     agent_id: Annotated[
         str | None, Query(description="Only sessions belonging to this agent.")
     ] = None,
@@ -209,7 +179,7 @@ async def list_sessions(
     """List the bot's sessions."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     params: dict[str, Any] = _window(page)
     if owner_id == user_id:
@@ -224,7 +194,7 @@ async def list_sessions(
     if facts is None:
         try:
             friend_result = await expert.list_chat_sessions(
-                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 session_key=session_key, limit=params["limit"],
                 offset=params["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
@@ -258,6 +228,7 @@ async def create_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -265,12 +236,12 @@ async def create_session(
     """Create a session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     if facts is None:
         try:
             created_result = await expert.create_chat_session(
-                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
             )
             session_key = created_result.get("session_key")
@@ -283,12 +254,12 @@ async def create_session(
             }
             if requested:
                 item = await expert.update_owned_chat_session(
-                    user_id, bot_id, owner_id, session_key, requested,
+                    f_user_id, bot_id, owner_id, session_key, requested,
                     request.cookies.get("IAM_TOKEN") or None,
                 )
             else:
                 item = await expert.get_owned_chat_session(
-                    user_id, bot_id, owner_id, session_key,
+                    f_user_id, bot_id, owner_id, session_key,
                     request.cookies.get("IAM_TOKEN") or None,
                 )
         except Exception as error:
@@ -325,6 +296,7 @@ async def list_session_favorites(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     agent_id: Annotated[
         str | None, Query(description="Only favorites belonging to this agent.")
     ] = None,
@@ -335,13 +307,13 @@ async def list_session_favorites(
     """List sessions the acting user has favorited on this bot runtime."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     if facts is None:
         window = _window(page)
         try:
             friend_result = await expert.list_chat_sessions(
-                user_id=user_id, bot_id=bot_id, owner_id=owner_id,
+                user_id=f_user_id, bot_id=bot_id, owner_id=owner_id,
                 favorite_only=True, limit=window["limit"], offset=window["offset"],
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
             )
@@ -376,6 +348,7 @@ async def get_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -389,12 +362,12 @@ async def get_session(
     # containing "/" would not be addressable, but no engine id format has one.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     if facts is None:
         try:
             item = await expert.get_owned_chat_session(
-                user_id, bot_id, owner_id, session_id,
+                f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
             )
         except Exception as error:
@@ -418,6 +391,7 @@ async def _set_session_favorite(
     bot_id: str,
     session_id: str,
     user_id: str,
+    friend_user_id: str | None,
     owner_id: str,
     stage: RuntimeStage,
     favorited: bool,
@@ -428,12 +402,12 @@ async def _set_session_favorite(
 ) -> SessionFavorite:
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=friend_user_id, stage=stage,
     )
     if facts is None:
         try:
             await expert.set_owned_chat_session_favorite(
-                user_id, bot_id, owner_id, session_id, favorited,
+                friend_user_id, bot_id, owner_id, session_id, favorited,
                 request.cookies.get("IAM_TOKEN") or None,
             )
         except Exception as error:
@@ -461,6 +435,7 @@ async def add_session_favorite(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -470,6 +445,7 @@ async def add_session_favorite(
         bot_id=bot_id,
         session_id=session_id,
         user_id=user_id,
+        friend_user_id=f_user_id,
         owner_id=owner_id,
         stage=stage,
         favorited=True,
@@ -490,6 +466,7 @@ async def remove_session_favorite(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -499,6 +476,7 @@ async def remove_session_favorite(
         bot_id=bot_id,
         session_id=session_id,
         user_id=user_id,
+        friend_user_id=f_user_id,
         owner_id=owner_id,
         stage=stage,
         favorited=False,
@@ -520,6 +498,7 @@ async def update_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -529,13 +508,13 @@ async def update_session(
     # a POST to an /update sub-path.
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     payload = {k: v for k, v in body.model_dump().items() if v is not None}
     if facts is None:
         try:
             item = await expert.update_owned_chat_session(
-                user_id, bot_id, owner_id, session_id, payload,
+                f_user_id, bot_id, owner_id, session_id, payload,
                 request.cookies.get("IAM_TOKEN") or None,
             )
         except Exception as error:
@@ -569,6 +548,7 @@ async def delete_session(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -576,12 +556,12 @@ async def delete_session(
     """Delete a session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     if facts is None:
         try:
             await expert.delete_owned_chat_session(
-                user_id, bot_id, owner_id, session_id
+                f_user_id, bot_id, owner_id, session_id
             )
         except Exception as error:
             _raise_expert_error(error)
@@ -911,6 +891,7 @@ async def list_session_messages(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -926,14 +907,14 @@ async def list_session_messages(
     """
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     _require_within_depth(page)
     if facts is None:
         window = _history_window(page)
         try:
             friend_result = await expert.list_owned_chat_session_messages(
-                user_id, bot_id, owner_id, session_id,
+                f_user_id, bot_id, owner_id, session_id,
                 limit=window["limit"], offset=0,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
             )
@@ -972,6 +953,7 @@ async def clear_session_messages(
     owner_id: OwnerIdDep,
     request: Request,
     stage: StageQuery = RuntimeStage.DRAFT,
+    f_user_id: FriendUserIdQuery = None,
     relay: EngineRuntimeRelayProtocol = Injected(EngineRuntimeRelayProtocol),
     friendships: HumanBotFriendshipServiceProtocol = Injected(HumanBotFriendshipServiceProtocol),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
@@ -979,12 +961,12 @@ async def clear_session_messages(
     """Clear a session's message history, keeping the session."""
     facts = await _resolve_session_backend(
         relay=relay, friendships=friendships, expert=expert, request=request,
-        bot_id=bot_id, user_id=user_id, owner_id=owner_id, stage=stage,
+        bot_id=bot_id, user_id=user_id, owner_id=owner_id, friend_user_id=f_user_id, stage=stage,
     )
     if facts is None:
         try:
             await expert.clear_owned_chat_session_messages(
-                user_id, bot_id, owner_id, session_id,
+                f_user_id, bot_id, owner_id, session_id,
                 request.cookies.get("IAM_TOKEN") or None,
             )
         except Exception as error:

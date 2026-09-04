@@ -50,9 +50,8 @@ class FakeRelay:
     either an operator or not.
 
     The relay keeps that second step even though most of this package's rows
-    are ``Check(MEMBER)`` now, because the sessions group did **not** migrate:
-    its handlers turn the relay's refusal into the friend fallback, so the
-    refusal has to still happen. :attr:`operators` therefore feeds two things
+    are ``Check(MEMBER)`` now, so the delivery and core gates remain aligned.
+    :attr:`operators` therefore feeds two things
     at once — this method, and the seam doubles :func:`bind_seam_from_relay`
     wires — which is what keeps one ``add_operator`` call describing one world.
     """
@@ -162,9 +161,8 @@ def bind_seam_from_relay(binder, relay: FakeRelay) -> None:
     collaborator double at all — ``resolve_operable_permission_level``
     short-circuits ``user_id == owner_id`` to OWNER.
 
-    The relay still adjudicates too, and deliberately: the sessions group did
-    not migrate, and its handlers depend on the relay refusing so they can
-    offer the friend fallback. Two gates at one bar, reading one set.
+    The relay still adjudicates too, deliberately. Two gates at one bar read
+    one set.
     """
     from injector import InstanceProvider
 

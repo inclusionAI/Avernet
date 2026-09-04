@@ -75,11 +75,17 @@ def test_list_sessions(client, relay):
 
 def test_list_sessions_hides_openclaw_internal_title_suffix(client, relay):
     canonical_id = f"agent:main:{SESSION_ID}"
-    relay.results = [EngineResult(data=[{
-        **ENGINE_SESSION,
-        "id": canonical_id,
-        "title": "Quarterly_report_2d20edc1-2f84-4524-8486-15bbd7078d42",
-    }])]
+    relay.results = [
+        EngineResult(
+            data=[
+                {
+                    **ENGINE_SESSION,
+                    "id": canonical_id,
+                    "title": "Quarterly_report_2d20edc1-2f84-4524-8486-15bbd7078d42",
+                }
+            ]
+        )
+    ]
 
     item = ok(client.get(_base()))["items"][0]
 
@@ -100,7 +106,10 @@ def test_list_omits_optional_client_filters_the_caller_did_not_send(client, rela
     relay.results = [EngineResult(data=[ENGINE_SESSION])]
     ok(client.get(_base()))
     assert set(relay.calls[0]["params"]) == {
-        "offset", "limit", "user_id", "source",
+        "offset",
+        "limit",
+        "user_id",
+        "source",
     }
 
 
@@ -247,7 +256,10 @@ def test_create_session_reconciliation_matches_only_managed_openclaw_keys(
 
 def test_create_session_other_engine_does_not_add_reconciliation_call(client, relay):
     relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
-        bot_id=BOT, bot_type="personal", active_engine="claude_code", owner_id=OWNER,
+        bot_id=BOT,
+        bot_type="personal",
+        active_engine="claude_code",
+        owner_id=OWNER,
     )
     relay.results = [EngineResult(data=ENGINE_SESSION)]
 
@@ -858,7 +870,7 @@ def test_friend_sessions_reuse_expert_chat_without_owner_runtime_relay(
     }
     client = make_client(router, caller=caller)
 
-    data = ok(client.get(_base(), params={"owner_id": OWNER}))
+    data = ok(client.get(_base(), params={"owner_id": OWNER, "f_user_id": caller}))
 
     assert data["total"] == 1
     assert data["items"][0]["session_id"] == "friend-session"
@@ -876,11 +888,56 @@ def test_non_friend_keeps_the_existing_masked_not_found(
 ):
     client = make_client(router, caller="stranger")
 
-    assert fails(client.get(_base(), params={"owner_id": OWNER}), 404)[
-        "message"
-    ] == "Not found"
+    assert (
+        fails(
+            client.get(_base(), params={"owner_id": OWNER, "f_user_id": "stranger"}),
+            404,
+        )["message"]
+        == "Not found"
+    )
     assert relay.calls == []
     assert len(friendships.calls) == 1
+    assert expert.calls == []
+
+
+def test_omitted_friend_selector_never_falls_back_to_bcn(
+    make_client, friendships, expert
+):
+    client = make_client(router, caller="stranger")
+
+    response = client.get(_base(), params={"owner_id": OWNER})
+
+    assert fails(response, 404)["message"] == "Not found"
+    assert friendships.calls == []
+    assert expert.calls == []
+
+
+def test_owner_can_address_one_bcn_friend_without_device_wide_access(
+    make_client, relay, friendships, expert
+):
+    friendships.allowed = True
+    expert.sessions = {"items": [expert.session], "total": 1}
+    client = make_client(router, caller=OWNER)
+
+    response = client.get(_base(), params={"owner_id": OWNER, "f_user_id": "friend-1"})
+
+    assert response.status_code == 200, response.json()
+    assert relay.calls == []
+    assert friendships.calls[0]["human_id"] == "friend-1"
+    list_call = next(call for call in expert.calls if call[0] == "list_chat_sessions")
+    assert list_call[2]["user_id"] == "friend-1"
+
+
+def test_collaborator_cannot_address_another_friend(
+    make_client, relay, friendships, expert
+):
+    relay.add_operator("collaborator")
+    client = make_client(router, caller="collaborator")
+
+    response = client.get(_base(), params={"owner_id": OWNER, "f_user_id": "friend-1"})
+
+    assert fails(response, 404)["message"] == "Not found"
+    assert friendships.calls == []
     assert expert.calls == []
 
 
@@ -901,7 +958,12 @@ def test_owner_path_does_not_query_bcn_or_expert_chat(
         ("patch", "/friend-session", {"title": "Renamed"}, "update_owned_chat_session"),
         ("delete", "/friend-session", None, "delete_owned_chat_session"),
         ("get", "/friend-session/messages", None, "list_owned_chat_session_messages"),
-        ("delete", "/friend-session/messages", None, "clear_owned_chat_session_messages"),
+        (
+            "delete",
+            "/friend-session/messages",
+            None,
+            "clear_owned_chat_session_messages",
+        ),
         ("get", "/favorites", None, "list_chat_sessions"),
         ("put", "/friend-session/favorite", None, "set_owned_chat_session_favorite"),
         ("delete", "/friend-session/favorite", None, "set_owned_chat_session_favorite"),
@@ -913,7 +975,7 @@ def test_each_friend_session_operation_reuses_expert_chat(
     friendships.allowed = True
     expert.sessions = {"items": [expert.session], "total": 1}
     client = make_client(router, caller="friend-1")
-    kwargs = {"params": {"owner_id": OWNER}}
+    kwargs = {"params": {"owner_id": OWNER, "f_user_id": "friend-1"}}
     if body is not None:
         kwargs["json"] = body
 
@@ -929,7 +991,7 @@ def test_friend_access_is_draft_only(make_client, friendships, expert):
     client = make_client(router, caller="friend-1")
 
     response = client.get(
-        _base(), params={"owner_id": OWNER, "stage": "online"}
+        _base(), params={"owner_id": OWNER, "f_user_id": "friend-1", "stage": "online"}
     )
 
     assert fails(response, 404)["message"] == "Not found"
