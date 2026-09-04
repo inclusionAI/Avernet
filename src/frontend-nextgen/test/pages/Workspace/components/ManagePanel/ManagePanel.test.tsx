@@ -68,6 +68,7 @@ const groupProps = (): GroupManagePanelProps => ({
   onDeleteDingTalk: jest.fn(async () => true),
   dingTalkBinding: null,
   dingTalkLoading: false,
+  advancedConfigEnabled: true,
 });
 
 it('group panel exposes base info tabs and member management', () => {
@@ -84,6 +85,11 @@ it('group panel exposes base info tabs and member management', () => {
 it('group panel advanced tab renders dingtalk binding form', () => {
   render(<GroupManagePanel {...groupProps()} />);
   expect(screen.getByText('高级配置')).toBeInTheDocument();
+});
+
+it('group panel hides advanced tab when advanced config is disabled', () => {
+  render(<GroupManagePanel {...groupProps()} advancedConfigEnabled={false} />);
+  expect(screen.queryByRole('tab', { name: '高级配置' })).not.toBeInTheDocument();
 });
 
 // 非管理者：仅当当前身份是群直属成员（在 participants 名单中）才展示「退出协作群」；

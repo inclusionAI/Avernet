@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
@@ -5,11 +6,10 @@ import { sessionService } from '@/services/workspace/sessionService';
 import type { Identity } from '@/services/workspace/workspaceModel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useState } from 'react';
-import { toast } from 'sonner';
 import { GroupChatPane } from './components/GroupChatPane';
 import { SessionFilesModal } from './components/GroupChatPane/SessionFilesModal';
+import { GroupMembersPanelSlot } from './components/GroupMembersPanelSlot';
 import { GroupSidebar, GroupSidebarList, type GroupSidebarProps } from './components/GroupSidebar';
-import { MembersPanel } from './components/MembersPanel';
 import { CreateGroupModal } from './components/Modals/CreateGroupModal';
 import { WorkspaceManagePanels } from './components/WorkspaceManagePanels';
 import { useGroupChat } from './hooks/useGroupChat';
@@ -58,7 +58,12 @@ export function GroupWorkspaceArea({
   const sessions = useGroupSessions(ws.selectedGroupId, expandedGroupIds);
   const chat = useGroupChat(sessions.selectedSession);
   const [activePanel, setActivePanel] = useState<GroupPanelKind>('none');
-  const groupManage = useGroupManagement(ws.selectedGroupId, ws.reloadSelectedGroup, activePanel === 'manage');
+  const groupAdvancedConfigEnabled = getCapabilities().getGroupAdvancedConfigEnabled().value;
+  const groupManage = useGroupManagement(
+    ws.selectedGroupId,
+    ws.reloadSelectedGroup,
+    activePanel === 'manage' && groupAdvancedConfigEnabled,
+  );
   const sessionManage = useSessionManagement(sessions.selectedSession, sessions.applySessionUpdate);
   const createGroupDialog = useGroupCreateDialog({
     refreshGroups: ws.refreshGroups,
@@ -239,22 +244,20 @@ export function GroupWorkspaceArea({
         userAvatarUrl={userAvatarUrl}
         userIdentityId={userIdentityId}
       />
-      {activePanel === 'members' && selectedGroup && (
-        <div className="flex w-[min(320px,30vw)] max-w-[30vw] shrink-0 border-l border-border">
-          <MembersPanel
-            group={selectedGroup}
-            session={sessions.selectedSession}
-            canManage={canManage}
-            onUpdateMode={() => toast.info('成员模式调整由协作群 Service 接入')}
-            onRemoveParticipant={() => toast.info('移除成员由协作群 Service 接入')}
-            onClose={() => setActivePanel('none')}
-          />
-        </div>
-      )}
+      {selectedGroup ? (
+        <GroupMembersPanelSlot
+          open={activePanel === 'members'}
+          group={selectedGroup}
+          session={sessions.selectedSession}
+          canManage={canManage}
+          onClose={() => setActivePanel('none')}
+        />
+      ) : null}
       <WorkspaceManagePanels
         activePanel={activePanel}
         group={selectedGroup}
         session={sessions.selectedSession}
+        groupAdvancedConfigEnabled={groupAdvancedConfigEnabled}
         canManage={canManage}
         identities={ws.identities}
         activeIdentity={ws.activeIdentity}

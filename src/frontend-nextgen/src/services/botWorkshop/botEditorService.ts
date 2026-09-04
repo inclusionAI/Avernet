@@ -6,7 +6,7 @@ import type {
   BotEngineConfig,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
-import { botEditorController, type SkillDto } from '@/services/backendApi/bots/botEditorController';
+import { botEditorController, type SkillDto, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
 import {
   dataOr,
@@ -17,8 +17,20 @@ import {
   mapSkill,
   toRoutineWrite,
 } from './botEditorMappers';
-import { loadCapabilityCandidates } from './capabilityCandidateService';
 import { isImageResourcePath } from './resourcePreview';
+
+async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkillDto[]> {
+  const pageSize = 100;
+  const items: SpaceSkillDto[] = [];
+  for (let page = 1; ; page += 1) {
+    const response = await botEditorController.listConsumableSpaceSkills(spaceId, page, pageSize);
+    const pageItems = response.data?.items ?? [];
+    items.push(...pageItems);
+    const total = response.data?.total;
+    if (!pageItems.length || pageItems.length < pageSize || (total !== undefined && items.length >= total)) break;
+  }
+  return items;
+}
 
 // 本地候选必须由服务端按 Bot 上传归属过滤；可达列表也包含共享安装的 Skill。
 async function listAllLocalBotSkills(botId: string, ownerId?: string): Promise<SkillDto[]> {
@@ -163,7 +175,45 @@ export const botEditorService = {
       (typeof data?.total === 'number' ? page * pageSize < data.total : (data?.items?.length ?? 0) >= pageSize);
     return { items, hasMore: Boolean(hasMore) && (data?.items?.length ?? 0) > 0 };
   },
-  loadCapabilityCandidates,
+  async loadCapabilityCandidates(botId: string, spaceId?: string) {
+    const [boundMcps, mcpServers, repositorySkills, spaceSkills] = await Promise.all([
+      botEditorController.listBotMcps(botId),
+      botEditorController.listMcpServers(),
+      botEditorController.listRepositorySkills(),
+      spaceId ? listAllConsumableSpaceSkills(spaceId) : Promise.resolve([]),
+    ]);
+    return {
+      availableMcps: dataOr(mcpServers.data?.items, []).map(
+        (item): BotEditorMcp => ({
+          serverCode: item.server_code,
+          name: item.name || item.server_code,
+          description: item.description,
+          active: Boolean(boundMcps.data?.some((bound) => bound.server_code === item.server_code && bound.active)),
+        }),
+      ),
+      marketSkills: dataOr(repositorySkills.data?.items, []).map(
+        (item): BotEditorSkill => ({
+          id: String(item.skill_id ?? item.id ?? ''),
+          name: item.name,
+          description: item.description,
+          version: item.latest_published_version ?? item.version,
+          source: 'teamclaw-market',
+          active: false,
+        }),
+      ),
+      skillCenterSkills: [] as BotEditorSkill[],
+      workshopSkills: spaceSkills.map(
+        (item): BotEditorSkill => ({
+          id: item.skill_id,
+          name: item.name,
+          description: item.description,
+          version: item.latest_published_version?.version ? `V${item.latest_published_version.version}` : undefined,
+          source: 'workshop',
+          active: false,
+        }),
+      ),
+    };
+  },
   toggleSkill: (botId: string, skill: BotEditorSkill) =>
     botEditorController.setSkillActive(botId, skill.id, !skill.active),
   deleteSkill: (botId: string, skillId: string) => botEditorController.deleteSkill(botId, skillId),

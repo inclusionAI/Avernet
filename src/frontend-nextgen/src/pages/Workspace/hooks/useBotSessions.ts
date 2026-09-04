@@ -53,13 +53,11 @@ export function useBotSessions(
     loadMoreSessions: loadMoreSessionsFromMap,
     toggleBotExpanded: toggleBotExpandedFromMap,
   } = useBotSessionMap(chatBots, expandedBotIds, activeIdentityId);
+  const selectedBotId = expandedBotIds[0] ?? null;
   const selectedSession = useMemo(() => {
-    for (const list of Object.values(rawByBotId)) {
-      const found = list.find((s) => s.sessionId === selectedBotSessionId);
-      if (found) return found;
-    }
-    return null;
-  }, [rawByBotId, selectedBotSessionId]);
+    if (!selectedBotId || !selectedBotSessionId) return null;
+    return rawByBotId[selectedBotId]?.find((s) => s.sessionId === selectedBotSessionId) ?? null;
+  }, [selectedBotId, rawByBotId, selectedBotSessionId]);
   const selectSession = useCallback((id: string | null) => selectBotSession(id), [selectBotSession]);
   const openSession = useCallback(
     (botId: string, sessionId: string) => {

@@ -182,6 +182,60 @@ it('身份切换后旧请求结果不会回填新身份', async () => {
   await waitFor(() => expect(result.current.sessionsByBotId['b:1']?.[0]?.sessionId).toBe('s2'));
 });
 
+it('不同 Bot 存在相同 sessionId 时选中点击的 Bot 会话', async () => {
+  const botA: ChatBotView = {
+    botId: 'bot-a:1',
+    realBotId: 'bot-a',
+    ownerId: '1',
+    displayName: 'Bot A',
+    online: true,
+    chatable: true,
+  };
+  const botB: ChatBotView = {
+    botId: 'bot-b:1',
+    realBotId: 'bot-b',
+    ownerId: '1',
+    displayName: 'Bot B',
+    online: true,
+    chatable: true,
+  };
+  const sessionA: BotChatSessionView = {
+    sessionId: 'same-session',
+    botId: botA.botId,
+    title: 'Bot A 会话',
+    messageCount: 1,
+    gmtModified: '',
+    gmtCreate: '',
+  };
+  const sessionB: BotChatSessionView = {
+    sessionId: 'same-session',
+    botId: botB.botId,
+    title: 'Bot B 会话',
+    messageCount: 2,
+    gmtModified: '',
+    gmtCreate: '',
+  };
+  svc.listSessionsPage.mockReset();
+  svc.listSessionsPage
+    .mockResolvedValueOnce({ ok: true, data: { items: [sessionA], total: 1 } })
+    .mockResolvedValueOnce({ ok: true, data: { items: [sessionB], total: 1 } });
+
+  const { result, rerender } = renderHook(
+    ({ expandedBotId }) => useBotSessions([botA, botB], [expandedBotId], 'human-1'),
+    { initialProps: { expandedBotId: botA.botId } },
+  );
+  await waitFor(() => expect(result.current.sessionsByBotId[botA.botId]).toHaveLength(1));
+  rerender({ expandedBotId: botB.botId });
+  await waitFor(() => expect(result.current.sessionsByBotId[botB.botId]).toHaveLength(1));
+
+  await act(async () => {
+    result.current.openSession(botB.botId, sessionB.sessionId);
+  });
+
+  expect(result.current.selectedSession?.botId).toBe(botB.botId);
+  expect(result.current.selectedSession?.title).toBe(sessionB.title);
+});
+
 it('选中首页外会话时直接拉取详情并补入列表（外链直达旧会话）', async () => {
   const oldSession: BotChatSessionView = {
     sessionId: 's-old',

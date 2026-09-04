@@ -111,8 +111,3 @@ test('非默认能力集仍展示 Skill 和 MCP 的添加入口', () => {
 
   expect(screen.getAllByRole('button', { name: '添加' })).toHaveLength(2);
 });
-jest.mock('@/capabilities', () => ({
-  getCapabilities: () => ({
-    getBotCapabilitySetVisibility: () => ({ status: 'available', value: { mcp: true, cli: true } }),
-  }),
-}));

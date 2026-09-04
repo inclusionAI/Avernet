@@ -40,7 +40,7 @@ function notifyError(res: { ok: false; error: { friendlyMessage: string } }): vo
 export function useGroupManagement(
   groupId: string | null,
   onMutated: () => Promise<void>,
-  enabled: boolean = true,
+  loadChannelBindingsEnabled: boolean = true,
 ): UseGroupManagementResult {
   const [dingTalkBinding, setDingTalkBinding] = useState<DingTalkBindingState>(null);
   const [dingTalkLoading, setDingTalkLoading] = useState(false);
@@ -58,9 +58,9 @@ export function useGroupManagement(
   }, [groupId]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!loadChannelBindingsEnabled) return;
     void reloadDingTalk();
-  }, [enabled, reloadDingTalk]);
+  }, [loadChannelBindingsEnabled, reloadDingTalk]);
 
   const updateGroup = useCallback(
     async (patch: Parameters<UseGroupManagementResult['updateGroup']>[0]) => {

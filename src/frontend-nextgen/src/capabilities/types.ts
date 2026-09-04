@@ -196,12 +196,6 @@ export interface AdminSections {
   workOrders: boolean;
 }
 
-/** 能力集编辑区按部署形态开放的非 Skill 能力。 */
-export interface BotCapabilitySetVisibility {
-  mcp: boolean;
-  cli: boolean;
-}
-
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -283,8 +277,6 @@ export interface AppCapabilities {
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
   /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
-  /** Open Core/阿里云隐藏 MCP、CLI；internal overlay 保留完整能力集。 */
-  getBotCapabilitySetVisibility: () => CapabilityResult<BotCapabilitySetVisibility>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
@@ -302,6 +294,11 @@ export interface AppCapabilities {
    * 同步签名，组件仅消费可见性，不感知部署环境。
    */
   getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /**
+   * 协作群高级配置（当前为钉钉绑定）。Open Core 默认关闭；internal overlay 覆盖为 true。
+   * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。
+   */
+  getGroupAdvancedConfigEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`
