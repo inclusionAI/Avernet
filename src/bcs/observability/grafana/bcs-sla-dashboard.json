@@ -1827,7 +1827,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[1h])))",
+          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",status_class=\"5xx\",result=\"error\"}[1h])))",
           "instant": true,
           "legendFormat": "{{route}} {{method}}",
           "range": false,
