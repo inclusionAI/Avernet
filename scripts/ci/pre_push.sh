@@ -125,12 +125,6 @@ if [[ -z "$changed_files" ]]; then
   exit 0
 fi
 
-# TaskRunner design guard is a lightweight, always-on pre-push check. It is
-# intentionally outside run_heavy so the protected structure is checked in the
-# default lint-only mode as well as in full CI mode.
-run_required python3 "$repo_root/scripts/ci/task_design_guard.py" \
-  --base "$base" --head "$head"
-
 if matches_any '^src/backend/'; then
   # Backend 默认强卡点:
   # 1) python_sast_local.sh 近似线上 python-sast block 规则,且只扫本次变更 Python 文件

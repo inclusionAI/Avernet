@@ -1,384 +1,227 @@
-# TaskRunner Pre-Push Design Guard
+# TaskRunner Pull-Request Design Guard
 
 - **Status:** Implemented
-- **Phase:** 1 — local developer guard
-- **Date:** 2026-09-03
-- **Target baseline:** `origin/dev`, unless the repository's existing pre-push
-  merge-target configuration selects another `<remote>/<branch>`
-- **Protected owner identity:** local Git email `regrecall@gmail.com`
+- **Phase:** 1 — GitHub PR required check
+- **Target branch:** `dev`
+- **Owner identity:** GitHub login `regrecall`
+
+The filename is retained from the original pre-push prototype so existing links
+remain valid. This document supersedes that prototype: the guard no longer runs
+from `scripts/ci/pre_push.sh` and does not intercept personal branch pushes.
 
 ## 1. Decision Summary
 
-Add a small, deterministic AST guard to the repository's existing pre-push
-pipeline. The guard protects selected structural surfaces of `TaskRunner` and
-rejects a normal `git push` when a committed change modifies those surfaces.
+The repository protects selected structural surfaces of `TaskRunner` when a
+pull request targets `dev`. GitHub runs a deterministic AST comparison as the
+`TaskRunner design guard` status check. Repository administrators must mark
+that status as required for `dev`; a workflow file alone cannot disable the
+Merge button.
 
-Phase 1 is deliberately a local development aid, not a security boundary or a
-server CI gate. Git hooks are installed per worktree and can be bypassed with
-`git push --no-verify`. The configured owner email is also locally mutable.
-Those limitations are accepted for this phase and must remain explicit in user
-documentation and diagnostics.
+The workflow uses `pull_request_target` with `contents: read` and
+`statuses: write`. The write permission is used only to publish the
+`TaskRunner design guard` commit status on the pull request head SHA; it does
+not grant permission to change code, approve, or merge a pull request. The
+workflow checks out the pull request's trusted base SHA and fetches the head
+only as a Git object. It never checks out, imports, or executes pull-request
+code. The checker, manifest, and submitter policy therefore come from the
+already accepted `dev` revision and cannot be weakened by the pull request
+being evaluated.
 
-Phase 1 does not call Codex, inspect pull requests, validate GitHub approvals,
-or support waivers. Those capabilities belong to a later server-side phase.
+## 2. Trigger Boundary
 
-## 2. Problem
+The workflow responds only to these `pull_request_target` activities when the
+base branch is `dev`:
 
-The Backend Task framework contains structural seams that downstream callers
-and integrations already rely on. In particular, `TaskRunner` is the execution
-boundary used to inject delivery behavior and start a batch of dispatched task
-nodes. Casual changes to its class shape or selected method signatures can
-propagate into the orchestration engine, dependency wiring, test doubles, and
-production integrations.
+- `opened`
+- `synchronize`
+- `reopened`
+- `ready_for_review`
 
-The repository already has a pre-push pipeline, but it currently selects broad
-module gates from changed paths. It does not distinguish a flexible method-body
-refactor from a structural change to an explicitly protected class or method.
+There is no `push`, `workflow_dispatch`, or path filter. Draft pull requests
+run the lightweight check immediately and rerun after each pushed commit.
+Personal branch pushes do not trigger the guard.
 
-The first increment needs a fast local signal at push time without expanding
-the existing heavy-test default or requiring a model, network service, or new
-developer credential.
+Direct pushes to `dev` are outside this policy. Contributors with direct-push
+permission can bypass the PR guard; this is an explicitly accepted limitation.
 
-## 3. Goals
+## 3. Identity Policy
 
-1. Reject a normal push when a committed change modifies the protected
-   `TaskRunner` class structure or one of its protected method interfaces.
-2. Permit implementation-only edits inside method bodies.
-3. Reuse the existing immutable merge-base and head SHAs supplied by the
-   pre-push hook.
-4. Run in both lint-only and full-CI pre-push modes.
-5. Produce deterministic, English diagnostics that identify the protected
-   symbol and the structural difference.
-6. Allow the configured local owner identity to skip only this new guard.
-7. Fail open on guard configuration, extraction, or parser errors, while making
-   the degraded result visible as a warning.
+The pull request author's GitHub login is the identity authority. Git commit
+names, author emails, committer emails, and local Git configuration are not
+used because contributors can set them locally.
 
-## 4. Non-Goals
+Decision order:
 
-- An unbypassable repository policy.
-- Protection against a contributor changing their local Git email.
-- Protection against `git push --no-verify` or an uninstalled hook.
-- Pull-request review, GitHub branch protection, or required status checks.
-- Codex or another model participating in the Phase 1 decision.
-- Waiver creation, approval, expiry, or verification.
-- Detecting semantic behavior changes inside method bodies.
-- Discovering omitted protected classes or methods automatically.
-- Reviewing other files in the Backend Task package.
-- Self-protection against a local contributor editing the guard, its manifest,
-  or the hook before pushing.
+1. `regrecall` bypasses this guard.
+2. A non-owner modifying a guard control file is rejected.
+3. A non-owner absent from the guarded-submitter policy skips the structural
+   comparison and passes.
+4. A guarded submitter receives the full TaskRunner structural comparison.
 
-## 5. Existing Pre-Push Contract
+Login comparison is case-insensitive.
 
-The implementation must extend, rather than replace, the current flow:
-
-1. `.githooks/pre-push` resolves the configured merge target. Its precedence
-   remains `AVERNET_PRE_PUSH_MERGE_TARGET`, Git configuration, then
-   `origin/dev`.
-2. The hook fetches the target and resolves it to an immutable commit.
-3. For each non-deletion ref, it computes `git merge-base <local> <target>`.
-4. It calls `scripts/ci/pre_push.sh --base <base> --head <local>`.
-5. The dispatcher continues to own the existing SAST, test, coverage, and
-   singlebox selection behavior.
-
-The TaskRunner guard consumes the already resolved `base` and `head`. It must
-not independently select a different comparison range or fall back to the root
-commit.
-
-This means every pushed branch is compared with the intended merge target, not
-only a direct push to `dev`.
-
-## 6. Protected-Surface Manifest
-
-The machine-readable source of truth should be a versioned JSON document. JSON
-keeps the guard on Python's standard library and avoids adding a YAML parser to
-the default pre-push path. The
-initial content is logically equivalent to:
+The guarded-submitter policy is
+`docs/arch/task-design-guard-submitters.json`. Its schema is:
 
 ```json
 {
   "version": 1,
-  "packages": [
-    {
-      "package": "agentclaw.community.core.task.task_runner",
-      "classes": [
-        {
-          "class": "agentclaw.community.core.task.task_runner.task_runner.TaskRunner",
-          "methods": ["__init__", "set_delivery", "start_run"]
-        }
-      ]
-    }
+  "guarded_submitters": [
+    "github-login"
   ]
 }
 ```
 
-The manifest identifies symbols only. It does not duplicate parameter lists,
-return annotations, decorators, or source text. Those facts are extracted from
-the base and head revisions.
+The list must be non-empty, contain valid GitHub logins, and contain no
+case-insensitive duplicates. Only a pull request authored by `regrecall` may
+change it. A policy update takes effect only after it is merged into `dev`.
 
-Phase 1 does not enforce authorship of manifest changes. Repository-level
-ownership enforcement is deferred because the local identity signal is not a
-trustworthy authorization mechanism.
+## 4. Guard Control Files
 
-## 7. Structural Rules
+A non-owner pull request is rejected with `TRG900` if it changes any of:
 
-### 7.1 Protected class
+- `.github/workflows/task-design-guard.yml`
+- `docs/arch/task-design-guard-submitters.json`
+- `docs/superpowers/specs/2026-09-03-task-runner-pre-push-design-guard.md`
+- `scripts/ci/task_design_guard.json`
+- `scripts/ci/task_design_guard.py`
 
-For `TaskRunner`, reject the push when the head revision:
+This check runs before submitter-list membership, so an unlisted account cannot
+skip the guard and alter its controls in the same pull request.
+
+## 5. Protected Surface
+
+The protected-surface manifest remains
+`scripts/ci/task_design_guard.json`. The initial policy protects:
+
+```text
+agentclaw.community.core.task.task_runner.task_runner.TaskRunner
+  __init__
+  set_delivery
+  start_run
+```
+
+The manifest identifies symbols only. Parameter lists, annotations,
+decorators, fields, and source text are extracted from the trusted base and PR
+head revisions.
+
+## 6. Structural Rules
+
+For `TaskRunner`, reject a guarded submitter's pull request when the head:
 
 - removes or renames the class;
-- changes its base classes;
-- changes its class decorators;
-- adds, removes, or changes a class-level assigned or annotated field; or
+- changes its base classes or class decorators;
+- adds, removes, or changes a directly declared class field; or
 - adds any directly declared method, including private and dunder methods.
 
-Changing only the body of an existing, non-protected method is allowed.
-Deleting an unprotected method is not independently guarded in Phase 1. A
-rename of an unprotected method is rejected because it introduces a new method
-name on the protected class.
-
-"Class-level field" means an `Assign` or `AnnAssign` node directly inside the
-class body. Instance attributes assigned inside `__init__` or another method
-are method-body implementation details and are not compared in Phase 1.
-
-### 7.2 Protected methods
-
-For `__init__`, `set_delivery`, and `start_run`, reject the push when the head
-revision:
+For `__init__`, `set_delivery`, and `start_run`, reject when the head:
 
 - removes or renames the method;
 - changes `def` to `async def` or the reverse;
-- changes method decorators;
-- changes parameter names, order, positional/keyword kind, variadic kind,
-  default values, or annotations; or
+- changes decorators;
+- changes parameter names, order, kinds, defaults, or annotations; or
 - changes the return annotation.
 
-The method fingerprint excludes the executable body and docstring. Comments,
-whitespace, formatting, local variables, control flow, called functions, and
-other body-only changes are allowed by this guard.
+Method bodies and docstrings are excluded from fingerprints. Comments,
+whitespace, local variables, control flow, and called functions may change.
 
-### 7.3 Missing symbols
+The checker uses Python's standard-library `ast` module and never imports the
+Backend module. Normalized AST rendering excludes source locations so
+formatting movement does not create a violation.
 
-Missing symbols have asymmetric handling:
+## 7. Result Contract
 
-- If a protected symbol is absent from the base revision, emit a configuration
-  warning and pass this guard. This is a fail-open response to a stale manifest.
-- If the symbol exists in the base revision but is absent from the head
-  revision, treat it as a protected deletion or rename and reject the push.
+The checker has three exit statuses:
 
-## 8. AST Comparison Model
+| Status | Meaning | Workflow result |
+| --- | --- | --- |
+| `0` | passed, owner bypass, or unlisted-author skip | pass |
+| `1` | confirmed structural violation, control-file violation, or PR-head parse failure | fail |
+| `2` | trusted policy, checker, or recoverable Git/environment failure | warn and pass |
 
-The guard should use Python's standard-library `ast` module and require no new
-third-party dependency.
+A syntax error introduced in the protected PR-head source is `TRG901`, not an
+internal failure. This prevents a guarded submitter from bypassing comparison
+by making the file unparsable.
 
-For each protected source module:
+Exit status `2` implements the approved fail-open policy. The workflow writes
+an Actions warning and a prominent warning to `$GITHUB_STEP_SUMMARY`, then
+publishes a successful status whose description identifies the degraded run.
+The workflow first publishes `pending`, then replaces it with `success` or
+`failure` after evaluation. It publishes the status explicitly on
+`github.event.pull_request.head.sha`; the `pull_request_target` workflow run
+itself is associated with the trusted base revision and must not be selected as
+the required check. If GitHub never schedules the workflow, no repository code
+can apply fail-open; the required status remains missing until GitHub recovers
+or an administrator intervenes.
 
-1. Read the base and head blobs with `git show <sha>:<path>`.
-2. Parse both blobs with `ast.parse`.
-3. Resolve the configured top-level class and its directly declared methods.
-4. Build normalized structural records with location metadata removed.
-5. Compare the records according to Section 7.
-6. Report all violations in one run rather than stopping at the first one.
+## 8. Required GitHub Configuration
 
-Normalized AST rendering must exclude `lineno`, `col_offset`, `end_lineno`, and
-`end_col_offset` so formatting-only movement does not change a fingerprint.
-Default values, annotations, bases, fields, and decorators retain their AST
-shape because they are protected structure.
+After the bootstrap pull request is merged and the workflow has completed at
+least once, a repository administrator must configure the `dev` ruleset:
 
-The guard must not import or execute either revision of the Backend module.
-Static parsing avoids import-time side effects and missing runtime dependencies.
+1. Open **Settings → Rules → Rulesets** (or the repository's branch protection
+   page).
+2. Create or edit the rule targeting `dev`.
+3. Enable **Require status checks to pass**.
+4. Add the exact status check **TaskRunner design guard**.
+5. If GitHub offers an expected-source selector, choose **GitHub Actions**.
+6. Enable **Require branches to be up to date before merging**.
+7. Leave direct-push policy unchanged, per the accepted limitation.
 
-## 9. Owner Bypass
+Select the custom commit status named `TaskRunner design guard`, not the
+workflow job named `Publish TaskRunner design guard`.
 
-Before running the TaskRunner comparison, read:
+The first workflow PR cannot protect itself because its trusted base does not
+yet contain the workflow. It must be authored and manually verified by
+`regrecall`. Required-check configuration happens immediately after that first
+successful run.
 
-```bash
-git config user.email
-```
+## 9. Diagnostics
 
-If and only if its exact output is `regrecall@gmail.com`, skip the TaskRunner
-guard and produce no TaskRunner-specific output. The bypass is intentionally
-silent.
-
-The bypass must not exit the complete pre-push dispatcher. Existing Backend
-SAST, unit-test, coverage, singlebox, and other module gates continue normally.
-
-This is a cooperative convenience, not authentication. Any local user can
-change the value, and the design makes no stronger security claim.
-
-## 10. Failure Semantics
-
-The guard has two result categories:
-
-### Policy violation
-
-A successfully extracted and compared protected structure differs according to
-Section 7. The guard exits non-zero. `scripts/ci/pre_push.sh` treats the command
-as required and prevents the normal push.
-
-The error must include:
-
-- the source path;
-- the fully qualified class and method, where applicable;
-- a stable rule identifier;
-- a concise old-versus-new structural summary; and
-- a reminder that `TaskRunner` is a protected design surface.
-
-### Guard failure
-
-Manifest loading, Git blob extraction, JSON validation, AST parsing, or an
-unexpected internal exception fails. The guard writes an English warning to
-stderr and exits zero, allowing the push to continue.
-
-A syntax error may still be rejected independently by the repository's
-existing Python SAST/lint gate. The TaskRunner guard must not change that
-behavior.
-
-## 11. Integration Point
-
-`scripts/ci/pre_push.sh` should invoke the guard as an always-on lightweight
-required step, passing its existing `--base` and `--head` values. The invocation
-must not be placed behind `run_heavy` and must not depend on
-`OCB_PRE_PUSH_RUN_CI=1`.
-
-The guard may return immediately when neither the protected source file nor the
-manifest is present in the committed diff. Calling it unconditionally keeps
-dispatch behavior simple while preserving a cheap fast path internally.
-
-The new invocation must not replace or weaken the existing Backend gate. A
-Backend change continues through SAST and, when selected, the existing heavy
-checks after the TaskRunner decision.
-
-### 11.1 Expected implementation files
-
-The later implementation should remain a small CI-tooling change:
-
-- add `scripts/ci/task_design_guard.py` for manifest loading, Git blob
-  extraction, AST normalization, comparison, diagnostics, and exit semantics;
-- add `scripts/ci/task_design_guard.json` for the protected-surface manifest;
-- add `scripts/ci/tests/test_task_design_guard.py` for comparator and command
-  behavior;
-- update `scripts/ci/pre_push.sh` to invoke the guard with its resolved base and
-  head; and
-- extend the existing pre-push dispatcher or hook tests only where integration
-  behavior needs coverage.
-
-No production Backend package should import the guard. It is repository tooling
-and must remain outside `agentclaw` runtime code.
-
-## 12. User Experience
-
-Allowed change:
+Allowed structural change:
 
 ```text
 TaskRunner design guard passed: protected structure is unchanged
+```
+
+Unlisted author:
+
+```text
+TaskRunner design guard skipped: @user is not in the guarded submitter policy
 ```
 
 Blocked change:
 
 ```text
 TaskRunner design guard failed
-TRG003 agentclaw.community.core.task.task_runner.task_runner.TaskRunner.start_run
-parameter structure changed: (toDoTaskList: list[TaskNode]) -> (nodes: Sequence[TaskNode])
-TaskRunner is a protected design surface; revert the structural change before pushing.
+TRG104 agentclaw.community.core.task.task_runner.task_runner.TaskRunner.start_run
+  parameter structure changed: ...
+TaskRunner is a protected design surface; revert the structural change before merging into dev.
 ```
 
-Guard failure:
+There is no waiver flow in Phase 1.
 
-```text
-warning: TaskRunner design guard could not parse the head revision; guard skipped
-```
+## 10. Verification
 
-No waiver instructions should appear in Phase 1 because Phase 1 has no waiver
-mechanism.
+Tests must cover:
 
-## 13. Test Strategy
+- all existing class and protected-method AST rules;
+- method-body changes passing;
+- `regrecall` bypass;
+- guarded, unlisted, and case-insensitive submitter behavior;
+- non-owner control-file changes failing before membership checks;
+- trusted manifest and submitter policy being read from the base revision;
+- malformed PR-head source returning `1`;
+- trusted configuration or base-source failures returning `2`;
+- uncommitted working-tree changes being ignored;
+- removal of the pre-push invocation; and
+- workflow trigger, least-privilege permission, trusted-checkout constraints,
+  and explicit publication to the pull request head SHA.
 
-### 13.1 Comparator unit tests
-
-Use small source fixtures to prove that the normalized comparison:
-
-- allows method-body, local-variable, comment, whitespace, and formatting
-  changes;
-- rejects a new public, private, or dunder method;
-- rejects class removal or rename;
-- rejects base-class and class-decorator changes;
-- rejects class-level field name, annotation, or value changes;
-- rejects protected-method removal or rename;
-- rejects parameter name, order, kind, default, and annotation changes;
-- rejects return-annotation, sync/async, and method-decorator changes;
-- warns and passes when the protected class or method is already absent from
-  the base revision; and
-- rejects a symbol present in base but absent in head.
-
-### 13.2 Command tests
-
-Exercise the command against temporary Git repositories to prove that it:
-
-- compares the supplied immutable base and head revisions;
-- does not inspect uncommitted working-tree changes;
-- reports all detected violations;
-- exits non-zero only for confirmed policy violations;
-- warns and exits zero for invalid manifest, Git extraction, and AST failures;
-  and
-- silently returns success when `git config user.email` is exactly
-  `regrecall@gmail.com`.
-
-### 13.3 Pre-push integration tests
-
-Extend the existing pre-push dispatcher tests to prove that:
-
-- the TaskRunner guard runs in lint-only mode;
-- the TaskRunner guard runs in full-CI mode;
-- an owner bypass skips only the new guard;
-- existing Backend SAST dispatch remains active after an owner bypass;
-- a rejected guard result prevents the push; and
-- unrelated module dispatch behavior is unchanged.
-
-## 14. Acceptance Criteria
-
-Phase 1 is complete when:
-
-- the manifest identifies exactly `TaskRunner`, `__init__`, `set_delivery`, and
-  `start_run`;
-- every structural rule in Section 7 has a passing regression test;
-- a body-only edit to any protected method can be pushed normally;
-- a protected structural edit is rejected in the default lint-only pre-push
-  mode;
-- `regrecall@gmail.com` silently bypasses only the TaskRunner guard;
-- guard failures warn and allow the push;
-- the existing hook and dispatcher tests remain green; and
-- the hook installation documentation still accurately states that hooks are
-  installed per worktree and may be skipped by Git.
-
-## 15. Architecture Alignment and Limitations
+## 11. Architecture Alignment
 
 This guard supports Architecture Constitution Rules 16 and 17 by distinguishing
 a selected constrained surface from flexible implementation details and by
-making structural changes visible before push. It also follows the existing
-pre-push merge-base contract instead of inventing a conflicting change range.
-
-It does not satisfy the constitution's CI, conformance-test, structural-review,
-or waiver requirements by itself. Because it is local, bypassable, and
-fail-open on internal errors, it must not be presented as proof that a pull
-request is architecture-compliant.
-
-Protecting a concrete class is an intentionally narrow Phase 1 policy. It does
-not reclassify `TaskRunner` as a Service API or Plugin API, and it does not
-replace the existing `DeliveryPort` or Task service contracts.
-
-## 16. Deferred Phase 2
-
-A later design may move enforcement to pull requests and add:
-
-- a required GitHub status check for PRs targeting `dev`;
-- Codex review through the official Codex GitHub Action;
-- a protected, owner-maintained contract manifest;
-- GitHub identity and approval verification for `@regrecall`;
-- structured, head-bound waivers;
-- sticky PR review comments and source annotations;
-- fail-closed configuration validation; and
-- protection against local hook bypass and guard self-modification.
-
-Phase 2 must be reviewed as a separate security and governance boundary. It
-must not silently inherit the cooperative identity or fail-open assumptions of
-Phase 1.
+making structural changes visible before they enter `dev`. It remains a narrow
+governance policy for a concrete class; it does not reclassify `TaskRunner` as
+a Service API or Plugin API and does not replace conformance tests.

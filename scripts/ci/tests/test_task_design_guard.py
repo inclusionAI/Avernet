@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from pathlib import Path
-import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "scripts/ci/task_design_guard.py"
@@ -18,12 +16,10 @@ GUARD = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = GUARD
 SPEC.loader.exec_module(GUARD)
 
-QUALIFIED_CLASS = (
-    "agentclaw.community.core.task.task_runner.task_runner.TaskRunner"
-)
-SOURCE_PATH = (
-    "src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py"
-)
+QUALIFIED_CLASS = "agentclaw.community.core.task.task_runner.task_runner.TaskRunner"
+SOURCE_PATH = "src/backend/src/agentclaw/community/core/task/task_runner/task_runner.py"
+MANIFEST_PATH = "scripts/ci/task_design_guard.json"
+SUBMITTERS_PATH = "docs/arch/task-design-guard-submitters.json"
 PROTECTED = GUARD.ProtectedClass(
     package="agentclaw.community.core.task.task_runner",
     qualified_name=QUALIFIED_CLASS,
@@ -33,7 +29,7 @@ PROTECTED = GUARD.ProtectedClass(
     source_path=SOURCE_PATH,
 )
 
-BASE_SOURCE = '''\
+BASE_SOURCE = """\
 @class_decorator
 class TaskRunner(BaseRunner):
     _DELIVER_CONCURRENCY: int = 8
@@ -49,7 +45,7 @@ class TaskRunner(BaseRunner):
 
     def query_status(self, task_id: str) -> Status:
         return self._graph.status(task_id)
-'''
+"""
 
 
 def _rules(head_source: str) -> set[str]:
@@ -68,8 +64,7 @@ def test_method_body_and_docstring_changes_are_allowed() -> None:
 
     result = GUARD.compare_class_sources(BASE_SOURCE, head, PROTECTED)
 
-    assert result.violations == ()
-    assert result.warnings == ()
+    assert result == GUARD.Comparison((), ())
 
 
 @pytest.mark.parametrize(
@@ -142,7 +137,7 @@ def test_removed_protected_method_is_rejected() -> None:
     assert "TRG101" in _rules(head)
 
 
-def test_protected_symbol_missing_from_base_warns_and_passes() -> None:
+def test_protected_symbol_missing_from_base_is_reported() -> None:
     result = GUARD.compare_class_sources(
         "class SomethingElse:\n    pass\n", BASE_SOURCE, PROTECTED
     )
@@ -153,7 +148,7 @@ def test_protected_symbol_missing_from_base_warns_and_passes() -> None:
 
 def test_repository_manifest_resolves_current_task_runner() -> None:
     protected_classes = GUARD.load_manifest(
-        (REPO_ROOT / "scripts/ci/task_design_guard.json").read_text(encoding="utf-8")
+        (REPO_ROOT / MANIFEST_PATH).read_text(encoding="utf-8")
     )
     protected = protected_classes[0]
     source = (REPO_ROOT / protected.source_path).read_text(encoding="utf-8")
@@ -165,13 +160,40 @@ def test_repository_manifest_resolves_current_task_runner() -> None:
     assert result == GUARD.Comparison((), ())
 
 
+def test_repository_submitter_policy_is_valid() -> None:
+    submitters = GUARD.load_guarded_submitters(
+        (REPO_ROOT / SUBMITTERS_PATH).read_text(encoding="utf-8")
+    )
+
+    assert submitters == {
+        "jiangj0627",
+        "msjbear",
+        "wen6lev57q4",
+        "guok974-dot",
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not-json",
+        json.dumps({"version": 1, "guarded_submitters": []}),
+        json.dumps({"version": 1, "guarded_submitters": ["bad_login!"]}),
+        json.dumps({"version": 1, "guarded_submitters": ["Same", "same"]}),
+        json.dumps({"version": 1, "guarded_submitters": ["msjbear"], "extra": True}),
+    ],
+)
+def test_submitter_policy_rejects_invalid_content(payload: str) -> None:
+    with pytest.raises(GUARD.GuardFailure):
+        GUARD.load_guarded_submitters(payload)
+
+
 def _git(repository: Path, *arguments: str) -> str:
     return subprocess.run(
         ["git", *arguments],
         cwd=repository,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     ).stdout.strip()
 
@@ -201,20 +223,41 @@ def _manifest() -> str:
     )
 
 
-def _repository(tmp_path: Path) -> tuple[Path, str]:
+def _submitters() -> str:
+    return json.dumps({"version": 1, "guarded_submitters": ["msjbear", "WEN6Lev57q4"]})
+
+
+def _repository(
+    tmp_path: Path,
+    *,
+    base_source: str = BASE_SOURCE,
+    submitters: str | None = None,
+) -> tuple[Path, str]:
     repository = tmp_path / "repository"
     repository.mkdir()
     _git(repository, "init", "--initial-branch", "dev")
     _git(repository, "config", "user.name", "Guard Test")
     _git(repository, "config", "user.email", "guard-test@example.com")
-    _write(repository, SOURCE_PATH, BASE_SOURCE)
-    _write(repository, "scripts/ci/task_design_guard.json", _manifest())
+    _write(repository, SOURCE_PATH, base_source)
+    _write(repository, MANIFEST_PATH, _manifest())
+    _write(repository, SUBMITTERS_PATH, submitters or _submitters())
     _git(repository, "add", ".")
     _git(repository, "commit", "-m", "baseline")
     return repository, _git(repository, "rev-parse", "HEAD")
 
 
-def _run_guard(repository: Path, base: str) -> subprocess.CompletedProcess[str]:
+def _commit(repository: Path, path: str, content: str, message: str) -> None:
+    _write(repository, path, content)
+    _git(repository, "add", path)
+    _git(repository, "commit", "-m", message)
+
+
+def _run_guard(
+    repository: Path,
+    base: str,
+    *,
+    actor: str = "msjbear",
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [
             sys.executable,
@@ -223,26 +266,28 @@ def _run_guard(repository: Path, base: str) -> subprocess.CompletedProcess[str]:
             base,
             "--head",
             "HEAD",
+            "--actor",
+            actor,
             "--manifest",
-            "scripts/ci/task_design_guard.json",
+            MANIFEST_PATH,
+            "--submitters",
+            SUBMITTERS_PATH,
         ],
         cwd=repository,
         check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
     )
 
 
-def test_command_rejects_confirmed_structural_change(tmp_path: Path) -> None:
+def test_guarded_pr_author_is_blocked_on_structural_change(tmp_path: Path) -> None:
     repository, base = _repository(tmp_path)
-    _write(
+    _commit(
         repository,
         SOURCE_PATH,
         BASE_SOURCE.replace("nodes: list[TaskNode]", "tasks: list[TaskNode]"),
+        "change protected parameter",
     )
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "change protected parameter")
 
     result = _run_guard(repository, base)
 
@@ -251,47 +296,99 @@ def test_command_rejects_confirmed_structural_change(tmp_path: Path) -> None:
     assert "TRG104" in result.stderr
 
 
-def test_command_owner_email_bypasses_silently(tmp_path: Path) -> None:
+def test_owner_login_bypasses_silently_before_control_file_check(
+    tmp_path: Path,
+) -> None:
     repository, base = _repository(tmp_path)
-    _write(
-        repository,
-        SOURCE_PATH,
-        BASE_SOURCE.replace("nodes: list[TaskNode]", "tasks: list[TaskNode]"),
-    )
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "change protected parameter")
-    _git(repository, "config", "user.email", "regrecall@gmail.com")
+    _commit(repository, MANIFEST_PATH, "not-json\n", "owner changes policy")
 
-    result = _run_guard(repository, base)
+    result = _run_guard(repository, base, actor="RegRecall")
 
     assert result.returncode == 0
-    assert result.stdout == ""
+    assert "owner @RegRecall bypass" in result.stdout
     assert result.stderr == ""
 
 
-def test_command_invalid_manifest_warns_and_fails_open(tmp_path: Path) -> None:
+def test_unlisted_pr_author_skips_structural_check(tmp_path: Path) -> None:
     repository, base = _repository(tmp_path)
-    _write(repository, "scripts/ci/task_design_guard.json", "not-json\n")
-    _write(
+    _commit(
         repository,
         SOURCE_PATH,
         BASE_SOURCE.replace("nodes: list[TaskNode]", "tasks: list[TaskNode]"),
+        "change protected parameter",
     )
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "break manifest and protected parameter")
+
+    result = _run_guard(repository, base, actor="unlisted-user")
+
+    assert result.returncode == 0
+    assert "not in the guarded submitter policy" in result.stdout
+
+
+def test_guarded_submitter_matching_is_case_insensitive(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    _commit(
+        repository,
+        SOURCE_PATH,
+        BASE_SOURCE.replace("nodes: list[TaskNode]", "tasks: list[TaskNode]"),
+        "change protected parameter",
+    )
+
+    result = _run_guard(repository, base, actor="wen6LEV57Q4")
+
+    assert result.returncode == 1
+    assert "TRG104" in result.stderr
+
+
+@pytest.mark.parametrize("actor", ["msjbear", "unlisted-user"])
+def test_non_owner_cannot_change_guard_control_files(
+    tmp_path: Path, actor: str
+) -> None:
+    repository, base = _repository(tmp_path)
+    _commit(repository, MANIFEST_PATH, "not-json\n", "tamper with guard policy")
+
+    result = _run_guard(repository, base, actor=actor)
+
+    assert result.returncode == 1
+    assert "TRG900" in result.stderr
+    assert MANIFEST_PATH in result.stderr
+
+
+def test_head_syntax_error_is_a_blocking_policy_failure(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path)
+    _commit(repository, SOURCE_PATH, "class TaskRunner(:\n", "break protected source")
 
     result = _run_guard(repository, base)
 
-    assert result.returncode == 0
-    assert "warning: TaskRunner design guard skipped" in result.stderr
+    assert result.returncode == 1
+    assert "TRG901" in result.stderr
+
+
+def test_trusted_submitter_policy_failure_returns_degraded_status(
+    tmp_path: Path,
+) -> None:
+    repository, base = _repository(tmp_path, submitters="not-json\n")
+    _commit(repository, "README.md", "unrelated\n", "unrelated change")
+
+    result = _run_guard(repository, base)
+
+    assert result.returncode == 2
+    assert "design guard degraded" in result.stderr
     assert "not valid JSON" in result.stderr
 
 
-def test_command_ignores_uncommitted_structural_change(tmp_path: Path) -> None:
+def test_trusted_base_syntax_error_returns_degraded_status(tmp_path: Path) -> None:
+    repository, base = _repository(tmp_path, base_source="class TaskRunner(:\n")
+    _commit(repository, SOURCE_PATH, "class TaskRunner(:\n# still invalid\n", "change")
+
+    result = _run_guard(repository, base)
+
+    assert result.returncode == 2
+    assert "design guard degraded" in result.stderr
+
+
+def test_guard_ignores_uncommitted_structural_change(tmp_path: Path) -> None:
     repository, base = _repository(tmp_path)
-    _write(repository, "README.md", "committed unrelated change\n")
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "unrelated change")
+    _commit(repository, "README.md", "committed unrelated change\n", "unrelated")
     _write(
         repository,
         SOURCE_PATH,
@@ -301,62 +398,34 @@ def test_command_ignores_uncommitted_structural_change(tmp_path: Path) -> None:
     result = _run_guard(repository, base)
 
     assert result.returncode == 0
-    assert result.stdout == ""
-    assert result.stderr == ""
+    assert "no protected source changes" in result.stdout
 
 
-def test_pre_push_dispatcher_runs_guard_in_lint_only_mode(tmp_path: Path) -> None:
-    repository, base = _repository(tmp_path)
-    dispatcher = repository / "scripts/ci/pre_push.sh"
-    dispatcher.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO_ROOT / "scripts/ci/pre_push.sh", dispatcher)
-    dispatcher.chmod(0o755)
-    _write(repository, "src/bcs/feature.rs", "// unrelated BCS change\n")
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "change BCS")
+def test_pre_push_dispatcher_does_not_run_task_design_guard() -> None:
+    dispatcher = (REPO_ROOT / "scripts/ci/pre_push.sh").read_text(encoding="utf-8")
 
-    result = subprocess.run(
-        [str(dispatcher), "--base", base, "--head", "HEAD", "--dry-run"],
-        cwd=repository,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
+    assert "task_design_guard.py" not in dispatcher
+
+
+def test_workflow_only_targets_pull_requests_to_dev() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/task-design-guard.yml").read_text(
+        encoding="utf-8"
     )
 
-    assert "mode: lint-only" in result.stdout
-    assert "scripts/ci/task_design_guard.py" in result.stdout
-
-
-def test_owner_bypass_keeps_backend_sast_gate_active(tmp_path: Path) -> None:
-    repository, base = _repository(tmp_path)
-    dispatcher = repository / "scripts/ci/pre_push.sh"
-    guard = repository / "scripts/ci/task_design_guard.py"
-    sast = repository / "scripts/ci/python_sast_local.sh"
-    dispatcher.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(REPO_ROOT / "scripts/ci/pre_push.sh", dispatcher)
-    shutil.copy2(SCRIPT, guard)
-    dispatcher.chmod(0o755)
-    sast.write_text("#!/usr/bin/env bash\necho BACKEND_SAST_RAN\n", encoding="utf-8")
-    sast.chmod(0o755)
-    _write(
-        repository,
-        SOURCE_PATH,
-        BASE_SOURCE.replace("nodes: list[TaskNode]", "tasks: list[TaskNode]"),
-    )
-    _git(repository, "add", ".")
-    _git(repository, "commit", "-m", "change protected parameter")
-    _git(repository, "config", "user.email", "regrecall@gmail.com")
-
-    result = subprocess.run(
-        [str(dispatcher), "--base", base, "--head", "HEAD"],
-        cwd=repository,
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    assert "BACKEND_SAST_RAN" in result.stdout
-    assert "TaskRunner design guard passed" not in result.stdout
-    assert "TaskRunner design guard" not in result.stderr
+    assert "pull_request_target:" in workflow
+    assert "      - dev" in workflow
+    assert "  push:" not in workflow
+    assert "workflow_dispatch:" not in workflow
+    assert "paths:" not in workflow
+    assert "contents: read" in workflow
+    assert "statuses: write" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "continue-on-error: true" in workflow
+    assert "CHECKOUT_OUTCOME" in workflow
+    assert "name: Publish TaskRunner design guard" in workflow
+    assert workflow.count('context: "TaskRunner design guard"') == 2
+    assert "github.event.pull_request.head.sha" in workflow
+    assert "github.rest.repos.createCommitStatus" in workflow
+    assert 'state: "pending"' in workflow
+    assert "steps.evaluate.outputs.state" in workflow
+    assert '--actor "$PR_AUTHOR"' in workflow

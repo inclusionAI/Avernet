@@ -1,26 +1,41 @@
-#!/usr/bin/env python3
-"""Protect selected Task module class structure during pre-push."""
+"""Protect selected Task module structure on pull requests targeting dev."""
 
 from __future__ import annotations
 
 import argparse
 import ast
-from collections import Counter
 import json
 import os
-from pathlib import Path
+import re
 import subprocess
 import sys
-from typing import Any, NamedTuple, Sequence
+from collections import Counter
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, NamedTuple
 
-
-OWNER_EMAIL = "regrecall@gmail.com"
+OWNER_LOGIN = "regrecall"
 DEFAULT_MANIFEST = "scripts/ci/task_design_guard.json"
+DEFAULT_SUBMITTERS = "docs/arch/task-design-guard-submitters.json"
 BACKEND_SOURCE_ROOT = Path("src/backend/src")
+PROTECTED_CONTROL_PATHS = frozenset(
+    {
+        ".github/workflows/task-design-guard.yml",
+        "docs/arch/task-design-guard-submitters.json",
+        "docs/superpowers/specs/2026-09-03-task-runner-pre-push-design-guard.md",
+        "scripts/ci/task_design_guard.json",
+        "scripts/ci/task_design_guard.py",
+    }
+)
+GITHUB_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 
 
 class GuardFailure(RuntimeError):
-    """The guard could not establish a reliable comparison."""
+    """The trusted guard could not establish a reliable comparison."""
+
+
+class HeadPolicyFailure(RuntimeError):
+    """The pull request made the protected source impossible to validate."""
 
 
 class ProtectedClass(NamedTuple):
@@ -43,6 +58,12 @@ class Comparison(NamedTuple):
     warnings: tuple[str, ...]
 
 
+class Evaluation(NamedTuple):
+    comparison: Comparison
+    relevant: bool
+    skipped_reason: str | None
+
+
 def _clean_git_environment() -> dict[str, str]:
     environment = os.environ.copy()
     for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX", "GIT_INDEX_FILE"):
@@ -57,9 +78,9 @@ def _git(
         ["git", *arguments],
         cwd=repository,
         env=_clean_git_environment(),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
+        check=False,
     )
     if required and result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip() or "unknown Git error"
@@ -70,13 +91,6 @@ def _git(
 def find_repository_root(start: Path) -> Path:
     result = _git(start, ["rev-parse", "--show-toplevel"])
     return Path(result.stdout.strip()).resolve()
-
-
-def configured_email(repository: Path) -> str | None:
-    result = _git(repository, ["config", "--get", "user.email"], required=False)
-    if result.returncode != 0:
-        return None
-    return result.stdout.strip()
 
 
 def _read_blob(repository: Path, revision: str, path: str) -> str | None:
@@ -165,16 +179,55 @@ def load_manifest(text: str) -> tuple[ProtectedClass, ...]:
     return tuple(protected)
 
 
-def _parse(source: str, label: str) -> ast.Module:
+def load_guarded_submitters(text: str) -> frozenset[str]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise GuardFailure(f"submitter policy is not valid JSON: {error}") from error
+    if not isinstance(payload, dict):
+        raise GuardFailure("submitter policy must be an object")
+    expected_keys = {"version", "guarded_submitters"}
+    if set(payload) != expected_keys:
+        raise GuardFailure(
+            "submitter policy must contain exactly version and guarded_submitters"
+        )
+    if payload.get("version") != 1:
+        raise GuardFailure("submitter policy version must be 1")
+    raw_submitters = payload.get("guarded_submitters")
+    if not isinstance(raw_submitters, list) or not raw_submitters:
+        raise GuardFailure("guarded_submitters must be a non-empty list")
+
+    submitters: set[str] = set()
+    for index, login in enumerate(raw_submitters):
+        if not isinstance(login, str) or not GITHUB_LOGIN.fullmatch(login):
+            raise GuardFailure(
+                f"guarded_submitters[{index}] must be a valid GitHub login"
+            )
+        normalized = login.casefold()
+        if normalized in submitters:
+            raise GuardFailure(f"duplicate guarded submitter: {login}")
+        submitters.add(normalized)
+    return frozenset(submitters)
+
+
+def _parse(
+    source: str,
+    label: str,
+    failure_type: type[GuardFailure | HeadPolicyFailure] = GuardFailure,
+) -> ast.Module:
     try:
         return ast.parse(source, filename=label)
     except SyntaxError as error:
-        raise GuardFailure(f"could not parse {label}: {error}") from error
+        raise failure_type(f"could not parse {label}: {error}") from error
 
 
 def _find_class(tree: ast.Module, name: str) -> ast.ClassDef | None:
     return next(
-        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == name),
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == name
+        ),
         None,
     )
 
@@ -218,7 +271,9 @@ def _class_fields(node: ast.ClassDef) -> tuple[str, ...]:
                 ast.dump(target, include_attributes=False) for target in child.targets
             )
             value = ast.dump(child.value, include_attributes=False)
-            fields.append(f"assign:{targets}={value}:type_comment={child.type_comment!r}")
+            fields.append(
+                f"assign:{targets}={value}:type_comment={child.type_comment!r}"
+            )
         elif isinstance(child, ast.AnnAssign):
             target = ast.dump(child.target, include_attributes=False)
             annotation = ast.dump(child.annotation, include_attributes=False)
@@ -246,9 +301,15 @@ def compare_class_sources(
     base_source: str,
     head_source: str,
     protected: ProtectedClass,
+    *,
+    head_failure_type: type[GuardFailure | HeadPolicyFailure] = GuardFailure,
 ) -> Comparison:
     base_tree = _parse(base_source, f"base:{protected.source_path}")
-    head_tree = _parse(head_source, f"head:{protected.source_path}")
+    head_tree = _parse(
+        head_source,
+        f"head:{protected.source_path}",
+        head_failure_type,
+    )
     base_class = _find_class(base_tree, protected.name)
     head_class = _find_class(head_tree, protected.name)
 
@@ -256,7 +317,7 @@ def compare_class_sources(
         return Comparison(
             violations=(),
             warnings=(
-                f"protected class {protected.qualified_name} is absent from the base revision; guard skipped",
+                f"protected class {protected.qualified_name} is absent from the base revision",
             ),
         )
     if head_class is None:
@@ -326,14 +387,12 @@ def compare_class_sources(
         head_method = _find_method(head_class, method_name)
         if base_method is None:
             warnings.append(
-                f"protected method {symbol} is absent from the base revision; method guard skipped"
+                f"protected method {symbol} is absent from the base revision"
             )
             continue
         if head_method is None:
             violations.append(
-                Violation(
-                    "TRG101", symbol, "protected method was removed or renamed"
-                )
+                Violation("TRG101", symbol, "protected method was removed or renamed")
             )
             continue
 
@@ -397,32 +456,30 @@ def changed_files(repository: Path, base: str, head: str) -> set[str]:
     return {line for line in result.stdout.splitlines() if line}
 
 
-def evaluate(
+def evaluate_structure(
     repository: Path,
     base: str,
     head: str,
     manifest_path: str = DEFAULT_MANIFEST,
 ) -> tuple[Comparison, bool]:
-    manifest_text = _read_blob(repository, head, manifest_path)
+    manifest_text = _read_blob(repository, base, manifest_path)
     if manifest_text is None:
-        raise GuardFailure(f"manifest {manifest_path} is absent from {head}")
+        raise GuardFailure(f"trusted manifest {manifest_path} is absent from {base}")
     protected_classes = load_manifest(manifest_text)
     changed = changed_files(repository, base, head)
-    relevant_paths = {manifest_path, *(item.source_path for item in protected_classes)}
+    relevant_paths = {item.source_path for item in protected_classes}
     if changed.isdisjoint(relevant_paths):
         return Comparison((), ()), False
 
     violations: list[Violation] = []
-    warnings: list[str] = []
     for protected in protected_classes:
-        if protected.source_path not in changed and manifest_path not in changed:
+        if protected.source_path not in changed:
             continue
         base_source = _read_blob(repository, base, protected.source_path)
         if base_source is None:
-            warnings.append(
-                f"protected source {protected.source_path} is absent from the base revision; guard skipped"
+            raise GuardFailure(
+                f"trusted protected source {protected.source_path} is absent from {base}"
             )
-            continue
         head_source = _read_blob(repository, head, protected.source_path)
         if head_source is None:
             violations.append(
@@ -433,10 +490,65 @@ def evaluate(
                 )
             )
             continue
-        result = compare_class_sources(base_source, head_source, protected)
+        result = compare_class_sources(
+            base_source,
+            head_source,
+            protected,
+            head_failure_type=HeadPolicyFailure,
+        )
+        if result.warnings:
+            raise GuardFailure("; ".join(result.warnings))
         violations.extend(result.violations)
-        warnings.extend(result.warnings)
-    return Comparison(tuple(violations), tuple(warnings)), True
+    return Comparison(tuple(violations), ()), True
+
+
+def evaluate_pull_request(
+    repository: Path,
+    base: str,
+    head: str,
+    actor: str,
+    manifest_path: str = DEFAULT_MANIFEST,
+    submitters_path: str = DEFAULT_SUBMITTERS,
+) -> Evaluation:
+    normalized_actor = actor.strip().casefold()
+    if not normalized_actor:
+        raise GuardFailure("pull request actor must be a non-empty GitHub login")
+    if normalized_actor == OWNER_LOGIN.casefold():
+        return Evaluation(Comparison((), ()), False, f"owner @{actor} bypass")
+
+    changed = changed_files(repository, base, head)
+    changed_controls = sorted(changed.intersection(PROTECTED_CONTROL_PATHS))
+    if changed_controls:
+        violations = tuple(
+            Violation(
+                "TRG900",
+                path,
+                f"guard control file may only be changed by @{OWNER_LOGIN}",
+            )
+            for path in changed_controls
+        )
+        return Evaluation(Comparison(violations, ()), True, None)
+
+    submitters_text = _read_blob(repository, base, submitters_path)
+    if submitters_text is None:
+        raise GuardFailure(
+            f"trusted submitter policy {submitters_path} is absent from {base}"
+        )
+    guarded_submitters = load_guarded_submitters(submitters_text)
+    if normalized_actor not in guarded_submitters:
+        return Evaluation(
+            Comparison((), ()),
+            False,
+            f"@{actor} is not in the guarded submitter policy",
+        )
+
+    comparison, relevant = evaluate_structure(
+        repository,
+        base,
+        head,
+        manifest_path,
+    )
+    return Evaluation(comparison, relevant, None)
 
 
 def _print_violations(violations: Sequence[Violation]) -> None:
@@ -447,7 +559,7 @@ def _print_violations(violations: Sequence[Violation]) -> None:
             file=sys.stderr,
         )
     print(
-        "TaskRunner is a protected design surface; revert the structural change before pushing.",
+        "TaskRunner is a protected design surface; revert the structural change before merging into dev.",
         file=sys.stderr,
     )
 
@@ -456,30 +568,37 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True)
     parser.add_argument("--head", required=True)
+    parser.add_argument("--actor", required=True)
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
+    parser.add_argument("--submitters", default=DEFAULT_SUBMITTERS)
     arguments = parser.parse_args(argv)
 
     try:
         repository = find_repository_root(Path.cwd())
-        if configured_email(repository) == OWNER_EMAIL:
-            return 0
-        comparison, relevant = evaluate(
+        evaluation = evaluate_pull_request(
             repository,
             arguments.base,
             arguments.head,
+            arguments.actor,
             arguments.manifest,
+            arguments.submitters,
         )
-        for warning in comparison.warnings:
-            print(f"warning: {warning}", file=sys.stderr)
-        if comparison.violations:
-            _print_violations(comparison.violations)
+        if evaluation.comparison.violations:
+            _print_violations(evaluation.comparison.violations)
             return 1
-        if relevant:
+        if evaluation.skipped_reason:
+            print(f"TaskRunner design guard skipped: {evaluation.skipped_reason}")
+        elif evaluation.relevant:
             print("TaskRunner design guard passed: protected structure is unchanged")
+        else:
+            print("TaskRunner design guard passed: no protected source changes")
         return 0
-    except Exception as error:  # Fail open by explicit Phase 1 policy.
-        print(f"warning: TaskRunner design guard skipped: {error}", file=sys.stderr)
-        return 0
+    except HeadPolicyFailure as error:
+        _print_violations((Violation("TRG901", "pull request head", str(error)),))
+        return 1
+    except Exception as error:  # noqa: BLE001 - fail-open is the policy boundary.
+        print(f"warning: TaskRunner design guard degraded: {error}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
