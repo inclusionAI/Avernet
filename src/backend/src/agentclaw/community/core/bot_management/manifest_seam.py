@@ -2,8 +2,12 @@
 
 Its own module rather than a declaration inside ``create_flow``: that file is
 already at the size the architecture cap allows, and a contract is a different
-kind of thing from the flow that calls it. The reason it is a ``Protocol`` at
-all is the import cycle — see the class docstring.
+kind of thing from the flow that calls it. It is also what the implementation
+imports to declare itself — see the class docstring — so keeping it free of
+everything but ``typing`` is what lets that import stay one-directional.
+
+The reason it is a ``Protocol`` at all is the import cycle — again, see the
+class docstring.
 """
 
 from __future__ import annotations
@@ -17,9 +21,21 @@ class ManifestCreationSeam(Protocol):
     A ``Protocol`` rather than the concrete ``BotCreationManifestSeam``:
     ``core/bot_management`` must not import ``core/bot_config_manifest`` — that
     closes a cycle, since the manifest package reaches back into the creation
-    graph — and structural typing states the contract with no import at all. The
-    real seam satisfies it by shape; a test double satisfies it by shape too,
-    which is the second reason.
+    graph — and a Protocol states the contract with no import at all. A test
+    double satisfies it by shape, with no base class and no import, which is the
+    second reason.
+
+    **The one real implementation says so out loud.**
+    ``BotCreationManifestSeam`` inherits this explicitly. That import runs
+    manifest → management, the direction that is allowed and that the manifest
+    package already takes; only the reverse closes the cycle. It buys what
+    conformance-by-shape alone never did: the contract is checked against *this*
+    file rather than against whichever call site happens to pass the seam here,
+    and a reader or an IDE can walk between the contract and its implementation
+    instead of guessing which class fits. The checking is a type checker's in an
+    editor and ``test_creation_seam``'s in CI — the suite pins both the
+    inheritance and the four signatures, because no type checker runs on this
+    tree.
 
     Only the four operations submission calls are here. The pre-container apply
     and the job's own steps belong to the creation job, which holds the seam

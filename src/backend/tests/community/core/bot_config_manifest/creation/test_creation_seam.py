@@ -1,12 +1,19 @@
 """The four operations bot creation asks of the manifest layer."""
 from __future__ import annotations
 
+import inspect
+
+import pytest
+
 from agentclaw.community.core.bot_config_manifest.create_job import (
     DEFAULT_CREATE_DEADLINE_SECONDS,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
     BotCreationManifestSeam,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
 )
 
 
@@ -188,3 +195,58 @@ def test_persist_keys_by_the_spec_entity_id_and_nothing_else():
     )
     assert entity_id == "u_owner"
     assert manifests.puts[0]["entity_id"] == "u_owner"
+
+
+# ── the contract itself (``ManifestCreationSeam``) ─────────────────────────
+
+
+def test_the_seam_declares_the_creation_protocol_rather_than_matching_it():
+    """The contract is a base class, not a resemblance.
+
+    ``core/bot_management`` states what submission needs as a ``Protocol`` and
+    must not import this package to say it — that closes a cycle. The dependency
+    runs the other way, so this class can and does inherit it, which is what lets
+    a reader (and an IDE) get from ``submit_bot_creation_with_manifest``'s
+    parameter to the one class that answers it. Matching by shape looked
+    identical to a type checker and led nowhere for a human.
+    """
+    assert ManifestCreationSeam in BotCreationManifestSeam.__mro__
+
+
+@pytest.mark.parametrize(
+    "operation", ["preflight", "persist", "start_job", "discard"]
+)
+def test_every_declared_operation_keeps_the_contract_signature(operation):
+    """Signature drift is caught here, because no type checker runs in CI.
+
+    Inheriting the Protocol is what makes a checker verify these; the suite is
+    what verifies them on this tree. Each contract parameter must survive by
+    name — silently renaming one would leave every caller passing an argument
+    the implementation no longer takes. Extra parameters are allowed only with a
+    default (``discard``'s ``owner_id``, which the creation job passes and
+    submission does not), since a required one the Protocol does not name could
+    never be supplied through it.
+
+    The first assertion is the hazard the base class brings with it: a Protocol
+    method's body is ``...``, so an operation dropped from the seam would be
+    *inherited* and answer ``None`` — a submission that silently persisted
+    nothing — where before the base class it raised ``AttributeError``.
+    """
+    assert operation in vars(BotCreationManifestSeam), (
+        f"{operation} is inherited from the Protocol rather than implemented; "
+        "its body is `...`, so it would answer None instead of raising"
+    )
+
+    declared = inspect.signature(getattr(ManifestCreationSeam, operation))
+    implemented = inspect.signature(getattr(BotCreationManifestSeam, operation))
+
+    missing = set(declared.parameters) - set(implemented.parameters)
+    assert not missing, f"{operation} no longer accepts {sorted(missing)}"
+
+    for name, parameter in implemented.parameters.items():
+        if name in declared.parameters:
+            continue
+        assert parameter.default is not inspect.Parameter.empty, (
+            f"{operation} requires {name!r}, which no caller holding the "
+            "Protocol can pass"
+        )

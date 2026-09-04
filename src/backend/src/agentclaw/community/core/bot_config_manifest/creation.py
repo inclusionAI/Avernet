@@ -50,6 +50,9 @@ from agentclaw.community.core.bot_config_manifest.schema import (
     ManifestValidationError,
     Violation,
 )
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
+)
 from agentclaw.community.core.task_queue.types import TaskRecord
 from agentclaw.community.log import get_logger
 from agentclaw.community.utils.avernet_tenant import get_current_avernet_tenant
@@ -164,8 +167,31 @@ def _location_for(construct: ApplyConstruct) -> str:
     return f"manifest.{construct.value}"
 
 
-class BotCreationManifestSeam:
+class BotCreationManifestSeam(ManifestCreationSeam):
     """Everything bot creation asks of the manifest layer, in one place.
+
+    The base class is ``core/bot_management``'s :class:`ManifestCreationSeam`,
+    the Protocol naming the four operations submission calls — **declared** here
+    rather than merely satisfied by shape. Structural conformance was checked
+    nowhere: a signature drifting from the contract surfaced, if at all, as a
+    type error at the one call site that passes this class where the Protocol is
+    asked for, and neither a reader nor an IDE could get from the contract to its
+    single real implementation. Inheriting costs nothing at runtime — every
+    method the Protocol names is overridden below — and makes both hold; the
+    signatures themselves are pinned by ``test_creation_seam``, since no type
+    checker runs on this tree.
+
+    It does bring one hazard, which the same test pins: a Protocol method's body
+    is ``...``, so an operation dropped from this class would be *inherited* and
+    quietly answer ``None`` where it used to raise ``AttributeError``.
+
+    The dependency direction is unchanged: this package already imports
+    ``core/bot_management`` (the engine registry, the token vault), and it is the
+    *reverse* that would close a cycle, which is why the contract lives over
+    there. What this class adds beyond it — ``apply_pre_container``,
+    ``find_job``, and ``discard``'s ``owner_id`` — stays off the Protocol on
+    purpose: those belong to the creation job and the poll, which hold this class
+    directly and need no stand-in for it.
 
     Deliberately small and free of creation policy: creation decides *when* to
     call these, this decides what each one means. Everything underneath is W1's
