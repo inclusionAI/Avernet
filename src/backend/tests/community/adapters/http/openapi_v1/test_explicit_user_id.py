@@ -299,12 +299,15 @@ _NO_USER_DIMENSION = {
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
     # Task public surface: execute submits (owner in body), dashboard reads by
-    # task_id — neither scopes to a caller-supplied user_id. grant/revoke
-    # identify the operator from the verified principal (Cookie/Referer relayed
-    # to secbaas, the api-key held server-side), not a caller-supplied user_id.
-    # list does take a caller-supplied user_id filter, so it is NOT here.
+    # task_id — neither scopes to a caller-supplied user_id. bbs/list is a
+    # tenant-wide paged read of BBS relay tasks (run_mode='bbs'), no user_id
+    # filter. grant/revoke identify the operator from the verified principal
+    # (Cookie/Referer relayed to secbaas, the api-key held server-side), not a
+    # caller-supplied user_id. list does take a caller-supplied user_id filter,
+    # so it is NOT here.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
 }
