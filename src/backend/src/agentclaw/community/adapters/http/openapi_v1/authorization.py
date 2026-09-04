@@ -613,6 +613,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
         NoCheck("a task, not a bot; read-only task graph by task_id"),
     ("GET", "/openapi/v1/collaboration/tasks/list"):
         NoCheck("a task, not a bot; filters records by the named user"),
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/list"):
+        NoCheck("a task, not a bot; paged read of BBS relay tasks"),
     ("POST", "/openapi/v1/collaboration/tasks/grant"):
         NoCheck("a stateless relay to secbaas; the human Cookie/Referer authorizes the grant, not a bot permission"),
     ("POST", "/openapi/v1/collaboration/tasks/revoke"):

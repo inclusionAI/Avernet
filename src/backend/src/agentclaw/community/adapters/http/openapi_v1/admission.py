@@ -618,6 +618,7 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     ("POST", "/openapi/v1/collaboration/tasks/execute"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/dashboard"): AdmissionMode.OPEN,
     ("GET", "/openapi/v1/collaboration/tasks/list"): AdmissionMode.OPEN,
+    ("GET", "/openapi/v1/collaboration/tasks/bbs/list"): AdmissionMode.OPEN,
     # Grant/revoke are stateless relays to secbaas (api-key server-side; the
     # human Cookie/Referer authorizes the action) — OPEN at the gate, secbaas
     # authorizes. Same shape as the other task public operations.

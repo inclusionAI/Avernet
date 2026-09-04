@@ -3,9 +3,10 @@
 POST /openapi/v1/collaboration/tasks/execute   — 提交任务(delegate TaskServiceProtocol.execute)
 GET  /openapi/v1/collaboration/tasks/dashboard  — 查任务图(delegate TaskServiceProtocol.get_task_dashboard)
 GET  /openapi/v1/collaboration/tasks/list       — 列持久化任务记录(delegate TaskServiceProtocol.list_tasks)
+GET  /openapi/v1/collaboration/tasks/bbs/list   — 列 BBS 接力任务(分页;delegate TaskServiceProtocol.list_bbs_tasks)
 
-前端公开面经 gateway spanner 鉴权(``/openapi/v1/collaboration/**`` → user+app required)。内部接口
-(回投 / bbs 接力 / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``,不经 spanner)。
+前端公开面经 gateway spanner 鉴权(``/openapi/v1/collaboration/**`` → user+app required)。其余内部接口
+(回投 / bbs 接力步 claim·attach·result / 任务发现阶段)见 ``adapters/http/task/``(前缀 ``/api/v1/collaboration/tasks``,不经 spanner)。
 统一 ``/openapi/v1`` 返回协议:成功经 ``envelope()`` → ``Envelope{code,message,data,request_id}``;
 领域异常(GraphAlreadyInitialized/TaskNotFound/TaskState/GraphIntegrity…)直接上抛,
 由 ``@envelope_errors`` + ``ENVELOPE_ERRORS`` 映射为统一 ``ErrorEnvelope``——router 不手写
@@ -29,6 +30,7 @@ from agentclaw.community.adapters.http.openapi_v1.responses import (
     page as page_envelope,
 )
 from agentclaw.community.adapters.http.task.schemas import (
+    BbsTaskItemDTO,
     TaskExecutionGraphDTO,
     TaskGrantRequestDTO,
     TaskGrantResultDTO,
@@ -37,6 +39,7 @@ from agentclaw.community.adapters.http.task.schemas import (
     TaskOpResultDTO,
     TaskRevokeRequestDTO,
     TaskRevokeResultDTO,
+    bbs_task_overview_to_dto,
     graph_to_dto,
     op_result_to_dto,
     task_info_record_to_dto,
@@ -58,6 +61,17 @@ def _validate_status_filter(status: str | None) -> None:
     for tok in (t.strip().upper() for t in status.split(",") if t.strip()):
         if tok not in valid:
             raise HTTPException(status_code=400, detail=f"invalid status filter: {status}")
+
+
+def _validate_single_status(status: str | None) -> str | None:
+    """校验单值 status(运行时态枚举):空白 → None(不过滤);非空则 strip+upper 后须 ∈ Status 枚举值,
+    否则 400(逗号多值整体不在枚举内 → 400,强制单值契约)。返回归一化大写字符串供等值比对。"""
+    if status is None or not status.strip():
+        return None
+    v = status.strip().upper()
+    if v not in {s.value for s in Status}:
+        raise HTTPException(status_code=400, detail=f"invalid status: {status}")
+    return v
 
 
 router = APIRouter(prefix="/openapi/v1/collaboration/tasks", tags=["task"], route_class=PublicAPIRoute)
@@ -168,6 +182,46 @@ async def list_tasks(
         request,
     )
 
+
+@router.get("/bbs/list", response_model=Envelope[Page[BbsTaskItemDTO]])
+@envelope_errors
+async def list_bbs_tasks(
+    request: Request,
+    principal: PrincipalDep,
+    page: int = Query(default=1, ge=1, description="页码,1-based,默认 1"),
+    page_size: int = Query(
+        default=20, ge=1, le=100, description="每页数量,默认 20,最大 100"
+    ),
+    search_word: str | None = Query(
+        default=None,
+        description="可选模糊匹配:对 task_spec/extend_props 文本大小写不敏感 LIKE;空则不过滤",
+    ),
+    status: str | None = Query(
+        default=None,
+        description="可选单值状态过滤(PENDING/PLANNING/RUNNING/DONE/FAILED/HUNG/CANCELLED);逗号多值/非法 → 400",
+    ),
+    service: TaskServiceProtocol = Injected(TaskServiceProtocol),  # noqa: B008
+) -> Envelope[Page[BbsTaskItemDTO]]:
+    """列 BBS 接力任务(run_mode='bbs')的一页(公开面镜像;delegate TaskServiceProtocol.list_bbs_tasks)。
+
+    鉴权经 PrincipalDep(require_principal);bbs/list 按 run_mode='bbs' 列全部任务,不按 user 归属过滤
+    (与内部 ``/api/v1/collaboration/tasks/bbs/list`` 契约一致)。分页 1-based(``page`` 默认 1 /
+    ``page_size`` 默认 20,最大 100);可选 ``status`` 单值等值过滤、``search_word`` 模糊匹配。返回
+    ``Envelope{data: Page{total, items: BbsTaskItemDTO[]}}``;非法 status → 400。"""
+    del principal  # 鉴权经 PrincipalDep;bbs/list 按 run_mode='bbs' 列全部,不按 user 过滤
+    normalized_status = _validate_single_status(status)
+    normalized_word = (search_word or "").strip() or None
+    records, total = service.list_bbs_tasks(
+        page=page,
+        page_size=page_size,
+        search_word=normalized_word,
+        status=normalized_status,
+    )
+    return page_envelope(
+        total,
+        [bbs_task_overview_to_dto(r) for r in records],
+        request,
+    )
 
 
 @router.post("/grant", response_model=Envelope[TaskGrantResultDTO])
