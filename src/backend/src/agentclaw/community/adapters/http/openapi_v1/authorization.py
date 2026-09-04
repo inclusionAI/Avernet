@@ -868,7 +868,6 @@ def _assert_check_rows_are_enforceable(
     sockets: set[tuple[str, str]], checked_handlers: list[tuple[tuple[str, str], object]]
 ) -> None:
     """Refuse a ``Check`` row the seam could not actually enforce.
-
     A row that declares enforcement the mechanism cannot deliver is worse than
     no row: the table reads as covered, and the inventory agrees, while the
     operation is served unguarded. Three shapes of that.
@@ -951,7 +950,6 @@ def _assert_check_rows_are_enforceable(
 
 def _consumes(endpoint: object, dependency: object) -> bool:
     """Whether ``endpoint``'s own signature declares ``Depends(dependency)``.
-
     Its *own* signature, deliberately: the gate itself takes ``OwnerIdDep``, so
     walking the route's whole dependency tree would find it every time and the
     check would pass vacuously. ``get_type_hints`` follows ``__wrapped__``, so a
@@ -979,7 +977,6 @@ def _consumes(endpoint: object, dependency: object) -> bool:
 
 def _walk(router: APIRouter):
     """Every operation as the application will really serve it.
-
     ``include_router`` stores a lazy wrapper rather than copying routes, so the
     effective contexts — not ``router.routes`` — are what the surface serves.
     """
@@ -992,7 +989,6 @@ def _walk(router: APIRouter):
 
 def _is_websocket(route: Any) -> bool:
     """WebSocket routes are ``APIWebSocketRoute``, which takes no route class.
-
     FastAPI offers no per-router class for the socket plane, so a socket route
     cannot carry :class:`PublicAPIRoute` and ``_rule_for`` never runs for it.
     It is covered by the *missing* check above rather than by this exemption —
