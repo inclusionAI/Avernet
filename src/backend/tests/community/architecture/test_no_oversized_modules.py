@@ -79,6 +79,14 @@ _ALLOWLIST: dict[str, str] = {
     # it just should not ride on a feature that adds three rows.
     "adapters/http/openapi_v1/authorization.py":
         "1011 — one AUTHORIZATION row per public operation; grows with the surface",
+    "adapters/http/openapi_v1/engine_runtime/sessions/router.py":
+        "1001 — one route per engine_runtime/sessions public operation; grows with the "
+        "surface. Crossed the cap during the REL20260904→dev forward-integration: "
+        "#1848 ('carry a session working directory from OpenAPI to the engine') added "
+        "the first net-additive row (the `cwd` carry-through on session create). Same "
+        "inventory/router shape as admission/responses/authorization/bots-router — "
+        "splitting the session-create seam from the rest is a separate refactor, not "
+        "a rider on this forward-integration.",
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py":
         "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",
