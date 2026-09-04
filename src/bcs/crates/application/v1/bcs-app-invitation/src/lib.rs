@@ -328,22 +328,42 @@ impl InvitationService for InvitationFriendshipServiceImpl {
             ));
         }
         // Minting is gated on session membership only: any participant of the
-        // session (any role) may create an invitation for it. Group-level
-        // roles (driver, originator, manager) are intentionally NOT required,
-        // mirroring the relaxed legacy `create_session_invite_token`.
-        if !session
-            .participants
-            .iter()
-            .any(|p| p.bot_uuid == principal.actor_id())
-        {
-            return Err(ApplicationError::forbidden(
-                "Only Session participants may create invitations for this Session",
+        // session (any role) may create an invitation for it. A Human caller
+        // also qualifies through any owned Bot that participates in the
+        // session. Group-level roles (driver, originator, manager) are
+        // intentionally NOT required, mirroring the relaxed legacy
+        // `create_session_invite_token`.
+        let is_member = |actor_id: &str| {
+            session
+                .participants
+                .iter()
+                .any(|p| p.bot_uuid == actor_id)
+        };
+        if is_member(&principal.actor_id()) {
+            return Ok(self.mint_invitation(
+                InvitationTargetType::Session,
+                &command.session_id,
+                command.expires_in_seconds,
             ));
         }
-        Ok(self.mint_invitation(
-            InvitationTargetType::Session,
-            &command.session_id,
-            command.expires_in_seconds,
+        if let Principal::Human(human) = principal {
+            let owned_bots = self
+                .registry
+                .try_list_bots_by_creator(&human.subject.id)
+                .await
+                .map_err(map_service_error)?;
+            if owned_bots.iter().any(|bot| {
+                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
+            }) {
+                return Ok(self.mint_invitation(
+                    InvitationTargetType::Session,
+                    &command.session_id,
+                    command.expires_in_seconds,
+                ));
+            }
+        }
+        Err(ApplicationError::forbidden(
+            "Only Session participants may create invitations for this Session",
         ))
     }
 
