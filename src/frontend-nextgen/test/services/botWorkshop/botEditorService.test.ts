@@ -103,8 +103,21 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
   expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
   expect(controller.listMcpServers).toHaveBeenCalledTimes(1);
   expect(controller.listRepositorySkills).toHaveBeenCalledTimes(1);
-  expect(controller.listSkillCenterSkills).toHaveBeenCalledTimes(1);
+  expect(controller.listSkillCenterSkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).toHaveBeenCalledWith('12', 1, 100);
+});
+
+it('Open Core 仅允许我的 Skill 时不请求市场、工坊或 MCP 候选接口', async () => {
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', {
+    skillSources: ['mine'],
+    mcp: false,
+  });
+
+  expect(controller.listBotMcps).not.toHaveBeenCalled();
+  expect(controller.listMcpServers).not.toHaveBeenCalled();
+  expect(controller.listRepositorySkills).not.toHaveBeenCalled();
+  expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
+  expect(result).toEqual({ availableMcps: [], marketSkills: [], skillCenterSkills: [], workshopSkills: [] });
 });
 
 it('工坊可消费 Skill 超过单页时加载全部分页', async () => {
@@ -146,7 +159,7 @@ it('按 SkillCenter、TeamClaw 和工坊可消费接口分类候选 Skill', asyn
   const result = await botEditorService.loadCapabilityCandidates('bot-1', '12');
 
   expect(result.marketSkills).toEqual([expect.objectContaining({ id: 'repo-1', source: 'teamclaw-market' })]);
-  expect(result.skillCenterSkills).toEqual([
+  expect((await botEditorService.searchSkillCenterSkills('', 1)).items).toEqual([
     expect.objectContaining({ id: 'sc-1', source: 'skillcenter-market', version: '3' }),
   ]);
   expect(result.workshopSkills).toEqual([
@@ -244,4 +257,47 @@ it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
   });
   await expect(botEditorService.updateMcpCallType('bot-1', 'mcp.weather', 'owner')).resolves.toBe('owner');
   expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner');
+});
+
+it('我的 Skill 仅请求当前 Bot 的 LOCAL 分页，保留激活和未激活项并透传 owner', async () => {
+  const items = Array.from({ length: 20 }, (_, i) => ({ skill_id: `local-${i}`, name: `Local ${i}`, active: i === 0 }));
+  controller.listSkills.mockImplementation(async (_botId, options) => {
+    if (options?.source !== 'LOCAL') {
+      return { data: { total: 1, items: [{ skill_id: 'other-bot-shared', name: 'Other Bot', active: true }] } };
+    }
+    return {
+      data: {
+        total: 21,
+        items: options.page === 1 ? items : [{ skill_id: 'last-local', name: 'Last', active: false }],
+      },
+    };
+  });
+  const result = await botEditorService.load('bot-1', false, 'owner-1');
+  expect(result.skills).toHaveLength(21);
+  expect(result.skills.map((skill) => skill.id)).not.toContain('other-bot-shared');
+  expect(result.skills[0].active).toBe(true);
+  expect(result.skills[20].active).toBe(false);
+  expect(controller.listSkills).toHaveBeenNthCalledWith(1, 'bot-1', {
+    source: 'LOCAL',
+    owner_id: 'owner-1',
+    page: 1,
+    page_size: 20,
+  });
+  expect(controller.listSkills).toHaveBeenNthCalledWith(2, 'bot-1', {
+    source: 'LOCAL',
+    owner_id: 'owner-1',
+    page: 2,
+    page_size: 20,
+  });
+});
+
+it('超过 20 项时明确拒绝，不静默截断提交', async () => {
+  await expect(
+    botEditorService.addSkillCenterReferences(
+      'bot-1',
+      'set-1',
+      Array.from({ length: 21 }, (_, i) => `sc-${i}`),
+    ),
+  ).rejects.toThrow('一次最多添加 20 个 Skill');
+  expect(controller.createSkillCenterReferences).not.toHaveBeenCalled();
 });

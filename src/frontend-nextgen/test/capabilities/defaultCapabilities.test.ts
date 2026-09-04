@@ -80,6 +80,13 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getBotSkillPickerSources()).toEqual({ status: 'available', value: ['mine'] });
   });
 
+  test('Open Core / 阿里云能力集隐藏 MCP 和 CLI', () => {
+    expect(defaultCapabilities.getBotCapabilitySetVisibility()).toEqual({
+      status: 'available',
+      value: { mcp: false, cli: false },
+    });
+  });
+
   test('getProductBrand 默认 Avernet（横版 wordmark + 方版 mark 视觉组件）', () => {
     const r = defaultCapabilities.getProductBrand();
     expect(r.status).toBe('available');

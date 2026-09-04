@@ -162,8 +162,10 @@ const request = <T>(url: string, method = 'GET', params: BackendUnknownRecord = 
   backendRequest<BackendApiEnvelope<T>>(url, { method, params: userScopedParams(params), data });
 
 export const botEditorController = {
-  listSkills: (botId: string) =>
-    request<BackendApiPage<SkillDto>>(path(botId, 'skills'), 'GET', { page: 1, page_size: 100 }),
+  listSkills: (
+    botId: string,
+    options: { source?: 'LOCAL'; owner_id?: string; user_id?: string; page?: number; page_size?: number } = {},
+  ) => request<BackendApiPage<SkillDto>>(path(botId, 'skills'), 'GET', { page: 1, page_size: 100, ...options }),
   setSkillActive: (botId: string, skillId: string, active: boolean) =>
     request(path(botId, `skills/${skillId}/${active ? 'activate' : 'deactivate'}`), 'POST'),
   deleteSkill: (botId: string, skillId: string) => request(path(botId, `skills/${skillId}`), 'DELETE'),
@@ -195,15 +197,15 @@ export const botEditorController = {
       page_size: 100,
       sort: 'latest',
     }),
-  listSkillCenterSkills: () =>
+  listSkillCenterSkills: (keyword = '', pageNum = 1, pageSize = 20) =>
     request<BackendApiPage<SkillCenterSkillDto>>(
       '/openapi/v1/bots/market/skill-center/skills',
       'POST',
       {},
       {
-        keyword: '',
-        pageNum: 1,
-        pageSize: 20,
+        keyword,
+        pageNum,
+        pageSize,
         sortBy: 'latest',
         tagList: [],
         creatorName: null,

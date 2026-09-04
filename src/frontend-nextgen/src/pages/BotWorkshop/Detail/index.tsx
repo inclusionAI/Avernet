@@ -67,7 +67,8 @@ const BotWorkshopDetailPage: React.FC = () => {
     id,
     detail.bot?.serviceMode === 'service',
     currentSpaceId === undefined ? undefined : String(currentSpaceId),
-    requestIdentity.ready,
+    requestIdentity.ready && detail.bot?.id === id,
+    detail.bot?.ownerId,
   );
   const advanced = useBotAdvancedConfig(id, requestIdentity.ready);
   const [tab, setTab] = useState<MainTab>('capability');

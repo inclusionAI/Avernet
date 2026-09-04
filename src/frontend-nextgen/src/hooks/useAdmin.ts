@@ -5,6 +5,7 @@ import type { Space } from '@/domain/admin/models';
 import { sortSpacesByDisplayOrder } from '@/domain/spaceContext';
 import { adminService } from '@/services/admin';
 import { useAdminStore } from '@/stores/adminStore';
+import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
@@ -53,7 +54,8 @@ export function useAdmin() {
       setLoading(false);
       if (r.error) {
         setError(r.error);
-        notifyError(r.error.message, { requestId: r.error.requestId });
+        // 未登录（oauth-provider + 非 authenticated）静默：自动加载 toast 统一由 ExternalLoginPromptModal 承担。
+        if (!shouldMuteNonAuthedToast()) notifyError(r.error.message, { requestId: r.error.requestId });
         return;
       }
       setList(sortSpacesByDisplayOrder(r.data?.items ?? []), r.data?.total ?? 0);

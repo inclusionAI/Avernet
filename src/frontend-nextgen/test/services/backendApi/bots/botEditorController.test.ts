@@ -238,3 +238,27 @@ describe('botEditorController', () => {
     );
   });
 });
+
+test('LOCAL Skill 请求携带当前用户、Bot owner 与分页参数', async () => {
+  const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+  try {
+    await botEditorController.listSkills('bot-1', {
+      source: 'LOCAL',
+      owner_id: 'owner-1',
+      user_id: '168944',
+      page: 2,
+      page_size: 20,
+    });
+    const url = new URL(String(fetchSpy.mock.calls[0][0]), 'http://localhost');
+    expect(url.pathname).toBe('/openapi/v1/bots/bot-1/skills');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      source: 'LOCAL',
+      owner_id: 'owner-1',
+      user_id: '168944',
+      page: '2',
+      page_size: '20',
+    });
+  } finally {
+    fetchSpy.mockRestore();
+  }
+});

@@ -8,6 +8,7 @@ import { workOrderService } from '@/services/admin/workOrderService';
 import { useNotificationStore } from '@/stores/notificationStore';
 import { useWorkOrderStore } from '@/stores/workOrderStore';
 import { extractErrorMessage } from '@/utils/requestErrorHandler';
+import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 
@@ -56,7 +57,11 @@ export function useWorkOrders() {
       setLoading(false);
       if (r.error) {
         setError(r.error);
-        toast.error(r.error.message);
+        // 未登录（oauth-provider + 非 authenticated）静默：自动加载失败 toast 统一由
+        // ExternalLoginPromptModal 承担（见 loginToastGate）；已登录照常提示真实失败，不丢反馈。
+        if (!shouldMuteNonAuthedToast()) {
+          toast.error(r.error.message);
+        }
         return;
       }
       setList(r.data?.items ?? [], r.data?.total ?? 0);
