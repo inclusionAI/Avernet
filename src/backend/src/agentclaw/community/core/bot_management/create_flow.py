@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from agentclaw.community.core.bot_management.create_context import (
     BotCreateContext,
     BotCreateDeploymentMode as BotCreateDeploymentMode,
+    BotCreateSpec as BotCreateSpec,
 )
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotCreateTemplateValidationMode,
@@ -46,6 +47,11 @@ from agentclaw.community.core.bot_management.manifest_seam import (
 from agentclaw.community.core.bot_management.errors import (
     ApplicationCodingUnavailableError,
     BotTemplateInvalidError,
+)
+from agentclaw.community.core.bot_management.service_intake import (
+    ServiceIntakeSeam,
+    finish_service_intake,
+    prepare_service_intake,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
@@ -233,56 +239,6 @@ class AuthStatusResult:
 
     status: str
     bot: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class BotCreateSpec:
-    """The bot attributes a create / authorization-completion runs with.
-
-    An explicit contract instead of an untyped payload dict: each API surface
-    maps its own request shape into this, so a field added or renamed here is a
-    type error at every call site rather than a key that silently goes missing
-    on one surface.
-
-    ``entity_id`` and ``engine_type`` are **required and concrete** — each
-    surface resolves its own default while building the spec (the caller's id;
-    ``DEFAULT_ENGINE_TYPE``). ``BotService.create_bot`` only ever applies
-    ``x or <default>`` to them, so a concrete value is equivalent to leaving
-    them unset, and the flow never has to reason about an absent engine.
-
-    Two fields keep an unset state on purpose:
-
-    * ``bot_name`` — ``None`` means "no name given" so ``_resolve_bot_name``
-      derives one (the owner's nick name for a first bot, else the bot id). No
-      string can stand in: ``validate_bot_name("")`` rejects the request, and
-      the default needs a first-bot lookup the caller cannot pre-compute.
-    * ``bot_desc`` — stored straight through to a nullable column and echoed
-      back in responses, so ``None`` ("no description") and ``""`` are
-      genuinely different persisted values, not interchangeable defaults.
-    """
-
-    entity_id: str
-    engine_type: str
-    bot_type: str
-    bot_name: str | None
-    entity_type: str = "staff"
-    bot_desc: str | None = None
-    avatar_url: str | None = None
-    share_policy: dict[str, Any] | None = None
-    template_type: str | None = None
-    template_config: dict[str, Any] | None = None
-    # How strictly template ownership rules apply: PUBLIC for OpenAPI inputs,
-    # LEGACY for established internal snapshots (may carry ``template_uid``).
-    template_validation_mode: BotCreateTemplateValidationMode = (
-        BotCreateTemplateValidationMode.LEGACY
-    )
-    space_id: int | None = None
-    # Engine-owned creation properties (the public ``engine_properties``
-    # contract), kept opaque here: only the engine-selected
-    # ``EngineProvisioningStrategy`` may interpret its keys. The legacy
-    # template_type/template_config pair above serves established internal
-    # callers and is mutually exclusive with this bag.
-    engine_properties: dict[str, Any] = field(default_factory=dict)
 
 
 def _prepare_create(
@@ -507,6 +463,7 @@ def create_bot_with_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     skill_set_factory: SkillSetServiceFactory,
+    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> Created | AuthPending:
     """Run the create + Passport-authorization flow for an already-allocated id.
 
@@ -521,6 +478,8 @@ def create_bot_with_authorization(
     downstream memoryos call still relies on it; the public ``/openapi/v1``
     surface does not pass it. Remove once the internal path stops needing it.
     """
+    spec, service_intake = prepare_service_intake(spec, context, service_intake_seam)
+
     # Creation policy is evaluated here, rather than in either transport, so no
     # caller can bypass template/combination rules before Passport or writes.
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
@@ -621,6 +580,11 @@ def create_bot_with_authorization(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,
         nick_name=nick_name, bot_id=bot_id,
     )
+
+    if service_intake:
+        result = finish_service_intake(
+            bot_id=bot_id, user_id=user_id, bot_service=bot_service, seam=service_intake_seam
+        )
 
     return Created(
         bot=result,
@@ -931,6 +895,7 @@ def complete_bot_authorization(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     provision: bool = True,
+    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> AuthStatusResult:
     """Poll Passport authorization for a pending bot; complete creation on ISSUED.
 
@@ -945,6 +910,8 @@ def complete_bot_authorization(
     ``cookie`` carries the browser session into the service layer — **bad
     practice**, see :func:`create_bot_with_authorization`; internal path only.
     """
+    spec, service_intake = prepare_service_intake(spec, context, service_intake_seam)
+
     # Re-run the same policy on authorization completion because callers echo
     # the creation attributes and must not bypass the original create contract.
     spec = _prepare_create(spec=spec, context=context, bot_service=bot_service)
@@ -987,4 +954,10 @@ def complete_bot_authorization(
         auth_rel_plugin, user_id=user_id, agent_code=agent_code,
         nick_name=nick_name, bot_id=bot_id,
     )
+
+    if service_intake:
+        result = finish_service_intake(
+            bot_id=bot_id, user_id=user_id, bot_service=bot_service, seam=service_intake_seam
+        )
+
     return AuthStatusResult(status=AuthStatus.ISSUED, bot=result)
