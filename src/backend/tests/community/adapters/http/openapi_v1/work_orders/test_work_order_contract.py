@@ -296,7 +296,7 @@ def test_create_work_order_event_accepts_json_objects(
         "approver_user_ids": ["approver-1"],
         "recipient_user_ids": [],
         "title": "ignored display title",
-        "content": {"message": "apply", "items": [1, True]},
+        "content": {"text": "apply", "items": [1, True]},
         "biz_data": {"space_id": 7, "meta": {"source": "web"}},
     }
 
@@ -318,7 +318,7 @@ def test_create_work_order_event_accepts_json_objects(
         approver_user_ids=["approver-1"],
         recipient_user_ids=[],
         title="ignored display title",
-        content={"message": "apply", "items": [1, True]},
+        content={"text": "apply", "items": [1, True]},
         apply_reason=None,
         biz_data={"space_id": 7, "meta": {"source": "web"}},
         actor_id="owner-1",
@@ -326,36 +326,72 @@ def test_create_work_order_event_accepts_json_objects(
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "content",
     [
-        ("content", [1, 2, 3]),
-        ("content", "text"),
-        ("content", 123),
-        ("content", True),
-        ("biz_data", [1, 2, 3]),
-        ("biz_data", "text"),
-        ("biz_data", 123),
-        ("biz_data", True),
+        None,
+        {"text": "display"},
+        {"text": "display", "legacy_value": "legacy"},
+        {"workitem_name": "历史任务"},
     ],
 )
-def test_create_work_order_event_rejects_non_object_json(
-    client, work_order_service, field, value
-):
+def test_create_work_order_event_accepts_supported_content(content, client, work_order_service):
+    work_order_service.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.NOTICE,
+        work_order_id=None,
+        work_order_no=None,
+        notification_ids=[21],
+        status=WorkOrderEventStatus.CREATED,
+    )
     payload = {
-        "event_category": "APPROVAL",
-        "biz_type": "SPACE_JOIN",
-        "biz_id": "7",
-        "event_type": "SPACE_JOIN_APPLIED",
-        "applicant_user_id": "owner-1",
-        "approver_user_ids": ["approver-1"],
-        "recipient_user_ids": [],
-        "title": "title",
-        field: value,
+        "event_category": "NOTICE",
+        "biz_type": "SPACE",
+        "biz_id": "space-1",
+        "event_type": "SPACE_MEMBER_ADDED",
+        "recipient_user_ids": ["owner-1"],
+        "title": "Member added",
+        "content": content,
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 201
+    assert work_order_service.create_work_order_event.call_args.kwargs["content"] == content
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "普通字符串",
+        [],
+        123,
+        True,
+        {},
+        {"legacy_value": "历史内容"},
+        {"text": ""},
+        {"text": "   "},
+        {"text": None},
+        {"text": 123},
+        {"text": None, "workitem_name": "历史任务"},
+        {"workitem_name": ""},
+        {"workitem_name": "   "},
+        {"workitem_name": 123},
+    ],
+)
+def test_create_work_order_event_rejects_invalid_content(content, client, work_order_service):
+    payload = {
+        "event_category": "NOTICE",
+        "biz_type": "SPACE",
+        "biz_id": "space-1",
+        "event_type": "SPACE_MEMBER_ADDED",
+        "recipient_user_ids": ["owner-1"],
+        "title": "Member added",
+        "content": content,
     }
 
     response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
 
     assert response.status_code == 422
+    assert "缺少必填字段text" in response.text
     work_order_service.create_work_order_event.assert_not_called()
 
 
@@ -877,7 +913,9 @@ def test_content_presentation_supports_all_legacy_shapes():
 
     assert extract_content_text("plain text") == "plain text"
     assert extract_content_text(json.dumps({"text": "  ", "legacy_value": "legacy"})) == "legacy"
-    assert extract_content_text(json.dumps({"text": "display", "legacy_value": "legacy"})) == "display"
+    assert extract_content_text(json.dumps({"text": "display", "legacy_value": "legacy", "workitem_name": "workitem"})) == "display"
+    assert extract_content_text(json.dumps({"legacy_value": "legacy", "workitem_name": "workitem"})) == "legacy"
+    assert extract_content_text(json.dumps({"workitem_name": "workitem"})) == "workitem"
     assert extract_content_text(json.dumps({"other": "value"})) is None
     assert extract_content_text(json.dumps(["not", "an", "object"])) is None
     assert display_summary(None, biz_type="UNKNOWN") == "你有一条新的通知，请查看详情。"

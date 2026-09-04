@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -350,7 +351,7 @@ class WorkOrderNotificationDraft(BaseModel):
     biz_type: str
     biz_id: str
     title: str
-    content: str
+    content: dict[str, Any]
 
 
 class WorkOrderNotificationDetail(BaseModel):

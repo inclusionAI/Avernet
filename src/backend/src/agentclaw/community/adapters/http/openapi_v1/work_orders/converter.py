@@ -128,7 +128,7 @@ def extract_content_text(raw: Any) -> str | None:
         return parsed or None
     if not isinstance(parsed, dict):
         return None
-    for key in ("text", "legacy_value"):
+    for key in ("text", "legacy_value", "workitem_name"):
         value = parsed.get(key)
         if isinstance(value, str) and value.strip():
             return value

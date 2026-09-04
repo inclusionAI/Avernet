@@ -866,7 +866,7 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                         WorkOrderEventType.SPACE_JOIN_REVIEWED.value,
                         notification.title,
                     ),
-                    content=notification.content,
+                    content=json.dumps(notification.content, ensure_ascii=False),
                     env=env,
                 )
             )

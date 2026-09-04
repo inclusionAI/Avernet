@@ -99,7 +99,7 @@ def _review_notification(
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id=str(space_id),
         title=title,
-        content=content,
+        content={"text": content},
     )
 
 
@@ -113,7 +113,7 @@ def _bot_review_notification(
         biz_type=WorkOrderBizType.BOT_COLLABORATOR,
         biz_id=bot_id,
         title="Bot 共同编辑申请已通过",
-        content="approved",
+        content={"text": "approved"},
     )
 
 
@@ -127,7 +127,7 @@ def _skill_review_notification(
         biz_type=WorkOrderBizType.SKILL_COLLABORATOR,
         biz_id=str(skill_id),
         title="Skill 共同编辑申请已通过" if approved else "Skill 共同编辑申请未通过",
-        content="reviewed",
+        content={"text": "reviewed"},
     )
 
 
@@ -1205,7 +1205,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     assert applicant_total == 1
     applicant_notification = applicant_items[0].notification
     assert applicant_notification.title == "空间加入申请已处理"
-    assert applicant_notification.content == approved_notification.content
+    assert json.loads(applicant_notification.content) == approved_notification.content
     assert (
         repository.list_items(
             actor_id="applicant-1",
@@ -1332,7 +1332,7 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
         applicant_items[0].notification.title
         == "空间加入申请已处理"
     )
-    assert applicant_items[0].notification.content == "custom rejected content"
+    assert json.loads(applicant_items[0].notification.content) == {"text": "custom rejected content"}
 
 
 def test_badge_counts_distinct_pending_work_orders(db) -> None:
