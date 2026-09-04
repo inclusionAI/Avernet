@@ -312,6 +312,13 @@ class BaasBotService(BotService):
         # Step 2: Get or create adapter session
         session_client = self._create_session_client(conn_info, engine_type)
 
+        # 评测流量：eval_id 存在且调用方未传 session_id 时，
+        # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，
+        # 使引擎返回的 session_id 与评测标识关联。
+        effective_session_id = session_id
+        if session_id is None and eval_id and session_consistency_key:
+            effective_session_id = session_consistency_key
+
         try:
             async with session_client:
                 # adapter session 创建:命中 adapter 走 adapter,否则走原始分支
@@ -320,7 +327,7 @@ class BaasBotService(BotService):
                 if _adapter is not None:
                     adapter_session_id, reused = await _adapter.create_adapter_session(
                         session_client=session_client,
-                        session_id=session_id,
+                        session_id=effective_session_id,
                         user_id=user_id,
                         metadata=metadata,
                         bot_id=binding_info.bot_id,
@@ -332,7 +339,7 @@ class BaasBotService(BotService):
                         reused,
                     ) = await self._get_or_create_adapter_session(
                         session_client=session_client,
-                        session_id=session_id,
+                        session_id=effective_session_id,
                         user_id=user_id,
                         metadata=metadata,
                         engine_type=engine_type or "openclaw",
@@ -346,6 +353,16 @@ class BaasBotService(BotService):
             raise BotServiceError(
                 f"Failed to get or create adapter session for bot {bot_id}: {_safe_client_msg(e)}"
             ) from e
+
+        # session_id 退化检查：调用方传入了 session_id，但 adapter 返回了不同的值
+        if session_id and adapter_session_id != session_id:
+            logger.warning(
+                "[BaasBotService.create_session] session_id 退化: "
+                "请求=%s, 实际=%s, bot_id=%s — 调用方传入的 session_id 被替换",
+                session_id,
+                adapter_session_id,
+                bot_id,
+            )
 
         action = "reused" if reused else "created"
         logger.info(

@@ -288,13 +288,13 @@ class BotRunner:
                 session_id=metadata.get("session_id", ""),
                 method="deliver_message",
             )
-            # Session 保护：评测流量必须保留显式 session_id，
-            # 不得中途退化成随机值（系分 3.3.3）
+            # Session 保护：评测流量未传显式 session_id，由 BaasBotService 层
+            # effective_session_id 兜底（系分 3.3.3）
             session_id_from_metadata = metadata.get("session_id")
             if not session_id_from_metadata:
-                logger.warning(
-                    "[runner.deliver_message] eval 对话缺少显式 session_id, "
-                    "存在路由退化风险: eval_id=%s, bot_id=%s",
+                logger.debug(
+                    "[runner.deliver_message] eval 对话缺少显式 session_id: "
+                    "eval_id=%s, bot_id=%s",
                     eval_id,
                     bot_id,
                 )
@@ -308,19 +308,7 @@ class BotRunner:
             context=context,
         )
 
-        # 4. Session 完整性校验：评测流量下 session 不得退化（系分 3.3.3）
-        if eval_id and raw_session_id and actual_session_id != raw_session_id:
-            logger.warning(
-                "[runner.deliver_message] eval session_id 退化: "
-                "请求 session_id=%s, 实际 session_id=%s, eval_id=%s, bot_id=%s — "
-                "评测对话可能被误路由到生产环境",
-                raw_session_id,
-                actual_session_id,
-                eval_id,
-                bot_id,
-            )
-
-        # 5. 委托 dispatcher 异步发送
+        # 4. 委托 dispatcher 异步发送
         wait_result = parse_wait_result(metadata)
         chat_metadata = build_chat_metadata(
             metadata, run_id=message_id, eval_session_log=self._eval_session_log
@@ -412,12 +400,13 @@ class BotRunner:
                 session_id=metadata.get("session_id", ""),
                 method="deliver_message_stream",
             )
-            # Session 保护：评测流量必须保留显式 session_id（系分 3.3.3）
+            # Session 保护：评测流量未传显式 session_id，由 BaasBotService 层
+            # effective_session_id 兜底（系分 3.3.3）
             session_id_from_metadata = metadata.get("session_id")
             if not session_id_from_metadata:
-                logger.warning(
-                    "[runner.deliver_message_stream] eval 对话缺少显式 session_id, "
-                    "存在路由退化风险: eval_id=%s, bot_id=%s",
+                logger.debug(
+                    "[runner.deliver_message_stream] eval 对话缺少显式 session_id: "
+                    "eval_id=%s, bot_id=%s",
                     eval_id,
                     bot_id,
                 )
@@ -441,18 +430,6 @@ class BotRunner:
             route=route,
             context=context,
         )
-
-        # Session 完整性校验：评测流量下 session 不得退化（系分 3.3.3）
-        if eval_id and raw_session_id and actual_session_id != raw_session_id:
-            logger.warning(
-                "[runner.deliver_message_stream] eval session_id 退化: "
-                "请求 session_id=%s, 实际 session_id=%s, eval_id=%s, bot_id=%s — "
-                "评测对话可能被误路由到生产环境",
-                raw_session_id,
-                actual_session_id,
-                eval_id,
-                bot_id,
-            )
 
         # 委托 dispatcher 流式发送
         stream_iter = self._select_dispatcher(
