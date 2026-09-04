@@ -1015,7 +1015,7 @@ async def _dispatch_impl(
         # session.completed 收敛),不进 state_machine 的 translate_bcn/run_detail 路径。
         if parse_manager_worker_bcn(_raw_obj) is not None:
             logger.info("[task_callback] is_manager_worker_event, session_id=%s", _sid)
-            await svc.apply_manager_worker_event(_raw_obj)
+            #await svc.apply_manager_worker_event(_raw_obj)
             return envelope({"ok": True}, request)
 
         logger.info("[task_callback] is_state_machine_event, session_id=%s", _sid)
