@@ -129,6 +129,68 @@ RUN cd /tmp/openclaw-channel-bcn \
            /opt/openclawExt/openclaw-channel-bcn/ \
     && rm -rf /tmp/openclaw-channel-bcn
 
+# Build the taskguard plugin (TaskFlow DAG workflow engine for openclaw).
+# The dist_pack/openclaw/*.tgz artifact is a BUILD OUTPUT and is NOT shipped
+# in git. We must regenerate it here from source by mirroring the project's
+# own `node scripts/dist_pack.mjs openclaw` target:
+#   1) `npm ci` installs all deps incl. devDeps (tshy + esbuild + bundlers)
+#   2) dist_pack.mjs runs `npm run build` (tshy + bundle-runtime + facade
+#      skills + runtime asset copy) and then writes dist_pack/openclaw/
+#      clawmind-<version>.tgz with bundled node_modules inside.
+#   3) Extract the tgz into /opt/openclawExt/taskguard with
+#      --strip-components=1 (the tarball wraps everything in a `package/`
+#      prefix, matching the npm pack convention).
+# The build toolchain is heavier than openclaw-channel-bcn's, but reproducing
+# it here keeps the image self-contained — CI does not need a separate
+# pre-build step before `docker build`.
+#
+# Layer caching: copy ONLY the manifest files first, run `npm ci`, then copy
+# the rest of the source. Source edits do not invalidate the heavy npm ci
+# layer. node_modules / dist / *.tgz are excluded by the repo .dockerignore.
+COPY src/evolverun/taskguard/package.json \
+     src/evolverun/taskguard/package-lock.json \
+     src/evolverun/taskguard/tsconfig.json \
+     src/evolverun/taskguard/.tshy/ \
+     /tmp/taskguard/
+# Pull build scripts + configs before `npm ci` so dist_pack.mjs's `npm run
+# build` can find them (scripts/build/*.mjs are referenced from package.json
+# scripts and read configs/ at runtime).
+COPY src/evolverun/taskguard/scripts /tmp/taskguard/scripts
+COPY src/evolverun/taskguard/configs /tmp/taskguard/configs
+RUN cd /tmp/taskguard \
+    && npm ci --no-audit --no-fund --ignore-scripts \
+    && npm cache clean --force
+
+# Layer the rest of the source on top. The COPY above copies contents, so
+# node_modules installed by `npm ci` is preserved (not overwritten, because
+# node_modules is .dockerignore'd from the build context anyway).
+COPY src/evolverun/taskguard/ /tmp/taskguard/
+
+# Build + pack the openclaw extension tarball. dist_pack.mjs:
+#   - runs `npm run build` (tshy compile + bundle-runtime + facade skills
+#     + runtime asset copy), emitting dist/esm/
+#   - assembles dist_pack/openclaw/clawmind-<version>.tgz with bundled deps
+# Passing `openclaw` restricts work to that platform (default builds all
+# platforms then filters). `--skip-build` is intentionally NOT used so the
+# tgz always reflects in-source edits rather than a stale dist/.
+RUN cd /tmp/taskguard \
+    && node scripts/dist_pack.mjs openclaw \
+    && TGZ=$(ls -1 dist_pack/openclaw/clawmind-*.tgz 2>/dev/null | head -n1) \
+    && test -n "$TGZ" \
+    && mkdir -p /opt/openclawExt/taskguard \
+    && tar xzf "$TGZ" -C /opt/openclawExt/taskguard --strip-components=1 \
+    && test -f /opt/openclawExt/taskguard/openclaw.plugin.json \
+    && test -d /opt/openclawExt/taskguard/dist \
+    && rm -rf /tmp/taskguard /root/.npm /root/.cache
+
+# Overlay the source-of-truth config so the docker image always ships the
+# latest baseUrl / apiKey / etc. from src/evolverun/taskguard/configs/.
+# The tarball we just extracted may carry a stale placeholder from the last
+# repo snapshot at pack time; the source tree is the single point of truth
+# and wins.
+COPY src/evolverun/taskguard/configs/application.yaml \
+     /opt/openclawExt/taskguard/configs/application.yaml
+
 # Install supervisor in an isolated venv (avoids conflicts with engine site-packages).
 RUN python3 -m venv /opt/supervisor-venv \
     && /opt/supervisor-venv/bin/pip install --no-cache-dir supervisor \
