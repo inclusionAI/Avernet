@@ -19,6 +19,7 @@ At minimum, CI must enforce:
 4. **Configuration schema validation**
 5. **Conformance test execution**
 6. **Structural PR checklist completion**
+7. **Pull request title convention**
 
 ---
 
@@ -141,6 +142,9 @@ Conformance tests are mandatory for boundary contracts.
 PRs affecting boundaries must include completed structural analysis.
 
 ### Required PR fields
+- title matching `<type>: <concise outcome>` or
+  `<type>(<scope>): <concise outcome>` with an allowed type from `feat`, `fix`,
+  `refactor`, `docs`, `test`, `ci`, `build`, or `chore`; scope is optional
 - whether a contract changed
 - if changed, what kind of contract
 - affected consumers
@@ -151,6 +155,10 @@ PRs affecting boundaries must include completed structural analysis.
 
 ### Enforcement
 - PR template required
+- `.github/workflows/pr-title.yml` validates every PR title and reports the
+  stable `Validate PR title` status check
+- protected-branch rulesets must require `Validate PR title`; the workflow
+  result alone does not block merging unless the status check is required
 - reviewer must confirm completion
 - bots may reject PRs missing required sections
 

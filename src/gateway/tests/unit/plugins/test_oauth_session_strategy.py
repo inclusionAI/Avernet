@@ -92,11 +92,30 @@ async def test_missing_sub_claim_raises_auth_error(
 
 
 @pytest.mark.asyncio
+async def test_expired_cookie_raises_expired_login_error() -> None:
+    strategy = OauthSessionStrategy(jwt_secret=_TEST_SECRET)
+    now = datetime.now(tz=UTC)
+    expired_token = jwt.encode(
+        {
+            "sub": "user-123",
+            "src": "google",
+            "iat": int((now - timedelta(minutes=10)).timestamp()),
+            "exp": int((now - timedelta(minutes=5)).timestamp()),
+        },
+        _TEST_SECRET,
+        algorithm="HS256",
+    )
+
+    with pytest.raises(AuthError, match="bcs session cookie has expired"):
+        await strategy.build(_creds(expired_token))
+
+
+@pytest.mark.asyncio
 async def test_invalid_cookie_raises_auth_error() -> None:
     strategy = OauthSessionStrategy(jwt_secret=_TEST_SECRET)
     bad_token = jwt.encode(
         {"sub": "user-123", "src": "google", "iat": 1, "exp": 9999999999},
-        "wrong-secret",
+        "wrong-secret-for-test-only-32-bytes!!",
         algorithm="HS256",
     )
 
