@@ -204,10 +204,9 @@ async def list_bbs_tasks(
 ) -> Envelope[Page[BbsTaskItemDTO]]:
     """列 BBS 接力任务(run_mode='bbs')的一页(公开面镜像;delegate TaskServiceProtocol.list_bbs_tasks)。
 
-    鉴权经 PrincipalDep(require_principal);bbs/list 按 run_mode='bbs' 列全部任务,不按 user 归属过滤
-    (与内部 ``/api/v1/collaboration/tasks/bbs/list`` 契约一致)。分页 1-based(``page`` 默认 1 /
-    ``page_size`` 默认 20,最大 100);可选 ``status`` 单值等值过滤、``search_word`` 模糊匹配。返回
-    ``Envelope{data: Page{total, items: BbsTaskItemDTO[]}}``;非法 status → 400。"""
+    鉴权经 PrincipalDep(require_principal);按 run_mode='bbs' 列全部任务,不按 user 归属过滤(与内部
+    同路径契约一致)。分页 1-based:page 默认 1、page_size 默认 20(最大 100);可选 status 单值等值
+    过滤、search_word 模糊匹配。返回 Envelope{data: Page{total, items}};非法 status 返回 400。"""
     del principal  # 鉴权经 PrincipalDep;bbs/list 按 run_mode='bbs' 列全部,不按 user 过滤
     normalized_status = _validate_single_status(status)
     normalized_word = (search_word or "").strip() or None

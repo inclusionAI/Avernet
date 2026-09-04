@@ -455,7 +455,8 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Space Skill Version Copy adds one account-level operation; it is addressed by
 #: Space and Skill version rather than by Bot. Human Chat adds eleven Bot-path
 #: operations while retaining separate caller and Bot-owner identities.
-_BOT_ID_PLACEMENT = {"path": 167, "query": 1, "none": 103}
+#: Public BBS list adds one account-level read with no Bot in the path (103→104).
+_BOT_ID_PLACEMENT = {"path": 167, "query": 1, "none": 104}
 
 
 def _schema() -> dict:

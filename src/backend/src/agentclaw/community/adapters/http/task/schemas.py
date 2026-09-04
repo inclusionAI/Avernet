@@ -304,7 +304,7 @@ class TaskInfoRecordDTO(BaseModel):
 
 
 class BbsTaskItemDTO(BaseModel):
-    """GET /api/v1/collaboration/tasks/bbs/list 返回的单条 BBS 接力任务概览。
+    """BBS 接力任务列表返回的单条任务概览。
 
     忠实映射给定 SQL 的列别名(task_node_run_info r ⋈ task_node n,再补 task_info.owner_bot_id)。
     title/goal/acceptances 由 adapter 二次解析自 task_spec;assignee_name 解析自 extend_props;
