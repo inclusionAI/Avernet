@@ -1,10 +1,19 @@
 /** @jest-environment jsdom */
+import { extendCapabilities } from '@/capabilities';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
+import { botRegistrationService, resolveBcsEndpoint } from '@/services/workspace/botRegistrationService';
 import type { Identity } from '@/services/workspace/workspaceModel';
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+
+jest.mock('@/services/workspace/botRegistrationService');
+
+const getRegistrationTokenMock = botRegistrationService.getRegistrationToken as jest.MockedFunction<
+  typeof botRegistrationService.getRegistrationToken
+>;
+const resolveBcsEndpointMock = resolveBcsEndpoint as jest.MockedFunction<typeof resolveBcsEndpoint>;
 
 const identities: Identity[] = [
   {
@@ -38,6 +47,15 @@ const identities: Identity[] = [
 ];
 
 describe('WorkspaceIdentitySelector', () => {
+  beforeEach(() => {
+    extendCapabilities({
+      getBotRegistrationEnabled: () => ({ status: 'available', value: true }),
+    });
+    getRegistrationTokenMock.mockReset();
+    resolveBcsEndpointMock.mockReset();
+    resolveBcsEndpointMock.mockReturnValue('http://127.0.0.1:21000');
+  });
+
   it('展示当前身份入口，并按 Bot 业务信息展示头像、名称、Bot 类型、引擎、运行状态', async () => {
     render(<WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={() => {}} />);
 
@@ -238,6 +256,55 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.queryByRole('button', { name: '进入协作权限设置' })).not.toBeInTheDocument();
     expect(screen.queryByText('切换协作身份')).not.toBeInTheDocument();
     expect(onOpenPermissions).not.toHaveBeenCalled();
+  });
+
+  it('内部形态关闭接入新的 Bot 入口', async () => {
+    extendCapabilities({
+      getBotRegistrationEnabled: () => ({ status: 'available', value: false }),
+    });
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    await screen.findByText('隐藏 Bot');
+
+    expect(screen.queryByRole('button', { name: '接入新的 Bot' })).not.toBeInTheDocument();
+    expect(getRegistrationTokenMock).not.toHaveBeenCalled();
+  });
+
+  it('外部形态按需展示两种接入命令并复制真实 Token', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    getRegistrationTokenMock.mockResolvedValue({
+      ok: true,
+      data: {
+        token: 'token-1',
+        expiresAt: 1788272686000,
+        note: 'Use this token for bot registration within 6 hours',
+      },
+    });
+    render(<WorkspaceIdentitySelector identities={identities} activeId="human_447147" onChange={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
+    expect(getRegistrationTokenMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: '接入新的 Bot' }));
+
+    await waitFor(() => expect(getRegistrationTokenMock).toHaveBeenCalledTimes(1));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toHaveTextContent('用户自助接入');
+    expect(dialog).toHaveTextContent('install.sh --token token-1 --bcs-endpoint http://127.0.0.1:21000');
+    expect(dialog).not.toHaveTextContent('Use this token for bot registration within 6 hours');
+    expect(dialog).toHaveTextContent(/Token 有效期至：/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bot 自动接入' }));
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('your TOKEN is token-1'));
+    fireEvent.click(screen.getByRole('button', { name: /复制/ }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        'Follow the instructions in https://raw.githubusercontent.com/inclusionAI/Avernet/refs/heads/dev/src/bcs/crates/plugins/openclaw-channel-bcn/install-instructions/install.md to join BCN (Bot Coordination Network), your TOKEN is token-1 and BCS_ENDPOINT is http://127.0.0.1:21000.',
+      ),
+    );
+    expect(getRegistrationTokenMock).toHaveBeenCalledTimes(1);
   });
 
   it('打开入口和点击当前身份不会切换，点击其他身份后关闭 Popover', async () => {

@@ -17,6 +17,7 @@ import {
   mapSkill,
   toRoutineWrite,
 } from './botEditorMappers';
+import { isImageResourcePath } from './resourcePreview';
 
 async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkillDto[]> {
   const pageSize = 100;
@@ -247,7 +248,16 @@ export const botEditorService = {
   uploadResource: (botId: string, path: string, file: File, overwrite = false) =>
     file.arrayBuffer().then((body) => botEditorController.uploadResource(botId, path, body, overwrite)),
   async previewResource(botId: string, path: string) {
-    return (await botEditorController.previewResource(botId, path)).data?.content ?? '';
+    if (isImageResourcePath(path)) {
+      const blob = await botEditorController.downloadResource(botId, path);
+      return { kind: 'image' as const, blob, contentType: blob.type || 'application/octet-stream' };
+    }
+    const preview = (await botEditorController.previewResource(botId, path)).data;
+    return {
+      kind: 'text' as const,
+      content: preview?.content ?? '',
+      contentType: preview?.content_type ?? 'text/plain',
+    };
   },
   downloadResource: (botId: string, path: string) => botEditorController.downloadResource(botId, path),
   downloadResourceDirectory: (botId: string, path: string) =>

@@ -38,8 +38,8 @@ describe('Welcome 欢迎页(Open 形态默认入口)', () => {
     await act(async () => {
       render(<Welcome />);
     });
-    expect(screen.getByRole('heading', { name: 'Avernet' })).toBeTruthy();
-    expect(screen.getByText('让智能体在此协同、执行、进化。')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Avernet 组织级多智能体协作平台' })).toBeTruthy();
+    expect(screen.getByText('让智能体像组织一样，在此协同、执行、持续进化。')).toBeTruthy();
   });
 
   it('CTA「进入 Avernet」点击 → history.push(/workspace),登录态交给既有登录链路', async () => {

@@ -130,6 +130,9 @@ export interface BotEngineOption {
   label: string;
 }
 
+/** Bot 编辑页添加 Skill 时允许展示的来源。 */
+export type BotSkillPickerSource = 'market' | 'workshop' | 'mine';
+
 /** 仅 Internal Overlay 提供的 Agent Coding 外部资源；Open Core 全部为 null。 */
 export interface AgentCodingInternalResources {
   templateFactoryUrl: string | null;
@@ -241,6 +244,13 @@ export interface AppCapabilities {
    */
   getLoginStrategy: () => CapabilityResult<LoginStrategy>;
   /**
+   * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
+   * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
+   * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
+   * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
+   */
+  getTaskApiBase: () => CapabilityResult<string>;
+  /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
@@ -265,6 +275,8 @@ export interface AppCapabilities {
    * 是后端契约事实，MUST 保留全量，不随本清单收窄。
    */
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
+  /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
+  getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
@@ -277,6 +289,11 @@ export interface AppCapabilities {
    * 同步签名，不发请求。
    */
   getPersonalSpaceInitOptions: () => CapabilityResult<PersonalSpaceInitOptions>;
+  /**
+   * 外部部署版本的 Bot 自助接入入口。Open Core 默认开启；internal overlay 覆盖为 false。
+   * 同步签名，组件仅消费可见性，不感知部署环境。
+   */
+  getBotRegistrationEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`

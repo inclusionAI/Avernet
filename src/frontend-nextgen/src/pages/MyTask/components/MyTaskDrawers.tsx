@@ -3,7 +3,7 @@ import { Drawer, DrawerContent } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import type { TaskListItem } from '@/domain/tasks/models';
 import type { ScheduledRoutineRecord, ScheduledRoutineRunRecord } from '@/services/scheduledTasks';
-import { TASK_API_BASE } from '@/services/tasks/taskConfig';
+import { TASK_API_BASE, resolveTaskApiBase } from '@/services/tasks/taskConfig';
 import { getBotDisplayName, getUserTaskSourceLabel, getUserTaskTypeLabel } from '../userTaskUtils';
 import { MyTaskRoutineDrawer } from './MyTaskRoutineDrawer';
 import { MyTaskRoutineHistoryDrawer } from './MyTaskRoutineHistoryDrawer';
@@ -82,6 +82,7 @@ export function MyTaskDrawers({
             {selectedTaskId ? (
               <TaskPanel
                 apiBaseUrl={TASK_API_BASE}
+                taskApiBase={resolveTaskApiBase()}
                 bcsBaseUrl=""
                 userId={ownerUserId}
                 taskId={selectedTaskId}

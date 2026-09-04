@@ -5,18 +5,31 @@ import { OverviewCard } from '@/components/BotWorkshop/BotHealthCheckDrawer/comp
 import { RadarChart } from '@/components/BotWorkshop/BotHealthCheckDrawer/components/RadarChart';
 import { formatDateTime } from '@/components/BotWorkshop/BotHealthCheckDrawer/utils';
 import { Card } from '@/components/ui/Card';
-import type { BotHealthCheckSummary, BotHealthDimensionKey, BotHealthHistoryItem } from '@/domain/botHealthCheck';
+import type {
+  BotHealthCapability,
+  BotHealthCheckSummary,
+  BotHealthDimensionKey,
+  BotHealthHistoryItem,
+} from '@/domain/botHealthCheck';
 import { useMemo, useState } from 'react';
 
 interface HealthCheckViewProps {
   summary: BotHealthCheckSummary;
+  capability: BotHealthCapability;
   botName?: string;
   loading?: boolean;
   checking?: boolean;
   onReDiagnose: () => void;
 }
 
-export function HealthCheckView({ summary, botName, loading, checking, onReDiagnose }: HealthCheckViewProps) {
+export function HealthCheckView({
+  summary,
+  capability,
+  botName,
+  loading,
+  checking,
+  onReDiagnose,
+}: HealthCheckViewProps) {
   const firstDimension = summary.dimensions[0]?.key ?? 'configuration';
   const [activeDimensionKey, setActiveDimensionKey] = useState<BotHealthDimensionKey>(firstDimension);
   const [selectedHistory, setSelectedHistory] = useState<BotHealthHistoryItem | null>(null);
@@ -48,33 +61,44 @@ export function HealthCheckView({ summary, botName, loading, checking, onReDiagn
 
   return (
     <div className="space-y-5">
-      <Card className="grid rounded-xl lg:grid-cols-[1fr_320px]">
+      <Card className={capability.showRadar ? 'grid rounded-xl lg:grid-cols-[1fr_320px]' : 'rounded-xl'}>
         <OverviewCard
           botName={botName}
           healthScore={summary.healthScore}
           overallStatus={overallStatusText}
           latestAt={formatDateTime(summary.latestAt)}
         />
-        <div className="flex items-center justify-center border-t border-[var(--color-border)] p-5 lg:border-t-0 lg:border-l">
-          <RadarChart dimensions={summary.dimensions} />
-        </div>
+        {capability.showRadar ? (
+          <div className="flex items-center justify-center border-t border-[var(--color-border)] p-5 lg:border-t-0 lg:border-l">
+            <RadarChart dimensions={summary.dimensions} />
+          </div>
+        ) : null}
       </Card>
 
       <Card className="rounded-xl">
-        <DimensionTabs activeKey={activeDimensionKey} onChange={setActiveDimensionKey} />
+        {capability.dimensions.length > 1 ? (
+          <DimensionTabs
+            activeKey={activeDimensionKey}
+            dimensions={capability.dimensions}
+            onChange={setActiveDimensionKey}
+          />
+        ) : null}
         {currentDimension ? (
           <EnvironmentPanel
             dimension={currentDimension}
             loading={loading}
             checking={checking}
             history={dimensionHistory}
+            showHistoryDetails={capability.showLogDetails}
             onViewHistoryDetail={setSelectedHistory}
             onReDiagnose={onReDiagnose}
           />
         ) : null}
       </Card>
 
-      <CheckDetailDrawer item={selectedHistory} onOpenChange={(open) => !open && setSelectedHistory(null)} />
+      {capability.showLogDetails ? (
+        <CheckDetailDrawer item={selectedHistory} onOpenChange={(open) => !open && setSelectedHistory(null)} />
+      ) : null}
     </div>
   );
 }

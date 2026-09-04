@@ -1,0 +1,1 @@
+window.AVERNET_RUNTIME_CONFIG = {};

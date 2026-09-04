@@ -10,11 +10,12 @@ import {
 } from '@/components/ui/Drawer';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
-import type { BotHealthCheckSummary, BotHealthOverallStatus } from '@/domain/botHealthCheck';
+import type { BotHealthCapability, BotHealthCheckSummary, BotHealthOverallStatus } from '@/domain/botHealthCheck';
 import { HeartPulse, RefreshCw } from 'lucide-react';
 
 interface BotHealthCheckDrawerProps {
   open: boolean;
+  capability: BotHealthCapability;
   botName?: string;
   summary?: BotHealthCheckSummary;
   loading: boolean;
@@ -38,6 +39,7 @@ const overallMeta: Record<
 
 export default function BotHealthCheckDrawer({
   open,
+  capability,
   botName,
   summary,
   loading,
@@ -87,7 +89,13 @@ export default function BotHealthCheckDrawer({
         ) : null}
 
         {summary ? (
-          <HealthCheckView summary={summary} botName={botName} loading={loading} onReDiagnose={onRefresh} />
+          <HealthCheckView
+            summary={summary}
+            capability={capability}
+            botName={botName}
+            loading={loading}
+            onReDiagnose={onRefresh}
+          />
         ) : null}
 
         <DrawerFooter>

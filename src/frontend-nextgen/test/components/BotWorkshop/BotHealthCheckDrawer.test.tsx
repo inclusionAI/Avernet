@@ -1,11 +1,32 @@
 /** @jest-environment jsdom */
 
 import BotHealthCheckDrawer from '@/components/BotWorkshop/BotHealthCheckDrawer';
-import type { BotHealthCheckSummary, BotHealthDimensionKey } from '@/domain/botHealthCheck';
+import type { BotHealthCapability, BotHealthCheckSummary, BotHealthDimensionKey } from '@/domain/botHealthCheck';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 const noop = () => undefined;
+
+const internalCapability: BotHealthCapability = {
+  dimensions: [
+    'configuration',
+    'taskUnderstanding',
+    'planningExecution',
+    'capabilityInvocation',
+    'contextLearning',
+    'taskDelivery',
+  ],
+  showRadar: true,
+  showLogDetails: true,
+  showRawSnapshot: true,
+};
+
+const openCoreCapability: BotHealthCapability = {
+  dimensions: ['configuration'],
+  showRadar: false,
+  showLogDetails: false,
+  showRawSnapshot: false,
+};
 
 function buildDimension(
   key: BotHealthDimensionKey,
@@ -88,6 +109,7 @@ describe('BotHealthCheckDrawer', () => {
     render(
       <BotHealthCheckDrawer
         open
+        capability={internalCapability}
         botName="墨韵预发测试3"
         summary={summary}
         loading={false}
@@ -106,12 +128,36 @@ describe('BotHealthCheckDrawer', () => {
     expect(screen.getByRole('tab', { name: '能力调用力' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '上下文学习力' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '任务交付力' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '多维健康度雷达图' })).toBeInTheDocument();
+  });
+
+  test('Open Core only renders configuration health without tabs, radar, or history detail actions', () => {
+    render(
+      <BotHealthCheckDrawer
+        open
+        capability={openCoreCapability}
+        botName="开源 Bot"
+        summary={{ ...summary, dimensions: [summary.dimensions[0]], history: [summary.history[0]] }}
+        loading={false}
+        checking={false}
+        onOpenChange={noop}
+        onRefresh={noop}
+        onRunDiagnose={noop}
+      />,
+    );
+
+    expect(screen.getByText('配置健康度体检')).toBeInTheDocument();
+    expect(screen.queryByRole('tablist', { name: '体检维度' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: '多维健康度雷达图' })).not.toBeInTheDocument();
+    expect(screen.getByText('历史体检记录')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看详情' })).not.toBeInTheDocument();
   });
 
   test('active dimension panel shows check table and history', () => {
     render(
       <BotHealthCheckDrawer
         open
+        capability={internalCapability}
         botName="墨韵预发测试3"
         summary={summary}
         loading={false}
@@ -132,6 +178,7 @@ describe('BotHealthCheckDrawer', () => {
     render(
       <BotHealthCheckDrawer
         open
+        capability={internalCapability}
         botName="墨韵预发测试3"
         summary={summary}
         loading={false}
@@ -151,6 +198,7 @@ describe('BotHealthCheckDrawer', () => {
     render(
       <BotHealthCheckDrawer
         open
+        capability={internalCapability}
         botName="墨韵预发测试3"
         summary={summary}
         loading={false}
@@ -191,6 +239,7 @@ describe('BotHealthCheckDrawer', () => {
     render(
       <BotHealthCheckDrawer
         open
+        capability={internalCapability}
         botName="低分 Bot"
         summary={{
           botId: 'b1',

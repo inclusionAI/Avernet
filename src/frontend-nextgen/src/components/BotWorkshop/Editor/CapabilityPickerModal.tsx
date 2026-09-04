@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
@@ -70,7 +71,9 @@ export function CapabilityPickerModal({
   onConfirm,
   onUploadFolder,
 }: CapabilityPickerModalProps) {
-  const [source, setSource] = useState<Source>('market');
+  const skillSources = getCapabilities().getBotSkillPickerSources().value;
+  const sources: Source[] = kind === 'skill' ? skillSources : ['market', 'workshop'];
+  const [source, setSource] = useState<Source>(() => sources[0] ?? 'mine');
   const [marketSource, setMarketSource] = useState<MarketSource>('skillcenter-market');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
@@ -132,12 +135,16 @@ export function CapabilityPickerModal({
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>添加 {kind === 'skill' ? 'Skill' : 'MCP'}</ModalTitle>
-          <ModalDescription>从市场或能力工坊选择，可一次添加多个能力。</ModalDescription>
+          <ModalDescription>
+            {kind === 'skill' && sources.length === 1
+              ? '从我的 Skill 中选择，可一次添加多个能力。'
+              : '从市场或能力工坊选择，可一次添加多个能力。'}
+          </ModalDescription>
         </ModalHeader>
         <Segmented
           value={source}
           onChange={(value) => {
-            setSource(value);
+            setSource(value as Source);
             setSelected([]);
             setKeyword('');
           }}
@@ -149,7 +156,7 @@ export function CapabilityPickerModal({
               disabledReason: kind === 'mcp' ? '后端暂未提供能力工坊 MCP 独立列表 OpenAPI' : undefined,
             },
             ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
-          ]}
+          ].filter((option) => sources.includes(option.value as Source))}
           className="w-fit"
         />
         {kind === 'skill' && source === 'market' ? (

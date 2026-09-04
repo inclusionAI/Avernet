@@ -83,6 +83,10 @@ export interface BotEditorResource {
   size?: number;
 }
 
+export type BotEditorResourcePreview =
+  | { kind: 'text'; content: string; contentType: string }
+  | { kind: 'image'; blob: Blob; contentType: string };
+
 export interface BotEditorRoutine {
   id: string;
   name: string;

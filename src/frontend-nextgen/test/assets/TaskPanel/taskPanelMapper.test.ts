@@ -347,6 +347,73 @@ describe('taskPanelMapper root output dimensions (产物输出处理)', () => {
     expect(task.rootOutputDimensions?.[1].content).toBe('新客到店 1500、券核销 1000');
   });
 
+  it('维度内容优先取 $.<key>.output，兼容 $.<key> 直字符串与 JSON 信封展开', () => {
+    const dashboard = {
+      task_id: 'task-output-field',
+      run_id: 1,
+      status: 'DONE',
+      needs_attention: false,
+      task_type: 'dynamic',
+      source_type: 'bot',
+      owner_user_id: 'user-1',
+      owner_bot_id: 'bot-1',
+      task_spec: {
+        metadata: { title: '存储行业分析', instruction: '执行' },
+        goal: { objective: '目标', acceptances: [] },
+      },
+      create_time: '2026-09-01T10:00:00+08:00',
+      finish_time: null,
+      loop_round: 1,
+      progress: {
+        total: 1,
+        pending: 0,
+        planning: 0,
+        running: 0,
+        done: 1,
+        failed: 0,
+        hung: 0,
+        skipped: 0,
+        percent: 100,
+      },
+      tasks: [
+        {
+          node_id: 'node-root',
+          task_id: 'task-output-field',
+          sequence: 1,
+          status: 'DONE',
+          run_info: {
+            output: {
+              sub_tech_customers: { output: '## 技术演进与客户需求分析\n\n双维度均完整通过验收。' },
+              sub_investment_judgment: { output: '存储行业投资价值判断报告已完成。' },
+              'bbs-e5cb1eaf': { output: '{"result":"尽调报告已生成并保存"}' },
+              plain_dimension: '直接字符串维度的产出内容',
+            },
+          },
+          task_spec: {
+            metadata: { title: '任务接收', instruction: '执行' },
+            goal: { objective: '目标', acceptances: [] },
+          },
+        },
+      ],
+      relations: [],
+    } as unknown as TaskDashboardResponse;
+
+    const task = mapDashboard(dashboard);
+    expect(task.rootOutputDimensions?.map((d) => d.key)).toEqual([
+      'sub_tech_customers',
+      'sub_investment_judgment',
+      'bbs-e5cb1eaf',
+      'plain_dimension',
+    ]);
+    // $.<key>.output 为 markdown/文本 → 原样保留
+    expect(task.rootOutputDimensions?.[0].content).toBe('## 技术演进与客户需求分析\n\n双维度均完整通过验收。');
+    expect(task.rootOutputDimensions?.[1].content).toBe('存储行业投资价值判断报告已完成。');
+    // $.<key>.output 为 JSON 信封字符串 → 展开取 result 具体值
+    expect(task.rootOutputDimensions?.[2].content).toBe('尽调报告已生成并保存');
+    // $.<key> 本身为字符串 → 直接作为内容
+    expect(task.rootOutputDimensions?.[3].content).toBe('直接字符串维度的产出内容');
+  });
+
   it('根节点 output 为非结构化(字符串/null)时不产生维度卡片，回退 markdown 渲染', () => {
     const dashboard = {
       task_id: 'task-plain',

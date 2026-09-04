@@ -22,6 +22,12 @@ jest.mock('@/hooks/useBotWorkshopDetail', () => ({
     },
     loading: false,
     error: undefined,
+    capability: {
+      dimensions: ['configuration'],
+      showRadar: false,
+      showLogDetails: false,
+      showRawSnapshot: false,
+    },
   }),
 }));
 

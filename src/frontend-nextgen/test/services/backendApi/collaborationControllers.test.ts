@@ -4,6 +4,7 @@ import * as botController from '@/services/backendApi/collaboration/collaboratio
 import * as groupController from '@/services/backendApi/collaboration/collaborationGroupController';
 import * as invitationController from '@/services/backendApi/collaboration/collaborationInvitationController';
 import * as publicationController from '@/services/backendApi/collaboration/collaborationPublicationController';
+import * as registrationController from '@/services/backendApi/collaboration/collaborationRegistrationController';
 import {
   discoverPublicBots,
   PublicBotCatalogError,
@@ -259,6 +260,25 @@ describe('collaboration session controller', () => {
     expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/sessions/s1/participants/bot-x', {
       method: 'DELETE',
       injectUserId: false,
+    });
+  });
+});
+
+describe('collaboration registration controller', () => {
+  it('fetches bot registration token without injecting user_id', async () => {
+    backendRequest.mockResolvedValue({
+      code: 20000,
+      message: 'OK',
+      data: { token: 'token-1', expires_at: 1788272686000 },
+      request_id: 'r',
+    });
+
+    await registrationController.getBotRegistrationToken();
+
+    expect(backendRequest).toHaveBeenCalledWith('/openapi/v1/collaboration/register/token', {
+      method: 'GET',
+      injectUserId: false,
+      signal: undefined,
     });
   });
 });

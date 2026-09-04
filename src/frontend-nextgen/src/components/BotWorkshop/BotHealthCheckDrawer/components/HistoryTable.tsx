@@ -7,10 +7,11 @@ import { History } from 'lucide-react';
 
 interface HistoryTableProps {
   history: BotHealthHistoryItem[];
+  showDetails: boolean;
   onViewDetail: (item: BotHealthHistoryItem) => void;
 }
 
-export function HistoryTable({ history, onViewDetail }: HistoryTableProps) {
+export function HistoryTable({ history, showDetails, onViewDetail }: HistoryTableProps) {
   if (history.length === 0) {
     return null;
   }
@@ -33,7 +34,7 @@ export function HistoryTable({ history, onViewDetail }: HistoryTableProps) {
                   <th className="px-4 py-3 text-left">体检项目</th>
                   <th className="px-4 py-3 text-left">警告项</th>
                   <th className="px-4 py-3 text-left">未通过项</th>
-                  <th className="px-4 py-3 text-left">操作</th>
+                  {showDetails ? <th className="px-4 py-3 text-left">操作</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -52,11 +53,13 @@ export function HistoryTable({ history, onViewDetail }: HistoryTableProps) {
                       <td className="px-4 py-3 tabular-nums text-[var(--color-error)]">
                         {item.dimension.errorCount ?? 0}
                       </td>
-                      <td className="px-4 py-3">
-                        <Button variant="ghost" size="sm" onClick={() => onViewDetail(item)}>
-                          查看详情
-                        </Button>
-                      </td>
+                      {showDetails ? (
+                        <td className="px-4 py-3">
+                          <Button variant="ghost" size="sm" onClick={() => onViewDetail(item)}>
+                            查看详情
+                          </Button>
+                        </td>
+                      ) : null}
                     </tr>
                   );
                 })}

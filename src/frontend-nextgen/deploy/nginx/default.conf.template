@@ -13,8 +13,8 @@ server {
   location /openapi/v1/bots/work-order-notifications { proxy_pass ${TEAMCLAW_ADMIN_UPSTREAM}; proxy_set_header Host $host; }
   location /openapi/v1/bots/work-orders { proxy_pass ${TEAMCLAW_ADMIN_UPSTREAM}; proxy_set_header Host $host; }
   location /openapi/v1/bots/spaces { proxy_pass ${TEAMCLAW_ADMIN_UPSTREAM}; proxy_set_header Host $host; }
+  location /openapi/v1/collaboration/tasks/ { proxy_pass ${TASK_ENGINE_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; }
   location /openapi/ { proxy_pass ${TEAMCLAW_GATEWAY_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; }
-  location /api/v1/collaboration/tasks/ { proxy_pass ${TASK_ENGINE_UPSTREAM}; proxy_set_header Host $host; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; }
   location /api/v1/collaboration/ { proxy_pass ${TEAMCLAW_GATEWAY_UPSTREAM}; proxy_set_header Host $host; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade"; }
   location /api/workflows { proxy_pass ${CLAWWEB_UPSTREAM}; proxy_set_header Host $host; }
   location /api/ { proxy_pass ${PRIVATE_CHAT_MANAGEMENT_UPSTREAM}; proxy_set_header Host $host; }

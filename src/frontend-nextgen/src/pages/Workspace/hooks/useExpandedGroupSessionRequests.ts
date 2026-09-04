@@ -1,5 +1,6 @@
 import type { GroupSessionPage, SessionView } from '@/domain/collaboration';
 import { groupService } from '@/services/workspace/groupService';
+import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useEffect, type MutableRefObject } from 'react';
 import { toast } from 'sonner';
 
@@ -40,7 +41,9 @@ export function useExpandedGroupSessionRequests({
           if (res.ok) replaceGroupPage(gid, res.data);
           else {
             replaceGroupPage(gid, []);
-            toast.error(res.error.friendlyMessage);
+            // 未登录（oauth-provider + 非 authenticated）静默：会话失效后展开群 sessions 的
+            // 失败 toast 统一由 ExternalLoginPromptModal 承担（见 loginToastGate）。
+            if (!shouldMuteNonAuthedToast()) toast.error(res.error.friendlyMessage);
           }
         })
         .finally(() => {

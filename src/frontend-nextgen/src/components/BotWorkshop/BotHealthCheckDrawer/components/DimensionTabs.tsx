@@ -5,17 +5,20 @@ import { cn } from '@/utils/cn';
 
 interface DimensionTabsProps {
   activeKey: BotHealthDimensionKey;
+  dimensions: BotHealthDimensionKey[];
   onChange: (key: BotHealthDimensionKey) => void;
 }
 
-export function DimensionTabs({ activeKey, onChange }: DimensionTabsProps) {
+export function DimensionTabs({ activeKey, dimensions, onChange }: DimensionTabsProps) {
+  const allowedDimensions = new Set(dimensions);
+
   return (
     <div
       className="flex flex-wrap gap-2 border-b border-[var(--color-border)] px-6 py-3"
       role="tablist"
       aria-label="体检维度"
     >
-      {DIMENSIONS_INFO.map((dim) => {
+      {DIMENSIONS_INFO.filter((dim) => allowedDimensions.has(dim.dimensionKey)).map((dim) => {
         const active = activeKey === dim.dimensionKey;
         return (
           <Button

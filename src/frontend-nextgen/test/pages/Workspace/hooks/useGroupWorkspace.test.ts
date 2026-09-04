@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import { useGroupWorkspace } from '@/pages/Workspace/hooks/useGroupWorkspace';
 import { groupService } from '@/services/workspace/groupService';
+import { useLoginStrategyStore } from '@/stores/loginStrategyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
@@ -188,5 +189,24 @@ describe('useGroupWorkspace', () => {
     expect(toastError).toHaveBeenCalledWith('解散协作群失败，请稍后重试。');
     toastSuccess.mockRestore();
     toastError.mockRestore();
+  });
+
+  it('mutes loadGroups-failure toast when unauthenticated under oauth-provider', async () => {
+    const { toast } = jest.requireActual('sonner') as typeof import('sonner');
+    const toastError = jest.spyOn(toast, 'error').mockImplementation(() => 'err' as any);
+    useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
+    // externalAuthStore.status 默认 'unknown'（非 authenticated）→ shouldMuteNonAuthedToast() 为 true。
+    gs.loadGroups.mockResolvedValue({
+      ok: false,
+      error: { code: 'GROUPS_LOAD_FAILED', friendlyMessage: '加载协作群失败，请稍后重试。', canRetry: true },
+    });
+    renderHook(() => useGroupWorkspace());
+    await waitFor(() => expect(gs.loadGroups).toHaveBeenCalled());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(toastError).not.toHaveBeenCalled();
+    toastError.mockRestore();
+    useLoginStrategyStore.getState().setLoginStrategy('ace-gateway');
   });
 });

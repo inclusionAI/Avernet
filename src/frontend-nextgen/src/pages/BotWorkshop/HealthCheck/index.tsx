@@ -131,6 +131,7 @@ const BotHealthCheckPage: React.FC = () => {
         {healthCheck.summary ? (
           <HealthCheckView
             summary={healthCheck.summary}
+            capability={healthCheck.capability}
             botName={bot.name}
             loading={healthCheck.loading}
             checking={healthCheck.checking}

@@ -98,11 +98,20 @@ function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
 
   return Object.entries(payload as Record<string, unknown>)
     .map(([key, value]) => {
-      const summary =
-        value && typeof value === 'object' && !Array.isArray(value)
-          ? (value as Record<string, unknown>).summary
-          : undefined;
-      const content = typeof summary === 'string' && summary.trim() ? summary : renderableSource(value);
+      // 维度内容解析（兼容多种契约）:
+      //  1) $.<key>.output（字符串/对象）→ 取 output 内容;
+      //  2) $.<key>.summary（旧契约）→ 取 summary;
+      //  3) $.<key> 本身为字符串 → 直接作为内容。
+      // 取到内容后统一走 renderableSource：JSON 则展开具体值，非 JSON（markdown/文本）原样渲染。
+      let raw: unknown;
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const obj = value as Record<string, unknown>;
+        raw = obj.output ?? obj.summary;
+      } else if (typeof value === 'string') {
+        raw = value;
+      }
+      const resolved = raw === null || raw === undefined ? value : raw;
+      const content = renderableSource(resolved);
       return content?.trim() ? { key, content } : null;
     })
     .filter((item): item is TaskOutputDimension => item !== null);

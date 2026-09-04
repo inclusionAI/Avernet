@@ -16,6 +16,7 @@ interface EnvironmentPanelProps {
   loading?: boolean;
   checking?: boolean;
   history: BotHealthHistoryItem[];
+  showHistoryDetails: boolean;
   onViewHistoryDetail: (item: BotHealthHistoryItem) => void;
   onReDiagnose: () => void;
 }
@@ -25,12 +26,15 @@ export function EnvironmentPanel({
   loading,
   checking,
   history,
+  showHistoryDetails,
   onViewHistoryDetail,
   onReDiagnose,
 }: EnvironmentPanelProps) {
   const scanFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
-  const dimStyle =
-    DIM_STATUS_STYLES[scanFailed ? 'failed' : dimension.status] ?? { label: '未知', tone: 'neutral' as const };
+  const dimStyle = DIM_STATUS_STYLES[scanFailed ? 'failed' : dimension.status] ?? {
+    label: '未知',
+    tone: 'neutral' as const,
+  };
   const hasCheckItems = (dimension.checkItems?.length ?? 0) > 0;
   const showBadge = dimension.key === 'configuration' || hasCheckItems;
 
@@ -97,7 +101,7 @@ export function EnvironmentPanel({
 
       <OptimizationPanel dimension={dimension} />
 
-      <HistoryTable history={history} onViewDetail={onViewHistoryDetail} />
+      <HistoryTable history={history} showDetails={showHistoryDetails} onViewDetail={onViewHistoryDetail} />
     </div>
   );
 }

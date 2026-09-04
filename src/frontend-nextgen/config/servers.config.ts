@@ -7,6 +7,9 @@
 export interface ServerConfig {
   /** TeamClaw Gateway，承载 /openapi/v1/** 后端接口（协作/工坊/市场等）。 */
   TEAMCLAW_GW: string;
+  /** Open Core BCS endpoint：注册 CLI 在 PRE/PROD 环境下发使用的接入地址。 */
+  BCS_ENDPOINT_PRE: string;
+  BCS_ENDPOINT_PROD: string;
   /** Admin 后端（clawweb/空间中台），承载 /openapi/v1/spaces、/work-orders、/work-order-notifications。
    * 与 TeamClaw Gateway 不同域，独立代理；真实内部地址由 config/internal/servers.ts 注入。Open Core 占位 localhost。 */
   TEAMCLAW_ADMIN: string;
@@ -33,6 +36,8 @@ export type ServerConfigMap = Record<'LOCAL' | 'DEV' | 'PRE' | 'PROD', ServerCon
 
 const PLACEHOLDER: ServerConfig = {
   TEAMCLAW_GW: 'http://127.0.0.1:8888',
+  BCS_ENDPOINT_PRE: 'http://127.0.0.1:21000',
+  BCS_ENDPOINT_PROD: 'http://127.0.0.1:21000',
   TEAMCLAW_ADMIN: 'http://127.0.0.1:8888',
   PRIVATE_CHAT_MANAGEMENT: 'http://127.0.0.1:8888',
   LEGACY_AGENTCLAW: 'http://127.0.0.1:8888',

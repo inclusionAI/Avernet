@@ -26,7 +26,7 @@ export interface TaskComposerContext {
 }
 
 export function buildExecuteRequest(form: TaskComposerForm, ctx: TaskComposerContext): ExecuteTaskRequest {
-  // 后端契约 TaskInfoRequestDTO（/api/v1/collaboration/tasks/execute）：
+  // 后端契约 TaskInfoRequestDTO（task API execute 端点，前缀由 capability getTaskApiBase 注入）：
   // - task_spec.metadata 不含 task_id（后端自动生成 UUID）；
   // - task_type 进 execution_config.task_type；来源渠道语义由 source_type + owner_bot_id 承载
   //   （source_type 即原 source_channel_type，owner_bot_id 即原 source_channel_id），不再透传旧字段。
