@@ -193,12 +193,17 @@ def render_virtual_host(rule: OutboundRule, idx: int, cluster: str = "outbound_o
 
     domains_yaml = "\n".join(f'{child}- "{d}"' for d in rule.domains)
 
+    # upgrade_configs is required for WebSocket: without it Envoy treats the
+    # GET as a plain HTTP request, strips the hop-by-hop Upgrade headers, and
+    # the upstream 403/400s the non-websocket handshake.
     routes_yaml = (
         f'{child}- match:\n'
         f'{child}    prefix: "/"\n'
         f'{child}  route:\n'
         f'{child}    cluster: {cluster}\n'
-        f'{child}    timeout: 0s'
+        f'{child}    timeout: 0s\n'
+        f'{child}    upgrade_configs:\n'
+        f'{child}      - upgrade_type: websocket'
     )
 
     header_parts = []
@@ -271,7 +276,9 @@ def render_default_virtual_host(cluster: str = "outbound_original_dst_http") -> 
         f'{child}    prefix: "/"\n'
         f'{child}  route:\n'
         f'{child}    cluster: {cluster}\n'
-        f'{child}    timeout: 0s'
+        f'{child}    timeout: 0s\n'
+        f'{child}    upgrade_configs:\n'
+        f'{child}      - upgrade_type: websocket'
     )
 
 
