@@ -115,7 +115,11 @@ def _build_template_vars(
     mount_path = storage.path if storage and storage.path else "/home/admin"
     storage_size = storage.quota if storage and storage.quota else "1Gi"
     cpu = str(resource_spec.cpu) if resource_spec else "2"
-    memory = f"{resource_spec.memory}Gi" if resource_spec else "4Gi"
+    memory = f"{resource_spec.memory}Gi" if resource_spec else "3Gi"
+    cpu_request = "1"
+    cpu_limit = "1.5"
+    memory_request = memory
+    memory_limit = memory
     ttl_expiration_timestamp = ""
     if ttl_in_minutes is not None:
         ttl_expiration_timestamp = str(
@@ -134,6 +138,10 @@ def _build_template_vars(
         "mount_path": mount_path,
         "cpu": cpu,
         "memory": memory,
+        "cpu_request": cpu_request,
+        "cpu_limit": cpu_limit,
+        "memory_request": memory_request,
+        "memory_limit": memory_limit,
         "ttl_expiration_timestamp": ttl_expiration_timestamp,
         "envs": envs or {},
         "header_rules_yaml": _convert_outbound_rules(outbound_operation_rule),
