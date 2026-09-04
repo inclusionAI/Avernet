@@ -202,6 +202,24 @@ test_frontend_install_includes_dev_dependencies() (
   esac
 )
 
+# npm's legacy audit endpoint is being retired and the call now stalls ~7m
+# before giving up — a fixed cost per invocation, not proportional to the tree
+# (33 packages: 421s with audit, 3s without, identical node_modules). Every
+# install in the singlebox path must opt out, so a new call site cannot
+# silently reintroduce the stall. Global installs (-g) do not audit.
+test_npm_installs_opt_out_of_the_audit_call() {
+    local offenders
+    offenders="$(
+        grep -nE '(^|[^[:alnum:]_./-])npm[[:space:]]+(ci|install)([[:space:]]|$)' \
+            "${ROOT}"/scripts/modules/*.sh \
+        | grep -vE 'log_(info|warn|error)' \
+        | grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' \
+        | grep -vE 'npm[[:space:]]+install[[:space:]]+-g' \
+        | grep -v -- '--no-audit' || true
+    )"
+    [ -z "$offenders" ] || fail "npm install/ci without --no-audit: ${offenders}"
+}
+
 test_service_modules_use_ownership_aware_stop_helpers() {
   local offenders
   offenders="$(
@@ -616,6 +634,7 @@ test_backend_default_readiness_window_covers_cold_start
 test_frontend_start_prepares_dependencies_before_launch
 test_frontend_deps_require_dev_commands
 test_frontend_install_includes_dev_dependencies
+test_npm_installs_opt_out_of_the_audit_call
 test_service_modules_use_ownership_aware_stop_helpers
 test_service_starts_fail_when_ports_remain_occupied
 test_baas_stop_does_not_delegate_to_app_stop

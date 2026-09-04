@@ -324,12 +324,21 @@ install_bcs_panel_asset_deps() {
     log_info "Installing BCS panel asset dependencies..."
     cd "${BCS_PANEL_ASSET_DIR}"
 
+    # --no-audit/--no-fund: npm's legacy audit endpoint is being retired
+    # ("This endpoint is being retired. Use the bulk advisory endpoint
+    # instead"), and the call now stalls for ~7m before npm gives up and
+    # prints neither "audited N packages" nor a vulnerability count. The
+    # stall is a fixed cost per invocation, not proportional to the tree:
+    # these 33 packages took 421s with audit on and 3s with it off, for an
+    # identical node_modules. Auditing here was never a gate either — it
+    # printed advisories into a CI log nobody reads. Same flags as the
+    # claude_relays.sh gateway build.
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm ci --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install BCS panel asset dependencies"
             return 1
         fi
-    elif ! HUSKY=0 npm install --registry="${NPM_REGISTRY_URL}"; then
+    elif ! HUSKY=0 npm install --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
         log_error "Failed to install BCS panel asset dependencies"
         return 1
     fi
@@ -538,11 +547,24 @@ setup_bcn_plugin() {
                 return 1
             fi
 
+            # The dev tree this build needs is 2051 packages / 348 MB / 56k
+            # files (.npmrc pins install-strategy=nested, so nothing dedupes).
+            # Only `ws` ships, so the tree has to be reduced before it is copied
+            # back — but `npm prune --omit=dev` reduces it by reconciling that
+            # whole tree, which takes ~7m (measured: 423s, and the same
+            # "up to date in 7m" line appears in CI run 33837445531). Deleting
+            # node_modules and reinstalling prod-only lands the same shipped
+            # tree in 4s — `ws` and nothing else, where prune also left a few
+            # empty scope dirs behind — because it resolves one package
+            # instead of 2051.
+            # --no-audit/--no-fund drop two registry round-trips whose output
+            # nobody reads out of a throwaway build dir.
             if (
                 cd "${work}" &&
-                    npm install --registry="${NPM_REGISTRY_URL}" &&
+                    npm install --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund &&
                     npm run build &&
-                    npm prune --omit=dev
+                    rm -rf "${work}/node_modules" &&
+                    npm install --omit=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund
             ); then
                 rm -rf "${plugin_src}/dist" "${plugin_src}/node_modules"
                 if ! cp -R "${work}/dist" "${work}/node_modules" "${plugin_src}/"; then

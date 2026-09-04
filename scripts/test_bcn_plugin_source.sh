@@ -546,4 +546,96 @@ test_stack_config_allows_plugin_path_refresh
 test_dynamic_config_refreshes_plugin_path
 test_dynamic_config_copies_thinking_default
 
+# Lays out a fake PROJECT_ROOT holding just the plugin source, plus an npm stub
+# that records every invocation and fakes the artifacts the real one leaves
+# behind. Echoes "<fake_root>|<calls_file>|<ext_dir>".
+_bcn_source_fixture() {
+  local tmp="$1"
+  local src="${tmp}/root/src/bcs/crates/plugins/openclaw-channel-bcn"
+  local bindir="${tmp}/bin" calls="${tmp}/npm-calls" ext="${tmp}/ext"
+  mkdir -p "$src" "$bindir" "$ext"
+  printf '{"name":"stub","version":"0.0.0"}\n' > "${src}/package.json"
+  cat > "${bindir}/npm" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${calls}"
+[ "\$1 \$2" = "run build" ] && mkdir -p dist/esm && : > dist/esm/index.js
+[ "\$1" = "install" ] && mkdir -p node_modules
+exit 0
+STUB
+  chmod +x "${bindir}/npm"
+  printf '%s|%s|%s\n' "${tmp}/root" "$calls" "$ext"
+}
+
+_run_setup_bcn_source() {
+  local root="$1" bindir="$2" ext="$3" home="$4"
+  PROJECT_ROOT="$root" BCS_DIR="${root}/src/bcs" \
+  PATH="${bindir}:$PATH" OPENCLAW_EXTENSIONS_ROOT="$ext" HOME="$home" \
+  BCN_PLUGIN_SOURCE=source bash -c '
+    . "'"${SCRIPT_DIR}"'/utils.sh"
+    . "'"${SCRIPT_DIR}"'/modules/bcs.sh"
+    setup_bcn_plugin
+  ' >/dev/null 2>&1
+}
+
+# The source build reduces a 2051-package dev tree to the one package that
+# ships. `npm prune --omit=dev` did that by reconciling the whole tree (~7m
+# measured); reinstalling prod-only reaches the same state in seconds. Pin the
+# sequence so the slow form cannot come back unnoticed.
+test_source_build_reinstalls_prod_deps_instead_of_pruning() {
+  local tmp; tmp="$(mktemp -d)"
+  local fixture root calls ext
+  fixture="$(_bcn_source_fixture "$tmp")"
+  root="${fixture%%|*}"; calls="$(printf '%s' "$fixture" | cut -d'|' -f2)"
+  ext="${fixture##*|}"
+
+  _run_setup_bcn_source "$root" "${tmp}/bin" "$ext" "$tmp"
+
+  local first second third
+  first="$(sed -n 1p "$calls")"
+  second="$(sed -n 2p "$calls")"
+  third="$(sed -n 3p "$calls")"
+
+  assert_contains "$first" "install"
+  assert_contains "$first" "--no-audit"
+  assert_contains "$first" "--no-fund"
+  assert_eq "$second" "run build" "build runs against the dev tree"
+  assert_contains "$third" "install"
+  assert_contains "$third" "--omit=dev"
+
+  if grep -q -- "prune" "$calls"; then
+    fail "source build should not call npm prune: $(cat "$calls")"
+  fi
+  # The dev tree must be gone before the prod install, or the reinstall would
+  # leave all 2051 packages in place and the reduction would be a no-op.
+  if [ -d "${root}/src/bcs/crates/plugins/openclaw-channel-bcn/node_modules/eslint" ]; then
+    fail "dev dependencies survived into the copied-back tree"
+  fi
+  rm -rf "$tmp"
+}
+
+# The singlebox-coverage workflow caches dist/ + node_modules and relies on this
+# branch to turn a cache hit into a skipped build. If the skip stops firing the
+# cache silently buys nothing, so assert npm is never reached.
+test_source_build_skips_when_already_built() {
+  local tmp; tmp="$(mktemp -d)"
+  local fixture root calls ext src
+  fixture="$(_bcn_source_fixture "$tmp")"
+  root="${fixture%%|*}"; calls="$(printf '%s' "$fixture" | cut -d'|' -f2)"
+  ext="${fixture##*|}"
+  src="${root}/src/bcs/crates/plugins/openclaw-channel-bcn"
+
+  mkdir -p "${src}/dist/esm" "${src}/node_modules"
+  : > "${src}/dist/esm/index.js"
+
+  _run_setup_bcn_source "$root" "${tmp}/bin" "$ext" "$tmp"
+
+  if [ -s "$calls" ]; then
+    fail "prebuilt plugin should skip npm entirely, got: $(cat "$calls")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_source_build_reinstalls_prod_deps_instead_of_pruning
+test_source_build_skips_when_already_built
+
 if [ "$FAILS" -eq 0 ]; then echo "ALL PASS"; else echo "${FAILS} FAILURE(S)"; exit 1; fi

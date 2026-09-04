@@ -193,6 +193,29 @@ jobs:
             ${{ runner.os }}-cargo-e2e-
             ${{ runner.os }}-cargo-
 
+      - name: Cache built BCN plugin
+        if: steps.changes.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          # `setup_bcn_plugin` (scripts/modules/bcs.sh) rebuilds the plugin from
+          # source on every run: three unlocked npm tree operations in a fresh
+          # temp dir. package-lock.json is gitignored for this package, so npm
+          # re-resolves all 2051 packages from the registry each time — the one
+          # npm step in this job with no lockfile to fall back on. That cost 29s
+          # when the registry was fast and 11m when it was not (run 33837445531).
+          # Restoring dist/ + node_modules makes the script's own
+          # "BCN plugin already built, skipping" branch fire instead.
+          #
+          # No restore-keys: a near-miss would restore a dist/ built from a
+          # different package.json and the skip branch would accept it, so the
+          # key must match exactly or the plugin is rebuilt. node_modules is the
+          # prod-only tree the build reduces to before copying back: `ws` alone,
+          # 232 KB, so this entry stays small against the repo cache budget.
+          path: |
+            src/bcs/crates/plugins/openclaw-channel-bcn/dist
+            src/bcs/crates/plugins/openclaw-channel-bcn/node_modules
+          key: ${{ runner.os }}-bcn-plugin-${{ hashFiles('src/bcs/crates/plugins/openclaw-channel-bcn/package.json', 'src/bcs/crates/plugins/openclaw-channel-bcn/.npmrc') }}
+
       - name: Validate shell scripts
         if: steps.changes.outputs.skip != 'true'
         run: |
