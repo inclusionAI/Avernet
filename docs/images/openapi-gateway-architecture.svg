@@ -1,0 +1,330 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1680 1040" width="1680" height="1040" role="img" aria-label="Avernet OpenAPI 微服务架构：统一网关完成鉴权与主体签名后，按域转发至 backend、bcs、baas、bcsfuse、agentclawproxy 与 clawweb。">
+  <title>Avernet OpenAPI —— 以网关为中心的微服务架构</title>
+
+  <defs>
+    <marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563EB"/>
+    </marker>
+    <marker id="ah-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#0F8F86"/>
+    </marker>
+    <marker id="ah-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9AA5B5"/>
+    </marker>
+  </defs>
+
+  <g font-family="'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', 'WenQuanYi Zen Hei', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+
+    <rect x="0" y="0" width="1680" height="1040" fill="#FAFBFC"/>
+
+    <!-- ══ 标题 ══ -->
+    <text x="40" y="56" font-size="27" font-weight="700" fill="#16202E">Avernet OpenAPI &#8212;&#8212; 以网关为中心的微服务架构</text>
+    <text x="40" y="81" font-size="13.5" fill="#5B6779">一个配置驱动的统一入口，前置于六个服务。图中每一条路由，都是网关 <tspan font-style="italic">application.yaml</tspan> 里的一行配置，而不是手写的接口处理器。</text>
+
+    <!-- ══ 调用方 ══ -->
+    <text x="40" y="112" font-size="10.5" font-weight="700" letter-spacing="1.6" fill="#8A94A6">调用方</text>
+
+    <g>
+      <rect x="40" y="122" width="379" height="76" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <text x="60" y="147" font-size="13.5" font-weight="700" fill="#16202E">浏览器工作台</text>
+      <text x="60" y="165" font-size="10.5" fill="#5B6779">frontend &#183; frontend-nextgen</text>
+      <text x="60" y="185" font-size="10.5" font-weight="600" fill="#2563EB">Cookie / SSO 单点登录  &#8658;  User 用户身份</text>
+    </g>
+    <g>
+      <rect x="447" y="122" width="379" height="76" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <text x="467" y="147" font-size="13.5" font-weight="700" fill="#16202E">合作方应用</text>
+      <text x="467" y="165" font-size="10.5" fill="#5B6779">第三方集成，直接调用对外开放的 API</text>
+      <text x="467" y="185" font-size="10.5" font-weight="600" fill="#2563EB">应用令牌 + AccessKey  &#8658;  App / AccessKey 身份</text>
+    </g>
+    <g>
+      <rect x="854" y="122" width="379" height="76" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <text x="874" y="147" font-size="13.5" font-weight="700" fill="#16202E">机器人与 Agent 运行时</text>
+      <text x="874" y="165" font-size="10.5" fill="#5B6779">已注册的 Bot 以自身身份发起调用</text>
+      <text x="874" y="185" font-size="10.5" font-weight="600" fill="#2563EB">Bot 令牌  &#8658;  Bot 机器人身份</text>
+    </g>
+    <g>
+      <rect x="1261" y="122" width="379" height="76" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <text x="1281" y="147" font-size="13.5" font-weight="700" fill="#16202E">WebSocket 客户端</text>
+      <text x="1281" y="165" font-size="10.5" fill="#5B6779">会话长连接、引擎长连接</text>
+      <text x="1281" y="185" font-size="10.5" font-weight="600" fill="#0F8F86">凭证随握手请求的 query 参数携带</text>
+    </g>
+
+    <line x1="229" y1="204" x2="229" y2="250" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="636" y1="204" x2="636" y2="250" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="1043" y1="204" x2="1043" y2="250" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="1450" y1="204" x2="1450" y2="250" stroke="#0F8F86" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah-teal)"/>
+
+    <!-- ══ 网关主面板 ══ -->
+    <rect x="40" y="256" width="1600" height="328" rx="14" fill="#F4F8FF" stroke="#B9D0F8" stroke-width="1.5"/>
+    <path d="M 54 256 H 1626 A 14 14 0 0 1 1640 270 V 312 H 40 V 270 A 14 14 0 0 1 54 256 Z" fill="#E4EEFE"/>
+    <line x1="40" y1="312" x2="1640" y2="312" stroke="#B9D0F8"/>
+
+    <text x="64" y="294" font-size="20" font-weight="700" letter-spacing="1.4" fill="#1D4ED8">网关 GATEWAY</text>
+    <text x="228" y="294" font-size="12" fill="#3B5B93"><tspan font-weight="700">/openapi/v1</tspan> 与 <tspan font-weight="700">/api/v1</tspan> 的唯一入口 &#183; 社区版默认监听 :8889</text>
+    <text x="1616" y="294" font-size="11" fill="#5B7BAE" text-anchor="end">FastAPI &#183; dependency-injector &#183; 一条 HTTP 兜底路由 + 每个 socket 域一条 WS 路由</text>
+
+    <!-- 阶段 1 -->
+    <g>
+      <rect x="68" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="84" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="84" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+      <text x="100" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">CORS 边界</text>
+      <line x1="80" y1="360" x2="296" y2="360" stroke="#E2ECFB"/>
+      <text x="80" y="382" font-size="10" fill="#5B6779">OPTIONS 预检请求在这里应答</text>
+      <text x="80" y="396" font-size="10" fill="#5B6779">早于路由、也早于鉴权</text>
+      <text x="80" y="410" font-size="10" fill="#5B6779">剥离上游的 CORS 响应头，浏览器</text>
+      <text x="80" y="424" font-size="10" fill="#5B6779">只会收到唯一一个 Allow-Origin</text>
+      <text x="80" y="438" font-size="10" fill="#5B6779">白名单是配置项，禁止写成 &#8220;*&#8221;</text>
+    </g>
+
+    <!-- 阶段 2 -->
+    <g>
+      <rect x="328" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="344" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="344" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+      <text x="360" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">域路由 DOMAIN ROUTER</text>
+      <line x1="340" y1="360" x2="556" y2="360" stroke="#E2ECFB"/>
+      <text x="340" y="382" font-size="10" fill="#5B6779">取 /openapi/v1 之后的第一段路径</text>
+      <text x="340" y="396" font-size="10" fill="#5B6779">作为域（domain），域决定上游</text>
+      <text x="340" y="410" font-size="10" fill="#5B6779">域 &#8594; 上游 server 全部来自 YAML</text>
+      <text x="340" y="424" font-size="10" fill="#5B6779">字面量匹配长者优先于前缀匹配</text>
+      <text x="340" y="438" font-size="10" fill="#5B6779">未知域 &#8658; 404，绝不做开放代理</text>
+    </g>
+
+    <!-- 阶段 3 -->
+    <g>
+      <rect x="588" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="604" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="604" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+      <text x="620" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">路由鉴权 ROUTE SECURITY</text>
+      <line x1="600" y1="360" x2="816" y2="360" stroke="#E2ECFB"/>
+      <text x="600" y="382" font-size="10" fill="#5B6779">路径（+ 方法）决定该操作接受</text>
+      <text x="600" y="396" font-size="10" fill="#5B6779">哪几种身份：</text>
+      <text x="600" y="410" font-size="10" fill="#5B6779">{ user, bot, app, access_key }</text>
+      <text x="600" y="424" font-size="10" fill="#5B6779">每种身份标注 required | optional</text>
+      <text x="600" y="438" font-size="10" fill="#5B6779">默认 &#8220;/**&#8221; &#8658; 必须有 user，失败即拒</text>
+    </g>
+
+    <!-- 阶段 4 -->
+    <g>
+      <rect x="848" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="864" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="864" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">4</text>
+      <text x="880" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">身份认证链 IDENTITY CHAINS</text>
+      <line x1="860" y1="360" x2="1076" y2="360" stroke="#E2ECFB"/>
+      <text x="860" y="382" font-size="10" fill="#5B6779">每种身份一条有序的策略链</text>
+      <text x="860" y="396" font-size="10" fill="#5B6779">google / dev cookie &#8658; User</text>
+      <text x="860" y="410" font-size="10" fill="#5B6779">bot_token &#8658; Bot &#183; app_token &#8658; App</text>
+      <text x="860" y="424" font-size="10" fill="#5B6779">access_key_token &#8658; AccessKey</text>
+      <text x="860" y="438" font-size="10" fill="#5B6779">凭证存在但无效 &#8658; 直接 401，不回退</text>
+    </g>
+
+    <!-- 阶段 5 -->
+    <g>
+      <rect x="1108" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="1124" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="1124" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">5</text>
+      <text x="1140" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">主体签名 PRINCIPAL SIGNER</text>
+      <line x1="1120" y1="360" x2="1336" y2="360" stroke="#E2ECFB"/>
+      <text x="1120" y="382" font-size="10" fill="#5B6779">解析出的每个身份都会被签进</text>
+      <text x="1120" y="396" font-size="10" fill="#5B6779">同一个短时效 JWT，每请求一份</text>
+      <text x="1120" y="410" font-size="10" fill="#5B6779">iss=gateway &#183; kid &#183; ttl 60s</text>
+      <text x="1120" y="424" font-size="10" fill="#5B6779">签名密钥来自 SecretResolver</text>
+      <text x="1120" y="438" font-size="10" fill="#5B6779">上游信任这个令牌，而非调用方</text>
+    </g>
+
+    <!-- 阶段 6 -->
+    <g>
+      <rect x="1368" y="326" width="240" height="132" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <circle cx="1384" cy="344" r="8.5" fill="#2563EB"/>
+      <text x="1384" y="347.5" font-size="9.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">6</text>
+      <text x="1400" y="349" font-size="12" font-weight="700" letter-spacing="0.5" fill="#16202E">转发与中继 FORWARD / RELAY</text>
+      <line x1="1380" y1="360" x2="1596" y2="360" stroke="#E2ECFB"/>
+      <text x="1380" y="382" font-size="10" fill="#5B6779">HTTP：httpx 原样转发路径，</text>
+      <text x="1380" y="396" font-size="10" fill="#5B6779">响应原样流式回传给调用方</text>
+      <text x="1380" y="410" font-size="10" fill="#5B6779">可按域配置路径重写规则</text>
+      <text x="1380" y="424" font-size="10" fill="#0F8F86">WS：先拨通上游，再接受客户端</text>
+      <text x="1380" y="438" font-size="10" fill="#0F8F86">而后双向原样中继数据帧</text>
+    </g>
+
+    <!-- 横切能力 -->
+    <g>
+      <rect x="68" y="474" width="474" height="78" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="84" y="496" font-size="10.5" font-weight="700" letter-spacing="1.1" fill="#1D4ED8">SCHEMA CATALOG &#8594; 对外发布的 API 文档</text>
+      <text x="84" y="515" font-size="10" fill="#5B6779">各上游的 OpenAPI 描述可从 file / http / object store 读取，每 300 秒刷新一次，</text>
+      <text x="84" y="529" font-size="10" fill="#5B6779">再合并成网关自己的 /openapi.json 与 /docs。</text>
+      <text x="84" y="543" font-size="10" fill="#5B6779">对外的 API 文档是生成出来的，不是逐个接口手写维护的。</text>
+    </g>
+    <g>
+      <rect x="560" y="474" width="474" height="78" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="576" y="496" font-size="10.5" font-weight="700" letter-spacing="1.1" fill="#1D4ED8">网关自身持有的状态</text>
+      <text x="576" y="515" font-size="10" fill="#5B6779">applications &#183; access keys &#183; tenants &#183; bots &#8212;&#8212; 单机用 SQLite，部署用 MariaDB。</text>
+      <text x="576" y="529" font-size="10" fill="#5B6779">缓存：进程内 stub 或 Redis。</text>
+      <text x="576" y="543" font-size="10" fill="#5B6779">Admin 接口签发的，正是第 3、4 阶段要校验的那些凭证。</text>
+    </g>
+    <g>
+      <rect x="1052" y="474" width="474" height="78" rx="9" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="1068" y="496" font-size="10.5" font-weight="700" letter-spacing="1.1" fill="#1D4ED8">每一个阶段都是可插拔的接缝</text>
+      <text x="1068" y="515" font-size="10" fill="#5B6779">SPI Protocol &#8594; bare/stub 实现 &#8594; PluginContainer 选择器。</text>
+      <text x="1068" y="529" font-size="10" fill="#5B6779">在 application.yaml 中选择：forwarder、schema_catalog、cache、</text>
+      <text x="1068" y="543" font-size="10" fill="#5B6779">database、secret、authn.*。企业版在 bootstrap 时注册额外实现。</text>
+    </g>
+
+    <text x="840" y="572" font-size="10.5" font-style="italic" fill="#5B7BAE" text-anchor="middle">新增一个上游、一条路由规则或一种身份，都只是改配置 &#8212;&#8212; 网关不为任何单个接口编写处理函数。</text>
+
+    <text x="40" y="602" font-size="10.5" font-weight="700" letter-spacing="1.6" fill="#8A94A6">上游服务 &#8212;&#8212; 由域决定服务，由配置决定地址</text>
+
+    <!-- ══ 网关 → 上游 ══ -->
+    <line x1="165"  y1="612" x2="165"  y2="694" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="420"  y1="612" x2="420"  y2="694" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="452"  y1="612" x2="452"  y2="694" stroke="#0F8F86" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah-teal)"/>
+    <line x1="705"  y1="612" x2="705"  y2="694" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="975"  y1="612" x2="975"  y2="694" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <line x1="1245" y1="612" x2="1245" y2="694" stroke="#0F8F86" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah-teal)"/>
+    <line x1="1515" y1="612" x2="1515" y2="694" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+
+    <g font-size="10" font-weight="600" text-anchor="middle">
+      <rect x="45"   y="628" width="240" height="24" rx="12" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="165"  y="643.5" fill="#1D4ED8">/bots &#183; /org &#183; /spaces &#183; /work-orders</text>
+      <rect x="345"  y="628" width="180" height="24" rx="12" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="435"  y="643.5" fill="#1D4ED8">/collaboration</text>
+      <rect x="645"  y="628" width="120" height="24" rx="12" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="705"  y="643.5" fill="#1D4ED8">/chat</text>
+      <rect x="885"  y="628" width="180" height="24" rx="12" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="975"  y="643.5" fill="#1D4ED8">/bcsfuse/*</text>
+      <rect x="1135" y="628" width="220" height="24" rx="12" fill="#FFFFFF" stroke="#9FD8D3"/>
+      <text x="1245" y="643.5" fill="#0F8F86">/bots/messages/ws</text>
+      <rect x="1415" y="628" width="200" height="24" rx="12" fill="#FFFFFF" stroke="#C9DBF7"/>
+      <text x="1515" y="643.5" fill="#1D4ED8">/harnessflow</text>
+    </g>
+
+    <!-- ══ 上游服务 ══ -->
+
+    <!-- backend -->
+    <g>
+      <rect x="40" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <rect x="40" y="700" width="250" height="4" rx="2" fill="#2563EB"/>
+      <text x="54" y="728" font-size="16" font-weight="700" fill="#16202E">backend</text>
+      <text x="54" y="746" font-size="10" fill="#5B6779">agentclaw &#183; Python/FastAPI &#183; :8888</text>
+      <line x1="54" y1="758" x2="276" y2="758" stroke="#E7ECF3"/>
+      <text x="54" y="778" font-size="10.5" fill="#3D4859">Bot 生命周期、会话、对话、</text>
+      <text x="54" y="792" font-size="10.5" fill="#3D4859">工作空间、技能、组织目录。</text>
+      <text x="54" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由</text>
+      <text x="54" y="832" font-size="9.5" fill="#5B6779">/openapi/v1/bots &#183; /org &#183; /spaces</text>
+      <text x="54" y="846" font-size="9.5" fill="#5B6779">/work-orders &#183; /work-order-notifications</text>
+      <text x="54" y="860" font-size="9.5" fill="#5B6779">/bots/skills &#183; 发布 &#183; loadtest ws</text>
+    </g>
+
+    <!-- bcs -->
+    <g>
+      <rect x="310" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <rect x="310" y="700" width="250" height="4" rx="2" fill="#2563EB"/>
+      <text x="324" y="728" font-size="16" font-weight="700" fill="#16202E">bcs</text>
+      <text x="324" y="746" font-size="10" fill="#5B6779">BCN 协作平面 &#183; Rust &#183; :21000</text>
+      <line x1="324" y1="758" x2="546" y2="758" stroke="#E7ECF3"/>
+      <text x="324" y="778" font-size="10.5" fill="#3D4859">Bot 注册、发现、群聊、消息</text>
+      <text x="324" y="792" font-size="10.5" fill="#3D4859">路由、上下文融合、可见性。</text>
+      <text x="324" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由</text>
+      <text x="324" y="832" font-size="9.5" fill="#5B6779">/openapi/v1/collaboration（http + ws）</text>
+      <text x="324" y="846" font-size="9.5" fill="#5B6779">/api/v1/collaboration/**（内部）</text>
+      <text x="324" y="860" font-size="9.5" fill="#5B6779">会话文件 &#183; 状态机运行</text>
+    </g>
+
+    <!-- baas -->
+    <g>
+      <rect x="580" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <rect x="580" y="700" width="250" height="4" rx="2" fill="#2563EB"/>
+      <text x="594" y="728" font-size="16" font-weight="700" fill="#16202E">baas</text>
+      <text x="594" y="746" font-size="10" fill="#5B6779">secbaas &#183; Python/FastAPI &#183; :8890</text>
+      <line x1="594" y1="758" x2="816" y2="758" stroke="#E7ECF3"/>
+      <text x="594" y="778" font-size="10.5" fill="#3D4859">Bot 运行时与沙箱 PaaS：</text>
+      <text x="594" y="792" font-size="10.5" fill="#3D4859">开通、设备、发布、租户。</text>
+      <text x="594" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由</text>
+      <text x="594" y="832" font-size="9.5" fill="#5B6779">/openapi/v1/chat</text>
+      <text x="594" y="846" font-size="9.5" fill="#5B6779">（BaaS 同时向内部调用方提供自己</text>
+      <text x="594" y="860" font-size="9.5" fill="#5B6779">的 API Key 与租户管理接口）</text>
+    </g>
+
+    <!-- bcsfuse -->
+    <g>
+      <rect x="850" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <rect x="850" y="700" width="250" height="4" rx="2" fill="#2563EB"/>
+      <text x="864" y="728" font-size="16" font-weight="700" fill="#16202E">bcsfuse</text>
+      <text x="864" y="746" font-size="10" fill="#5B6779">AI Worker 控制面 &#183; Python &#183; :8765</text>
+      <line x1="864" y1="758" x2="1086" y2="758" stroke="#E7ECF3"/>
+      <text x="864" y="778" font-size="10.5" fill="#3D4859">任务理解、检索、团队编排，</text>
+      <text x="864" y="792" font-size="10.5" fill="#3D4859">以及 OpenClaw 集成。</text>
+      <text x="864" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由 &#183; 在网关侧重写</text>
+      <text x="864" y="832" font-size="9.5" fill="#5B6779">/bcsfuse/groups &#8594; /api/v1/groups</text>
+      <text x="864" y="846" font-size="9.5" fill="#5B6779">/bcsfuse/workers &#8594; /v1/workers</text>
+      <text x="864" y="860" font-size="9.5" fill="#5B6779">两份已发布的 schema，同一个 server</text>
+    </g>
+
+    <!-- agentclawproxy -->
+    <g>
+      <rect x="1120" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#9FD8D3"/>
+      <rect x="1120" y="700" width="250" height="4" rx="2" fill="#0F8F86"/>
+      <text x="1134" y="728" font-size="16" font-weight="700" fill="#16202E">agentclawproxy</text>
+      <text x="1134" y="746" font-size="10" fill="#5B6779">沙箱 / 引擎代理 &#183; Python</text>
+      <line x1="1134" y1="758" x2="1356" y2="758" stroke="#E7ECF3"/>
+      <text x="1134" y="778" font-size="10.5" fill="#3D4859">引擎与沙箱 Pod 前面的内部跳板；</text>
+      <text x="1134" y="792" font-size="10.5" fill="#3D4859">负责 JWT 鉴权与目标解析。</text>
+      <text x="1134" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由</text>
+      <text x="1134" y="832" font-size="9.5" fill="#5B6779">/bots/messages/ws &#8594; /proxypass（ws）</text>
+      <text x="1134" y="846" font-size="9.5" fill="#5B6779">凭证随握手 query 参数传递，</text>
+      <text x="1134" y="860" font-size="9.5" fill="#5B6779">由这一跳校验，而不是由网关校验</text>
+    </g>
+
+    <!-- clawweb -->
+    <g>
+      <rect x="1390" y="700" width="250" height="172" rx="10" fill="#FFFFFF" stroke="#D6DDE7"/>
+      <rect x="1390" y="700" width="250" height="4" rx="2" fill="#2563EB"/>
+      <text x="1404" y="728" font-size="16" font-weight="700" fill="#16202E">clawweb</text>
+      <text x="1404" y="746" font-size="10" fill="#5B6779">HarnessFlow Web 服务</text>
+      <line x1="1404" y1="758" x2="1626" y2="758" stroke="#E7ECF3"/>
+      <text x="1404" y="778" font-size="10.5" fill="#3D4859">面向操作者与应用的任务护航</text>
+      <text x="1404" y="792" font-size="10.5" fill="#3D4859">（HarnessFlow）相关界面。</text>
+      <text x="1404" y="816" font-size="9" font-weight="700" letter-spacing="1.1" fill="#8A94A6">承接的路由</text>
+      <text x="1404" y="832" font-size="9.5" fill="#5B6779">/openapi/v1/harnessflow &#8594; /</text>
+      <text x="1404" y="846" font-size="9.5" fill="#5B6779">两种身份存在时都原样透传；</text>
+      <text x="1404" y="860" font-size="9.5" fill="#5B6779">鉴权交由 clawweb 自行处理</text>
+    </g>
+
+    <!-- ══ 运行时底座 ══ -->
+    <line x1="435"  y1="876" x2="435"  y2="902" stroke="#9AA5B5" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah-grey)"/>
+    <line x1="705"  y1="876" x2="705"  y2="902" stroke="#9AA5B5" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah-grey)"/>
+    <line x1="1245" y1="876" x2="1245" y2="902" stroke="#9AA5B5" stroke-width="1.4" stroke-dasharray="4 4" marker-end="url(#ah-grey)"/>
+
+    <rect x="40" y="906" width="1600" height="86" rx="12" fill="#F1F3F7" stroke="#DCE2EA" stroke-dasharray="6 4"/>
+    <text x="60" y="924" font-size="9.5" font-weight="700" letter-spacing="1.4" fill="#8A94A6">网关所前置的这一层之后的运行时底座</text>
+
+    <g>
+      <rect x="60" y="932" width="376" height="46" rx="8" fill="#FFFFFF" stroke="#DCE2EA"/>
+      <text x="76" y="953" font-size="11.5" font-weight="700" fill="#3D4859">OpenClaw 引擎</text>
+      <text x="76" y="969" font-size="9.5" fill="#5B6779">claude_code &#183; openclaw 适配器，经防腐层转换</text>
+    </g>
+    <g>
+      <rect x="454" y="932" width="376" height="46" rx="8" fill="#FFFFFF" stroke="#DCE2EA"/>
+      <text x="470" y="953" font-size="11.5" font-weight="700" fill="#3D4859">沙箱与设备</text>
+      <text x="470" y="969" font-size="9.5" fill="#5B6779">由 BaaS 开通的 Pod，经代理访问</text>
+    </g>
+    <g>
+      <rect x="848" y="932" width="376" height="46" rx="8" fill="#FFFFFF" stroke="#DCE2EA"/>
+      <text x="864" y="953" font-size="11.5" font-weight="700" fill="#3D4859">Bot 进程与渠道</text>
+      <text x="864" y="969" font-size="9.5" fill="#5B6779">已注册的运行时、IM 下行网关</text>
+    </g>
+    <g>
+      <rect x="1242" y="932" width="376" height="46" rx="8" fill="#FFFFFF" stroke="#DCE2EA"/>
+      <text x="1258" y="953" font-size="11.5" font-weight="700" fill="#3D4859">数据面</text>
+      <text x="1258" y="969" font-size="9.5" fill="#5B6779">MariaDB &#183; Redis &#183; 对象存储（发布的 schema）</text>
+    </g>
+
+    <!-- ══ 图例 ══ -->
+    <line x1="40" y1="1016" x2="76" y2="1016" stroke="#2563EB" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+    <text x="86" y="1020" font-size="10.5" fill="#5B6779">HTTP 转发 &#8212;&#8212; 路径原样透传，响应原样流式回传</text>
+    <line x1="470" y1="1016" x2="506" y2="1016" stroke="#0F8F86" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah-teal)"/>
+    <text x="516" y="1020" font-size="10.5" fill="#5B6779">WebSocket 中继 &#8212;&#8212; 先拨通上游，再双向原样中继数据帧</text>
+    <text x="1640" y="1020" font-size="10" fill="#8A94A6" text-anchor="end">端口为单机默认值，实际部署会覆盖每个 base_url。部分历史遗留的直连服务路由，目前仍与该入口并存。</text>
+
+  </g>
+</svg>
