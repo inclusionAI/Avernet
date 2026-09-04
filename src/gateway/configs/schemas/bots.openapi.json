@@ -18585,6 +18585,18 @@
         "additionalProperties": false,
         "description": "Create-a-session request body.",
         "properties": {
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional absolute working directory for the session on the bot's device. Left unset, the bot's engine picks its own default. The device holds this to its own configured workspace roots and refuses anything outside them, so a path the bot is not allowed to run in fails the request rather than being silently relocated. A bot whose engine does not model a working directory ignores this and reports `cwd` empty on the created session.",
+            "title": "Cwd"
+          },
           "model": {
             "anyOf": [
               {
