@@ -19,11 +19,14 @@ def _creds(token: str | None) -> CredentialBundle:
     return CredentialBundle(headers={}, cookies=cookies, query={})
 
 
-def _token(*, sub: str = "user-123", src: str = "google") -> str:
+def _token(
+    *, sub: str = "user-123", src: str = "google", name: str = "alice"
+) -> str:
     now = datetime.now(tz=UTC)
     claims = {
         "sub": sub,
         "src": src,
+        "name": name,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=5)).timestamp()),
     }
@@ -43,7 +46,7 @@ async def test_valid_cookie_builds_user_principal() -> None:
 
     assert isinstance(result, UserPrincipal)
     assert result.subject.id == "user-123"
-    assert result.subject.username == "user-123"
+    assert result.subject.username == "alice"
     assert result.subject.display_name is None
 
 
@@ -74,6 +77,28 @@ async def test_empty_secret_value_raises_auth_error() -> None:
 
     with pytest.raises(AuthError):
         await strategy.build(_creds(_token()))
+
+
+@pytest.mark.asyncio
+async def test_valid_cookie_without_name_falls_back_to_subject_id() -> None:
+    strategy = OauthSessionStrategy(jwt_secret=_TEST_SECRET)
+    now = datetime.now(tz=UTC)
+    token = jwt.encode(
+        {
+            "sub": "user-123",
+            "src": "google",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(minutes=5)).timestamp()),
+        },
+        _TEST_SECRET,
+        algorithm="HS256",
+    )
+
+    result = await strategy.build(_creds(token))
+
+    assert isinstance(result, UserPrincipal)
+    assert result.subject.id == "user-123"
+    assert result.subject.username == "user-123"
 
 
 @pytest.mark.asyncio
