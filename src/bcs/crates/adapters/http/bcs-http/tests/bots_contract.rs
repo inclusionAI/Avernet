@@ -1553,6 +1553,55 @@ async fn search_bots_route_forwards_exact_bot_uuid_filter() {
     );
 }
 
+#[tokio::test]
+async fn search_bots_route_rejects_empty_exact_bot_uuid_filter_entry() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?bot_uuids=bot-alpha,")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(query.search_commands.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn search_bots_route_rejects_more_than_one_hundred_exact_bot_uuids() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+    let bot_uuids = (0..101)
+        .map(|index| format!("bot-{index}"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/bots/search?bot_uuids={bot_uuids}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(query.search_commands.lock().await.is_empty());
+}
 
 #[tokio::test]
 async fn search_bots_route_accepts_multi_visibility_and_returns_friend_policy_fields() {
