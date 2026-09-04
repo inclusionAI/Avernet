@@ -6,6 +6,7 @@
 //! collaboration startup.
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
@@ -94,12 +95,37 @@ pub struct ReactivateSessionLaunch {
     pub request: SessionLaunchRequest,
 }
 
+/// Bot run started by the context delivery for a newly-created Session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InitialSessionRun {
+    pub run_id: String,
+    pub bot_uuid: String,
+    pub activity_kind: InitialSessionRunActivityKind,
+    pub state: InitialSessionRunState,
+    pub started_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialSessionRunActivityKind {
+    SessionContext,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InitialSessionRunState {
+    Running,
+    Failed,
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionLaunchOutcome {
     pub session: Session,
     /// Preserves the legacy create-or-reactivate result for adapter-specific status codes.
     pub created: bool,
     pub state_machine_run: Option<StateMachineRunView>,
+    /// Context `chat.send` dispatched for a newly-created non-state-machine Session.
+    pub initial_run: Option<InitialSessionRun>,
 }
 
 #[derive(Debug, thiserror::Error)]

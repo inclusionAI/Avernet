@@ -67,8 +67,9 @@ pub use application::session::{
     SessionManagementService, SessionUseCaseError,
 };
 pub use application::session_launch::{
-    CreateSessionLaunch, ReactivateSessionLaunch, RequestedSessionRole, SessionCaller,
-    SessionLaunchError, SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService,
+    CreateSessionLaunch, InitialSessionRun, InitialSessionRunActivityKind, InitialSessionRunState,
+    ReactivateSessionLaunch, RequestedSessionRole, SessionCaller, SessionLaunchError,
+    SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService,
 };
 pub use application::session_files::{
     CapabilitiesView, DeleteFileCommand, DownloadRoute, PrepareUploadCommand, PrepareUploadResult,
