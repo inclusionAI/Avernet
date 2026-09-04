@@ -35,6 +35,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import
     CliToolDeliveryError,
     CliToolDeliveryPort,
     CliToolPlacementError,
+    DeliverableCliTool,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolService,
@@ -65,6 +66,7 @@ __all__ = [
     "CliToolStatus",
     "CliToolOutcome",
     "CliToolPlacementError",
+    "DeliverableCliTool",
     "CliToolScope",
     "CliToolService",
     "CliToolStore",

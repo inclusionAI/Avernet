@@ -380,14 +380,20 @@ class ManifestFetchModule(Module):
     ) -> CliToolServiceFactory:
         """W9: the one component both callers install a CLI tool through.
 
-        Parameterised by engine family and by nothing else, because that is the
-        only thing that differs: the table, the object store and the fetch
-        funnel are shared, and the family decides which delivery port sits
-        inside. The apply service asks for ``"arca"``, the teclaw platform
-        ports for ``"teclaw"``, and the management API for whichever the bot's
-        engine resolves to — all three getting the same service around the same
-        table, which is what makes the API and a manifest apply converge on one
-        answer.
+        Parameterised by the delivery binding and by nothing else, because that
+        is the only thing that differs: the table, the object store and the
+        fetch funnel are shared. Three keys, not two:
+
+        * ``"arca"`` — the engine's CLI endpoints, for either caller.
+        * ``"teclaw"`` — the apply path. The port makes **no** artifact push,
+          because ``TeclawDelivery.finish`` makes exactly one at the end of the
+          apply, covering every category it wrote. A push from the port would
+          arrive mid-apply and be followed by the correct one.
+        * ``"teclaw-live"`` — the management API. There is no closing step on
+          that path, so this binding carries the redeliver and the port pushes.
+
+        All of them wrap the same service around the same table, which is what
+        makes the API and a manifest apply converge on one answer.
 
         The device graph is reached lazily and by function-level import for the
         reason the resource factory above records: it reaches the device
@@ -411,6 +417,13 @@ class ManifestFetchModule(Module):
         def _delivery(family: str):
             if family == "teclaw":
                 return TeclawCliToolPort()
+            if family == "teclaw-live":
+                # Bound lazily: ``teclaw_bindings`` reaches the device graph,
+                # and asking for it here would close the same import cycle the
+                # function-level imports below exist to avoid.
+                return TeclawCliToolPort(
+                    redeliver=injector.get(TeclawPlatformBindings).redeliver
+                )
             from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
                 ArcaCliToolPort,
             )
@@ -485,7 +498,6 @@ class ManifestFetchModule(Module):
         injector: Injector,
         cli_tool_service_factory: CliToolServiceFactory,
         teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
-        teclaw_bindings: TeclawPlatformBindings,
     ) -> BotCliToolServiceProtocol:
         """W9: the ``bot_id``-addressed surface the HTTP routes bind to.
 
@@ -511,11 +523,10 @@ class ManifestFetchModule(Module):
         return BotCliToolService(
             bot_service=_Bots(),
             cli_tool_service_factory=cli_tool_service_factory,
+            # Only for the family answer. Delivery — including the artifact
+            # push a teclaw mutation needs — is the port's, reached through the
+            # ``"teclaw-live"`` binding this surface's factory key selects.
             is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
-            # The same closing redeliver a manifest apply uses. Without it a
-            # teclaw install would answer 200 while the running container kept
-            # its previous tool set.
-            redeliver=teclaw_bindings.redeliver,
         )
 
     @singleton

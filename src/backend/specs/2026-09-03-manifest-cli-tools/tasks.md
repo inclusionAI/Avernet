@@ -194,6 +194,64 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
 
 ---
 
+## Revision 8 — the whole-set port
+
+### Task 17 — `replace_all` becomes a port operation
+
+- **Files:** `cli_tools/delivery_port.py`, `cli_tools/arca_port.py`,
+  `cli_tools/teclaw_port.py`
+- Drop the base class's concrete `replace_all` loop; make it abstract, taking
+  the desired set and answering `name -> reason | None`.
+- ARCA implements it as one `POST` to the engine's replacement endpoint,
+  parsing the per-name response (D-15). A malformed or missing per-name body
+  fails every tool in the set with the engine's message, rather than reporting
+  silence as success.
+- teclaw implements it, `install` and `delete` as the same thing: compose and
+  deliver the bot's artifact once. The port takes the redeliver as a
+  collaborator, `None` on the apply path.
+- **Acceptance:** a set of any size reaches ARCA in one call; a teclaw port
+  with no redeliver makes no push; per-name failures survive the round trip.
+- **Depends on:** Task 4
+
+### Task 18 — the service writes platform state first
+
+- **Files:** `cli_tools/service.py`
+- Reorder `install` and `remove` so the row is written before the port is
+  called, with a rollback when the port refuses (restore the prior row, discard
+  the just-stored object).
+- Rewrite `replace_all` to write every row first and then call the port **once**,
+  fanning per-name results into `CliToolOutcome`s. No rollback on this path.
+- Keep the convergence short-circuit ahead of everything: an apply where
+  nothing changed calls neither the fetcher nor the port.
+- **Acceptance:** a refused single install leaves no row and no object; a
+  refused whole-set call leaves the desired state and a per-tool report; a
+  no-op apply makes zero port calls.
+- **Depends on:** Task 17
+
+### Task 19 — the redeliver leaves `BotCliToolService`
+
+- **Files:** `cli_tools/bot_service.py`, `di/modules/manifest_fetch_module.py`
+- Delete `_redeliver_if_teclaw`, the `redeliver` collaborator and the
+  `is_teclaw` branch; bind the API path's teclaw port with the redeliver and the
+  apply path's without it.
+- **Acceptance:** the API path still delivers to a running teclaw container; a
+  teclaw apply still makes exactly one artifact push, from
+  `TeclawDelivery.finish`.
+- **Depends on:** Task 18
+
+### Task 20 — the engine contract gains the replacement endpoint
+
+- **Files:** `docs/bot-config-manifest/engine-requirements.zh-CN.md`
+- A2 goes three endpoints to four: the request shape, the per-name response,
+  and the replacement semantics (what the engine does with a name it has that
+  the set does not name).
+- Record the accepted v1 cost — the call carries every tool's bytes, not only
+  what changed — with the TODO at the payload site.
+- **Acceptance:** an engine team can implement all four from A2 alone.
+- **Depends on:** Task 17
+
+---
+
 ## Groups
 
 - **Group A — The record:** Task 1
@@ -208,5 +266,7 @@ Spec: `spec.md` · Plan: `plan.md` · Work item W9, issue #1477. Revision 7.
   - Theme: Apply becomes a second caller of the same service, with full-override semantics, always platform-managed regardless of the switch.
 - **Group F — Promotion and the artifact:** Tasks 13, 14
   - Theme: Service-bot promotion gathers tools from the engine into stage-scoped OSS, and the artifact's refs point at them.
+- **Group H — The whole-set port (rev 8):** Tasks 17, 18, 19, 20
+  - Theme: One engine round trip per apply instead of one per tool, platform state written first, and the family knowledge moved out of the API service into the port.
 - **Group G — Docs and verification:** Tasks 12, 15, 16
   - Theme: Record how the agent finds a tool in v1 and correct §3.7's `PATH` promise, write down the limits, and check off the spec.

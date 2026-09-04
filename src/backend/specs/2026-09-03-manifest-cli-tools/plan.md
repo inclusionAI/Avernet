@@ -579,3 +579,85 @@ def test_teclaw_creation_carries_tools_in_its_first_artifact(): ...
 Also extended: a test pinning that no deploy-path file (beyond the promotion
 one), no `core/skill_center/*` file, no `teclaw_paths.py` change and no
 resources endpoint was modified.
+
+---
+
+## Revision 8 — the whole-set port
+
+Rev 7's port is name-addressed and **per tool**: `install(name, data)`,
+`delete(name)`, `list()`, with a concrete `replace_all` on the base class that
+loops removals then installs. Rev 8 keeps the single-tool pair and makes
+`replace_all` a **port operation** each family implements, because "here is the
+entire set" is a thing an engine can be told in one call and a thing teclaw can
+express in one artifact.
+
+### The port
+
+```python
+class CliToolDeliveryPort(ABC):
+    async def install(self, ctx, *, name: str, data: bytes) -> None: ...
+    async def delete(self, ctx, *, name: str) -> None: ...
+    async def list(self, ctx) -> list[str]: ...
+
+    @abstractmethod
+    async def replace_all(self, ctx, tools: Sequence[DeliverableCliTool]) -> Mapping[str, str | None]:
+        """The desired set, whole. Returns name -> failure reason, or None per
+        name for success; an empty mapping means every tool landed."""
+```
+
+`DeliverableCliTool` is `(name, data)` — the bytes the platform already fetched,
+verified and stored. Nothing else crosses: no digest to re-check (the platform
+did), no path (the engine owns it).
+
+### The two implementations
+
+**ARCA** — `replace_all` is one `POST` to the engine's new replacement endpoint
+carrying every tool in the desired set. The response reports **per name**
+(D-15), which is what `CliToolService` fans back out into one `CliToolOutcome`
+per tool so the apply report keeps its per-entry shape. `install` and `delete`
+stay as they are, for a live one-tool edit.
+
+**teclaw** — all three methods do the same thing: compose this bot's artifact
+from the table and deliver it once. The port therefore takes the redeliver that
+`BotCliToolService` used to hold, and holds `None` on the apply path, because
+`TeclawDelivery.finish` already makes that apply's single artifact push. Two
+bindings of one class, and which one a caller gets is the DI answer to "who owns
+the end of this operation".
+
+### The service's ordering, and why it inverts
+
+Rev 7 wrote the row **after** the port returned, so the platform never recorded
+a tool the engine refused. Rev 8 cannot: teclaw's port composes *from* the
+table, so a port called first would transmit the previous set (D-14).
+
+```
+install(one)      fetch → verify → OSS put → write row → port.install
+                                                       └ refused? roll the row back, discard the object
+
+remove(one)       read row → delete row → port.delete
+                                        └ refused? restore the row
+
+replace_all(set)  fetch/verify/OSS-put the changed ones
+                  → delete removed rows, upsert installed rows
+                  → port.replace_all(desired)          ← once, whatever the size
+                  → fan per-name results into outcomes
+                  (refused? the desired state stands — D-14)
+```
+
+The `(digest, subpath)` convergence check still runs first, so an apply where
+nothing changed fetches nothing, writes nothing and **does not call the port at
+all**.
+
+### What leaves
+
+`BotCliToolService` loses `is_teclaw` and `redeliver` and stops asking which
+family a bot is on; `_redeliver_if_teclaw` is deleted. `CliToolDeliveryPort`
+loses its concrete `replace_all` loop. `TeclawDelivery.finish` is unchanged — it
+still owns the one artifact push a platform-managed teclaw apply makes.
+
+### The engine contract
+
+`engine-requirements.zh-CN.md` A2 goes from three endpoints to four. The new one
+is the only one that is more than a name and a blob: it takes a set, applies it
+as a replacement, and answers per name. Stated there rather than discovered
+during implementation.

@@ -40,7 +40,7 @@ import hashlib
 import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
@@ -56,6 +56,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import 
     CliToolOutcome,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
+    DeliverableCliTool,
     CliToolDeliveryError,
     CliToolDeliveryPort,
 )
@@ -152,8 +153,9 @@ class CliToolService:
         *,
         installed_by: str,
         expect_absent: bool = False,
+        deliver: bool = True,
     ) -> CliToolOutcome:
-        """Fetch, verify, store, deliver and record one tool.
+        """Fetch, verify, store, record and deliver one tool.
 
         Every failure comes back as a ``FAILED`` outcome carrying the reason,
         rather than as an exception: a full override installing four tools must
@@ -165,6 +167,11 @@ class CliToolService:
         UNIQUE constraint decides, rather than an upsert that would quietly turn
         a losing concurrent install into a replacement. A manifest apply leaves
         it off — a full override is entitled to replace.
+
+        ``deliver=False`` stops before the family is told, leaving the row and
+        the stored bytes. :meth:`replace_all` uses it: on that path the family
+        hears about the whole set once, afterwards, rather than once per tool
+        (spec D-13). Nothing else should.
         """
         try:
             checked_name(decl.name)
@@ -190,7 +197,8 @@ class CliToolService:
         md5 = hashlib.md5(data).hexdigest()
         # Read before the write: a replacement must know which object the
         # surviving row points at, so a failed delivery can discard only what
-        # nothing references.
+        # nothing references — and, since rev 8, so the row can be *restored*
+        # to it when the engine refuses.
         superseded = self.get(ctx, decl.name)
         try:
             stored = await asyncio.to_thread(
@@ -204,23 +212,11 @@ class CliToolService:
             return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
         stored_at = time.monotonic()
 
-        try:
-            await self._delivery.install(ctx, name=decl.name, data=data)
-        except CliToolDeliveryError as error:
-            # The engine refused. The row is the platform's claim that the bot
-            # has the tool, so it is not written — and the object just stored
-            # is removed, because nothing will reference it and nothing else
-            # would ever collect it (its key is derived, not recorded).
-            #
-            # Safe on a replacement too, and only because the live key carries a
-            # content fingerprint: the bytes just written are at a key of their
-            # own, so discarding them cannot touch the object the surviving row
-            # still describes. The one case it must not fire is a re-install of
-            # the *same* digest, where both rows name the same key.
-            if superseded is None or superseded.oss_key != stored.store_key:
-                await self._discard(stored.store_key)
-            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
-
+        # The row goes in **before** the delivery, and that inverts rev 7
+        # (spec D-14). teclaw's port composes the artifact *from* this table, so
+        # a port called first would transmit the previous set. The property rev
+        # 7 got from the old order — never record a tool the engine refused — is
+        # preserved by rolling the row back below rather than by not writing it.
         write = self._repo.insert if expect_absent else self._repo.upsert
         try:
             record = await asyncio.to_thread(
@@ -246,13 +242,8 @@ class CliToolService:
             # override reported nothing for the tools it had not reached yet.
             # Broad on purpose — a driver raises whatever it raises, and the
             # alternative to translating it is losing the other declarations.
-            #
-            # Logged at exception, never swallowed: the engine has *accepted*
-            # the tool at this point, so platform state and container state now
-            # disagree, and the next full override is what reconciles them.
             logger.exception(
-                "[cli_tools] bot=%s name=%s: the engine accepted the tool but "
-                "recording it failed; the container is ahead of the platform",
+                "[cli_tools] bot=%s name=%s: the tool could not be recorded",
                 ctx.bot_id, decl.name,
             )
             if superseded is None or superseded.oss_key != stored.store_key:
@@ -260,7 +251,7 @@ class CliToolService:
             return CliToolOutcome(
                 decl.name,
                 CliToolStatus.FAILED,
-                f"the tool was installed but could not be recorded: {error}",
+                f"the tool could not be recorded: {error}",
             )
         if record is None:
             # ``insert`` alone can answer this, and only at the moment of the
@@ -277,6 +268,33 @@ class CliToolService:
                 CliToolStatus.CONFLICT,
                 f"the bot already has a CLI tool named {decl.name!r}",
             )
+        recorded_at = time.monotonic()
+
+        if not deliver:
+            logger.info(
+                "[cli_tools] recorded bot=%s name=%s size=%d by=%s "
+                "fetch=%.2fs store=%.2fs record=%.2fs — delivery deferred to "
+                "the whole-set call",
+                ctx.bot_id, decl.name, len(data), installed_by,
+                fetched_at - started,
+                stored_at - fetched_at,
+                recorded_at - stored_at,
+            )
+            return CliToolOutcome(
+                decl.name, CliToolStatus.INSTALLED, record=record
+            )
+
+        try:
+            await self._delivery.install(ctx, name=decl.name, data=data)
+        except CliToolDeliveryError as error:
+            # The engine refused. Undo the row so the platform is not left
+            # claiming a tool the bot does not have — the contract the old
+            # write-after-delivery order used to give for free.
+            await self._restore(ctx, decl.name, superseded)
+            if superseded is None or superseded.oss_key != stored.store_key:
+                await self._discard(stored.store_key)
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+
         if superseded is not None and superseded.oss_key != stored.store_key:
             # The replaced version's object is unreferenced the moment the row
             # is replaced, and its key is held nowhere else. Collected here or
@@ -286,21 +304,24 @@ class CliToolService:
         delivered_at = time.monotonic()
         logger.info(
             "[cli_tools] installed bot=%s name=%s size=%d by=%s "
-            "fetch=%.2fs store=%.2fs deliver=%.2fs total=%.2fs",
+            "fetch=%.2fs store=%.2fs record=%.2fs deliver=%.2fs total=%.2fs",
             ctx.bot_id, decl.name, len(data), installed_by,
             fetched_at - started,
             stored_at - fetched_at,
-            delivered_at - stored_at,
+            recorded_at - stored_at,
+            delivered_at - recorded_at,
             delivered_at - started,
         )
         return CliToolOutcome(decl.name, CliToolStatus.INSTALLED, record=record)
 
     async def remove(self, ctx: CliToolContext, name: str) -> CliToolOutcome:
-        """Delete the tool, the row and the object. In that order.
+        """Drop the row, tell the family, then collect the object.
 
         The row is read first because it holds the object key: a delete that
         dropped the row and then asked where the bytes were could never find
-        them again.
+        them again. The **object** is collected last, after the family has
+        accepted the removal, so a refusal can put the row back and leave the
+        bytes it still points at.
         """
         record = self.get(ctx, name)
         if record is None:
@@ -318,17 +339,70 @@ class CliToolService:
         about to remove would be one query per removal for an answer it has.
         """
         name = record.name
+        await self._drop_row(ctx, name)
         try:
             await self._delivery.delete(ctx, name=name)
         except CliToolDeliveryError as error:
+            # Put it back: the bot still has the tool, so the table must still
+            # say so. The object was not touched, and the restored row points
+            # at the same key it always did (spec D-14).
+            await self._restore(ctx, name, record)
             return CliToolOutcome(name, CliToolStatus.FAILED, str(error))
+        await self._discard(record.oss_key)
+        logger.info("[cli_tools] removed bot=%s name=%s", ctx.bot_id, name)
+        return CliToolOutcome(name, CliToolStatus.REMOVED, record=record)
+
+    # ── the rows, written before the family is told ──────────────────────
+
+    async def _drop_row(self, ctx: CliToolContext, name: str) -> None:
         await asyncio.to_thread(
             self._repo.delete,
             env=ctx.env, entity_id=ctx.entity_id, bot_id=ctx.bot_id, name=name,
         )
-        await self._discard(record.oss_key)
-        logger.info("[cli_tools] removed bot=%s name=%s", ctx.bot_id, name)
-        return CliToolOutcome(name, CliToolStatus.REMOVED, record=record)
+
+    async def _restore(
+        self,
+        ctx: CliToolContext,
+        name: str,
+        previous: Optional[BotCliToolRecord],
+    ) -> None:
+        """Undo one row write after the family refused it.
+
+        ``previous is None`` means the row was new, so the undo is a delete;
+        otherwise the prior row is written back verbatim, key included, which
+        is why the object it points at must not have been collected yet.
+
+        A failure here is logged, not raised. The caller is already reporting a
+        failed operation, and turning a failed *undo* into the reported reason
+        would name the wrong cause; what is left behind is drift, which
+        ``drift()`` is there to surface and the next full override to correct.
+        """
+        try:
+            if previous is None:
+                await self._drop_row(ctx, name)
+                return
+            await asyncio.to_thread(
+                self._repo.upsert,
+                env=previous.env,
+                entity_id=previous.entity_id,
+                bot_id=previous.bot_id,
+                name=previous.name,
+                source=previous.source,
+                digest=previous.digest,
+                subpath=previous.subpath,
+                md5=previous.md5,
+                size_bytes=previous.size_bytes,
+                version=previous.version,
+                oss_key=previous.oss_key,
+                installed_by=previous.installed_by,
+                modifier=previous.modifier,
+            )
+        except Exception as error:  # noqa: BLE001 — see docstring
+            logger.exception(
+                "[cli_tools] bot=%s name=%s: could not undo the row write after "
+                "the engine refused; the table and the bot now disagree: %s",
+                ctx.bot_id, name, error,
+            )
 
     async def replace_all(
         self, ctx: CliToolContext, decls: Sequence[CliToolDecl], *, installed_by: str
@@ -344,9 +418,21 @@ class CliToolService:
         existing = {record.name: record for record in self.list(ctx)}
         declared = {decl.name for decl in decls}
         outcomes: list[CliToolOutcome] = []
+        # What the family will be told, and what to collect once it agrees.
+        # Nothing is discarded before the call: a refused set leaves the desired
+        # rows standing (D-14), and rows that point at nothing would be worse
+        # than rows the engine has not caught up with.
+        collect: list[str] = []
+        touched = False
 
         for name in sorted(set(existing) - declared):
-            outcomes.append(await self._remove_record(ctx, existing[name]))
+            record = existing[name]
+            await self._drop_row(ctx, name)
+            collect.append(record.oss_key)
+            outcomes.append(
+                CliToolOutcome(name, CliToolStatus.REMOVED, record=record)
+            )
+            touched = True
 
         for decl in decls:
             current = existing.get(decl.name)
@@ -355,8 +441,96 @@ class CliToolService:
                     CliToolOutcome(decl.name, CliToolStatus.UNCHANGED, record=current)
                 )
                 continue
-            outcomes.append(await self.install(ctx, decl, installed_by=installed_by))
-        return outcomes
+            outcome = await self._record_one(ctx, decl, installed_by=installed_by)
+            if (
+                outcome.status is CliToolStatus.INSTALLED
+                and current is not None
+                and outcome.record is not None
+                and current.oss_key != outcome.record.oss_key
+            ):
+                collect.append(current.oss_key)
+            outcomes.append(outcome)
+            touched = True
+
+        if not touched:
+            # Every declaration already converged, so there is nothing for the
+            # family to be told and nothing it could do about it. This is what
+            # keeps a re-applied manifest from re-transmitting every binary the
+            # bot has.
+            return outcomes
+
+        # The destination: what the bot should end up with. Deliberately not
+        # "everything that did not fail" — a REMOVED outcome carries the row it
+        # removed, and including it would tell the family to keep the tool the
+        # declaration just dropped.
+        desired = [
+            outcome.record
+            for outcome in outcomes
+            if outcome.status in (CliToolStatus.INSTALLED, CliToolStatus.UNCHANGED)
+            and outcome.record is not None
+        ]
+        try:
+            failures = await self._deliver_set(ctx, desired)
+        except CliToolDeliveryError as error:
+            # The call did not complete, so nothing is known per tool. Every
+            # row the platform just wrote stands — the desired state — and the
+            # report says the whole set failed for one reason.
+            return [
+                o if o.status is CliToolStatus.FAILED
+                else CliToolOutcome(o.name, CliToolStatus.FAILED, str(error), o.record)
+                for o in outcomes
+            ]
+
+        for key in collect:
+            await self._discard(key)
+        if not failures:
+            return outcomes
+        return [
+            CliToolOutcome(o.name, CliToolStatus.FAILED, failures[o.name], o.record)
+            if o.name in failures
+            else o
+            for o in outcomes
+        ]
+
+    async def _deliver_set(
+        self, ctx: CliToolContext, records: Sequence[BotCliToolRecord]
+    ) -> Mapping[str, str]:
+        """Hand the family the whole desired set, in one call.
+
+        The bytes are read back out of the object store **only when the family
+        transmits them** — ARCA POSTs each binary, teclaw's artifact merely
+        references them, and reading a few hundred megabytes to hand teclaw an
+        argument it ignores would be pure waste.
+        """
+        if not self._delivery.needs_tool_bytes:
+            # The names still travel, so the family's own log and any future
+            # use of the set are honest about its size; only the payload is
+            # withheld, because this family references the objects rather than
+            # carrying them.
+            return await self._delivery.replace_all(
+                ctx, [DeliverableCliTool(name=r.name, data=b"") for r in records]
+            )
+        tools = [
+            DeliverableCliTool(
+                name=record.name,
+                data=await asyncio.to_thread(self._store.read, key=record.oss_key),
+            )
+            for record in records
+        ]
+        return await self._delivery.replace_all(ctx, tools)
+
+    async def _record_one(
+        self, ctx: CliToolContext, decl: CliToolDecl, *, installed_by: str
+    ) -> CliToolOutcome:
+        """Fetch, verify, store and record one tool — without telling anyone.
+
+        The half of :meth:`install` that runs per tool. ``replace_all`` needs
+        it separated out because the family is told once, about the set, rather
+        than once per tool (spec D-13).
+        """
+        return await self.install(
+            ctx, decl, installed_by=installed_by, deliver=False
+        )
 
     async def remove_all(self, ctx: CliToolContext) -> int:
         """Drop every tool the bot has — the creation-cleanup entry point.

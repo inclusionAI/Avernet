@@ -550,6 +550,7 @@ provides:
   - StoredCliTool
   - CliToolContext
   - CliToolDeliveryPort  # W9: the per-family delivery boundary, name-addressed
+  - DeliverableCliTool  # W9 rev 8: one tool as the whole-set call carries it
   - CliToolDeliveryError
   - CliToolPlacementError
   - ArcaCliToolPort

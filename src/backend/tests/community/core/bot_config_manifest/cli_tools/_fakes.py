@@ -128,13 +128,29 @@ class FakeCliToolRepo:
 class FakeDelivery:
     """Records every delivery call; refuses on demand."""
 
-    def __init__(self, *, install_error=None, delete_error=None, listing=None) -> None:
+    #: Mirrors the real ports: ARCA carries the binaries, teclaw references
+    #: them. Flipped per test to exercise the service's read-back branch.
+    needs_tool_bytes = True
+
+    def __init__(
+        self,
+        *,
+        install_error=None,
+        delete_error=None,
+        listing=None,
+        replace_error=None,
+        replace_failures=None,
+    ) -> None:
         self.installed: list[tuple[str, bytes]] = []
         self.deleted: list[str] = []
         self.listed = 0
         self.install_error = install_error
         self.delete_error = delete_error
         self.listing = listing
+        #: Every whole-set call, as the list of tools it carried.
+        self.replaced: list[list[tuple[str, bytes]]] = []
+        self.replace_error = replace_error
+        self.replace_failures = replace_failures or {}
 
     async def install(self, ctx, *, name, data) -> None:
         if self.install_error is not None:
@@ -145,6 +161,12 @@ class FakeDelivery:
         if self.delete_error is not None:
             raise self.delete_error
         self.deleted.append(name)
+
+    async def replace_all(self, ctx, tools):
+        if self.replace_error is not None:
+            raise self.replace_error
+        self.replaced.append([(t.name, t.data) for t in tools])
+        return dict(self.replace_failures)
 
     async def list(self, ctx):
         self.listed += 1

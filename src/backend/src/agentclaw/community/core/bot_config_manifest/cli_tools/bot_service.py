@@ -17,17 +17,18 @@ passed. Check and address cannot disagree, because there is one lookup.
 ``PUT``.** A bot's engine can change, and this surface has no stored document
 to have been validated against in the first place.
 
-**A teclaw mutation is followed by a redeliver, and it has to be.** On that
-family the composed artifact *is* the delivery, so writing the row and the
-bytes changes nothing a running container can see. The manifest path closes
-with the strategy's redeliver; this path is the other caller and needs its own,
-or a `POST` would answer 200 while the bot kept its previous tool set until
-some unrelated operation happened to compose another artifact. On ARCA there is
-nothing to do — the engine's `install` already put the tool in the container.
+**This service does not know what teclaw is.** A teclaw mutation still has to
+reach the running container — writing the row and the bytes changes nothing a
+container can see, since on that family the composed artifact *is* the
+delivery — but that is the delivery port's job, and rev 8 moved it there. The
+port this service's `CliToolService` holds is the one bound for *this* path,
+which carries the redeliver; the apply path's is bound without it, because a
+manifest apply closes with `TeclawDelivery.finish` instead. Neither branch is
+taken here.
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
     ManifestCategory,
@@ -60,8 +61,12 @@ from agentclaw.community.utils.env_utils import get_current_env
 
 logger = get_logger()
 
-#: The engine families, as the delivery factory keys them.
-FAMILY_TECLAW = "teclaw"
+#: The delivery bindings, as the service factory keys them. Not quite "engine
+#: family": teclaw has two, because *who pushes the artifact* differs by caller
+#: and not by engine. This surface is the live one, so its binding carries the
+#: redeliver; a manifest apply asks for plain ``"teclaw"`` and closes with
+#: ``TeclawDelivery.finish`` instead (spec D-14).
+FAMILY_TECLAW = "teclaw-live"
 FAMILY_ARCA = "arca"
 
 
@@ -85,19 +90,13 @@ class BotCliToolService(BotCliToolServiceProtocol):
         bot_service: BotLookupPort,
         cli_tool_service_factory: Callable[[str], CliToolService],
         is_teclaw: Callable[[Optional[str]], bool],
-        redeliver: Callable[[Any], Awaitable[Optional[str]]],
     ) -> None:
         self._bots = bot_service
         self._factory = cli_tool_service_factory
+        # Still needed, and only for the *capability* answer below: whether a
+        # bot's engine supports this category at all. Not for delivery — that
+        # moved into the port at rev 8.
         self._is_teclaw = is_teclaw
-        # The same whole-artifact redeliver the manifest apply closes with,
-        # reached on this path for the teclaw family alone. Required rather
-        # than defaulted: a wiring that omitted it would answer 200 to a teclaw
-        # install while the running bot kept its previous tool set, and the
-        # only way to see that is in production. The redeliver *itself* may
-        # decline — a bot with no live binding is not an error — but whether
-        # this service can ask is not a runtime state.
-        self._redeliver = redeliver
 
     # ── the surface ──────────────────────────────────────────────────────
 
@@ -128,7 +127,6 @@ class BotCliToolService(BotCliToolServiceProtocol):
             raise conflict
         if outcome.failed or outcome.record is None:
             raise CliToolRefusedError(outcome.detail or "the tool could not be installed")
-        await self._redeliver_if_teclaw(ctx)
         return outcome.record
 
     def list(
@@ -146,27 +144,7 @@ class BotCliToolService(BotCliToolServiceProtocol):
         outcome = await service.remove(ctx, name)
         if outcome.status is not CliToolStatus.REMOVED:
             raise CliToolRefusedError(outcome.detail or "the tool could not be removed")
-        await self._redeliver_if_teclaw(ctx)
         return outcome
-
-    async def _redeliver_if_teclaw(self, ctx: CliToolContext) -> None:
-        """Hand the running container a fresh artifact, on teclaw only.
-
-        A failure is logged, not raised: the tool *is* installed — the row, the
-        bytes and, on the engine's next compose, the artifact all say so — and
-        answering 500 to a caller whose install succeeded would be a worse
-        report than a delayed delivery. A bot with no live binding is not a
-        failure at all; provisioning composes from the state just written.
-        """
-        if not self._is_teclaw(ctx.engine_type):
-            return
-        note = await self._redeliver(ctx)
-        if note:
-            logger.warning(
-                "[cli_tools] bot=%s: the tool is recorded but the running "
-                "container was not updated: %s",
-                ctx.bot_id, note,
-            )
 
     # ── resolution ───────────────────────────────────────────────────────
 

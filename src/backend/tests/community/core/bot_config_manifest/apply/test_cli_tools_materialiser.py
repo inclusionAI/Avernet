@@ -166,7 +166,10 @@ async def test_an_unchanged_digest_and_subpath_plans_unchanged() -> None:
 
     assert plan.is_noop
     assert [r.outcome for r in results] == [EntryOutcome.UNCHANGED]
-    assert len(fetcher.calls) == 1 and len(delivery.installed) == 1
+    # Not re-fetched, and the family is not called at all: an apply where every
+    # declaration converged has nothing to tell it (spec D-13).
+    assert len(fetcher.calls) == 1
+    assert len(delivery.replaced) == 1
 
 
 @pytest.mark.asyncio
@@ -190,7 +193,9 @@ async def test_a_row_the_declaration_no_longer_names_plans_a_removal() -> None:
     _, plan, results = await _apply(mat, ctx, [_entry(name="new")])
 
     assert plan.removals == ("old",)
-    assert delivery.deleted == ["old"]
+    # Removed by omission from the whole-set call, not by a delete of its own.
+    assert delivery.deleted == []
+    assert [[name for name, _ in call] for call in delivery.replaced][-1] == ["new"]
     assert {r.identity for r in results} == {"new"}
     assert {row.name for row in repo.list(env="dev", entity_id="u1", bot_id="bot7")} == {"new"}
 

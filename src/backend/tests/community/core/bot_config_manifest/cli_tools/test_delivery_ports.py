@@ -13,6 +13,9 @@ import inspect
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
+    REPLACE_PATH,
+    REPLACE_TIMEOUT_CAP_SECONDS,
+    replace_timeout_for,
     CONTROL_TIMEOUT_SECONDS,
     DELETE_PATH,
     INSTALL_PATH,
@@ -24,6 +27,8 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
+    CliToolDeliveryError,
+    DeliverableCliTool,
     CliToolDeliveryPort,
     CliToolPlacementError,
 )
@@ -126,26 +131,28 @@ def test_a_family_that_forgets_a_method_fails_at_construction() -> None:
     assert "abstract" in str(excinfo.value)
 
 
-@pytest.mark.asyncio
-async def test_replace_all_removes_before_it_installs() -> None:
-    """A name in both lists is a replacement; installing first would delete
-    what was just placed."""
-    order: list[str] = []
+def test_replace_all_has_no_default_built_from_the_single_tool_methods() -> None:
+    """Rev 8 removed it, and the removal is the point.
 
-    class Recording(CliToolDeliveryPort):
+    A loop of deletes then installs describes a *journey*, and a journey has
+    intermediate states an observer can see: the container would be told it had
+    lost tools it was about to regain. A family states the destination instead,
+    which is a thing both of ours can do in one call — so a family that does
+    not implement it fails at construction rather than silently getting the
+    wrong semantics (spec D-13).
+    """
+    class Incomplete(CliToolDeliveryPort):
         async def install(self, ctx, *, name, data):
-            order.append(f"install:{name}")
+            ...
 
         async def delete(self, ctx, *, name):
-            order.append(f"delete:{name}")
+            ...
 
         async def list(self, ctx):
             return []
 
-    await Recording().replace_all(
-        _CTX, install=[("mycli", _BYTES)], remove=["mycli", "oldcli"]
-    )
-    assert order == ["delete:mycli", "delete:oldcli", "install:mycli"]
+    with pytest.raises(TypeError):
+        Incomplete()
 
 
 # ── ARCA ──────────────────────────────────────────────────────────────────
@@ -286,14 +293,118 @@ def test_the_arca_port_takes_only_a_resolver_and_a_transport() -> None:
     assert params == {"self", "resolver", "transport"}
 
 
+# ── ARCA, the whole set ───────────────────────────────────────────────────
+
+
+def _ok(*names: str) -> dict:
+    return {
+        "success": True,
+        "data": {"results": [{"name": n, "success": True} for n in names]},
+    }
+
+
+@pytest.mark.asyncio
+async def test_arca_replace_is_one_call_carrying_the_whole_set() -> None:
+    """One round trip, whatever the size — and the destination, not a diff."""
+    port, _, transport = _arca(transport=FakeTransport(response=_ok("a", "b")))
+    await port.replace_all(
+        _CTX,
+        [
+            DeliverableCliTool(name="a", data=_BYTES),
+            DeliverableCliTool(name="b", data=b"\x7fELF-b"),
+        ],
+    )
+    assert len(transport.calls) == 1
+    call = transport.calls[0]
+    assert (call["method"], call["path"]) == ("POST", REPLACE_PATH)
+    assert [t["name"] for t in call["body"]["tools"]] == ["a", "b"]
+    assert base64.b64decode(call["body"]["tools"][0]["content_b64"]) == _BYTES
+    assert call["timeout"] == replace_timeout_for(2)
+
+
+@pytest.mark.asyncio
+async def test_an_empty_set_is_still_a_call() -> None:
+    """``cli_tools: []`` means "this bot has no tools", which the engine has to
+    be told — skipping the call would leave every tool it has in place."""
+    port, _, transport = _arca(transport=FakeTransport(response=_ok()))
+    assert await port.replace_all(_CTX, []) == {}
+    assert transport.calls[0]["body"] == {"tools": []}
+
+
+@pytest.mark.asyncio
+async def test_the_replace_budget_scales_with_the_set_but_is_capped() -> None:
+    assert replace_timeout_for(1) == INSTALL_TIMEOUT_SECONDS
+    assert replace_timeout_for(0) == INSTALL_TIMEOUT_SECONDS
+    assert replace_timeout_for(3) == 3 * INSTALL_TIMEOUT_SECONDS
+    assert replace_timeout_for(10_000) == REPLACE_TIMEOUT_CAP_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_a_per_name_refusal_comes_back_named() -> None:
+    """The whole reason the response is per name: an apply report is per
+    declared entry, and one verdict for the set would lose which tool the
+    engine actually objected to (spec D-15)."""
+    transport = FakeTransport(
+        response={
+            "success": True,
+            "data": {
+                "results": [
+                    {"name": "a", "success": True},
+                    {"name": "b", "success": False, "message": "not executable"},
+                ]
+            },
+        }
+    )
+    port, _, _ = _arca(transport=transport)
+    failures = await port.replace_all(
+        _CTX,
+        [
+            DeliverableCliTool(name="a", data=_BYTES),
+            DeliverableCliTool(name="b", data=_BYTES),
+        ],
+    )
+    assert failures == {"b": "not executable"}
+
+
+@pytest.mark.asyncio
+async def test_a_response_that_omits_a_tool_is_not_read_as_success() -> None:
+    """Silence is the dangerous answer: taking it for success is exactly how a
+    tool the bot does not have ends up in a green apply report."""
+    port, _, _ = _arca(transport=FakeTransport(response=_ok("a")))
+    with pytest.raises(CliToolDeliveryError):
+        await port.replace_all(
+            _CTX,
+            [
+                DeliverableCliTool(name="a", data=_BYTES),
+                DeliverableCliTool(name="b", data=_BYTES),
+            ],
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_response_with_no_results_at_all_is_refused() -> None:
+    port, _, _ = _arca(transport=FakeTransport(response={"success": True}))
+    with pytest.raises(CliToolDeliveryError):
+        await port.replace_all(_CTX, [DeliverableCliTool(name="a", data=_BYTES)])
+
+
+@pytest.mark.asyncio
+async def test_a_name_the_platform_did_not_send_is_ignored() -> None:
+    """An engine listing something extra is drift for ``list`` to surface, not
+    a failure of this call."""
+    port, _, _ = _arca(transport=FakeTransport(response=_ok("a", "stowaway")))
+    assert await port.replace_all(_CTX, [DeliverableCliTool(name="a", data=_BYTES)]) == {}
+
+
 # ── teclaw ────────────────────────────────────────────────────────────────
 
 
 def test_the_teclaw_port_holds_no_engine_collaborator() -> None:
     """The strongest form of "makes no engine call": there is nothing to call
-    with. The port takes no transport, no resolver, no device."""
-    assert TeclawCliToolPort.__init__ is object.__init__
-    assert vars(TeclawCliToolPort()) == {}
+    with. The port takes no transport, no resolver and no device — only the
+    whole-artifact redeliver, which reaches the *container*, never a CLI
+    endpoint, and which the apply binding leaves unset."""
+    assert vars(TeclawCliToolPort()) == {"_redeliver": None}
 
 
 @pytest.mark.asyncio
@@ -307,9 +418,20 @@ async def test_teclaw_install_and_delete_do_nothing() -> None:
 
 @pytest.mark.asyncio
 async def test_teclaw_replace_all_makes_no_engine_call_either() -> None:
-    await TeclawCliToolPort().replace_all(
-        _CTX, install=[("mycli", _BYTES)], remove=["oldcli"]
+    """And answers no per-name failures: an artifact is accepted whole or it is
+    not, so there is no per-tool verdict for this family to report."""
+    failures = await TeclawCliToolPort().replace_all(
+        _CTX, [DeliverableCliTool(name="mycli", data=_BYTES)]
     )
+    assert failures == {}
+
+
+@pytest.mark.asyncio
+async def test_teclaw_does_not_ask_for_the_tools_bytes() -> None:
+    """The artifact references the objects rather than carrying them, so
+    reading a few hundred megabytes back out of the store to hand this port an
+    argument it ignores would be pure waste."""
+    assert TeclawCliToolPort.needs_tool_bytes is False
 
 
 @pytest.mark.asyncio

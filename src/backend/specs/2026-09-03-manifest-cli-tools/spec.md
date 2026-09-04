@@ -3,7 +3,18 @@
 Work item W9 of `docs/bot-config-manifest/work-items.zh-CN.md` §5, issue #1477.
 Plan: `plan.md` in this directory.
 
-> **Revision 7 (2026-09-03).** The engine's `install` owns the executable bit —
+> **Revision 8 (2026-09-04).** The delivery port gains a **whole-set** operation
+> beside the single-tool ones: `replace_all` means "this is the entire set,
+> replace what you have", and it is what a manifest apply calls — one engine
+> round trip instead of one per tool, and no intermediate state on the wire.
+> The families differ only in how the set is transmitted: teclaw composes it
+> into the artifact, ARCA calls a new engine **replacement** endpoint that
+> reports per-name status. Because teclaw's port composes *from* the table,
+> **platform state is written before the port is called** (D-14), which retires
+> the closing redeliver `BotCliToolService` was making and moves the family
+> knowledge into the port where it belongs. Rev 7's summary follows.
+>
+> **Revision 7.** The engine's `install` owns the executable bit —
 > the platform issues no `chmod` and runs no shell command. Rev 6's summary
 > follows, unchanged otherwise.
 >
@@ -119,14 +130,21 @@ owns the filesystem.**
   bot: the pinned `digest`, the selected `subpath`, the delivered `md5`, the
   `version`, the OSS key, size and audit stamps. It answers "what does this bot
   have", and it makes replacement and removal decidable.
-- **Delivery differs by family, and only there.**
-  - **ARCA** — the tool is installed into the live container by name, in one
-    call to the engine's `install` endpoint, which owns placement, the
-    executable bit and exposure to the agent. Needs the container, so
-    `ON_CONTAINER`.
-  - **teclaw** — the artifact *is* the delivery. The platform updates the row,
-    writes the bytes to OSS, composes the `cli_tools` refs and delivers, exactly
-    as `mcp` is composed and delivered. No separate engine upload call.
+- **Delivery differs by family, and only in how the desired set is
+  transmitted.** Both families implement one port with two shapes: `install` /
+  `delete` for a single live edit, and `replace_all` for "this is the whole
+  set". A one-tool edit must not re-send the rest, and a full override should
+  say so in one call rather than N.
+  - **ARCA** — one call to the engine, by name for a single edit and to a
+    **replacement** endpoint carrying the desired set for an apply. The engine
+    owns placement, the executable bit and exposure to the agent; the
+    replacement response reports **per name**, so the apply report keeps its
+    per-entry shape (D-15). Needs the container, so `ON_CONTAINER`.
+  - **teclaw** — the composed artifact *is* the transmission, so all three
+    methods do the same thing: compose the bot's artifact from the table and
+    deliver it once, exactly as `mcp` is composed and delivered. No separate
+    engine upload call, and no per-tool call — a set of any size is one
+    artifact.
 - **The backend never knows where a tool lands.** ARCA's install is by name and
   the directory is the port's private constant; teclaw resolves the refs itself.
   No container path crosses the boundary in either direction.
@@ -177,11 +195,25 @@ wrong: the generic re-phasing keys on the switch, and this category must not.
 - [x] No response exposes a container path.
 - [x] A tool installed through the API is visible to a subsequent manifest apply
       as something the override replaces or removes, and the report says which.
+- [ ] A single install or remove whose port call is refused **rolls its row
+      back**, so a non-2xx is never followed by a `GET` that lists the tool
+      (D-14).
+- [ ] The push to a running teclaw container happens **in the port**;
+      `BotCliToolService` no longer asks which family a bot is on.
 
 ### Manifest apply
 
 - [x] The `cli_tools` materialiser calls `CliToolService.replace_all` and adds no
       fetch, verification or placement logic of its own.
+- [ ] `replace_all` reaches the engine **once**, through the port's whole-set
+      operation, whatever the size of the declared set — and not at all when
+      every declaration already converges.
+- [ ] Platform state is written before the port is called, and a refused
+      whole-set call leaves it standing: the report says per tool what failed
+      and the next apply re-sends (D-14).
+- [ ] A teclaw apply still makes exactly **one** artifact push, from
+      `TeclawDelivery.finish`; the `cli_tools` port does not push a second one
+      mid-apply.
 - [x] `cli_tools` is **`ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw,
       under either switch position** — a category-specific rule in the teclaw
       strategy's `phase_of`, because the generic re-phasing keys on the switch
@@ -263,6 +295,42 @@ issues no `chmod` and runs no shell command. teclaw's artifact *is* the
 delivery, so there is no separate engine upload. The protocol needs no `get`,
 because the platform never reads bytes back out of a container.
 
+**D-13 — The port carries a whole-set operation beside the single-tool ones.**
+`install` and `delete` serve a live owner edit; `replace_all` serves a full
+override and says "this is the entire set" in one call. Driving an apply
+through the single-tool method instead would mean N engine round trips and N
+intermediate states on the wire — and on teclaw those states are *wrong*, not
+merely redundant, because `replace_all` removes every undeclared tool before it
+installs, so the container would first receive an artifact that has lost tools
+and not yet regained them. Both shapes are needed: a one-tool edit through the
+batch method would re-transmit every binary the bot has.
+
+**D-14 — Platform state is written before the port is called.** teclaw's port
+composes the artifact *from* `ac_bot_cli_tool`, so a port called before the rows
+were written would transmit the previous set. This makes the table what its own
+repository contract already called it — the record of what the platform *asked
+for* — with `drift()` there to compare it against what the engine has.
+
+The consequence is the failure story, and it differs by path on purpose:
+
+- **A single install or remove rolls its row back** when the port refuses. The
+  endpoint's contract is that a non-2xx means the bot does not have the tool;
+  without the rollback a failed `POST` would be followed by a `GET` that lists
+  it. One row, and the prior value is in hand.
+- **`replace_all` does not roll back.** The desired state stands, the report
+  says per tool what failed, `drift()` shows the mismatch, and the next apply
+  re-sends. Partial failure is already an apply's normal shape, and unwinding N
+  rows would add a failure mode of its own.
+
+**D-15 — The engine's replacement response reports per name.** The apply report
+is per declared entry, and a single batch call would otherwise collapse every
+engine-side refusal into one verdict for the whole set. Platform-side failures —
+a digest mismatch, a non-amd64 ELF, a missing `subpath`, an unreachable source —
+stay per tool regardless, because they happen before any engine call. This makes
+ARCA's replacement endpoint meaningfully more work than the three name-addressed
+ones: it accepts a set, applies it, and reports each name's outcome. That is
+stated in the engine contract rather than left to be discovered.
+
 **D-6 — `cli_tools` is `ON_CONTAINER` on ARCA and `PRE_CONTAINER` on teclaw**,
 under either switch position, because a teclaw creation has no phase B and its
 artifact is composed before provisioning. This is a category-specific rule in
@@ -306,8 +374,8 @@ than reopen "do we trust an archive's mode bits", v1 states the limit.
 - The `ac_bot_cli_tool` table, its record, protocol and implementation.
 - `CliToolService`: install, delete, list, `replace_all`, drift.
 - The OSS tool store: the bytes the platform keeps per bot.
-- The ARCA delivery: name-addressed install / delete / list / batch, each one
-  call to the engine.
+- The ARCA delivery: name-addressed `install` / `delete` / `list`, plus the
+  whole-set `replace` that reports per name — each one call to the engine.
 - The teclaw delivery: `cli_tools` refs on the composed artifact, and promotion
   as a stage-scoped **copy** of the OSS objects.
 - The `/cli-tools` management API and its `api/` contract.
@@ -339,6 +407,17 @@ which no platform code depends on:
   engine's constant and the default-skillset skill's to describe; the platform
   contract is unaffected by the choice.
 
+Tracked rather than open, because v1 accepts it (rev 8):
+
+- **The whole-set call re-transmits every tool's bytes, not just what changed.**
+  An apply that changes one tool of four uploads all four to ARCA. A *no-op*
+  apply costs nothing — every declaration converges on `(digest, subpath)` and
+  the port is not called at all — so the cost falls only on an apply that
+  changes something, which is why it is acceptable for v1. The shape that fixes
+  it carries the full desired set as `(name, digest)` and bytes only for what
+  changed, which is an engine-contract change; a TODO sits where the payload is
+  built.
+
 ## Revision history
 
 | | What changed, and why |
@@ -349,4 +428,5 @@ which no platform code depends on:
 | **rev 4** | Platform-managed on the owner's decision: metadata table, one core service every caller delegates to, engine CRUD plus batch, a management API, no projection. |
 | **rev 5** | The engine owns the directory and the protocol is **name-addressed** (D-3), so the `tools/` namespace and every isolation mechanism are dropped (D-5). `cli_tools` is always platform-managed, independent of the teclaw switch, like `mcp` (D-6). The teclaw arm gains the **promotion gather** — GET from the engine, stage-scoped OSS, artifact refs — which is why the protocol needs `get`. `PATH` is replaced by a default-skillset skill for v1, with the cost and the §3.7 correction written down (D-8). |
 | **rev 6** | **The platform stores the bytes in OSS at install time** (D-4) — rev 5 had no answer for what a teclaw artifact references on a live update or a manifest apply. The artifact becomes teclaw's delivery with no separate engine upload (D-5); promotion becomes a stage-scoped copy rather than a download, so the protocol's `get` is no longer needed; and the phase settles as ARCA `ON_CONTAINER` / teclaw `PRE_CONTAINER` under either switch position (D-6), correcting rev 5's claim that no category-specific code was required. |
+| **rev 8** | The port gains a **whole-set** operation beside the single-tool ones (D-13): a manifest apply calls `replace_all` once instead of `install` per tool, so the engine sees one desired set and no intermediate state — on teclaw those intermediates were wrong, since removals precede installs. The families differ only in transmission: teclaw composes the set into the artifact, ARCA calls a new replacement endpoint reporting **per name** (D-15), which keeps the apply report per entry. teclaw's port composes *from* the table, so **platform state is written before the port is called** (D-14); a single install or remove rolls its row back when the port refuses, an apply does not. The closing redeliver leaves `BotCliToolService` — the family knowledge moves into the port, and `TeclawDelivery.finish` keeps owning the one artifact push a manifest apply makes. |
 | **rev 7** | The engine's `install` owns the executable bit (D-5). Rev 6 had the platform do a device write then a `chmod` through the general shell channel; withdrawn in review — once `install` carries the semantics, a platform-side `chmod` is a second implementation of the engine's own job, and it took a user-supplied name through a shell. No `chmod`, no shell command, no quoting. |

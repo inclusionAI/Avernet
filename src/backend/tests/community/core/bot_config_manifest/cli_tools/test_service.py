@@ -370,7 +370,10 @@ async def test_replace_all_removes_tools_absent_from_the_declaration() -> None:
     assert [(o.name, o.status) for o in outcomes] == [
         ("old", CliToolStatus.REMOVED), ("new", CliToolStatus.INSTALLED),
     ]
-    assert delivery.deleted == ["old"]
+    # One whole-set call carrying the destination, not a delete and an install.
+    # The removal is implicit in what the set does *not* name (spec D-13).
+    assert delivery.deleted == []
+    assert [[name for name, _ in call] for call in delivery.replaced] == [["new"]]
     assert set(r.name for r in repo.list(env="dev", entity_id="u1", bot_id="bot7")) == {"new"}
 
 
@@ -382,7 +385,9 @@ async def test_replace_all_computes_removals_from_the_table_not_the_engine() -> 
     service, _, _, _, _ = _service(delivery=delivery)
     await service.install(_CTX, _decl(name="old"), installed_by="manifest")
     await service.replace_all(_CTX, [], installed_by="manifest")
-    assert delivery.deleted == ["old"]
+    # The empty set is a real call, not a skip: "this bot has no tools" is
+    # something the family has to be told.
+    assert delivery.replaced == [[]]
     assert delivery.listed == 0
 
 
@@ -424,7 +429,8 @@ async def test_a_changed_subpath_reinstalls_even_at_the_same_digest() -> None:
         installed_by="manifest",
     )
     assert [o.status for o in outcomes] == [CliToolStatus.INSTALLED]
-    assert len(delivery.installed) == 2
+    # Re-fetched and re-stored, then delivered as the whole set.
+    assert [[name for name, _ in call] for call in delivery.replaced] == [["mycli"]]
 
 
 @pytest.mark.asyncio
@@ -632,7 +638,9 @@ async def test_a_manifest_apply_removes_a_tool_a_person_installed() -> None:
 
     assert [(o.name, o.status) for o in outcomes] == [("by-hand", CliToolStatus.REMOVED)]
     assert outcomes[0].record.installed_by == "u2"
-    assert delivery.deleted == ["by-hand"] and repo.rows == {}
+    # Removed by omission: the whole-set call names what should remain, and
+    # this tool is not in it.
+    assert delivery.replaced == [[]] and repo.rows == {}
 
 
 # ── replacement, and the object the surviving row still describes ─────────
@@ -725,84 +733,93 @@ class _Bots:
 
 
 @pytest.mark.asyncio
-async def test_a_teclaw_install_redelivers_the_artifact() -> None:
-    """On teclaw the artifact *is* the delivery, so a row and some bytes change
-    nothing a running container can see. Without this the API would answer 200
-    while the bot kept its previous tool set."""
-    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
-        BotCliToolService,
+async def test_the_live_port_pushes_an_artifact_on_install_and_on_remove() -> None:
+    """The management API's binding. There is no closing step on that path, so
+    the port is what hands the running container a fresh artifact."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+        TeclawCliToolPort,
     )
 
-    delivered: list[str] = []
+    pushes: list[str] = []
 
     async def _redeliver(ctx):
-        delivered.append(ctx.bot_id)
+        pushes.append(ctx.bot_id)
         return None
 
-    service, *_ = _service()
-    bots = _Bots(engine="teclaw")
-    api = BotCliToolService(
-        bot_service=bots,
-        cli_tool_service_factory=lambda family: service,
-        is_teclaw=lambda engine: engine == "teclaw",
-        redeliver=_redeliver,
-    )
-    await api.install(bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl())
-    assert delivered == ["bot7"]
+    service, *_ = _service(delivery=TeclawCliToolPort(redeliver=_redeliver))
+    await service.install(_CTX, _decl(), installed_by="u2")
+    assert pushes == ["bot7"]
 
-    await api.remove(bot_id="bot7", owner_id="u1", actor_id="u2", name="mycli")
-    assert delivered == ["bot7", "bot7"]
+    await service.remove(_CTX, "mycli")
+    assert pushes == ["bot7", "bot7"]
 
 
 @pytest.mark.asyncio
-async def test_an_arca_install_does_not_redeliver() -> None:
-    """The engine's ``install`` already put the tool in the container; a
-    whole-artifact redeliver would be a second delivery of nothing."""
-    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
-        BotCliToolService,
+async def test_the_apply_bound_port_installs_without_pushing() -> None:
+    """The other binding. ``TeclawDelivery.finish`` makes that apply's single
+    artifact push, covering every category it wrote; one from here would arrive
+    mid-apply — ``cli_tools`` final, ``resources`` not yet written — and be
+    followed by the correct one."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+        TeclawCliToolPort,
     )
 
-    delivered: list[str] = []
+    service, repo, *_ = _service(delivery=TeclawCliToolPort())
+    outcomes = await service.replace_all(_CTX, [_decl()], installed_by="manifest")
 
-    async def _redeliver(ctx):
-        delivered.append(ctx.bot_id)
-        return None
-
-    service, *_ = _service()
-    api = BotCliToolService(
-        bot_service=_Bots(engine="openclaw"),
-        cli_tool_service_factory=lambda family: service,
-        is_teclaw=lambda engine: engine == "teclaw",
-        redeliver=_redeliver,
-    )
-    await api.install(bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl())
-    assert delivered == []
+    assert [o.status for o in outcomes] == [CliToolStatus.INSTALLED]
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
 
 
 @pytest.mark.asyncio
-async def test_a_failed_redeliver_does_not_fail_an_install_that_worked() -> None:
-    """The tool is installed — the row, the bytes and the next compose all say
-    so. Answering 500 to a caller whose install succeeded would be the worse
-    report."""
-    from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
-        BotCliToolService,
+async def test_a_refused_push_undoes_the_install_it_was_for() -> None:
+    """The rev-8 order writes the row first, so the property the old order gave
+    for free — never record a tool the bot does not have — is now the
+    rollback's job. Deliberately a change of behaviour: the pre-rev-8 redeliver
+    logged and answered 200, which left a `GET` listing a tool the container
+    never received."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+        TeclawCliToolPort,
     )
 
     async def _redeliver(ctx):
         return "the container was unreachable"
 
-    service, repo, *_ = _service()
-    api = BotCliToolService(
-        bot_service=_Bots(engine="teclaw"),
-        cli_tool_service_factory=lambda family: service,
-        is_teclaw=lambda engine: engine == "teclaw",
-        redeliver=_redeliver,
+    service, repo, _, _, oss = _service(
+        delivery=TeclawCliToolPort(redeliver=_redeliver)
     )
-    record = await api.install(
-        bot_id="bot7", owner_id="u1", actor_id="u2", decl=_decl()
+    outcome = await service.install(_CTX, _decl(), installed_by="u2")
+
+    assert outcome.status is CliToolStatus.FAILED
+    assert "unreachable" in (outcome.detail or "")
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is None
+    assert _key() not in oss.objects
+
+
+@pytest.mark.asyncio
+async def test_a_refused_push_puts_a_removed_row_back() -> None:
+    """The bot still has the tool, so the table must still say so — and the
+    object it points at must still be there to be pointed at."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+        TeclawCliToolPort,
     )
-    assert record.name == "mycli"
-    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is not None
+
+    refuse = False
+
+    async def _redeliver(ctx):
+        return "the container was unreachable" if refuse else None
+
+    service, repo, _, _, oss = _service(
+        delivery=TeclawCliToolPort(redeliver=_redeliver)
+    )
+    await service.install(_CTX, _decl(), installed_by="u2")
+
+    refuse = True
+    outcome = await service.remove(_CTX, "mycli")
+
+    assert outcome.status is CliToolStatus.FAILED
+    row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    assert row is not None and oss.objects[row.oss_key] == _TOOL
 
 
 # ── the API's 409, made true at the write ─────────────────────────────────
@@ -900,9 +917,12 @@ async def test_a_conflict_over_identical_bytes_keeps_the_winners_object() -> Non
 
 @pytest.mark.asyncio
 async def test_a_failed_record_is_reported_rather_than_raised() -> None:
-    """The class promises every failure comes back as an outcome. This write
-    was the one that did not honour it, and it is the *last* step — the engine
-    has already accepted the tool by the time it runs."""
+    """The class promises every failure comes back as an outcome, and this
+    write had no such handling: one flaky insert aborted a whole batch.
+
+    Since rev 8 the row goes in *before* the delivery, so a failed record also
+    means the family was never told — which is the tidier failure of the two
+    orders: nothing to undo anywhere."""
     service, repo, delivery, _, oss = _service()
     repo.write_error = RuntimeError("connection reset")
 
@@ -910,9 +930,7 @@ async def test_a_failed_record_is_reported_rather_than_raised() -> None:
 
     assert outcome.status is CliToolStatus.FAILED and outcome.failed
     assert "could not be recorded" in (outcome.detail or "")
-    # The engine got it — that is exactly why this is worth logging — and the
-    # unreferenced object is not left behind.
-    assert [name for name, _ in delivery.installed] == ["mycli"]
+    assert delivery.installed == []
     assert _key() in oss.deletes and _key() not in oss.objects
 
 

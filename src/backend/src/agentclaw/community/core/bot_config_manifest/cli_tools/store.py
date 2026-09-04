@@ -211,6 +211,20 @@ class CliToolStore:
             raise CliToolStoreError(f"object store put failed for {key!r}")
         return StoredCliTool(name=name, ref_path=ref_path, store_key=key)
 
+    def read(self, *, key: str) -> bytes:
+        """The bytes at ``key``, for a caller that has to re-transmit them.
+
+        The whole-set delivery on a family that carries binaries needs the
+        tools it did *not* just fetch — the ones a manifest re-declared
+        unchanged — and this is where they come from. It is the only read of a
+        tool's bytes the platform makes: nothing ever reads them back out of a
+        container (spec D-5).
+        """
+        content = self._oss.get_object(key)
+        if content is None:
+            raise CliToolStoreError(f"object store has nothing at {key!r}")
+        return content
+
     def copy_to_stage(
         self,
         scope: CliToolScope,
