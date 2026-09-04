@@ -243,6 +243,9 @@ class BaasBotService(BotService):
         # Resolve user id for the session
         user_id = resolve_user_id(metadata, binding_info, context, bot_id)
 
+        # 评测流量：提取 eval_id 供 consistency_key 构造使用
+        eval_id = metadata.get("eval_id") if metadata else None
+
         # Step 1: Resolve bot_uuid → WsConnectionInfo (also verifies bot is ACTIVE)
         env = get_current_env()
         logger.info(
@@ -260,7 +263,7 @@ class BaasBotService(BotService):
                 session_consistency_key = _adapter.session_consistency_key(
                     tc_bot_id=binding_info.bot_id,
                     user_id=user_id,
-                    run_id=run_id,
+                    run_id=eval_id or run_id,
                     session_id=session_id,
                 )
             else:
@@ -270,6 +273,7 @@ class BaasBotService(BotService):
                     user_id=user_id,
                     run_id=run_id,
                     session_id=session_id,
+                    eval_id=eval_id,
                 )
             consistency_key = (
                 _strip_agent_main_prefix(session_consistency_key)
@@ -308,6 +312,13 @@ class BaasBotService(BotService):
         # Step 2: Get or create adapter session
         session_client = self._create_session_client(conn_info, engine_type)
 
+        # 评测流量：eval_id 存在且调用方未传 session_id 时，
+        # 用 consistency_key（结构化格式，含 evalId）作为 session_id 传给 adapter，
+        # 使引擎返回的 session_id 与评测标识关联。
+        effective_session_id = session_id
+        if session_id is None and eval_id and session_consistency_key:
+            effective_session_id = session_consistency_key
+
         try:
             async with session_client:
                 # adapter session 创建:命中 adapter 走 adapter,否则走原始分支
@@ -316,7 +327,7 @@ class BaasBotService(BotService):
                 if _adapter is not None:
                     adapter_session_id, reused = await _adapter.create_adapter_session(
                         session_client=session_client,
-                        session_id=session_id,
+                        session_id=effective_session_id,
                         user_id=user_id,
                         metadata=metadata,
                         bot_id=binding_info.bot_id,
@@ -328,7 +339,7 @@ class BaasBotService(BotService):
                         reused,
                     ) = await self._get_or_create_adapter_session(
                         session_client=session_client,
-                        session_id=session_id,
+                        session_id=effective_session_id,
                         user_id=user_id,
                         metadata=metadata,
                         engine_type=engine_type or "openclaw",
@@ -342,6 +353,16 @@ class BaasBotService(BotService):
             raise BotServiceError(
                 f"Failed to get or create adapter session for bot {bot_id}: {_safe_client_msg(e)}"
             ) from e
+
+        # session_id 退化检查：调用方传入了 session_id，但 adapter 返回了不同的值
+        if session_id and adapter_session_id != session_id:
+            logger.warning(
+                "[BaasBotService.create_session] session_id 退化: "
+                "请求=%s, 实际=%s, bot_id=%s — 调用方传入的 session_id 被替换",
+                session_id,
+                adapter_session_id,
+                bot_id,
+            )
 
         action = "reused" if reused else "created"
         logger.info(
@@ -1167,6 +1188,7 @@ class BaasBotService(BotService):
         user_id: str,
         run_id: str,
         session_id: str | None = None,
+        eval_id: str | None = None,
     ) -> str | None:
         """Create consistency key for session routing.
 
@@ -1176,15 +1198,22 @@ class BaasBotService(BotService):
         canonicalized by stripping a leading ``agent:main:`` so the DingTalk
         path (raw id) and the Open API path (prefixed id) hash to the same
         device. The persisted/returned session id contract is unchanged.
+
+        When ``eval_id`` is present (eval traffic) and ``session_id`` is None
+        (first round), the eval_id replaces run_id in the session field,
+        producing a structured key like ``agent:{id}:session:{evalId}:user:{uid}``
+        that is consistent with the production format.
         """
         if session_id is not None:
             return session_id
 
+        session_key = eval_id if eval_id else run_id
+
         if engine_type == "openclaw":
             # Fixed prefix 'agent:main:'
-            return f"agent:main:session:{run_id}:user:{user_id}"
+            return f"agent:main:session:{session_key}:user:{user_id}"
         elif engine_type == "claude_code":
-            return f"agent:{tc_bot_id}:session:{run_id}:user:{user_id}"
+            return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
         else:
             # TODO
             return None

@@ -69,4 +69,5 @@ def test_skill_collaborator_handler_delegates_atomic_approval() -> None:
     assert call["target_status"] is WorkOrderStatus.APPROVED
     assert call["notification"].recipient_user_id == "member-1"
     assert call["notification"].event_type == "SKILL_COLLABORATOR_REVIEWED"
+    assert call["notification"].content == {"text": "你共同编辑 Skill「Review Skill」的申请已通过。"}
     assert call["env"] == "test"

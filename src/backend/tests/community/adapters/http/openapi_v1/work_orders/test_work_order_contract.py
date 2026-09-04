@@ -11,8 +11,11 @@ from injector import Injector, Module
 
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
+    display_summary,
     display_title,
+    extract_content_text,
     json_object,
+    preserve_content,
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.router import router
 from agentclaw.community.api.work_order_service import (
@@ -293,7 +296,7 @@ def test_create_work_order_event_accepts_json_objects(
         "approver_user_ids": ["approver-1"],
         "recipient_user_ids": [],
         "title": "ignored display title",
-        "content": {"message": "apply", "items": [1, True]},
+        "content": {"text": "apply", "items": [1, True]},
         "biz_data": {"space_id": 7, "meta": {"source": "web"}},
     }
 
@@ -315,7 +318,7 @@ def test_create_work_order_event_accepts_json_objects(
         approver_user_ids=["approver-1"],
         recipient_user_ids=[],
         title="ignored display title",
-        content={"message": "apply", "items": [1, True]},
+        content={"text": "apply", "items": [1, True]},
         apply_reason=None,
         biz_data={"space_id": 7, "meta": {"source": "web"}},
         actor_id="owner-1",
@@ -323,36 +326,66 @@ def test_create_work_order_event_accepts_json_objects(
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    "content",
     [
-        ("content", [1, 2, 3]),
-        ("content", "text"),
-        ("content", 123),
-        ("content", True),
-        ("biz_data", [1, 2, 3]),
-        ("biz_data", "text"),
-        ("biz_data", 123),
-        ("biz_data", True),
+        None,
+        {},
+        {"text": "display"},
+        {"text": "display", "legacy_value": "legacy"},
+        {"message": "成员已加入空间", "space_id": 7},
+        {"display_content": "...", "metadata": {"source": "bcs"}},
+        {"review_remark": "审批备注"},
+        {"workitem_name": "历史任务"},
     ],
 )
-def test_create_work_order_event_rejects_non_object_json(
-    client, work_order_service, field, value
-):
+def test_create_work_order_event_accepts_supported_content(content, client, work_order_service):
+    work_order_service.create_work_order_event.return_value = WorkOrderEventCreatedResult(
+        event_category=NotificationCategory.NOTICE,
+        work_order_id=None,
+        work_order_no=None,
+        notification_ids=[21],
+        status=WorkOrderEventStatus.CREATED,
+    )
     payload = {
-        "event_category": "APPROVAL",
-        "biz_type": "SPACE_JOIN",
-        "biz_id": "7",
-        "event_type": "SPACE_JOIN_APPLIED",
-        "applicant_user_id": "owner-1",
-        "approver_user_ids": ["approver-1"],
-        "recipient_user_ids": [],
-        "title": "title",
-        field: value,
+        "event_category": "NOTICE",
+        "biz_type": "SPACE",
+        "biz_id": "space-1",
+        "event_type": "SPACE_MEMBER_ADDED",
+        "recipient_user_ids": ["owner-1"],
+        "title": "Member added",
+        "content": content,
+    }
+
+    response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
+
+    assert response.status_code == 201
+    assert work_order_service.create_work_order_event.call_args.kwargs["content"] == content
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "普通字符串",
+        [],
+        123,
+        True,
+    ],
+)
+def test_create_work_order_event_rejects_invalid_content(content, client, work_order_service):
+    payload = {
+        "event_category": "NOTICE",
+        "biz_type": "SPACE",
+        "biz_id": "space-1",
+        "event_type": "SPACE_MEMBER_ADDED",
+        "recipient_user_ids": ["owner-1"],
+        "title": "Member added",
+        "content": content,
     }
 
     response = client.post("/openapi/v1/bots/work-orders/events", json=payload)
 
     assert response.status_code == 422
+    assert "Invalid request" in response.text
     work_order_service.create_work_order_event.assert_not_called()
 
 
@@ -411,13 +444,15 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[0]["item_type"] == "APPROVAL"
     assert items[0]["notification_id"] is None
     assert items[0]["title"] == "空间加入申请待审批"
+    assert items[0]["summary"] == "有新的空间加入申请，请及时处理。"
     assert items[0]["content"] is None
     assert items[0]["gmt_created"] == "2026-08-18T01:02:03"
     assert items[0]["gmt_modified"] == "2026-08-18T02:03:04"
     assert items[1]["item_id"] == "NOTIFICATION_21"
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
-    assert items[1]["title"] == "空间加入申请已通过"
+    assert items[1]["title"] == "空间加入申请已处理"
+    assert items[1]["summary"] == "空间加入申请已有处理结果。"
     assert items[1]["content"] == {"message": "approved"}
     assert items[1]["gmt_created"] == "2026-08-18T01:02:03"
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05"
@@ -464,23 +499,20 @@ def test_list_work_orders_derives_space_title_without_notification(
 
 
 @pytest.mark.parametrize(
-    ("stored_title", "expected"),
+    ("event_type", "stored_title", "expected"),
     [
-        ("空间加入申请待审批", "空间加入申请待审批"),
-        ("空间加入申请已通过", "空间加入申请已通过"),
-        ("空间加入申请未通过", "空间加入申请未通过"),
-        ("SPACE_JOIN APPROVED", "空间加入申请已通过"),
-        ("SPACE_JOIN REJECTED", "空间加入申请未通过"),
-        ("SPACE_JOIN_PENDING", "空间加入申请待审批"),
-        ("SPACE_JOIN_APPROVED", "空间加入申请已通过"),
-        ("SPACE_JOIN_REJECTED", "空间加入申请未通过"),
-        ("custom title", "custom title"),
+        (WorkOrderEventType.SPACE_JOIN_REVIEWED, None, "空间加入申请已处理"),
+        (WorkOrderEventType.SKILL_COLLABORATOR_APPLIED, None, "Skill 共同编辑申请待审批"),
+        (WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED, "BOT_FRIEND APPROVED", "Bot 好友申请已通过"),
+        ("EXTERNAL_EVENT", "custom title", "custom title"),
     ],
 )
-def test_list_work_orders_translates_compatible_titles(
-    client, work_order_service, stored_title, expected
+def test_list_work_orders_uses_event_type_display_contract(
+    client, work_order_service, event_type, stored_title, expected
 ):
-    notification = _notification().model_copy(update={"title": stored_title})
+    notification = _notification().model_copy(
+        update={"event_type": event_type, "title": stored_title}
+    )
     work_order_service.list_items.return_value = (
         1,
         [
@@ -495,7 +527,36 @@ def test_list_work_orders_translates_compatible_titles(
     response = client.get("/openapi/v1/bots/work-orders")
 
     assert response.status_code == 200
-    assert response.json()["data"]["items"][0]["title"] == expected
+    item = response.json()["data"]["items"][0]
+    assert item["title"] == expected
+    assert item["summary"]
+
+
+def test_list_work_orders_uses_rejected_friend_status_for_title(
+    client, work_order_service
+):
+    notification = _notification().model_copy(
+        update={
+            "event_type": WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED,
+            "title": "BOT_FRIEND REJECTED",
+        }
+    )
+    work_order_service.list_items.return_value = (
+        1,
+        [
+            WorkOrderListItem(
+                work_order=_work_order(WorkOrderStatus.REJECTED),
+                notification=notification,
+                can_approve=False,
+            )
+        ],
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["title"] == "Bot 好友申请未通过"
 
 
 def test_get_work_order_maps_nested_content(client, work_order_service):
@@ -523,6 +584,29 @@ def test_get_work_order_maps_nested_content(client, work_order_service):
     work_order_service.get_detail.assert_called_once_with(
         work_order_id=11, actor_id="owner-1"
     )
+
+
+def test_get_work_order_without_notification_uses_business_status_title(
+    client, work_order_service
+):
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(WorkOrderStatus.PENDING),
+        event_type=None,
+        title=None,
+        content=None,
+        space_id=7,
+        space_name="Team",
+        applicant_name="Applicant",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["event_type"] is None
+    assert data["title"] == "空间加入申请待审批"
+    assert data["summary"] == "有新的空间加入申请，请及时处理。"
 
 
 def test_get_bot_editor_work_order_maps_business_content(client, work_order_service):
@@ -667,7 +751,8 @@ def test_notification_detail_and_mark_read(client, notification_service):
         "work_order_id": 11,
         "notification_category": "APPROVAL",
         "event_type": "SPACE_JOIN_REVIEWED",
-        "title": "空间加入申请已通过",
+        "title": "空间加入申请已处理",
+        "summary": "空间加入申请已有处理结果。",
         "content": {"message": "approved"},
         "is_read": False,
         "work_order_status": "PENDING",
@@ -701,8 +786,9 @@ def test_notification_detail_wraps_historical_plain_text(client, notification_se
     response = client.get("/openapi/v1/bots/work-order-notifications/21")
 
     assert response.status_code == 200
-    assert response.json()["data"]["title"] == "空间加入申请已通过"
-    assert response.json()["data"]["content"] == {"legacy_value": "approved"}
+    assert response.json()["data"]["title"] == "空间加入申请已处理"
+    assert response.json()["data"]["summary"] == "approved"
+    assert response.json()["data"]["content"] == "approved"
 
 
 def test_domain_error_is_mapped_to_public_work_order_contract(
@@ -740,4 +826,120 @@ def test_request_validation_rejects_invalid_contract(client, path, method, paylo
 
 def test_presentation_helpers_preserve_empty_values() -> None:
     assert display_title(None, biz_type="CUSTOM", status=None) is None
+    assert display_title("SPACE_JOIN_PENDING") == "空间加入申请待审批"
+    assert display_title("custom title") == "custom title"
     assert json_object(None) is None
+    assert json_object("not-json") == {"legacy_value": "not-json"}
+
+
+def test_notification_content_text_has_priority_and_is_preserved(client, notification_service):
+    notification_service.get_detail.return_value = WorkOrderNotificationDetail(
+        notification=_notification().model_copy(
+            update={
+                "content": json.dumps({"legacy_value": "legacy", "text": "display"}),
+            }
+        ),
+        work_order_status=WorkOrderStatus.APPROVED,
+        can_approve=False,
+    )
+
+    response = client.get("/openapi/v1/bots/work-order-notifications/21")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["content"] == {
+        "legacy_value": "legacy",
+        "text": "display",
+    }
+    assert response.json()["data"]["summary"] == "display"
+
+
+def test_work_order_content_summary_falls_back_to_legacy_value(
+    client, work_order_service
+):
+    work_order_service.get_detail.return_value = WorkOrderDetail(
+        work_order=_work_order(),
+        event_type=WorkOrderEventType.SPACE_JOIN_APPLIED,
+        title="pending",
+        content=json.dumps({"legacy_value": "legacy display"}),
+        space_id=7,
+        space_name="Team",
+        applicant_name="Applicant",
+        can_approve=True,
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders/11")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["summary"] == "legacy display"
+    assert response.json()["data"]["content"] == {"legacy_value": "legacy display"}
+
+
+@pytest.mark.parametrize(
+    ("biz_type", "expected"),
+    [
+        (WorkOrderBizType.BOT_COLLABORATOR, "Bot 共同编辑申请待审批"),
+        (WorkOrderBizType.SKILL_COLLABORATOR, "Skill 共同编辑申请待审批"),
+        (WorkOrderBizType.BOT_FRIEND, "好友申请待审批"),
+    ],
+)
+def test_list_work_orders_derives_collaborator_title_without_notification(
+    client, work_order_service, biz_type, expected
+):
+    work_order = _work_order().model_copy(update={"biz_type": biz_type})
+    work_order_service.list_items.return_value = (
+        1, [WorkOrderListItem(work_order=work_order, notification=None, can_approve=True)]
+    )
+
+    response = client.get("/openapi/v1/bots/work-orders")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["title"] == expected
+    assert item["summary"]
+    assert item["content"] is None
+
+
+def test_content_presentation_supports_all_legacy_shapes():
+    assert preserve_content(None) is None
+    assert preserve_content("plain text") == "plain text"
+    assert preserve_content(json.dumps({"text": "structured"})) == {"text": "structured"}
+    assert preserve_content(json.dumps(["legacy", 1])) == "[\"legacy\", 1]"
+
+    assert extract_content_text("plain text") == "plain text"
+    assert extract_content_text(json.dumps({"text": "  ", "legacy_value": "legacy"})) == "legacy"
+    assert extract_content_text(json.dumps({"text": "display", "legacy_value": "legacy", "workitem_name": "workitem"})) == "display"
+    assert extract_content_text(json.dumps({"legacy_value": "legacy", "workitem_name": "workitem"})) == "legacy"
+    assert extract_content_text(json.dumps({"workitem_name": "workitem"})) == "workitem"
+    assert extract_content_text(json.dumps({"other": "value"})) is None
+    assert extract_content_text(json.dumps(["not", "an", "object"])) is None
+    assert display_summary(None, biz_type="UNKNOWN") == "你有一条新的通知"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (WorkOrderStatus.PENDING, "有新的 Skill 共同编辑申请，请及时处理。"),
+        (WorkOrderStatus.APPROVED, "Skill 共同编辑申请已通过。"),
+        (WorkOrderStatus.REJECTED, "Skill 共同编辑申请未通过。"),
+    ],
+)
+def test_display_summary_uses_work_order_status_without_notification(status, expected):
+    assert (
+        display_summary(
+            None,
+            biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            status=status,
+        )
+        == expected
+    )
+
+
+def test_display_summary_unknown_event_falls_back_to_business_status():
+    assert (
+        display_summary(
+            "LEGACY_SKILL_EVENT",
+            biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            status=WorkOrderStatus.REJECTED,
+        )
+        == "Skill 共同编辑申请未通过。"
+    )

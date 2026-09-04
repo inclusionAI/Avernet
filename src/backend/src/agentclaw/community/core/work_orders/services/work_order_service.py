@@ -64,6 +64,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderApproverStatus,
     WorkOrderDecision,
     WorkOrderEventCreatedResult,
+    skill_collaborator_applicant_display,
 )
 from agentclaw.community.core.work_orders.protocols import (
     SkillCollaboratorApprovalHandlerProtocol,
@@ -448,6 +449,24 @@ class WorkOrderService(WorkOrderServiceProtocol):
         nickname = (profile.nick_name or "").strip()
         return nickname[:128] or applicant_user_id
 
+    def _get_reviewer_name(self, *, reviewer_user_id: str | None) -> str | None:
+        if not reviewer_user_id:
+            return None
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(reviewer_user_id)
+            )
+        except StaffProfileLookupError:
+            logger.warning(
+                "failed to resolve reviewer nickname",
+                extra={"user_id": reviewer_user_id},
+                exc_info=True,
+            )
+            return None
+
+        nickname = (profile.nick_name or "").strip()
+        return nickname[:128] or None
+
     def list_items(
         self,
         *,
@@ -459,7 +478,7 @@ class WorkOrderService(WorkOrderServiceProtocol):
         page_no: int,
         page_size: int,
     ):
-        return self._repository.list_items(
+        total, items = self._repository.list_items(
             actor_id=actor_id,
             env=get_current_env(),
             query_type=query_type,
@@ -468,6 +487,38 @@ class WorkOrderService(WorkOrderServiceProtocol):
             biz_id=biz_id,
             offset=(page_no - 1) * page_size,
             limit=page_size,
+        )
+        return total, [self._present_skill_collaborator_item(item) for item in items]
+
+    def _present_skill_collaborator_item(self, item):
+        """Refresh pending Skill-request copy so historical rows gain a nickname."""
+
+        work_order = item.work_order
+        notification = item.notification
+        if (
+            work_order is None
+            or notification is None
+            or work_order.biz_type != WorkOrderBizType.SKILL_COLLABORATOR.value
+            or notification.event_type
+            != WorkOrderEventType.SKILL_COLLABORATOR_APPLIED.value
+        ):
+            return item
+        skill_name = str(_business_data(work_order.biz_data).get("skill_name") or "")
+        if not skill_name:
+            return item
+        applicant_user_id = work_order.applicant_user_id
+        applicant_name = self._get_applicant_name(applicant_user_id=applicant_user_id)
+        content = WorkOrderMessageContent.SKILL_COLLABORATOR_PENDING.value.format(
+            applicant_display=skill_collaborator_applicant_display(
+                applicant_user_id=applicant_user_id,
+                applicant_name=applicant_name,
+            ),
+            skill_name=skill_name,
+        )
+        return item.model_copy(
+            update={
+                "notification": notification.model_copy(update={"content": content})
+            }
         )
 
     def get_detail(self, *, work_order_id: int, actor_id: str):
@@ -478,7 +529,13 @@ class WorkOrderService(WorkOrderServiceProtocol):
         )
         if detail is None:
             raise WorkOrderNotFoundError("work order not found")
-        return detail
+        return detail.model_copy(
+            update={
+                "reviewer_user_name": self._get_reviewer_name(
+                    reviewer_user_id=detail.work_order.reviewer_user_id
+                )
+            }
+        )
 
     def approve(self, *, work_order_id: int, actor_id: str, review_remark: str | None):
         normalized_remark = (review_remark or "").strip() or None
@@ -589,17 +646,21 @@ class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
     ) -> WorkOrderNotificationDraft:
         if target_status is WorkOrderStatus.APPROVED:
             title = WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
-            content = WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
-                space_name=detail.space_name
-            )
+            content = {
+                "text": WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
+                    space_name=detail.space_name
+                )
+            }
         elif target_status is WorkOrderStatus.REJECTED:
             if review_remark is None:
                 raise WorkOrderInvalidRemarkError("review remark is required")
             title = WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
-            content = WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
-                space_name=detail.space_name,
-                review_remark=review_remark,
-            )
+            content = {
+                "text": WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
+                    space_name=detail.space_name,
+                    review_remark=review_remark,
+                )
+            }
         else:
             raise ValueError(f"unsupported review status: {target_status}")
 
@@ -643,7 +704,7 @@ class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
             biz_type=WorkOrderBizType.BOT_COLLABORATOR,
             biz_id=detail.work_order.biz_id,
             title=title,
-            content=content,
+            content={"text": content},
         )
 
     def get_detail(self, *, notification_id: int, actor_id: str):

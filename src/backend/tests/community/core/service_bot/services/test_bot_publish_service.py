@@ -1098,6 +1098,50 @@ class TestUpgradeBotToService:
             nick_name="Test User",
         )
 
+    def test_upgrade_bot_to_service_persists_default_before_creating_publish(self):
+        """默认镜像策略必须在异步 restart 前写入 Bot，避免新发布单误 Pin。"""
+        publish_repo = Mock()
+        publish_repo.get_by_publish_bot_id.return_value = None
+        publish_repo.get_by_publish_bot_id_and_version.return_value = None
+        publish_repo.insert.return_value = _create_mock_record(
+            record_id=10, status=PublishStatus.DRAFT, ext={"sbot_use_default_image": True}
+        )
+        bot_repo = Mock()
+        bot = {
+            "id": 100, "bot_id": "bot_001", "bot_name": "Test Bot",
+            "bot_type": "personal", "active_engine": "openclaw",
+            "owner_id": "user_001", "owner_name": "Test User",
+            "ext": {"stale": True},
+        }
+        bot_repo.get_by_id_and_owner.return_value = bot
+        bot_repo.update_by_owner.return_value = {
+            **bot, "bot_type": "service",
+            "ext": {"stale": True, "sbot_use_default_image": True},
+        }
+        bot_repo.get_by_id_and_owner.side_effect = [bot, bot_repo.update_by_owner.return_value]
+        bot_service = Mock()
+        bot_service.is_teclaw_bot.return_value = False
+        common_config = Mock()
+        common_config.get_value.return_value = {"image": "arca:v2"}
+        service = _make_service(
+            publish_repo, bot_repo=bot_repo, bot_service=bot_service,
+            common_config_service=common_config,
+        )
+
+        result = service.upgrade_bot_to_service("bot_001", "user_001")
+
+        assert result["publish_record"].id == 10
+        bot_repo.update_by_owner.assert_called_once_with(
+            "bot_001", "user_001",
+            {"bot_type": "service", "ext": {
+                "stale": True, "sbot_use_default_image": True,
+            }},
+        )
+        assert publish_repo.insert.call_args.args[0]["ext"] == {
+            "sbot_use_default_image": True,
+        }
+        bot_service.restart_bot.assert_called_once()
+
     def test_upgrade_bot_to_service_with_existing_publish(self):
         """已有发布记录时，只更新 bot_type，不创建新发布记录，返回已有发布记录，但会异步重启 Bot。"""
         # Arrange

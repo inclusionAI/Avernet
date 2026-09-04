@@ -20,6 +20,15 @@ from agentclaw.community.core.skill_center.errors import (
 )
 from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
 from agentclaw.community.core.spaces.protocols import SpaceAccessServiceProtocol
+from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileLookupError,
+)
+from agentclaw.community.utils.work_no import normalize_work_no_for_lookup
+
+
+logger = get_logger()
 
 
 def space_skill_actor_permissions(
@@ -56,10 +65,12 @@ class SpaceSkillGrantService:
         self,
         access: SpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        staff_dept: StaffDeptPlugin,
         env_provider: Callable[[], str],
     ) -> None:
         self._access = access
         self._repository = repository
+        self._staff_dept = staff_dept
         self._env_provider = env_provider
 
     def list_grants(
@@ -183,17 +194,18 @@ class SpaceSkillGrantService:
         if role != "OWNER":
             raise SpaceSkillGrantForbiddenError("skill owner required")
 
-    @classmethod
     def _present(
-        cls,
+        self,
         record: SpaceSkillGrantSetRecord,
         *,
         space_type,
         space_role,
     ) -> SpaceSkillGrantViewRecord:
         return {
-            "owner": record["owner"],
-            "managers": record["managers"],
+            "owner": self._with_display_name(record["owner"]),
+            "managers": [
+                self._with_display_name(manager) for manager in record["managers"]
+            ],
             "actor": {
                 "skill_role": record["actor_role"],
                 "permissions": space_skill_actor_permissions(
@@ -203,3 +215,20 @@ class SpaceSkillGrantService:
                 ),
             },
         }
+
+    def _with_display_name(self, grant: SpaceSkillGrantItem) -> SpaceSkillGrantItem:
+        user_id = grant["user_id"]
+        try:
+            profile = self._staff_dept.get_profile_by_work_no(
+                work_no=normalize_work_no_for_lookup(user_id)
+            )
+        except StaffProfileLookupError:
+            logger.warning(
+                "failed to resolve Skill Grant display name",
+                extra={"user_id": user_id},
+                exc_info=True,
+            )
+            display_name = None
+        else:
+            display_name = (profile.nick_name or "").strip()[:128] or None
+        return {**grant, "display_name": display_name}

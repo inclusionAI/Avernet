@@ -1,9 +1,8 @@
-"""Event listener: full skill-symlink sync when a device becomes active.
+"""Event listener: full runtime projection when a runtime becomes ready.
 
-Subscribed to DeviceActivatedEvent. Triggered once per container ready
-callback (new bot, restart, or post-batch-restart) — ensures that every
-time a container comes up, its symlinks are refreshed from the DB's
-current active skill sets (including default sets).
+Subscribed to ``DeviceActivatedEvent`` for first activation and to
+``RuntimeProjectionRequestedEvent`` for successful BaaS restarts. Both paths
+refresh runtime state from the DB's current desired state.
 
 The listener is constructed via the DI injector at app startup; its
 ``handle`` method is bound to the event bus so the bus can dispatch with
@@ -17,7 +16,10 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import (
+    DeviceActivatedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 from agentclaw.community.kernel.lifecycle import LifecycleBase
 from agentclaw.community.log import get_logger
 
@@ -30,6 +32,7 @@ if TYPE_CHECKING:
 logger = get_logger()
 
 _TRANSITION_AUTHORITY = "transition"
+_RuntimeReadyEvent = DeviceActivatedEvent | RuntimeProjectionRequestedEvent
 
 
 def _run_reconcile_blocking(coro: Any) -> Any:
@@ -82,7 +85,7 @@ class SkillSymlinkListener(LifecycleBase):
         self._runtime_non_skill_reconcile = runtime_non_skill_reconcile
 
     async def startup(self) -> None:
-        """Lifecycle hook — subscribe ``self.handle`` to DeviceActivatedEvent.
+        """Subscribe ``self.handle`` to activation and reprojection events.
 
         Replaces the explicit wiring in the pre-R11
         ``_register_event_listeners()`` helper. Idempotent — checks
@@ -92,21 +95,24 @@ class SkillSymlinkListener(LifecycleBase):
         from agentclaw.community.core.events.bus import get_event_bus
 
         bus = get_event_bus()
-        existing = bus._handlers.get(DeviceActivatedEvent, [])  # type: ignore[attr-defined]
-        if self.handle in existing:
+        for event_type in (DeviceActivatedEvent, RuntimeProjectionRequestedEvent):
+            existing = bus._handlers.get(event_type, [])  # type: ignore[attr-defined]
+            if self.handle in existing:
+                logger.info(
+                    "[skill_symlink_listener] already subscribed to %s",
+                    event_type.__name__,
+                )
+                continue
+            bus.subscribe(event_type, self.handle)
             logger.info(
-                "[skill_symlink_listener] already subscribed to DeviceActivatedEvent"
+                "[skill_symlink_listener] subscribed to %s", event_type.__name__
             )
-            return
-        bus.subscribe(DeviceActivatedEvent, self.handle)
-        logger.info(
-            "[skill_symlink_listener] subscribed to DeviceActivatedEvent"
-        )
 
-    def handle(self, event: DeviceActivatedEvent) -> None:
+    def handle(self, event: _RuntimeReadyEvent) -> None:
         logger.info(
-            "[skill_symlink_listener] received DeviceActivatedEvent: "
+            "[skill_symlink_listener] received %s: "
             "device_id=%s binding_id=%s provider=%s sandbox_id=%s",
+            type(event).__name__,
             event.device_id,
             event.binding_id,
             event.device_provider,
@@ -134,10 +140,11 @@ class SkillSymlinkListener(LifecycleBase):
                 return
 
             is_desktop = bot.get("bot_type") == "desktop"
-            self._enqueue_desktop_reconciliation(
-                event=event,
-                is_desktop=is_desktop,
-            )
+            if isinstance(event, DeviceActivatedEvent):
+                self._enqueue_desktop_reconciliation(
+                    event=event,
+                    is_desktop=is_desktop,
+                )
             initial_authority = self._resolve_desktop_layout_authority(bot)
             ctx = self._resolver.resolve_for_bot(bot_id, owner_id)
             if ctx.binding_id != event.binding_id:
@@ -166,20 +173,21 @@ class SkillSymlinkListener(LifecycleBase):
                 return
 
             if self._runtime_reconcile is not None:
-                # DeviceActivatedEvent is emitted after a restart/ready
-                # transition.  Rebuild the complete DB desired state through
-                # the same Reconciler as explicit mutations; do not rebuild
-                # a legacy Default-exclusion mapping in this listener.
+                # Both first activation and explicit post-restart projection
+                # rebuild the complete DB desired state through the same
+                # Reconciler as explicit mutations; do not rebuild a legacy
+                # Default-exclusion mapping in this listener.
                 try:
                     outcome = self._runtime_reconcile(str(bot_id), str(owner_id))
                     if asyncio.iscoroutine(outcome):
                         _run_reconcile_blocking(outcome)
                 finally:
-                    self._reenqueue_if_desktop_cutover_started(
-                        event=event,
-                        bot=bot if is_desktop else None,
-                        initial_authority=initial_authority,
-                    )
+                    if isinstance(event, DeviceActivatedEvent):
+                        self._reenqueue_if_desktop_cutover_started(
+                            event=event,
+                            bot=bot if is_desktop else None,
+                            initial_authority=initial_authority,
+                        )
                 return
 
             from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
@@ -206,11 +214,12 @@ class SkillSymlinkListener(LifecycleBase):
             try:
                 result = device_sync.sync_symlinks(symlinks)
             finally:
-                self._reenqueue_if_desktop_cutover_started(
-                    event=event,
-                    bot=bot if is_desktop else None,
-                    initial_authority=initial_authority,
-                )
+                if isinstance(event, DeviceActivatedEvent):
+                    self._reenqueue_if_desktop_cutover_started(
+                        event=event,
+                        bot=bot if is_desktop else None,
+                        initial_authority=initial_authority,
+                    )
             logger.info(
                 "[skill_symlink_listener] sync result: success=%s message=%s",
                 result.get("success"),

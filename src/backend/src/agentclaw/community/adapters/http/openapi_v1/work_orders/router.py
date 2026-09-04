@@ -46,8 +46,10 @@ from agentclaw.community.adapters.http.openapi_v1.work_orders.schemas import (
     WorkOrderLegacyReviewResponse,
 )
 from agentclaw.community.adapters.http.openapi_v1.work_orders.converter import (
+    display_summary,
     display_title,
     json_object,
+    preserve_content,
 )
 from agentclaw.community.adapters.http.work_orders.converter import (
     create_work_order_event_data,
@@ -132,8 +134,14 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             reviewed_at=None,
             recipient_user_id=notification.recipient_user_id,
             event_type=notification.event_type,
-            title=display_title(notification.title),
-            content=json_object(notification.content),
+            title=display_title(notification.title, event_type=notification.event_type) or "新的系统通知",
+            summary=display_summary(
+                notification.event_type,
+                notification.content,
+                biz_type=notification.biz_type,
+                status=(work_order.status if work_order is not None else None),
+            ),
+            content=preserve_content(notification.content),
             status=None,
             is_read=notification.is_read,
             read_at=notification.read_at,
@@ -158,12 +166,20 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         if category is not None
         else WorkOrderItemType.APPROVAL
     )
+    event_type = notification.event_type if notification is not None else None
     title = display_title(
         notification.title if notification is not None else None,
+        event_type=event_type,
+        biz_type=work_order.biz_type,
+        status=work_order.status,
+    ) or "新的系统通知"
+    summary = display_summary(
+        event_type,
+        notification.content if notification is not None else None,
         biz_type=work_order.biz_type,
         status=work_order.status,
     )
-    content = json_object(notification.content) if notification is not None else None
+    content = preserve_content(notification.content) if notification is not None else None
     return WorkOrderListItem(
         item_id=(
             f"NOTIFICATION_{notification.id}"
@@ -185,8 +201,9 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         recipient_user_id=notification.recipient_user_id
         if notification is not None
         else None,
-        event_type=notification.event_type if notification is not None else None,
+        event_type=event_type,
         title=title,
+        summary=summary,
         content=content,
         status=work_order.status,
         is_read=notification.is_read if notification is not None else None,
@@ -358,12 +375,20 @@ async def get_work_order(
             event_type=detail.event_type,
             title=display_title(
                 detail.title,
+                event_type=detail.event_type,
+                biz_type=work_order.biz_type,
+                status=work_order.status,
+            ) or "新的系统通知",
+            summary=display_summary(
+                detail.event_type,
+                detail.content,
                 biz_type=work_order.biz_type,
                 status=work_order.status,
             ),
-            content=json_object(detail.content),
+            content=preserve_content(detail.content),
             status=work_order.status,
             reviewer_user_id=work_order.reviewer_user_id,
+            reviewer_user_name=detail.reviewer_user_name,
             review_remark=work_order.review_remark,
             reviewed_at=work_order.reviewed_at,
             biz_data=json_object(work_order.biz_data),
@@ -513,10 +538,17 @@ async def get_notification(
             event_type=record.event_type,
             title=display_title(
                 record.title,
+                event_type=record.event_type,
+                biz_type=record.biz_type,
+                status=detail.work_order_status,
+            ) or "新的系统通知",
+            summary=display_summary(
+                record.event_type,
+                record.content,
                 biz_type=record.biz_type,
                 status=detail.work_order_status,
             ),
-            content=json_object(record.content),
+            content=preserve_content(record.content),
             is_read=record.is_read,
             work_order_status=detail.work_order_status,
             can_approve=detail.can_approve,

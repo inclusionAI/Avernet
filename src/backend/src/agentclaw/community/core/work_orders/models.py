@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -56,48 +57,132 @@ class WorkOrderItemType(StrEnum):
 
 
 class WorkOrderEventType(StrEnum):
-    SPACE_JOIN_APPLIED = "SPACE_JOIN_APPLIED"
-    SPACE_JOIN_REVIEWED = "SPACE_JOIN_REVIEWED"
-    SPACE_MEMBER_ADDED = "SPACE_MEMBER_ADDED"
-    BOT_COLLABORATOR_APPLIED = "BOT_COLLABORATOR_APPLIED"
-    BOT_COLLABORATOR_REVIEWED = "BOT_COLLABORATOR_REVIEWED"
-    BOT_MEMBER_ADDED = "BOT_MEMBER_ADDED"
-    SKILL_COLLABORATOR_APPLIED = "SKILL_COLLABORATOR_APPLIED"
-    SKILL_COLLABORATOR_REVIEWED = "SKILL_COLLABORATOR_REVIEWED"
-    SKILL_MEMBER_ADDED = "SKILL_MEMBER_ADDED"
-    HUMAN2BOT_FRIEND_APPLIED = "HUMAN2BOT_FRIEND_APPLIED"
-    HUMAN2BOT_FRIEND_REVIEWED = "HUMAN2BOT_FRIEND_REVIEWED"
-    BOT2BOT_FRIEND_APPLIED = "BOT2BOT_FRIEND_APPLIED"
-    BOT2BOT_FRIEND_REVIEWED = "BOT2BOT_FRIEND_REVIEWED"
-    HUMAN2BOT_PUBLIC_ORDER_CREATED = "HUMAN2BOT_PUBLIC_ORDER_CREATED"
-    HUMAN2BOT_PUBLIC_ORDER_COMPLETED = "HUMAN2BOT_PUBLIC_ORDER_COMPLETED"
-    BOT2BOT_PUBLIC_ORDER_CREATED = "BOT2BOT_PUBLIC_ORDER_CREATED"
-    BOT2BOT_PUBLIC_ORDER_COMPLETED = "BOT2BOT_PUBLIC_ORDER_COMPLETED"
-    SPACE_MEMBER_REMOVED = "SPACE_MEMBER_REMOVED"
-    TASK_DISCOVERED = "TASK_DISCOVERED"
+    """Known notification events and their complete display contract.
+
+    Keeping the category, title, and summary beside the event value prevents
+    the event catalogue and presentation mappings from drifting apart.
+    """
+
+    def __new__(
+        cls,
+        value: str,
+        category: NotificationCategory,
+        title: str,
+        summary: str,
+    ):
+        member = str.__new__(cls, value)
+        member._value_ = value
+        member.notification_category = category
+        member.title = title
+        member.summary = summary
+        return member
+
+    SPACE_JOIN_APPLIED = (
+        "SPACE_JOIN_APPLIED", NotificationCategory.APPROVAL,
+        "空间加入申请待审批", "有新的空间加入申请，请及时处理。",
+    )
+    SPACE_JOIN_REVIEWED = (
+        "SPACE_JOIN_REVIEWED", NotificationCategory.NOTICE,
+        "空间加入申请已处理", "空间加入申请已有处理结果。",
+    )
+    SPACE_MEMBER_ADDED = (
+        "SPACE_MEMBER_ADDED", NotificationCategory.NOTICE,
+        "你已被添加到空间", "你已加入一个新的空间。",
+    )
+    SPACE_MEMBER_REMOVED = (
+        "SPACE_MEMBER_REMOVED", NotificationCategory.NOTICE,
+        "你已被移出空间", "你已被移出一个空间。",
+    )
+    BOT_COLLABORATOR_APPLIED = (
+        "BOT_COLLABORATOR_APPLIED", NotificationCategory.APPROVAL,
+        "Bot 共同编辑申请待审批", "有新的 Bot 共同编辑申请，请及时处理。",
+    )
+    BOT_COLLABORATOR_REVIEWED = (
+        "BOT_COLLABORATOR_REVIEWED", NotificationCategory.NOTICE,
+        "Bot 共同编辑申请已处理", "Bot 共同编辑申请已有处理结果。",
+    )
+    BOT_MEMBER_ADDED = (
+        "BOT_MEMBER_ADDED", NotificationCategory.NOTICE,
+        "你已被添加为 Bot 协作者", "你已获得一个 Bot 的协作权限。",
+    )
+    SKILL_COLLABORATOR_APPLIED = (
+        "SKILL_COLLABORATOR_APPLIED", NotificationCategory.APPROVAL,
+        "Skill 共同编辑申请待审批", "有新的 Skill 共同编辑申请，请及时处理。",
+    )
+    SKILL_COLLABORATOR_REVIEWED = (
+        "SKILL_COLLABORATOR_REVIEWED", NotificationCategory.NOTICE,
+        "Skill 共同编辑申请已处理", "Skill 共同编辑申请已有处理结果。",
+    )
+    SKILL_MEMBER_ADDED = (
+        "SKILL_MEMBER_ADDED", NotificationCategory.NOTICE,
+        "你已被添加为 Skill 协作者", "你已获得一个 Skill 的协作权限。",
+    )
+    HUMAN2BOT_FRIEND_APPLIED = (
+        "HUMAN2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
+        "人机好友申请待审批", "有新的人机好友申请，请及时处理。",
+    )
+    HUMAN2BOT_FRIEND_REVIEWED = (
+        "HUMAN2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
+        "人机好友申请已处理", "人机好友申请已有处理结果。",
+    )
+    BOT2BOT_FRIEND_APPLIED = (
+        "BOT2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
+        "Bot 好友申请待审批", "有新的 Bot 好友申请，请及时处理。",
+    )
+    BOT2BOT_FRIEND_REVIEWED = (
+        "BOT2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
+        "Bot 好友申请已处理", "Bot 好友申请已有处理结果。",
+    )
+    HUMAN2BOT_PUBLIC_ORDER_CREATED = (
+        "HUMAN2BOT_PUBLIC_ORDER_CREATED", NotificationCategory.NOTICE,
+        "Bot 公开工单审批已创建", "Bot 公开工单审批已创建",
+    )
+    HUMAN2BOT_PUBLIC_ORDER_COMPLETED = (
+        "HUMAN2BOT_PUBLIC_ORDER_COMPLETED", NotificationCategory.NOTICE,
+        "Bot 公开工单审批已结束", "Bot 公开工单审批已结束",
+    )
+    BOT2BOT_PUBLIC_ORDER_CREATED = (
+        "BOT2BOT_PUBLIC_ORDER_CREATED", NotificationCategory.NOTICE,
+        "Bot 公开工单审批已创建", "Bot 公开工单审批已创建",
+    )
+    BOT2BOT_PUBLIC_ORDER_COMPLETED = (
+        "BOT2BOT_PUBLIC_ORDER_COMPLETED", NotificationCategory.NOTICE,
+        "Bot 公开工单审批已结束", "Bot 公开工单审批已结束",
+    )
+    TASK_DISCOVERED = (
+        "TASK_DISCOVERED", NotificationCategory.NOTICE,
+        "发现新任务", "发现一条新任务。",
+    )
 
 
 EVENT_CATEGORIES: dict[WorkOrderEventType, NotificationCategory] = {
-    WorkOrderEventType.SPACE_JOIN_APPLIED: NotificationCategory.APPROVAL,
-    WorkOrderEventType.SPACE_JOIN_REVIEWED: NotificationCategory.NOTICE,
-    WorkOrderEventType.SPACE_MEMBER_ADDED: NotificationCategory.NOTICE,
-    WorkOrderEventType.BOT_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
-    WorkOrderEventType.BOT_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
-    WorkOrderEventType.BOT_MEMBER_ADDED: NotificationCategory.NOTICE,
-    WorkOrderEventType.SKILL_COLLABORATOR_APPLIED: NotificationCategory.APPROVAL,
-    WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED: NotificationCategory.NOTICE,
-    WorkOrderEventType.SKILL_MEMBER_ADDED: NotificationCategory.NOTICE,
-    WorkOrderEventType.HUMAN2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
-    WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED: NotificationCategory.NOTICE,
-    WorkOrderEventType.BOT2BOT_FRIEND_APPLIED: NotificationCategory.APPROVAL,
-    WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED: NotificationCategory.NOTICE,
-    WorkOrderEventType.HUMAN2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
-    WorkOrderEventType.HUMAN2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
-    WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_CREATED: NotificationCategory.NOTICE,
-    WorkOrderEventType.BOT2BOT_PUBLIC_ORDER_COMPLETED: NotificationCategory.NOTICE,
-    WorkOrderEventType.SPACE_MEMBER_REMOVED: NotificationCategory.NOTICE,
-    WorkOrderEventType.TASK_DISCOVERED: NotificationCategory.NOTICE,
+    event_type: event_type.notification_category for event_type in WorkOrderEventType
 }
+
+
+def event_type_definition(event_type: str | None) -> WorkOrderEventType | None:
+    """Return the canonical definition, or ``None`` for external/legacy values."""
+    try:
+        return WorkOrderEventType(event_type) if event_type else None
+    except ValueError:
+        return None
+
+
+def notification_title_for(
+    event_type: str | None, fallback_title: str | None = None
+) -> str:
+    """Return the canonical title while retaining a useful legacy fallback."""
+    definition = event_type_definition(event_type)
+    if definition is not None:
+        return definition.title
+    return fallback_title or "新的系统通知"
+
+
+def notification_summary_for(event_type: str | None) -> str:
+    """Return a non-empty summary for every known and unknown event."""
+    definition = event_type_definition(event_type)
+    return definition.summary if definition is not None else "你有一条新的通知"
+
 
 # Approval events are extracted from the single classification table so new
 # event values only need one category entry above.
@@ -166,6 +251,10 @@ class WorkOrderMessageTitle(StrEnum):
     SKILL_COLLABORATOR_PENDING = "Skill 共同编辑申请待审批"
     SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
     SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
+    HUMAN_FRIEND_APPROVED = "人机好友申请已通过"
+    HUMAN_FRIEND_REJECTED = "人机好友申请未通过"
+    BOT_FRIEND_APPROVED = "Bot 好友申请已通过"
+    BOT_FRIEND_REJECTED = "Bot 好友申请未通过"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -186,12 +275,27 @@ class WorkOrderMessageContent(StrEnum):
         "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
     )
     SKILL_COLLABORATOR_PENDING = (
-        "用户「{applicant_name}」申请共同编辑 Skill「{skill_name}」，请及时处理。"
+        "用户{applicant_display}申请共同编辑 Skill「{skill_name}」，请及时处理。"
     )
     SKILL_COLLABORATOR_APPROVED = "你共同编辑 Skill「{skill_name}」的申请已通过。"
     SKILL_COLLABORATOR_REJECTED = (
         "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
+    HUMAN_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
+    HUMAN_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
+    BOT_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
+    BOT_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
+
+
+def skill_collaborator_applicant_display(
+    *, applicant_user_id: str, applicant_name: str
+) -> str:
+    """Format the stable identity shown in a Skill editor request."""
+
+    normalized_name = applicant_name.strip()
+    if not normalized_name or normalized_name == applicant_user_id:
+        return f"「{applicant_user_id}」"
+    return f"「{normalized_name}」({applicant_user_id})"
 
 
 class WorkOrderApproverRecord(BaseModel):
@@ -247,7 +351,7 @@ class WorkOrderNotificationDraft(BaseModel):
     biz_type: str
     biz_id: str
     title: str
-    content: str
+    content: dict[str, Any]
 
 
 class WorkOrderNotificationDetail(BaseModel):
@@ -271,12 +375,13 @@ class WorkOrderListItem(BaseModel):
 
 class WorkOrderDetail(BaseModel):
     work_order: WorkOrderRecord
-    event_type: str
-    title: str
+    event_type: str | None
+    title: str | None
     content: str | None = None
     space_id: int
     space_name: str
     applicant_name: str
+    reviewer_user_name: str | None = None
     can_approve: bool
 
 

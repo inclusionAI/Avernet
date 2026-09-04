@@ -27,6 +27,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderEventType,
     WorkOrderMessageContent,
     WorkOrderMessageTitle,
+    notification_title_for,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.staff_dept import (
@@ -143,9 +144,12 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
             applicant_user_id=None,
             approver_user_ids=[],
             recipient_user_ids=[normalized],
-            title=WorkOrderMessageTitle.SPACE_MEMBER_REMOVED.value,
+            title=notification_title_for(
+                WorkOrderEventType.SPACE_MEMBER_REMOVED.value,
+                WorkOrderMessageTitle.SPACE_MEMBER_REMOVED.value,
+            ),
             content={
-                "legacy_value": WorkOrderMessageContent.SPACE_MEMBER_REMOVED.format(
+                "text": WorkOrderMessageContent.SPACE_MEMBER_REMOVED.format(
                     space_name=space.name
                 )
             },

@@ -45,6 +45,7 @@ from agentclaw.community.core.devices.models import DeviceBindingStatus
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
+    ChatPermissionError,
     ConnectionError,
 )
 from agentclaw.community.core.repository.protocols.chat import ExpertChatInstanceRepository
@@ -128,6 +129,52 @@ class ExpertChatInstanceService(ExpertChatInstanceServiceProtocol):
     # ------------------------------------------------------------------
     # Public entry
     # ------------------------------------------------------------------
+    async def get_authorized_caller_connection(
+        self,
+        *,
+        operator_id: str,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        is_super_admin: bool,
+        force_upgrade: bool = False,
+    ) -> Dict[str, Any]:
+        """Authorize an actor before entering the existing lifecycle flow."""
+        if is_super_admin:
+            return await self.get_caller_connection(
+                user_id=user_id,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                force_upgrade=force_upgrade,
+            )
+
+        # COSEC: caller lifecycle access requires trusted actor identity plus
+        # an exact existing instance with a reusable container identifier.
+        if operator_id != user_id:
+            raise self._caller_permission_error("cross_user")
+
+        instance = self._instance_repo.get_instance(user_id, bot_id, owner_id)
+        if instance is None:
+            raise self._caller_permission_error("instance_not_found")
+
+        ext = instance.get("ext")
+        bot_uuid = ext.get("bot_uuid") if isinstance(ext, dict) else None
+        if not isinstance(bot_uuid, str) or not bot_uuid.strip():
+            raise self._caller_permission_error("instance_missing_bot_uuid")
+
+        return await self.get_caller_connection(
+            user_id=user_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            force_upgrade=force_upgrade,
+        )
+
+    @staticmethod
+    def _caller_permission_error(reason: str) -> ChatPermissionError:
+        error = ChatPermissionError("无权限执行此操作")
+        error.reason = reason
+        return error
+
     async def get_caller_connection(
         self,
         user_id: str,

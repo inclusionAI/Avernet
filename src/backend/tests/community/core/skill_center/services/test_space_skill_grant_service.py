@@ -13,9 +13,16 @@ from agentclaw.community.core.skill_center.services.space_skill_grant_service im
     SpaceSkillGrantService,
 )
 from agentclaw.community.core.spaces.models import SpaceRole, SpaceType
+from agentclaw.community.plugin_api.staff_dept import (
+    StaffDeptPlugin,
+    StaffProfileInfo,
+    StaffProfileLookupError,
+)
 
 
-def _service(*, actor_role=SpaceRole.MEMBER, space_type=SpaceType.TEAM):
+def _service(
+    *, actor_role=SpaceRole.MEMBER, space_type=SpaceType.TEAM, staff_dept=None
+):
     access = MagicMock()
     access.require_space_member.return_value = (
         SimpleNamespace(space_type=space_type, created_by="space-admin"),
@@ -27,8 +34,15 @@ def _service(*, actor_role=SpaceRole.MEMBER, space_type=SpaceType.TEAM):
         "managers": [],
         "actor_role": None,
     }
+    if staff_dept is None:
+        staff_dept = MagicMock(spec=StaffDeptPlugin)
+        staff_dept.get_profile_by_work_no.side_effect = (
+            lambda *, work_no: StaffProfileInfo(
+                work_no=work_no, nick_name=f"{work_no}-name"
+            )
+        )
     return (
-        SpaceSkillGrantService(access, repository, lambda: "test"),
+        SpaceSkillGrantService(access, repository, staff_dept, lambda: "test"),
         access,
         repository,
     )
@@ -56,6 +70,41 @@ def test_list_grants_returns_acl_qualifications_not_state_predictions():
     repository.list_grants.assert_called_once_with(
         space_id=7, skill_id=9, actor_id="space-admin", env="test"
     )
+    assert result["owner"]["display_name"] == "owner-1-name"
+
+
+def test_list_grants_resolves_owner_and_manager_display_names():
+    service, _, repository = _service()
+    repository.list_grants.return_value["managers"] = [
+        {"user_id": "manager-1", "role": "MANAGER"}
+    ]
+
+    result = service.list_grants(space_id=7, skill_id=9, actor_id="owner-1")
+
+    assert result["owner"]["display_name"] == "owner-1-name"
+    assert result["managers"] == [
+        {
+            "user_id": "manager-1",
+            "role": "MANAGER",
+            "display_name": "manager-1-name",
+        }
+    ]
+
+
+def test_list_grants_keeps_user_ids_when_profile_lookup_fails():
+    staff_dept = MagicMock(spec=StaffDeptPlugin)
+    staff_dept.get_profile_by_work_no.side_effect = StaffProfileLookupError(
+        "directory unavailable"
+    )
+    service, _, _ = _service(staff_dept=staff_dept)
+
+    result = service.list_grants(space_id=7, skill_id=9, actor_id="owner-1")
+
+    assert result["owner"] == {
+        "user_id": "owner-1",
+        "role": "OWNER",
+        "display_name": None,
+    }
 
 
 def test_owner_can_idempotently_add_manager():

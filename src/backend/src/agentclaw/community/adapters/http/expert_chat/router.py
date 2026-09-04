@@ -19,6 +19,7 @@ ExpertChat Router — HTTP接口入口
   OK:  import core.expert_chat.errors          (业务异常)
   BAD: import plugins.*                   (never import impl directly)
 """
+import time
 import traceback
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -478,51 +479,99 @@ async def get_caller_connection_for_other(
     user_id: str = Query(..., description="调用者(Caller)用户ID"),
     force_upgrade: bool = Query(False, description="强制升级，跳过版本检查"),
     user: AuthenticatedUser = Depends(get_current_user),
-    instance_service: ExpertChatInstanceServiceProtocol = Injected(ExpertChatInstanceServiceProtocol)
+    instance_service: ExpertChatInstanceServiceProtocol = Injected(
+        ExpertChatInstanceServiceProtocol
+    ),
 ):
-    """
-    获取 caller 独立容器连接信息(管理员接口)
+    """Get or restart an authorized caller's existing container instance."""
+    started_at = time.perf_counter()
+    operator_id = user.staffId
+    log_args = (operator_id, bot_id, owner_id, user_id, force_upgrade)
+    logger.info(
+        "event=expert_chat.caller_connection.request direction=inbound "
+        "operation=caller_connection method=POST "
+        "route=/api/v1/expert-chats/caller-connection operator_id=%s "
+        "bot_id=%s owner_id=%s user_id=%s force_upgrade=%s",
+        *log_args,
+    )
 
-    为每个 caller (user_id) 创建/复用独立的 BaaS 容器实例。
-    仅限超级管理员调用，用于为其他用户（caller）管理独立容器实例。
-
-    参数通过 query string 传递:
-        - bot_id: Bot ID
-        - owner_id: Bot 所有者ID
-        - user_id: 调用者用户ID
-        - force_upgrade: 是否强制升级（跳过版本检查快速路径）
-
-    返回:
-        - instance: 实例记录
-        - connection: WebSocket 连接信息 (当 need_poll=False 时)
-        - need_poll: 是否需要轮询等待容器就绪
-    """
-    try:
-        operator_id = user.staffId
-
-        # 操作者身份校验
-        if not operator_id or operator_id == "anonymous":
-            return ApiResponse(success=False, message="无法获取操作者信息", error_code=400, data=None)
-
-        # 权限校验：只有 SUPER_ADMIN 中的用户才能操作
-        if operator_id not in super_admin():
-            logger.warning(f"[get_caller_connection_for_other] Permission denied: operator={operator_id}")
-            return ApiResponse(success=False, message="无权限执行此操作", error_code=403, data=None)
-
-        logger.info(
-            f"[get_caller_connection_for_other] Creating/retrieving caller instance: "
-            f"bot_id={bot_id}, owner_id={owner_id}, user_id={user_id}, operator={operator_id}"
+    if not operator_id or operator_id == "anonymous":
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.warning(
+            "event=expert_chat.caller_connection.denied direction=inbound "
+            "operation=caller_connection method=POST "
+            "route=/api/v1/expert-chats/caller-connection operator_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s force_upgrade=%s "
+            "reason=missing_operator duration_ms=%.1f",
+            *log_args,
+            duration_ms,
+        )
+        return ApiResponse(
+            success=False,
+            message="无法获取操作者信息",
+            error_code=400,
+            data=None,
         )
 
-        result = await instance_service.get_caller_connection(
+    try:
+        is_super_admin = operator_id in super_admin()
+        result = await instance_service.get_authorized_caller_connection(
+            operator_id=operator_id,
             user_id=user_id,
             bot_id=bot_id,
             owner_id=owner_id,
+            is_super_admin=is_super_admin,
             force_upgrade=force_upgrade,
         )
-        return ApiResponse(success=True, message="获取成功", error_code=0, data=result)
-
-    except Exception as e:
-        logger.error(f"[expert_chats.get_caller_connection_for_other] Unexpected error: {type(e).__name__}: {e}")
-        logger.error(f"[expert_chats.get_caller_connection_for_other] Traceback: {traceback.format_exc()}")
-        return ApiResponse(success=False, message="获取 Caller 连接失败，请稍后重试", error_code=5999)
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        authorized_as = "admin" if is_super_admin else "self"
+        logger.info(
+            "event=expert_chat.caller_connection.success direction=inbound "
+            "operation=caller_connection method=POST "
+            "route=/api/v1/expert-chats/caller-connection operator_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s force_upgrade=%s "
+            "authorized_as=%s need_poll=%s duration_ms=%.1f",
+            *log_args,
+            authorized_as,
+            result.get("need_poll"),
+            duration_ms,
+        )
+        return ApiResponse(
+            success=True, message="获取成功", error_code=0, data=result
+        )
+    except ChatPermissionError as error:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        reason = getattr(error, "reason", "permission_denied")
+        logger.warning(
+            "event=expert_chat.caller_connection.denied direction=inbound "
+            "operation=caller_connection method=POST "
+            "route=/api/v1/expert-chats/caller-connection operator_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s force_upgrade=%s "
+            "reason=%s duration_ms=%.1f",
+            *log_args,
+            reason,
+            duration_ms,
+        )
+        return ApiResponse(
+            success=False,
+            message="无权限执行此操作",
+            error_code=403,
+            data=None,
+        )
+    except Exception as error:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        logger.error(
+            "event=expert_chat.caller_connection.failed direction=inbound "
+            "operation=caller_connection method=POST "
+            "route=/api/v1/expert-chats/caller-connection operator_id=%s "
+            "bot_id=%s owner_id=%s user_id=%s force_upgrade=%s "
+            "exception_type=%s duration_ms=%.1f",
+            *log_args,
+            type(error).__name__,
+            duration_ms,
+        )
+        return ApiResponse(
+            success=False,
+            message="获取 Caller 连接失败，请稍后重试",
+            error_code=5999,
+        )

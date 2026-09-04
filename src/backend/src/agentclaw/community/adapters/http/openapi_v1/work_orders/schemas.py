@@ -372,9 +372,10 @@ class WorkOrderListItem(_UtcResponseModel):
     event_type: str | None = Field(
         description="Originating event, or null when no notification is attached."
     )
-    title: str | None = Field(description="Notification title, when available.")
-    content: dict[str, Any] | None = Field(
-        description="Notification JSON object, or null when unavailable."
+    title: str = Field(description="Canonical notification title.")
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        description="Original notification content, either text or a JSON object."
     )
     status: WorkOrderStatus | None = Field(
         description="Related work-order status, when one exists."
@@ -407,9 +408,10 @@ class WorkOrderDetailResponse(_UtcResponseModel):
     event_type: str | None = Field(
         default=None, description="Legacy originating event, when available."
     )
-    title: str = Field(description="Display title of the work order.")
-    content: dict[str, Any] | None = Field(
-        default=None, description="Notification JSON object, when available."
+    title: str = Field(description="Canonical display title of the work order.")
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        default=None, description="Original notification content, when available."
     )
     biz_data: dict[str, Any] | None = Field(
         default=None, description="Work-order business JSON object, when available."
@@ -417,6 +419,9 @@ class WorkOrderDetailResponse(_UtcResponseModel):
     status: WorkOrderStatus = Field(description="Current work-order status.")
     reviewer_user_id: str | None = Field(
         description="Identifier of the reviewer after processing, otherwise null."
+    )
+    reviewer_user_name: str | None = Field(
+        description="Display name of the reviewer after processing, otherwise null."
     )
     review_remark: str | None = Field(
         description="Review comment after processing, otherwise null."
@@ -440,9 +445,10 @@ class NotificationDetailResponse(BaseModel):
         description="Presentation category of the notification."
     )
     event_type: str = Field(description="Legacy event represented by the notification.")
-    title: str = Field(description="Display title of the notification.")
-    content: dict[str, Any] | None = Field(
-        description="Notification JSON object, when present."
+    title: str = Field(description="Canonical display title of the notification.")
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        description="Original notification content, either text or a JSON object."
     )
     is_read: bool = Field(
         description="Whether the recipient has read the notification."

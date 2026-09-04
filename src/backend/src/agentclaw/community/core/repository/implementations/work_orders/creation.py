@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -23,7 +24,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderStatus,
     WorkOrderEventType,
     WorkOrderMessageContent,
-    WorkOrderTitleKey,
+    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -112,7 +113,7 @@ class _WorkOrderCreationRepository:
                     event_type=event_type,
                     biz_type=biz_type,
                     biz_id=biz_id,
-                    title=title,
+                    title=notification_title_for(event_type, title),
                     content=content,
                     env=env,
                 )
@@ -254,9 +255,14 @@ class _WorkOrderCreationRepository:
             )
             db.add(row)
             db.flush()
-            title = WorkOrderTitleKey.SPACE_JOIN_PENDING.value
-            content = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-                applicant_name=applicant_name, space_name=space.name
+            title = "空间加入申请待审批"
+            content = json.dumps(
+                {
+                    "text": WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
+                        applicant_name=applicant_name, space_name=space.name
+                    )
+                },
+                ensure_ascii=False,
             )
             for (owner_id,) in owners:
                 db.add(
@@ -275,7 +281,9 @@ class _WorkOrderCreationRepository:
                         event_type=WorkOrderEventType.SPACE_JOIN_APPLIED.value,
                         biz_type=WorkOrderBizType.SPACE_JOIN.value,
                         biz_id=str(space_id),
-                        title=title,
+                        title=notification_title_for(
+                            WorkOrderEventType.SPACE_JOIN_APPLIED.value, title
+                        ),
                         content=content,
                         env=env,
                     )

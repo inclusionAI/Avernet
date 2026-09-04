@@ -229,6 +229,19 @@ class TestAICodingProvider:
         assert "workspace/.repos/" in plan.rsync_excludes
         assert "workspace/.prewarm_ready.json" in plan.rsync_excludes
 
+    def test_build_plan_excludes_pool_skill_center_symmetric_with_skills_repo(self):
+        # skill-center and skills-repo are both external read-only mounts under
+        # workspace/skills-pool/; both must be rsync-skipped (not copied) and
+        # re-mounted at image startup. Exclude entries must be symmetric:
+        # <name> + .<name>* sidecar guard.
+        provider = AICodingSandboxProvider(workspace=_workspace())
+        excludes = provider.get_build_plan().rsync_excludes
+
+        assert "workspace/skills-pool/skills-repo" in excludes
+        assert "workspace/skills-pool/.skills-repo*" in excludes
+        assert "workspace/skills-pool/skill-center" in excludes
+        assert "workspace/skills-pool/.skill-center*" in excludes
+
     def test_build_plan_keeps_extra_sync_from_claude(self):
         provider = AICodingSandboxProvider(workspace=_workspace())
         plan = provider.get_build_plan()

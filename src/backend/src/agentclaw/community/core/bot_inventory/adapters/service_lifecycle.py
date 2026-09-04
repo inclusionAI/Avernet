@@ -116,6 +116,11 @@ class ServiceLifecycleView(ServiceLifecyclePort):
 
         if record.status == PublishStatus.DRAFT.value:
             add(BotAction.EDIT, BotAction.PUBLISH_STAGING)
+            # The draft / validating runtimes are the owner's own dev-stage
+            # machines: an engine-process restart (POST …/engine/restart,
+            # stage defaults to draft; the verify card must send ?stage=verify)
+            # is a self-service recovery, granted with the card.
+            add(BotAction.ENGINE_RESTART)
             if not any(
                 item.status == PublishStatus.SUCCESS.value for item in all_records
             ):
@@ -124,6 +129,7 @@ class ServiceLifecycleView(ServiceLifecyclePort):
             add(
                 BotAction.PUBLISH_ONLINE,
                 BotAction.RESTART,
+                BotAction.ENGINE_RESTART,
                 BotAction.CANCEL_STAGING,
             )
         elif record.status == PublishStatus.SUCCESS.value:

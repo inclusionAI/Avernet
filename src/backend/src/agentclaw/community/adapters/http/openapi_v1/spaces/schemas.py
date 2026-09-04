@@ -70,6 +70,7 @@ class SkillGrantItem(BaseModel):
     """One active OWNER or MANAGER Grant."""
 
     user_id: str = Field(description="User holding this active Skill Grant.")
+    display_name: str | None = Field(None, description="Current staff-directory display name.")
     role: SkillRole = Field(description="Role held by the user for this Skill.")
 
 

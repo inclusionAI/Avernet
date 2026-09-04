@@ -33,6 +33,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderReviewResult,
     WorkOrderStatus,
+    notification_title_for,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -193,7 +194,9 @@ class _BotEditorWorkOrderRepository:
                     event_type=WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value,
                     biz_type=WorkOrderBizType.BOT_COLLABORATOR.value,
                     biz_id=bot_id,
-                    title=title,
+                    title=notification_title_for(
+                        WorkOrderEventType.BOT_COLLABORATOR_APPLIED.value, title
+                    ),
                     content=content,
                     env=env,
                 )
@@ -331,8 +334,11 @@ class _BotEditorWorkOrderRepository:
                         notification.biz_type, "value", notification.biz_type
                     ),
                     biz_id=notification.biz_id,
-                    title=notification.title,
-                    content=notification.content,
+                    title=notification_title_for(
+                        getattr(notification.event_type, "value", notification.event_type),
+                        notification.title,
+                    ),
+                    content=json.dumps(notification.content, ensure_ascii=False),
                     env=env,
                 )
             )

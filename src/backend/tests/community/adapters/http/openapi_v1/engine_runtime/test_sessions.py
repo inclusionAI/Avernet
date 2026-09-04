@@ -306,6 +306,41 @@ def test_create_does_not_forward_an_agent_field(client, relay):
     assert "agent_id" not in relay.calls[0]["body"]
 
 
+def test_create_forwards_the_working_directory_to_the_engine(client, relay):
+    """The engine binds a session to its directory on the create request, before
+    any turn runs, so a caller's ``cwd`` has to travel with the create itself —
+    there is no later operation on this surface that could set it."""
+    relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
+        bot_id=BOT, bot_type="personal", active_engine="claude_code", owner_id=OWNER,
+    )
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+
+    resp = client.post(_base(), json={"title": "T", "cwd": "/workspace/report"})
+
+    assert resp.status_code == 201, resp.json()
+    assert relay.calls[0]["body"]["cwd"] == "/workspace/report"
+    # What the engine reports back, not what was asked for: an engine that
+    # models no working directory answers with an empty one, and that is how a
+    # caller tells the request applied from a request that was ignored.
+    assert resp.json()["data"]["cwd"] == ENGINE_SESSION["cwd"]
+
+
+def test_create_omits_a_working_directory_the_caller_did_not_send(client, relay):
+    """Absent means "the engine picks its own default". Forwarding an explicit
+    null would make the backend the one choosing that fallback, and an engine
+    distinguishing a blank directory from an absent one would bind the wrong
+    one."""
+    relay.bots[(BOT, OWNER)] = relay.bots[(BOT, OWNER)].__class__(
+        bot_id=BOT, bot_type="personal", active_engine="claude_code", owner_id=OWNER,
+    )
+    relay.results = [EngineResult(data=ENGINE_SESSION)]
+
+    resp = client.post(_base(), json={"title": "T"})
+
+    assert resp.status_code == 201, resp.json()
+    assert "cwd" not in relay.calls[0]["body"]
+
+
 def test_get_session_uses_the_id_verbatim(client, relay):
     """Colons are legal in a path segment; no encoding scheme is applied."""
     relay.results = [EngineResult(data=ENGINE_SESSION)]

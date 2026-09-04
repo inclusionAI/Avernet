@@ -15248,6 +15248,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -15255,7 +15258,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, when present.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "event_type": {
@@ -15276,6 +15279,12 @@
             "description": "Identifier of the notification.",
             "title": "Notification Id",
             "type": "integer"
+          },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
           },
           "title": {
             "description": "Display title of the notification.",
@@ -18576,6 +18585,18 @@
         "additionalProperties": false,
         "description": "Create-a-session request body.",
         "properties": {
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional absolute working directory for the session on the bot's device. Left unset, the bot's engine picks its own default. The device holds this to its own configured workspace roots and refuses anything outside them, so a path the bot is not allowed to run in fails the request rather than being silently relocated. A bot whose engine does not model a working directory ignores this and reports `cwd` empty on the created session.",
+            "title": "Cwd"
+          },
           "model": {
             "anyOf": [
               {
@@ -20052,6 +20073,18 @@
       "SkillGrantItem": {
         "description": "One active OWNER or MANAGER Grant.",
         "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current staff-directory display name.",
+            "title": "Display Name"
+          },
           "role": {
             "$ref": "#/components/schemas/SkillRole",
             "description": "Role held by the user for this Skill."
@@ -22607,6 +22640,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -22614,7 +22650,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, when available.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "event_type": {
@@ -22665,9 +22701,27 @@
             "description": "Identifier of the reviewer after processing, otherwise null.",
             "title": "Reviewer User Id"
           },
+          "reviewer_user_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Display name of the reviewer after processing, otherwise null.",
+            "title": "Reviewer User Name"
+          },
           "status": {
             "$ref": "#/components/schemas/WorkOrderStatus",
             "description": "Current work-order status."
+          },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
           },
           "title": {
             "description": "Display title of the work order.",
@@ -22693,6 +22747,7 @@
           "title",
           "status",
           "reviewer_user_id",
+          "reviewer_user_name",
           "review_remark",
           "reviewed_at",
           "can_approve"
@@ -22904,6 +22959,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -22911,7 +22969,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, or null when unavailable.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "env": {
@@ -23069,6 +23127,12 @@
               }
             ],
             "description": "Related work-order status, when one exists."
+          },
+          "summary": {
+            "default": "你有一条新的通知，请查看详情。",
+            "description": "Stable notification summary.",
+            "title": "Summary",
+            "type": "string"
           },
           "title": {
             "anyOf": [
@@ -37300,7 +37364,7 @@
     "/openapi/v1/bots/skills": {
       "get": {
         "deprecated": true,
-        "description": "List every skill the bot has, from stored desired state (paginated).\n\nCovers both ways a bot reaches a skill: skills uploaded to this bot, and\nskills a capability set of the bot's brings to it. Answers even while the\nbot is offline — active is the desired state, not the live runtime.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills instead.",
+        "description": "List every skill the bot has, from stored desired state (paginated).\n\nWithout the source filter, covers every way a Bot reaches a Skill: uploads to\nthis Bot, SkillSet membership, and direct installation. source=LOCAL\nnarrows the page to Bot-owned Local uploads. Answers even while the Bot is\noffline — active is desired state, not observed runtime.\n\nDeprecated: use GET /openapi/v1/bots/{bot_id}/skills instead.",
         "operationId": "list_skills_openapi_v1_bots_skills_get",
         "parameters": [
           {
@@ -37366,6 +37430,25 @@
               ],
               "description": "Filter: case-insensitive substring match against the skill's name and description.",
               "title": "Keyword"
+            }
+          },
+          {
+            "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "LOCAL",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+              "title": "Source"
             }
           },
           {
@@ -80622,7 +80705,7 @@
     },
     "/openapi/v1/bots/{bot_id}/skills": {
       "get": {
-        "description": "List every skill the bot has, from stored desired state (paginated).\n\nCovers both ways a bot reaches a skill: skills uploaded to this bot, and\nskills a capability set of the bot's brings to it. Answers even while the\nbot is offline — active is the desired state, not the live runtime.",
+        "description": "List every skill the bot has, from stored desired state (paginated).\n\nWithout the source filter, covers every way a Bot reaches a Skill: uploads to\nthis Bot, SkillSet membership, and direct installation. source=LOCAL\nnarrows the page to Bot-owned Local uploads. Answers even while the Bot is\noffline — active is desired state, not observed runtime.",
         "operationId": "list_skills_openapi_v1_bots__bot_id__skills_get",
         "parameters": [
           {
@@ -80670,6 +80753,25 @@
               ],
               "description": "Filter: case-insensitive substring match against the skill's name and description.",
               "title": "Keyword"
+            }
+          },
+          {
+            "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "const": "LOCAL",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional asset-source filter. LOCAL returns only Skills uploaded to this Bot; omit for every Skill currently reachable by the Bot.",
+              "title": "Source"
             }
           },
           {

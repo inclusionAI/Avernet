@@ -23,3 +23,8 @@ contract. Ordinary subscribers remain best-effort and cannot block siblings.
 Handlers registered with `required=True` are reserved for durable hand-off
 boundaries: all siblings still run, then `publish()` raises
 `RequiredEventDeliveryError` so the producer's retry mechanism can redeliver.
+
+`DeviceActivatedEvent` announces the first `PENDING -> ACTIVE` transition.
+`RuntimeProjectionRequestedEvent` is a narrower wake-up used after a successful
+runtime restart; it asks projection consumers to re-read current desired state
+without replaying unrelated activation side effects.

@@ -8,7 +8,7 @@ non-public surfaces.
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.contracts import (
@@ -304,15 +304,23 @@ async def list_skills(
         description="Filter: case-insensitive substring match against the "
         "skill's name and description.",
     ),
+    source: Literal["LOCAL"] | None = Query(
+        default=None,
+        description=(
+            "Optional asset-source filter. LOCAL returns only Skills uploaded "
+            "to this Bot; omit for every Skill currently reachable by the Bot."
+        ),
+    ),
     query_service: SkillQueryServiceProtocol = Injected(
         SkillQueryServiceProtocol
     ),
 ) -> Envelope[Page[Skill]]:
     """List every skill the bot has, from stored desired state (paginated).
 
-    Covers both ways a bot reaches a skill: skills uploaded to this bot, and
-    skills a capability set of the bot's brings to it. Answers even while the
-    bot is offline — active is the desired state, not the live runtime.
+    Without the source filter, covers every way a Bot reaches a Skill: uploads to
+    this Bot, SkillSet membership, and direct installation. source=LOCAL
+    narrows the page to Bot-owned Local uploads. Answers even while the Bot is
+    offline — active is desired state, not observed runtime.
     """
     total, records = query_service.list_bot_skills(
         bot_id=bot_id,
@@ -322,6 +330,7 @@ async def list_skills(
         page_size=page.page_size,
         active=active,
         keyword=keyword,
+        source=source,
     )
     return page_envelope(total, [_to_skill(record) for record in records], request)
 

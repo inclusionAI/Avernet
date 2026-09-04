@@ -50,7 +50,6 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderNotificationDraft,
     WorkOrderQueryType,
     WorkOrderStatus,
-    WorkOrderTitleKey,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -100,7 +99,7 @@ def _review_notification(
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id=str(space_id),
         title=title,
-        content=content,
+        content={"text": content},
     )
 
 
@@ -114,7 +113,7 @@ def _bot_review_notification(
         biz_type=WorkOrderBizType.BOT_COLLABORATOR,
         biz_id=bot_id,
         title="Bot 共同编辑申请已通过",
-        content="approved",
+        content={"text": "approved"},
     )
 
 
@@ -128,7 +127,7 @@ def _skill_review_notification(
         biz_type=WorkOrderBizType.SKILL_COLLABORATOR,
         biz_id=str(skill_id),
         title="Skill 共同编辑申请已通过" if approved else "Skill 共同编辑申请未通过",
-        content="reviewed",
+        content={"text": "reviewed"},
     )
 
 
@@ -229,6 +228,43 @@ def test_skill_editor_review_atomically_controls_manager_grant(
             .one_or_none()
         )
     assert (manager is not None) is manager_expected
+
+
+def test_skill_editor_request_persists_display_name_and_work_no(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    spaces.add_member(
+        space_id=team.id,
+        user_id="200177",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    repository = _work_orders(db)
+
+    order = repository.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="200177",
+        applicant_name="张三",
+        apply_reason="maintain together",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        content = (
+            session.query(WorkOrderNotificationModel)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == order.id,
+                WorkOrderNotificationModel.env == "dev",
+            )
+            .one()
+            .content
+        )
+
+    assert content == (
+        "用户「张三」(200177)申请共同编辑 Skill「review-skill」，请及时处理。"
+    )
 
 
 def test_skill_editor_request_rejects_personal_space(db) -> None:
@@ -1034,6 +1070,8 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     owner_detail = repository.get_detail(
         work_order_id=record.id, actor_id="owner-1", env="dev"
     )
+    assert owner_detail.event_type is not None
+    assert owner_detail.title is not None
     assert owner_detail.can_approve is True
     assert (
         repository.get_detail(work_order_id=record.id, actor_id="intruder", env="dev")
@@ -1044,7 +1082,7 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
 
     notification = pending[0].notification
-    assert notification.title == WorkOrderTitleKey.SPACE_JOIN_PENDING.value
+    assert notification.title == "空间加入申请待审批"
     assert repository.count_unread(recipient_user_id="owner-1", env="dev") == 1
     owner_badge = repository.get_notification_badge_summary(
         recipient_user_id="owner-1", env="dev"
@@ -1166,8 +1204,8 @@ def test_work_order_repository_approve_and_notification_lifecycle(db) -> None:
     )
     assert applicant_total == 1
     applicant_notification = applicant_items[0].notification
-    assert applicant_notification.title == WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
-    assert applicant_notification.content == approved_notification.content
+    assert applicant_notification.title == "空间加入申请已处理"
+    assert json.loads(applicant_notification.content) == approved_notification.content
     assert (
         repository.list_items(
             actor_id="applicant-1",
@@ -1292,9 +1330,9 @@ def test_work_order_repository_rejects_and_requires_reviewer(db) -> None:
     )
     assert (
         applicant_items[0].notification.title
-        == WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
+        == "空间加入申请已处理"
     )
-    assert applicant_items[0].notification.content == "custom rejected content"
+    assert json.loads(applicant_items[0].notification.content) == {"text": "custom rejected content"}
 
 
 def test_badge_counts_distinct_pending_work_orders(db) -> None:
@@ -1371,17 +1409,72 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     )
 
     with db.orm_session() as session:
-        result_event_type = (
-            session.query(WorkOrderNotificationModel.event_type)
+        result = (
+            session.query(
+                WorkOrderNotificationModel.event_type,
+                WorkOrderNotificationModel.title,
+                WorkOrderNotificationModel.content,
+            )
             .filter(
                 WorkOrderNotificationModel.work_order_id == created.work_order_id,
                 WorkOrderNotificationModel.recipient_user_id == "applicant-friend",
                 WorkOrderNotificationModel.notification_category
                 == NotificationCategory.NOTICE.value,
             )
-            .scalar()
+            .one()
         )
-    assert result_event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.title == "Bot 好友申请已通过"
+    assert json.loads(result.content) == {"text": "你的 Bot 好友申请已通过。"}
+
+
+def test_friend_rejection_persists_status_specific_content(db) -> None:
+    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="legacy-id-reject",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-reject",
+        approver_user_ids=["reviewer-reject"],
+        recipient_user_ids=[],
+        title="friend approval",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-reject"]}),
+        env="dev",
+    )
+    assert created.work_order_id is not None
+
+    repository.process_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="reviewer-reject",
+        decision=WorkOrderDecision.REJECTED,
+        review_remark="审批备注",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        result = (
+            session.query(
+                WorkOrderNotificationModel.event_type,
+                WorkOrderNotificationModel.title,
+                WorkOrderNotificationModel.content,
+            )
+            .filter(
+                WorkOrderNotificationModel.work_order_id == created.work_order_id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-reject",
+                WorkOrderNotificationModel.notification_category
+                == NotificationCategory.NOTICE.value,
+            )
+            .one()
+        )
+    assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.title == "Bot 好友申请未通过"
+    assert json.loads(result.content) == {
+        "text": "你的 Bot 好友申请未通过。",
+        "review_remark": "审批备注",
+    }
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:

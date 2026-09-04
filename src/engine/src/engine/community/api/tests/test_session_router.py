@@ -30,6 +30,7 @@ def _make_session(session_id: str = "sess-1", **kwargs):
     s.agent_id = kwargs.get("agent_id", None)
     s.model = kwargs.get("model", "gpt-4")
     s.runtime = kwargs.get("runtime", None)
+    s.cwd = kwargs.get("cwd", None)
     s.permission_mode = kwargs.get("permission_mode", None)
     s.created_at = _NOW
     s.updated_at = _NOW
@@ -75,6 +76,17 @@ def mock_favorite_repository():
         return_value=repository,
     ):
         yield repository
+
+
+@pytest.fixture()
+def allow_root(tmp_path, monkeypatch) -> str:
+    """A real directory admitted by ``AICODING_CWD_ALLOW_ROOTS``.
+
+    The allow roots are read from the environment on every call, so a temp dir
+    keeps these tests off the container's hardcoded default workspace base.
+    """
+    monkeypatch.setenv("AICODING_CWD_ALLOW_ROOTS", str(tmp_path))
+    return str(tmp_path)
 
 
 @pytest.fixture()
@@ -209,6 +221,89 @@ class TestCreateSession:
         resp = client.post("/api/sessions", json={})
         assert resp.status_code == 200
         assert "runtime" not in resp.json()["data"]
+
+    def test_cwd_forwarded_to_create_request(self, client, mock_session_api, allow_root):
+        resp = client.post("/api/sessions", json={
+            "title": "Report",
+            "cwd": f"{allow_root}/report",
+        })
+        assert resp.status_code == 200
+        req = mock_session_api.create.call_args[0][0]
+        assert req.cwd == f"{allow_root}/report"
+
+    def test_cwd_outside_the_allowed_roots_is_rejected(self, client, mock_session_api):
+        """``cwd`` binds the claude_code relay's working directory, and that
+        session runs with ``permissionMode: bypassPermissions``. The relay only
+        checks absolute/exists/is-a-directory, so ``/etc`` would sail through —
+        the allowed-roots gate is the only thing standing between a caller of
+        this route and an agent bound outside the workspace."""
+        resp = client.post("/api/sessions", json={"cwd": "/etc"})
+        assert resp.status_code == 400, resp.json()
+        assert "not allowed" in resp.json()["detail"]
+        # Never reached the engine: rejected before any session was created.
+        mock_session_api.create.assert_not_called()
+
+    def test_cwd_traversal_out_of_an_allowed_root_is_rejected(
+        self, client, mock_session_api, allow_root
+    ):
+        """Canonicalised before the prefix test, so ``..`` cannot walk out."""
+        resp = client.post("/api/sessions", json={"cwd": f"{allow_root}/../../etc"})
+        assert resp.status_code == 400, resp.json()
+        mock_session_api.create.assert_not_called()
+
+    def test_relative_cwd_is_rejected(self, client, mock_session_api):
+        resp = client.post("/api/sessions", json={"cwd": "relative/dir"})
+        assert resp.status_code == 400, resp.json()
+        mock_session_api.create.assert_not_called()
+
+    def test_cwd_is_canonicalised_before_forwarding(
+        self, client, mock_session_api, allow_root
+    ):
+        resp = client.post("/api/sessions", json={"cwd": f"{allow_root}/a/./b/"})
+        assert resp.status_code == 200, resp.json()
+        req = mock_session_api.create.call_args[0][0]
+        assert req.cwd == f"{allow_root}/a/b"
+
+    def test_cwd_defaults_to_none(self, client, mock_session_api):
+        """Absent leaves the working directory to the engine: the claude_code
+        relay falls back to its own default, and an engine that models no
+        working directory ignores it."""
+        client.post("/api/sessions", json={})
+        req = mock_session_api.create.call_args[0][0]
+        assert req.cwd is None
+
+    def test_cwd_in_response(self, client, mock_session_api, allow_root):
+        mock_session_api.create.return_value = _make_session(cwd=allow_root)
+        resp = client.post("/api/sessions", json={"cwd": allow_root})
+        assert resp.status_code == 200
+        assert resp.json()["data"]["cwd"] == allow_root
+
+
+class TestUpdateSessionCwdGate:
+    """``POST /api/sessions/{id}/update`` takes ``cwd`` as a query parameter, and
+    the public create route reaches it for a friend bot (Expert Chat applies the
+    requested fields through /update), so it needs the same gate as create."""
+
+    def test_cwd_outside_the_allowed_roots_is_rejected(self, client, mock_session_api):
+        resp = client.post("/api/sessions/sess-1/update", params={"cwd": "/etc"})
+        assert resp.status_code == 400, resp.json()
+        assert "not allowed" in resp.json()["detail"]
+        mock_session_api.update.assert_not_called()
+
+    def test_allowed_cwd_is_forwarded(self, client, mock_session_api, allow_root):
+        resp = client.post(
+            "/api/sessions/sess-1/update", params={"cwd": f"{allow_root}/report"}
+        )
+        assert resp.status_code == 200, resp.json()
+        req = mock_session_api.update.call_args[0][0]
+        assert req.cwd == f"{allow_root}/report"
+
+    def test_omitted_cwd_stays_none(self, client, mock_session_api):
+        resp = client.post("/api/sessions/sess-1/update", params={"title": "T"})
+        assert resp.status_code == 200, resp.json()
+        req = mock_session_api.update.call_args[0][0]
+        assert req.cwd is None
+
 
 # ── GET /api/sessions/{session_id} ───────────────────────────────────────────
 
@@ -399,17 +494,22 @@ class TestUpdateSession:
         assert req.title is None
         assert req.model is None
 
-    def test_all_query_params_forwarded(self, client, mock_session_api):
+    def test_all_query_params_forwarded(self, client, mock_session_api, allow_root):
+        # ``cwd`` must sit inside the allowed roots: this route now holds a
+        # caller-supplied working directory to ``AICODING_CWD_ALLOW_ROOTS``
+        # before forwarding it (see TestUpdateSessionCwdGate). What this test
+        # asserts — that every query parameter reaches the request — is
+        # unchanged.
         resp = client.post(
             "/api/sessions/sess-1/update"
-            "?title=Chat&model=GLM-5&cwd=/tmp/work"
+            f"?title=Chat&model=GLM-5&cwd={allow_root}/work"
             "&user_id=u-1&agent_id=a-1&permission_mode=ask"
         )
         assert resp.status_code == 200
         req = mock_session_api.update.call_args[0][0]
         assert req.title == "Chat"
         assert req.model == "GLM-5"
-        assert req.cwd == "/tmp/work"
+        assert req.cwd == f"{allow_root}/work"
         assert req.user_id == "u-1"
         assert req.agent_id == "a-1"
         assert req.permission_mode == "ask"

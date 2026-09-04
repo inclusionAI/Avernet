@@ -274,7 +274,7 @@ def test_delete_member_returns_true_for_existing_non_creator() -> None:
         approver_user_ids=[],
         recipient_user_ids=["member-1"],
         title="你已被移出空间",
-        content={"legacy_value": "你已被移出空间「Team」。"},
+        content={"text": "你已被移出空间「Team」。"},
         apply_reason=None,
         biz_data=None,
         actor_id="owner-1",

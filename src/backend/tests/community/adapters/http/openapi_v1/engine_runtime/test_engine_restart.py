@@ -36,6 +36,18 @@ def test_restart_forwards_to_the_engine_daemon(client, relay):
     assert data == {"bot_id": BOT, "status": "restarting"}
 
 
+def test_restart_sends_the_body_the_engine_adapter_requires(client, relay):
+    # The device endpoint is typed ``engine_restart(request:
+    # EngineRestartRequest)`` — FastAPI answers 422 to a bodyless POST however
+    # optional the model's fields are, and the relay flattens that 422 into a
+    # public 502. The forward must always carry the JSON envelope, force off.
+    relay.results = [EngineResult(data={"status": "restarting"})]
+
+    ok(client.post(_restart()))
+
+    assert relay.calls[0]["body"] == {"force": False}
+
+
 def test_restart_status_falls_back_to_empty_when_engine_omits_it(client, relay):
     relay.results = [EngineResult(data={})]
 

@@ -7,7 +7,10 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from agentclaw.community.core.events.types import DeviceActivatedEvent
+from agentclaw.community.core.events.types import (
+    DeviceActivatedEvent,
+    RuntimeProjectionRequestedEvent,
+)
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
 )
@@ -104,6 +107,35 @@ def _layout_state(
 
 
 class TestHandleDeviceActivated:
+    def test_restart_projection_trigger_is_layout_agnostic(self):
+        bot_query = MagicMock()
+        bot_query.get_by_binding_id.return_value = {
+            "bot_id": "service-1",
+            "owner_id": "u001",
+            "bot_type": "service",
+        }
+        layout_repository = MagicMock()
+        runtime_reconcile = MagicMock()
+        listener, _, dispatcher, _ = _make_listener(
+            bot_query=bot_query,
+            layout_repository=layout_repository,
+            runtime_reconcile=runtime_reconcile,
+        )
+
+        listener.handle(
+            RuntimeProjectionRequestedEvent(
+                device_id="device-001",
+                binding_id=42,
+                entity_id="u001",
+                entity_type="staff",
+                device_provider="baas",
+            )
+        )
+
+        runtime_reconcile.assert_called_once_with("service-1", "u001")
+        layout_repository.get.assert_not_called()
+        dispatcher.dispatch.assert_not_called()
+
     @pytest.mark.asyncio
     async def test_runtime_reconcile_blocks_even_inside_a_running_loop(self):
         completed = []
