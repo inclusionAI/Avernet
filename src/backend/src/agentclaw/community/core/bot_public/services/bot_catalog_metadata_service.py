@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 import httpx
 
@@ -33,6 +33,7 @@ class BcsBotCatalogMetadataService:
         search: str | None,
         page: int,
         page_size: int,
+        bot_uuids: Sequence[str] = (),
         filters: BotCatalogSearchFilters | None = None,
         caller: BotCatalogCaller,
         request_id: str,
@@ -46,6 +47,8 @@ class BcsBotCatalogMetadataService:
         }
         if search and search.strip():
             params["q"] = search
+        if bot_uuids:
+            params["bot_uuids"] = ",".join(bot_uuids)
         if filters is not None:
             if filters.visibility:
                 params["visibility"] = ",".join(filters.visibility)

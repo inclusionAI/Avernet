@@ -285,6 +285,31 @@ async fn search_bots_visibility_filter_accepts_multiple_values() {
 }
 
 #[tokio::test]
+async fn search_bots_applies_exact_bot_uuid_candidates() {
+    let (bot, core, _data_dir) = build_bot().await;
+    core.register("candidate-bot".to_string(), capabilities("Candidate", "public"))
+        .await
+        .expect("register candidate bot");
+    core.register("other-bot".to_string(), capabilities("Other", "public"))
+        .await
+        .expect("register other bot");
+
+    let result = bot
+        .search_bots(SearchBotsCommand {
+            bot_uuids: Some(vec![
+                "candidate-bot".to_string(),
+                "missing-bot".to_string(),
+            ]),
+            ..Default::default()
+        })
+        .await
+        .expect("search exact candidates");
+
+    assert_eq!(result.total, 1);
+    assert_eq!(result.items[0].bot_uuid, "candidate-bot");
+}
+
+#[tokio::test]
 async fn search_bots_excludes_soft_deleted_persistent_rows_even_if_memory_has_bot() {
     let cache = Arc::new(InMemoryCachePlugin::new());
     let db = sqlite_db().await;
@@ -445,4 +470,3 @@ async fn search_bots_rejects_friendship_filter_without_viewer_actor() {
         )) if message == "friendship filter requires viewer_actor_id"
     ));
 }
-

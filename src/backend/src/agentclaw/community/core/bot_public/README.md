@@ -12,7 +12,7 @@ provides:
   - "Bot-public SQLAlchemy models"
 consumes:
   - "BotManagement repo + service"
-  - "BotCatalogMetadata port (current BCS page, joined by (bot_id, entity_id))"
+  - "BotCatalogMetadata port (BCS search page or exact recommendation candidates, joined by (bot_id, entity_id))"
   - "AntProcess plugins (auth_relationship, bot_publish_approval, antprocess)"
   - "PassportPlugin"
   - "SkillCenter factories"

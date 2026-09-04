@@ -66,6 +66,7 @@ pub struct BotSearchCandidateQuery {
     pub env: String,
     pub visibility: BotCandidateVisibility,
     pub friend_ids: HashSet<String>,
+    pub bot_uuids: Option<Vec<String>>,
     pub name: Option<String>,
     pub q: Option<String>,
     pub visibility_filter: Option<Vec<String>>,

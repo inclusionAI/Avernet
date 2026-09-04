@@ -2037,6 +2037,11 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                     .filter(|value| !value.is_empty())
             })
             .map(str::to_lowercase);
+        let bot_uuid_filter = match query.bot_uuids.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => Some(values.iter().map(String::as_str).collect::<HashSet<_>>()),
+            None => None,
+        };
         let visibility_filter = match query.visibility_filter.as_ref() {
             Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
             Some(values) => Some(
@@ -2063,6 +2068,12 @@ impl BotControlPlaneRepoPort for MemoryBotRepo {
                 continue;
             };
             if bot.bot_id == query.acting_bot_id || bot.kind != bcs_service_api::ActorKind::Bot {
+                continue;
+            }
+            if bot_uuid_filter
+                .as_ref()
+                .is_some_and(|values| !values.contains(bot.bot_id.as_str()))
+            {
                 continue;
             }
             if search_text.as_ref().is_some_and(|needle| {

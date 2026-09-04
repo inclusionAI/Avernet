@@ -421,6 +421,7 @@ impl Bot {
             env: bcs_config::resolve_env_str(),
             visibility: bcs_service_api::BotCandidateVisibility::Discovery,
             friend_ids,
+            bot_uuids: command.bot_uuids.clone(),
             name: command.q.clone(),
             q: command.q.clone(),
             visibility_filter: command.visibility.clone(),

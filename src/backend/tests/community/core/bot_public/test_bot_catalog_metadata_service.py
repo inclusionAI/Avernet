@@ -243,6 +243,37 @@ def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
     assert "headers" not in call.kwargs
 
 
+def test_bcs_catalog_search_forwards_exact_bot_uuid_candidates() -> None:
+    """Discover candidates must be checked by the same BCS catalog search path."""
+    service, http = _make_service()
+    http.set_response("get", _response(200, {"total": 0, "items": []}))
+
+    result = service.search_public_bot_metadata(
+        search=None,
+        page=1,
+        page_size=2,
+        bot_uuids=("bot-1:owner-1", "bot-2:owner-2"),
+        filters=BotCatalogSearchFilters(
+            status="online",
+            viewer_actor_type="human",
+            viewer_actor_id="owner-1",
+        ),
+        caller=_caller(),
+        request_id="trace-discover",
+    )
+
+    assert result == BotCatalogMetadataPage(total=0, items=[])
+    assert http.calls_to("get")[0].kwargs["params"] == {
+        "offset": 0,
+        "limit": 2,
+        "tc_bot": True,
+        "bot_uuids": "bot-1:owner-1,bot-2:owner-2",
+        "status": "online",
+        "viewer_actor_type": "human",
+        "viewer_actor_id": "owner-1",
+    }
+
+
 @pytest.mark.parametrize(
     "item",
     [

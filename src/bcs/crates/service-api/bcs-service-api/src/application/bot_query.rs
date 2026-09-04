@@ -110,6 +110,7 @@ pub struct BotQueryByIdsResult {
 /// restricts to non-TC bots; `None` applies no such filter.
 #[derive(Debug, Clone)]
 pub struct SearchBotsCommand {
+    pub bot_uuids: Option<Vec<String>>,
     pub q: Option<String>,
     pub visibility: Option<Vec<String>>,
     pub user_visibility: Option<Vec<String>>,
@@ -125,6 +126,7 @@ pub struct SearchBotsCommand {
 impl Default for SearchBotsCommand {
     fn default() -> Self {
         Self {
+            bot_uuids: None,
             q: None,
             visibility: None,
             user_visibility: None,

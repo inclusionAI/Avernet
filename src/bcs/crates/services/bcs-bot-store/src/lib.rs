@@ -3171,6 +3171,19 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
                     .filter(|value| !value.is_empty())
             })
             .map(str::to_lowercase);
+        let bot_uuid_filter = match query.bot_uuids.as_ref() {
+            Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
+            Some(values) => {
+                let mut values = values
+                    .iter()
+                    .map(|value| value.trim().to_string())
+                    .collect::<Vec<_>>();
+                values.sort_unstable();
+                values.dedup();
+                Some(values)
+            }
+            None => None,
+        };
         let visibility_filter = match query.visibility_filter.as_ref() {
             Some(values) if values.is_empty() => return Ok((Vec::new(), 0)),
             Some(values) => Some(
@@ -3229,6 +3242,13 @@ impl BotControlPlaneRepoPort for PersistentBotRepo {
             .collect::<Vec<_>>();
         params.push(Value::from(query.env.as_str()));
         params.push(Value::from(query.acting_bot_id.as_str()));
+        if let Some(values) = bot_uuid_filter.as_ref() {
+            predicates.push(format!(
+                "b.bot_uuid IN ({})",
+                vec!["?"; values.len()].join(", ")
+            ));
+            params.extend(values.iter().map(|value| Value::from(value.as_str())));
+        }
         if let Some(search_text) = search_text.as_ref() {
             predicates.push(
                 "(INSTR(LOWER(COALESCE(b.name, '')), ?) > 0 OR INSTR(LOWER(COALESCE(b.bot_info, '')), ?) > 0 OR INSTR(LOWER(b.bot_uuid), ?) > 0)"

@@ -88,6 +88,7 @@ class BotPublicModule(Module):
         self,
         bot_repository: BotRepository,
         bcsfuse_config: cfg.BcsFuseConfig,
+        catalog_metadata_service: BotCatalogMetadataServiceProtocol,
     ) -> BotDiscoverService:
         # Explicit provider (not ``binder.bind``): BotDiscoverService
         # types ``bcsfuse_config`` under TYPE_CHECKING to avoid a
@@ -98,6 +99,7 @@ class BotPublicModule(Module):
         return BotDiscoverService(
             bot_repository=bot_repository,
             bcsfuse_config=bcsfuse_config,
+            catalog_metadata_service=catalog_metadata_service,
         )
 
     @singleton
