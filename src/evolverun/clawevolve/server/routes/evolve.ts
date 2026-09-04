@@ -72,6 +72,11 @@ import {
   dispatchPendingBusinessStep,
   startInitialEvolveStep,
 } from "../services/evolve/task-start.js";
+import {
+  createRunAnalysisStarter,
+  RunAnalysisStartError,
+  type RunAnalysisStarter,
+} from "../services/evolve/run-analysis-starter.js";
 
 type Dispatch = typeof dispatchEvolveCommand;
 type DispatchTaskLogArchive = typeof dispatchEvolveTaskLogArchive;
@@ -94,6 +99,7 @@ export type EvolveRouterDeps = {
   /** Backward-compatible signing-only dependency used by an embedding host. */
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
+  runAnalysisStarter?: RunAnalysisStarter | null;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
 const DIAGNOSE_MODELS = new Set(["GLM-5.1", "GLM-5.2"]);
@@ -919,6 +925,114 @@ function buildSuggestionApplyMessage(input: {
   })}`;
 }
 
+type SuggestionDiagnosisContext = {
+  schemaVersion: "task-guard-diagnosis-context/v1";
+  readOnly: true;
+  diagnoses: Array<{
+    diagnosisId: string;
+    analysisId?: string;
+    flowIds: string[];
+    nodeId: string | null;
+    failureSignature: string;
+    failureMode: string | null;
+    conclusion: string;
+    problemSources: Array<{ eventId: string; eventType: string; summary: string }>;
+  }>;
+};
+
+function storedStringArray(value: string | null | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function buildSuggestionDiagnosisContext(
+  suggestions: EvolveSuggestionRow[],
+  workflowEvolutionRepo: WorkflowEvolutionRepository | null,
+  repo: EvolveRepository,
+): Promise<SuggestionDiagnosisContext | undefined> {
+  const diagnosisIds = [...new Set(suggestions.flatMap((suggestion) => storedStringArray(suggestion.source_diagnosis_ids)))]
+    .slice(-8);
+  if (diagnosisIds.length === 0) return undefined;
+
+  try {
+    const projected = workflowEvolutionRepo
+      ? (await workflowEvolutionRepo.listProjectedDiagnoses({
+          workflowId: suggestions[0]?.workflow_id,
+          limit: 200,
+        })).rows
+      : [];
+    const projectedById = new Map(projected.flatMap((item) => {
+      const diagnosisId = typeof item.diagnosis_id === "string" ? item.diagnosis_id : "";
+      return diagnosisId ? [[diagnosisId, item] as const] : [];
+    }));
+    const selectedProjected = diagnosisIds.flatMap((diagnosisId) => {
+      const item = projectedById.get(diagnosisId);
+      return item ? [item] : [];
+    });
+    const citedEventIds = selectedProjected.flatMap((item) => Array.isArray(item.evidence_event_ids)
+      ? item.evidence_event_ids.filter((eventId): eventId is string => typeof eventId === "string")
+      : []);
+    const evidenceRows = workflowEvolutionRepo
+      ? await workflowEvolutionRepo.listEvidenceByEventIds(citedEventIds.slice(0, 40))
+      : [];
+    const evidenceById = new Map(evidenceRows.map((row) => [row.event_id, row]));
+    const diagnoses: SuggestionDiagnosisContext["diagnoses"] = [];
+
+    for (const diagnosisId of diagnosisIds) {
+      const item = projectedById.get(diagnosisId);
+      if (item) {
+        const flowIds = Array.isArray(item.flow_ids)
+          ? item.flow_ids.filter((flowId): flowId is string => typeof flowId === "string").slice(0, 10)
+          : typeof item.flow_id === "string" ? [item.flow_id] : [];
+        const eventIds = Array.isArray(item.evidence_event_ids)
+          ? item.evidence_event_ids.filter((eventId): eventId is string => typeof eventId === "string").slice(0, 5)
+          : [];
+        diagnoses.push({
+          diagnosisId,
+          ...(typeof item.analysis_id === "string" ? { analysisId: item.analysis_id } : {}),
+          flowIds,
+          nodeId: typeof item.node_id === "string" ? item.node_id : null,
+          failureSignature: String(item.failure_signature ?? "").slice(0, 512),
+          failureMode: typeof item.failure_mode === "string" ? item.failure_mode : null,
+          conclusion: String(item.reasoning ?? item.failure_signature ?? "").slice(0, 1_000),
+          problemSources: presentEvidence(eventIds, evidenceById).map((source) => ({
+            eventId: source.eventId,
+            eventType: source.eventType,
+            summary: source.summary,
+          })),
+        });
+        continue;
+      }
+
+      const legacy = await repo.findDiagnosis(diagnosisId);
+      if (!legacy) continue;
+      diagnoses.push({
+        diagnosisId,
+        flowIds: [legacy.flow_id].filter(Boolean).slice(0, 10),
+        nodeId: legacy.node_id,
+        failureSignature: legacy.failure_signature,
+        failureMode: legacy.failure_mode,
+        conclusion: (legacy.error_text || legacy.failure_signature).slice(0, 1_000),
+        problemSources: [],
+      });
+    }
+
+    return diagnoses.length > 0
+      ? { schemaVersion: "task-guard-diagnosis-context/v1", readOnly: true, diagnoses }
+      : undefined;
+  } catch (error) {
+    console.warn(`[task-guard] suggestion diagnosis context unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
 function diffSuggestionProposals(previous: Record<string, unknown>, current: Record<string, unknown>): Record<string, unknown> {
   const operations = (value: Record<string, unknown>) => Array.isArray(value.operations)
     ? value.operations.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
@@ -979,6 +1093,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const artifactStore = deps.artifactStore ?? unavailableArtifactStore;
   const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
+  const runAnalysisStarter = deps.runAnalysisStarter
+    ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
 
   router.get("/task-definitions", (_req, res) => {
     res.json({
@@ -2943,6 +3059,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (req.params.taskId && step.task_id !== String(req.params.taskId)) {
       res.status(404).json({ error: "step 不属于指定 task" }); return;
     }
+    if (step.step_type === "run_analysis" || step.step_type === "suggestion_apply") {
+      res.status(410).json({
+        error: "task_guard_managed_callback_required",
+        message: "Task Guard steps must use the signed managed callback",
+      });
+      return;
+    }
     const userId = resolveRequestUserId(req);
     const { status, summary, error, output: reportedOutput } = req.body ?? {};
     let output = reportedOutput;
@@ -3483,7 +3606,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const analysis = requestedAnalysisId
       ? await workflowEvolutionRepo.findAnalysisRunForFlow(requestedAnalysisId, flowId)
       : await workflowEvolutionRepo.findLatestAnalysisRunByFlow(flowId);
-    if (!analysis) {
+    if (!analysis || (analysis.workflow_id != null && analysis.workflow_id !== workflowId)) {
       if (requestedAnalysisId) {
         res.status(404).json({ error: "未找到该运行对应的分析结果" });
         return;
@@ -3584,6 +3707,29 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     if (!userId) { res.status(401).json({ error: "未登录" }); return; }
     const flowId = String(req.params.flowId ?? "").trim();
     if (!flowId) { res.status(400).json({ error: "flowId 为必填项" }); return; }
+    if (runAnalysisStarter) {
+      const requestBody = (req.body ?? {}) as Record<string, unknown>;
+      try {
+        const result = await runAnalysisStarter.start({
+          flowId,
+          userId,
+          botId: String(requestBody.botId ?? "").trim() || undefined,
+          botEnv: requestBody.botEnv ? String(requestBody.botEnv) : undefined,
+          force: requestBody.force === true,
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof RunAnalysisStartError) {
+          const payload = error.statusCode === 502
+            ? { error: "消息派发失败", message: error.message, ...error.details }
+            : { code: error.code, error: error.message, ...error.details };
+          res.status(error.statusCode).json(payload);
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
     const workflowId = await repo.getWorkflowIdByFlowId(flowId);
     if (!workflowId) { res.status(404).json({ error: "未找到该 flow 对应的工作流" }); return; }
 
@@ -3842,6 +3988,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       return null;
     }
 
+    const validatedProposals: Array<ReturnType<typeof validateWorkflowPatchProposal>> = [];
     for (const suggestion of suggestions) {
       if (!suggestion.proposal_json) continue;
       try {
@@ -3850,10 +3997,36 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           res.status(400).json({ error: "proposal_digest_mismatch", message: `建议 ${suggestion.id} 的 typed proposal 不完整或已被修改` });
           return null;
         }
+        validatedProposals.push(proposal);
       } catch (error) {
         res.status(400).json({
           error: "proposal_invalid",
           message: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    }
+    if (validatedProposals.length > 0) {
+      if (!db) {
+        res.status(503).json({ error: "workflow_spec_unavailable", message: "无法读取当前 Workflow 配置" });
+        return null;
+      }
+      const current = (await db.query<{ spec_json: unknown }>(
+        "SELECT spec_json FROM workflow_specs WHERE workflow_id = ? LIMIT 1",
+        [workflowId],
+      ))[0];
+      let currentSpec: unknown;
+      try {
+        currentSpec = JSON.parse(dbText(current?.spec_json));
+      } catch {
+        res.status(409).json({ error: "workflow_spec_unavailable", message: "当前 Workflow 配置不存在或无法解析" });
+        return null;
+      }
+      const currentSpecDigest = digestCanonicalJson(currentSpec);
+      if (validatedProposals.some((proposal) => proposal.baseSpecDigest !== currentSpecDigest)) {
+        res.status(409).json({
+          error: "workflow_spec_changed",
+          message: "分析后 Workflow 已发生变化，请重新分析或更新修复要求后再应用",
         });
         return null;
       }
@@ -3896,6 +4069,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       && task.proposalDigest !== suggestions[0].proposal_digest);
     const previousProposal = previousTask?.proposal ?? undefined;
     const proposalDelta = previousProposal && proposal ? diffSuggestionProposals(previousProposal, proposal) : undefined;
+    const diagnosisContext = await buildSuggestionDiagnosisContext(suggestions, workflowEvolutionRepo, repo);
     const message = buildSuggestionApplyMessage({
       taskId,
       stepId,
@@ -3928,6 +4102,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
             ...(!edited && proposal ? { proposal } : {}),
             ...(previousProposal ? { previousProposal } : {}),
             ...(proposalDelta ? { proposalDelta } : {}),
+            ...(diagnosisContext ? { diagnosisContext } : {}),
             deploy: true,
           },
         }),
@@ -3945,6 +4120,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           message: "任务正在派发",
           elapsedMs: 0,
           updatedAtMs: progressStartedAt,
+          history: [{
+            phase: "task_received",
+            message: "任务正在派发",
+            updatedAtMs: progressStartedAt,
+          }],
         },
       },
     });

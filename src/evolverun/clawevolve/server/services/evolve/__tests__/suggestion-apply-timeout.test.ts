@@ -38,16 +38,21 @@ describe("suggestion application timeout", () => {
         output_json: JSON.stringify({ applicationProgress: { phase: "editing_workflow", updatedAtMs: now - 5 * 60_000 } }),
         config_json: JSON.stringify({ workflowId: "wf-1", suggestionIds: ["1"] }),
       }]),
-      tryTimeoutSuggestionApplyStep: vi.fn().mockResolvedValue(true),
-      updateSuggestionStatus: vi.fn().mockResolvedValue({ id: 1, node_id: "n1", failure_signature: "sig-1" }),
+      tryFinalizeSuggestionApplication: vi.fn().mockResolvedValue({ settled: true, supersededSuggestionIds: [] }),
+      findSuggestionById: vi.fn().mockResolvedValue({ id: 1, node_id: "n1", failure_signature: "sig-1" }),
       updateDiagnosesSuggestionStatus: vi.fn().mockResolvedValue(undefined),
-      recordSuggestionOutcome: vi.fn().mockResolvedValue(undefined),
     } as unknown as EvolveRepository;
 
     expect(await runSuggestionApplyTimeoutSweep(repo, now)).toBe(1);
-    expect(repo.tryTimeoutSuggestionApplyStep).toHaveBeenCalledWith(
-      "EV-1-step-apply", "SUGGESTION_APPLY_TIMEOUT", expect.stringContaining("15 分钟"),
+    expect(repo.tryFinalizeSuggestionApplication).toHaveBeenCalledWith(
+      "EV-1-step-apply",
+      expect.objectContaining({
+        source: "timeout",
+        status: "failed",
+        errorCode: "SUGGESTION_APPLY_TIMEOUT",
+        suggestionIds: ["1"],
+        failureVerdict: "application_timeout",
+      }),
     );
-    expect(repo.updateSuggestionStatus).toHaveBeenCalledWith("1", "failed", expect.objectContaining({ action: "failed" }));
   });
 });

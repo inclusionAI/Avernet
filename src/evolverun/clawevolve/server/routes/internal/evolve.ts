@@ -228,6 +228,7 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
     const input = await workflowEvolutionRepo.getAnalysisInput(String(req.params.analysisId));
     if (!input) { res.status(404).json({ error: "analysis_not_found" }); return; }
     let workflowSpecDigest: string | null = null;
+    let workflowSpec: Record<string, unknown> | null = null;
     if (input.analysis.workflow_id) {
       const row = (await db.query<{ spec_json: string }>(
         "SELECT spec_json FROM workflow_specs WHERE workflow_id = ? LIMIT 1",
@@ -236,11 +237,18 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
       if (row?.spec_json) {
         try {
           const { digestCanonicalJson } = await import("../../services/evolution/contracts.js");
-          workflowSpecDigest = digestCanonicalJson(JSON.parse(row.spec_json));
-        } catch { workflowSpecDigest = null; }
+          const parsed = JSON.parse(row.spec_json) as unknown;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            workflowSpec = parsed as Record<string, unknown>;
+            workflowSpecDigest = digestCanonicalJson(workflowSpec);
+          }
+        } catch {
+          workflowSpec = null;
+          workflowSpecDigest = null;
+        }
       }
     }
-    res.json({ ...input, workflowSpecDigest });
+    res.json({ ...input, workflowSpecDigest, workflowSpec });
   });
 
   router.post("/analysis-runs/:analysisId/claim", async (req: Request, res: Response) => {

@@ -225,6 +225,8 @@ export type EvolveBotRuntime = {
   bindingId: string | number | null;
   provider: string | null;
   deviceId: string | null;
+  /** Raw ARCA PaaS device id. It may include the stable `@template_id` suffix. */
+  arcaInstanceId?: string | null;
   bindingStatus: string | null;
   env: string | null;
   ownerId?: string;
@@ -665,18 +667,6 @@ export class EvolveRepository {
   }
 
   async listEligibleBotsForAnalyze(userId: string, workflowId: string): Promise<{ botId: string; botName: string | null; env: string | null; accessType: string; ownerId: string | null }[]> {
-    // Collect owner-level grants (any of view/execute/edit) for this workflow under this user.
-    const ownerRows = await this.db.query<{ bot_owner_id: string }>(
-      `SELECT bot_owner_id FROM bot_workflow_permissions
-       WHERE workflow_id = ? AND (can_view = 1 OR can_execute = 1 OR can_edit = 1)
-         AND (bot_id IS NULL OR bot_id = '')
-         AND (bot_owner_id = ? OR bot_owner_id = '*')
-       GROUP BY bot_owner_id`,
-      [workflowId, userId],
-    );
-    const ownerSet = new Set(ownerRows.map((r) => r.bot_owner_id));
-    const hasOwnerAccess = ownerSet.has(userId) || ownerSet.has('*');
-
     const botRows = await this.db.query<{ bot_id: string; bot_owner_id: string }>(
       `SELECT bot_id, bot_owner_id FROM bot_workflow_permissions
        WHERE workflow_id = ? AND (can_view = 1 OR can_execute = 1 OR can_edit = 1) AND bot_id IS NOT NULL AND bot_id <> ''
@@ -689,27 +679,8 @@ export class EvolveRepository {
       [workflowId, userId, workflowId, userId],
     );
 
-    const allowedBotIds = new Set<string>();
-    for (const r of botRows) allowedBotIds.add(r.bot_id);
-
     const result: { botId: string; botName: string | null; env: string | null; accessType: string; ownerId: string | null }[] = [];
     const seen = new Set<string>();
-
-    if (hasOwnerAccess) {
-      const allBots = await this.db.query<{ bot_id: string; bot_name: string | null; env: string | null }>(
-        `SELECT bot_id, bot_name, env FROM ac_bots
-         WHERE (owner_id = ? OR entity_id = ?) AND is_delete = 0
-           AND bot_id IS NOT NULL AND bot_id <> ''
-         ORDER BY id DESC`,
-        [userId, userId],
-      );
-      for (const b of allBots) {
-        const key = `${b.bot_id}\0${b.env ?? ""}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        result.push({ botId: b.bot_id, botName: b.bot_name, env: b.env, accessType: "owner", ownerId: userId });
-      }
-    }
 
     for (const r of botRows) {
       const info = await this.db.query<{ bot_id: string; bot_name: string | null; env: string | null }>(
@@ -757,6 +728,7 @@ export class EvolveRepository {
       elapsedMs: number;
       updatedAtMs: number;
       stalled: boolean;
+      history: Array<{ phase: string; message: string; updatedAtMs: number }>;
     } | null;
     appliedAt: number | string | null;
     createdAt: number | string;
@@ -819,6 +791,19 @@ export class EvolveRepository {
           const item = value as Record<string, unknown>;
           if (typeof item.phase !== "string" || typeof item.message !== "string"
             || !Number.isFinite(Number(item.elapsedMs)) || !Number.isFinite(Number(item.updatedAtMs))) return null;
+          const history = Array.isArray(item.history)
+            ? item.history.flatMap((entry): Array<{ phase: string; message: string; updatedAtMs: number }> => {
+              if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+              const historyItem = entry as Record<string, unknown>;
+              if (typeof historyItem.phase !== "string" || typeof historyItem.message !== "string"
+                || !Number.isFinite(Number(historyItem.updatedAtMs))) return [];
+              return [{
+                phase: historyItem.phase,
+                message: historyItem.message,
+                updatedAtMs: Number(historyItem.updatedAtMs),
+              }];
+            }).slice(-10)
+            : [];
           return {
             phase: item.phase,
             message: item.message,
@@ -833,6 +818,7 @@ export class EvolveRepository {
             ),
             updatedAtMs: Number(item.updatedAtMs),
             stalled: Date.now() - Number(item.updatedAtMs) > 90_000,
+            history,
           };
         } catch { return null; }
       })();
@@ -1304,6 +1290,51 @@ export class EvolveRepository {
     );
   }
 
+  async tryTimeoutRunAnalysisStep(
+    stepId: string,
+    flowId: string,
+    errorCode: string,
+    errorMessage: string,
+    completedAtMs = Date.now(),
+  ): Promise<boolean> {
+    const now = this.db.dialect.now();
+    return this.db.transaction(async (tx) => {
+      const step = (await tx.query<{ task_id: string }>(
+        "SELECT task_id FROM ce_steps WHERE step_id = ? LIMIT 1",
+        [stepId],
+      ))[0];
+      if (!step) return false;
+      const updated = await tx.exec(
+        `UPDATE ce_steps
+         SET status = 'failed', error_code = ?, error_message = ?, retryable = 1,
+             completed_at = ?, gmt_modified = ?
+         WHERE step_id = ? AND step_type = 'run_analysis'
+           AND status IN ('created', 'dispatching', 'dispatched', 'running', 'analyzing')`,
+        [errorCode, errorMessage, now, now, stepId],
+      );
+      if ((updated.affectedRows ?? 0) !== 1) return false;
+      await tx.exec(
+        "UPDATE ce_tasks SET status = 'failed', error_message = ?, gmt_modified = ? WHERE task_id = ?",
+        [errorMessage, now, step.task_id],
+      );
+      await tx.exec(
+        `UPDATE workflow_evolution_analysis_runs
+         SET status = 'failed', error_code = ?, completed_at_ms = ?,
+             state_version = state_version + 1, gmt_modified = ?
+         WHERE (step_id = ? OR task_id = ?)
+           AND status IN ('queued', 'collecting', 'analyzing')`,
+        [errorCode, completedAtMs, now, stepId, step.task_id],
+      );
+      if (flowId) {
+        await tx.exec(
+          "UPDATE flow_runs SET evolution_analysis_status = 'failed', evolution_analyzed_at = ? WHERE flow_id = ?",
+          [now, flowId],
+        );
+      }
+      return true;
+    });
+  }
+
   async clearFlowDiagnoses(flowId: string): Promise<number> {
     const result = await this.db.exec(
       "DELETE FROM workflow_healing_diagnoses WHERE flow_id = ?",
@@ -1692,14 +1723,24 @@ export class EvolveRepository {
     } : null;
   }
 
+  /** Resolve a Bot by its real owner. Admin authorization stays in the caller. */
+  async resolveEvolveBotRuntimeForOwner(
+    ownerId: string,
+    botId: string,
+    env?: string,
+  ): Promise<EvolveBotRuntime | null> {
+    const runtime = await this.resolveOwnedEvolveBotRuntime(ownerId, botId, env);
+    return runtime ? { ...runtime, ownerId, accessType: "owner" } : null;
+  }
+
   private async resolveOwnedEvolveBotRuntime(userId: string, botId: string, env?: string): Promise<EvolveBotRuntime | null> {
     const rows = await this.db.query<{
       active_engine: string | null; bot_type: string | null; bot_status: string | null; binding_id: string | number | null;
       device_provider: string | null; device_id: string | null;
-      binding_status: string | null; env: string | null;
+      device_props: unknown; binding_status: string | null; env: string | null;
     }>(
       `SELECT b.active_engine, b.bot_type, b.status AS bot_status, b.binding_id,
-              d.device_provider, d.device_id, d.status AS binding_status,
+              d.device_provider, d.device_id, d.device_props, d.status AS binding_status,
               COALESCE(d.env, b.env) AS env
        FROM ac_bots b
        LEFT JOIN ac_entity_device_binding d ON d.id = b.binding_id
@@ -1711,6 +1752,24 @@ export class EvolveRepository {
     ).catch(() => []);
     const row = rows[0];
     if (!row) return null;
+    let deviceProps: Record<string, unknown> | null = null;
+    if (row.device_props && typeof row.device_props === "object" && !Array.isArray(row.device_props)) {
+      deviceProps = row.device_props as Record<string, unknown>;
+    } else if (typeof row.device_props === "string" && row.device_props.trim()) {
+      try {
+        const parsed = JSON.parse(row.device_props) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          deviceProps = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // The target validator reports a missing ARCA instance id below. Do not
+        // turn malformed provider metadata into a partially trusted target.
+      }
+    }
+    const rawArcaInstanceId = deviceProps?.sandbox_id;
+    const arcaInstanceId = typeof rawArcaInstanceId === "string" || typeof rawArcaInstanceId === "number"
+      ? String(rawArcaInstanceId).trim() || null
+      : null;
     const publishedRows = await this.db.query<{ published_count: number | string | Buffer }>(
       `SELECT COUNT(*) AS published_count
        FROM ac_bot_publish p
@@ -1728,6 +1787,7 @@ export class EvolveRepository {
       bindingId: row.binding_id,
       provider: row.device_provider?.toLowerCase() ?? null,
       deviceId: row.device_id,
+      arcaInstanceId,
       bindingStatus: row.binding_status,
       env: row.env,
     };
@@ -1850,54 +1910,107 @@ export class EvolveRepository {
     );
   }
 
-  async tryTimeoutSuggestionApplyStep(stepId: string, errorCode: string, errorMessage: string): Promise<boolean> {
-    const now = this.db.dialect.now();
-    const completedAt = this.db.dialect.now();
-    return this.db.transaction(async (tx) => {
-      const step = (await tx.query<{ task_id: string }>("SELECT task_id FROM ce_steps WHERE step_id = ? LIMIT 1", [stepId]))[0];
-      if (!step) return false;
-      const updated = await tx.exec(
-        `UPDATE ce_steps SET status = 'failed', error_code = ?, error_message = ?, retryable = 1,
-                completed_at = ?, gmt_modified = ?
-         WHERE step_id = ? AND status IN ('created', 'dispatching', 'dispatched', 'running', 'applying')`,
-        [errorCode, errorMessage, completedAt, now, stepId],
-      );
-      if ((updated.affectedRows ?? 0) !== 1) return false;
-      await tx.exec(
-        "UPDATE ce_tasks SET status = 'failed', error_message = ?, gmt_modified = ? WHERE task_id = ?",
-        [errorMessage, now, step.task_id],
-      );
-      return true;
-    });
-  }
-
-  async trySettleSuggestionApplyStep(stepId: string, input: {
+  async tryFinalizeSuggestionApplication(stepId: string, input: {
+    source: "callback" | "timeout";
     status: "succeeded" | "failed";
     summary: string;
     output?: Record<string, unknown>;
     errorCode?: string;
     errorMessage?: string;
     retryable?: boolean;
-  }): Promise<boolean> {
+    suggestionIds: string[];
+    workflowId: string;
+    revisions?: Array<{ suggestionId: string; proposalDigest: string | null }>;
+    actor: string;
+    failureVerdict?: string;
+    completedAtMs?: number;
+  }): Promise<{ settled: boolean; supersededSuggestionIds: string[] }> {
     const now = this.db.dialect.now();
     const completedAt = this.db.dialect.now();
     return this.db.transaction(async (tx) => {
       const step = (await tx.query<{ task_id: string }>("SELECT task_id FROM ce_steps WHERE step_id = ? LIMIT 1", [stepId]))[0];
-      if (!step) return false;
+      if (!step) return { settled: false, supersededSuggestionIds: [] };
+      const activePredicate = input.source === "callback"
+        ? "status = 'running'"
+        : "status IN ('created', 'dispatching', 'dispatched', 'running', 'applying')";
       const updated = await tx.exec(
         `UPDATE ce_steps SET status = ?, summary = ?, output_json = COALESCE(?, output_json),
                 error_code = COALESCE(?, error_code), error_message = COALESCE(?, error_message),
                 retryable = COALESCE(?, retryable), completed_at = ?, gmt_modified = ?
-         WHERE step_id = ? AND status = 'running'`,
+         WHERE step_id = ? AND ${activePredicate}`,
         [input.status, input.summary, input.output === undefined ? null : JSON.stringify(input.output),
           input.errorCode ?? null, input.errorMessage ?? null,
           input.retryable == null ? null : Number(input.retryable), completedAt, now, stepId],
       );
-      if ((updated.affectedRows ?? 0) !== 1) return false;
-      if (input.status === "failed") {
-        await tx.exec("UPDATE ce_tasks SET status = 'failed', error_message = ?, gmt_modified = ? WHERE task_id = ?", [input.errorMessage ?? input.summary, now, step.task_id]);
+      if ((updated.affectedRows ?? 0) !== 1) return { settled: false, supersededSuggestionIds: [] };
+
+      const supersededSuggestionIds: string[] = [];
+      const actionTimestamp = new Date(input.completedAtMs ?? Date.now()).toISOString();
+      const appliedAt = Math.floor((input.completedAtMs ?? Date.now()) / 1000);
+      for (const suggestionId of input.suggestionIds) {
+        const suggestion = (await tx.query<EvolveSuggestionRow>(
+          "SELECT * FROM workflow_healing_suggestions WHERE id = ? LIMIT 1",
+          [suggestionId],
+        ))[0] ?? null;
+        const revision = input.revisions?.find((item) => item.suggestionId === suggestionId);
+        const expectedProposalDigest = revision?.proposalDigest ?? null;
+        const superseded = input.status === "succeeded"
+          && expectedProposalDigest !== (suggestion?.proposal_digest ?? null);
+        if (superseded) supersededSuggestionIds.push(suggestionId);
+
+        if (suggestion && input.status === "succeeded" && !superseded) {
+          if (!new Set(["adopted", "applying"]).has(suggestion.status)) {
+            throw new Error(`当前建议状态为 ${suggestion.status}，只能记录已采纳或应用中的建议`);
+          }
+          const actionLog = this.parseActionLog(suggestion.action_log);
+          actionLog.push({
+            action: "applied_unverified",
+            actor: input.actor,
+            note: input.summary,
+            timestamp: actionTimestamp,
+          });
+          await tx.exec(
+            `UPDATE workflow_healing_suggestions
+             SET status = 'applied_unverified', applied_at = ?, verification_status = 'observing',
+                 verification_checked_at = NULL, recurrence_count = 0, last_recurrence_at = NULL,
+                 action_log = ?, updated_by = ?, gmt_modified = ?
+             WHERE id = ?`,
+            [appliedAt, JSON.stringify(actionLog), input.actor, now, suggestionId],
+          );
+        } else if (suggestion && input.status === "failed") {
+          const actionLog = this.parseActionLog(suggestion.action_log);
+          actionLog.push({ action: "failed", actor: input.actor, note: input.summary, timestamp: actionTimestamp });
+          await tx.exec(
+            `UPDATE workflow_healing_suggestions
+             SET status = 'failed', action_log = ?, updated_by = ?, gmt_modified = ? WHERE id = ?`,
+            [JSON.stringify(actionLog), input.actor, now, suggestionId],
+          );
+        }
+
+        const succeeded = input.status === "succeeded";
+        await tx.exec(
+          `INSERT INTO workflow_healing_outcomes
+           (outcome_id, lesson_id, suggestion_id, workflow_id, node_id, action, applied, succeeded,
+            verdict, note, source_task_id, source_step_id, created_by, gmt_create, gmt_modified)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            `OUT-SUGG-${randomUUID().slice(0, 12).toUpperCase()}`, null, suggestionId,
+            input.workflowId || null, suggestion?.node_id ?? null, "suggestion_apply",
+            succeeded && !superseded ? 1 : 0, succeeded ? 1 : 0,
+            succeeded
+              ? superseded ? "application_succeeded_superseded" : "application_succeeded"
+              : input.failureVerdict ?? "application_failed",
+            input.summary, step.task_id, stepId, input.actor, now, now,
+          ],
+        );
       }
-      return true;
+
+      await tx.exec(
+        "UPDATE ce_tasks SET status = ?, error_message = ?, gmt_modified = ? WHERE task_id = ?",
+        [input.status === "succeeded" ? "completed" : "failed",
+          input.status === "succeeded" ? null : input.errorMessage ?? input.summary, now, step.task_id],
+      );
+      return { settled: true, supersededSuggestionIds };
     });
   }
 

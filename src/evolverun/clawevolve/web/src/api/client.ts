@@ -273,6 +273,11 @@ export type SuggestionApplyTask = {
     elapsedMs: number
     updatedAtMs: number
     stalled: boolean
+    history?: Array<{
+      phase: 'task_received' | 'reading_workflow' | 'planning_change' | 'editing_workflow' | 'deploying'
+      message: string
+      updatedAtMs: number
+    }>
   } | null
   appliedAt: number | string | null
   createdAt: number | string
@@ -339,6 +344,12 @@ export type EvolveSuggestionAction = {
   created_by: string | null
   gmt_create: number | string
   gmt_modified: number | string
+}
+
+export type WorkflowAutoAnalysisSetting = {
+  workflowId: string
+  enabled: boolean
+  source: 'database' | 'environment' | 'default'
 }
 
 
@@ -819,8 +830,11 @@ function appendBenchAdminFilters(sp: URLSearchParams, params?: BenchAdminFilters
 
 export const api = {
   repair: {
-    bots(): Promise<{ userId: string; bots: RepairBot[] }> {
-      return fetchJson(`${BASE}/repair/v1/bots`)
+    bots(ownerId?: string): Promise<{ userId: string; bots: RepairBot[] }> {
+      const query = ownerId?.trim()
+        ? `?ownerId=${encodeURIComponent(ownerId.trim())}`
+        : ''
+      return fetchJson(`${BASE}/repair/v1/bots${query}`)
     },
     create(input: RepairCreateTaskInput): Promise<RepairTask> {
       return fetchJson(`${BASE}/repair/v1/tasks`, { method: 'POST', body: JSON.stringify(input) })
@@ -1353,6 +1367,18 @@ export const api = {
       const qs = days ? `?days=${days}` : ''
       return fetchJson<{ data: WorkflowHealth }>(`${BASE}/workflows/${encodeURIComponent(workflowId)}/health${qs}`)
         .then(r => r.data)
+    },
+  },
+
+  taskGuard: {
+    getAutoAnalysis(workflowId: string): Promise<WorkflowAutoAnalysisSetting> {
+      return fetchJson(`${BASE}/task-guard/workflows/${encodeURIComponent(workflowId)}/auto-analysis`)
+    },
+    updateAutoAnalysis(workflowId: string, enabled: boolean): Promise<WorkflowAutoAnalysisSetting> {
+      return fetchJson(`${BASE}/task-guard/workflows/${encodeURIComponent(workflowId)}/auto-analysis`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      })
     },
   },
 

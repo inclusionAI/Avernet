@@ -20,6 +20,61 @@ const PHASE_MESSAGES: Record<SuggestionApplyPhase, string> = {
   deploying: "正在部署 Workflow",
 };
 
+type SuggestionApplyProgressHistoryItem = {
+  phase: SuggestionApplyPhase;
+  message: string;
+  updatedAtMs: number;
+};
+
+function sanitizeProgressMessage(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const message = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  return message ? message.slice(0, 160) : fallback;
+}
+
+function readApplicationProgress(outputJson: string | null): {
+  phase: SuggestionApplyPhase | null;
+  history: SuggestionApplyProgressHistoryItem[];
+  value?: Record<string, unknown>;
+} {
+  try {
+    const output = JSON.parse(outputJson ?? "null") as { applicationProgress?: unknown } | null;
+    const rawValue = output?.applicationProgress;
+    if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) return { phase: null, history: [] };
+    const progress = rawValue as Record<string, unknown>;
+    const phase = typeof progress.phase === "string" && PHASES.includes(progress.phase as SuggestionApplyPhase)
+      ? progress.phase as SuggestionApplyPhase
+      : null;
+    let history = Array.isArray(progress.history)
+      ? progress.history.flatMap((entry): SuggestionApplyProgressHistoryItem[] => {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+        const item = entry as Record<string, unknown>;
+        if (typeof item.phase !== "string" || !PHASES.includes(item.phase as SuggestionApplyPhase)
+          || typeof item.message !== "string" || !Number.isFinite(Number(item.updatedAtMs))) return [];
+        return [{
+          phase: item.phase as SuggestionApplyPhase,
+          message: sanitizeProgressMessage(item.message, PHASE_MESSAGES[item.phase as SuggestionApplyPhase]),
+          updatedAtMs: Number(item.updatedAtMs),
+        }];
+      }).slice(-10)
+      : [];
+    const message = phase && typeof progress.message === "string"
+      ? sanitizeProgressMessage(progress.message, PHASE_MESSAGES[phase])
+      : phase ? PHASE_MESSAGES[phase] : null;
+    const updatedAtMs = Number(progress.updatedAtMs);
+    const elapsedMs = Number(progress.elapsedMs);
+    if (phase && message && history.length === 0 && Number.isFinite(updatedAtMs)) {
+      history = [{ phase, message, updatedAtMs }];
+    }
+    const canonicalValue = phase && message && Number.isFinite(updatedAtMs) && Number.isFinite(elapsedMs)
+      ? { phase, message, updatedAtMs, elapsedMs, history }
+      : undefined;
+    return { phase, history, ...(canonicalValue ? { value: canonicalValue } : {}) };
+  } catch {
+    return { phase: null, history: [] };
+  }
+}
+
 function timestampMs(value: number | string): number {
   if (typeof value === "number" && Number.isFinite(value)) return value < 1e12 ? value * 1000 : value;
   const numeric = Number(value);
@@ -118,61 +173,53 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
     const error = req.body?.error && typeof req.body.error === "object"
       ? req.body.error as Record<string, unknown>
       : undefined;
-    const settled = await repo.trySettleSuggestionApplyStep(stepId, {
-      status,
-      summary,
-      ...(output ? { output } : {}),
-      ...(succeeded ? {} : {
-        errorCode: String(error?.code ?? "SUGGESTION_APPLY_FAILED"),
-        errorMessage: String(error?.message ?? summary),
-        retryable: error?.retryable === true,
-      }),
-    });
-    if (!settled) {
-      const current = await repo.findStep(stepId);
-      res.json({ ok: true, duplicate: true, status: current?.status ?? step.status });
-      return;
-    }
-
+    const previousProgress = readApplicationProgress(step.output_json).value;
+    const settledOutput = output || previousProgress
+      ? { ...(output ?? {}), ...(previousProgress ? { applicationProgress: previousProgress } : {}) }
+      : undefined;
     const suggestionIds = Array.isArray(config.suggestionIds)
       ? config.suggestionIds.map(String).filter(Boolean)
       : [String(config.suggestionId ?? "")].filter(Boolean);
     const workflowId = String(config.workflowId ?? "");
     const revisions = Array.isArray(config.suggestionRevisions)
-      ? config.suggestionRevisions.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      ? config.suggestionRevisions.flatMap((item): Array<{ suggestionId: string; proposalDigest: string | null }> => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+        const revision = item as Record<string, unknown>;
+        const suggestionId = String(revision.suggestionId ?? "");
+        if (!suggestionId) return [];
+        return [{
+          suggestionId,
+          proposalDigest: typeof revision.proposalDigest === "string" ? revision.proposalDigest : null,
+        }];
+      })
       : [];
-    const supersededSuggestionIds: string[] = [];
-    for (const suggestionId of suggestionIds) {
-      const current = await repo.findSuggestionById(suggestionId);
-      const revision = revisions.find((item) => String(item.suggestionId ?? "") === suggestionId);
-      const expectedProposalDigest = typeof revision?.proposalDigest === "string" ? revision.proposalDigest : null;
-      const superseded = succeeded && expectedProposalDigest !== (current?.proposal_digest ?? null);
-      if (superseded) supersededSuggestionIds.push(suggestionId);
-      const suggestion = succeeded
-        ? superseded
-          ? current
-          : await repo.markSuggestionAppliedUnverified(suggestionId, { actor: botId, note: summary })
-        : await repo.updateSuggestionStatus(suggestionId, "failed", {
-          action: "failed", actor: botId, note: summary, timestamp: new Date().toISOString(),
-        });
-      await repo.recordSuggestionOutcome({
-        suggestionId,
-        workflowId,
-        nodeId: suggestion?.node_id ?? null,
-        action: "suggestion_apply",
-        applied: succeeded && !superseded,
-        succeeded,
-        verdict: succeeded
-          ? superseded ? "application_succeeded_superseded" : "application_succeeded"
-          : "application_failed",
-        note: summary,
-        sourceTaskId: taskId,
-        sourceStepId: stepId,
-        createdBy: botId,
-      });
+    const settlement = await repo.tryFinalizeSuggestionApplication(stepId, {
+      source: "callback",
+      status,
+      summary,
+      ...(settledOutput ? { output: settledOutput } : {}),
+      ...(succeeded ? {} : {
+        errorCode: String(error?.code ?? "SUGGESTION_APPLY_FAILED"),
+        errorMessage: String(error?.message ?? summary),
+        retryable: error?.retryable === true,
+      }),
+      suggestionIds,
+      workflowId,
+      revisions,
+      actor: botId,
+    });
+    if (!settlement.settled) {
+      const current = await repo.findStep(stepId);
+      res.json({ ok: true, duplicate: true, status: current?.status ?? step.status });
+      return;
     }
-    if (succeeded) await repo.completeTask(taskId);
-    res.json({ ok: true, duplicate: false, status, suggestionIds, supersededSuggestionIds });
+    res.json({
+      ok: true,
+      duplicate: false,
+      status,
+      suggestionIds,
+      supersededSuggestionIds: settlement.supersededSuggestionIds,
+    });
   });
 
   router.post("/suggestion-applications/:taskId/steps/:stepId/progress", async (req: Request, res: Response) => {
@@ -215,24 +262,27 @@ export function createInternalTaskGuardRouter(repo: EvolveRepository | null): Ro
       res.status(409).json({ error: "suggestion_application_not_claimed" }); return;
     }
 
-    let previousPhase: SuggestionApplyPhase | null = null;
-    try {
-      const output = JSON.parse(step.output_json ?? "null") as { applicationProgress?: { phase?: unknown } } | null;
-      const value = output?.applicationProgress?.phase;
-      if (typeof value === "string" && PHASES.includes(value as SuggestionApplyPhase)) {
-        previousPhase = value as SuggestionApplyPhase;
-      }
-    } catch { /* malformed historical output is replaced by the current safe progress */ }
+    const previous = readApplicationProgress(step.output_json);
+    const previousPhase = previous.phase;
     if (previousPhase && PHASES.indexOf(previousPhase) > PHASES.indexOf(phase)) {
       res.json({ ok: true, ignored: true, phase: previousPhase }); return;
     }
 
     const updatedAtMs = Date.now();
+    const message = sanitizeProgressMessage(req.body?.message, PHASE_MESSAGES[phase]);
+    const history = [...previous.history];
+    const last = history.at(-1);
+    if (last?.phase === phase && last.message === message) {
+      history[history.length - 1] = { ...last, updatedAtMs };
+    } else {
+      history.push({ phase, message, updatedAtMs });
+    }
     const progress = {
       phase,
-      message: PHASE_MESSAGES[phase],
+      message,
       elapsedMs: Math.max(0, updatedAtMs - timestampMs(task.gmt_create)),
       updatedAtMs,
+      history: history.slice(-10),
     };
     if (!await repo.tryUpdateSuggestionApplyProgress(stepId, progress.message, { applicationProgress: progress })) {
       res.json({ ok: true, ignored: true, terminal: true });

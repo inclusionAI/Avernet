@@ -1488,6 +1488,26 @@ export function useWorkflowAccess(workflowId: string | null) {
   })
 }
 
+export function useWorkflowAutoAnalysis(workflowId: string | null) {
+  return useQuery({
+    queryKey: ['workflow-auto-analysis', workflowId],
+    queryFn: () => api.taskGuard.getAutoAnalysis(workflowId!),
+    enabled: !!workflowId,
+    staleTime: 15_000,
+  })
+}
+
+export function useUpdateWorkflowAutoAnalysis() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workflowId, enabled }: { workflowId: string; enabled: boolean }) =>
+      api.taskGuard.updateAutoAnalysis(workflowId, enabled),
+    onSuccess: (setting) => {
+      queryClient.setQueryData(['workflow-auto-analysis', setting.workflowId], setting)
+    },
+  })
+}
+
 export function useDeleteWorkflow() {
   const queryClient = useQueryClient()
   return useMutation({

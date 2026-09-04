@@ -2557,7 +2557,7 @@ function EvolveShell({ children }: { children: ReactNode }) {
             <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-amber-600" />
           </label>
           {enabled && <>
-            <p className="mt-2 text-[10px] leading-4 text-amber-700">仅扩展列表读取范围，不改变写权限。</p>
+            <p className="mt-2 text-[10px] leading-4 text-amber-700">可按工号查看数据；Repair 创建页可选择该用户的 Bot，其他操作仍按各页面权限校验。</p>
             <input
               aria-label="按工号筛选"
               list="evolve-admin-owner-options"

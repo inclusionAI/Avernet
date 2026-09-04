@@ -62,35 +62,34 @@ export async function runSuggestionApplyTimeoutSweep(repo: EvolveRepository, now
       phase: typeof progress.phase === "string" ? progress.phase : null,
     });
     if (!decision.timedOut) continue;
-    if (!await repo.tryTimeoutSuggestionApplyStep(step.step_id, decision.errorCode, decision.message)) continue;
-    timedOut += 1;
     const suggestionIds = Array.isArray(config.suggestionIds)
       ? config.suggestionIds.map(String).filter(Boolean)
       : [String(config.suggestionId ?? "")].filter(Boolean);
     const workflowId = String(config.workflowId ?? "");
+    const settlement = await repo.tryFinalizeSuggestionApplication(step.step_id, {
+      source: "timeout",
+      status: "failed",
+      summary: decision.message,
+      errorCode: decision.errorCode,
+      errorMessage: decision.message,
+      retryable: true,
+      suggestionIds,
+      workflowId,
+      actor: "suggestion-apply-timeout-sweeper",
+      failureVerdict: decision.resultUnknown ? "application_result_unknown" : "application_timeout",
+      completedAtMs: nowMs,
+    });
+    if (!settlement.settled) continue;
+    timedOut += 1;
     for (const suggestionId of suggestionIds) {
-      const suggestion = await repo.updateSuggestionStatus(suggestionId, "failed", {
-        action: "failed",
-        actor: "suggestion-apply-timeout-sweeper",
-        note: decision.message,
-        timestamp: new Date(nowMs).toISOString(),
-      });
-      if (suggestion && workflowId) {
-        await repo.updateDiagnosesSuggestionStatus(workflowId, suggestion.failure_signature, suggestionId, "failed");
+      try {
+        const suggestion = await repo.findSuggestionById(suggestionId);
+        if (suggestion && workflowId) {
+          await repo.updateDiagnosesSuggestionStatus(workflowId, suggestion.failure_signature, suggestionId, "failed");
+        }
+      } catch (error) {
+        console.warn(`[evolve] suggestion timeout projection failed for ${suggestionId}:`, error);
       }
-      await repo.recordSuggestionOutcome({
-        suggestionId,
-        workflowId,
-        nodeId: suggestion?.node_id ?? null,
-        action: "suggestion_apply",
-        applied: false,
-        succeeded: false,
-        verdict: decision.resultUnknown ? "application_result_unknown" : "application_timeout",
-        note: decision.message,
-        sourceTaskId: step.task_id,
-        sourceStepId: step.step_id,
-        createdBy: "suggestion-apply-timeout-sweeper",
-      });
     }
   }
   return timedOut;
