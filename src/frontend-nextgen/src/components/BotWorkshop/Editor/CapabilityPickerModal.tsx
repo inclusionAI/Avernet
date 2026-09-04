@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
+import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
 import { Check, ExternalLink, FolderUp, Plug, Search, Shapes } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
@@ -63,7 +64,6 @@ export function CapabilityPickerModal({
   kind,
   open,
   marketItems,
-  skillCenterItems,
   workshopItems,
   myItems,
   existingIds,
@@ -79,20 +79,23 @@ export function CapabilityPickerModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
+  const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
   const items =
     source === 'mine'
       ? myItems
       : source === 'market'
       ? marketSource === 'skillcenter-market'
-        ? skillCenterItems
+        ? skillCenter.items
         : marketItems
       : workshopItems;
   const visibleItems = useMemo(() => {
+    if (remoteSearch) return items;
     const normalized = keyword.trim().toLowerCase();
     return items.filter(
       (item) => !normalized || `${item.name} ${item.description ?? ''}`.toLowerCase().includes(normalized),
     );
-  }, [items, keyword]);
+  }, [items, keyword, remoteSearch]);
   const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
   const close = () => {
     setSelected([]);
@@ -177,7 +180,7 @@ export function CapabilityPickerModal({
         {kind === 'skill' && source === 'mine' && onUploadFolder ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3">
             <p className="m-0 min-w-0 flex-1 text-xs text-muted-foreground">
-              本地目录上传后会出现在“我的 Skill”，勾选并确认后才加入当前能力集。
+              仅显示当前 Bot 上传的本地 Skill（含已激活和未激活项），勾选并确认后加入当前能力集。
             </p>
             <Button
               variant="secondary"
@@ -200,6 +203,20 @@ export function CapabilityPickerModal({
             }`}
           />
         </div>
+        {remoteSearch ? (
+          <div className="text-xs text-muted-foreground" role="status">
+            已选 {selected.length}/20，单次最多添加 20 个 Skill
+            {skillCenter.loading ? ' · 加载中…' : ''}
+            {skillCenter.error ? (
+              <>
+                <span role="alert">{skillCenter.error}</span>
+                <Button variant="ghost" onClick={skillCenter.retry}>
+                  重试
+                </Button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <div className="app-scrollbar grid max-h-[420px] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
           {visibleItems.length ? (
             visibleItems.map((item) => {
@@ -213,7 +230,7 @@ export function CapabilityPickerModal({
                   className={`h-auto min-h-24 items-start justify-start whitespace-normal p-3 text-left ${
                     active ? 'border-primary bg-accent' : ''
                   }`}
-                  disabled={alreadyAdded}
+                  disabled={alreadyAdded || (remoteSearch && selected.length >= 20 && !active)}
                   onClick={() =>
                     setSelected((current) => (active ? current.filter((value) => value !== id) : [...current, id]))
                   }
@@ -246,6 +263,11 @@ export function CapabilityPickerModal({
             </div>
           )}
         </div>
+        {remoteSearch && skillCenter.hasMore ? (
+          <Button variant="secondary" disabled={skillCenter.loading} onClick={() => void skillCenter.loadMore()}>
+            {skillCenter.loading ? '加载中…' : '加载更多'}
+          </Button>
+        ) : null}
         <ModalFooter>
           <Button variant="secondary" onClick={close}>
             取消

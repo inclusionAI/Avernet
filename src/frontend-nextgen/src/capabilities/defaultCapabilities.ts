@@ -134,6 +134,7 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
+  getBotCapabilitySetVisibility: () => ({ status: 'available', value: { mcp: false, cli: false } }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',

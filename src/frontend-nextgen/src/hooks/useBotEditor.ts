@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import type {
   BotCapabilitySet,
   BotEditorEngineStatus,
@@ -11,12 +12,22 @@ import type {
   BotRenderScreen,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
+import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
-export function useBotEditor(botId: string | null, serviceBot = false, spaceId?: string, enabled = true) {
+export function useBotEditor(
+  botId: string | null,
+  serviceBot = false,
+  spaceId?: string,
+  enabled = true,
+  ownerId?: string,
+) {
+  const skillSources = useMemo(() => getCapabilities().getBotSkillPickerSources().value, []);
+  const capabilitySetVisibility = useMemo(() => getCapabilities().getBotCapabilitySetVisibility().value, []);
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
+  const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
   const [availableMcps, setAvailableMcps] = useState<BotEditorMcp[]>([]);
@@ -39,7 +50,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     if (!botId || !enabled) return;
     setLoading(true);
     try {
-      const data = await botEditorService.load(botId, serviceBot);
+      const data = await botEditorService.load(botId, serviceBot, ownerId);
       setSkills(data.skills);
       setSkillSets(data.skillSets);
       setMcps(data.mcps);
@@ -49,7 +60,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
       setEngineConfig(data.engineConfig);
       setEngineStatus(data.engineStatus);
       setApprovalRequired(data.approvalRequired);
-      if (serviceBot) {
+      if (serviceBot && (capabilitySetVisibility.mcp || capabilitySetVisibility.cli)) {
         const callerContext = await botEditorService.getCallerContext(botId).catch(() => undefined);
         setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
         setCallerContextEditable(callerContext?.editable ?? false);
@@ -63,7 +74,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
     } finally {
       setLoading(false);
     }
-  }, [botId, enabled, serviceBot, spaceId]);
+  }, [botId, capabilitySetVisibility.cli, capabilitySetVisibility.mcp, enabled, serviceBot, spaceId, ownerId]);
   useEffect(() => {
     setAvailableMcps([]);
     setMarketSkills([]);
@@ -74,7 +85,10 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
   const loadCapabilityCandidates = useCallback(async () => {
     if (!botId) return;
     try {
-      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId);
+      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId, {
+        skillSources,
+        mcp: capabilitySetVisibility.mcp,
+      });
       setAvailableMcps(candidates.availableMcps);
       setMarketSkills(candidates.marketSkills);
       setSkillCenterSkills(candidates.skillCenterSkills);
@@ -83,7 +97,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
       toast.error(error instanceof Error ? error.message : '可选能力加载失败');
       throw error;
     }
-  }, [botId, spaceId]);
+  }, [botId, capabilitySetVisibility.mcp, skillSources, spaceId]);
   const act = useCallback(
     async (work: () => Promise<unknown>, message: string) => {
       try {
@@ -168,17 +182,7 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
       ),
     addSkillCenterReferences: (setId: string, skillCodes: string[]) =>
       act(() => botEditorService.addSkillCenterReferences(botId!, setId, skillCodes), 'SkillCenter Skill 已加入能力集'),
-    uploadSkillFolder: async (files: File[]) => {
-      try {
-        const skill = await botEditorService.uploadSkillFolder(botId!, files);
-        setSkills((current) => [skill, ...current.filter((item) => item.id !== skill.id)]);
-        toast.success('本地 Skill 已上传，请勾选后确认添加');
-        return skill;
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : '本地 Skill 目录上传失败');
-        throw error;
-      }
-    },
+    uploadSkillFolder,
     setSkillSetMcp: (setId: string, serverCode: string, active: boolean) =>
       act(
         () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active),

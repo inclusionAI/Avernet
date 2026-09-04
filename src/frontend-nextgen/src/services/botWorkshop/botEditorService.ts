@@ -6,7 +6,7 @@ import type {
   BotEngineConfig,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
-import { botEditorController, type SpaceSkillDto } from '@/services/backendApi/bots/botEditorController';
+import { botEditorController, type SkillDto } from '@/services/backendApi/bots/botEditorController';
 import { clearBotCdnConfig, storeBotCdnConfigs } from '@/services/bcs/libraryCdnInjector';
 import {
   dataOr,
@@ -17,13 +17,20 @@ import {
   mapSkill,
   toRoutineWrite,
 } from './botEditorMappers';
+import { loadCapabilityCandidates } from './capabilityCandidateService';
 import { isImageResourcePath } from './resourcePreview';
 
-async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkillDto[]> {
-  const pageSize = 100;
-  const items: SpaceSkillDto[] = [];
+// 本地候选必须由服务端按 Bot 上传归属过滤；可达列表也包含共享安装的 Skill。
+async function listAllLocalBotSkills(botId: string, ownerId?: string): Promise<SkillDto[]> {
+  const pageSize = 20;
+  const items: SkillDto[] = [];
   for (let page = 1; ; page += 1) {
-    const response = await botEditorController.listConsumableSpaceSkills(spaceId, page, pageSize);
+    const response = await botEditorController.listSkills(botId, {
+      source: 'LOCAL',
+      owner_id: ownerId,
+      page,
+      page_size: pageSize,
+    });
     const pageItems = response.data?.items ?? [];
     items.push(...pageItems);
     const total = response.data?.total;
@@ -58,10 +65,10 @@ export const botEditorService = {
       return 0;
     }
   },
-  async load(botId: string, serviceBot = false) {
+  async load(botId: string, serviceBot = false, ownerId?: string) {
     const [skills, skillSetResources, resources, screens, routines, engineConfig, engineStatus, approval] =
       await Promise.allSettled([
-        botEditorController.listSkills(botId),
+        listAllLocalBotSkills(botId, ownerId),
         botEditorController.listSkillSetResources(botId),
         botEditorService.listResources(botId),
         botEditorController.listRenderScreens(botId),
@@ -109,7 +116,7 @@ export const botEditorService = {
       sets.push(...details);
     }
     return {
-      skills: skills.status === 'fulfilled' ? dataOr(skills.value.data?.items, []).map(mapSkill) : [],
+      skills: skills.status === 'fulfilled' ? skills.value.map(mapSkill) : [],
       skillSets: sets,
       mcps: [],
       availableMcps: [],
@@ -134,59 +141,29 @@ export const botEditorService = {
         ).length + skillSetDetailErrors,
     };
   },
-  async loadCapabilityCandidates(botId: string, spaceId?: string) {
-    const [boundMcps, mcpServers, repositorySkills, skillCenterSkills, spaceSkills] = await Promise.all([
-      botEditorController.listBotMcps(botId),
-      botEditorController.listMcpServers(),
-      botEditorController.listRepositorySkills(),
-      botEditorController.listSkillCenterSkills(),
-      spaceId ? listAllConsumableSpaceSkills(spaceId) : Promise.resolve([]),
-    ]);
-    return {
-      availableMcps: dataOr(mcpServers.data?.items, []).map(
-        (item): BotEditorMcp => ({
-          serverCode: item.server_code,
-          name: item.name || item.server_code,
+  async searchSkillCenterSkills(keyword: string, page: number, pageSize = 20) {
+    const skillCenterSkills = await botEditorController.listSkillCenterSkills(keyword, page, pageSize);
+    const items = dataOr(skillCenterSkills.data?.items, []).flatMap((item): BotEditorSkill[] => {
+      if (!item.skillCode) return [];
+      return [
+        {
+          id: item.skillCode,
+          name: item.skillName || item.skillCode,
           description: item.description,
-          active: Boolean(boundMcps.data?.some((bound) => bound.server_code === item.server_code && bound.active)),
-        }),
-      ),
-      marketSkills: dataOr(repositorySkills.data?.items, []).map(
-        (item): BotEditorSkill => ({
-          id: String(item.skill_id ?? item.id ?? ''),
-          name: item.name,
-          description: item.description,
-          version: item.latest_published_version ?? item.version,
-          source: 'teamclaw-market',
+          version: item.latestVersionNumber === undefined ? undefined : String(item.latestVersionNumber),
+          homepageUrl: item.homepageUrl,
+          source: 'skillcenter-market',
           active: false,
-        }),
-      ),
-      skillCenterSkills: dataOr(skillCenterSkills.data?.items, []).flatMap((item): BotEditorSkill[] => {
-        if (!item.skillCode) return [];
-        return [
-          {
-            id: item.skillCode,
-            name: item.skillName || item.skillCode,
-            description: item.description,
-            version: item.latestVersionNumber === undefined ? undefined : String(item.latestVersionNumber),
-            homepageUrl: item.homepageUrl,
-            source: 'skillcenter-market',
-            active: false,
-          },
-        ];
-      }),
-      workshopSkills: spaceSkills.map(
-        (item): BotEditorSkill => ({
-          id: item.skill_id,
-          name: item.name,
-          description: item.description,
-          version: item.latest_published_version?.version ? `V${item.latest_published_version.version}` : undefined,
-          source: 'workshop',
-          active: false,
-        }),
-      ),
-    };
+        },
+      ];
+    });
+    const data = skillCenterSkills.data;
+    const hasMore =
+      data?.hasMore ??
+      (typeof data?.total === 'number' ? page * pageSize < data.total : (data?.items?.length ?? 0) >= pageSize);
+    return { items, hasMore: Boolean(hasMore) && (data?.items?.length ?? 0) > 0 };
   },
+  loadCapabilityCandidates,
   toggleSkill: (botId: string, skill: BotEditorSkill) =>
     botEditorController.setSkillActive(botId, skill.id, !skill.active),
   deleteSkill: (botId: string, skillId: string) => botEditorController.deleteSkill(botId, skillId),
@@ -208,11 +185,9 @@ export const botEditorService = {
   setSkillSetSkill: (botId: string, setId: string, skillId: string, active: boolean) =>
     botEditorController.setSkillSetSkill(botId, setId, skillId, active),
   async addSkillCenterReferences(botId: string, setId: string, skillCodes: string[]) {
-    const created = await botEditorController.createSkillCenterReferences(
-      botId,
-      setId,
-      [...new Set(skillCodes)].slice(0, 20),
-    );
+    const distinct = [...new Set(skillCodes)];
+    if (distinct.length > 20) throw new Error('一次最多添加 20 个 Skill');
+    const created = await botEditorController.createSkillCenterReferences(botId, setId, distinct);
     const requestId = created.data?.request_id;
     if (!requestId) throw new Error('SkillCenter 引用已提交，但响应缺少轮询标识');
     for (let attempt = 0; attempt < 60; attempt += 1) {

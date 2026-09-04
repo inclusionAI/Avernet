@@ -196,6 +196,12 @@ export interface AdminSections {
   workOrders: boolean;
 }
 
+/** 能力集编辑区按部署形态开放的非 Skill 能力。 */
+export interface BotCapabilitySetVisibility {
+  mcp: boolean;
+  cli: boolean;
+}
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -277,6 +283,8 @@ export interface AppCapabilities {
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
   /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
+  /** Open Core/阿里云隐藏 MCP、CLI；internal overlay 保留完整能力集。 */
+  getBotCapabilitySetVisibility: () => CapabilityResult<BotCapabilitySetVisibility>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
