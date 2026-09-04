@@ -1,6 +1,3 @@
-The room, table, podium, sprite, and marker visuals in this package are original
-CSS pixel-art primitives created for this asset. They are not downloaded at
-runtime and do not include third-party raster files. The primitives are
-available under the package's Apache-2.0 license; the design intentionally
-follows the integer-scale, nearest-neighbor conventions commonly used by CC0
-pixel-art asset packs.
+Original panel code and bridge artwork are licensed under Apache-2.0; see ../LICENSE.
+
+Selected source pixels derived from Kenney RPG Urban Pack and Kenney Roguelike/RPG Pack are CC0 1.0. Exact source files/cells, transformations, source URLs, and retained license text are recorded in THIRD_PARTY_NOTICES.md and assets/source/.

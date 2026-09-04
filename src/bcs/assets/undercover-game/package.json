@@ -1,6 +1,6 @@
 {
   "name": "@avernet-assets/undercover-game-panel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Pixel-art 谁是卧底 BCS side-panel component distributed as a UMD asset.",
   "main": "./dist/index.umd.js",
   "browser": "./dist/index.umd.js",
@@ -16,7 +16,11 @@
     "dist/index.umd.js",
     "README.md",
     "LICENSE",
-    "assets/LICENSE.txt"
+    "assets/LICENSE.txt",
+    "assets/THIRD_PARTY_NOTICES.md",
+    "assets/ASSET_GUIDE.md",
+    "assets/SELECTION.md",
+    "assets/source"
   ],
   "scripts": {
     "build": "vite build",
@@ -24,9 +28,10 @@
     "test:umd": "node test/umd-contract.mjs",
     "typecheck": "tsc --noEmit",
     "scan:public": "node scripts/public-scan.mjs",
-    "verify": "npm run typecheck && npm run build && npm run test:focused && npm run test:integration && npm run test:umd && npm run scan:public",
+    "verify": "npm run typecheck && npm run build && npm run test:focused && npm run test:integration && npm run test:umd && npm run test:visual && npm run scan:public",
     "prepack": "npm run verify",
-    "test:integration": "node test/integration-smoke.mjs"
+    "test:integration": "node test/integration-smoke.mjs",
+    "test:visual": "node test/visual-regression.mjs"
   },
   "dependencies": {
     "styled-components": "^6.0.7"

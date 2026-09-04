@@ -57,3 +57,40 @@ No backend endpoint, graph topology, generic frontend behavior, or runtime depen
 The panel does not assume that manager-worker one-shot node outputs are copied into ordinary session messages. For completed nodes explicitly listed in `nodeActorMap`, it incrementally reads the existing authenticated node-detail endpoint, caches by `(runId, nodeId, attempt)`, and merges those results with the session-message compatibility path. Speech artifacts become phase-local player bubbles; vote artifacts become only `已投票` until an authorized host tally/result is public. Host and unknown artifacts are never inferred as player speech.
 
 The panel root is its own bounded viewport. The room scrolls inside the scene region, while the Action Dock uses a fixed header, internally scrollable context body, and non-scrolling footer for submit/confirmation and recovery controls. Actor details use an absolute panel-local overlay, close with Escape, and restore focus to the invoking seat or bubble. Automatic refresh is run-owned and continues after unchanged non-terminal snapshots; it stops on terminal state, run replacement, disabled refresh, or unmount.
+
+## Asset-backed pixel room
+
+Version 1.1 renders a local, atlas-backed indoor game room. The wall/floor, rug, oval table, directional chairs, host podium, window, lamp, shelf, plant, frames, clock, character variants, portraits, bubbles, cards, and lifecycle markers are embedded into the single UMD bundle; the panel makes no runtime image request to an asset host.
+
+The room has three container-driven compositions:
+
+- **wide (≥680px):** landscape room, host, full oval table, and six depth-sorted seats;
+- **medium (460–679px):** portrait room retaining the host, table, all seats, labels, and current action;
+- **narrow (<460px):** indoor vignette followed by a sprite-backed participant roster.
+
+Crossing a threshold changes presentation only. Speech drafts, vote selection and confirmation, focus restoration, polling, and the fixed Action Dock footer remain owned by the persistent panel component.
+
+### Public state legend
+
+- `（你）` plus the framed portrait: current viewer identity;
+- `!` triangle: Human action required;
+- waveform: Bot speaking;
+- check: speech completed;
+- sealed envelope: private vote submitted (never a target);
+- cross: eliminated, with the original seat retained;
+- circular arrow / warning: retry or error.
+
+Every state includes readable text or a distinct shape and remains understandable with color removed. `prefers-reduced-motion: reduce` stops attention animation while retaining the static marker.
+
+### Provenance and visual verification
+
+Selected CC0 source pixels and retained licenses are under `assets/source/`. Exact source files/cells, transformations, rejected references, and bridge-art rules are documented in `assets/THIRD_PARTY_NOTICES.md`, `assets/SELECTION.md`, and `assets/ASSET_GUIDE.md`.
+
+```bash
+node scripts/generate-atlases.mjs
+npm run test:visual
+npm run scan:public
+npm run verify
+```
+
+The scan enforces complete provenance, no tracked source-pack archives, a 120 KiB combined atlas budget, no third-party runtime image URLs, and a 250 KiB minified UMD budget.
