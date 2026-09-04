@@ -27,6 +27,10 @@ class Capability(Enum):
     SESSION_UPDATE = "session.update"
     SESSION_HISTORY = "session.history"
     SESSION_ARCHIVE = "session.archive"
+    # Read-only active-session / active-run query (OpenClaw engine first).
+    # Surfaces whether the engine currently has in-flight chat runs, with a
+    # clear/active/unknown verdict — see ``GET /api/engine/active-sessions``.
+    SESSION_ACTIVE_QUERY = "session.active_query"
 
     # ── Chat ──
     CHAT_STREAM = "chat.stream"

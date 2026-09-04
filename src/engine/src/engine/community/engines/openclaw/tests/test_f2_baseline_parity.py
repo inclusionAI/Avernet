@@ -36,6 +36,7 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.SESSION_DELETE,
     Capability.SESSION_UPDATE,
     Capability.SESSION_HISTORY,
+    Capability.SESSION_ACTIVE_QUERY,
     # Chat
     Capability.CHAT_STREAM,
     Capability.CHAT_COMPLETE,

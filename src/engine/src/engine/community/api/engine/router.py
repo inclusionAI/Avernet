@@ -18,7 +18,11 @@ import logging
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from engine.community.api.engine.schemas import EngineRestartRequest, EngineSwitchRequest
+from engine.community.api.engine.schemas import (
+    ActiveSessionQueryResponse,
+    EngineRestartRequest,
+    EngineSwitchRequest,
+)
 from engine.community.manager import EngineManager
 
 log = logging.getLogger("engine-web")
@@ -66,6 +70,33 @@ async def list_registered_engines() -> dict:
             "engines": manager.get_registered_engines(),
         },
     }
+
+
+@router.get("/active-sessions")
+async def engine_active_sessions(
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    timeout_seconds: float | None = None,
+) -> ActiveSessionQueryResponse:
+    """Read-only Active Session query for the active engine (M4, doc §18.2).
+
+    Returns the dual-axis model (`query_status` / `verdict`):
+      - `query_status=ok`    → `verdict=clear` (no in-flight runs) or
+                                  `active` (>= 1 in-flight run)
+      - `query_status=unsupported|timeout|error` → `verdict=unknown`
+
+    OpenClaw backs this from its own process-local active-run registry; engines
+    without that surface return `unsupported` rather than failing. This endpoint
+    is read-only and never mutates engine or run state, and it must not block
+    the engine hot path — query failures degrade to `unknown`.
+    """
+    manager = EngineManager.get_instance()
+    result = await manager.active_sessions_query(
+        session_id=session_id,
+        agent_id=agent_id,
+        timeout=timeout_seconds,
+    )
+    return ActiveSessionQueryResponse(**result)
 
 
 @router.post("/switch")

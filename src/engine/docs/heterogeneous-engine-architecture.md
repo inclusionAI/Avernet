@@ -4435,6 +4435,27 @@ async def list_registered_engines():
             "engines": manager.get_registered_engines(),
         },
     }
+
+@router.get("/active-sessions")
+async def engine_active_sessions(
+    session_id: str | None = None,
+    agent_id: str | None = None,
+    timeout_seconds: float | None = None,
+):
+    """OpenClaw 只读活跃会话查询，供 BaaS 发布前判断是否存在仍在执行的 session/run。
+
+    返回双轴模型：``query_status`` ∈ {ok, unsupported, timeout, error}，
+    ``verdict`` ∈ {clear, active, unknown}（仅在 query_status=ok 时为 clear/active）。
+    OpenClaw 基于 engine 自有的进程内 active-run 记录实现；未实现该能力的
+    引擎返回 ``query_status=unsupported, verdict=unknown``。该端点只读、不阻塞
+    engine 主链路，查询失败统一降级为 unknown。
+    """
+    manager = EngineManager.get_instance()
+    return await manager.active_sessions_query(
+        session_id=session_id,
+        agent_id=agent_id,
+        timeout=timeout_seconds,
+    )
 ```
 
 ---
