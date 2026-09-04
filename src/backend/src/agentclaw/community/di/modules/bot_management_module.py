@@ -103,9 +103,7 @@ from agentclaw.community.core.bot_config_manifest.creation import (
 from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply_service import (
     BotConfigManifestApplyService,
 )
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
-    EntryFetcher,
-)
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
@@ -812,9 +810,7 @@ class BotManagementModule(Module):
             find_job=lambda **fields: find_create_job(
                 task_queue_provider(), **fields
             ),
-            authorization_window_seconds=(
-                create_with_manifest_config.authorization_window_seconds
-            ),
+            authorization_window_seconds=create_with_manifest_config.authorization_window_seconds,
             purge_managed_files=lambda o, b: injector.get(ManagedFilesStore).purge_owner_bot(o, b),
             purge_cli_tools=injector.get(CliToolPurger),
             creation_sequence=lambda e: apply_service.delivery_for_engine(e).creation_sequence,
