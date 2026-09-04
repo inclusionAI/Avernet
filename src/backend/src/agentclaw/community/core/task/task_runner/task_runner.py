@@ -16,7 +16,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +91,6 @@ class TaskRunner:
 
         return list(await asyncio.gather(*[_deliver_one(n) for n in toDoTaskList]))
 
-    def query_status(self, task_id: str) -> Status:
-        """产品/系统触发:查询某任务及所有子任务的状态(返回图级 status)。"""
-        return self._graph.query_task_dashboard(task_id).status
-
-    def query_detail(self, node: TaskNode) -> TaskNode:
-        """产品触发:查询任务最新详情(从图回填 node.run_info)。"""
-        graph = self._graph.query_task_dashboard(node.task_id)
-        for n in graph.tasks:
-            if n.node_id == node.node_id:
-                return n
-        return node
-
-    def query_result(self, node: TaskNode) -> TaskNode:
-        """产品/系统触发:查询某任务及其所有子任务的产出结果(回填 node.run_info.output)。"""
-        return self.query_detail(node)
-
-    def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
-        """获取某个 Bot 下的所有任务实例列表。Avernet stub:返回空列表(后续补全局索引)。"""
-        return []
-
     async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
         协程化:BCS 建群是网络 IO,``await`` 不阻塞编排核(由 engine 锁外 await 调用)。
@@ -128,15 +107,6 @@ class TaskRunner:
             "无真群/无 poller,任务将卡 RUNNING 不收敛。排查: grep [task][engine] execution_backend 不装配",
             gid)
         return gid
-
-    async def trigger_workflow(self, *, bot_id: str, message: str,
-                               metadata: dict[str, Any] | None = None) -> BotSendResult:
-        """Single-bot workflow trigger: send the message, return run_id + session_id."""
-        if self._execution_backend is not None:
-            return await self._execution_backend.trigger_workflow(
-                bot_id=bot_id, message=message, metadata=metadata)
-        logger.warning("[task][task_runner] trigger_workflow 退桩(无 execution_backend)→ 造假 run_id,单 bot 不真实发起")
-        return BotSendResult(run_id=f"stub_{uuid.uuid4().hex[:8]}", session_id=None)
 
     async def get_group_session(self, group_id: str) -> str | None:
         """Fetch the initial session_id for a coop group; create one if absent."""

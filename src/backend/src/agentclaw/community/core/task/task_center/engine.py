@@ -53,7 +53,6 @@ from agentclaw.community.core.task.domain.models import (
     TaskNodeQueryCriteria,
 )
 from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
-from agentclaw.community.core.task.task_runner.client.ports import BotSendResult
 
 
 logger = logging.getLogger("task.engine")
@@ -253,14 +252,6 @@ class ExecutionEngine:
         )
 
     # ===== 任务类型分流 seams(委托 self._runner;TaskService.execute 调用)=====
-    async def trigger_single_bot_workflow(
-        self, *, task_id: str, bot_id: str, message: str
-    ) -> BotSendResult:
-        """Single-bot workflow trigger; returns the conversation session_id."""
-        return await self._runner.trigger_workflow(
-            bot_id=bot_id, message=message, metadata={"biz_task_id": task_id}
-        )
-
     async def start_coop_group(self, gf: GroupFormation) -> CoopGroupStart:
         """Create the BCN coop group and fetch its initial session_id by default."""
         group_id = await self._runner.form_coop_group(gf)
@@ -272,7 +263,7 @@ class ExecutionEngine:
         if self._bot is None or self._bcs is None:
             logger.warning(
                 "[task][engine] execution_backend 不装配(bot=%s bcs=%s)→ form_coop_group/start_run/"
-                "trigger_workflow/BBS start_run 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
+                "BBS start_run 全退 Avernet 桩(grp_<8hex>/stub_<8hex>/无 poller,任务卡 RUNNING 不收敛)。"
                 "corp 排查: 确认 DEPLOY_PROFILE=corp + grep [task][corp-task] not configured 看哪个端口空。",
                 "None" if self._bot is None else type(self._bot).__name__,
                 "None" if self._bcs is None else type(self._bcs).__name__,

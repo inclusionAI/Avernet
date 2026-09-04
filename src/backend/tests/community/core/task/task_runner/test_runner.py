@@ -2,7 +2,7 @@
 
 真实 TaskGraphService 构图场景;Runner 内聚(无额外 stub)。覆盖:
 start_run 三 run_mode 分发(记投递日志/loop_task_id 格式/非法模式 False)、form_coop_group 生成 group_id+记 GroupFormation、
-query_status/detail/result 回填、query_bot_tasks stub、_build_context 验收/执行双模式自动切换。
+_build_context 验收/执行双模式自动切换。
 """
 from __future__ import annotations
 
@@ -162,42 +162,6 @@ class TestFormCoopGroup:
             _run(runner.form_coop_group(GroupFormation(bot_ids=["b"], collab_mode=cm)))
         modes = {g.collab_mode for g in runner._groups.values()}
         assert modes == {"chat", "manager_worker", "state_machine"}
-
-
-# ===== query_* =====
-class TestQuery:
-    def test_query_status_returns_graph_status(self, svc, graph):
-        runner = TaskRunner(svc)
-        assert runner.query_status("t1") == Status.RUNNING
-        graph.status = Status.DONE
-        assert runner.query_status("t1") == Status.DONE
-
-    def test_query_detail_backfills_node(self, svc, graph):
-        runner = TaskRunner(svc)
-        _dispatch(svc, graph, ["c1"])
-        shell = _child("c1")
-        shell.run_info.assignee = None
-        detail = runner.query_detail(shell)
-        assert detail.run_info.run_mode == "single_bot"
-        assert detail.run_info.assignee == "bot1"
-        assert detail.status == Status.RUNNING
-
-    def test_query_detail_unknown_node_returns_input(self, svc, graph):
-        runner = TaskRunner(svc)
-        shell = _child("nope")
-        ret = runner.query_detail(shell)
-        assert ret is shell  # 图内无 → 原样返回
-
-    def test_query_result_backfills_output(self, svc, graph):
-        runner = TaskRunner(svc)
-        _dispatch(svc, graph, ["c1"])
-        svc.update_task_node_info(_patch("t1", "c1", output_patch={"data": "行业全貌"}))
-        ret = runner.query_result(_child("c1"))
-        assert ret.run_info.output.get("data") == "行业全貌"
-
-    def test_query_bot_tasks_stub_empty(self, svc):
-        runner = TaskRunner(svc)
-        assert runner.query_bot_tasks("bot_market") == []  # Avernet stub
 
 
 # ===== _build_context 双模式 =====

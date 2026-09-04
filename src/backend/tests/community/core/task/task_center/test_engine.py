@@ -130,11 +130,6 @@ class StubRunner:
         self._groups.append(gf)
         return "grp_stub"
 
-    def query_status(self, task_id): return Status.PENDING
-    def query_detail(self, node): return node
-    def query_result(self, node): return node
-    def query_bot_tasks(self, bot_id): return []
-
 
 class _CaseEngine(ExecutionEngine):
     """测试子类覆写 _build_* 注入 stub(T1=A:corp 最简形态)。"""

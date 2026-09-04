@@ -26,6 +26,14 @@
       "timeout": 10,
       "user_path": "/auth/user"
     },
+    "bcs_client": {
+      "base_url": "${BCS_URL:-}",
+      "base_url_pre": "${BCS_URL:-}",
+      "secret_secret": "${secret_secret:-}",
+      "task_callback_url": "${BACKEND_URL:-}",
+      "task_callback_url_pre": "${BACKEND_URL:-}",
+      "token_secret": "${token_secret:-}"
+    },
     "bcsfuse": {
       "base_url": "${BCS_FUSE_URL:-}"
     },
@@ -114,6 +122,12 @@
         "region": "us-east-1",
         "secure": true
       }
+    },
+    "openapi_bot": {
+      "api_key_prefix": "${api_key_prefix:-}",
+      "api_key_secret": "${api_key_secret:-}",
+      "base_url": "${BASS_URL:-}",
+      "base_url_pre": "${BASS_URL:-}"
     },
     "openclaw": {
       "skills_repo_url": ""

@@ -263,10 +263,6 @@ class _TestRunner:
         self._groups.append(gf)
         return gid
 
-    def query_status(self, task_id): return self._graph.query_task_dashboard(task_id).status
-    def query_detail(self, node): return node
-    def query_result(self, node): return node
-    def query_bot_tasks(self, bot_id): return []
     def set_delivery(self, mode, port): pass
 
 
@@ -468,16 +464,3 @@ class TestMissEscalateBbs:
         assert svc._get_node(g, scoped.node_id).status == Status.SUCCESS
         assert svc._get_node(g, "t_case").status == Status.SUCCESS
         assert g.status == Status.SUCCESS
-
-
-# ===== Test 5: dashboard 事件可重放(view 终态断言) =====
-class TestDashboardTerminal:
-    def test_query_result_and_detail(self):
-        facade, svc, *_ = _wire_facade()
-        _exec(facade, _task_info_request("t_case"))
-        _run(facade.callback.report_result(_cb(True, "t_case::N_overview", data="行业全貌")))
-        from agentclaw.community.core.task.task_runner.task_runner import TaskRunner
-        r = TaskRunner(svc)
-        detail = r.query_detail(_node("N_overview", "t_case"))
-        assert detail.run_info.output.get("output") == "行业全貌"
-        assert r.query_result(_node("N_overview", "t_case")).run_info.output.get("output") == "行业全貌"
