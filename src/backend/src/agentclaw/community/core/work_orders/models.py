@@ -83,15 +83,15 @@ class WorkOrderEventType(StrEnum):
     )
     SPACE_JOIN_REVIEWED = (
         "SPACE_JOIN_REVIEWED", NotificationCategory.NOTICE,
-        "空间加入申请已处理", "空间加入申请已有处理结果，请查看详情。",
+        "空间加入申请已处理", "空间加入申请已有处理结果。",
     )
     SPACE_MEMBER_ADDED = (
         "SPACE_MEMBER_ADDED", NotificationCategory.NOTICE,
-        "你已被添加到空间", "你已加入一个新的空间，请查看详情。",
+        "你已被添加到空间", "你已加入一个新的空间。",
     )
     SPACE_MEMBER_REMOVED = (
         "SPACE_MEMBER_REMOVED", NotificationCategory.NOTICE,
-        "你已被移出空间", "你已被移出一个空间，请查看详情。",
+        "你已被移出空间", "你已被移出一个空间。",
     )
     BOT_COLLABORATOR_APPLIED = (
         "BOT_COLLABORATOR_APPLIED", NotificationCategory.APPROVAL,
@@ -99,11 +99,11 @@ class WorkOrderEventType(StrEnum):
     )
     BOT_COLLABORATOR_REVIEWED = (
         "BOT_COLLABORATOR_REVIEWED", NotificationCategory.NOTICE,
-        "Bot 共同编辑申请已处理", "Bot 共同编辑申请已有处理结果，请查看详情。",
+        "Bot 共同编辑申请已处理", "Bot 共同编辑申请已有处理结果。",
     )
     BOT_MEMBER_ADDED = (
         "BOT_MEMBER_ADDED", NotificationCategory.NOTICE,
-        "你已被添加为 Bot 协作者", "你已获得一个 Bot 的协作权限，请查看详情。",
+        "你已被添加为 Bot 协作者", "你已获得一个 Bot 的协作权限。",
     )
     SKILL_COLLABORATOR_APPLIED = (
         "SKILL_COLLABORATOR_APPLIED", NotificationCategory.APPROVAL,
@@ -111,11 +111,11 @@ class WorkOrderEventType(StrEnum):
     )
     SKILL_COLLABORATOR_REVIEWED = (
         "SKILL_COLLABORATOR_REVIEWED", NotificationCategory.NOTICE,
-        "Skill 共同编辑申请已处理", "Skill 共同编辑申请已有处理结果，请查看详情。",
+        "Skill 共同编辑申请已处理", "Skill 共同编辑申请已有处理结果。",
     )
     SKILL_MEMBER_ADDED = (
         "SKILL_MEMBER_ADDED", NotificationCategory.NOTICE,
-        "你已被添加为 Skill 协作者", "你已获得一个 Skill 的协作权限，请查看详情。",
+        "你已被添加为 Skill 协作者", "你已获得一个 Skill 的协作权限。",
     )
     HUMAN2BOT_FRIEND_APPLIED = (
         "HUMAN2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
@@ -123,7 +123,7 @@ class WorkOrderEventType(StrEnum):
     )
     HUMAN2BOT_FRIEND_REVIEWED = (
         "HUMAN2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
-        "人机好友申请已处理", "人机好友申请已有处理结果，请查看详情。",
+        "人机好友申请已处理", "人机好友申请已有处理结果。",
     )
     BOT2BOT_FRIEND_APPLIED = (
         "BOT2BOT_FRIEND_APPLIED", NotificationCategory.APPROVAL,
@@ -131,27 +131,27 @@ class WorkOrderEventType(StrEnum):
     )
     BOT2BOT_FRIEND_REVIEWED = (
         "BOT2BOT_FRIEND_REVIEWED", NotificationCategory.NOTICE,
-        "Bot 好友申请已处理", "Bot 好友申请已有处理结果，请查看详情。",
+        "Bot 好友申请已处理", "Bot 好友申请已有处理结果。",
     )
     HUMAN2BOT_PUBLIC_ORDER_CREATED = (
         "HUMAN2BOT_PUBLIC_ORDER_CREATED", NotificationCategory.NOTICE,
-        "人机公开订单已创建", "你有一条新的人机公开订单，请查看详情。",
+        "Bot 公开工单审批已创建", "Bot 公开工单审批已创建",
     )
     HUMAN2BOT_PUBLIC_ORDER_COMPLETED = (
         "HUMAN2BOT_PUBLIC_ORDER_COMPLETED", NotificationCategory.NOTICE,
-        "人机公开订单已完成", "一条人机公开订单已完成，请查看详情。",
+        "Bot 公开工单审批已结束", "Bot 公开工单审批已结束",
     )
     BOT2BOT_PUBLIC_ORDER_CREATED = (
         "BOT2BOT_PUBLIC_ORDER_CREATED", NotificationCategory.NOTICE,
-        "Bot 公开订单已创建", "你有一条新的 Bot 公开订单，请查看详情。",
+        "Bot 公开工单审批已创建", "Bot 公开工单审批已创建",
     )
     BOT2BOT_PUBLIC_ORDER_COMPLETED = (
         "BOT2BOT_PUBLIC_ORDER_COMPLETED", NotificationCategory.NOTICE,
-        "Bot 公开订单已完成", "一条 Bot 公开订单已完成，请查看详情。",
+        "Bot 公开工单审批已结束", "Bot 公开工单审批已结束",
     )
     TASK_DISCOVERED = (
         "TASK_DISCOVERED", NotificationCategory.NOTICE,
-        "发现新任务", "发现一条新任务，请查看详情。",
+        "发现新任务", "发现一条新任务。",
     )
 
 
@@ -181,7 +181,7 @@ def notification_title_for(
 def notification_summary_for(event_type: str | None) -> str:
     """Return a non-empty summary for every known and unknown event."""
     definition = event_type_definition(event_type)
-    return definition.summary if definition is not None else "你有一条新的通知，请查看详情。"
+    return definition.summary if definition is not None else "你有一条新的通知"
 
 
 # Approval events are extracted from the single classification table so new

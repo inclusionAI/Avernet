@@ -452,7 +452,7 @@ def test_list_work_orders_maps_plain_and_notification_items(client, work_order_s
     assert items[1]["item_type"] == "NOTICE"
     assert items[1]["notification_id"] == 21
     assert items[1]["title"] == "空间加入申请已处理"
-    assert items[1]["summary"] == "空间加入申请已有处理结果，请查看详情。"
+    assert items[1]["summary"] == "空间加入申请已有处理结果。"
     assert items[1]["content"] == {"message": "approved"}
     assert items[1]["gmt_created"] == "2026-08-18T01:02:03"
     assert items[1]["gmt_modified"] == "2026-08-18T03:04:05"
@@ -752,7 +752,7 @@ def test_notification_detail_and_mark_read(client, notification_service):
         "notification_category": "APPROVAL",
         "event_type": "SPACE_JOIN_REVIEWED",
         "title": "空间加入申请已处理",
-        "summary": "空间加入申请已有处理结果，请查看详情。",
+        "summary": "空间加入申请已有处理结果。",
         "content": {"message": "approved"},
         "is_read": False,
         "work_order_status": "PENDING",
@@ -912,4 +912,34 @@ def test_content_presentation_supports_all_legacy_shapes():
     assert extract_content_text(json.dumps({"workitem_name": "workitem"})) == "workitem"
     assert extract_content_text(json.dumps({"other": "value"})) is None
     assert extract_content_text(json.dumps(["not", "an", "object"])) is None
-    assert display_summary(None, biz_type="UNKNOWN") == "你有一条新的通知，请查看详情。"
+    assert display_summary(None, biz_type="UNKNOWN") == "你有一条新的通知"
+
+
+@pytest.mark.parametrize(
+    ("status", "expected"),
+    [
+        (WorkOrderStatus.PENDING, "有新的 Skill 共同编辑申请，请及时处理。"),
+        (WorkOrderStatus.APPROVED, "Skill 共同编辑申请已通过。"),
+        (WorkOrderStatus.REJECTED, "Skill 共同编辑申请未通过。"),
+    ],
+)
+def test_display_summary_uses_work_order_status_without_notification(status, expected):
+    assert (
+        display_summary(
+            None,
+            biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            status=status,
+        )
+        == expected
+    )
+
+
+def test_display_summary_unknown_event_falls_back_to_business_status():
+    assert (
+        display_summary(
+            "LEGACY_SKILL_EVENT",
+            biz_type=WorkOrderBizType.SKILL_COLLABORATOR.value,
+            status=WorkOrderStatus.REJECTED,
+        )
+        == "Skill 共同编辑申请未通过。"
+    )

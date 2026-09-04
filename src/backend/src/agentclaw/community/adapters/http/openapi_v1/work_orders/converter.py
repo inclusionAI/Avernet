@@ -48,12 +48,20 @@ _TITLE_BY_BIZ_STATUS = {
     (WorkOrderBizType.BOT_FRIEND.value, WorkOrderStatus.REJECTED): "好友申请未通过",
 }
 _SUMMARY_BY_BIZ_TYPE = {
-    WorkOrderBizType.SPACE_JOIN.value: "有新的空间加入申请，请及时处理。",
-    WorkOrderBizType.BOT_COLLABORATOR.value: "有新的 Bot 共同编辑申请，请及时处理。",
-    WorkOrderBizType.SKILL_COLLABORATOR.value: "有新的 Skill 共同编辑申请，请及时处理。",
-    WorkOrderBizType.BOT_FRIEND.value: "有新的好友申请，请及时处理。",
+    (WorkOrderBizType.SPACE_JOIN.value, WorkOrderStatus.PENDING): "有新的空间加入申请，请及时处理。",
+    (WorkOrderBizType.SPACE_JOIN.value, WorkOrderStatus.APPROVED): "空间加入申请已通过。",
+    (WorkOrderBizType.SPACE_JOIN.value, WorkOrderStatus.REJECTED): "空间加入申请未通过。",
+    (WorkOrderBizType.BOT_COLLABORATOR.value, WorkOrderStatus.PENDING): "有新的 Bot 共同编辑申请，请及时处理。",
+    (WorkOrderBizType.BOT_COLLABORATOR.value, WorkOrderStatus.APPROVED): "Bot 共同编辑申请已通过。",
+    (WorkOrderBizType.BOT_COLLABORATOR.value, WorkOrderStatus.REJECTED): "Bot 共同编辑申请未通过。",
+    (WorkOrderBizType.SKILL_COLLABORATOR.value, WorkOrderStatus.PENDING): "有新的 Skill 共同编辑申请，请及时处理。",
+    (WorkOrderBizType.SKILL_COLLABORATOR.value, WorkOrderStatus.APPROVED): "Skill 共同编辑申请已通过。",
+    (WorkOrderBizType.SKILL_COLLABORATOR.value, WorkOrderStatus.REJECTED): "Skill 共同编辑申请未通过。",
+    (WorkOrderBizType.BOT_FRIEND.value, WorkOrderStatus.PENDING): "有新的好友申请，请及时处理。",
+    (WorkOrderBizType.BOT_FRIEND.value, WorkOrderStatus.APPROVED): "好友申请已通过。",
+    (WorkOrderBizType.BOT_FRIEND.value, WorkOrderStatus.REJECTED): "好友申请未通过。",
 }
-_GENERIC_SUMMARY = "你有一条新的通知，请查看详情。"
+_GENERIC_SUMMARY = "你有一条新的通知"
 _REVIEWED_TITLE_BY_EVENT_STATUS = {
     (
         WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED.value,
@@ -140,6 +148,7 @@ def display_summary(
     content: Any = None,
     *,
     biz_type: str | None = None,
+    status: WorkOrderStatus | None = None,
 ) -> str:
     """Return content text first, then the event/business default summary."""
 
@@ -147,8 +156,15 @@ def display_summary(
     if content_text is not None:
         return content_text
     if event_type is not None:
-        return notification_summary_for(event_type)
-    return _SUMMARY_BY_BIZ_TYPE.get(biz_type or "", _GENERIC_SUMMARY)
+        event_summary = notification_summary_for(event_type)
+        # Unknown/legacy event types should still use the work-order state
+        # when it provides a more specific fallback.
+        if event_summary != _GENERIC_SUMMARY:
+            return event_summary
+    return _SUMMARY_BY_BIZ_TYPE.get(
+        (biz_type or "", status),
+        _GENERIC_SUMMARY,
+    )
 
 
 def json_object(raw: str | None) -> JsonObject | None:

@@ -136,7 +136,10 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
             event_type=notification.event_type,
             title=display_title(notification.title, event_type=notification.event_type) or "新的系统通知",
             summary=display_summary(
-                notification.event_type, notification.content, biz_type=notification.biz_type
+                notification.event_type,
+                notification.content,
+                biz_type=notification.biz_type,
+                status=(work_order.status if work_order is not None else None),
             ),
             content=preserve_content(notification.content),
             status=None,
@@ -174,6 +177,7 @@ def _list_item(item: DomainListItem) -> WorkOrderListItem:
         event_type,
         notification.content if notification is not None else None,
         biz_type=work_order.biz_type,
+        status=work_order.status,
     )
     content = preserve_content(notification.content) if notification is not None else None
     return WorkOrderListItem(
@@ -376,7 +380,10 @@ async def get_work_order(
                 status=work_order.status,
             ) or "新的系统通知",
             summary=display_summary(
-                detail.event_type, detail.content, biz_type=work_order.biz_type
+                detail.event_type,
+                detail.content,
+                biz_type=work_order.biz_type,
+                status=work_order.status,
             ),
             content=preserve_content(detail.content),
             status=work_order.status,
@@ -536,7 +543,10 @@ async def get_notification(
                 status=detail.work_order_status,
             ) or "新的系统通知",
             summary=display_summary(
-                record.event_type, record.content, biz_type=record.biz_type
+                record.event_type,
+                record.content,
+                biz_type=record.biz_type,
+                status=detail.work_order_status,
             ),
             content=preserve_content(record.content),
             is_read=record.is_read,
