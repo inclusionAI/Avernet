@@ -34,6 +34,7 @@ export interface GroupManagePanelProps {
   onDeleteDingTalk: () => Promise<boolean>;
   dingTalkBinding: DingTalkBindingState;
   dingTalkLoading: boolean;
+  advancedConfigEnabled: boolean;
 }
 
 const KIND_LABEL: Record<GroupView['kind'], string> = {
@@ -96,7 +97,7 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
         value={tab}
         options={[
           { value: 'basic', label: '基础信息' },
-          { value: 'advanced', label: '高级配置' },
+          ...(props.advancedConfigEnabled ? [{ value: 'advanced' as const, label: '高级配置' }] : []),
         ]}
         onChange={setTab}
       />

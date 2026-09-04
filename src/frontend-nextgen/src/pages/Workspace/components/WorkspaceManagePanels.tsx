@@ -11,6 +11,7 @@ export interface WorkspaceManagePanelsProps {
   activePanel: GroupPanelKind;
   group: GroupView | null;
   session: SessionView | null;
+  groupAdvancedConfigEnabled: boolean;
   canManage: PolicyResult;
   identities: IdentityView[];
   activeIdentity: IdentityView | null;
@@ -54,6 +55,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
           <GroupManagePanel
             key={group.groupId}
             group={group}
+            advancedConfigEnabled={props.groupAdvancedConfigEnabled}
             canManage={canManage}
             candidates={identities}
             activeIdentity={activeIdentity}

@@ -107,19 +107,6 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
   expect(controller.listConsumableSpaceSkills).toHaveBeenCalledWith('12', 1, 100);
 });
 
-it('Open Core 仅允许我的 Skill 时不请求市场、工坊或 MCP 候选接口', async () => {
-  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', {
-    skillSources: ['mine'],
-    mcp: false,
-  });
-
-  expect(controller.listBotMcps).not.toHaveBeenCalled();
-  expect(controller.listMcpServers).not.toHaveBeenCalled();
-  expect(controller.listRepositorySkills).not.toHaveBeenCalled();
-  expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
-  expect(result).toEqual({ availableMcps: [], marketSkills: [], skillCenterSkills: [], workshopSkills: [] });
-});
-
 it('工坊可消费 Skill 超过单页时加载全部分页', async () => {
   const firstPage = Array.from({ length: 100 }, (_, index) => ({
     skill_id: `space-${index + 1}`,

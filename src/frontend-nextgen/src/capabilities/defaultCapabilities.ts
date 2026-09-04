@@ -134,7 +134,6 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core / 阿里云不具备内部 SkillCenter 与能力工坊产品入口，只展示用户自己的 Skill。
   getBotSkillPickerSources: () => ({ status: 'available', value: ['mine'] }),
-  getBotCapabilitySetVisibility: () => ({ status: 'available', value: { mcp: false, cli: false } }),
   // Open Core 品牌：Avernet（横版 wordmark 用于页头；方版 mark 备用于登录/空态方形场景）。
   getProductBrand: (): CapabilityResult<ProductBrand> => ({
     status: 'available',
@@ -150,6 +149,11 @@ export const defaultCapabilities: AppCapabilities = {
   getBotRegistrationEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
     value: true,
+  }),
+  // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
+  getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
+    status: 'available',
+    value: false,
   }),
   // Open Core（阿里云部署）壳层可见性：展示【管理后台】导航项与页头通知中心
   // （adminEntry/notificationBell=true），不展示侧栏空间切换器（spaceSwitcher=false）；

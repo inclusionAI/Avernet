@@ -1,4 +1,3 @@
-import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -37,7 +36,6 @@ export interface CapabilitySetManagerProps {
 type Picker = { set: BotCapabilitySet; kind: 'skill' | 'mcp' };
 
 export function CapabilitySetManager(props: CapabilitySetManagerProps) {
-  const visibility = getCapabilities().getBotCapabilitySetVisibility().value;
   const {
     sets,
     mySkills,
@@ -105,9 +103,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                         {set.isDefault ? <Badge tone="primary">系统默认</Badge> : null}
                       </span>
                       <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
-                        {set.skills.length} Skill
-                        {visibility.mcp ? ` · ${set.mcps.length} MCP` : ''}
-                        {visibility.cli ? ` · ${set.clis.length} CLI` : ''}
+                        {set.skills.length} Skill · {set.mcps.length} MCP · {set.clis.length} CLI
                       </span>
                     </span>
                   </Button>
@@ -146,26 +142,22 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       }
                       onRemove={(id) => onSkill(set.id, id, false)}
                     />
-                    {visibility.mcp ? (
-                      <CapabilityMembers
-                        kind="mcp"
-                        items={set.mcps}
-                        editable={editable}
-                        identities={props.mcpCallTypes}
-                        identityEditable={props.callerContextEditable}
-                        updatingIdentityId={props.updatingCallType}
-                        onIdentity={props.onMcpCallType}
-                        onAdd={
-                          set.isDefault
-                            ? undefined
-                            : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'mcp' }))
-                        }
-                        onRemove={(id) => onMcp(set.id, id, false)}
-                      />
-                    ) : null}
-                    {visibility.cli && set.clis.length ? (
-                      <CapabilityMembers kind="cli" items={set.clis} editable={false} />
-                    ) : null}
+                    <CapabilityMembers
+                      kind="mcp"
+                      items={set.mcps}
+                      editable={editable}
+                      identities={props.mcpCallTypes}
+                      identityEditable={props.callerContextEditable}
+                      updatingIdentityId={props.updatingCallType}
+                      onIdentity={props.onMcpCallType}
+                      onAdd={
+                        set.isDefault
+                          ? undefined
+                          : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'mcp' }))
+                      }
+                      onRemove={(id) => onMcp(set.id, id, false)}
+                    />
+                    {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
                   </div>
                 ) : null}
               </section>

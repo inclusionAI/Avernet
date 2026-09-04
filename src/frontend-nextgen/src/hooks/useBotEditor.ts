@@ -1,4 +1,3 @@
-import { getCapabilities } from '@/capabilities';
 import type {
   BotCapabilitySet,
   BotEditorEngineStatus,
@@ -14,7 +13,7 @@ import type {
 } from '@/domain/botEditor';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 export function useBotEditor(
@@ -24,8 +23,6 @@ export function useBotEditor(
   enabled = true,
   ownerId?: string,
 ) {
-  const skillSources = useMemo(() => getCapabilities().getBotSkillPickerSources().value, []);
-  const capabilitySetVisibility = useMemo(() => getCapabilities().getBotCapabilitySetVisibility().value, []);
   const [skills, setSkills] = useState<BotEditorSkill[]>([]);
   const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
@@ -60,7 +57,7 @@ export function useBotEditor(
       setEngineConfig(data.engineConfig);
       setEngineStatus(data.engineStatus);
       setApprovalRequired(data.approvalRequired);
-      if (serviceBot && (capabilitySetVisibility.mcp || capabilitySetVisibility.cli)) {
+      if (serviceBot) {
         const callerContext = await botEditorService.getCallerContext(botId).catch(() => undefined);
         setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
         setCallerContextEditable(callerContext?.editable ?? false);
@@ -74,7 +71,7 @@ export function useBotEditor(
     } finally {
       setLoading(false);
     }
-  }, [botId, capabilitySetVisibility.cli, capabilitySetVisibility.mcp, enabled, serviceBot, spaceId, ownerId]);
+  }, [botId, enabled, serviceBot, spaceId, ownerId]);
   useEffect(() => {
     setAvailableMcps([]);
     setMarketSkills([]);
@@ -85,10 +82,7 @@ export function useBotEditor(
   const loadCapabilityCandidates = useCallback(async () => {
     if (!botId) return;
     try {
-      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId, {
-        skillSources,
-        mcp: capabilitySetVisibility.mcp,
-      });
+      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId);
       setAvailableMcps(candidates.availableMcps);
       setMarketSkills(candidates.marketSkills);
       setSkillCenterSkills(candidates.skillCenterSkills);
@@ -97,7 +91,7 @@ export function useBotEditor(
       toast.error(error instanceof Error ? error.message : '可选能力加载失败');
       throw error;
     }
-  }, [botId, capabilitySetVisibility.mcp, skillSources, spaceId]);
+  }, [botId, spaceId]);
   const act = useCallback(
     async (work: () => Promise<unknown>, message: string) => {
       try {
