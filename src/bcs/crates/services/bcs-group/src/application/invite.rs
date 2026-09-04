@@ -73,10 +73,11 @@ impl InviteServiceImpl {
     }
 
     /// Session invite tokens are gated on session membership only: any
-    /// participant of the session (any role, bot or human) may mint one.
-    /// Group-level roles (driver, originator, manager) are intentionally NOT
-    /// required here.
-    fn ensure_session_member(
+    /// participant of the session (any role, bot or human) may mint one. A
+    /// Human caller also qualifies through any owned Bot that participates in
+    /// the session. Group-level roles (driver, originator, manager) are
+    /// intentionally NOT required here.
+    async fn ensure_session_member(
         &self,
         cmd: &CreateInviteTokenCommand,
         session: &bcs_service_api::Session,
@@ -88,6 +89,12 @@ impl InviteServiceImpl {
         }
         if let Some(staff_no) = cmd.caller_staff_no.as_deref() {
             if is_member(&format!("human_{}", staff_no)) {
+                return Ok(());
+            }
+            let owned = self.registry.list_bots_by_creator(staff_no).await;
+            if owned.iter().any(|bot| {
+                bot.actor_kind == ActorKind::Bot && is_member(bot.bot_uuid.as_str())
+            }) {
                 return Ok(());
             }
         }
@@ -213,7 +220,7 @@ impl InviteService for InviteServiceImpl {
             ));
         }
 
-        self.ensure_session_member(&cmd, &session)?;
+        self.ensure_session_member(&cmd, &session).await?;
         let (token, exp) = self.make_token(&cmd.target_id, cmd.ttl_seconds);
         let join_url = match &self.session_link_url {
             Some(url) => format!("{}/{}", url.trim_end_matches('/'), token),
