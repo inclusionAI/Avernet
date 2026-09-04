@@ -149,7 +149,7 @@ class SpaceMemberService(SpaceMemberServiceProtocol):
                 WorkOrderMessageTitle.SPACE_MEMBER_REMOVED.value,
             ),
             content={
-                "legacy_value": WorkOrderMessageContent.SPACE_MEMBER_REMOVED.format(
+                "text": WorkOrderMessageContent.SPACE_MEMBER_REMOVED.format(
                     space_name=space.name
                 )
             },

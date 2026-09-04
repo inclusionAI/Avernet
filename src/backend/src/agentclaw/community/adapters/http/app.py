@@ -70,7 +70,6 @@ if get_current_env() in ("pre", "prod"):
     eager_check_critical_bindings(injector)
 # ──────────────────────────────────────────────────────────────────────────
 
-
 # =============================================================================
 # Pre-import side effects: AGENTCLAW_CONFIG_PATH + OpenClaw DB config
 # =============================================================================
@@ -94,9 +93,7 @@ def _set_openclaw_config_path():
     except Exception as e:
         logging.warning(f"Could not set AGENTCLAW_CONFIG_PATH: {e}")
 
-
 _set_openclaw_config_path()  # noqa: FLA010 — composition root, must run at import time before OpenClaw imports below read AGENTCLAW_CONFIG_PATH
-
 
 # =============================================================================
 # Router imports (post-DI-bootstrap)
@@ -625,7 +622,10 @@ async def _validation_error_handler(
             ],
             exc_info=exc,
         )
-        return error_response(422, "Invalid request", request)
+        message = "缺少必填字段text" if any(
+            "缺少必填字段text" in str(error.get("msg", "")) for error in exc.errors()
+        ) else "Invalid request"
+        return error_response(422, message, request)
     # Internal routes keep FastAPI's ``{"detail": [...]}`` body, whose default
     # handler logs nothing. Same treatment as above: log, then delegate. The
     # ``input`` each error carries is the caller's raw payload, so only

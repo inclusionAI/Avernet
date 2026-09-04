@@ -333,7 +333,7 @@ def test_unified_approval_dispatches_bot_editor_side_effect() -> None:
         biz_type=WorkOrderBizType.BOT_COLLABORATOR,
         biz_id="bot-17",
         title="approved",
-        content="approved",
+        content={"text": "approved"},
     )
     notifications.build_bot_editor_review_result.return_value = notification
     expected = WorkOrderReviewResult(
@@ -848,7 +848,7 @@ def test_review_requires_owner_and_delegates(
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id="7",
         title="reviewed",
-        content="result",
+        content={"text": "result"},
     )
     notifications.build_space_join_review_result.return_value = notification
     expected = WorkOrderReviewResult(
@@ -893,7 +893,7 @@ def test_approve_accepts_missing_or_blank_remark(value: str | None) -> None:
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id="7",
         title="approved",
-        content="approved",
+        content={"text": "approved"},
     )
     notifications.build_space_join_review_result.return_value = notification
     expected = WorkOrderReviewResult(
@@ -984,7 +984,7 @@ def test_notification_service_builds_space_join_review_result(
         biz_type=WorkOrderBizType.SPACE_JOIN,
         biz_id="7",
         title=expected_title,
-        content=expected_content,
+        content={"text": expected_content},
     )
 
 

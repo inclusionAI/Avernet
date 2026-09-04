@@ -15248,6 +15248,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -15255,7 +15258,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, when present.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "event_type": {
@@ -22625,6 +22628,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -22632,7 +22638,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, when available.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "event_type": {
@@ -22941,6 +22947,9 @@
           "content": {
             "anyOf": [
               {
+                "type": "string"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -22948,7 +22957,7 @@
                 "type": "null"
               }
             ],
-            "description": "Notification JSON object, or null when unavailable.",
+            "description": "Original notification content, either text or a JSON object.",
             "title": "Content"
           },
           "env": {

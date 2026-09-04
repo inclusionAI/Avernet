@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -255,8 +256,13 @@ class _WorkOrderCreationRepository:
             db.add(row)
             db.flush()
             title = "空间加入申请待审批"
-            content = WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
-                applicant_name=applicant_name, space_name=space.name
+            content = json.dumps(
+                {
+                    "text": WorkOrderMessageContent.SPACE_JOIN_PENDING.value.format(
+                        applicant_name=applicant_name, space_name=space.name
+                    )
+                },
+                ensure_ascii=False,
             )
             for (owner_id,) in owners:
                 db.add(
