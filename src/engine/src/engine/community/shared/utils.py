@@ -3,11 +3,45 @@
 """
 import base64
 import re
+from typing import Any
 
 _MANAGED_SESSION_KEY = re.compile(
     r"^(?:agent:([^:]+):)?(session:[^:]+:user:[^:]+)$",
     re.IGNORECASE,
 )
+_OPENCLAW_USER_SESSION_KEY = re.compile(
+    r"^(?:agent:main:)?session:[^:]+:user:([^:]+)$"
+)
+
+OPENCLAW_SOURCE_ALL_BUT_OTHERS = "all_but_others"
+
+
+def filter_openclaw_sessions_by_source(
+    sessions: list[dict[str, Any]],
+    *,
+    source: str | None,
+    user_id: str | None,
+) -> list[dict[str, Any]]:
+    """Apply OpenClaw's optional caller-relative session visibility filter."""
+    if source is None:
+        return sessions
+    if source != OPENCLAW_SOURCE_ALL_BUT_OTHERS or not user_id:
+        # COSEC: Unknown explicit filters fail closed instead of exposing an
+        # unfiltered session list under a restriction the caller expected.
+        return []
+
+    caller_id = user_id.casefold()
+    visible: list[dict[str, Any]] = []
+    for session in sessions:
+        key = session.get("key")
+        match = (
+            _OPENCLAW_USER_SESSION_KEY.fullmatch(key)
+            if isinstance(key, str)
+            else None
+        )
+        if match is None or match.group(1).casefold() == caller_id:
+            visible.append(session)
+    return visible
 
 
 def normalize_managed_session_lookup_key(session_key: str) -> str:

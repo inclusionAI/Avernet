@@ -6,6 +6,7 @@ import pytest
 from engine.community.shared.utils import (
     decode_session_key,
     encode_session_key,
+    filter_openclaw_sessions_by_source,
     managed_session_keys_equal,
     normalize_managed_session_lookup_key,
 )
@@ -39,6 +40,59 @@ def test_managed_session_keys_match_relative_and_agent_scoped_forms():
     )
     assert not managed_session_keys_equal("Opaque-ID", "opaque-id")
     assert not managed_session_keys_equal("prefix:target", "target")
+
+
+def test_openclaw_all_but_others_filters_only_managed_user_sessions():
+    sessions = [
+        {"key": "session:own:user:CloudUser"},
+        {"key": "agent:main:session:own-2:user:clouduser"},
+        {"key": "session:other:user:another-user"},
+        {"key": "agent:main:session:other-2:user:another-user"},
+        {"key": "agent:other:session:other-agent:user:another-user"},
+        {"key": "agent:main:dingtalk:direct:another-user"},
+        {"key": "agent:main:cron:daily"},
+        {"key": "agent:main:main"},
+    ]
+
+    visible = filter_openclaw_sessions_by_source(
+        sessions,
+        source="all_but_others",
+        user_id="clouduser",
+    )
+
+    assert [session["key"] for session in visible] == [
+        "session:own:user:CloudUser",
+        "agent:main:session:own-2:user:clouduser",
+        "agent:other:session:other-agent:user:another-user",
+        "agent:main:dingtalk:direct:another-user",
+        "agent:main:cron:daily",
+        "agent:main:main",
+    ]
+
+
+def test_openclaw_source_omission_preserves_the_unfiltered_list():
+    sessions = [{"key": "session:other:user:another-user"}]
+
+    assert filter_openclaw_sessions_by_source(
+        sessions, source=None, user_id=None
+    ) is sessions
+
+
+@pytest.mark.parametrize("source", ["mine", "others", "", "unsupported"])
+def test_openclaw_unsupported_source_values_return_no_sessions(source):
+    sessions = [{"key": "session:own:user:u1"}, {"key": "agent:main:main"}]
+
+    assert filter_openclaw_sessions_by_source(
+        sessions, source=source, user_id="u1"
+    ) == []
+
+
+def test_openclaw_all_but_others_without_a_user_returns_no_sessions():
+    assert filter_openclaw_sessions_by_source(
+        [{"key": "agent:main:main"}],
+        source="all_but_others",
+        user_id=None,
+    ) == []
 
 
 class TestEncodeSessionKey:

@@ -27,24 +27,29 @@ class OpenClawSessionPort(Protocol):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        user_id: str | None = None,
+        source: str | None = None,
     ) -> list[dict]:
         """Orchestrate `sessions.list` + bcs filter + paginate + chat.history + init filter.
 
         Exact ordering (matches legacy `engines/openclaw/session.py:list`):
-          1. `sessions.list` RPC → raw sessions
+          1. Fetch a sufficient newest-session prefix via `sessions.list(limit)`
           2. Filter internal `agent:main:bcs_grp_` sessions and `bcs:group`
              sessions (keep namespaced `bcs_grp_*_dm_*` and bcs-cli)
-          3. Filter by `agent_id` if provided (request-param-driven but primitive)
-          4. Filter by exact non-blank `session_key` if provided
-          5. Paginate: slice `[offset : offset+limit]`
-          6. Fetch `chat.history` ONLY for the paginated page sessions
-          7. Filter out single-message "Bot 初始化配置" sessions from the page
-          8. Normalise model strings via `providers.available` (cached)
-          9. Return the final page dicts (with `_messages` and `_message_count` populated)
+          3. Apply the optional caller-relative `source` filter
+          4. Filter by `agent_id` if provided (request-param-driven but primitive)
+          5. Filter by exact non-blank `session_key` if provided
+          6. Paginate: slice `[offset : offset+limit]`
+          7. Fetch `chat.history` ONLY for the paginated page sessions
+          8. Filter out single-message "Bot 初始化配置" sessions from the page
+          9. Normalise model strings via `providers.available` (cached)
+          10. Return the final page dicts (with `_messages` and `_message_count` populated)
 
         Pagination is performed BEFORE the per-session `chat.history` RPCs so
         that history is fetched only for the visible page — matching legacy
-        behaviour exactly.  A page may return fewer than `limit` items when
+        behaviour exactly. The gateway prefix is expanded when local filters
+        would otherwise leave the requested page incomplete. A page may return
+        fewer than `limit` items when
         "Bot 初始化配置" sessions fall within it.
 
         Returns `[]` on gateway error.

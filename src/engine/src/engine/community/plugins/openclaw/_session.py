@@ -11,6 +11,8 @@ from typing import Any
 
 from engine.community.openclaw.client.gateway_client import OpenClawGatewayClient
 from engine.community.shared.utils import (
+    OPENCLAW_SOURCE_ALL_BUT_OTHERS,
+    filter_openclaw_sessions_by_source,
     managed_session_keys_equal,
     normalize_managed_session_lookup_key,
 )
@@ -133,26 +135,34 @@ class _SessionPortMixin:
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        user_id: str | None = None,
+        source: str | None = None,
     ) -> list[dict[str, Any]]:
         """Orchestrate session listing with the exact legacy ordering.
 
         Exact sequence (mirrors `engines/openclaw/session.py:list`):
-          1. `sessions.list` RPC → raw sessions
+          1. Fetch a sufficient newest-session prefix via `sessions.list(limit)`
           2. Filter internal BCS sessions and `bcs:group` sessions, keeping
              namespaced `bcs_grp_*_dm_*` and bcs-cli
-          3. Filter by `agent_id` if provided
-          4. Filter by exact non-blank `session_key` if provided
-          5. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
-          6. Fetch `chat.history` ONLY for the paginated page sessions
-          7. Filter "Bot 初始化配置" single-message sessions from the page
-          8. Normalise model strings (cached provider map)
-          9. Return the final page dicts with `_messages`/`_message_count` set
+          3. Apply the optional caller-relative `source` filter
+          4. Filter by `agent_id` if provided
+          5. Filter by exact non-blank `session_key` if provided
+          6. Paginate: slice `[offset : offset+limit]` — BEFORE history fetch
+          7. Fetch `chat.history` ONLY for the paginated page sessions
+          8. Filter "Bot 初始化配置" single-message sessions from the page
+          9. Normalise model strings (cached provider map)
+          10. Return the final page dicts with `_messages`/`_message_count` set
 
         Returns `[]` for gateway business errors. Transport failures propagate
         so callers never mistake an unavailable gateway for an empty session
         collection. A page may return fewer than `limit` items when "Bot 初始化配置"
         sessions fall within it (exact legacy behaviour).
         """
+        if source is not None and (
+            source != OPENCLAW_SOURCE_ALL_BUT_OTHERS or not user_id
+        ):
+            return []
+
         client = await self._pooled_client(token)
         requested_session_key = (
             session_key if session_key and session_key.strip() else None
@@ -163,64 +173,118 @@ class _SessionPortMixin:
             else None
         )
 
-        # Push the lookup into the gateway before its default result cap is
-        # applied. Keep the exact local filter because gateway search is fuzzy.
-        list_params = (
-            {"search": lookup_session_key}
-            if lookup_session_key is not None
-            else {}
-        )
+        # OpenClaw 2026.5.12 has `limit` but no `offset`, and defaults to the
+        # newest 100 rows. Grow that prefix only when local filters leave too
+        # few rows to serve the requested window.
+        window_end = max(offset + limit, 1)
+        required_rows = 1 if requested_session_key is not None else window_end
+        gateway_limit = window_end
+        previous_raw_count = -1
+        raw_sessions: list[dict[str, Any]] = []
 
-        # Step 1: sessions.list RPC
-        try:
-            response = await client.send_request("sessions.list", list_params)
-        except (ConnectionError, TimeoutError):
-            # An empty list is a valid answer, so it must not mask an upstream outage.
-            raise
-        except Exception as e:
-            log.exception("[sessions_list] unexpected error: %s", e)
-            return []
+        while True:
+            list_params: dict[str, Any] = {"limit": gateway_limit}
+            if lookup_session_key is not None:
+                # Gateway search is fuzzy, so the exact local filter remains.
+                list_params["search"] = lookup_session_key
 
-        if not response.ok:
-            error_msg = response.error.message if response.error else "Unknown error"
-            log.error("[sessions_list] sessions.list failed: %s", error_msg)
-            return []
+            try:
+                response = await client.send_request("sessions.list", list_params)
+            except (ConnectionError, TimeoutError):
+                # An empty list is a valid answer, so it must not mask an upstream outage.
+                raise
+            except Exception as e:
+                log.exception("[sessions_list] unexpected error: %s", e)
+                return []
 
-        payload = response.payload or []
-        if isinstance(payload, dict):
-            raw_sessions: list[dict[str, Any]] = payload.get("sessions", [])
-        elif isinstance(payload, list):
-            raw_sessions = payload
-        else:
-            log.warning("[sessions_list] unexpected payload type: %s", type(payload).__name__)
-            return []
+            if not response.ok:
+                error_msg = response.error.message if response.error else "Unknown error"
+                log.error("[sessions_list] sessions.list failed: %s", error_msg)
+                return []
 
-        raw_sessions = [s for s in raw_sessions if isinstance(s, dict)]
+            payload = response.payload or []
+            total_count: int | None = None
+            if isinstance(payload, dict):
+                rows = payload.get("sessions", [])
+                if not isinstance(rows, list):
+                    log.warning(
+                        "[sessions_list] sessions field has unexpected type: %s",
+                        type(rows).__name__,
+                    )
+                    return []
+                reported_total = payload.get("totalCount")
+                if (
+                    isinstance(reported_total, int)
+                    and not isinstance(reported_total, bool)
+                    and reported_total >= 0
+                ):
+                    total_count = reported_total
+                has_more = payload.get("hasMore") is True
+                if total_count is not None:
+                    has_more = has_more or len(rows) < total_count
+            elif isinstance(payload, list):
+                rows = payload
+                has_more = False
+            else:
+                log.warning(
+                    "[sessions_list] unexpected payload type: %s",
+                    type(payload).__name__,
+                )
+                return []
 
-        # Step 2: Hide BCS group chats while keeping user-visible DM sessions.
-        raw_sessions = [s for s in raw_sessions if _should_keep_session(s)]
+            raw_count = len(rows)
+            raw_sessions = [s for s in rows if isinstance(s, dict)]
 
-        # Step 3: Filter by agent_id if provided (primitive, not DTO-driven).
-        if agent_id is not None:
-            raw_sessions = [s for s in raw_sessions if s.get("agentId") == agent_id]
+            # Step 2: Hide BCS group chats while keeping user-visible DM sessions.
+            raw_sessions = [s for s in raw_sessions if _should_keep_session(s)]
 
-        if requested_session_key is not None:
-            # Filter before pagination so a copied key can be found beyond the current page.
-            raw_sessions = [
-                s
-                for s in raw_sessions
-                if isinstance(s.get("key"), str)
-                and managed_session_keys_equal(s["key"], requested_session_key)
-            ]
+            # Step 3: Apply the optional caller-relative visibility filter.
+            raw_sessions = filter_openclaw_sessions_by_source(
+                raw_sessions,
+                source=source,
+                user_id=user_id,
+            )
 
-        # Step 5: Paginate BEFORE history fetch (legacy ordering).
+            # Step 4: Filter by agent_id if provided (primitive, not DTO-driven).
+            if agent_id is not None:
+                raw_sessions = [
+                    s for s in raw_sessions if s.get("agentId") == agent_id
+                ]
+
+            if requested_session_key is not None:
+                # Filter before pagination so a copied key can be found beyond the current page.
+                raw_sessions = [
+                    s
+                    for s in raw_sessions
+                    if isinstance(s.get("key"), str)
+                    and managed_session_keys_equal(s["key"], requested_session_key)
+                ]
+
+            if len(raw_sessions) >= required_rows or not has_more:
+                break
+            if raw_count <= previous_raw_count:
+                log.warning(
+                    "[sessions_list] gateway prefix did not grow at limit=%d",
+                    gateway_limit,
+                )
+                break
+
+            previous_raw_count = raw_count
+            next_limit = gateway_limit * 2
+            if total_count is not None:
+                next_limit = min(next_limit, total_count)
+            if next_limit <= gateway_limit:
+                break
+            gateway_limit = next_limit
+
+        # Step 6: Paginate BEFORE history fetch (legacy ordering).
         page = raw_sessions[offset: offset + limit]
 
         # Build/retrieve the cached provider map (FIX 2 — at most one RPC ever).
         provider_map = await self._get_provider_map(client)
 
-        # Step 6: Fetch chat.history ONLY for the page sessions.
-        # Step 7: Filter "Bot 初始化配置" single-message init sessions from page.
+        # Step 7: Fetch chat.history ONLY for the page sessions.
+        # Step 8: Filter "Bot 初始化配置" single-message init sessions from page.
         enriched: list[dict[str, Any]] = []
         for s in page:
             key = s.get("key", "")

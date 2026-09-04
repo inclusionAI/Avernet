@@ -111,9 +111,10 @@ def _window(page_params: Any) -> dict[str, int]:
     capped the reported total at the prefix length.
 
     This is the **session list**'s window, and it is the straightforward one: the
-    engine paginates a fully-materialised list
-    (``plugins/openclaw/_session.py``: ``raw_sessions[offset : offset+limit]``),
-    so ``offset``/``limit`` mean what they say. Message history does not — see
+    engine materialises enough of the provider's list, applies its filters,
+    and then slices it (``plugins/openclaw/_session.py``:
+    ``raw_sessions[offset : offset+limit]``), so ``offset``/``limit`` mean what
+    they say. Message history does not — see
     :func:`_history_window`.
     """
     return {
