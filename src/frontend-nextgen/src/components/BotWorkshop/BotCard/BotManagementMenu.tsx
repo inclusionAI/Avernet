@@ -1,8 +1,9 @@
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotDomain } from '@/services/botWorkshop';
-import { ArrowUpRight, MapPin, MoreHorizontal, Users } from 'lucide-react';
+import { ArrowUpRight, CircleHelp, MapPin, MoreHorizontal, Users } from 'lucide-react';
 import { useState } from 'react';
 import { actionIcon, actionLabel, type BotCardManagementAction } from './config';
 
@@ -14,6 +15,24 @@ interface BotManagementMenuProps {
   onManagePublication?: (bot: BotDomain) => void;
   onChangeSpace?: (bot: BotDomain) => void;
   onAuthorize?: (bot: BotDomain) => void;
+}
+
+function ActionHelp({ children, description }: { children: string; description: string }) {
+  return (
+    <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+      {children}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span tabIndex={0} aria-label={`${children}说明`} className="inline-flex shrink-0 text-muted-foreground">
+              <CircleHelp className="size-3.5" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-72">{description}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </span>
+  );
 }
 
 export function BotManagementMenu(props: BotManagementMenuProps) {
@@ -75,7 +94,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
               setConfirmAction('restart');
             }}
           >
-            {actionLabel.restart}
+            <ActionHelp description="指重新启动当前 Bot 实例，重新加载当前会话状态、配置或运行流程。">
+              {actionLabel.restart}
+            </ActionHelp>
           </Button>
           {!isAgentCodingBot ? (
             <Button
@@ -89,7 +110,9 @@ export function BotManagementMenu(props: BotManagementMenuProps) {
                 setConfirmAction('engine_restart');
               }}
             >
-              {actionLabel.engine_restart}
+              <ActionHelp description="指重新启动 Bot 所依赖的底层运行引擎（如 OpenClaw、ClaudeCode 等）。">
+                {actionLabel.engine_restart}
+              </ActionHelp>
             </Button>
           ) : null}
           <Button

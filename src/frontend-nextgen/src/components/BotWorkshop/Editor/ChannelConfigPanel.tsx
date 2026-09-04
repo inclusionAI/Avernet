@@ -3,36 +3,28 @@ import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
-import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import { Switch } from '@/components/ui/Switch';
 import type { BotChannel, BotChannelInput } from '@/domain/botAdvancedConfig';
-import { Plus, Trash2 } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { ChannelFormModal } from './ChannelFormModal';
 
-const empty: BotChannelInput = {
-  description: '',
-  clientId: '',
-  clientSecret: '',
-  enableStreamingCards: false,
-  cardTemplateId: '',
-  cardTemplateKey: '',
-};
 export function ChannelConfigPanel({
   channels,
   editable,
   onCreate,
+  onUpdate,
   onToggle,
   onDelete,
 }: {
   channels: BotChannel[];
   editable: boolean;
   onCreate: (input: BotChannelInput) => Promise<void>;
+  onUpdate: (id: number, input: BotChannelInput) => Promise<void>;
   onToggle: (channel: BotChannel) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState(empty);
+  const [editing, setEditing] = useState<BotChannel>();
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
@@ -54,7 +46,11 @@ export function ChannelConfigPanel({
                   Client ID：{channel.clientId} · Secret {channel.hasSecret ? '已配置' : '未配置'}
                 </p>
                 <p className="m-0 mt-1 text-xs text-muted-foreground">
-                  流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'}
+                  流式输出：{channel.enableStreamingCards ? '已开启' : '已关闭'} · 私聊：
+                  {channel.dmPolicy === 'open' ? '允许' : '禁止'}
+                  {channel.createdAt
+                    ? ` · 创建于 ${new Date(channel.createdAt).toLocaleString('zh-CN', { hour12: false })}`
+                    : ''}
                 </p>
               </div>
               <Badge tone={channel.status === 'active' ? 'success' : 'neutral'}>
@@ -63,6 +59,17 @@ export function ChannelConfigPanel({
               <Button variant="secondary" size="sm" disabled={!editable} onClick={() => void onToggle(channel)}>
                 {channel.status === 'active' ? '停用' : '启用'}
               </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                disabled={!editable}
+                aria-label={`编辑${channel.description || channel.clientId}`}
+                leftIcon={<Pencil className="size-4" />}
+                onClick={() => {
+                  setEditing(channel);
+                  setOpen(true);
+                }}
+              />
               <ConfirmDialog
                 title="删除渠道"
                 description="删除后需重新配置凭证。"
@@ -78,76 +85,15 @@ export function ChannelConfigPanel({
       ) : (
         <Empty title="暂无绑定渠道" description="当前仅支持钉钉渠道。" />
       )}
-      <Modal open={open} onOpenChange={setOpen}>
-        <ModalContent>
-          <ModalHeader>
-            <ModalTitle>绑定钉钉渠道</ModalTitle>
-          </ModalHeader>
-          <div className="space-y-3">
-            <Input
-              placeholder="用途说明"
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-            />
-            <Input
-              placeholder="Client ID"
-              value={form.clientId}
-              onChange={(e) => setForm({ ...form, clientId: e.target.value })}
-            />
-            <Input
-              type="password"
-              placeholder="Client Secret"
-              value={form.clientSecret}
-              onChange={(e) => setForm({ ...form, clientSecret: e.target.value })}
-            />
-            <label className="flex items-center justify-between gap-4 rounded-lg border border-border p-3 text-xs">
-              <span>
-                <span className="block font-medium">流式输出</span>
-                <span className="mt-1 block text-muted-foreground">使用钉钉互动卡片持续更新 Bot 回复</span>
-              </span>
-              <Switch
-                checked={form.enableStreamingCards}
-                onCheckedChange={(enableStreamingCards) => setForm({ ...form, enableStreamingCards })}
-                aria-label="流式输出"
-              />
-            </label>
-            {form.enableStreamingCards ? (
-              <>
-                <Input
-                  placeholder="互动卡片模板 ID"
-                  value={form.cardTemplateId}
-                  onChange={(e) => setForm({ ...form, cardTemplateId: e.target.value })}
-                />
-                <Input
-                  placeholder="卡片正文模板字段（可选）"
-                  value={form.cardTemplateKey}
-                  onChange={(e) => setForm({ ...form, cardTemplateKey: e.target.value })}
-                />
-              </>
-            ) : null}
-          </div>
-          <ModalFooter>
-            <Button variant="secondary" onClick={() => setOpen(false)}>
-              取消
-            </Button>
-            <Button
-              disabled={
-                !form.clientId.trim() ||
-                !form.clientSecret.trim() ||
-                (form.enableStreamingCards && !form.cardTemplateId.trim())
-              }
-              onClick={() =>
-                void onCreate(form).then(() => {
-                  setOpen(false);
-                  setForm(empty);
-                })
-              }
-            >
-              保存
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <ChannelFormModal
+        open={open}
+        channel={editing}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setEditing(undefined);
+        }}
+        onSubmit={(input) => (editing ? onUpdate(editing.id, input) : onCreate(input))}
+      />
     </div>
   );
 }

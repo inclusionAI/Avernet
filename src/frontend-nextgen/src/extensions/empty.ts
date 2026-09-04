@@ -1,6 +1,8 @@
 import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
+import { TaskLoopCard } from '@/components/TaskCards';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
+import { resolveTaskApiBase } from '@/services/tasks/taskConfig';
 import { ensureReactGlobal } from '@/services/workspace';
 import '@/services/workspace/chatBridge';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -18,9 +20,11 @@ type SidePanelConfigureFn = (opts: { maxTabLabelLength?: number }) => void;
  * - 协作群消息查询：在群成员中找归属本人的 bot 作 view_bot_id（actor_id 末段 === 登录人工号）。
  * - 跨用户单聊：会话归属人 ≠ 登录人 时置无权限提示。
  *
- * assets 守卫禁止 TaskPanelAdapter 反查 teamclaw 业务层（stores/capabilities），故在此 wrapper 注入：
- * 从登录态 human identity 取纯工号塞入 params.userId，assets 保持纯净。
- * params 已带 userId（发起方/后端注入）优先沿用，缺省才回填登录人工号。
+ * assets 守卫禁止 TaskPanelAdapter 反查 teamclaw 业务层（stores/capabilities/services），故在此 wrapper 注入：
+ * - userId：从登录态 human identity 取纯工号塞入 params.userId；params 已带（发起方/后端注入）优先沿用，缺省才回填登录人工号。
+ * - taskApiBase：task API 路径前缀由 capability getTaskApiBase 解析（Open Core → /openapi/v1/collaboration/tasks、
+ *   内部 overlay → /api/v1/collaboration/tasks），渲染期注入而不落库到持久 params——部署路由随环境变化，
+ *   渲染期取当前 capability 最准，旧副屏消息切环境后仍命中正确路由。
  *
  * 用 getHumanIdentity 而非 getCurrentOpenApiUserId：后者依赖 activeIdentityId，群聊副屏以 bot 身份
  * 渲染时取不到工号；前者直接从 workspaceStore.identities 取 kind=user 的登录人，不受当前身份影响。
@@ -31,7 +35,12 @@ const TaskPanelAdapterWithUser: ComponentType<PanelContentProps> = (props) => {
   const human = getCapabilities().getHumanIdentity();
   const loginUserId = human.status === 'available' ? human.value?.userId?.trim() || undefined : undefined;
   const incoming = props.params ?? {};
-  const params = incoming.userId ? incoming : { ...incoming, userId: loginUserId };
+  // userId：已带沿用，缺省回填登录人工号；taskApiBase：capability 渲染期注入（部署路由随环境取最准）。
+  const params = {
+    ...incoming,
+    userId: incoming.userId ?? loginUserId,
+    taskApiBase: resolveTaskApiBase(),
+  };
   return React.createElement(TaskPanelAdapter, { ...props, params } as PanelContentProps);
 };
 
@@ -66,6 +75,8 @@ export function registerSidePanelWiring(): void {
   ensureReactGlobal();
   registerUmdPanelHandler();
   registerTaskPanel();
+  // Open Core task-loop skill card: public component key replaces the internal cardId loader.
+  registerPanelContent('taskCard.TaskLoopCard', TaskLoopCard as ComponentType<PanelContentProps>);
   // 业务层覆盖注入登录用户工号：协群后端 opening_message.params 不带 userId，副屏下钻需登录人工号
   // 判定群成员归属本人 bot（view_bot_id）与跨用户单聊权限；缺省回填，已有 userId 则沿用。
   registerPanelContent('taskPanel.TaskLoopView', TaskPanelAdapterWithUser);

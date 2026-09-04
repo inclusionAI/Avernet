@@ -7,12 +7,11 @@ import { Compass, Sparkles } from 'lucide-react';
 // 注意：extendCapabilities 合并后无法恢复，故 internal 形态用例置于文件末尾，不影响前述默认用例。
 
 describe('getMergedNavigationItems（Open Core 默认 capabilities）', () => {
-  it('adminEntry=false：剔除【管理后台】项，其余基线项原序保留', () => {
+  it('adminEntry=true：保留【管理后台】项于 manage 分区末位，基线项原序保留', () => {
     const merged = getMergedNavigationItems();
-    expect(merged.find((item) => item.id === 'admin')).toBeUndefined();
-    expect(merged.map((item) => item.id)).toEqual(
-      navigationItems.filter((item) => item.id !== 'admin').map((item) => item.id),
-    );
+    expect(merged.find((item) => item.id === 'admin')).toBeDefined();
+    // Open Core 默认无内部导航项注入，合并结果 = 基线 navigationItems 原序。
+    expect(merged.map((item) => item.id)).toEqual(navigationItems.map((item) => item.id));
   });
 
   it('基线 navigationItems 数组字面量本身不被改动（过滤只发生在合并点）', () => {

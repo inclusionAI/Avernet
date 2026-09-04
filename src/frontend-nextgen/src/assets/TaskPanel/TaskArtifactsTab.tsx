@@ -7,7 +7,7 @@ import { ExternalLink } from './icons';
 import { MarkdownCell } from './MarkdownCell';
 import { Empty } from './theme';
 import { ARTIFACT_TYPE_LABELS, C } from './tokens';
-import type { TaskView } from './types';
+import type { TaskOutputDimension, TaskView } from './types';
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -103,33 +103,56 @@ const ArtifactCard: React.FC<{ a: TaskView['artifacts'][number] }> = ({ a }) => 
   </div>
 );
 
+/** 单个产出维度卡片：不展示维度标题，仅渲染正文内容框。 */
+const DimensionCard: React.FC<{ dimension: TaskOutputDimension }> = ({ dimension }) => (
+  <div
+    style={{
+      background: C.surface,
+      border: `1px solid ${C.border}`,
+      borderRadius: 8,
+      padding: 14,
+    }}
+  >
+    <MarkdownCell content={dimension.content} />
+  </div>
+);
+
 export const TaskArtifactsTab: React.FC<{ task: TaskView }> = ({ task }) => {
+  const dimensions = task.rootOutputDimensions ?? [];
+  const hasDimensions = dimensions.length > 0;
   const hasOutput = !!task.rootOutputRender && task.rootOutputRender.trim().length > 0;
   const hasArtifacts = task.artifacts.length > 0;
 
-  if (!hasOutput && !hasArtifacts) {
+  if (!hasDimensions && !hasOutput && !hasArtifacts) {
     return <Empty description="暂无产物" />;
   }
 
   return (
     <div style={{ padding: 16 }}>
-      {hasOutput && (
-        <div
-          style={{
-            background: C.surface,
-            border: `1px solid ${C.border}`,
-            borderRadius: 8,
-            padding: 14,
-            marginBottom: hasArtifacts ? 16 : 0,
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 650, color: C.textPrimary, marginBottom: 4 }}>产出内容</div>
-          <MarkdownCell content={task.rootOutputRender} />
-        </div>
-      )}
+      {(hasDimensions || hasOutput) &&
+        (hasDimensions ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: hasArtifacts ? 16 : 0 }}>
+            {dimensions.map((d) => (
+              <DimensionCard key={d.key} dimension={d} />
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              background: C.surface,
+              border: `1px solid ${C.border}`,
+              borderRadius: 8,
+              padding: 14,
+              marginBottom: hasArtifacts ? 16 : 0,
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 650, color: C.textPrimary, marginBottom: 4 }}>产出内容</div>
+            <MarkdownCell content={task.rootOutputRender} />
+          </div>
+        ))}
       {hasArtifacts && (
         <div>
-          {hasOutput && (
+          {(hasDimensions || hasOutput) && (
             <div style={{ fontSize: 12, fontWeight: 650, color: C.textSecondary, margin: '4px 0 8px' }}>产物文件</div>
           )}
           {task.artifacts.map((a) => (

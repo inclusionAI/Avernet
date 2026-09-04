@@ -589,3 +589,20 @@ div[data-qiankun='aix-card'] * {
 [data-sonner-toast][data-type='error'] {
   border-color: var(--color-error);
 }
+
+/* ==========================================================================
+   任务卡片内联渲染：解除 SDK InlineBusinessComponent 容器的 400px 截断与外层边框
+   ==========================================================================
+   @tc-chat/ui 的 MarkdownRender InlineContainer 对内联 <AixUI component=...> 业务组件
+   硬编码 max-height:400px;overflow:auto;border;radius;bg。任务卡片（taskCard.TaskLoopCard）
+   应与原始 cardId 沙箱渲染（iframe border:none / 高度按 scrollHeight 自增长 / #root overflow:hidden）
+   一致：随内容自增长、无内滚动条、无外层重复边框（卡片自带 border/shadow/rounded/bg-white）。
+   仅以卡片根节点标记 .task-loop-card-root 解其直接父容器（InlineContainer）的截断与外框，
+   精确命中单张卡片容器，不影响其它内联业务组件，也不依赖 SDK 生成的 styled-components 类名。 */
+div:has(> .task-loop-card-root) {
+  max-height: none !important;
+  overflow: visible !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+}

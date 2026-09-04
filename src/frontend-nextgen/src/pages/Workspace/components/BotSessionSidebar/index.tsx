@@ -1,9 +1,9 @@
-import { Empty, Input, Skeleton } from '@/components/ui';
+import { Button, Empty, Input, Skeleton } from '@/components/ui';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { Identity } from '@/services/workspace/workspaceModel';
-import { Search } from 'lucide-react';
+import { ArrowRight, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { WorkspaceActionButton } from '../WorkspaceActionButton';
@@ -20,6 +20,7 @@ export interface BotSessionSidebarProps {
   onOpenPermissions?: () => void;
   userAvatarUrl?: string;
   chatBots: ChatBotView[];
+  hasAgentCodingBots?: boolean;
   friendBots: ChatBotView[];
   isMyBotsLoading: boolean;
   isFriendBotsLoading: boolean;
@@ -42,6 +43,7 @@ export interface BotSessionSidebarProps {
   onLoadFavorites: (botId: string) => Promise<void>;
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
   onManageBot?: (bot: ChatBotView) => void;
+  onOpenBotWorkshop?: () => void;
   onCreateGroup: () => void;
   onAddFriend: () => void;
 }
@@ -58,6 +60,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     onOpenPermissions = () => {},
     userAvatarUrl,
     chatBots,
+    hasAgentCodingBots = false,
     friendBots,
     isMyBotsLoading,
     isFriendBotsLoading,
@@ -80,6 +83,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     onLoadFavorites,
     onLoadMoreSessions,
     onManageBot,
+    onOpenBotWorkshop = () => {},
     onCreateGroup,
     onAddFriend,
   } = props;
@@ -87,7 +91,9 @@ export function BotSessionList(props: BotSessionSidebarProps) {
   const keyword = search.trim().toLowerCase();
   const filteredMine = chatBots.filter((b) => !keyword || b.displayName.toLowerCase().includes(keyword));
   const filteredFriends = friendBots.filter((b) => !keyword || b.displayName.toLowerCase().includes(keyword));
-  const activeIdentityName = identities.find((identity) => identity.id === activeIdentityId)?.name;
+  const activeIdentity = identities.find((identity) => identity.id === activeIdentityId);
+  const activeIdentityName = activeIdentity?.name;
+  const isUserIdentity = activeIdentity?.kind === 'user';
   const managedBotTitle = activeIdentityName ? `${activeIdentityName}管理的 Bot` : '已管理 Bot';
   const friendBotTitle = activeIdentityName ? `${activeIdentityName}的好友 Bot` : '好友 Bot';
   const showViewSwitch = availableViews && availableViews.length > 0 && view && onViewChange;
@@ -153,17 +159,34 @@ export function BotSessionList(props: BotSessionSidebarProps) {
               <Skeleton.Block key={i} className="h-14 w-full rounded-none border-b border-border last:border-b-0" />
             ))}
           </div>
-        ) : filteredMine.length === 0 && filteredFriends.length === 0 ? (
+        ) : !isUserIdentity && filteredMine.length === 0 && filteredFriends.length === 0 ? (
           <Empty compact title="暂无可协作的 Bot" description="可在「添加好友」中搜索并添加 Bot。" />
         ) : (
           <div>
-            {filteredMine.length > 0 && (
+            {(isUserIdentity || filteredMine.length > 0) && (
               <BotListSection
                 title={managedBotTitle}
                 sectionKey="mine"
                 count={filteredMine.length}
                 bots={filteredMine}
                 isLoading={isMyBotsLoading}
+                footer={
+                  hasAgentCodingBots ? (
+                    <Button
+                      variant="ghost"
+                      className="group mx-[18px] mb-3 mt-3 flex h-auto w-[calc(100%-36px)] cursor-pointer items-center justify-between gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-left text-foreground transition-colors hover:bg-primary/10"
+                      onClick={onOpenBotWorkshop}
+                    >
+                      <span className="text-xs font-medium leading-5 text-foreground">
+                        AgentCoding Bot 请前往 Bot 工坊使用
+                      </span>
+                      <ArrowRight
+                        className="h-4 w-4 shrink-0 text-foreground/70 transition-colors group-hover:text-primary"
+                        aria-hidden="true"
+                      />
+                    </Button>
+                  ) : null
+                }
                 {...sectionProps}
               />
             )}

@@ -147,14 +147,19 @@ describe('mapBbsTaskStatus', () => {
     expect(mapBbsTaskStatus('RUNNING')).toBe('claimed');
   });
 
-  it('DONE 映射为 completed（已完成）', () => {
-    expect(mapBbsTaskStatus('DONE')).toBe('completed');
+  it('DONE 映射为 reviewing（待验收）', () => {
+    expect(mapBbsTaskStatus('DONE')).toBe('reviewing');
+  });
+
+  it('SUCCESS 映射为 completed（已完成）', () => {
+    expect(mapBbsTaskStatus('SUCCESS')).toBe('completed');
   });
 
   it('对大小写与前后空白鲁棒', () => {
     expect(mapBbsTaskStatus('  pending  ')).toBe('pending_claim');
     expect(mapBbsTaskStatus('running')).toBe('claimed');
-    expect(mapBbsTaskStatus('done')).toBe('completed');
+    expect(mapBbsTaskStatus('done')).toBe('reviewing');
+    expect(mapBbsTaskStatus('success')).toBe('completed');
   });
 
   it('未知态返回 null（不入列）', () => {
@@ -173,16 +178,16 @@ describe('mapPlazaStatusToBbsStatus', () => {
     expect(mapPlazaStatusToBbsStatus('claimed')).toBe('RUNNING');
   });
 
-  it('completed → DONE', () => {
-    expect(mapPlazaStatusToBbsStatus('completed')).toBe('DONE');
+  it('completed → SUCCESS', () => {
+    expect(mapPlazaStatusToBbsStatus('completed')).toBe('SUCCESS');
   });
 
   it('pending_claim → PENDING（单值限制下不含 HUNG）', () => {
     expect(mapPlazaStatusToBbsStatus('pending_claim')).toBe('PENDING');
   });
 
-  it('reviewing → undefined（无对应原始态；筛选项已下掉）', () => {
-    expect(mapPlazaStatusToBbsStatus('reviewing')).toBeUndefined();
+  it('reviewing → DONE', () => {
+    expect(mapPlazaStatusToBbsStatus('reviewing')).toBe('DONE');
   });
 
   it('all → undefined（不过滤）', () => {
@@ -287,7 +292,7 @@ describe('mapBbsTaskItemDto', () => {
     expect(task?.claimedBotName).toBe('后端名');
   });
 
-  it('extend_props.output：有 string 型 content 取 content，否则用整个 output（字符串直用/对象 JSON），缺失/null 不填', () => {
+  it('extend_props.output：string 直用；对象含 string content/output 取之，否则对象 JSON；缺失/null 不填', () => {
     // 字符串型 output → 直接用（去空白）
     const str = mapBbsTaskItemDto(
       { ...baseDto, status: 'DONE', extend_props: { output: '  最终产出内容  ' } },
@@ -300,6 +305,12 @@ describe('mapBbsTaskItemDto', () => {
       publisherNameMap,
     );
     expect(withContent?.output).toBe('报告内容');
+    // 对象且含 string 型 output → 取 output（BBS 包装 {output} 形态）
+    const withOutputKey = mapBbsTaskItemDto(
+      { ...baseDto, status: 'DONE', extend_props: { output: { output: '  尽调报告已完成，已保存至工作区  ' } } },
+      publisherNameMap,
+    );
+    expect(withOutputKey?.output).toBe('尽调报告已完成，已保存至工作区');
     // 对象但无 content 字段 → 用整个 output 的 JSON 文本
     const noContent = mapBbsTaskItemDto(
       { ...baseDto, status: 'DONE', extend_props: { output: { text: 'x', n: 1 } } },
@@ -322,11 +333,33 @@ describe('mapBbsTaskItemDto', () => {
     ).toBeUndefined();
   });
 
-  it('DONE 状态映射为 completed，并填完成时间，保留承接者信息', () => {
+  it('DONE 状态映射为 reviewing，并填完成时间，保留承接者信息', () => {
     const task = mapBbsTaskItemDto(
       {
         ...baseDto,
         status: 'DONE',
+        assignee_id: 'bot-assignee-1',
+        assignee_name: '运维协作助手',
+        relay_begin_time: '2026-09-01T10:00:00Z',
+        relay_end_time: '2026-09-01T17:00:00Z',
+      },
+      publisherNameMap,
+    );
+    expect(task).toEqual(
+      expect.objectContaining({
+        status: 'reviewing',
+        claimedBotName: '运维协作助手',
+        claimedAt: '2026-09-01T10:00:00Z',
+        completedAt: '2026-09-01T17:00:00Z',
+      }),
+    );
+  });
+
+  it('SUCCESS 状态映射为 completed，并填完成时间，保留承接者信息', () => {
+    const task = mapBbsTaskItemDto(
+      {
+        ...baseDto,
+        status: 'SUCCESS',
         assignee_id: 'bot-assignee-1',
         assignee_name: '运维协作助手',
         relay_begin_time: '2026-09-01T10:00:00Z',
@@ -344,7 +377,7 @@ describe('mapBbsTaskItemDto', () => {
     );
   });
 
-  it('非 completed 状态不填 completedAt', () => {
+  it('非 completed 且非 reviewing 状态不填 completedAt', () => {
     const task = mapBbsTaskItemDto(
       { ...baseDto, status: 'RUNNING', assignee_id: 'bot-1', relay_end_time: 'should-not-appear' },
       publisherNameMap,

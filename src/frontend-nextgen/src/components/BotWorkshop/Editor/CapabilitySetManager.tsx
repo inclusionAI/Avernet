@@ -27,6 +27,10 @@ export interface CapabilitySetManagerProps {
   onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
   onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
   onLoadCandidates: () => Promise<void>;
+  mcpCallTypes?: Record<string, 'caller' | 'owner'>;
+  callerContextEditable?: boolean;
+  updatingCallType?: string;
+  onMcpCallType?: (serverCode: string, callType: 'caller' | 'owner') => Promise<void>;
 }
 
 type Picker = { set: BotCapabilitySet; kind: 'skill' | 'mcp' };
@@ -53,7 +57,6 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [picker, setPicker] = useState<Picker>();
-  const [identities, setIdentities] = useState<Record<string, 'caller' | 'owner'>>({});
   useEffect(() => {
     if (sets[0]) setExpanded((current) => (current.length ? current : [sets[0].id]));
   }, [sets]);
@@ -143,13 +146,10 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       kind="mcp"
                       items={set.mcps}
                       editable={editable}
-                      identities={identities}
-                      onIdentity={(id) =>
-                        setIdentities((current) => ({
-                          ...current,
-                          [id]: current[id] === 'caller' ? 'owner' : 'caller',
-                        }))
-                      }
+                      identities={props.mcpCallTypes}
+                      identityEditable={props.callerContextEditable}
+                      updatingIdentityId={props.updatingCallType}
+                      onIdentity={props.onMcpCallType}
                       onAdd={
                         set.isDefault
                           ? undefined

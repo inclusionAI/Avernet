@@ -232,6 +232,43 @@ describe('mapWorkOrderDto', () => {
     expect(item.canApprove).toBe(false);
   });
 
+  it('顶层 summary 优先生效：列表文案从 content.legacy_value 切到 summary（与 content 同级）', () => {
+    // 线上列表 payload（APPROVAL 工单）：content 仍包 { legacy_value }，新契约把展示文案提升为顶层 summary
+    const { item } = mapWorkOrderDto({
+      ...workOrderDto,
+      item_id: 'NOTIFICATION_6',
+      work_order_id: 5,
+      notification_id: 6,
+      title: '空间加入申请待审批',
+      summary: '有新的空间加入申请，请及时处理。',
+      content: { legacy_value: '用户「146836」申请加入空间「测试空间2」，请及时处理。' },
+    });
+    // summary 是与 content 同级的展示文案，替代 legacy_value
+    expect(item.content).toBe('有新的空间加入申请，请及时处理。');
+    expect(item.applicantName).toBeUndefined();
+  });
+
+  it('无顶层 summary 时回退既有合成链：legacy_value / 字符串 content 不受影响', () => {
+    const legacy = mapWorkOrderDto({
+      title: '空间加入申请已通过',
+      content: { legacy_value: '你加入空间「系统智能」的申请已通过。' },
+    }).item;
+    expect(legacy.content).toBe('你加入空间「系统智能」的申请已通过。');
+  });
+
+  it('工单详情 reviewer_user_name 映射为 reviewerUserName（展示名），null 归 undefined', () => {
+    const reviewed = mapWorkOrderDto({
+      work_order_id: 5,
+      event_type: 'SPACE_JOIN_APPLIED',
+      reviewer_user_id: '12345',
+      reviewer_user_name: '拓界',
+    }).item;
+    expect(reviewed.reviewerUserName).toBe('拓界');
+    const pending = mapWorkOrderDto({ reviewer_user_id: null, reviewer_user_name: null }).item;
+    expect(pending.reviewerUserName).toBeUndefined();
+    expect(pending.reviewerUserId).toBeUndefined();
+  });
+
   it('work_order_status 与 status 两种契约字段名都识别（详情用前者、列表用后者）', () => {
     expect(mapWorkOrderDto({ work_order_status: 'REJECTED' }).item.status).toBe('REJECTED');
     expect(mapWorkOrderDto({ status: 'PENDING' }).item.status).toBe('PENDING');

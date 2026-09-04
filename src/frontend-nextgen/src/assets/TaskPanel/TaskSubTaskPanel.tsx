@@ -58,6 +58,8 @@ const TaskLabelEffect: React.FC<{ task: TaskView; onLabel: (taskId: string, labe
 
 export interface TaskSubTaskPanelProps {
   apiBaseUrl: string;
+  // task API 路径前缀（不含 host），透传给内部 TaskPanelFetcher。
+  taskApiBase?: string;
   taskIds: string[];
   activeTaskId: string;
   onSelect: (taskId: string) => void;
@@ -68,6 +70,7 @@ type SubTaskTab = 'info' | 'artifacts' | 'progress';
 
 export const TaskSubTaskPanel: React.FC<TaskSubTaskPanelProps> = ({
   apiBaseUrl,
+  taskApiBase,
   taskIds,
   activeTaskId,
   onSelect,
@@ -180,7 +183,7 @@ export const TaskSubTaskPanel: React.FC<TaskSubTaskPanelProps> = ({
         })}
       </div>
 
-      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskId={activeTaskId}>
+      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskApiBase={taskApiBase} taskId={activeTaskId}>
         {({ task, loading, error, retry }) => {
           if (loading && !task) {
             return <Empty description="正在加载子任务…" minHeight={180} />;

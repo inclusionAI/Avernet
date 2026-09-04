@@ -13,6 +13,8 @@ import { TaskPanel, type TaskPanelProps } from './TaskPanel';
 
 type TaskPanelParams = {
   apiBaseUrl?: string;
+  // task API 路径前缀（不含 host）：由 empty.ts 副屏 wrapper 经 capability 解析注入；缺省走内面路径。
+  taskApiBase?: string;
   bcsBaseUrl?: string;
   userId?: string;
   taskId?: string;
@@ -57,6 +59,7 @@ export function TaskPanelAdapter({
   return (
     <TaskPanel
       apiBaseUrl={apiBaseUrl}
+      taskApiBase={p.taskApiBase}
       bcsBaseUrl={bcsBaseUrl}
       userId={p.userId}
       taskId={p.taskId}

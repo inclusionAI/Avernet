@@ -13,6 +13,13 @@ export interface BotChannel {
   enableStreamingCards: boolean;
   cardTemplateId?: string;
   cardTemplateKey?: string;
+  dmPolicy: 'open' | 'disabled';
+  allowlist: string[];
+  replyToMessage: boolean;
+  aixEnable: boolean;
+  includeSenderName: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 export interface BotChannelInput {
   description: string;
@@ -21,4 +28,9 @@ export interface BotChannelInput {
   enableStreamingCards: boolean;
   cardTemplateId: string;
   cardTemplateKey: string;
+  dmPolicy: 'open' | 'disabled';
+  allowlist: string[];
+  replyToMessage: boolean;
+  aixEnable: boolean;
+  includeSenderName: boolean;
 }

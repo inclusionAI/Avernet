@@ -6,6 +6,8 @@ const preset = PRESETS[presetName];
 if (!preset) throw new Error(`Unknown PRESET: ${presetName}`);
 
 const gateway = process.env.TEAMCLAW_GW_BASE || preset.servers.TEAMCLAW_GW;
+const bcsEndpointPre = process.env.BCS_ENDPOINT_PRE || preset.servers.BCS_ENDPOINT_PRE;
+const bcsEndpointProd = process.env.BCS_ENDPOINT_PROD || preset.servers.BCS_ENDPOINT_PROD;
 // Task APIs may be deployed as a dedicated service. Default to Gateway so a single-upstream
 // Open Core deployment remains runnable; operators can split it with TASK_ENGINE_UPSTREAM.
 const taskEngine = process.env.TASK_ENGINE_UPSTREAM || gateway;
@@ -25,8 +27,10 @@ export default defineConfig({
     '/openapi/v1/bots/work-order-notifications': proxy(admin),
     '/openapi/v1/bots/work-orders': proxy(admin),
     '/openapi/v1/bots/spaces': proxy(admin),
+    // 任务执行/进度/授权（openapi /openapi/v1/collaboration/tasks/**）：Open Core 统一走 openapi 前缀，
+    // 窄匹配须置于 /openapi 通用 catch-all 之前（umi proxy 按对象键插入顺序匹配）。
+    '/openapi/v1/collaboration/tasks': proxy(taskEngine, true),
     '/openapi': proxy(gateway, true),
-    '/api/v1/collaboration/tasks': proxy(taskEngine, true),
     '/api/v1/collaboration': proxy(gateway, true),
     '/api/workflows': proxy(clawweb),
     '/api': proxy(privateChatManagement),
@@ -41,6 +45,8 @@ export default defineConfig({
   define: {
     TEAMCLAW_DEV_ENV:
       presetName === 'prod' ? 'PROD' : presetName === 'pre' ? 'PRE' : presetName === 'dev' ? 'DEV' : 'LOCAL',
+    BCS_ENDPOINT_PRE: bcsEndpointPre,
+    BCS_ENDPOINT_PROD: bcsEndpointProd,
     TEAMCLAW_OPENAPI_USER_ID: '',
     TEAMCLAW_GW_BASE: gateway,
     TEAMCLAW_ADMIN_BASE: admin,

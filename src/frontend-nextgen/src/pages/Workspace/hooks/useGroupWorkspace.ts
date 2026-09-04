@@ -1,6 +1,7 @@
 import type { GroupKind, GroupView, IdentityView } from '@/domain/collaboration';
 import { groupService, type PolicyResult } from '@/services/workspace/groupService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useSelectedGroupDetail } from './useSelectedGroupDetail';
@@ -105,7 +106,9 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
         const res = await groupService.loadGroups(identity, { q, membership });
         if (res.ok) {
           setSessionGroups(res.data);
-        } else {
+        } else if (!shouldMuteNonAuthedToast()) {
+          // 未登录（oauth-provider + 非 authenticated）静默：会话失效后「加载协作群失败」
+          // 等业务 toast 噪音统一由 ExternalLoginPromptModal 承担（见 loginToastGate）。
           toast.error(res.error.friendlyMessage);
         }
       } finally {

@@ -351,6 +351,7 @@ describe('Agent Coding Bot card actions', () => {
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     expect(screen.getByText('开启服务化')).toBeInTheDocument();
     expect(screen.getByText('重启 Bot')).toBeInTheDocument();
+    expect(screen.getByLabelText('重启 Bot说明')).toBeInTheDocument();
     expect(screen.getByText('变更归属空间')).toBeInTheDocument();
     expect(screen.getByText('删除')).toBeInTheDocument();
     expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();

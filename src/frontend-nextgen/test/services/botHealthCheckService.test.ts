@@ -108,4 +108,53 @@ describe('botHealthCheckService', () => {
     expect(summary.healthScore).toBe(77);
     expect(summary.raw).toBeUndefined();
   });
+
+  test('preserves completed scan status and maps result_detail as the check conclusion', () => {
+    const summary = mapBotHealthSummary(
+      {
+        bot_id: 'b1',
+        entity_id: 'u1',
+        items: [
+          {
+            scan_dim: 'full:L1',
+            health_score: 30,
+            grade: 'critical',
+            status: 'completed',
+            failed_reason: null,
+            check_items: [
+              {
+                check_item: 'AGENTS.md',
+                status: 'completed',
+                result: 'fail',
+                result_detail: '缺少明确的安全边界',
+                score: 25,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        bot_id: 'b1',
+        entity_id: 'u1',
+        total: 0,
+        page: 1,
+        size: 20,
+        items: [],
+      },
+      { dimensions: ['configuration'], showRadar: false, showLogDetails: false, showRawSnapshot: false },
+    );
+
+    expect(summary.dimensions[0]).toMatchObject({
+      status: 'error',
+      scanStatus: 'completed',
+      failedReason: null,
+      checkItems: [
+        expect.objectContaining({
+          name: 'AGENTS.md',
+          resultDetail: '缺少明确的安全边界',
+          conclusion: '缺少明确的安全边界',
+        }),
+      ],
+    });
+  });
 });

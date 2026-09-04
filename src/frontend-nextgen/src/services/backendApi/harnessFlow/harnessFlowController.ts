@@ -116,6 +116,13 @@ export interface WorkflowListItem {
   updatedAt: number;
 }
 
+export interface FacadeBinding {
+  command: string;
+  workflowId: string;
+  packId: string | null;
+  remark: string | null;
+}
+
 export interface FlowRunsParams {
   status?: string;
   workflowId?: string;
@@ -191,6 +198,12 @@ export async function listWorkflows(botOwnerId?: string, botId?: string): Promis
 /** 获取 workflow 详情（含 facade.command，用于任务工作流触发命令）。 */
 export async function getWorkflowDetail(workflowId: string): Promise<WorkflowSpec> {
   return backendRequest<WorkflowSpec>(`${BASE}/workflows/${encodeURIComponent(workflowId)}`, {
+    method: 'GET',
+  });
+}
+
+export async function listFacadeBindings(): Promise<FacadeBinding[]> {
+  return backendRequest<FacadeBinding[]>(`${BASE}/facades`, {
     method: 'GET',
   });
 }

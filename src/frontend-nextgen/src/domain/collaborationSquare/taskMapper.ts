@@ -72,7 +72,8 @@ export function mapPublicTaskDto(dto: PublicTaskTransport): PublicTask | null {
  * | `PENDING` | `pending_claim` | 待认领 |
  * | `HUNG` | `pending_claim` | 无人承接，回收为待认领 |
  * | `RUNNING` | `claimed` | 已认领执行中 |
- * | `DONE` | `completed` | 已完成 |
+ * | `DONE` | `reviewing` | 已完成执行，待验收 |
+ * | `SUCCESS` | `completed` | 验收通过，已完成 |
  *
  * 其余未映射态（`CANCELLED`/`FAILED`/`PLANNING`/未知/缺失）→ `null`（丢弃，不入列）。
  * 对大小写与前后空白鲁棒（后端枚举通常大写，但防御性归一）。
@@ -85,6 +86,8 @@ export function mapBbsTaskStatus(raw: string | undefined): PlazaTaskStatus | nul
     case 'RUNNING':
       return 'claimed';
     case 'DONE':
+      return 'reviewing';
+    case 'SUCCESS':
       return 'completed';
     default:
       return null;
@@ -96,14 +99,16 @@ export function mapBbsTaskStatus(raw: string | undefined): PlazaTaskStatus | nul
  *
  * 后端 `status` 为单值（逗号多值 / 非法枚举 → 400），故 `pending_claim`（= PENDING 或 HUNG）目前仅映射
  * `PENDING`，HUNG 回收态暂不在该筛选下（待后端 `status` 支持逗号多值后再补 `PENDING,HUNG`）。`reviewing`
- * 无对应原始态（死状态，筛选项已下掉）→ `undefined`。`all` / 未知 → `undefined`（不下发 `status`，不过滤）。
+ * → `DONE`（待验收态筛选）；`completed` → `SUCCESS`。`all` / 未知 → `undefined`（不下发 `status`，不过滤）。
  */
 export function mapPlazaStatusToBbsStatus(status: TaskStatusFilter): string | undefined {
   switch (status) {
     case 'claimed':
       return 'RUNNING';
-    case 'completed':
+    case 'reviewing':
       return 'DONE';
+    case 'completed':
+      return 'SUCCESS';
     case 'pending_claim':
       return 'PENDING';
     default:
@@ -114,8 +119,9 @@ export function mapPlazaStatusToBbsStatus(status: TaskStatusFilter): string | un
 /**
  * 将 `extend_props.output` 提取为详情页展示文本：
  * - 字符串 → 去空白直用；
- * - 对象且有 string 型 `content` → 取 `content`（后端常见包装 `{content, extra}`，只展示内容文本）；
- * - 对象但无可用 content → 用整个 output 的 JSON 文本（不臆造其它字段名，原样序列化）；
+ * - 对象且含 string 型 `content` → 取 `content`（后端包装 `{content, extra}` 形态）；
+ * - 对象且含 string 型 `output` → 取 `output`（BBS 包装 `{output}` 形态）；
+ * - 对象但无可用 content/output → 用整个 output 的 JSON 文本（不臆造其它字段名，原样序列化）；
  * - null / undefined / 其它原始值 → `undefined`（不展示）。
  *
  * 详情页以纯文本展示（`whitespace-pre-wrap`），不做 markdown 渲染。
@@ -123,8 +129,11 @@ export function mapPlazaStatusToBbsStatus(status: TaskStatusFilter): string | un
 function toTaskOutputText(raw: unknown): string | undefined {
   if (typeof raw === 'string') return raw.trim() || undefined;
   if (raw !== null && typeof raw === 'object') {
-    const content = (raw as Record<string, unknown>).content;
+    const obj = raw as Record<string, unknown>;
+    const content = obj.content;
     if (typeof content === 'string') return content.trim() || undefined;
+    const output = obj.output;
+    if (typeof output === 'string') return output.trim() || undefined;
     const json = JSON.stringify(raw, null, 2);
     return json || undefined;
   }
@@ -150,8 +159,8 @@ function toTaskOutputText(raw: unknown): string | undefined {
  *   `resolveBotNames` 反查；复合 `bot_id:owner` 已在 `resolveBotNames` 内拆 realBotId 并按原始 id 回填）
  *   → `assignee_id`（兜底）；仅当有承接者（`assignee_id` 存在）时填。
  * - `claimedAt` ← `relay_begin_time`；仅当有承接者时填。
- * - `completedAt` ← `relay_end_time`；仅当 `status` 映射为 `completed`（即 DONE）时填。
- * - `output` ← `extend_props.output` 经 {@link toTaskOutputText} 提取为文本（有 string `content` 取 `content`，否则字符串直用/对象 JSON）；缺失/null → 不填。
+ * - `completedAt` ← `relay_end_time`；仅当 `status` 映射为 `completed`（即 SUCCESS）或 `reviewing`（即 DONE）时填。
+ * - `output` ← `extend_props.output` 经 {@link toTaskOutputText} 提取为文本（string 直用；对象含 string `content` 取 `content`、含 string `output` 取 `output`，否则对象 JSON）；缺失/null → 不填。
  */
 export function mapBbsTaskItemDto(
   dto: BbsTaskItem,
@@ -172,7 +181,7 @@ export function mapBbsTaskItemDto(
     ? dto.assignee_name?.trim() || assigneeNameMap[assigneeId] || assigneeId
     : undefined;
   const claimedAt = hasAssignee ? dto.relay_begin_time?.trim() : undefined;
-  const completedAt = status === 'completed' ? dto.relay_end_time?.trim() : undefined;
+  const completedAt = status === 'completed' || status === 'reviewing' ? dto.relay_end_time?.trim() : undefined;
   const output = toTaskOutputText(dto.extend_props?.output);
   const publisherName = dto.publisher_name?.trim() || undefined;
 

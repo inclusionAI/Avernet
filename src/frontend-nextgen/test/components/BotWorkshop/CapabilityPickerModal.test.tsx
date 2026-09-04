@@ -5,6 +5,12 @@ import '@testing-library/jest-dom';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+jest.mock('@/capabilities', () => ({
+  getCapabilities: () => ({
+    getBotSkillPickerSources: () => ({ status: 'available', value: ['market', 'workshop', 'mine'] }),
+  }),
+}));
+
 const skills = [
   { id: 'skill-1', name: '已添加 Skill', active: false },
   { id: 'skill-2', name: '可添加 Skill', active: false },

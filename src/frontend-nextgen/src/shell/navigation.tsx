@@ -75,10 +75,10 @@ export const navigationItems: NavigationItem[] = [
  * 保持原版菜单业务序「bot-workshop → 能力工坊 → 能力市场 → 管理后台」。
  * Open Core 形态下 capability 返回 []，结果 = Open Core 基线项。
  *
- * 形态级入口收敛：getShellVisibility().adminEntry=false（Open Core / 阿里云部署）时
- * 从合并结果剔除【管理后台】项。过滤单点在此处完成，基线 navigationItems 数组与
- * routeMeta 字面量保留不删（/admin 直访由 getRuntimeRouteRedirect 重定向兜底）。见
- * openspec open-core-shell-visibility-capability D3/D4。
+ * 形态级入口收敛：getShellVisibility().adminEntry=false 时从合并结果剔除【管理后台】项。
+ * Open Core（阿里云部署）默认 adminEntry=true——管理后台项展示；过滤单点仍按此开关收敛（预留未来形态），
+ * 基线 navigationItems 数组与 routeMeta 字面量保留不删（/admin 直访不再重定向，管理后台已开放）。
+ * 见 openspec open-core-shell-visibility-capability / avernet-admin-notification-reveal。
  */
 export function getMergedNavigationItems(): NavigationItem[] {
   const internal = getCapabilities().getInternalNavigationItems();

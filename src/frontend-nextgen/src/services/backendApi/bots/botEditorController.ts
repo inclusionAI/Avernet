@@ -314,7 +314,11 @@ export const botEditorController = {
   updateIdentityFile: (botId: string, type: string, content: string) =>
     request(path(botId, `identity/${type}`), 'PUT', {}, { content }),
   listChannels: (botId: string) =>
-    request<BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', { page: 1, page_size: 100, stage: 'draft' }),
+    request<ChannelDto[] | BackendApiPage<ChannelDto>>(path(botId, 'channels'), 'GET', {
+      page: 1,
+      page_size: 100,
+      stage: 'draft',
+    }),
   createChannel: (botId: string, body: BackendUnknownRecord) =>
     request<ChannelDto>(path(botId, 'channels'), 'POST', {}, body),
   updateChannel: (botId: string, channelId: number, body: BackendUnknownRecord) =>
@@ -322,6 +326,19 @@ export const botEditorController = {
   setChannelStatus: (botId: string, channelId: number, status: 'active' | 'inactive') =>
     request<ChannelDto>(path(botId, `channels/${channelId}/status`), 'PUT', {}, { status }),
   deleteChannel: (botId: string, channelId: number) => request(path(botId, `channels/${channelId}`), 'DELETE'),
+  getCallerContext: (botId: string) =>
+    request<{
+      editable: boolean;
+      mcp_call_types: Record<string, 'caller' | 'owner'>;
+      cli_call_types: Record<string, 'caller' | 'owner'>;
+    }>(path(botId, 'caller-context'), 'GET', { stage: 'draft' }),
+  updateMcpCallType: (botId: string, serverCode: string, callType: 'caller' | 'owner') =>
+    request<{ server_code: string; call_type: 'caller' | 'owner'; bot_call_type: 'caller' | 'owner' }>(
+      path(botId, `mcps/${encodeURIComponent(serverCode)}/call-type`),
+      'PATCH',
+      {},
+      { call_type: callType },
+    ),
   getEngineConfig: (botId: string) => request<BackendUnknownRecord>(path(botId, 'engine/config')),
   getEngineStatus: (botId: string) => request<EngineStatusDto>(path(botId, 'engine/status')),
   updateEngineConfig: (botId: string, body: BackendUnknownRecord) =>
@@ -329,8 +346,8 @@ export const botEditorController = {
   getApprovalConfig: (botId: string) => request<ApprovalConfigDto>(path(botId, 'lifecycle/approval')),
   updateApprovalConfig: (botId: string, enabled: boolean) =>
     request<ApprovalConfigDto>(path(botId, 'lifecycle/approval'), 'PUT', {}, { should_approval: enabled }),
-  listRenderScreens: (botId: string) =>
-    request<{ total: number; items: RenderScreenDto[] }>(path(botId, 'render-screens')),
+  listRenderScreens: (botId: string, ownerId?: string) =>
+    request<{ total: number; items: RenderScreenDto[] }>(path(botId, 'render-screens'), 'GET', { owner_id: ownerId }),
   createRenderScreen: (botId: string, body: { name: string; cdn_url: string }) =>
     request<RenderScreenDto>(path(botId, 'render-screens'), 'POST', {}, body),
   updateRenderScreen: (botId: string, id: number, body: { name: string; cdn_url: string }) =>

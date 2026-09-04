@@ -1,8 +1,8 @@
 // @asset-migrated: teamclaw 自研资产
 /**
  * TaskPanelFetcher —— 任务副屏轮询内核（路 A 自管）。
- * - 数据流：从 params.{apiBaseUrl, taskId} 取参，组件内 raw fetch，不自读 config / 不依赖 taskService。
- * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发 dashboard 到对应网关。
+ * - 数据流：由上层 wrapper 透传 {apiBaseUrl(host), taskApiBase(路径前缀), taskId}，组件内 raw fetch，不自读 config / 不依赖 taskService / 不反查 capability。
+ * - apiBaseUrl 为 '' 时走相对路径，由当前环境代理转发；taskApiBase 缺省回退内面 /api/v1。
  * - 轮询：图级 status 非终态时 setTimeout 重排（默认 1000ms）；产品态 DONE/FAILED/REVIEWING/CANCELLED 停，兼容旧 HUNG。
  * - 取消：AbortController，切 taskId / 卸载时 abort。
  * - 日志：include_action_log 默认 false（日志抽屉打开时由上层单独请求，P0 常规轮询不携带）。
@@ -28,6 +28,9 @@ function joinUrl(baseUrl: string, path: string): string {
 
 export interface TaskPanelFetcherProps {
   apiBaseUrl: string;
+  // task API 路径前缀（不含 host）：Open Core /openapi/v1/collaboration/tasks、内部 /api/v1/collaboration/tasks。
+  // 由 app-level 经 capability 解析透传，缺省回退内面路径（向后兼容纯 assets 渲染）。
+  taskApiBase?: string;
   taskId: string;
   userId?: string;
   includeActionLog?: boolean;
@@ -42,6 +45,7 @@ export interface TaskPanelFetcherProps {
 
 export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
   apiBaseUrl,
+  taskApiBase = '/api/v1/collaboration/tasks',
   taskId,
   userId,
   includeActionLog = false,
@@ -71,7 +75,7 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
       try {
         const url = joinUrl(
           apiBaseUrl,
-          `/api/v1/collaboration/tasks/list?user_id=${encodeURIComponent(userId)}&page=1&page_size=100`,
+          `${taskApiBase}/list?user_id=${encodeURIComponent(userId)}&page=1&page_size=100`,
         );
         const response = await fetch(url, { credentials: 'include' });
         if (!response.ok) return;
@@ -116,7 +120,7 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrl, taskId, userId]);
+  }, [apiBaseUrl, taskApiBase, taskId, userId]);
 
   const fetchDashboard = useCallback(
     async (mode: 'initial' | 'refresh') => {
@@ -135,7 +139,7 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
       try {
         const url = joinUrl(
           apiBaseUrl,
-          `/api/v1/collaboration/tasks/dashboard?task_id=${encodeURIComponent(taskId)}&include_action_log=${
+          `${taskApiBase}/dashboard?task_id=${encodeURIComponent(taskId)}&include_action_log=${
             includeActionLog ? 'true' : 'false'
           }`,
         );
@@ -172,7 +176,7 @@ export const TaskPanelFetcher: React.FC<TaskPanelFetcherProps> = ({
         }
       }
     },
-    [apiBaseUrl, taskId, includeActionLog],
+    [apiBaseUrl, taskApiBase, taskId, includeActionLog],
   );
 
   // 首帧 + taskId/baseUrl 变更重置

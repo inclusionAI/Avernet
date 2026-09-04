@@ -130,6 +130,9 @@ export interface BotEngineOption {
   label: string;
 }
 
+/** Bot 编辑页添加 Skill 时允许展示的来源。 */
+export type BotSkillPickerSource = 'market' | 'workshop' | 'mine';
+
 /** 仅 Internal Overlay 提供的 Agent Coding 外部资源；Open Core 全部为 null。 */
 export interface AgentCodingInternalResources {
   templateFactoryUrl: string | null;
@@ -180,6 +183,19 @@ export interface ShellVisibility {
   notificationBell: boolean;
 }
 
+/**
+ * 管理后台页内分区（Tab）形态级可见性（见 `getAdminSections` capability）。
+ * - `spaces`：【空间管理】Tab（空间卡片/创建/成员管理视图）
+ * - `workOrders`：【工单中心】Tab
+ * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后，
+ * 仅暴露工单中心，空间管理 Tab 收敛（空间数据链路不受影响）；internal overlay 覆盖为全 true。
+ * 消费方（`src/pages/Admin`）按本结果过滤 Tab 与默认/深链回退，MUST NOT 以 `if (isInternal)` 替代。
+ */
+export interface AdminSections {
+  spaces: boolean;
+  workOrders: boolean;
+}
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -228,6 +244,13 @@ export interface AppCapabilities {
    */
   getLoginStrategy: () => CapabilityResult<LoginStrategy>;
   /**
+   * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
+   * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；
+   * internal overlay 覆盖为 `/api/v1/collaboration/tasks`（内面，不经 spanner，内部网关直连 task 引擎）。
+   * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
+   */
+  getTaskApiBase: () => CapabilityResult<string>;
+  /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2
    * 「导航中的内部入口」必须按开源模式分隔的强约束）；
@@ -252,6 +275,8 @@ export interface AppCapabilities {
    * 是后端契约事实，MUST 保留全量，不随本清单收窄。
    */
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
+  /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
+  getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
@@ -265,10 +290,24 @@ export interface AppCapabilities {
    */
   getPersonalSpaceInitOptions: () => CapabilityResult<PersonalSpaceInitOptions>;
   /**
+   * 外部部署版本的 Bot 自助接入入口。Open Core 默认开启；internal overlay 覆盖为 false。
+   * 同步签名，组件仅消费可见性，不感知部署环境。
+   */
+  getBotRegistrationEnabled: () => CapabilityResult<boolean>;
+  /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
-   * Open Core（阿里云部署）默认三项全 false（defaultCapabilities）；
+   * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`
+   * （defaultCapabilities：展示管理后台与通知中心，不展示侧栏空间切换器）；
    * internal overlay 经 `src/extensions/internal.ts` 覆盖为全 true——内部形态渲染结果与改造前一致。
    * 同步签名，不发请求。消费方（navigation / SidebarNavList / AppHeader）不得以 `if (isInternal)` 替代。
    */
   getShellVisibility: () => CapabilityResult<ShellVisibility>;
+  /**
+   * 管理后台页内分区（Tab）可见性（空间管理 / 工单中心，见 `AdminSections`）。
+   * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后仅暴露工单中心，
+   * 空间管理 Tab 收敛；internal overlay 经 `src/extensions/internal.ts` 覆盖为 `{ spaces:true, workOrders:true }`，
+   * 内部形态两 Tab 均在（与改造前一致）。同步签名，不发请求。
+   * 消费方（`src/pages/Admin/index.tsx`）按本结果过滤 Tab、选择默认 Tab 并对隐藏/非法 `?tab=` 深链回落首项。
+   */
+  getAdminSections: () => CapabilityResult<AdminSections>;
 }

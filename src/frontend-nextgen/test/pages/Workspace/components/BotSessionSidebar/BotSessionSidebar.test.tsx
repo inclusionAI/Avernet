@@ -430,4 +430,46 @@ describe('BotSessionSidebar', () => {
     // 切到已收藏 tab，无收藏会话时不显示会话1
     expect(screen.queryByText('会话1')).not.toBeInTheDocument();
   });
+
+  it('接口返回 AgentCoding Bot 时展示 Bot 工坊入口卡片', () => {
+    const onOpenBotWorkshop = jest.fn();
+    render(
+      <BotSessionSidebar
+        view="chat"
+        availableViews={['chat', 'group']}
+        onViewChange={() => {}}
+        identities={[{ id: 'identity:me', name: '风太', kind: 'user', avatar: '风' }]}
+        activeIdentityId="identity:me"
+        chatBots={bots}
+        friendBots={[]}
+        isMyBotsLoading={false}
+        isFriendBotsLoading={false}
+        expandedBotSectionKey={{}}
+        expandedBotIds={{}}
+        sessionsByBotId={{}}
+        isSessionsLoading={false}
+        selectedBotSessionId={null}
+        onToggleBotExpanded={() => {}}
+        onSelectSession={() => {}}
+        onCreateSession={() => {}}
+        onDeleteSession={noopBool}
+        onRenameSession={noopBool}
+        onClearSessionContext={noopBool}
+        onToggleFavorite={noopBool}
+        onLoadFavorites={noopAsync}
+        hasAgentCodingBots
+        onOpenBotWorkshop={onOpenBotWorkshop}
+        onCreateGroup={noop}
+        onAddFriend={noop}
+      />,
+    );
+
+    const workshopCard = screen.getByRole('button', { name: 'AgentCoding Bot 请前往 Bot 工坊使用' });
+    expect(workshopCard).toHaveClass('bg-primary/5', 'border-primary/20');
+    fireEvent.click(workshopCard);
+    expect(onOpenBotWorkshop).toHaveBeenCalledTimes(1);
+
+    expect(screen.queryByRole('img', { name: 'AgentCoding Bot 使用说明' })).not.toBeInTheDocument();
+    expect(workshopCard).toHaveClass('cursor-pointer');
+  });
 });

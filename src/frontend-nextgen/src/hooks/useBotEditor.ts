@@ -31,6 +31,9 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
   const [engineStatus, setEngineStatus] = useState<BotEditorEngineStatus>();
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [routineRuns, setRoutineRuns] = useState<BotEditorRoutineRun[]>([]);
+  const [mcpCallTypes, setMcpCallTypes] = useState<Record<string, 'caller' | 'owner'>>({});
+  const [callerContextEditable, setCallerContextEditable] = useState(false);
+  const [updatingCallType, setUpdatingCallType] = useState<string>();
   const [loading, setLoading] = useState(Boolean(botId));
   const load = useCallback(async () => {
     if (!botId || !enabled) return;
@@ -46,6 +49,14 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
       setEngineConfig(data.engineConfig);
       setEngineStatus(data.engineStatus);
       setApprovalRequired(data.approvalRequired);
+      if (serviceBot) {
+        const callerContext = await botEditorService.getCallerContext(botId).catch(() => undefined);
+        setMcpCallTypes(callerContext?.mcpCallTypes ?? {});
+        setCallerContextEditable(callerContext?.editable ?? false);
+      } else {
+        setMcpCallTypes({});
+        setCallerContextEditable(false);
+      }
       if (data.errors) toast.warning(`${data.errors} 个配置模块暂时无法加载`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '编辑配置加载失败');
@@ -173,6 +184,22 @@ export function useBotEditor(botId: string | null, serviceBot = false, spaceId?:
         () => botEditorService.setSkillSetMcp(botId!, setId, serverCode, active),
         active ? 'MCP 已加入能力集' : 'MCP 已移出能力集',
       ),
+    mcpCallTypes,
+    callerContextEditable,
+    updatingCallType,
+    updateMcpCallType: async (serverCode: string, callType: 'caller' | 'owner') => {
+      setUpdatingCallType(serverCode);
+      try {
+        const applied = await botEditorService.updateMcpCallType(botId!, serverCode, callType);
+        setMcpCallTypes((current) => ({ ...current, [serverCode]: applied }));
+        toast.success('调用身份已更新');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '调用身份更新失败');
+        throw error;
+      } finally {
+        setUpdatingCallType(undefined);
+      }
+    },
     loadResourceDirectory: async (directory: string) => {
       setResourceLoadingPaths((current) => [...new Set([...current, directory])]);
       try {

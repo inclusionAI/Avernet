@@ -226,20 +226,22 @@ export function parseCheckItems(value: unknown): BotHealthCheckItem[] | undefine
           : ['scanning', 'running', 'patching', 'pending'].includes(rawStatus.toLowerCase())
           ? 'scanning'
           : 'unknown';
+      const resultDetail =
+        pickString(record.result_detail) ?? pickString(record.resultDetail) ?? pickString(record.detail) ?? null;
       return {
         name,
         checkItem: pickString(record.check_item) ?? name,
         note: pickString(record.note),
         status,
         result,
-        resultDetail:
-          pickString(record.result_detail) ?? pickString(record.resultDetail) ?? pickString(record.detail) ?? null,
+        resultDetail,
         score: pickNumber(record.score ?? record.health_score ?? record.value),
         repairSuggestion:
           pickString(record.repair_suggestion) ?? pickString(record.repairSuggestion) ?? pickString(record.suggestion),
         riskLevel: pickString(record.risk_level) ?? pickString(record.riskLevel),
         evidence: normalizeEvidence(record.evidence),
         conclusion:
+          resultDetail ??
           pickString(record.conclusion) ??
           pickString(record.description) ??
           pickString(record.message) ??

@@ -1,2 +1,7 @@
-export { taskEscortService } from './taskEscortService';
-export type { FlowRunDetail, NodeExecution } from './taskEscortService';
+export { WorkflowImportValidationError, taskEscortService } from './taskEscortService';
+export type {
+  CreateWorkflowFromYamlInput,
+  FlowRunDetail,
+  NodeExecution,
+  WorkflowImportErrorField,
+} from './taskEscortService';

@@ -270,6 +270,11 @@ describe('GroupSessionView root session fallback', () => {
         expect.stringContaining('/openapi/v1/collaboration/sessions/bcs_grp_root%3Around-1/messages'),
         expect.objectContaining({ credentials: 'include' }),
       );
+      // 群内无本人 owned bot → 省略 view_bot_id,用认证 Human Actor 视角拉取(后端按名册校验)
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.not.stringContaining('view_bot_id'),
+        expect.objectContaining({ credentials: 'include' }),
+      );
     } finally {
       global.fetch = originalFetch;
     }

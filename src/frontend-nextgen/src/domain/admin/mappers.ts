@@ -34,6 +34,7 @@ const UNKNOWN_SUFFIX = 'UNKNOWN' as const;
 function synthesizeContentDisplay(contentObj: BackendUnknownRecord): string {
   // NOTICE 类详情（如 SPACE_JOIN_REVIEWED）content 形如 { legacy_value: "你加入空间「X」的申请已通过。" }，
   // legacy_value 已是后端合成好的展示文案，直接透传，避免落到 space_name/reason 分支返回空串。
+  // 注：新契约下展示文案优先取顶层 summary（见 mapWorkOrderDto），legacy_value 仅作旧 payload 兜底。
   const legacy = asString(contentObj.legacy_value);
   if (legacy) return legacy;
   const spaceName = asString(contentObj.space_name);
@@ -158,6 +159,8 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
       ? synthesizeContentDisplay(contentObj)
       : '';
   const contentRaw = contentObj ? JSON.stringify(contentObj, null, 2) : undefined;
+  // 列表/详情均有顶层 summary（与 content 同级，后端合成好的展示文案）：有则优先，替代 content.legacy_value。
+  const summary = asString(dto.summary);
   // apply_reason / applicant_* 在详情里藏在 content 内，在列表里位于顶层；顶层优先、对象兜底。
   const applyReason = asString(dto.apply_reason) ?? (contentObj ? asString(contentObj.reason) : undefined);
   const applicantUserId =
@@ -182,12 +185,13 @@ export function mapWorkOrderDto(dto: BackendUnknownRecord): { item: WorkOrder; w
     applicantName,
     applyReason,
     reviewerUserId: asString(dto.reviewer_user_id),
+    reviewerUserName: asString(dto.reviewer_user_name),
     reviewRemark: asString(dto.review_remark),
     reviewedAt: asString(dto.reviewed_at),
     recipientUserId: asString(dto.recipient_user_id),
     eventType: eventType ?? '',
     title: asString(dto.title) ?? '',
-    content: contentDisplay,
+    content: summary ?? contentDisplay,
     contentRaw,
     status,
     statusLabel: WORK_ORDER_STATUS_LABEL[status],

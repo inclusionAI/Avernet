@@ -202,15 +202,35 @@ function toOwnedBotView(dto: OwnedBotDto): ChatBotView {
   };
 }
 
+async function fetchOwnedBots(
+  userId: string,
+): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
+  try {
+    const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
+    const items = (resp.data?.items ?? []).map(toOwnedBotView);
+    // 对话协作的「已管理 Bot」只展示可直接走普通单聊的 Bot；AgentCoding
+    // Bot 有独立消费入口，不应在这里抢占右侧对话面板。普通 CC 仍由运行时分类保留。
+    return {
+      ok: true,
+      data: {
+        bots: items.filter((bot) => !bot.isAgentCodingBot),
+        hasAgentCodingBots: items.some((bot) => bot.isAgentCodingBot),
+      },
+    };
+  } catch (e) {
+    return { ok: false, error: toDomainError(e) };
+  }
+}
+
 export const botSessionService = {
   async listOwnedBots(userId: string): Promise<DomainResult<ChatBotView[]>> {
-    try {
-      const resp = await listOwnedBotsApi({ user_id: resolveUserId(userId), page: 1, page_size: 100 });
-      const items = (resp.data?.items ?? []).map(toOwnedBotView);
-      return { ok: true, data: items };
-    } catch (e) {
-      return { ok: false, error: toDomainError(e) };
-    }
+    const result = await fetchOwnedBots(userId);
+    return result.ok ? { ok: true, data: result.data.bots } : result;
+  },
+  async listOwnedBotsWithMeta(
+    userId: string,
+  ): Promise<DomainResult<{ bots: ChatBotView[]; hasAgentCodingBots: boolean }>> {
+    return fetchOwnedBots(userId);
   },
   async listSessionsPage(
     bot: ChatBotView,
@@ -344,7 +364,7 @@ export const botSessionService = {
 
   async listModels(bot: ChatBotView, userId: string): Promise<DomainResult<BotModelView[]>> {
     try {
-      const params = { user_id: resolveUserId(userId), page: 1, page_size: 50 };
+      const params = { user_id: resolveUserId(userId), owner_id: bot.ownerId, page: 1, page_size: 50 };
       const resp = await listBotModels(bot.realBotId, params);
       return { ok: true, data: (resp.data?.items ?? []).map(toModelView) };
     } catch (e) {

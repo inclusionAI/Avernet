@@ -1,7 +1,9 @@
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE, botSessionService } from '@/services/workspace/botSessionService';
+import { appendUnique } from '@/services/workspace/botSessionHelpers';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDirectSessionFallback } from './useDirectSessionFallback';
 
 export interface BotSessionPageMeta {
   total: number;
@@ -23,11 +25,6 @@ export interface UseBotSessionMapResult {
   loadMoreSessions: (bot: ChatBotView, userId: string, mode: 'all' | 'favorite') => Promise<void>;
   /** 按 section 展开 bot，记录归属 section 并懒加载会话。 */
   toggleBotExpanded: (botId: string, sectionKey?: string) => void;
-}
-
-function appendUnique(current: BotChatSessionView[], incoming: BotChatSessionView[]): BotChatSessionView[] {
-  const existingIds = new Set(current.map((session) => session.sessionId));
-  return [...current, ...incoming.filter((session) => !existingIds.has(session.sessionId))];
 }
 
 function hasMoreForPage(itemCount: number, total: number, page: number): boolean {
@@ -113,6 +110,8 @@ export function useBotSessionMap(
       void loadFirstPage(bot, activeIdentityId);
     }
   }, [activeIdentityId, chatBots, expandedBotIds, loadFirstPage]);
+
+  useDirectSessionFallback(activeIdentityId, chatBots, expandedBotIds, rawByBotId, setRawByBotId, loadedRef);
 
   const updateBotSessions = useCallback(
     (botId: string, fn: (list: BotChatSessionView[]) => BotChatSessionView[]) =>

@@ -189,6 +189,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               channels={advanced.channels}
               editable={editable}
               onCreate={advanced.createChannel}
+              onUpdate={advanced.updateChannel}
               onToggle={advanced.toggleChannel}
               onDelete={advanced.deleteChannel}
             />
@@ -228,6 +229,10 @@ const BotWorkshopDetailPage: React.FC = () => {
               onUploadSkillFolder={editor.uploadSkillFolder}
               onLoadCandidates={editor.loadCapabilityCandidates}
               onMcp={editor.setSkillSetMcp}
+              mcpCallTypes={editor.mcpCallTypes}
+              callerContextEditable={editor.callerContextEditable}
+              updatingCallType={editor.updatingCallType}
+              onMcpCallType={editor.updateMcpCallType}
             />
           ) : tab === 'resource' ? (
             <ResourcePanel

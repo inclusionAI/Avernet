@@ -16,6 +16,7 @@ interface EnvironmentPanelProps {
   loading?: boolean;
   checking?: boolean;
   history: BotHealthHistoryItem[];
+  showHistoryDetails: boolean;
   onViewHistoryDetail: (item: BotHealthHistoryItem) => void;
   onReDiagnose: () => void;
 }
@@ -25,10 +26,15 @@ export function EnvironmentPanel({
   loading,
   checking,
   history,
+  showHistoryDetails,
   onViewHistoryDetail,
   onReDiagnose,
 }: EnvironmentPanelProps) {
-  const dimStyle = DIM_STATUS_STYLES[dimension.status] ?? { label: '未知', tone: 'neutral' as const };
+  const scanFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
+  const dimStyle = DIM_STATUS_STYLES[scanFailed ? 'failed' : dimension.status] ?? {
+    label: '未知',
+    tone: 'neutral' as const,
+  };
   const hasCheckItems = (dimension.checkItems?.length ?? 0) > 0;
   const showBadge = dimension.key === 'configuration' || hasCheckItems;
 
@@ -86,7 +92,7 @@ export function EnvironmentPanel({
         <Card className="rounded-xl">
           <CardContent className="py-5 text-center">
             <div className="text-2xl font-semibold text-[var(--color-error)]">{dimension.errorCount ?? 0}</div>
-            <div className="mt-1 text-xs text-[var(--color-muted)]">错误</div>
+            <div className="mt-1 text-xs text-[var(--color-muted)]">未通过</div>
           </CardContent>
         </Card>
       </div>
@@ -95,7 +101,7 @@ export function EnvironmentPanel({
 
       <OptimizationPanel dimension={dimension} />
 
-      <HistoryTable history={history} onViewDetail={onViewHistoryDetail} />
+      <HistoryTable history={history} showDetails={showHistoryDetails} onViewDetail={onViewHistoryDetail} />
     </div>
   );
 }

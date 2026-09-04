@@ -130,6 +130,14 @@ describe('TaskCard', () => {
     expect(screen.getByText(/完成时间：2026-08-14 17:20/)).toBeInTheDocument();
   });
 
+  test('待验收任务（带 completedAt）展示「开始验收时间」而非「完成时间」', () => {
+    const task: PublicTask = { ...reviewingTask, completedAt: '2026-08-18T12:00:00' };
+    render(<TaskCard task={task} onOpenDetail={jest.fn()} />);
+    expect(screen.getByText('待验收')).toBeInTheDocument();
+    expect(screen.getByText(/开始验收时间：2026-08-18 12:00/)).toBeInTheDocument();
+    expect(screen.queryByText(/完成时间/)).not.toBeInTheDocument();
+  });
+
   test('点击 goal 调用 onOpenDetail 并传入完整任务', async () => {
     const user = userEvent.setup();
     const onOpenDetail = jest.fn();

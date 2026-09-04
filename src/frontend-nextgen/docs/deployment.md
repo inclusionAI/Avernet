@@ -10,16 +10,18 @@ The public `@tc-chat/ui@2.0.0` package and its `@ant-design/x` dependency requir
 
 The container refuses to start until all variables are provided:
 
-| Variable                           | Existing frontend route responsibility                                   |
-| ---------------------------------- | ------------------------------------------------------------------------ |
-| `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                               |
-| `TASK_ENGINE_UPSTREAM`             | `/api/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
-| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and non-task `/api/v1/collaboration/*`                      |
-| `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below       |
-| `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                         |
-| `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                             |
-| `CLAWWEB_UPSTREAM`                 | `/api/workflows*`                                                        |
-| `AIXCORE_UPSTREAM`                 | `/aixcore/*`                                                             |
+| Variable                           | Existing frontend route responsibility                                       |
+| ---------------------------------- | ---------------------------------------------------------------------------- |
+| `BCS_AUTH_UPSTREAM`                | BCS `/auth/*` OAuth routes                                                   |
+| `TASK_ENGINE_UPSTREAM`             | `/openapi/v1/collaboration/tasks/*` task execute/dashboard/list/grant/revoke |
+| `TEAMCLAW_GATEWAY_UPSTREAM`        | `/openapi/*` and non-task `/api/v1/collaboration/*`                          |
+| `TEAMCLAW_ADMIN_UPSTREAM`          | Reserved for the separately deployed admin service; see note below           |
+| `PRIVATE_CHAT_MANAGEMENT_UPSTREAM` | `/api/*` private-chat management                                             |
+| `PRIVATE_CHAT_SESSION_UPSTREAM`    | `/proxypass/*` and WebSocket                                                 |
+| `CLAWWEB_UPSTREAM`                 | `/api/workflows*`                                                            |
+| `AIXCORE_UPSTREAM`                 | `/aixcore/*`                                                                 |
+| `BCS_ENDPOINT_PRE`                 | Bot registration command endpoint for pre-production                         |
+| `BCS_ENDPOINT_PROD`                | Bot registration command endpoint for production                             |
 
 Values must be absolute upstream origins understood by Nginx, for example an internal service-discovery URL. Repository examples deliberately do not provide real domains or credentials.
 

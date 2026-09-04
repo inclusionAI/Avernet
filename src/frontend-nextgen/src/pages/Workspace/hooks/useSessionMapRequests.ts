@@ -1,6 +1,7 @@
 import type { GroupSessionPage, SessionView } from '@/domain/collaboration';
 import { groupService } from '@/services/workspace/groupService';
 import type { DomainError } from '@/services/workspace/identityService';
+import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { toast } from 'sonner';
 import { useExpandedGroupSessionRequests } from './useExpandedGroupSessionRequests';
@@ -39,6 +40,9 @@ interface UseSessionMapRequestsOptions {
 }
 
 function notifyError(err: DomainError): void {
+  // 未登录（oauth-provider + 非 authenticated）静默：会话失效后的 sessions 加载失败 toast
+  // 统一由 ExternalLoginPromptModal 承担（见 loginToastGate）；已登录 / ace-gateway 照常提示。
+  if (shouldMuteNonAuthedToast()) return;
   toast.error(err.friendlyMessage);
 }
 

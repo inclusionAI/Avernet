@@ -39,6 +39,8 @@ const leftRailStyle: React.CSSProperties = {
 
 export interface TaskPanelProps {
   apiBaseUrl: string;
+  // task API 路径前缀：Open Core /openapi、内部 /api（不含 host），由上层经 capability 透传。
+  taskApiBase?: string;
   bcsBaseUrl?: string;
   userId?: string;
   taskId: string;
@@ -54,6 +56,7 @@ export interface TaskPanelProps {
 
 export const TaskPanel: React.FC<TaskPanelProps> = ({
   apiBaseUrl,
+  taskApiBase,
   bcsBaseUrl = '',
   userId,
   taskId,
@@ -103,7 +106,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   return (
     <>
       <GlobalKeyframes />
-      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskId={taskId} userId={userId}>
+      <TaskPanelFetcher apiBaseUrl={apiBaseUrl} taskApiBase={taskApiBase} taskId={taskId} userId={userId}>
         {({ task, loading, error, retry }) => {
           const resolvedTask = task
             ? {
@@ -144,6 +147,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
                 <aside style={leftRailStyle}>
                   <TaskSubTaskPanel
                     apiBaseUrl={apiBaseUrl}
+                    taskApiBase={taskApiBase}
                     taskIds={subTaskIds}
                     activeTaskId={activeSubTaskId}
                     onSelect={setActiveSubTaskId}

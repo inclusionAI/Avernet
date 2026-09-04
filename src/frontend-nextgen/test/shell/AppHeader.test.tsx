@@ -67,9 +67,9 @@ describe('AppHeader 通知中心门控（getShellVisibility.notificationBell）'
       />,
     );
 
-  it('Open Core 默认（notificationBell=false）：不渲染通知铃铛，HelpMenu/AccountBadge 保留', () => {
+  it('Open Core 默认（notificationBell=true）：渲染通知铃铛，HelpMenu/AccountBadge 保留', () => {
     renderHeader();
-    expect(screen.queryByTestId('notification-bell')).not.toBeInTheDocument();
+    expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
     expect(screen.getByTestId('help-menu')).toBeInTheDocument();
     expect(screen.getByTestId('account-badge')).toBeInTheDocument();
   });

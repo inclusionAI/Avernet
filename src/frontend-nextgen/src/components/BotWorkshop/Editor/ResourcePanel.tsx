@@ -4,7 +4,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import type { BotEditorResource } from '@/domain/botEditor';
+import type { BotEditorResource, BotEditorResourcePreview } from '@/domain/botEditor';
 import {
   ChevronDown,
   ChevronRight,
@@ -17,7 +17,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 function formatBytes(size: number) {
   if (size < 1024) return `${size} B`;
@@ -58,19 +58,29 @@ export function ResourcePanel({
   onCreateDirectory: (path: string) => Promise<void>;
   onDelete: (path: string) => Promise<void>;
   onUpload: (path: string, file: File) => Promise<void>;
-  onPreview: (path: string) => Promise<string>;
+  onPreview: (path: string) => Promise<BotEditorResourcePreview>;
   onDownload: (path: string, type: BotEditorResource['type']) => Promise<void>;
   onLoadDirectory: (path: string) => Promise<void>;
   loadingPaths: string[];
 }) {
   const [path, setPath] = useState('');
-  const [preview, setPreview] = useState<{ path: string; content: string }>();
+  const [preview, setPreview] = useState<{ path: string; result: BotEditorResourcePreview }>();
+  const [previewImageUrl, setPreviewImageUrl] = useState('');
   const [directory, setDirectory] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [expanded, setExpanded] = useState<string[]>([]);
   const [loaded, setLoaded] = useState<string[]>([]);
   const uploadRef = useRef<HTMLInputElement>(null);
   const visibleResources = useMemo(() => buildVisibleResourceTree(resources, expanded), [expanded, resources]);
+  useEffect(() => {
+    if (preview?.result.kind !== 'image') {
+      setPreviewImageUrl('');
+      return undefined;
+    }
+    const url = URL.createObjectURL(preview.result.blob);
+    setPreviewImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [preview]);
   return (
     <div className="p-5 sm:p-6">
       <Card>
@@ -177,7 +187,7 @@ export function ResourcePanel({
                       aria-label={`预览${item.name}`}
                       leftIcon={<Eye className="size-4" />}
                       onClick={() =>
-                        void onPreview(item.path).then((content) => setPreview({ path: item.path, content }))
+                        void onPreview(item.path).then((result) => setPreview({ path: item.path, result }))
                       }
                     />
                   ) : null}
@@ -209,7 +219,19 @@ export function ResourcePanel({
                   关闭预览
                 </Button>
               </div>
-              <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{preview.content}</pre>
+              {preview.result.kind === 'image' ? (
+                previewImageUrl ? (
+                  <div className="flex max-h-[480px] justify-center overflow-auto rounded-lg bg-background p-3">
+                    <img
+                      src={previewImageUrl}
+                      alt={preview.path.split('/').pop() || '资源图片预览'}
+                      className="max-h-[440px] max-w-full object-contain"
+                    />
+                  </div>
+                ) : null
+              ) : (
+                <pre className="m-0 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{preview.result.content}</pre>
+              )}
             </Card>
           ) : null}
         </CardContent>

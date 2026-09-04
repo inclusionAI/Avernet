@@ -1,8 +1,14 @@
+import { getCapabilities } from '@/capabilities';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
+/** 解析 task API 路径前缀；capability 缺省回退内面 /api/v1。 */
+function taskApiBase(): string {
+  return getCapabilities().getTaskApiBase().value ?? '/api/v1/collaboration/tasks';
+}
+
 /**
- * BBS 接力公开任务列表项（GET /api/v1/collaboration/tasks/bbs/list 的 data 数组元素）。
+ * BBS 接力公开任务列表项（GET {taskApiBase}/bbs/list 的 data 数组元素）。
  *
  * 后端已二次解析出 `title`/`goal`/`acceptances`（来自 `task_spec`）：
  * - `title` 解析自 `task_spec.metadata.title`；
@@ -75,14 +81,16 @@ export interface ListBbsTasksParams {
 }
 
 export const BBS_TASK_ENDPOINTS = {
-  list: '/api/v1/collaboration/tasks/bbs/list',
+  list: 'bbs/list',
 };
 
 /**
  * 查询跨用户公开的 BBS 接力任务列表（1-based 分页 + 可选 status / search_word 过滤；`total` 为过滤后行数）。
  *
- * 端点走 `/api/v1` 内部面，与协作广场其它真实接口同层（`backendRequest`）。不注入 `user_id`：该端点全量返回
- * 公开任务，按会话态鉴权，无 owner 视图参数，与协作广场公开 Bot/群目录一致（`injectUserId: false`）。
+ * 端点前缀由 capability getTaskApiBase 注入（Open Core /openapi/v1/collaboration/tasks，后端将公开 bbs openapi；
+ * internal /api/v1/collaboration/tasks 内面）。与协作广场其它真实接口同层（`backendRequest`）。
+ * 不注入 `user_id`:该端点全量返回公开任务，按会话态鉴权，无 owner 视图参数，
+ * 与协作广场公开 Bot/群目录一致（`injectUserId: false`）。
  * 查询参数经 `backendRequest` 的 `params` 以 query string 下发（调用方按需构造，避免下发 undefined）。
  * ACE 登录拦截体由 httpClient 抛 AceLoginRedirectError；非 2xx 抛 BackendRequestError；
  * code != 200000 / 非信封形状交由 adapter 校验并经 mapListError 归一，controller 保持薄出口。
@@ -91,7 +99,7 @@ export async function listBbsTasks(
   params: ListBbsTasksParams = {},
   signal?: AbortSignal,
 ): Promise<BbsTaskListResponse> {
-  const response = await backendRequest<unknown>(BBS_TASK_ENDPOINTS.list, {
+  const response = await backendRequest<unknown>(`${taskApiBase()}/${BBS_TASK_ENDPOINTS.list}`, {
     method: 'GET',
     params: params as Record<string, unknown>,
     injectUserId: false,

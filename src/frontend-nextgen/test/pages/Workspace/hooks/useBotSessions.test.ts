@@ -181,3 +181,31 @@ it('身份切换后旧请求结果不会回填新身份', async () => {
 
   await waitFor(() => expect(result.current.sessionsByBotId['b:1']?.[0]?.sessionId).toBe('s2'));
 });
+
+it('选中首页外会话时直接拉取详情并补入列表（外链直达旧会话）', async () => {
+  const oldSession: BotChatSessionView = {
+    sessionId: 's-old',
+    botId: 'b:1',
+    title: '旧会话',
+    messageCount: 5,
+    gmtModified: '',
+    gmtCreate: '',
+  };
+  svc.getSessionDetail.mockResolvedValue({ ok: true, data: oldSession });
+
+  const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  // 首页加载（仅 s1、s2），不含 s-old
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
+
+  // 选中首页外的旧会话
+  await act(async () => {
+    result.current.selectSession('s-old');
+  });
+
+  // 兜底 effect 直接拉取该会话详情并补入列表
+  await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 's-old'));
+  await waitFor(() =>
+    expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's-old')).toBeDefined(),
+  );
+  await waitFor(() => expect(result.current.selectedSession?.sessionId).toBe('s-old'));
+});

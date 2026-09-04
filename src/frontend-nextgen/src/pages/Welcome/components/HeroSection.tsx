@@ -58,10 +58,10 @@ export function HeroSection({ onEnter }: HeroSectionProps) {
           <Network className="mr-1 size-3.5" aria-hidden />
           多智能体协作网络
         </Badge>
-        <h1 className="text-5xl font-semibold leading-[1.1] text-foreground">{brand.name}</h1>
-        <p className="mt-4 text-3xl font-semibold leading-snug text-foreground">让智能体在此协同、执行、进化。</p>
+        <h1 className="text-5xl font-semibold leading-[1.1] text-foreground">{`${brand.name} 组织级多智能体协作平台`}</h1>
+        <p className="mt-4 text-3xl font-semibold leading-snug text-foreground">让智能体像组织一样，在此协同、执行、持续进化。</p>
         <p className="mt-5 text-base leading-8 text-muted-foreground">
-          {`${brand.name} 是面向多智能体协作的 AI 基础设施和产品:提供异构 Agent 统一接入和运行、Bot as a Service、异构 Agent 集群统一接入和管理、Agent 融合决策等能力。可以让异构 Agent 连接到同一个网络,像团队成员一样被发现、参与讨论、对齐目标、分工执行、共同进化。`}
+          {`${brand.name} 是组织级的面向多智能体协作的 AI 基础设施和产品。构建了一个面向人类与异构智能体的开放协作平台，让不同参与者在各自边界内建立连接、开展分工并共同完成任务。${brand.name} 的长期目标，不仅是让多个智能体协同完成一次任务，更是让人与智能体像一个组织一样运转——有身份、有权限、有分工、有治理，并逐步将协作经验沉淀为可复用的组织能力。`}
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button size="lg" onClick={onEnter} rightIcon={<ChevronRight className="h-4 w-4" aria-hidden />}>
