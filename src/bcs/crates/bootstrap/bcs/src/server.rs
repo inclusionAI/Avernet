@@ -926,6 +926,55 @@ async fn metrics_handler(State(state): State<Arc<BcsServerState>>) -> Response {
         .into_response()
 }
 
+struct HttpRequestMetricsGuard {
+    metrics: Arc<crate::metrics::MetricsRuntime>,
+    route: String,
+    method: String,
+    start: Instant,
+    completed: bool,
+}
+
+impl HttpRequestMetricsGuard {
+    fn new(
+        metrics: Arc<crate::metrics::MetricsRuntime>,
+        route: String,
+        method: String,
+    ) -> Self {
+        Self {
+            metrics,
+            route,
+            method,
+            start: Instant::now(),
+            completed: false,
+        }
+    }
+
+    fn complete(mut self, status: StatusCode) {
+        self.completed = true;
+        self.metrics.record_http_request(
+            &self.route,
+            &self.method,
+            status,
+            self.start.elapsed(),
+        );
+    }
+}
+
+impl Drop for HttpRequestMetricsGuard {
+    fn drop(&mut self) {
+        if !self.completed {
+            // Axum drops the request future when the upstream connection is
+            // abandoned. This is the application-side equivalent of a proxy
+            // reporting 499; there is no HTTP response status to inspect.
+            self.metrics.record_http_request_cancelled(
+                &self.route,
+                &self.method,
+                self.start.elapsed(),
+            );
+        }
+    }
+}
+
 async fn http_metrics_middleware(
     State(state): State<Arc<BcsServerState>>,
     req: Request<Body>,
@@ -944,10 +993,10 @@ async fn http_metrics_middleware(
         .get::<MatchedPath>()
         .map(|matched| matched.as_str().to_string())
         .unwrap_or_else(|| "unmatched".to_string());
-    let start = Instant::now();
+    let guard = HttpRequestMetricsGuard::new(metrics, route, method);
     let response = next.run(req).await;
     let status = response.status();
-    metrics.record_http_request(&route, &method, status, start.elapsed());
+    guard.complete(status);
     response
 }
 
@@ -4922,10 +4971,6 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
         );
 
         Ok(router
-            .layer(middleware::from_fn_with_state(
-                Arc::clone(&self.state),
-                http_metrics_middleware,
-            ))
             .layer(middleware::from_fn(debug_middleware))
             .layer(CatchPanicLayer::custom(
                 |_: Box<dyn std::any::Any + Send>| {
@@ -4939,6 +4984,12 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                         .body(axum::body::Body::from(body.to_string()))
                         .unwrap()
                 },
+            ))
+            // Keep metrics outside panic handling so handler panics are
+            // recorded as the generated 500 response, not as cancellations.
+            .layer(middleware::from_fn_with_state(
+                Arc::clone(&self.state),
+                http_metrics_middleware,
             ))
             .layer(
                 TraceLayer::new_for_http()
@@ -5359,6 +5410,37 @@ mod tests {
     use tokio::net::TcpListener;
     use tokio::time::{Duration, timeout};
     use tower::ServiceExt;
+
+    #[cfg(feature = "prometheus-metrics")]
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn dropped_http_metrics_guard_records_cancelled_request() {
+        let mut config = BcsConfig::default();
+        config.metrics.enabled = true;
+        let metrics = crate::metrics::MetricsRuntime::install(&config)
+            .expect("install metrics")
+            .expect("metrics enabled");
+        let route = "/metrics-test/{request_id}";
+
+        {
+            let _guard = HttpRequestMetricsGuard::new(
+                metrics.clone(),
+                route.to_string(),
+                "POST".to_string(),
+            );
+        }
+
+        let body = metrics.render();
+        let env = metrics.env.as_ref();
+        assert!(body.contains(&format!(
+            "bcs_http_requests_total{{env=\"{env}\",route=\"{route}\",method=\"POST\",status_class=\"4xx\",result=\"error\"}}"
+        )));
+        assert!(body.contains(&format!(
+            "bcs_http_request_cancellations_total{{env=\"{env}\",route=\"{route}\",method=\"POST\"}}"
+        )));
+
+        metrics.shutdown().await;
+    }
 
     #[derive(Default)]
     struct RecordingSessionChannelOutbound {

@@ -468,6 +468,15 @@ impl MetricsRuntime {
     ) {
         record_http_request(&self.env, route, method, status, duration);
     }
+
+    pub fn record_http_request_cancelled(
+        &self,
+        route: &str,
+        method: &str,
+        duration: Duration,
+    ) {
+        record_http_request_cancelled(&self.env, route, method, duration);
+    }
 }
 
 #[cfg(feature = "prometheus-metrics")]
@@ -1250,29 +1259,74 @@ fn record_http_request(
     #[cfg(feature = "prometheus-metrics")]
     {
         let status_class = http_status_class(status);
-        metrics::counter!(
-            "bcs_http_requests_total",
-            "env" => env.to_string(),
-            "route" => route.to_string(),
-            "method" => method.to_string(),
-            "status_class" => status_class,
-            "result" => http_result_label(status),
-        )
-        .increment(1);
-        metrics::histogram!(
-            "bcs_http_request_duration_seconds",
-            "env" => env.to_string(),
-            "route" => route.to_string(),
-            "method" => method.to_string(),
-            "status_class" => status_class,
-        )
-        .record(duration.as_secs_f64());
+        record_http_request_outcome(
+            env,
+            route,
+            method,
+            status_class,
+            http_result_label(status),
+            duration,
+        );
     }
 
     #[cfg(not(feature = "prometheus-metrics"))]
     {
         let _ = (env, route, method, status, duration);
     }
+}
+
+fn record_http_request_cancelled(
+    env: &str,
+    route: &str,
+    method: &str,
+    duration: Duration,
+) {
+    #[cfg(feature = "prometheus-metrics")]
+    {
+        // A cancelled request has no application response status. Classify
+        // the proxy-499 equivalent as a failed 4xx terminal outcome.
+        record_http_request_outcome(env, route, method, "4xx", "error", duration);
+        metrics::counter!(
+            "bcs_http_request_cancellations_total",
+            "env" => env.to_string(),
+            "route" => route.to_string(),
+            "method" => method.to_string(),
+        )
+        .increment(1);
+    }
+
+    #[cfg(not(feature = "prometheus-metrics"))]
+    {
+        let _ = (env, route, method, duration);
+    }
+}
+
+#[cfg(feature = "prometheus-metrics")]
+fn record_http_request_outcome(
+    env: &str,
+    route: &str,
+    method: &str,
+    status_class: &'static str,
+    result: &'static str,
+    duration: Duration,
+) {
+    metrics::counter!(
+        "bcs_http_requests_total",
+        "env" => env.to_string(),
+        "route" => route.to_string(),
+        "method" => method.to_string(),
+        "status_class" => status_class,
+        "result" => result,
+    )
+    .increment(1);
+    metrics::histogram!(
+        "bcs_http_request_duration_seconds",
+        "env" => env.to_string(),
+        "route" => route.to_string(),
+        "method" => method.to_string(),
+        "status_class" => status_class,
+    )
+    .record(duration.as_secs_f64());
 }
 
 #[cfg(feature = "prometheus-metrics")]
