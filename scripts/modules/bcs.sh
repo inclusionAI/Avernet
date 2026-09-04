@@ -324,12 +324,21 @@ install_bcs_panel_asset_deps() {
     log_info "Installing BCS panel asset dependencies..."
     cd "${BCS_PANEL_ASSET_DIR}"
 
+    # --no-audit/--no-fund: npm's legacy audit endpoint is being retired
+    # ("This endpoint is being retired. Use the bulk advisory endpoint
+    # instead"), and the call now stalls for ~7m before npm gives up and
+    # prints neither "audited N packages" nor a vulnerability count. The
+    # stall is a fixed cost per invocation, not proportional to the tree:
+    # these 33 packages took 421s with audit on and 3s with it off, for an
+    # identical node_modules. Auditing here was never a gate either — it
+    # printed advisories into a CI log nobody reads. Same flags as the
+    # claude_relays.sh gateway build.
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm ci --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install BCS panel asset dependencies"
             return 1
         fi
-    elif ! HUSKY=0 npm install --registry="${NPM_REGISTRY_URL}"; then
+    elif ! HUSKY=0 npm install --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
         log_error "Failed to install BCS panel asset dependencies"
         return 1
     fi

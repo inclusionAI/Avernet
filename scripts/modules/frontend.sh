@@ -84,15 +84,19 @@ install_frontend_deps() {
     # 用 --registry 仅影响下载来源,npm ci 不会回写 lockfile。
     # 前端 dev server 依赖 cross-env 和 @umijs/max 等 devDependencies，显式包含 dev
     # 依赖，避免 NODE_ENV=production 或 npm omit 配置导致启动命令缺失。
+    # --no-audit/--no-fund: npm's legacy audit endpoint is being retired and
+    # the call now stalls for ~7m before giving up, a fixed cost per
+    # invocation regardless of tree size (see install_bcs_panel_asset_deps in
+    # bcs.sh for the measurement). Neither flag changes what is installed.
     if [ -f package-lock.json ]; then
-        if ! HUSKY=0 npm ci --include=dev --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm ci --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies (npm ci)."
             log_error "若刚改过 package.json,请先本地 'npm install' 更新 package-lock.json 再提交。"
             return 1
         fi
     else
         log_warn "No package-lock.json; falling back to 'npm install' (will generate a lockfile)."
-        if ! HUSKY=0 npm install --include=dev --registry="${NPM_REGISTRY_URL}"; then
+        if ! HUSKY=0 npm install --include=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund; then
             log_error "Failed to install frontend dependencies"
             return 1
         fi
