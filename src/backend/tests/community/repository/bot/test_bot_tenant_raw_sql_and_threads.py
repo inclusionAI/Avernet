@@ -20,6 +20,10 @@ from agentclaw.community.core.bot_collaborator.models import BotCollaboratorMode
 from agentclaw.community.core.bot_public.services.bot_discover_service import (
     BotDiscoverService,
 )
+from agentclaw.community.core.bot_public.catalog_metadata import (
+    BotCatalogAddress,
+    BotCatalogMetadata,
+)
 from agentclaw.community.core.service_bot.repository.models import BotPublishModel
 from agentclaw.community.di.config import BcsFuseConfig
 from agentclaw.community.plugin_api.models import BotModel
@@ -140,7 +144,11 @@ def test_list_live_bots_by_owner_bot_pairs_keeps_non_public_and_scopes_live_rows
 # ── Comment 1: the real caller (_batch_get_public_bots) end-to-end ──
 
 def _discover_service(repo):
-    return BotDiscoverService(bot_repository=repo, bcsfuse_config=BcsFuseConfig())
+    return BotDiscoverService(
+        bot_repository=repo,
+        bcsfuse_config=BcsFuseConfig(),
+        catalog_metadata_service=object(),
+    )
 
 
 def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
@@ -158,10 +166,17 @@ def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
     svc = _discover_service(repo)
     rec = {"score": 0.9}
     entries = [("own-a:worker", "bot-a", "own-a", rec)]
+    metadata = {
+        ("bot-a", "own-a"): BotCatalogMetadata(
+            address=BotCatalogAddress("bot-a", "own-a"),
+            kind="bot",
+            bot_uuid="bot-a:own-a",
+        )
+    }
 
     # Under tenant-a: the detail comes back, ext parsed, rec threaded through.
     with avernet_tenant_scope("tenant-a"):
-        result = svc._batch_get_public_bots(entries, user_id="own-a")
+        result = svc._batch_get_public_bots(entries, metadata)
     assert len(result) == 1
     bot_detail, got_rec = result[0]
     assert bot_detail["bot_id"] == "bot-a"
@@ -174,12 +189,12 @@ def test_batch_get_public_bots_returns_detail_and_is_tenant_scoped(repo):
     # Under tenant-b: the ORM guard hides tenant-a's bot — the real leak the
     # raw SQL allowed is now closed at the service entry point.
     with avernet_tenant_scope("tenant-b"):
-        assert svc._batch_get_public_bots(entries, user_id="own-a") == []
+        assert svc._batch_get_public_bots(entries, metadata) == []
 
 
 def test_batch_get_public_bots_empty_entries(repo):
     svc = _discover_service(repo)
-    assert svc._batch_get_public_bots([], user_id="u") == []
+    assert svc._batch_get_public_bots([], {}) == []
 
 
 # ── Comment 2: a repo read inside a bound thread keeps the tenant ───

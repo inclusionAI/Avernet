@@ -1501,6 +1501,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-memory".to_string()]),
+            bot_uuids: None,
             name: Some(" needle ".to_string()),
             q: None,
             visibility_filter: None,
@@ -1516,12 +1517,38 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
     assert_eq!(match_name.1, 1);
     assert_eq!(match_name.0[0].bot.bot_id, "search-match-memory");
 
+    let (exact_bots, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-memory-search".to_string(),
+            env: env.clone(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            bot_uuids: Some(vec![
+                "search-match-memory".to_string(),
+                "missing-memory".to_string(),
+            ]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("exact bot uuid filter");
+    assert_eq!(total, 1);
+    assert_eq!(exact_bots[0].bot.bot_id, "search-match-memory");
+
     let (empty_visibility, total) = repo
         .search_control_plane_candidates(BotSearchCandidateQuery {
             acting_bot_id: "acting-memory-search".to_string(),
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: Some(vec![]),
@@ -1543,6 +1570,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1564,6 +1592,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1585,6 +1614,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-memory".to_string()]),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1607,6 +1637,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-memory".to_string()]),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1628,6 +1659,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env.clone(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1649,6 +1681,7 @@ async fn memory_control_plane_search_covers_search_text_friendship_and_tc_filter
             env: env,
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1741,6 +1774,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            bot_uuids: None,
             name: Some(" needle ".to_string()),
             q: None,
             visibility_filter: None,
@@ -1756,12 +1790,38 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
     assert_eq!(match_name.1, 1);
     assert_eq!(match_name.0[0].bot.bot_id, "search-match-persistent");
 
+    let (exact_bots, total) = repo
+        .search_control_plane_candidates(BotSearchCandidateQuery {
+            acting_bot_id: "acting-persistent-search".to_string(),
+            env: "dev".to_string(),
+            visibility: BotCandidateVisibility::Discovery,
+            friend_ids: HashSet::new(),
+            bot_uuids: Some(vec![
+                "search-match-persistent".to_string(),
+                "missing-persistent".to_string(),
+            ]),
+            name: None,
+            q: None,
+            visibility_filter: None,
+            user_visibility: None,
+            status: None,
+            friendship: None,
+            tc_bot: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("exact bot uuid filter");
+    assert_eq!(total, 1);
+    assert_eq!(exact_bots[0].bot.bot_id, "search-match-persistent");
+
     let (empty_visibility, total) = repo
         .search_control_plane_candidates(BotSearchCandidateQuery {
             acting_bot_id: "acting-persistent-search".to_string(),
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: Some(vec![]),
@@ -1783,6 +1843,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1804,6 +1865,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1825,6 +1887,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1847,6 +1910,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::from(["friend-persistent".to_string()]),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1868,6 +1932,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,
@@ -1889,6 +1954,7 @@ async fn persistent_control_plane_search_covers_search_text_friendship_and_tc_fi
             env: "dev".to_string(),
             visibility: BotCandidateVisibility::Discovery,
             friend_ids: HashSet::new(),
+            bot_uuids: None,
             name: None,
             q: None,
             visibility_filter: None,

@@ -252,7 +252,7 @@ async def search_public_bots(
 )
 async def discover_public_bots(
     request: Request,
-    _principal: PrincipalDep,
+    principal: PrincipalDep,
     keyword: str = Query(min_length=1, description="Keyword used for discovery."),
     top_k: int = Query(default=10, ge=1, le=20, description="Maximum recommendations."),
     min_score: float = Query(
@@ -261,14 +261,39 @@ async def discover_public_bots(
     runtime_state: RuntimeState = Query(
         default="online", description="Runtime state filter."
     ),
+    viewer_actor_type: str | None = Query(
+        default=None, description="Explicit BCS viewer actor type: human or bot."
+    ),
+    viewer_actor_id: str | None = Query(
+        default=None, description="Explicit BCS viewer actor id; requires viewer_actor_type."
+    ),
     service: BotDiscoverServiceProtocol = Injected(BotDiscoverServiceProtocol),
 ) -> Envelope[Page[DiscoveredPublicBot]]:
+    try:
+        catalog_filters = _catalog_search_filters(
+            visibility=None,
+            user_visibility=None,
+            status="online" if runtime_state == "online" else None,
+            viewer_actor_type=viewer_actor_type,
+            viewer_actor_id=viewer_actor_id,
+            friendship=None,
+        )
+    except ValueError:
+        _log_failure("discover", request, "invalid_filters")
+        return error_response(422, "Invalid Catalog Search filters", request)
     try:
         result = service.search_by_keyword(
             keyword=keyword,
             top_k=top_k,
             min_score=min_score,
             filters={"runtime_state": [runtime_state]},
+            catalog_filters=catalog_filters,
+            caller=BotCatalogCaller(
+                tenant_id=principal.tenant,
+                user_id=principal.user_id or None,
+                app_id=principal.app_id,
+            ),
+            request_id=_request_id(request),
         )
     except Exception:  # noqa: BLE001 - the public error must remain fixed
         _log_failure("discover", request, "recommender_failure")

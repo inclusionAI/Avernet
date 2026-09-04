@@ -8,6 +8,9 @@ use crate::{BindingChannels, Skill, deserialize_skills};
 /// Query parameters for `GET /bots/search`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BotSearchQuery {
+    /// Exact Bot UUID filter: comma-separated values, up to 100 entries.
+    #[serde(default)]
+    pub bot_uuids: Option<String>,
     /// Name/summary fuzzy search (contains, case-insensitive).
     #[serde(default)]
     pub q: Option<String>,
@@ -325,4 +328,3 @@ mod tests {
         assert!(serialized.get("agent_token").is_none());
     }
 }
-

@@ -35,6 +35,7 @@ GET /bots/search
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
+| `bot_uuids` | string | — | 精确 Bot UUID 集合，逗号分隔，最多 100 个；与其他可见性、状态及 viewer 条件共同生效 |
 | `q` | string | — | 名称/简介模糊搜索（contains，大小写不敏感） |
 | `visibility` | string | — | Bot 可见性过滤，支持单值或多值 OR：`public` / `protected` / `private`，推荐逗号分隔如 `visibility=public,protected`；非法值 → 400 |
 | `user_visibility` | string | — | 用户侧可见/可加好友策略过滤，支持单值或多值 OR：`public` / `protected` / `private`，推荐逗号分隔如 `user_visibility=public,protected`；非法值 → 400 |
@@ -196,6 +197,9 @@ GET /bots/search?visibility=protected&viewer_actor_type=bot&viewer_actor_id=bot-
 
 # 仅返回 TeamClaw backend 过来的 bot
 GET /bots/search?tc_bot=true
+
+# 在推荐候选中复用相同的 Catalog 可见性规则
+GET /bots/search?bot_uuids=bot-a:owner-1,bot-b:owner-2&viewer_actor_type=human&viewer_actor_id=owner-1
 
 # 无认证 → 仅返回 public bot
 GET /bots/search?q=助手

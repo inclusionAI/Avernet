@@ -1522,6 +1522,37 @@ async fn search_bots_route_forwards_tc_bot_filter_param() {
     assert_eq!(commands[0].tc_bot, Some(true));
 }
 
+#[tokio::test]
+async fn search_bots_route_forwards_exact_bot_uuid_filter() {
+    let query = Arc::new(RecordingBotQueryService {
+        search_result: Ok(BotSearchResult { items: vec![], total: 0 }),
+        ..Default::default()
+    });
+    let services = Services::builder().bot_query(query.clone()).build_for_test();
+    let app = build_router(HttpAppState::new(services));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/bots/search?bot_uuids=bot-alpha%3Aowner-1,bot-beta%3Aowner-2")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let commands = query.search_commands.lock().await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].bot_uuids.as_ref().unwrap(),
+        &vec![
+            "bot-alpha:owner-1".to_string(),
+            "bot-beta:owner-2".to_string(),
+        ]
+    );
+}
+
 
 #[tokio::test]
 async fn search_bots_route_accepts_multi_visibility_and_returns_friend_policy_fields() {

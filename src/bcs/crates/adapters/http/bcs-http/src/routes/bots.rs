@@ -483,6 +483,7 @@ pub async fn search_bots(
         "user_visibility",
         &["public", "protected", "private"],
     )?;
+    let bot_uuids = parse_bot_uuid_filter(q.bot_uuids.as_deref())?;
     let status = match q.status.as_deref() {
         Some("online") => Some(ActorStatus::Online),
         Some("hidden") => Some(ActorStatus::Hidden),
@@ -586,6 +587,7 @@ pub async fn search_bots(
         .services
         .bot_query
         .search_bots(SearchBotsCommand {
+            bot_uuids,
             q: q.q.clone(),
             visibility: effective_visibility,
             user_visibility: effective_user_visibility,
@@ -630,6 +632,28 @@ pub async fn search_bots(
         "offset": offset,
         "limit": limit,
     })))
+}
+
+fn parse_bot_uuid_filter(raw: Option<&str>) -> Result<Option<Vec<String>>, HttpAdapterError> {
+    let Some(raw) = raw else { return Ok(None) };
+    let mut values = Vec::new();
+    for part in raw.split(',') {
+        let value = part.trim();
+        if value.is_empty() {
+            return Err(HttpAdapterError::BadRequest(
+                "bot_uuids must contain non-empty comma-separated values".to_string(),
+            ));
+        }
+        if !values.iter().any(|existing| existing == value) {
+            values.push(value.to_string());
+        }
+    }
+    if values.len() > 100 {
+        return Err(HttpAdapterError::BadRequest(
+            "bot_uuids must contain at most 100 values".to_string(),
+        ));
+    }
+    Ok(Some(values))
 }
 
 fn parse_csv_filter(
@@ -925,4 +949,3 @@ async fn dispatch_visibility_sync_after_update(
 fn invalid_visibility_message() -> &'static str {
     "visibility must be 'public', 'protected', or 'private'"
 }
-

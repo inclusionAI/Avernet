@@ -73,6 +73,7 @@ class BotCatalogMetadataServiceProtocol(Protocol):
         search: str | None,
         page: int,
         page_size: int,
+        bot_uuids: Sequence[str] = (),
         filters: BotCatalogSearchFilters | None,
         caller: BotCatalogCaller,
         request_id: str,
