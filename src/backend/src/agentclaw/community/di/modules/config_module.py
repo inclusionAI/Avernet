@@ -485,14 +485,7 @@ class ConfigModule(Module):
     @singleton
     @provider
     def bcsfuse(self) -> cfg.BcsFuseConfig:
-        """Reads ``user_config.bcsfuse``, falls back to root-level
-        ``bcsfuse``. Mirrors the lookup in ``BotDiscoverService``.
-
-        The hardcoded prod URL fallback (legacy line 67 of
-        ``BotDiscoverService``) lives on the dataclass default, not
-        here — consumers reading ``cfg.base_url`` get it automatically
-        when the YAML block is missing.
-        """
+        """Read ``user_config.bcsfuse``, falling back to the root block."""
         user_block = _block("bcsfuse")
         if not user_block:
             try:
@@ -508,11 +501,8 @@ class ConfigModule(Module):
             base_url=user_block.get("base_url", defaults.base_url),
             base_url_pre=user_block.get("base_url_pre", defaults.base_url_pre),
             worker_id_with_owner=_coerce(
-                user_block,
-                "worker_id_with_owner",
-                _as_bool,
-                defaults.worker_id_with_owner,
-                "bcsfuse",
+                user_block, "worker_id_with_owner", _as_bool,
+                defaults.worker_id_with_owner, "bcsfuse",
             ),
             raw=user_block,
         )
