@@ -196,7 +196,11 @@ write_openclaw_bcs_config() {
               else
                 .
               end
-            | .channels.bcs.heartbeatIntervalMs = (.channels.bcs.heartbeatIntervalMs // 30000)
+            | if (.channels.bcs.heartbeatIntervalMs == null or .channels.bcs.heartbeatIntervalMs == 60000) then
+                .channels.bcs.heartbeatIntervalMs = 30000
+              else
+                .
+              end
         ' "$config_file" > "$tmp_file"; then
             rm -f "$tmp_file"
             log_error "Failed to update OpenClaw config: ${config_file}"
