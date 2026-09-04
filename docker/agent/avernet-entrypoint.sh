@@ -12,7 +12,8 @@
 #   1. Create runtime directories (system dirs as root, /home/admin as admin)
 #   2. Verify build artifacts
 #   3. Generate ~/.openclaw/openclaw.json from template + env vars (as admin)
-#   4. exec supervisord (becomes PID 1)
+#   4. Allow private-network model provider endpoints (openclaw config set)
+#   5. exec supervisord (becomes PID 1)
 #
 # The platform invokes start_service.sh externally (docker exec) with
 # --token/--client_id to save credentials and start the engine.
@@ -124,7 +125,26 @@ else
     echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
 fi
 
-# --- 4. exec supervisord — becomes PID 1
+# --- 4. Allow private-network model provider endpoints ---
+# MODEL_PROVIDER_HOST can point at internal hosts (e.g. *.inner.avernet.com).
+# openclaw blocks requests to private networks on a provider unless
+# request.allowPrivateNetwork is true, so lift the restriction for the
+# openai-compatible provider. Deliberate: the provider URL is
+# operator-controlled (image template + pod env), not bot-controlled, so the
+# SSRF guard is not needed here. Runs on EVERY boot, not only at first-boot
+# rendering, so NAS-persisted configs from older images are patched too.
+# Best-effort — a CLI failure must not block pod start (the restriction then
+# surfaces as per-request model errors instead of a dead entrypoint).
+if [ -x /usr/local/bin/openclaw ] && [ -f "${CONFIG_FILE}" ]; then
+    if su admin -s /bin/bash -c \
+        'openclaw config set models.providers.openai-compatible.request.allowPrivateNetwork true'; then
+        echo "===> openclaw: private-network model endpoints allowed (allowPrivateNetwork=true)"
+    else
+        echo "WARNING: openclaw config set allowPrivateNetwork failed — private model hosts will be blocked" >&2
+    fi
+fi
+
+# --- 5. exec supervisord — becomes PID 1
 # Engine and openclaw are both autostart=false.
 # The platform invokes start_service.sh externally (e.g. docker exec)
 # with --token/--client_id to orchestrate pod startup.
