@@ -15,6 +15,19 @@ class ExpertChatInstanceServiceProtocol(Protocol):
     caller.
     """
 
+    async def get_authorized_caller_connection(
+        self,
+        *,
+        operator_id: str,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        is_super_admin: bool,
+        force_upgrade: bool = False,
+    ) -> Dict[str, Any]:
+        """Authorize an actor before entering caller lifecycle operations."""
+        ...
+
     async def get_caller_connection(
         self,
         user_id: str,

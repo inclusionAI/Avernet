@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from agentclaw.community.core.expert_chat.errors import (
     BotNotPublishedError,
+    ChatPermissionError,
     ConnectionError,
 )
 from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
@@ -1877,3 +1878,107 @@ class TestCallerIdentityExchange:
         call_kwargs = caller_identity.exchange_caller_identity.call_args[1]
         # binding_id=0 should be passed as is (the method signature accepts Optional[int])
         assert call_kwargs["binding_id"] == 0
+
+
+class TestGetAuthorizedCallerConnection:
+    """Actor-aware authorization before the existing lifecycle entry."""
+
+    @pytest.mark.asyncio
+    async def test_admin_preserves_existing_creation_path(self):
+        svc, instance_repo, baas, *_ = _make_service()
+        expected = {"connection": None, "need_poll": True}
+        svc.get_caller_connection = AsyncMock(return_value=expected)
+
+        result = await svc.get_authorized_caller_connection(
+            operator_id="admin",
+            user_id=USER_ID,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+            is_super_admin=True,
+        )
+
+        assert result == expected
+        instance_repo.get_instance.assert_not_called()
+        svc.get_caller_connection.assert_awaited_once_with(
+            user_id=USER_ID,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+            force_upgrade=False,
+        )
+        baas.get_publish_progress.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_self_with_existing_bot_uuid_delegates_force_upgrade(self):
+        svc, instance_repo, _, *_ = _make_service()
+        instance_repo.get_instance.return_value = {
+            "status": "success",
+            "ext": {"bot_uuid": BOT_UUID},
+        }
+        expected = {"connection": None, "need_poll": True}
+        svc.get_caller_connection = AsyncMock(return_value=expected)
+
+        result = await svc.get_authorized_caller_connection(
+            operator_id=USER_ID,
+            user_id=USER_ID,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+            is_super_admin=False,
+            force_upgrade=True,
+        )
+
+        assert result == expected
+        instance_repo.get_instance.assert_called_once_with(
+            USER_ID, BOT_ID, OWNER_ID
+        )
+        svc.get_caller_connection.assert_awaited_once_with(
+            user_id=USER_ID,
+            bot_id=BOT_ID,
+            owner_id=OWNER_ID,
+            force_upgrade=True,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("operator_id", "instance", "reason"),
+        [
+            ("other-user", {"ext": {"bot_uuid": BOT_UUID}}, "cross_user"),
+            (USER_ID, None, "instance_not_found"),
+            (USER_ID, {"ext": {}}, "instance_missing_bot_uuid"),
+            (USER_ID, {"ext": {"bot_uuid": "  "}}, "instance_missing_bot_uuid"),
+            (USER_ID, {"ext": {"bot_uuid": 123}}, "instance_missing_bot_uuid"),
+            (USER_ID, {"ext": "invalid-ext"}, "instance_missing_bot_uuid"),
+        ],
+    )
+    async def test_denied_before_lifecycle_calls(
+        self, operator_id, instance, reason
+    ):
+        svc, instance_repo, baas, _, bot_repo, _, bot_build_service, *_ = (
+            _make_service()
+        )
+        instance_repo.get_instance.return_value = instance
+        svc.get_caller_connection = AsyncMock()
+
+        with pytest.raises(ChatPermissionError) as exc_info:
+            await svc.get_authorized_caller_connection(
+                operator_id=operator_id,
+                user_id=USER_ID,
+                bot_id=BOT_ID,
+                owner_id=OWNER_ID,
+                is_super_admin=False,
+            )
+
+        assert getattr(exc_info.value, "reason") == reason
+        svc.get_caller_connection.assert_not_awaited()
+        instance_repo.upsert_instance.assert_not_called()
+        instance_repo.update_instance.assert_not_called()
+        bot_repo.get_by_id_and_owner.assert_not_called()
+        bot_build_service.release_async.assert_not_called()
+        bot_build_service.upgrade_async.assert_not_called()
+        baas.get_publish_progress.assert_not_called()
+        baas.get_ws_info_by_bot_uuid.assert_not_called()
+        if reason == "cross_user":
+            instance_repo.get_instance.assert_not_called()
+        else:
+            instance_repo.get_instance.assert_called_once_with(
+                USER_ID, BOT_ID, OWNER_ID
+            )
