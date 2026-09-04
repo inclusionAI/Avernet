@@ -16,7 +16,7 @@ use bcs_ws::{bot::BOT_WS_ENDPOINT, web::FRONTEND_WS_ENDPOINT};
 #[cfg(feature = "prometheus-metrics")]
 use bcs_service_api::{
     A2aChatRunService, A2aRunStatus, ActorKind, ActorStatus, AsyncA2aChatAccepted, AsyncA2aChatCommand,
-    BotDeliveryCommand, BotDeliveryKind,
+    BotAbortDeliveryCommand, BotAbortDeliveryResult, BotDeliveryCommand, BotDeliveryKind,
     BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget, BotEventCommand, BotEventOutcome,
     BotMetricCount, BotMetricsSnapshotPort,
     ChatAbortCommand, ChatAbortOutcome, ChatRunCancelCommand, ChatRunMetricCount, ChatRunQueryCommand,
@@ -1036,6 +1036,33 @@ impl BotDeliveryPort for MetricsBotDeliveryPort {
                     duration,
                 );
             }
+        }
+
+        result
+    }
+
+    async fn abort(&self, cmd: BotAbortDeliveryCommand) -> ServiceResult<BotAbortDeliveryResult> {
+        let start = Instant::now();
+        let result = self.inner.abort(cmd).await;
+        let duration = start.elapsed();
+
+        match &result {
+            Ok(_) => record_delivery(
+                &self.env,
+                DeliveryMetricTarget::Bot,
+                DeliveryMetricKind::Abort,
+                DeliveryOutcome::Delivered,
+                DeliveryErrorCode::None,
+                duration,
+            ),
+            Err(error) => record_delivery(
+                &self.env,
+                DeliveryMetricTarget::Bot,
+                DeliveryMetricKind::Abort,
+                DeliveryOutcome::Failed,
+                service_error_code(error),
+                duration,
+            ),
         }
 
         result
