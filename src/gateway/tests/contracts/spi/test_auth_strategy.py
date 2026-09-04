@@ -106,6 +106,9 @@ class TestGoogleUserStrategy(AuthStrategyContract):
 
         result = await self.strategy.build(self.applicable_creds)  # type: ignore[attr-defined]
         assert isinstance(result, UserPrincipal)
+        assert result.subject.id == "g-1"
+        assert result.subject.username == "a@example.com"
+        assert result.subject.display_name == "A"
 
 
 class TestOauthSessionStrategy(AuthStrategyContract):
@@ -118,6 +121,7 @@ class TestOauthSessionStrategy(AuthStrategyContract):
             {
                 "sub": "user-123",
                 "src": "google",
+                "name": "alice",
                 "iat": int(now.timestamp()),
                 "exp": int((now + timedelta(minutes=5)).timestamp()),
             },
@@ -134,6 +138,8 @@ class TestOauthSessionStrategy(AuthStrategyContract):
 
         result = await self.strategy.build(self.applicable_creds)  # type: ignore[attr-defined]
         assert isinstance(result, UserPrincipal)
+        assert result.subject.id == "user-123"
+        assert result.subject.username == "alice"
 
 
 class TestBotTokenStrategy(AuthStrategyContract):
