@@ -32,7 +32,7 @@ core/task/
 ├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
 │   └── dispatcher.py              #   dispatch(toDoList) → 填 run_mode/assignee 返 list[TaskNode];protocols.py 延后
 ├── task_runner/                   # TaskRunner 三模态执行 + 回投适配
-│   ├── runner.py                  #   start_run(批量)三模态自适应 + query_status/detail/result/bot_tasks
+│   ├── runner.py                  #   start_run(批量)三模态自适应 + form_coop_group/get_group_session
 │   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
 ├── task_harness/                  # TaskHarness 旁路常驻巡检
 │   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)

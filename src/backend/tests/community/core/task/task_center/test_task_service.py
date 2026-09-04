@@ -127,11 +127,6 @@ class StubRunner:
     async def form_coop_group(self, gf):
         return "grp_stub"
 
-    def query_status(self, task_id): return Status.PENDING
-    def query_detail(self, node): return node
-    def query_result(self, node): return node
-    def query_bot_tasks(self, bot_id): return []
-
 
 # ===== CaseEngine:覆写 _build_* 注入 stub(T1=A corp 最简形态)=====
 class _CaseEngine(ExecutionEngine):

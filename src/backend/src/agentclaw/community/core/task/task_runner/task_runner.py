@@ -91,18 +91,6 @@ class TaskRunner:
 
         return list(await asyncio.gather(*[_deliver_one(n) for n in toDoTaskList]))
 
-    def query_detail(self, node: TaskNode) -> TaskNode:
-        """产品触发:查询任务最新详情(从图回填 node.run_info)。"""
-        graph = self._graph.query_task_dashboard(node.task_id)
-        for n in graph.tasks:
-            if n.node_id == node.node_id:
-                return n
-        return node
-
-    def query_result(self, node: TaskNode) -> TaskNode:
-        """产品/系统触发:查询某任务及其所有子任务的产出结果(回填 node.run_info.output)。"""
-        return self.query_detail(node)
-
     async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
         协程化:BCS 建群是网络 IO,``await`` 不阻塞编排核(由 engine 锁外 await 调用)。
