@@ -43,6 +43,7 @@ class BotAction(StrEnum):
     EDIT = "edit"
     DELETE = "delete"
     RESTART = "restart"
+    RESTART_PUBLISH = "restart_publish"
     DATA_INIT = "data_init"
     ACTIVATE = "activate"
     OPEN_FOLDER = "open_folder"

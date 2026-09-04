@@ -820,6 +820,7 @@ BotAction = Literal[
     "edit",
     "delete",
     "restart",
+    "restart_publish",
     "data_init",
     "activate",
     "open_folder",
