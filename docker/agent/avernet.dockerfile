@@ -249,9 +249,12 @@ COPY docker/agent/openclaw.json /opt/openclaw.json.template
 # Claude Code provider settings template — staged like openclaw.json above:
 # /home/admin is NAS-mounted at pod start, which SHADOWS anything baked
 # there, so the file must live in /opt and be copied into ~/.claude AFTER
-# the mount (start_claude_code.sh does the copy; mount-wins: a file already
-# on the NAS is kept). Content is FULLY STATIC, mirroring openclaw.json's
-# hardcoded config: URL, model (glm-5.2), and the auth token as the literal
+# the mount (start_claude_code.sh does the copy, substituting the
+# MODEL_PROVIDER_HOST placeholder from the pod env — same variable and
+# bare-host contract as the entrypoint's openclaw.json rendering, defaulting
+# to dashscope.aliyuncs.com; mount-wins: a file already on the NAS is kept).
+# Everything else is static, mirroring openclaw.json's hardcoded config:
+# model (glm-5.2), and the auth token as the literal
 # placeholder "Bearer ${API-KEY}" — the gateway on the upstream side
 # replaces the placeholder with the real key (same pattern as openclaw.json's
 # "apiKey": "Bearer ${API-KEY}"). No credentials are injected into the pod
