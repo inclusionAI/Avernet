@@ -169,6 +169,7 @@ def _build(db):
         find_job=lambda **_kwargs: None,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
         purge_managed_files=store.purge_owner_bot,
+        purge_cli_tools=lambda entity_id, bot_id: 0,
     )
 
     order: list[str] = []

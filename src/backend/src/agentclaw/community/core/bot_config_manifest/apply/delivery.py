@@ -272,6 +272,15 @@ class TeclawDelivery(DeliveryStrategy):
         # all. Substituted into whichever bundle ``ports`` returns, so the
         # invariant holds in one place instead of depending on two wiring sites
         # agreeing.
+        #
+        # ``mcp`` is always platform-managed too and needs none of this,
+        # because it has no port in ``MaterialiserPorts`` at all: on both
+        # families its delivery *is* the artifact, so there is nothing
+        # family-specific to select. ``cli_tools`` is the one category that is
+        # always platform-managed and still has a per-family delivery step —
+        # ARCA installs into a live container over an engine endpoint, teclaw
+        # does nothing — so it owns a port, and a port selected by a switch
+        # this category ignores is the exact mismatch corrected here.
         self._cli_tool_service = cli_tool_service
         self._redeliver = redeliver
 

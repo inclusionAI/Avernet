@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.bot_config_manifest.cli_tools import (
     CliToolContext,
     CliToolDecl,
-    CliToolOp,
+    CliToolStatus,
     CliToolScope,
     CliToolService,
     CliToolStore,
@@ -111,7 +111,7 @@ async def test_install_fetches_stores_delivers_and_records() -> None:
     service, repo, delivery, fetcher, oss = _service()
     outcome = await service.install(_CTX, _decl(version="1.4.2"), installed_by="u2")
 
-    assert outcome.op is CliToolOp.INSTALLED
+    assert outcome.status is CliToolStatus.INSTALLED
     assert delivery.installed == [("mycli", _TOOL)]
     assert oss.objects[_key()] == _TOOL
     record = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
@@ -166,7 +166,7 @@ async def test_install_enforces_the_declared_sha256() -> None:
     is the road where stored bytes could stand in for what was declared."""
     service, repo, delivery, _, _ = _service(digest="sha256:" + "0" * 64)
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert _DIGEST in outcome.detail
     assert delivery.installed == [] and repo.rows == {}
 
@@ -175,7 +175,7 @@ async def test_install_enforces_the_declared_sha256() -> None:
 async def test_a_fetch_failure_records_nothing() -> None:
     service, repo, delivery, _, oss = _service(fetch_error=EntryFetchError("404"))
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED and "404" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and "404" in outcome.detail
     assert repo.rows == {} and oss.puts == [] and delivery.installed == []
 
 
@@ -191,7 +191,7 @@ async def test_archive_selects_only_the_declared_subpath(kind, pack) -> None:
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack=kind, subpath="bin/mycli"), installed_by="u2"
     )
-    assert outcome.op is CliToolOp.INSTALLED
+    assert outcome.status is CliToolStatus.INSTALLED
     assert delivery.installed == [("mycli", _TOOL)]
     # The key fingerprints the *archive's* digest — what the entry pinned —
     # rather than the selected member's, because the declaration is what a
@@ -207,7 +207,7 @@ async def test_an_absent_member_fails_and_names_what_the_archive_holds() -> None
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip", subpath="bin/mycli"), installed_by="u2"
     )
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert "bin/other" in outcome.detail
     assert repo.rows == {}
 
@@ -223,7 +223,7 @@ async def test_a_subpath_naming_a_directory_is_refused() -> None:
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip", subpath="bin"), installed_by="u2"
     )
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
 
 
 @pytest.mark.asyncio
@@ -235,7 +235,7 @@ async def test_unpack_without_a_subpath_fails_rather_than_guessing() -> None:
     outcome = await service.install(
         _CTX, _decl(digest=digest, unpack="zip"), installed_by="u2"
     )
-    assert outcome.op is CliToolOp.FAILED and "subpath" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and "subpath" in outcome.detail
 
 
 @pytest.mark.asyncio
@@ -245,7 +245,7 @@ async def test_a_subpath_without_unpack_is_refused_not_ignored() -> None:
     outcome = await service.install(
         _CTX, _decl(subpath="bin/mycli"), installed_by="u2"
     )
-    assert outcome.op is CliToolOp.FAILED and "unpack" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and "unpack" in outcome.detail
 
 
 # ── architecture ──────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ async def test_a_non_elf_file_is_refused() -> None:
     digest = "sha256:" + hashlib.sha256(script).hexdigest()
     service, repo, delivery, _, _ = _service(content=script, digest=digest)
     outcome = await service.install(_CTX, _decl(digest=digest), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED and "ELF" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and "ELF" in outcome.detail
     assert repo.rows == {} and delivery.installed == []
 
 
@@ -269,7 +269,7 @@ async def test_a_non_amd64_elf_fails_with_the_architecture_found() -> None:
     digest = "sha256:" + hashlib.sha256(arm).hexdigest()
     service, repo, _, _, _ = _service(content=arm, digest=digest)
     outcome = await service.install(_CTX, _decl(digest=digest), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert "aarch64" in outcome.detail
     assert repo.rows == {}
 
@@ -278,7 +278,7 @@ async def test_a_non_amd64_elf_fails_with_the_architecture_found() -> None:
 async def test_a_name_that_is_not_one_key_segment_is_refused_before_any_fetch() -> None:
     service, _, _, fetcher, _ = _service()
     outcome = await service.install(_CTX, _decl(name="../escape"), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert fetcher.calls == []
 
 
@@ -292,7 +292,7 @@ async def test_nothing_is_recorded_when_placement_fails() -> None:
     delivery = FakeDelivery(install_error=CliToolPlacementError("disk full"))
     service, repo, _, _, oss = _service(delivery=delivery)
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED and "disk full" in outcome.detail
+    assert outcome.status is CliToolStatus.FAILED and "disk full" in outcome.detail
     assert repo.rows == {}
 
 
@@ -310,7 +310,7 @@ async def test_a_failed_placement_discards_the_object_it_just_stored() -> None:
 async def test_a_failed_object_write_never_reaches_the_engine() -> None:
     service, repo, delivery, _, _ = _service(oss=FakeObjectStorage(fail_puts=True))
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert delivery.installed == [] and repo.rows == {}
 
 
@@ -322,7 +322,7 @@ async def test_remove_deletes_the_oss_object_with_the_row() -> None:
     service, repo, delivery, _, oss = _service()
     await service.install(_CTX, _decl(), installed_by="u2")
     outcome = await service.remove(_CTX, "mycli")
-    assert outcome.op is CliToolOp.REMOVED
+    assert outcome.status is CliToolStatus.REMOVED
     assert delivery.deleted == ["mycli"]
     assert repo.rows == {}
     assert _key() not in oss.objects
@@ -332,7 +332,7 @@ async def test_remove_deletes_the_oss_object_with_the_row() -> None:
 async def test_removing_a_tool_the_bot_does_not_have_fails_plainly() -> None:
     service, _, delivery, _, _ = _service()
     outcome = await service.remove(_CTX, "ghost")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert delivery.deleted == []
 
 
@@ -343,7 +343,7 @@ async def test_a_refused_engine_delete_leaves_the_row_standing() -> None:
     await service.install(_CTX, _decl(), installed_by="u2")
     service._delivery.delete_error = CliToolPlacementError("busy")
     outcome = await service.remove(_CTX, "mycli")
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is not None
 
 
@@ -367,8 +367,8 @@ async def test_replace_all_removes_tools_absent_from_the_declaration() -> None:
     outcomes = await service.replace_all(
         _CTX, [_decl(name="new")], installed_by="manifest"
     )
-    assert [(o.name, o.op) for o in outcomes] == [
-        ("old", CliToolOp.REMOVED), ("new", CliToolOp.INSTALLED),
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("old", CliToolStatus.REMOVED), ("new", CliToolStatus.INSTALLED),
     ]
     assert delivery.deleted == ["old"]
     assert set(r.name for r in repo.list(env="dev", entity_id="u1", bot_id="bot7")) == {"new"}
@@ -391,7 +391,7 @@ async def test_a_matching_digest_and_subpath_is_unchanged_and_not_refetched() ->
     service, _, delivery, fetcher, _ = _service()
     await service.install(_CTX, _decl(), installed_by="manifest")
     outcomes = await service.replace_all(_CTX, [_decl()], installed_by="manifest")
-    assert [o.op for o in outcomes] == [CliToolOp.UNCHANGED]
+    assert [o.status for o in outcomes] == [CliToolStatus.UNCHANGED]
     assert len(fetcher.calls) == 1
     assert len(delivery.installed) == 1
 
@@ -405,7 +405,7 @@ async def test_version_alone_never_forces_a_reinstall() -> None:
     outcomes = await service.replace_all(
         _CTX, [_decl(version="2.0")], installed_by="manifest"
     )
-    assert [o.op for o in outcomes] == [CliToolOp.UNCHANGED]
+    assert [o.status for o in outcomes] == [CliToolStatus.UNCHANGED]
     assert len(fetcher.calls) == 1
 
 
@@ -423,7 +423,7 @@ async def test_a_changed_subpath_reinstalls_even_at_the_same_digest() -> None:
         [_decl(digest=digest, unpack="zip", subpath="bin/b")],
         installed_by="manifest",
     )
-    assert [o.op for o in outcomes] == [CliToolOp.INSTALLED]
+    assert [o.status for o in outcomes] == [CliToolStatus.INSTALLED]
     assert len(delivery.installed) == 2
 
 
@@ -436,8 +436,8 @@ async def test_replace_all_reports_per_tool_on_partial_failure() -> None:
     outcomes = await service.replace_all(
         _CTX, [_decl(name="a"), bad, _decl(name="c")], installed_by="manifest"
     )
-    assert [(o.name, o.op) for o in outcomes] == [
-        ("a", CliToolOp.INSTALLED), ("bad", CliToolOp.FAILED), ("c", CliToolOp.INSTALLED),
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("a", CliToolStatus.INSTALLED), ("bad", CliToolStatus.FAILED), ("c", CliToolStatus.INSTALLED),
     ]
     assert set(r.name for r in repo.list(env="dev", entity_id="u1", bot_id="bot7")) == {"a", "c"}
 
@@ -535,8 +535,8 @@ def test_on_fetch_failure_fail_turns_keep_last_off() -> None:
 def test_a_failed_outcome_says_it_failed() -> None:
     from agentclaw.community.core.bot_config_manifest.cli_tools import CliToolOutcome
 
-    assert CliToolOutcome("c", CliToolOp.FAILED, "why").failed is True
-    assert CliToolOutcome("c", CliToolOp.INSTALLED).failed is False
+    assert CliToolOutcome("c", CliToolStatus.FAILED, "why").failed is True
+    assert CliToolOutcome("c", CliToolStatus.INSTALLED).failed is False
 
 
 @pytest.mark.asyncio
@@ -567,7 +567,7 @@ async def test_an_object_that_will_not_delete_is_logged_not_raised() -> None:
     await service.install(_CTX, _decl(), installed_by="u2")
     oss.fail_deletes = True
     outcome = await service.remove(_CTX, "mycli")
-    assert outcome.op is CliToolOp.REMOVED
+    assert outcome.status is CliToolStatus.REMOVED
     assert repo.rows == {}
 
 
@@ -630,7 +630,7 @@ async def test_a_manifest_apply_removes_a_tool_a_person_installed() -> None:
     await service.install(_CTX, _decl(name="by-hand"), installed_by="u2")
     outcomes = await service.replace_all(_CTX, [], installed_by="manifest")
 
-    assert [(o.name, o.op) for o in outcomes] == [("by-hand", CliToolOp.REMOVED)]
+    assert [(o.name, o.status) for o in outcomes] == [("by-hand", CliToolStatus.REMOVED)]
     assert outcomes[0].record.installed_by == "u2"
     assert delivery.deleted == ["by-hand"] and repo.rows == {}
 
@@ -661,7 +661,7 @@ async def test_a_failed_replacement_leaves_the_installed_tools_bytes_intact() ->
         _CTX, _decl(digest=other_digest), installed_by="u2"
     )
 
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     # The row still points at its own object, and that object still holds the
     # bytes the bot is running.
     row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
@@ -681,7 +681,7 @@ async def test_a_failed_reinstall_of_the_same_digest_keeps_the_shared_object() -
     service._delivery.install_error = CliToolPlacementError("nope")
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
 
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert oss.objects[key] == _TOOL and key not in oss.deletes
 
 
@@ -698,7 +698,7 @@ async def test_a_successful_replacement_collects_the_version_it_replaced() -> No
         _CTX, _decl(digest=other_digest), installed_by="u2"
     )
 
-    assert outcome.op is CliToolOp.INSTALLED
+    assert outcome.status is CliToolStatus.INSTALLED
     new_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
     assert new_key != old_key
     assert old_key in oss.deletes and old_key not in oss.objects
@@ -829,7 +829,7 @@ async def test_insert_only_refuses_a_name_taken_during_the_fetch() -> None:
         _CTX, _decl(digest=other_digest), installed_by="u2", expect_absent=True
     )
 
-    assert outcome.op is CliToolOp.CONFLICT and outcome.failed
+    assert outcome.status is CliToolStatus.CONFLICT and outcome.failed
     # The winner's row and object are untouched.
     row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
     assert (row.installed_by, row.oss_key) == ("someone-else", winner_key)
@@ -868,7 +868,7 @@ async def test_a_manifest_apply_still_replaces_rather_than_conflicting() -> None
         _CTX, [_decl(digest=other_digest)], installed_by="manifest"
     )
 
-    assert [o.op for o in outcomes] == [CliToolOp.INSTALLED]
+    assert [o.status for o in outcomes] == [CliToolStatus.INSTALLED]
     assert repo.get(
         env="dev", entity_id="u1", bot_id="bot7", name="mycli"
     ).digest == other_digest
@@ -890,7 +890,7 @@ async def test_a_conflict_over_identical_bytes_keeps_the_winners_object() -> Non
         _CTX, _decl(), installed_by="u2", expect_absent=True
     )
 
-    assert outcome.op is CliToolOp.CONFLICT
+    assert outcome.status is CliToolStatus.CONFLICT
     key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
     assert key not in oss.deletes and oss.objects[key] == _TOOL
 
@@ -908,7 +908,7 @@ async def test_a_failed_record_is_reported_rather_than_raised() -> None:
 
     outcome = await service.install(_CTX, _decl(), installed_by="u2")
 
-    assert outcome.op is CliToolOp.FAILED and outcome.failed
+    assert outcome.status is CliToolStatus.FAILED and outcome.failed
     assert "could not be recorded" in (outcome.detail or "")
     # The engine got it — that is exactly why this is worth logging — and the
     # unreferenced object is not left behind.
@@ -931,9 +931,9 @@ async def test_a_batch_continues_past_one_tools_persistence_failure() -> None:
         installed_by="manifest",
     )
 
-    assert [(o.name, o.op) for o in outcomes] == [
-        ("first", CliToolOp.FAILED),
-        ("second", CliToolOp.INSTALLED),
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("first", CliToolStatus.FAILED),
+        ("second", CliToolStatus.INSTALLED),
     ]
     assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="second")
 
@@ -956,5 +956,20 @@ async def test_a_failed_record_leaves_the_previous_version_intact() -> None:
         _CTX, _decl(digest=other_digest), installed_by="u2"
     )
 
-    assert outcome.op is CliToolOp.FAILED
+    assert outcome.status is CliToolStatus.FAILED
     assert oss.objects[old_key] == _TOOL and old_key not in oss.deletes
+
+
+@pytest.mark.asyncio
+async def test_a_successful_install_reports_where_the_time_went(caplog) -> None:
+    """Three networks move the binary — the source, the object store, the
+    engine — and "which of the three was slow" is the first question when an
+    apply drags. A single total cannot answer it."""
+    service, *_ = _service()
+
+    with caplog.at_level("INFO"):
+        await service.install(_CTX, _decl(), installed_by="u2")
+
+    line = next(m for m in caplog.messages if "installed bot=" in m)
+    for phase in ("fetch=", "store=", "deliver=", "total="):
+        assert phase in line, f"{phase} missing from {line!r}"

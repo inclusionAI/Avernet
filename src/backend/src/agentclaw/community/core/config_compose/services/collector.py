@@ -154,9 +154,9 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         identity_service: "IdentityService",
         overrides_reader: ChannelEngineOverridesReader,
         center_store: CanonicalCenterVersionStore,
+        cli_tool_repository: BotCliToolRepositoryProtocol,
         local_mcp_registry: LocalMCPRegistry | None = None,
         managed_files_reader: ManagedFilesReader | None = None,
-        cli_tool_repository: "BotCliToolRepositoryProtocol | None" = None,
     ) -> None:
         self._skill_set_service_factory = skill_set_service_factory
         self._mcp_config_service = mcp_config_service
@@ -178,10 +178,11 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         # bare/unit collector) means the engine owns every compose, and every
         # teclaw branch below answers as it did before W8.
         self._managed_files = managed_files_reader
-        # W9: ``ac_bot_cli_tool``. Optional for the same reason the reader above
-        # is — the bare/unit collector has no repository — and a compose without
-        # one yields no tools, which composes an artifact with the key absent,
-        # exactly as before W9.
+        # W9: ``ac_bot_cli_tool``. Required rather than defaulted, unlike the
+        # readers above: this collector missing it is exactly the bug review
+        # found — every production compose returned no tool refs while the
+        # tests, which wired it, passed. A bot with no tools is an empty table,
+        # which is a different thing from a collector that cannot see one.
         self._cli_tool_repository = cli_tool_repository
 
     # ── platform ownership (W8) ─────────────────────────────────────────
@@ -736,8 +737,6 @@ class ConfigComposerInputCollector(ComposeInputCollector):
         a replacement writes a new object rather than overwriting the one the
         current row describes.
         """
-        if self._cli_tool_repository is None:
-            return []
         scope = CliToolScope(
             entity_type=req.entity_type, entity_id=req.entity_id, bot_id=req.bot_id
         )

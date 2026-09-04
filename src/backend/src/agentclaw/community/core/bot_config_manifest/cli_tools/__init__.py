@@ -28,7 +28,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
     CliToolDecl,
     CliToolDrift,
-    CliToolOp,
+    CliToolStatus,
     CliToolOutcome,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
@@ -62,7 +62,7 @@ __all__ = [
     "CliToolDeliveryError",
     "CliToolDeliveryPort",
     "CliToolDrift",
-    "CliToolOp",
+    "CliToolStatus",
     "CliToolOutcome",
     "CliToolPlacementError",
     "CliToolScope",

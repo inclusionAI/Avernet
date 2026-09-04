@@ -29,6 +29,9 @@ from agentclaw.community.utils.avernet_tenant import (
     avernet_tenant_scope,
     get_current_avernet_tenant,
 )
+from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+    FakeCliToolRepo,
+)
 
 
 def _req(engine_type: str = "openclaw") -> ComposeRequest:
@@ -56,7 +59,8 @@ def _ready_center_store():
 def _collector(*, skill_set_service=None, mcp_config_service=None,
                resource_repository=None,
                identity_service=None, channel_repo=None,
-               local_mcp_registry=None, managed_files_reader=None):
+               local_mcp_registry=None, managed_files_reader=None,
+               cli_tool_repository=None):
     center_store = _ready_center_store()
     return ConfigComposerInputCollector(
         skill_set_service_factory=_factory_returning(skill_set_service or MagicMock()),
@@ -67,6 +71,7 @@ def _collector(*, skill_set_service=None, mcp_config_service=None,
         identity_service=identity_service or MagicMock(),
         overrides_reader=_reader_over(channel_repo),
         center_store=center_store,
+        cli_tool_repository=cli_tool_repository or FakeCliToolRepo(),
         # Default to an EMPTY registry rather than the production default, which
         # would read the repo's bundled local-mcp-servers.yaml off disk and make
         # every test here depend on that file's contents.
@@ -221,6 +226,7 @@ def test_local_skill_not_emitted_engine_owned():
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
+        cli_tool_repository=FakeCliToolRepo(),
     )
     skills = collector.skills(
         ComposeRequest(entity_id="staff_u1", bot_id="bot7", user_id="u1", engine_type="openclaw")
@@ -291,6 +297,7 @@ def test_one_compose_builds_one_skill_set_service():
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
+        cli_tool_repository=FakeCliToolRepo(),
         local_mcp_registry=_registry_over({}),
     )
 
@@ -325,6 +332,7 @@ def test_a_memoized_service_never_crosses_from_one_bot_to_another():
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
         center_store=_ready_center_store(),
+        cli_tool_repository=FakeCliToolRepo(),
         local_mcp_registry=_registry_over({}),
     )
 

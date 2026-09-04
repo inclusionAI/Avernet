@@ -75,7 +75,8 @@ class _Jobs:
         return self._found
 
 
-def _seam(applies=None, manifests=None, scripts=None, jobs=None):
+def _seam(applies=None, manifests=None, scripts=None, jobs=None,
+          purge_cli_tools=None):
     jobs = jobs or _Jobs()
     return BotCreationManifestSeam(
         manifest_service=manifests or _Manifests(),
@@ -84,6 +85,9 @@ def _seam(applies=None, manifests=None, scripts=None, jobs=None):
         start_job=jobs.start,
         find_job=jobs.find,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
+        # W9: required, so a seam can never be wired without a way to collect
+        # the tool rows a bot-less creation leaves behind.
+        purge_cli_tools=purge_cli_tools or (lambda entity_id, bot_id: 0),
     )
 
 

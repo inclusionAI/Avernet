@@ -47,7 +47,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
     CliToolDecl,
-    CliToolOp,
+    CliToolStatus,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
     INSTALLED_BY_MANIFEST,
@@ -61,13 +61,13 @@ from agentclaw.community.core.bot_config_manifest.schema import placeholders
 #: declared entry to attach to — the orchestrator reports removals from the
 #: plan — so it never reaches this map.
 _OUTCOMES = {
-    CliToolOp.INSTALLED: EntryOutcome.UPDATED,
-    CliToolOp.UNCHANGED: EntryOutcome.UNCHANGED,
-    CliToolOp.FAILED: EntryOutcome.FAILED,
+    CliToolStatus.INSTALLED: EntryOutcome.UPDATED,
+    CliToolStatus.UNCHANGED: EntryOutcome.UNCHANGED,
+    CliToolStatus.FAILED: EntryOutcome.FAILED,
     # Unreachable from here — a full override never asks for insert-only, so
     # the service never answers CONFLICT on this path. Mapped anyway so a
     # future caller that does ask cannot produce a KeyError mid-apply.
-    CliToolOp.CONFLICT: EntryOutcome.FAILED,
+    CliToolStatus.CONFLICT: EntryOutcome.FAILED,
 }
 
 
@@ -256,7 +256,7 @@ class CliToolsMaterialiser(Materialiser):
                 EntryResult(
                     self.construct,
                     name,
-                    _OUTCOMES[outcome.op],
+                    _OUTCOMES[outcome.status],
                     reason=outcome.detail if failed else None,
                     note=outcome.detail if not failed else None,
                 )

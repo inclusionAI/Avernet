@@ -48,6 +48,9 @@ from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply
 from agentclaw.community.core.bot_management.services.teclaw_provision_service import (
     TeclawProvisionService,
 )
+from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+    FakeCliToolRepo,
+)
 from agentclaw.community.core.config_compose.services.collector import (
     ConfigComposerInputCollector,
 )
@@ -248,6 +251,7 @@ def _build(db):
         identity_service=MagicMock(),
         overrides_reader=_reader_over(None),
         center_store=center_store,
+        cli_tool_repository=FakeCliToolRepo(),
         local_mcp_registry=_registry_over({}),
         managed_files_reader=reader,
     )

@@ -239,6 +239,7 @@ def _build(db, *, scripts=None):
         start_job=lambda **_kwargs: None,
         find_job=lambda **_kwargs: None,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
+        purge_cli_tools=lambda entity_id, bot_id: 0,
     )
 
     bots = _Bots()

@@ -558,7 +558,7 @@ provides:
   - CliToolService  # W9: the one component both callers install through
   - CliToolDecl
   - CliToolOutcome
-  - CliToolOp
+  - CliToolStatus
   - CliToolDrift
   - verify_amd64_elf  # W9: "can this machine run them", which the digest does not answer
   - select_subpath

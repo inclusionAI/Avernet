@@ -191,10 +191,14 @@ class ConfigComposer:
             skills=skills,
             resources=resources,
             identity_files=identity_files,
-            # ``or None`` keeps the key off the wire for a bot with no tools, so
-            # such an artifact stays byte-identical to the one this composer
-            # produced before W9. The transitional ``None`` in the artifact's
-            # own docstring is now only that case.
+            # Not a guard against ``None`` arriving — the collector always
+            # returns a list. It converts the *empty* list to ``None``, which is
+            # what keeps the key off the wire entirely for a bot with no tools,
+            # so such an artifact stays byte-identical to the one this composer
+            # produced before W9. Written ``cli_tools or None`` rather than a
+            # comparison because that is the idiom the neighbours here use; the
+            # transitional ``None`` in the artifact's own docstring is now only
+            # this case.
             cli_tools=cli_tools or None,
             stores=stores,
             engine_overrides=engine_overrides,

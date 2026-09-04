@@ -38,7 +38,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
     CliToolDecl,
-    CliToolOp,
+    CliToolStatus,
     CliToolOutcome,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
@@ -85,17 +85,18 @@ class BotCliToolService(BotCliToolServiceProtocol):
         bot_service: BotLookupPort,
         cli_tool_service_factory: Callable[[str], CliToolService],
         is_teclaw: Callable[[Optional[str]], bool],
-        redeliver: Optional[Callable[[Any], Awaitable[Optional[str]]]] = None,
+        redeliver: Callable[[Any], Awaitable[Optional[str]]],
     ) -> None:
         self._bots = bot_service
         self._factory = cli_tool_service_factory
         self._is_teclaw = is_teclaw
         # The same whole-artifact redeliver the manifest apply closes with,
-        # reached on this path for the teclaw family alone. ``None`` (the bare
-        # wiring) means a teclaw mutation lands in platform state and waits for
-        # the next compose, which is the pre-W9 behaviour rather than a silent
-        # half-delivery — but it is not what the API promises, so production
-        # binds it.
+        # reached on this path for the teclaw family alone. Required rather
+        # than defaulted: a wiring that omitted it would answer 200 to a teclaw
+        # install while the running bot kept its previous tool set, and the
+        # only way to see that is in production. The redeliver *itself* may
+        # decline — a bot with no live binding is not an error — but whether
+        # this service can ask is not a runtime state.
         self._redeliver = redeliver
 
     # ── the surface ──────────────────────────────────────────────────────
@@ -123,7 +124,7 @@ class BotCliToolService(BotCliToolServiceProtocol):
         outcome = await service.install(
             ctx, decl, installed_by=actor_id, expect_absent=True
         )
-        if outcome.op is CliToolOp.CONFLICT:
+        if outcome.status is CliToolStatus.CONFLICT:
             raise conflict
         if outcome.failed or outcome.record is None:
             raise CliToolRefusedError(outcome.detail or "the tool could not be installed")
@@ -143,7 +144,7 @@ class BotCliToolService(BotCliToolServiceProtocol):
         if service.get(ctx, name) is None:
             raise CliToolNotFoundError(f"bot {bot_id} has no CLI tool named {name!r}")
         outcome = await service.remove(ctx, name)
-        if outcome.op is not CliToolOp.REMOVED:
+        if outcome.status is not CliToolStatus.REMOVED:
             raise CliToolRefusedError(outcome.detail or "the tool could not be removed")
         await self._redeliver_if_teclaw(ctx)
         return outcome
@@ -157,7 +158,7 @@ class BotCliToolService(BotCliToolServiceProtocol):
         report than a delayed delivery. A bot with no live binding is not a
         failure at all; provisioning composes from the state just written.
         """
-        if self._redeliver is None or not self._is_teclaw(ctx.engine_type):
+        if not self._is_teclaw(ctx.engine_type):
             return
         note = await self._redeliver(ctx)
         if note:

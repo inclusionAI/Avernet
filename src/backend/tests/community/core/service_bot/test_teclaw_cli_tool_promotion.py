@@ -188,12 +188,12 @@ async def test_a_failed_copy_stops_the_build_rather_than_dropping_the_tool() -> 
 
 
 @pytest.mark.asyncio
-async def test_a_promotion_wired_without_the_table_carries_no_tool_refs() -> None:
-    """A deployment that has not enabled the category promotes files exactly as
-    it did before W9 — the correct answer, rather than a silent half-promotion."""
-    promotion = TeclawFilePromotion(oss_storage=FakeCopyingObjectStorage())
-    refs = await _stage(promotion)
-    assert refs.cli_tools == []
+async def test_the_collaborators_are_required_rather_than_defaulted() -> None:
+    """The empty answer must come from an empty table, never from a promotion
+    that was wired without one — that would drop every command from the new
+    stage's artifact with nothing failing to say so."""
+    with pytest.raises(TypeError):
+        TeclawFilePromotion(oss_storage=FakeCopyingObjectStorage())
 
 
 @pytest.mark.asyncio

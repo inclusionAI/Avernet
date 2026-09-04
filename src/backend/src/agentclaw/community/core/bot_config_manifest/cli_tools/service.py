@@ -38,6 +38,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
@@ -51,7 +52,7 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.declarations import (
     CliToolDecl,
     CliToolDrift,
-    CliToolOp,
+    CliToolStatus,
     CliToolOutcome,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
@@ -168,15 +169,23 @@ class CliToolService:
         try:
             checked_name(decl.name)
         except ValueError as error:
-            return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
 
+        # Three phases move a binary that can be a few hundred megabytes, over
+        # three different networks: the source, the object store, the engine.
+        # When an apply is slow, "which of the three" is the first question and
+        # a total tells nobody, so each is timed separately and reported
+        # together at the end. Monotonic, because a clock step during a
+        # multi-minute fetch would otherwise produce a negative duration.
+        started = time.monotonic()
         try:
             data = await self._acquire(ctx, decl)
         except (
             EntryFetchError, UnpackError, CliToolSubpathError,
             CliToolVerificationError, ValueError,
         ) as error:
-            return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+        fetched_at = time.monotonic()
 
         md5 = hashlib.md5(data).hexdigest()
         # Read before the write: a replacement must know which object the
@@ -192,7 +201,8 @@ class CliToolService:
                 data=data,
             )
         except CliToolStoreError as error:
-            return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
+        stored_at = time.monotonic()
 
         try:
             await self._delivery.install(ctx, name=decl.name, data=data)
@@ -209,7 +219,7 @@ class CliToolService:
             # the *same* digest, where both rows name the same key.
             if superseded is None or superseded.oss_key != stored.store_key:
                 await self._discard(stored.store_key)
-            return CliToolOutcome(decl.name, CliToolOp.FAILED, str(error))
+            return CliToolOutcome(decl.name, CliToolStatus.FAILED, str(error))
 
         write = self._repo.insert if expect_absent else self._repo.upsert
         try:
@@ -249,7 +259,7 @@ class CliToolService:
                 await self._discard(stored.store_key)
             return CliToolOutcome(
                 decl.name,
-                CliToolOp.FAILED,
+                CliToolStatus.FAILED,
                 f"the tool was installed but could not be recorded: {error}",
             )
         if record is None:
@@ -264,7 +274,7 @@ class CliToolService:
                 await self._discard(stored.store_key)
             return CliToolOutcome(
                 decl.name,
-                CliToolOp.CONFLICT,
+                CliToolStatus.CONFLICT,
                 f"the bot already has a CLI tool named {decl.name!r}",
             )
         if superseded is not None and superseded.oss_key != stored.store_key:
@@ -273,11 +283,17 @@ class CliToolService:
             # never. Reached whenever the digest changed — the ordinary
             # replacement — and also when the row predates a store-base change.
             await self._discard(superseded.oss_key)
+        delivered_at = time.monotonic()
         logger.info(
-            "[cli_tools] installed bot=%s name=%s size=%d by=%s",
+            "[cli_tools] installed bot=%s name=%s size=%d by=%s "
+            "fetch=%.2fs store=%.2fs deliver=%.2fs total=%.2fs",
             ctx.bot_id, decl.name, len(data), installed_by,
+            fetched_at - started,
+            stored_at - fetched_at,
+            delivered_at - stored_at,
+            delivered_at - started,
         )
-        return CliToolOutcome(decl.name, CliToolOp.INSTALLED, record=record)
+        return CliToolOutcome(decl.name, CliToolStatus.INSTALLED, record=record)
 
     async def remove(self, ctx: CliToolContext, name: str) -> CliToolOutcome:
         """Delete the tool, the row and the object. In that order.
@@ -289,7 +305,7 @@ class CliToolService:
         record = self.get(ctx, name)
         if record is None:
             return CliToolOutcome(
-                name, CliToolOp.FAILED, f"the bot has no CLI tool named {name!r}"
+                name, CliToolStatus.FAILED, f"the bot has no CLI tool named {name!r}"
             )
         return await self._remove_record(ctx, record)
 
@@ -305,14 +321,14 @@ class CliToolService:
         try:
             await self._delivery.delete(ctx, name=name)
         except CliToolDeliveryError as error:
-            return CliToolOutcome(name, CliToolOp.FAILED, str(error))
+            return CliToolOutcome(name, CliToolStatus.FAILED, str(error))
         await asyncio.to_thread(
             self._repo.delete,
             env=ctx.env, entity_id=ctx.entity_id, bot_id=ctx.bot_id, name=name,
         )
         await self._discard(record.oss_key)
         logger.info("[cli_tools] removed bot=%s name=%s", ctx.bot_id, name)
-        return CliToolOutcome(name, CliToolOp.REMOVED, record=record)
+        return CliToolOutcome(name, CliToolStatus.REMOVED, record=record)
 
     async def replace_all(
         self, ctx: CliToolContext, decls: Sequence[CliToolDecl], *, installed_by: str
@@ -336,7 +352,7 @@ class CliToolService:
             current = existing.get(decl.name)
             if current is not None and current.convergence_key == decl.convergence_key:
                 outcomes.append(
-                    CliToolOutcome(decl.name, CliToolOp.UNCHANGED, record=current)
+                    CliToolOutcome(decl.name, CliToolStatus.UNCHANGED, record=current)
                 )
                 continue
             outcomes.append(await self.install(ctx, decl, installed_by=installed_by))

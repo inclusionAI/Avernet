@@ -18,14 +18,18 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 )
 
 
-class CliToolOp(StrEnum):
-    """What happened to one tool.
+class CliToolStatus(StrEnum):
+    """What happened to one tool — an outcome, not an instruction.
+
+    Named for what it reports rather than for what was attempted: every member
+    is a result the caller reads back off a :class:`CliToolOutcome`, and
+    nothing chooses an operation from it.
 
     Deliberately not ``apply/outcomes.EntryOutcome``: that vocabulary has no
     ``REMOVED``, because in every other category a removal is not a declared
     entry. Here it is the visible half of a full override — "the declaration
     stopped naming it, so it is gone" is exactly what the caller must be able
-    to read — and the materialiser maps these four onto the report's own.
+    to read — and the materialiser maps these onto the report's own.
     """
 
     INSTALLED = "installed"
@@ -67,7 +71,7 @@ class CliToolDecl:
     keep_last: bool = True
 
     @classmethod
-    def from_entry(cls, entry: Mapping[str, Any]) -> "CliToolDecl":
+    def from_entry(cls, entry: Mapping[str, Any]) -> CliToolDecl:
         """A validated manifest entry, as this vocabulary.
 
         Reads only keys ``CATEGORY_ENTRY_KEYS[CLI_TOOLS]`` allows; the entry
@@ -106,13 +110,13 @@ class CliToolOutcome:
     """What happened to one tool, and why if it failed."""
 
     name: str
-    op: CliToolOp
+    status: CliToolStatus
     detail: Optional[str] = None
     record: Optional[BotCliToolRecord] = None
 
     @property
     def failed(self) -> bool:
-        return self.op in (CliToolOp.FAILED, CliToolOp.CONFLICT)
+        return self.status in (CliToolStatus.FAILED, CliToolStatus.CONFLICT)
 
 
 @dataclass(frozen=True)
@@ -142,6 +146,6 @@ class CliToolDrift:
 __all__ = [
     "CliToolDecl",
     "CliToolDrift",
-    "CliToolOp",
+    "CliToolStatus",
     "CliToolOutcome",
 ]

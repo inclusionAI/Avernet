@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools import (
     CliToolDecl,
-    CliToolOp,
+    CliToolStatus,
     CliToolOutcome,
     CliToolService,
     CliToolStore,
@@ -101,7 +101,7 @@ async def test_write_is_one_replace_all_call() -> None:
     class Recording(CliToolService):
         async def replace_all(self, ctx, decls, *, installed_by):
             calls.append((tuple(d.name for d in decls), installed_by))
-            return [CliToolOutcome(d.name, CliToolOp.INSTALLED) for d in decls]
+            return [CliToolOutcome(d.name, CliToolStatus.INSTALLED) for d in decls]
 
     service, *_ = _service()
     service.__class__ = Recording
@@ -257,7 +257,7 @@ async def test_the_api_and_apply_refuse_the_same_hostile_declaration() -> None:
         CliToolsMaterialiser(service), _ctx(), [_entry(digest=digest)]
     )
 
-    assert direct.op is CliToolOp.FAILED
+    assert direct.status is CliToolStatus.FAILED
     assert [r.outcome for r in results] == [EntryOutcome.FAILED]
     assert "aarch64" in direct.detail and "aarch64" in (results[0].reason or "")
     assert repo.rows == {}

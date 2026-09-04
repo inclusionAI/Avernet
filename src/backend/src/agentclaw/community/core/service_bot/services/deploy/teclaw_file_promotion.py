@@ -111,14 +111,15 @@ class TeclawFilePromotion:
         self,
         *,
         oss_storage: ObjectStoragePlugin,
-        cli_tool_repository: BotCliToolRepositoryProtocol | None = None,
-        cli_tool_store: CliToolStore | None = None,
+        cli_tool_repository: BotCliToolRepositoryProtocol,
+        cli_tool_store: CliToolStore,
     ) -> None:
         self._oss = oss_storage
-        # W9. Optional together: a build wired without them promotes files as
-        # before and carries no tool refs, which is the correct answer for a
-        # deployment that has not enabled the category rather than a silent
-        # half-promotion.
+        # W9. Required, not defaulted: a build wired without them would promote
+        # files exactly as before and silently drop every CLI ref from the new
+        # stage's artifact — a bot that loses its commands at publish, with
+        # nothing failing to say so. There is no deployment where the category
+        # is off; the table is simply empty for a bot with no tools.
         self._cli_tools = cli_tool_repository
         self._cli_tool_store = cli_tool_store
 
@@ -248,8 +249,6 @@ class TeclawFilePromotion:
         A failed copy raises rather than dropping the tool: a published artifact
         that silently lost a command is worse than a build that stopped.
         """
-        if self._cli_tools is None or self._cli_tool_store is None:
-            return []
         scope = CliToolScope(
             entity_type=entity_type, entity_id=entity_id, bot_id=bot_id
         )
