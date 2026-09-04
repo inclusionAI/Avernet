@@ -7,7 +7,7 @@
     "mode": "merge",
     "providers": {
       "openai-compatible": {
-        "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "baseUrl": "https://MODEL_PROVIDER_HOST/compatible-mode/v1",
         "apiKey": "Bearer ${API-KEY}",
         "auth": "api-key",
         "api": "openai-completions",

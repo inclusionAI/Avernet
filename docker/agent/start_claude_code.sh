@@ -20,18 +20,22 @@
 #   4. Start the engine program via supervisorctl
 #   5. Wait for engine /health, write the ready marker and print status
 #
-# Provider config is FULLY STATIC (nothing read from pod env): the image
+# Provider config is static except the model provider host: the image
 # stages docker/agent/claude-settings.json at
 # /opt/claude-settings.json.template (NOT under /home/admin — that path is
 # NAS-mounted at pod start and shadows image content) and Step 1 copies it
-# into ~/.claude/settings.json AFTER the mount, mount-wins. Content — URL,
-# model glm-5.2, and the auth token as the literal placeholder
-# "Bearer ${API-KEY}" — mirrors openclaw.json ("apiKey":
+# into ~/.claude/settings.json AFTER the mount, mount-wins, substituting the
+# MODEL_PROVIDER_HOST placeholder from the pod env (same variable the
+# entrypoint's openclaw.json rendering uses, same bare-host contract: no
+# scheme or path — the template carries https:// and /apps/anthropic).
+# Everything else — model glm-5.2, and the auth token as the literal
+# placeholder "Bearer ${API-KEY}" — mirrors openclaw.json ("apiKey":
 # "Bearer ${API-KEY}"): the gateway on the upstream side replaces the
 # placeholder with the real key. Swap the whole provider scenario by
 # mounting a file at the final path.
 #
 # Reads (pod env):
+#   MODEL_PROVIDER_HOST          optional, defaults dashscope.aliyuncs.com
 #   CLAUDE_RELAY_PORT           optional, defaults 18900
 #   CLAUDE_RELAY_PERMISSION_MODE optional, defaults acceptEdits
 #   CLAUDE_CODE_PATH            optional, defaults /usr/local/bin/claude
@@ -66,11 +70,12 @@ RELAY_GATEWAY_DIR="/opt/engine/src/engine/community/claude_code_gateway"
 
 section "start_claude_code.sh - claude_code engine startup"
 
-# Nothing to validate: every provider field — URL, model, and the auth token
-# (the literal placeholder "Bearer ${API-KEY}") — lives in the STATIC
-# settings.json baked into the image. The gateway on the upstream side
-# replaces the placeholder with the real key, exactly like openclaw.json's
-# "apiKey": "Bearer ${API-KEY}" placeholder.
+# Nothing to validate beyond MODEL_PROVIDER_HOST (bare host or empty — the
+# default is applied at the copy step below): every other provider field —
+# model, and the auth token (the literal placeholder "Bearer ${API-KEY}") —
+# is static in the settings.json template baked into the image. The gateway
+# on the upstream side replaces the placeholder with the real key, exactly
+# like openclaw.json's "apiKey": "Bearer ${API-KEY}" placeholder.
 
 # --- Step 1: Configure engine + relay environment ---
 
@@ -118,18 +123,24 @@ success "Relay env file written to $RELAY_ENV_FILE (mode 600)"
 # /opt/claude-settings.json.template and we copy it in here, at service
 # start, AFTER the mount is live. Mount-wins: a settings.json already
 # present on the NAS (a deployment's own provider scenario) is kept
-# untouched. Content is static (URL + glm-5.2 + placeholder token
-# "Bearer ${API-KEY}" the upstream gateway replaces), so this is a plain cp
-# — no substitution needed (the entrypoint's openclaw.json _sub pattern
-# exists only because that template carries ${...} placeholders).
+# untouched. The copy substitutes the MODEL_PROVIDER_HOST placeholder (sed on
+# the bare variable name, same literal pattern as the entrypoint's
+# openclaw.json _sub — NOT the token's ${...} placeholder style). Only "/"
+# is escaped in the sed replacement; hosts must not carry sed metacharacters.
 CLAUDE_SETTINGS_FILE="/home/admin/.claude/settings.json"
 CLAUDE_SETTINGS_TEMPLATE="/opt/claude-settings.json.template"
 if [ ! -f "$CLAUDE_SETTINGS_FILE" ]; then
     if [ -f "$CLAUDE_SETTINGS_TEMPLATE" ]; then
         cp "$CLAUDE_SETTINGS_TEMPLATE" "$CLAUDE_SETTINGS_FILE"
+        # Same default as the entrypoint's openclaw.json MODEL_PROVIDER_HOST
+        # rendering (avernet-entrypoint.sh): an un-injected pod env keeps
+        # the shipped dashscope scenario. "Bearer ${API-KEY}" is untouched.
+        MODEL_PROVIDER_HOST="${MODEL_PROVIDER_HOST:-dashscope.aliyuncs.com}"
+        _esc_model_provider_host="${MODEL_PROVIDER_HOST//\//\\/}"
+        sed -i "s/MODEL_PROVIDER_HOST/${_esc_model_provider_host}/g" "$CLAUDE_SETTINGS_FILE"
         chown admin:admin "$CLAUDE_SETTINGS_FILE" 2>/dev/null || true
         chmod 600 "$CLAUDE_SETTINGS_FILE"
-        success "Claude settings.json staged from template to $CLAUDE_SETTINGS_FILE (mode 600)"
+        success "Claude settings.json staged from template to $CLAUDE_SETTINGS_FILE (model provider host: ${MODEL_PROVIDER_HOST})"
     else
         warn "No $CLAUDE_SETTINGS_FILE on the mount and no template in the image; claude/relay fall back to their defaults"
     fi

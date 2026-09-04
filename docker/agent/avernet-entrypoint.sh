@@ -93,6 +93,7 @@ if [ ! -f "${CONFIG_FILE}" ]; then
         }
 
         _sub OPENCLAW_OPENAI_BASE_URL  OPENCLAW_OPENAI_BASE_URL
+        _sub MODEL_PROVIDER_HOST       MODEL_PROVIDER_HOST
         _sub OPENCLAW_OPENAI_API_KEY   OPENCLAW_OPENAI_API_KEY
         _sub OPENCLAW_OPENAI_MODEL_ID  OPENCLAW_OPENAI_MODEL_ID
         _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
@@ -106,6 +107,13 @@ if [ ! -f "${CONFIG_FILE}" ]; then
         fi
     }
     export -f _gen_config
+    # MODEL_PROVIDER_HOST: model provider host (bare host, no scheme or path —
+    # the template carries the https:// prefix and the provider-specific path
+    # suffix). Shared contract with start_claude_code.sh, which substitutes
+    # the same placeholder into the claude_code settings.json. The default
+    # keeps the shipped dashscope scenario when the pod env does not inject
+    # it and must NOT fall through to _sub's UNSET literal (https://UNSET/...).
+    export MODEL_PROVIDER_HOST="${MODEL_PROVIDER_HOST:-dashscope.aliyuncs.com}"
     export TEMPLATE_FILE CONFIG_FILE OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY \
            OPENCLAW_OPENAI_MODEL_ID OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_GATEWAY_TOKEN \
            BCS_URL BCS_BOT_ID BCS_BOT_NAME

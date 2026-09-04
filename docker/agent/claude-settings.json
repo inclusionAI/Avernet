@@ -1,6 +1,6 @@
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "ANTHROPIC_BASE_URL": "https://MODEL_PROVIDER_HOST/apps/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "Bearer ${API-KEY}",
     "ANTHROPIC_MODEL": "glm-5.2",
     "ANTHROPIC_SMALL_FAST_MODEL": "glm-5.2",
