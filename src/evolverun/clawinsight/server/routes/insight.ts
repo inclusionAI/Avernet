@@ -27,11 +27,22 @@ import type { RuleEvolutionService } from "../services/insight/rule-evolution-se
 import { readAutoRepairRule } from "../services/insight/auto-repair-policy.js";
 import { createAdminConsentToken } from "../services/insight/admin-consent.js";
 import { getClawWebPublicBaseUrl } from "../env.js";
-import { InsightTaskCreationError, type InsightTaskService } from "../services/evolve/insight-task-service.js";
+import { InsightTaskCreationError, type CreateInsightTaskInput, type InsightTaskCreationResult } from "../services/evolve/insight-task-service.js";
 import type { RepairTaskService } from "../services/repair/repair-runtime.js";
 import { RepairError } from "../services/repair/errors.js";
 
 const MAX_PAGE_SIZE = 100;
+
+type InsightTaskCreator = { create(input: CreateInsightTaskInput): Promise<InsightTaskCreationResult> };
+
+function isInsightTaskCreationError(error: unknown): error is InsightTaskCreationError {
+  if (error instanceof InsightTaskCreationError) return true;
+  if (!(error instanceof Error) || !("code" in error) || !("category" in error)) return false;
+  const category = (error as { category?: unknown }).category;
+  return typeof (error as { code?: unknown }).code === "string"
+    && typeof category === "string"
+    && ["validation", "auth", "forbidden", "not_found", "conflict", "source"].includes(category);
+}
 
 type InsightRouterOptions = {
   metricWriter?: InsightMetricDailyRepository | null;
@@ -41,7 +52,7 @@ type InsightRouterOptions = {
   agentAuthorizer?: InsightAgentAuthorizer | null;
   ruleProvider?: GovernanceRuleProvider | null;
   autoRepairRepo?: InsightAutoRepairRepository | null;
-  insightTaskService?: InsightTaskService | null;
+  insightTaskService?: InsightTaskCreator | null;
   repairService?: RepairTaskService | null;
   ruleEvolutionService?: RuleEvolutionService | null;
 };
@@ -1191,7 +1202,7 @@ export function createInsightRouter(service: InsightService | null, options: Ins
         idempotent: result.idempotent,
       });
     } catch (error) {
-      if (error instanceof InsightTaskCreationError) {
+      if (isInsightTaskCreationError(error)) {
         const status = error.category === "validation" ? 400
           : error.category === "auth" ? 401
             : error.category === "forbidden" ? 403
