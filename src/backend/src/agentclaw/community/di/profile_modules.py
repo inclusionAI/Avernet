@@ -301,6 +301,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
         from agentclaw.community.di.modules.infrastructure.community.eval_env import (
             CommunityEvalEnvModule,
         )
+        from agentclaw.community.di.modules.infrastructure.community.task_runner_integration import (
+            TaskRunnerIntegrationModule,
+        )
 
         column: list[Module] = [
             # Decomposed per-concern community infrastructure modules.
@@ -337,6 +340,11 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             CommunityNotifyModule(),
             # 评测环境 Prod 绑定。
             CommunityEvalEnvModule(),
+            # Task-runner dispatch integration (community public) — binds
+            # OpenApiBotPort / BcsClientPort / BcsTokenProvider(callback) from
+            # the openapi_bot / bcs_client user_config blocks. Registered after
+            # base TaskModule so its bcs_token_provider callback override wins.
+            TaskRunnerIntegrationModule(),
         ]
         return column
 
