@@ -56,10 +56,15 @@ remove puts its row back, and each leaves the object the surviving row points
 at. An object stored for a delivery that then failed is discarded — its key is
 derived, not recorded, so it is collected there or never.
 
-A **full override does not roll back**. Its rows are the desired state, the
-report says per tool what the engine refused, `drift()` shows the mismatch and
-the next apply re-sends. Partial failure is already an apply's normal shape,
-and unwinding N rows would add a failure mode of its own.
+A **full override rolls back too**, and for the same reason — the rule is one
+rule: the platform records what the family confirmed. A per-name refusal undoes
+that name; a call that did not complete undoes every name the apply touched,
+including the rows it *dropped* for removal.
+
+An earlier draft left an apply's rows standing, on the theory that the next
+apply would re-send them. It would not: the row already carries the
+declaration's `(digest, subpath)`, so the next apply converges on it and
+reports `unchanged` forever. Rolling back is what makes the retry real.
 
 ## Who tells the family, and how many times
 

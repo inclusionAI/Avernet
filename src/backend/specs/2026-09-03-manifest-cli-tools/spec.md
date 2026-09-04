@@ -208,9 +208,10 @@ wrong: the generic re-phasing keys on the switch, and this category must not.
 - [ ] `replace_all` reaches the engine **once**, through the port's whole-set
       operation, whatever the size of the declared set — and not at all when
       every declaration already converges.
-- [ ] Platform state is written before the port is called, and a refused
-      whole-set call leaves it standing: the report says per tool what failed
-      and the next apply re-sends (D-14).
+- [ ] Platform state is written before the port is called, and every name the
+      family did not confirm is rolled back — the refused ones on a per-name
+      answer, all of them on a call that did not complete, including the rows
+      dropped for removal (D-14).
 - [ ] A teclaw apply still makes exactly **one** artifact push, from
       `TeclawDelivery.finish`; the `cli_tools` port does not push a second one
       mid-apply.
@@ -311,16 +312,34 @@ were written would transmit the previous set. This makes the table what its own
 repository contract already called it — the record of what the platform *asked
 for* — with `drift()` there to compare it against what the engine has.
 
-The consequence is the failure story, and it differs by path on purpose:
+The consequence is the failure story, and it is the same on every path: **the
+platform records what the family confirmed.** Anything it did not is rolled
+back — a single install undoes its insert, a single remove puts its row back,
+and a whole-set call unwinds every name it touched that the family refused or
+never answered for.
 
-- **A single install or remove rolls its row back** when the port refuses. The
-  endpoint's contract is that a non-2xx means the bot does not have the tool;
-  without the rollback a failed `POST` would be followed by a `GET` that lists
-  it. One row, and the prior value is in hand.
-- **`replace_all` does not roll back.** The desired state stands, the report
-  says per tool what failed, `drift()` shows the mismatch, and the next apply
-  re-sends. Partial failure is already an apply's normal shape, and unwinding N
-  rows would add a failure mode of its own.
+*This corrects an earlier draft of this decision*, which had `replace_all`
+leave its rows standing on the theory that the desired state would be re-sent
+by the next apply. **It would not.** The row already carries the declaration's
+`(digest, subpath)`, so the next apply converges on it, reports `unchanged` and
+never retries — leaving a row pointing at bytes the engine rejected,
+permanently, with `drift()` the only thing that could notice and nothing acting
+on it. The argument against rolling back was that unwinding N rows adds a
+failure mode; the rows actually unwound are only the ones this apply *touched*
+and the family did not confirm, which is typically one or none.
+
+Two specific losses the corrected rule prevents, both found in review of the
+first draft:
+
+- A tool whose per-name result says the engine refused it kept the **new** row
+  while its **previous** object was collected — destroying the last
+  known-good binary of the one tool that failed.
+- A whole-call failure (an unreachable engine) never restored the rows already
+  **dropped** for removal. "The desired state stands" never covered those:
+  they were dropped, not written. The platform would stop tracking a tool the
+  container may still be running, and nothing could notice — teclaw cannot
+  observe drift by design, and a later apply only removes what the table still
+  has.
 
 **D-15 — The engine's replacement response reports per name.** The apply report
 is per declared entry, and a single batch call would otherwise collapse every
@@ -428,5 +447,5 @@ Tracked rather than open, because v1 accepts it (rev 8):
 | **rev 4** | Platform-managed on the owner's decision: metadata table, one core service every caller delegates to, engine CRUD plus batch, a management API, no projection. |
 | **rev 5** | The engine owns the directory and the protocol is **name-addressed** (D-3), so the `tools/` namespace and every isolation mechanism are dropped (D-5). `cli_tools` is always platform-managed, independent of the teclaw switch, like `mcp` (D-6). The teclaw arm gains the **promotion gather** — GET from the engine, stage-scoped OSS, artifact refs — which is why the protocol needs `get`. `PATH` is replaced by a default-skillset skill for v1, with the cost and the §3.7 correction written down (D-8). |
 | **rev 6** | **The platform stores the bytes in OSS at install time** (D-4) — rev 5 had no answer for what a teclaw artifact references on a live update or a manifest apply. The artifact becomes teclaw's delivery with no separate engine upload (D-5); promotion becomes a stage-scoped copy rather than a download, so the protocol's `get` is no longer needed; and the phase settles as ARCA `ON_CONTAINER` / teclaw `PRE_CONTAINER` under either switch position (D-6), correcting rev 5's claim that no category-specific code was required. |
-| **rev 8** | The port gains a **whole-set** operation beside the single-tool ones (D-13): a manifest apply calls `replace_all` once instead of `install` per tool, so the engine sees one desired set and no intermediate state — on teclaw those intermediates were wrong, since removals precede installs. The families differ only in transmission: teclaw composes the set into the artifact, ARCA calls a new replacement endpoint reporting **per name** (D-15), which keeps the apply report per entry. teclaw's port composes *from* the table, so **platform state is written before the port is called** (D-14); a single install or remove rolls its row back when the port refuses, an apply does not. The closing redeliver leaves `BotCliToolService` — the family knowledge moves into the port, and `TeclawDelivery.finish` keeps owning the one artifact push a manifest apply makes. |
+| **rev 8** | (Corrected in review: `replace_all` **does** roll back what the family did not confirm — see D-14. The first draft left its rows standing, which the next apply would then converge on and never retry.) The port gains a **whole-set** operation beside the single-tool ones (D-13): a manifest apply calls `replace_all` once instead of `install` per tool, so the engine sees one desired set and no intermediate state — on teclaw those intermediates were wrong, since removals precede installs. The families differ only in transmission: teclaw composes the set into the artifact, ARCA calls a new replacement endpoint reporting **per name** (D-15), which keeps the apply report per entry. teclaw's port composes *from* the table, so **platform state is written before the port is called** (D-14); a single install or remove rolls its row back when the port refuses, an apply does not. The closing redeliver leaves `BotCliToolService` — the family knowledge moves into the port, and `TeclawDelivery.finish` keeps owning the one artifact push a manifest apply makes. |
 | **rev 7** | The engine's `install` owns the executable bit (D-5). Rev 6 had the platform do a device write then a `chmod` through the general shell channel; withdrawn in review — once `install` carries the semantics, a platform-side `chmod` is a second implementation of the engine's own job, and it took a user-supplied name through a shell. No `chmod`, no shell command, no quoting. |

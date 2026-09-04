@@ -418,21 +418,27 @@ class CliToolService:
         existing = {record.name: record for record in self.list(ctx)}
         declared = {decl.name for decl in decls}
         outcomes: list[CliToolOutcome] = []
-        # What the family will be told, and what to collect once it agrees.
-        # Nothing is discarded before the call: a refused set leaves the desired
-        # rows standing (D-14), and rows that point at nothing would be worse
-        # than rows the engine has not caught up with.
-        collect: list[str] = []
-        touched = False
+        # Everything below is bookkeeping for one question: *what does the
+        # platform have to undo for a name the family does not confirm?*
+        #
+        #   undo    — the row as it was, per name this apply touched. ``None``
+        #             means there was no row, so the undo is a delete.
+        #   fresh   — the object this apply stored for that name, to be
+        #             discarded if its row is rolled back.
+        #   collect — the object the *previous* row pointed at, to be discarded
+        #             only once the family has confirmed the replacement.
+        undo: dict[str, Optional[BotCliToolRecord]] = {}
+        fresh: dict[str, str] = {}
+        collect: dict[str, str] = {}
 
         for name in sorted(set(existing) - declared):
             record = existing[name]
             await self._drop_row(ctx, name)
-            collect.append(record.oss_key)
+            undo[name] = record
+            collect[name] = record.oss_key
             outcomes.append(
                 CliToolOutcome(name, CliToolStatus.REMOVED, record=record)
             )
-            touched = True
 
         for decl in decls:
             current = existing.get(decl.name)
@@ -442,17 +448,15 @@ class CliToolService:
                 )
                 continue
             outcome = await self._record_one(ctx, decl, installed_by=installed_by)
-            if (
-                outcome.status is CliToolStatus.INSTALLED
-                and current is not None
-                and outcome.record is not None
-                and current.oss_key != outcome.record.oss_key
-            ):
-                collect.append(current.oss_key)
+            if outcome.status is CliToolStatus.INSTALLED:
+                undo[decl.name] = current
+                if outcome.record is not None:
+                    fresh[decl.name] = outcome.record.oss_key
+                    if current is not None and current.oss_key != outcome.record.oss_key:
+                        collect[decl.name] = current.oss_key
             outcomes.append(outcome)
-            touched = True
 
-        if not touched:
+        if not undo:
             # Every declaration already converged, so there is nothing for the
             # family to be told and nothing it could do about it. This is what
             # keeps a re-applied manifest from re-transmitting every binary the
@@ -472,17 +476,26 @@ class CliToolService:
         try:
             failures = await self._deliver_set(ctx, desired)
         except CliToolDeliveryError as error:
-            # The call did not complete, so nothing is known per tool. Every
-            # row the platform just wrote stands — the desired state — and the
-            # report says the whole set failed for one reason.
+            # The call did not complete, so nothing is confirmed. Every name
+            # this apply touched goes back to what it was — including the rows
+            # dropped for removal, which were never written and so would not be
+            # covered by "the desired state stands".
+            await self._unwind(ctx, undo, fresh, names=set(undo))
             return [
-                o if o.status is CliToolStatus.FAILED
-                else CliToolOutcome(o.name, CliToolStatus.FAILED, str(error), o.record)
+                CliToolOutcome(o.name, CliToolStatus.FAILED, str(error), o.record)
+                if o.name in undo
+                else o
                 for o in outcomes
             ]
 
-        for key in collect:
-            await self._discard(key)
+        # Per name now, and the same rule: undo what the family refused, and
+        # collect the superseded object only for what it accepted. Discarding
+        # before reading ``failures`` would delete the last known-good binary of
+        # a tool the engine had just rejected.
+        await self._unwind(ctx, undo, fresh, names=set(failures) & set(undo))
+        for name, key in collect.items():
+            if name not in failures:
+                await self._discard(key)
         if not failures:
             return outcomes
         return [
@@ -491,6 +504,40 @@ class CliToolService:
             else o
             for o in outcomes
         ]
+
+    async def _unwind(
+        self,
+        ctx: CliToolContext,
+        undo: Mapping[str, Optional[BotCliToolRecord]],
+        fresh: Mapping[str, str],
+        *,
+        names: set[str],
+    ) -> None:
+        """Put the named rows back as they were, and drop what they orphan.
+
+        Rev 8 writes rows before the family is told, so this is what keeps the
+        table's meaning intact: **the platform records what the family
+        confirmed.** An earlier draft of this design left a refused whole-set
+        call's rows standing on the theory that the next apply would re-send
+        them. It would not: the row already carries the declaration's
+        ``(digest, subpath)``, so the next apply converges on it, reports
+        ``unchanged`` and never retries — leaving a row that points at bytes
+        the engine rejected, permanently. Rolling back is what restores the
+        retry.
+
+        Only the *touched* names are unwound, and typically that is one or
+        none, so this is not the N-row unwind that argued against rolling back
+        at all.
+        """
+        for name in sorted(names):
+            previous = undo.get(name)
+            await self._restore(ctx, name, previous)
+            key = fresh.get(name)
+            # The bytes this apply stored are unreferenced once the row is back
+            # — unless the restored row points at them, which happens when the
+            # same digest was re-installed under the same name.
+            if key is not None and (previous is None or previous.oss_key != key):
+                await self._discard(key)
 
     async def _deliver_set(
         self, ctx: CliToolContext, records: Sequence[BotCliToolRecord]

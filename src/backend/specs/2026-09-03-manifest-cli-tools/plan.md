@@ -641,7 +641,9 @@ replace_all(set)  fetch/verify/OSS-put the changed ones
                   → delete removed rows, upsert installed rows
                   → port.replace_all(desired)          ← once, whatever the size
                   → fan per-name results into outcomes
-                  (refused? the desired state stands — D-14)
+                  └ refused, or the call never completed? unwind every name
+                    this apply touched and the family did not confirm — the
+                    installs *and* the rows dropped for removal (D-14)
 ```
 
 The `(digest, subpath)` convergence check still runs first, so an apply where

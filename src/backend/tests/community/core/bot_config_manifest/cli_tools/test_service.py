@@ -991,3 +991,135 @@ async def test_a_successful_install_reports_where_the_time_went(caplog) -> None:
     line = next(m for m in caplog.messages if "installed bot=" in m)
     for phase in ("fetch=", "store=", "deliver=", "total="):
         assert phase in line, f"{phase} missing from {line!r}"
+
+
+# ── a whole-set call the family did not confirm ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_per_name_refusal_puts_that_tools_row_back() -> None:
+    """The row must not keep pointing at bytes the engine rejected.
+
+    If it did, the next apply would converge on it — the row already carries
+    the declaration's ``(digest, subpath)`` — report ``unchanged`` and never
+    retry. The rollback is what makes "the next apply re-sends" true.
+    """
+    service, repo, delivery, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    old = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    delivery.replace_failures = {"mycli": "not executable"}
+
+    outcomes = await service.replace_all(
+        _CTX, [_decl(digest=other_digest)], installed_by="manifest"
+    )
+
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("mycli", CliToolStatus.FAILED)
+    ]
+    row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli")
+    assert row.digest == old.digest and row.oss_key == old.oss_key
+
+
+@pytest.mark.asyncio
+async def test_a_per_name_refusal_keeps_the_last_known_good_binary() -> None:
+    """The superseded object is collected only for a name the family accepted.
+    Discarding before reading the per-name results would delete the working
+    binary of the very tool the engine had just rejected."""
+    service, repo, delivery, _, oss = _service()
+    await service.install(_CTX, _decl(), installed_by="u2")
+    old_key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli").oss_key
+
+    other = _elf(payload=b"\x02" * 64)
+    other_digest = "sha256:" + hashlib.sha256(other).hexdigest()
+    service._fetcher.content, service._fetcher.digest = other, other_digest
+    delivery.replace_failures = {"mycli": "not executable"}
+
+    await service.replace_all(_CTX, [_decl(digest=other_digest)], installed_by="manifest")
+
+    assert oss.objects[old_key] == _TOOL and old_key not in oss.deletes
+    # And the bytes nothing references any more are gone.
+    assert _key(digest=other_digest) not in oss.objects
+
+
+@pytest.mark.asyncio
+async def test_one_refusal_does_not_undo_the_tools_that_landed() -> None:
+    service, repo, delivery, _, _ = _service()
+    delivery.replace_failures = {"b": "not executable"}
+
+    outcomes = await service.replace_all(
+        _CTX, [_decl(name="a"), _decl(name="b")], installed_by="manifest"
+    )
+
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("a", CliToolStatus.INSTALLED), ("b", CliToolStatus.FAILED),
+    ]
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="a") is not None
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="b") is None
+
+
+@pytest.mark.asyncio
+async def test_a_whole_call_failure_restores_the_rows_dropped_for_removal() -> None:
+    """The row was *dropped*, not written, so "the desired state stands" never
+    covered it. Left gone, the platform stops tracking a tool the container may
+    still be running — and nothing can notice: teclaw cannot observe drift, and
+    a later apply only removes what the table still has."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
+        CliToolDeliveryError,
+    )
+
+    service, repo, delivery, _, oss = _service()
+    await service.install(_CTX, _decl(name="oldcli"), installed_by="u2")
+    key = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="oldcli").oss_key
+    delivery.replace_error = CliToolDeliveryError("engine unreachable")
+
+    outcomes = await service.replace_all(_CTX, [], installed_by="manifest")
+
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("oldcli", CliToolStatus.FAILED)
+    ]
+    row = repo.get(env="dev", entity_id="u1", bot_id="bot7", name="oldcli")
+    assert row is not None and oss.objects[key] == _TOOL
+
+
+@pytest.mark.asyncio
+async def test_a_whole_call_failure_undoes_the_installs_too() -> None:
+    """Nothing was confirmed, so nothing is recorded — otherwise the next apply
+    converges on rows describing tools the bot never received."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
+        CliToolDeliveryError,
+    )
+
+    service, repo, delivery, _, oss = _service()
+    delivery.replace_error = CliToolDeliveryError("engine unreachable")
+
+    outcomes = await service.replace_all(_CTX, [_decl()], installed_by="manifest")
+
+    assert [o.status for o in outcomes] == [CliToolStatus.FAILED]
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="mycli") is None
+    assert _key() not in oss.objects
+
+
+@pytest.mark.asyncio
+async def test_a_whole_call_failure_leaves_the_converged_tools_alone() -> None:
+    """A tool this apply did not touch is still installed and still working;
+    reporting it FAILED would name the wrong casualty."""
+    from agentclaw.community.core.bot_config_manifest.cli_tools.delivery_port import (
+        CliToolDeliveryError,
+    )
+
+    service, repo, delivery, _, _ = _service()
+    await service.install(_CTX, _decl(name="steady"), installed_by="u2")
+    delivery.replace_error = CliToolDeliveryError("engine unreachable")
+
+    outcomes = await service.replace_all(
+        _CTX, [_decl(name="steady"), _decl(name="fresh")], installed_by="manifest"
+    )
+
+    assert [(o.name, o.status) for o in outcomes] == [
+        ("steady", CliToolStatus.UNCHANGED), ("fresh", CliToolStatus.FAILED),
+    ]
+    assert repo.get(env="dev", entity_id="u1", bot_id="bot7", name="steady") is not None
