@@ -241,6 +241,12 @@ async def restart_bot_engine(
     result = await relay.call(
         bot_id=bot_id, owner_id=owner_id, facts=facts, stage=stage.value,
         method="POST", path="/api/engine/restart",
+        # The device endpoint is typed ``engine_restart(request:
+        # EngineRestartRequest)``: FastAPI rejects a bodyless POST with 422
+        # (which the relay would flatten into a public 502) however optional
+        # the model's fields are. Always carry the JSON envelope; force stays
+        # off until a public contract exposes it.
+        body={"force": False},
     )
     raw = result.data if isinstance(result.data, dict) else {}
     return envelope(
