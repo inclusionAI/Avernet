@@ -101,7 +101,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "((100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",result=\"success\"}[1h]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\"}[1h]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\"}[1h]))) or vector(0)) == 0)) or vector(100)",
+          "expr": "(100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"success\"}[1h]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[1h]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[1h]))) or vector(0)) == 0)",
           "instant": false,
           "legendFormat": "value",
           "range": true,
@@ -173,7 +173,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "((100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",result=\"success\"}[1d]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\"}[1d]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\"}[1d]))) or vector(0)) == 0)) or vector(100)",
+          "expr": "(100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"success\"}[1d]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[1d]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[1d]))) or vector(0)) == 0)",
           "instant": false,
           "legendFormat": "value",
           "range": true,
@@ -245,7 +245,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "((100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",result=\"success\"}[7d]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\"}[7d]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\"}[7d]))) or vector(0)) == 0)) or vector(100)",
+          "expr": "(100 * ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"success\"}[7d]))) or vector(0)) / ((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[7d]))) or vector(0))) unless (((sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[7d]))) or vector(0)) == 0)",
           "instant": false,
           "legendFormat": "value",
           "range": true,
@@ -1467,7 +1467,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "((100 * ((sum(rate(bcs_http_requests_total{env=\"$env\",result=\"success\"}[15m]))) or vector(0)) / ((sum(rate(bcs_http_requests_total{env=\"$env\"}[15m]))) or vector(0))) unless (((sum(rate(bcs_http_requests_total{env=\"$env\"}[15m]))) or vector(0)) == 0)) or vector(100)",
+          "expr": "(100 * ((sum(rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"success\"}[15m]))) or vector(0)) / ((sum(rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[15m]))) or vector(0))) unless (((sum(rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[15m]))) or vector(0)) == 0)",
           "instant": false,
           "legendFormat": "HTTP API",
           "range": true,
@@ -1827,7 +1827,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",result=\"error\"}[1h])))",
+          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[1h])))",
           "instant": true,
           "legendFormat": "{{route}} {{method}}",
           "range": false,

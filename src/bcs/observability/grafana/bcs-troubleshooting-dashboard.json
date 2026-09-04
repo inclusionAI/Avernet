@@ -167,7 +167,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * (sum(rate(bcs_http_requests_total{env=\"$env\",result=\"error\"}[5m])) or vector(0)) / clamp_min((sum(rate(bcs_http_requests_total{env=\"$env\"}[5m])) or vector(0)), 0.001)",
+          "expr": "100 * (sum(rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[5m])) or vector(0)) / clamp_min((sum(rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[5m])) or vector(0)), 0.001)",
           "instant": false,
           "legendFormat": "http error %",
           "range": true,
@@ -1165,7 +1165,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum(increase(bcs_http_requests_total{env=\"$env\",result=\"error\"}[5m])) or vector(0)",
+          "expr": "sum(increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[5m])) or vector(0)",
           "instant": true,
           "legendFormat": "errors in 5m",
           "range": false,
@@ -1231,7 +1231,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",result=\"error\"}[5m])))",
+          "expr": "topk(20, sum by(route, method, status_class) (increase(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[5m])))",
           "instant": true,
           "legendFormat": "{{route}} {{method}} / {{status_class}}",
           "range": false,
@@ -1329,7 +1329,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\"}[5m]))",
+          "expr": "sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[5m]))",
           "instant": false,
           "legendFormat": "{{route}} {{method}}",
           "range": true,
@@ -1427,7 +1427,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "100 * (sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",result=\"error\"}[5m])) or (0 * sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\"}[5m])))) / clamp_min(sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\"}[5m])), 0.001)",
+          "expr": "100 * (sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[5m])) or (0 * sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[5m])))) / clamp_min(sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[5m])), 0.001)",
           "instant": false,
           "legendFormat": "{{route}} {{method}}",
           "range": true,
@@ -1493,7 +1493,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(20, sum by(route, method, status_class) (rate(bcs_http_requests_total{env=\"$env\",result=\"error\"}[5m])))",
+          "expr": "topk(20, sum by(route, method, status_class) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\",result=\"error\"}[5m])))",
           "instant": false,
           "legendFormat": "{{route}} {{method}} / {{status_class}}",
           "range": true,
@@ -1559,7 +1559,7 @@
             "uid": "$datasource"
           },
           "editorMode": "code",
-          "expr": "topk(20, sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\"}[5m])))",
+          "expr": "topk(20, sum by(route, method) (rate(bcs_http_requests_total{env=\"$env\",route!=\"/health\"}[5m])))",
           "instant": false,
           "legendFormat": "{{route}} {{method}}",
           "range": true,
