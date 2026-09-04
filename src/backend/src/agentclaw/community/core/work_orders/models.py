@@ -270,12 +270,23 @@ class WorkOrderMessageContent(StrEnum):
         "你共同编辑 Bot「{bot_name}」的申请未通过。拒绝原因：{review_remark}"
     )
     SKILL_COLLABORATOR_PENDING = (
-        "用户「{applicant_name}」申请共同编辑 Skill「{skill_name}」，请及时处理。"
+        "用户{applicant_display}申请共同编辑 Skill「{skill_name}」，请及时处理。"
     )
     SKILL_COLLABORATOR_APPROVED = "你共同编辑 Skill「{skill_name}」的申请已通过。"
     SKILL_COLLABORATOR_REJECTED = (
         "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
+
+
+def skill_collaborator_applicant_display(
+    *, applicant_user_id: str, applicant_name: str
+) -> str:
+    """Format the stable identity shown in a Skill editor request."""
+
+    normalized_name = applicant_name.strip()
+    if not normalized_name or normalized_name == applicant_user_id:
+        return f"「{applicant_user_id}」"
+    return f"「{normalized_name}」({applicant_user_id})"
 
 
 class WorkOrderApproverRecord(BaseModel):

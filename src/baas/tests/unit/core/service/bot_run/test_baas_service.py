@@ -238,6 +238,62 @@ class TestSessionRoutingAffinityPrefix:
             == "agent:main:session:run-1:user:u-1"
         )
 
+    def test_eval_id_replaces_run_id_in_openclaw_key(self, service):
+        """eval_id 存在时用 evalId 替换 run_id 作为 session 字段值。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id="eval-abc123",
+            )
+            == "agent:main:session:eval-abc123:user:u-1"
+        )
+
+    def test_eval_id_replaces_run_id_in_claude_code_key(self, service):
+        """eval_id 存在时 claude_code 引擎也用 evalId 替换 run_id。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="claude_code",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id="eval-abc123",
+            )
+            == f"agent:{BOT_UUID}:session:eval-abc123:user:u-1"
+        )
+
+    def test_eval_id_none_falls_back_to_run_id(self, service):
+        """eval_id=None 时回退到 run_id，与原有行为一致。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="claude_code",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id=None,
+            )
+            == f"agent:{BOT_UUID}:session:run-1:user:u-1"
+        )
+
+    def test_eval_id_ignored_when_session_id_provided(self, service):
+        """session_id 已传入时直接返回，eval_id 不生效。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="openclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id="existing-session",
+                eval_id="eval-abc123",
+            )
+            == "existing-session"
+        )
+
     @pytest.mark.asyncio
     async def test_create_session_path_strips_prefix_before_resolve(
         self, service, wss_resolver

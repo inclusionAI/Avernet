@@ -230,6 +230,43 @@ def test_skill_editor_review_atomically_controls_manager_grant(
     assert (manager is not None) is manager_expected
 
 
+def test_skill_editor_request_persists_display_name_and_work_no(db) -> None:
+    spaces = SpaceRepository(db)
+    team, skill_id = _space_skill(db, spaces)
+    spaces.add_member(
+        space_id=team.id,
+        user_id="200177",
+        role=SpaceRole.MEMBER,
+        creator_id="owner-1",
+        env="dev",
+    )
+    repository = _work_orders(db)
+
+    order = repository.create_skill_editor_request(
+        space_id=team.id,
+        skill_id=skill_id,
+        applicant_user_id="200177",
+        applicant_name="张三",
+        apply_reason="maintain together",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        content = (
+            session.query(WorkOrderNotificationModel)
+            .filter(
+                WorkOrderNotificationModel.work_order_id == order.id,
+                WorkOrderNotificationModel.env == "dev",
+            )
+            .one()
+            .content
+        )
+
+    assert content == (
+        "用户「张三」(200177)申请共同编辑 Skill「review-skill」，请及时处理。"
+    )
+
+
 def test_skill_editor_request_rejects_personal_space(db) -> None:
     spaces = SpaceRepository(db)
     with spaces.create_personal_transaction(

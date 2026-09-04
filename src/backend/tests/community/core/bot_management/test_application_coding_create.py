@@ -746,6 +746,22 @@ def test_factory_snapshot_gates_match_application_coding() -> None:
     assert prepared.template_config == _FACTORY_SNAPSHOT
 
 
+def test_legacy_fold_supplies_template_type_for_factory_snapshot() -> None:
+    # The internal /api/bots surface declares application-coding intent through
+    # top-level template_type/template_config; the fold into the
+    # engine_properties bag must carry template_type along, or the strategy's
+    # factory branch rejects a full-identity snapshot (template_key +
+    # template_uid) for lacking a declared type.
+    prepared = _prepare_spec(
+        _application_coding_spec(template_config=dict(_FACTORY_SNAPSHOT))
+    )
+    assert prepared.template_type == "applicationCoding"
+    assert prepared.template_config == _FACTORY_SNAPSHOT
+    # The bag is consumed by the strategy on success — re-feeding the prepared
+    # spec must not trip the mixed-source invariant.
+    assert prepared.engine_properties == {}
+
+
 def test_handcrafted_path_rejects_foreign_template_type() -> None:
     with pytest.raises(BotTemplateInvalidError):
         _strategy_prepare(

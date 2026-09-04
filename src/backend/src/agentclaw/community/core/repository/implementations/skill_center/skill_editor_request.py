@@ -35,6 +35,7 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderReviewResult,
     WorkOrderStatus,
     notification_title_for,
+    skill_collaborator_applicant_display,
 )
 from agentclaw.community.core.work_orders.repository.models import (
     WorkOrderApproverModel,
@@ -168,7 +169,10 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
             owner_id = owner[0]
             title = WorkOrderMessageTitle.SKILL_COLLABORATOR_PENDING.value
             content = WorkOrderMessageContent.SKILL_COLLABORATOR_PENDING.value.format(
-                applicant_name=applicant_name,
+                applicant_display=skill_collaborator_applicant_display(
+                    applicant_user_id=applicant_user_id,
+                    applicant_name=applicant_name,
+                ),
                 skill_name=skill.name,
             )
             order = WorkOrderModel(
@@ -470,6 +474,4 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                 synchronize_session=False,
             )
         session.flush()
-
-
 __all__ = ["SkillEditorRequestRepository"]

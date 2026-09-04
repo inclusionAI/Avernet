@@ -510,6 +510,7 @@ async def list_space_skill_grants(
 @router.put(
     "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
     response_model=Envelope[SkillGrantItem],
+    response_model_exclude_none=True,
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors
@@ -533,6 +534,7 @@ async def add_space_skill_manager(
 @router.delete(
     "/{space_id}/skills/{skill_id}/managers/{manager_user_id}",
     response_model=Envelope[SkillGrantItem],
+    response_model_exclude_none=True,
     dependencies=_REFUSES_APP_ONLY,
 )
 @envelope_errors

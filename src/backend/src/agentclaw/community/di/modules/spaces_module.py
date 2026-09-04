@@ -84,6 +84,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
     CanonicalCenterVersionStore,
 )
 from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.skill_center.services.space_skill_version_query_service import (
     SpaceSkillVersionQueryService,
 )
@@ -109,6 +110,7 @@ from agentclaw.community.core.skill_center.skill_package import SkillPackageVali
 from agentclaw.community.core.skill_center.draft_content import DraftContentStore
 from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 from agentclaw.community.plugin_api.object_storage import ObjectStoragePlugin
+from agentclaw.community.plugin_api.staff_dept import StaffDeptPlugin
 from agentclaw.community.core.task_queue.services.registry import HandlerRegistry
 from agentclaw.community.core.task_queue.services.task_queue_service import (
     TaskQueueService,
@@ -181,9 +183,10 @@ class SpacesModule(Module):
         self,
         access: CoreSpaceAccessServiceProtocol,
         repository: SpaceSkillRepository,
+        staff_dept: StaffDeptPlugin,
     ) -> SpaceSkillGrantServiceProtocol:
         """Assemble Grant policy with environment resolution at the DI boundary."""
-        return SpaceSkillGrantService(access, repository, get_current_env)
+        return SpaceSkillGrantService(access, repository, staff_dept, get_current_env)
 
     @singleton
     @provider
@@ -217,10 +220,12 @@ class SpacesModule(Module):
     @provider
     @inject
     def space_skill_editor_request_service(
-        self, repository: WorkOrderRepositoryProtocol
+        self,
+        repository: WorkOrderRepositoryProtocol,
+        staff_dept: StaffDeptPlugin,
     ) -> SpaceSkillEditorRequestServiceProtocol:
         """Assemble editor-request policy with environment at the boundary."""
-        return SpaceSkillEditorRequestService(repository, get_current_env)
+        return SpaceSkillEditorRequestService(repository, staff_dept, get_current_env)
 
     @singleton
     @provider

@@ -11,6 +11,7 @@ from agentclaw.community.core.service_bot.services.bot_publish_service import (
     PublishNotFoundError,
 )
 from agentclaw.community.core.service_bot.services.deploy.service_publish_env import (
+    service_publish_extra_envs,
     service_publish_template_config,
 )
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
@@ -118,6 +119,7 @@ class EvalPublishMixin:
                 version=str(publish_record.version or 1),
                 delivery=delivery,
                 ext_info=ext_info,
+                extra_envs=service_publish_extra_envs(publish_record.ext, bot),
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
             )

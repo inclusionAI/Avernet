@@ -62,6 +62,31 @@ def _upload(client: httpx.Client, bot_id: str, path: str, filename: str, data: b
     assert response.status_code == 200, response.text
 
 
+def _mkdir_when_baas_visible(client: httpx.Client, bot_id: str, path: str) -> None:
+    """Create a directory after the newly active BaaS bot is queryable.
+
+    The Backend status poll may observe the activation callback a few
+    milliseconds before BaaS's bot-read path sees the same record. Retry only
+    that transient ``BOT_NOT_FOUND`` response; every other error remains a
+    test failure at its original boundary.
+    """
+    last_response: httpx.Response | None = None
+    for attempt in range(5):
+        response = client.post(
+            f"/api/resources/files/mkdir?bot_id={bot_id}",
+            data={"path": path},
+        )
+        if response.status_code == 200:
+            return
+        last_response = response
+        if "BOT_NOT_FOUND" not in response.text:
+            break
+        time.sleep(0.1 * (attempt + 1))
+
+    assert last_response is not None
+    assert last_response.status_code == 200, last_response.text
+
+
 @pytest.mark.acceptance
 def test_workspace_directory_download(live_backend):
     """Zip a workspace directory through the public API, get what the browser shows.
@@ -94,11 +119,7 @@ def test_workspace_directory_download(live_backend):
         # (each mkdir drops a .keep the download must filter) and an identity
         # file at the workspace root (hidden from a *root* download only).
         for directory in (parent, f"{parent}/nested"):
-            response = client.post(
-                f"/api/resources/files/mkdir?bot_id={bot_id}",
-                data={"path": directory},
-            )
-            assert response.status_code == 200, response.text
+            _mkdir_when_baas_visible(client, bot_id, directory)
         _upload(client, bot_id, parent, "notes.txt", notes_payload)
         _upload(client, bot_id, f"{parent}/nested", "deep.txt", deep_payload)
         _upload(client, bot_id, "", "AGENTS.md", b"# workspace identity\n")

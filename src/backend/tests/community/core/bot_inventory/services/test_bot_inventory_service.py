@@ -18,6 +18,8 @@ from agentclaw.community.core.bot_inventory.protocols import (
 )
 from agentclaw.community.core.bot_inventory.services.bot_inventory_service import (
     BotInventoryService,
+    _cloud_fetch_engines,
+    _select_aicoding_runtime_rows,
 )
 from agentclaw.community.core.bot_inventory.services.lifecycle_view import (
     BotLifecycleView,
@@ -790,3 +792,301 @@ def test_page_slice_missing_template_row_leaves_config_none() -> None:
 
     assert items[0].template_type == "applicationCoding"
     assert items[0].template_config is None
+
+
+# ── aicoding engine expansion (PR #1719 engine/form vocabulary split) ──────
+# ``engine=aicoding`` is claude_code's internal runtime form: the inventory
+# expands it to two fetch batches (legacy ``active_engine='aicoding'`` and
+# post-split ``active_engine='claude_code'``) then collapses them with
+# ``uses_aicoding_runtime``. These cases mock the bot port by engine value.
+
+
+def _by_engine_page(rows_by_engine: dict):
+    """side_effect: dispatch on kwargs['engine'], returning prebuilt rows."""
+
+    def _list(**kwargs):
+        rows = rows_by_engine.get(kwargs["engine"], [])
+        return {"total": len(rows), "items": list(rows)}
+
+    return _list
+
+
+def _cloud_row(
+    bot_id: str,
+    active_engine: str,
+    template_type: str | None = None,
+    bot_type: str = "personal",
+) -> dict:
+    return {
+        "id": abs(sum(ord(c) for c in bot_id)) % 100_000,
+        "bot_id": bot_id,
+        "bot_name": bot_id,
+        "bot_desc": "",
+        "active_engine": active_engine,
+        "template_type": template_type,
+        "bot_type": bot_type,
+        "status": "ACTIVE",
+        "owner_id": "u1",
+    }
+
+
+def _list_cloud(inventory, bot, rows_by_engine, *, page=1, page_size=10, engine="aicoding"):
+    bot.list_bots_by_conditions.side_effect = _by_engine_page(rows_by_engine)
+    return inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine=engine,
+        deploy_mode=DeployMode.CLOUD,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@pytest.mark.unit
+def test_aicoding_engine_expands_to_two_batches(service) -> None:
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row("a1", "aicoding")],
+            "claude_code": [_cloud_row("c1", "claude_code", "applicationCoding")],
+        },
+    )
+
+    engines_called = [c.kwargs["engine"] for c in bot.list_bots_by_conditions.call_args_list]
+    assert engines_called == ["aicoding", "claude_code"]
+    assert {item.bot_id for item in items} == {"a1", "c1"}
+    assert total == 2
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_includes_legacy_and_new_form_rows(service) -> None:
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row("legacy1", "aicoding", None)],
+            "claude_code": [
+                _cloud_row("new_app", "claude_code", "applicationCoding"),
+                _cloud_row("new_personal", "claude_code", "personalCoding"),
+            ],
+        },
+    )
+
+    assert {item.bot_id for item in items} == {"legacy1", "new_app", "new_personal"}
+    assert total == 3
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_excludes_plain_claude_code(service) -> None:
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row("legacy1", "aicoding")],
+            "claude_code": [
+                _cloud_row("plain_normalcc", "claude_code", "normalCC"),
+                _cloud_row("plain_none", "claude_code", None),
+                _cloud_row("form_app", "claude_code", "applicationCoding"),
+            ],
+        },
+    )
+
+    assert {item.bot_id for item in items} == {"legacy1", "form_app"}
+    assert total == 2
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_dedups_duplicate_bot_id(service) -> None:
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row("dup", "aicoding")],
+            "claude_code": [_cloud_row("dup", "claude_code", "applicationCoding")],
+        },
+    )
+
+    assert [item.bot_id for item in items] == ["dup"]
+    assert total == 1
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_paginates_after_filter(service) -> None:
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row(f"a{i}", "aicoding") for i in range(3)],
+            "claude_code": [
+                _cloud_row("p1", "claude_code", "normalCC"),
+                _cloud_row("p2", "claude_code", None),
+            ],
+        },
+        page=1,
+        page_size=2,
+    )
+
+    # total is taken from the collapsed set (3 aicoding), not the raw 5 rows.
+    assert total == 3
+    assert len(items) == 2
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_stops_when_upstream_total_is_unreliable(service) -> None:
+    """A short page with no reliable ``total`` still terminates the fan-out via
+    the ``len(page_items) < fetch_size`` break (the loop's second exit arm), not
+    only the total-reaching-exhaustion arm."""
+    inventory, bot, _ = service
+
+    def _list(**kwargs):
+        if kwargs["engine"] == "aicoding":
+            return {"items": [_cloud_row("a1", "aicoding")]}  # no ``total`` key
+        if kwargs["engine"] == "claude_code":
+            return {"items": [_cloud_row("c1", "claude_code", "applicationCoding")]}
+        return {"items": []}
+
+    bot.list_bots_by_conditions.side_effect = _list
+
+    items, total = inventory.list_items(
+        owner_id="u1",
+        space=NoopBusinessSpaceContext().resolve_current(
+            owner_id="u1", header_space_id=None
+        ),
+        keyword=None,
+        engine="aicoding",
+        deploy_mode=DeployMode.CLOUD,
+        page=1,
+        page_size=10,
+    )
+
+    assert {item.bot_id for item in items} == {"a1", "c1"}
+    assert total == 2
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_forwards_owner_scoping_and_attach_opt_out(service) -> None:
+    inventory, bot, _ = service
+
+    _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [_cloud_row("a1", "aicoding")],
+            "claude_code": [_cloud_row("c1", "claude_code", "applicationCoding")],
+        },
+    )
+
+    # Both batches inherit the owner scope and the template-attach opt-out.
+    for call in bot.list_bots_by_conditions.call_args_list:
+        assert call.kwargs["owner_id"] == "u1"
+        assert call.kwargs["attach_templates"] is False
+
+
+@pytest.mark.unit
+def test_aicoding_expansion_skips_non_cloud_bot_types(service) -> None:
+    """A fetched row carrying a non-cloud bot_type (e.g. a desktop row leaking
+    through) is dropped by the visibility filter, not surfaced as an item."""
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "aicoding": [
+                _cloud_row("a1", "aicoding"),
+                _cloud_row("sneaky", "aicoding", bot_type="desktop"),
+            ],
+            "claude_code": [_cloud_row("c1", "claude_code", "applicationCoding")],
+        },
+    )
+
+    assert {item.bot_id for item in items} == {"a1", "c1"}
+    assert total == 2
+
+
+@pytest.mark.unit
+def test_claude_code_engine_does_not_expand(service) -> None:
+    """Regression guard: engine=claude_code stays a single batch with no filter."""
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {
+            "claude_code": [
+                _cloud_row("form_app", "claude_code", "applicationCoding"),
+                _cloud_row("plain", "claude_code", "normalCC"),
+            ],
+        },
+        engine="claude_code",
+    )
+
+    assert [c.kwargs["engine"] for c in bot.list_bots_by_conditions.call_args_list] == [
+        "claude_code"
+    ]
+    # No collapse filter: the plain claude_code row is kept.
+    assert {item.bot_id for item in items} == {"form_app", "plain"}
+    assert total == 2
+
+
+@pytest.mark.unit
+def test_non_aicoding_engine_single_batch_unchanged(service) -> None:
+    """Regression guard: a normal engine stays a single batch with no filter."""
+    inventory, bot, _ = service
+
+    items, total = _list_cloud(
+        inventory,
+        bot,
+        {"teclaw": [_cloud_row("t1", "teclaw")]},
+        engine="teclaw",
+    )
+
+    assert [c.kwargs["engine"] for c in bot.list_bots_by_conditions.call_args_list] == [
+        "teclaw"
+    ]
+    assert {item.bot_id for item in items} == {"t1"}
+    assert total == 1
+
+
+@pytest.mark.unit
+def test_cloud_fetch_engines_branches() -> None:
+    # aicoding expands only when the normalized value matches the form literal.
+    assert _cloud_fetch_engines("aicoding") == ["aicoding", "claude_code"]
+    assert _cloud_fetch_engines("AICODING") == ["aicoding", "claude_code"]
+    assert _cloud_fetch_engines("aicoding ") == ["aicoding", "claude_code"]
+    # Non-matching engines pass through verbatim as a single batch.
+    assert _cloud_fetch_engines("claude_code") == ["claude_code"]
+    assert _cloud_fetch_engines("teclaw") == ["teclaw"]
+    assert _cloud_fetch_engines(None) == [None]
+
+
+@pytest.mark.unit
+def test_select_aicoding_runtime_rows_branches() -> None:
+    rows = [
+        _cloud_row("a", "aicoding"),
+        _cloud_row("b", "claude_code", "applicationCoding"),
+        _cloud_row("c", "claude_code", "personalCoding"),
+        _cloud_row("d", "claude_code", "normalCC"),
+        _cloud_row("e", "claude_code", None),
+        _cloud_row("f", "teclaw"),
+        # duplicate bot_id 'a' from the other batch — defensive dedup keeps one
+        _cloud_row("a", "claude_code", "applicationCoding"),
+    ]
+
+    out = _select_aicoding_runtime_rows(rows)
+
+    assert [r["bot_id"] for r in out] == ["a", "b", "c"]

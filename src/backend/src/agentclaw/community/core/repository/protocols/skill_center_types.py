@@ -93,6 +93,7 @@ class SpaceSkillGrantItem(TypedDict):
 
     user_id: str
     role: Literal["OWNER", "MANAGER"]
+    display_name: NotRequired[str | None]
 
 
 class SpaceSkillGrantSetRecord(TypedDict):

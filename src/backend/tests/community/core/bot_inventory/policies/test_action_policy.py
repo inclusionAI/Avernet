@@ -19,8 +19,8 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.RUNNING,
             (
-                "view", "chat", "edit", "restart", "delete", "passport",
-                "engine_config", "data_init",
+                "view", "chat", "edit", "restart", "engine_restart", "delete",
+                "passport", "engine_config", "data_init",
             ),
             {},
         ),
@@ -28,19 +28,29 @@ def _values(actions: tuple[BotAction, ...]) -> tuple[str, ...]:
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.DORMANT,
             ("view", "activate", "delete"),
-            {"chat": "activate first", "edit": "activate first", "restart": "activate first"},
+            {
+                "chat": "activate first",
+                "edit": "activate first",
+                "restart": "activate first",
+                "engine_restart": "activate first",
+            },
         ),
         (
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.FAILED,
             ("view", "delete"),
-            {"restart": "bot provisioning failed"},
+            {"restart": "bot provisioning failed", "engine_restart": "bot provisioning failed"},
         ),
         (
             BotInventoryKind.PERSONAL_CLOUD,
             DisplayState.PENDING,
             ("view",),
-            {"chat": "bot not ready", "edit": "bot not ready", "restart": "bot not ready"},
+            {
+                "chat": "bot not ready",
+                "edit": "bot not ready",
+                "restart": "bot not ready",
+                "engine_restart": "bot not ready",
+            },
         ),
         (
             BotInventoryKind.LOCAL,
