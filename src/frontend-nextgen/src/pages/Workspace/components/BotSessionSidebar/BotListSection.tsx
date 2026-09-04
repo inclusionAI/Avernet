@@ -1,6 +1,7 @@
 import { Button, Skeleton } from '@/components/ui';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { BotItem } from './BotItem';
@@ -30,6 +31,7 @@ interface BotListSectionProps {
   onLoadFavorites: (botId: string) => Promise<void>;
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
   onManageBot?: (bot: ChatBotView) => void;
+  footer?: ReactNode;
 }
 
 export function BotListSection({
@@ -57,6 +59,7 @@ export function BotListSection({
   onLoadFavorites,
   onLoadMoreSessions,
   onManageBot,
+  footer,
 }: BotListSectionProps) {
   const [collapsed, setCollapsed] = useState(!!defaultCollapsed);
 
@@ -121,6 +124,7 @@ export function BotListSection({
               ))}
             </div>
           )}
+          {footer}
         </div>
       )}
     </div>

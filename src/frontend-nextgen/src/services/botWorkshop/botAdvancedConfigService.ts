@@ -14,7 +14,8 @@ export const botAdvancedConfigService = {
     botEditorController.updateIdentityFile(botId, type, content),
   async listChannels(botId: string): Promise<BotChannel[]> {
     const response = await botEditorController.listChannels(botId);
-    return (response.data?.items ?? []).map((item) => ({
+    const items = Array.isArray(response.data) ? response.data : response.data?.items ?? [];
+    return items.map((item) => ({
       id: item.id,
       type: item.type,
       description: item.description,
@@ -24,6 +25,13 @@ export const botAdvancedConfigService = {
       enableStreamingCards: Boolean(item.config.enable_streaming_cards),
       cardTemplateId: item.config.card_template_id ?? undefined,
       cardTemplateKey: item.config.card_template_key ?? undefined,
+      dmPolicy: item.config.dm_policy === 'disabled' ? 'disabled' : 'open',
+      allowlist: Array.isArray(item.config.allowlist) ? item.config.allowlist : ['*'],
+      replyToMessage: item.config.reply_to_message !== false,
+      aixEnable: item.config.aix_enable !== false,
+      includeSenderName: item.config.include_sender_name !== false,
+      createdAt: item.created_at ?? undefined,
+      updatedAt: item.updated_at ?? undefined,
     }));
   },
   createChannel: (botId: string, input: BotChannelInput) =>
@@ -36,6 +44,27 @@ export const botAdvancedConfigService = {
         enable_streaming_cards: input.enableStreamingCards,
         card_template_id: input.cardTemplateId.trim() || null,
         card_template_key: input.cardTemplateKey.trim() || null,
+        dm_policy: input.dmPolicy,
+        allowlist: input.allowlist,
+        reply_to_message: input.replyToMessage,
+        aix_enable: input.aixEnable,
+        include_sender_name: input.includeSenderName,
+      },
+    }),
+  updateChannel: (botId: string, channelId: number, input: BotChannelInput) =>
+    botEditorController.updateChannel(botId, channelId, {
+      description: input.description || null,
+      config: {
+        client_id: input.clientId,
+        client_secret: input.clientSecret.trim() || null,
+        enable_streaming_cards: input.enableStreamingCards,
+        card_template_id: input.cardTemplateId.trim() || null,
+        card_template_key: input.cardTemplateKey.trim() || null,
+        dm_policy: input.dmPolicy,
+        allowlist: input.allowlist,
+        reply_to_message: input.replyToMessage,
+        aix_enable: input.aixEnable,
+        include_sender_name: input.includeSenderName,
       },
     }),
   setChannelStatus: (botId: string, channel: BotChannel) =>

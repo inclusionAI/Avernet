@@ -22,6 +22,7 @@ interface ChatSessionSidebarSlotProps {
   onOpenPermissions: () => void;
   userAvatarUrl?: string;
   onManageBot?: (bot: ChatBotView) => void;
+  onOpenBotWorkshop?: () => void;
 }
 
 /**
@@ -40,6 +41,7 @@ export function ChatSessionSidebarSlot({
   onOpenPermissions,
   userAvatarUrl,
   onManageBot,
+  onOpenBotWorkshop,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
   const botSidebarProps: BotSessionSidebarProps = {
@@ -52,6 +54,7 @@ export function ChatSessionSidebarSlot({
     onOpenPermissions,
     userAvatarUrl,
     chatBots: workspace.chatBots,
+    hasAgentCodingBots: workspace.hasAgentCodingBots,
     friendBots: workspace.friendBots,
     isMyBotsLoading: workspace.isMyBotsLoading,
     isFriendBotsLoading: workspace.isFriendBotsLoading,
@@ -89,6 +92,7 @@ export function ChatSessionSidebarSlot({
     onLoadFavorites: (botId) => botSessions.loadFavoriteSessions(botId),
     onLoadMoreSessions: botSessions.loadMoreSessions,
     onManageBot,
+    onOpenBotWorkshop,
     onCreateGroup: onOpenCreateGroup,
     onAddFriend: onOpenAddFriend,
   };

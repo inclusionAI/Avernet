@@ -7,9 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Spin } from '@/components/ui/Spin';
 import { useTaskEscortFlowConfig } from '@/hooks/useTaskEscortFlowConfig';
 import { dump as yamlDump } from 'js-yaml';
-import { RefreshCw } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
 
+import CreateWorkflowFromYamlModal from './CreateWorkflowFromYamlModal';
 import WorkflowDagView from './WorkflowDagView';
 
 interface FlowConfigProps {
@@ -36,10 +37,21 @@ function toText(value: unknown, fallback = ''): string {
 }
 
 const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, enabled }) => {
-  const { workflows, selectedWorkflowId, spec, isLoadingList, isLoadingSpec, error, selectWorkflow, refreshList } =
-    useTaskEscortFlowConfig({ botOwnerId, botId, enabled });
+  const {
+    workflows,
+    selectedWorkflowId,
+    spec,
+    isLoadingList,
+    isLoadingSpec,
+    isCreatingWorkflow,
+    error,
+    selectWorkflow,
+    refreshList,
+    createWorkflowFromYaml,
+  } = useTaskEscortFlowConfig({ botOwnerId, botId, enabled });
 
   const [viewMode, setViewMode] = useState<ViewMode>('dag');
+  const [createOpen, setCreateOpen] = useState(false);
 
   const yamlText = useMemo(() => {
     if (!spec) return '';
@@ -77,6 +89,9 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
             </SelectContent>
           </Select>
         </div>
+        <Button variant="secondary" size="icon" aria-label="从 YAML 创建工作流" onClick={() => setCreateOpen(true)}>
+          <Plus aria-hidden className="h-4 w-4" />
+        </Button>
         <Button
           variant="secondary"
           size="sm"
@@ -146,6 +161,13 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
 
       {/* Spec loading */}
       {selectedWorkflowId && isLoadingSpec && !spec && <Spin tip="加载工作流定义…" />}
+
+      <CreateWorkflowFromYamlModal
+        open={createOpen}
+        loading={isCreatingWorkflow}
+        onOpenChange={setCreateOpen}
+        onCreate={createWorkflowFromYaml}
+      />
     </div>
   );
 };

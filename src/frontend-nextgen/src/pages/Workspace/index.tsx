@@ -187,6 +187,7 @@ const WorkspacePage: React.FC = () => {
           onOpenPermissions={openCollaborationPermissions}
           userAvatarUrl={workspace.currentUserAvatarUrl}
           onManageBot={(bot) => navigate(`/bot-workshop/detail?type=view&id=${encodeURIComponent(bot.realBotId)}`)}
+          onOpenBotWorkshop={() => navigate('/bot-workshop')}
         />
         {workspace.selectedAgentCodingBot ? (
           <AgentCodingGuide bot={workspace.selectedAgentCodingBot} onOpen={openAgentCodingBot} />

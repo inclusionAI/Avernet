@@ -12,9 +12,37 @@ import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
 import { botSessionService, type BotChatSessionView, type ChatBotView } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { Plus, RefreshCw, Send, Square } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Send, Square } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+
+interface DebugMessageLike {
+  role: string;
+  content?: string;
+}
+
+export function shouldAppendThinking(messages: DebugMessageLike[], isRequesting: boolean) {
+  if (!isRequesting) return false;
+  const lastMessage = messages[messages.length - 1];
+  return !lastMessage || lastMessage.role === 'user';
+}
+
+function ThinkingReply({ botName }: { botName: string }) {
+  return (
+    <div className="flex items-start gap-3" role="status" aria-live="polite" aria-label={`${botName} 正在思考`}>
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs text-background">
+        {botName.slice(0, 1)}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="m-0 text-xs font-medium">{botName}</p>
+        <p className="m-0 mt-1 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+          Thinking...
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeStage?: BotRuntimeStage }) {
   const identityId = useWorkspaceStore((state) => state.activeIdentityId);
@@ -86,7 +114,7 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
             <p className="m-0 truncate text-sm font-semibold">调试对话</p>
             <Badge tone={connection.tone}>{connection.text}</Badge>
           </div>
-          <p className="m-0 mt-1 truncate text-xs text-[var(--color-muted)]">
+          <p className="m-0 mt-1 truncate text-xs text-muted-foreground">
             Human-to-Agent ·{' '}
             {chatBot.runtimeStage === 'online' ? '线上' : chatBot.runtimeStage === 'verify' ? '预发' : '草稿'}环境
           </p>
@@ -125,21 +153,37 @@ export function DebugChatPanel({ bot, runtimeStage }: { bot: BotDomain; runtimeS
         ) : !session ? (
           <Empty compact title="暂无调试会话" description="新建会话后即可向当前 Bot 发送消息。" />
         ) : (
-          debug.chat.messages.map((message) => (
-            <div key={message.id} className="group flex items-start gap-3">
-              <div
-                className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs ${
-                  message.role === 'user' ? 'bg-brand/15 text-brand' : 'bg-foreground text-background'
-                }`}
-              >
-                {message.role === 'user' ? '我' : bot.name.slice(0, 1)}
+          <>
+            {debug.chat.messages.map((message) => (
+              <div key={message.id} className="group flex items-start gap-3">
+                <div
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs ${
+                    message.role === 'user' ? 'bg-brand/15 text-brand' : 'bg-foreground text-background'
+                  }`}
+                >
+                  {message.role === 'user' ? '我' : bot.name.slice(0, 1)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="m-0 text-xs font-medium">{message.role === 'user' ? '我' : bot.name}</p>
+                  {debug.chat.isRequesting && message.role !== 'user' && !message.content.trim() ? (
+                    <p
+                      className="m-0 mt-1 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                      Thinking...
+                    </p>
+                  ) : (
+                    <p className="m-0 mt-1 whitespace-pre-wrap text-xs leading-5">{message.content}</p>
+                  )}
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="m-0 text-xs font-medium">{message.role === 'user' ? '我' : bot.name}</p>
-                <p className="m-0 mt-1 whitespace-pre-wrap text-xs leading-5">{message.content}</p>
-              </div>
-            </div>
-          ))
+            ))}
+            {shouldAppendThinking(debug.chat.messages, debug.chat.isRequesting) ? (
+              <ThinkingReply botName={bot.name} />
+            ) : null}
+          </>
         )}
       </div>
       <div className="border-t border-border p-4">

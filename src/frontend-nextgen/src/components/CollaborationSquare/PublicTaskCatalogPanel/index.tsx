@@ -10,12 +10,11 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { TASK_STATUS_CONFIG, type PublicTask, type TaskStatusFilter } from '@/domain/collaborationSquare/types';
 import { RefreshCw, Search, X } from 'lucide-react';
 
-// 待验收(reviewing)无对应 BBS 原始态(mapBbsTaskStatus 不产出它),服务端 status 过滤映射不到,
-// 选中会触发 400,故不作为筛选项暴露。
 const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
   { value: 'all', label: '全部' },
   { value: 'pending_claim', label: '待认领' },
   { value: 'claimed', label: '已认领' },
+  { value: 'reviewing', label: '待验收' },
   { value: 'completed', label: '已完成' },
 ];
 

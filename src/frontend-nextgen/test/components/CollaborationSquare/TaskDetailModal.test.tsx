@@ -98,6 +98,15 @@ describe('TaskDetailModal', () => {
     expect(screen.getAllByText('已完成').length).toBeGreaterThanOrEqual(1);
   });
 
+  test('待验收任务展示「开始验收时间」（而非「完成时间」）', () => {
+    const task: PublicTask = { ...completedTask, status: 'reviewing', completedAt: '2026-08-14T17:20:00' };
+    render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);
+    expect(screen.getByText(/开始验收时间/)).toBeInTheDocument();
+    expect(screen.getByText('2026-08-14 17:20')).toBeInTheDocument();
+    expect(screen.getAllByText('待验收').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText(/完成时间/)).not.toBeInTheDocument();
+  });
+
   test('有 output 时展示「输出内容」区与产出文本', () => {
     const task: PublicTask = { ...completedTask, output: '最终产出文档内容' };
     render(<TaskDetailModal open task={task} loading={false} onClose={jest.fn()} />);

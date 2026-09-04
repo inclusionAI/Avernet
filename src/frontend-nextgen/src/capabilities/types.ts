@@ -180,6 +180,19 @@ export interface ShellVisibility {
   notificationBell: boolean;
 }
 
+/**
+ * 管理后台页内分区（Tab）形态级可见性（见 `getAdminSections` capability）。
+ * - `spaces`：【空间管理】Tab（空间卡片/创建/成员管理视图）
+ * - `workOrders`：【工单中心】Tab
+ * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后，
+ * 仅暴露工单中心，空间管理 Tab 收敛（空间数据链路不受影响）；internal overlay 覆盖为全 true。
+ * 消费方（`src/pages/Admin`）按本结果过滤 Tab 与默认/深链回退，MUST NOT 以 `if (isInternal)` 替代。
+ */
+export interface AdminSections {
+  spaces: boolean;
+  workOrders: boolean;
+}
+
 export interface AppCapabilities {
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
@@ -266,9 +279,18 @@ export interface AppCapabilities {
   getPersonalSpaceInitOptions: () => CapabilityResult<PersonalSpaceInitOptions>;
   /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
-   * Open Core（阿里云部署）默认三项全 false（defaultCapabilities）；
+   * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`
+   * （defaultCapabilities：展示管理后台与通知中心，不展示侧栏空间切换器）；
    * internal overlay 经 `src/extensions/internal.ts` 覆盖为全 true——内部形态渲染结果与改造前一致。
    * 同步签名，不发请求。消费方（navigation / SidebarNavList / AppHeader）不得以 `if (isInternal)` 替代。
    */
   getShellVisibility: () => CapabilityResult<ShellVisibility>;
+  /**
+   * 管理后台页内分区（Tab）可见性（空间管理 / 工单中心，见 `AdminSections`）。
+   * Open Core（阿里云部署）默认 `{ spaces:false, workOrders:true }`——管理后台入口开放后仅暴露工单中心，
+   * 空间管理 Tab 收敛；internal overlay 经 `src/extensions/internal.ts` 覆盖为 `{ spaces:true, workOrders:true }`，
+   * 内部形态两 Tab 均在（与改造前一致）。同步签名，不发请求。
+   * 消费方（`src/pages/Admin/index.tsx`）按本结果过滤 Tab、选择默认 Tab 并对隐藏/非法 `?tab=` 深链回落首项。
+   */
+  getAdminSections: () => CapabilityResult<AdminSections>;
 }

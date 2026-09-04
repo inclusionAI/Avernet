@@ -67,6 +67,8 @@ export interface WorkOrder {
   applyReason?: string;
   /** 审批人用户 id（未处理时为 null/undefined） */
   reviewerUserId?: string;
+  /** 审批人展示名（工单详情 VO reviewer_user_name；展示时优先，回退 reviewerUserId） */
+  reviewerUserName?: string;
   /** 审批备注 */
   reviewRemark?: string;
   /** 审批时间（ISO，未处理为 null/undefined） */

@@ -515,31 +515,48 @@ export const GroupSessionView: React.FC<{
             : null,
         );
     // 消息可见性:
-    // - 协作群:需以本人创建的 bot 身份查看,先 await 群详情取群成员中归属本人的 bot 作 view_bot_id;无则置无权限态。
+    // - 协作群:优先本人 owned bot 作 view_bot_id;群内无本人 bot 时省略 view_bot_id,用认证用户 Human 视角
+    //   (仅当本人 Human 是该 Session participant 才有权限,后端按名册校验,否则 403 → 置无权限态)。
     // - 单聊:走 bots 端点;若会话归属人 ≠ 当前登录人(跨用户 bot,bots 端点会 403)→ 置无权限态,不发起请求。
     (async () => {
       try {
         const g = await memberPromise;
         if (cancelled) return;
+        setGroup(g); // 先展示群成员,消息可见性失败不影响群成员展示
         const effectiveUserId = resolveCurrentUserId(userId);
-        // 协作群:以群成员中归属本人(bot owner 工号 === 当前登录人)的 bot 作 view_bot_id;无则无查询权限。
-        //   view_bot_id 不能用 group_id 或 assignee(group_id 形态)冒充,群消息端点会 40300 拒绝。
         const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], effectiveUserId) : null;
-        // 有群详情(真实群成员)且无归属本人 bot → 无查询权限;无 group_id(根节点仅 sessionId,无群成员)
-        // 时回退节点 assignee 作为视角 bot(节点 bot 多为本人 master/driver),避免群消息端点 40300。
-        const viewBotId = isGroup ? ownedViewBot?.actor_id ?? (groupId ? '' : assignee ?? '') : '';
+        const groupViewBotId = isGroup ? ownedViewBot?.actor_id ?? null : null;
         // 单聊会话归属人(session_id 里的 :user:xxx,即 bot owner);与当前登录人不符 → 跨用户,无权查看。
         const singleSessionUser = !isGroup ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
         const crossUserSingle =
           !isGroup && singleSessionUser !== '' && Boolean(effectiveUserId) && singleSessionUser !== effectiveUserId;
-        const canViewMessages = isGroup ? Boolean(viewBotId) : !crossUserSingle;
-        const msgs = canViewMessages
-          ? await fetchSessionMessages(sessionId, isGroup, assignee, effectiveUserId, viewBotId || undefined)
-          : [];
+        // 协作群:有本人 bot → 带 view_bot_id;无本人 bot 但有登录人(Human 视角) → 省略 view_bot_id 仍尝试。
+        const canViewMessages = isGroup ? Boolean(groupViewBotId) || Boolean(effectiveUserId) : !crossUserSingle;
+        let msgs: GroupMessage[] = [];
+        let noMessagePerm = !canViewMessages;
+        if (canViewMessages) {
+          try {
+            msgs = await fetchSessionMessages(
+              sessionId,
+              isGroup,
+              assignee,
+              effectiveUserId,
+              groupViewBotId ?? undefined,
+            );
+          } catch (err) {
+            if (cancelled) return;
+            const msg = err instanceof Error ? err.message : '会话消息请求失败';
+            // Human 非该 Session participant → 403;转为无权限提示,群成员仍展示;其余错误外抛为加载失败。
+            if (isGroup && /（403）|forbidden/i.test(msg)) {
+              noMessagePerm = true;
+            } else {
+              throw err;
+            }
+          }
+        }
         if (cancelled) return;
-        setGroup(g);
-        setNoMessagePermission(!canViewMessages);
-        setMessages(sortMessagesByTimestamp(filterGroupMessages(msgs as GroupMessage[])));
+        setNoMessagePermission(noMessagePerm);
+        setMessages(sortMessagesByTimestamp(filterGroupMessages(msgs)));
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : '加载执行会话信息失败');

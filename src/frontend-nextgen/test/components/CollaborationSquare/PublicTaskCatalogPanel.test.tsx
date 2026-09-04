@@ -156,6 +156,14 @@ describe('PublicTaskCatalogPanel', () => {
     expect(vm.setTaskStatusFilter).toHaveBeenCalledWith('claimed');
   });
 
+  test('状态分段包含「待验收」选项，点击触发 setTaskStatusFilter("reviewing")', async () => {
+    const user = userEvent.setup();
+    const vm = buildVm({ tasks: sampleTasks });
+    render(<PublicTaskCatalogPanel vm={vm} />);
+    await user.click(screen.getByRole('button', { name: '待验收' }));
+    expect(vm.setTaskStatusFilter).toHaveBeenCalledWith('reviewing');
+  });
+
   test('状态分段具有可访问名称（aria-label 任务状态筛选）', () => {
     render(<PublicTaskCatalogPanel vm={buildVm({ tasks: sampleTasks })} />);
     expect(screen.getByRole('group', { name: '任务状态筛选' })).toBeInTheDocument();

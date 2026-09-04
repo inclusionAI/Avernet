@@ -23,6 +23,8 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     getMcpPermission: jest.fn(),
     setSkillSetMcp: jest.fn(),
     uploadSkillFolder: jest.fn(),
+    getCallerContext: jest.fn(),
+    updateMcpCallType: jest.fn(),
   },
 }));
 
@@ -225,4 +227,21 @@ it('MCP 权限通过后再绑定能力集', async () => {
 
   expect(controller.getMcpPermission).toHaveBeenCalledWith('mcp.public');
   expect(controller.setSkillSetMcp).toHaveBeenCalledWith('bot-1', 'set-1', 'mcp.public', true);
+});
+
+it('读取并持久化 MCP caller 模式，不在前端模拟', async () => {
+  controller.getCallerContext.mockResolvedValue({
+    data: { editable: true, mcp_call_types: { 'mcp.weather': 'caller' }, cli_call_types: {} },
+  });
+  controller.updateMcpCallType.mockResolvedValue({
+    data: { server_code: 'mcp.weather', call_type: 'owner', bot_call_type: 'owner' },
+  });
+
+  await expect(botEditorService.getCallerContext('bot-1')).resolves.toEqual({
+    editable: true,
+    mcpCallTypes: { 'mcp.weather': 'caller' },
+    cliCallTypes: {},
+  });
+  await expect(botEditorService.updateMcpCallType('bot-1', 'mcp.weather', 'owner')).resolves.toBe('owner');
+  expect(controller.updateMcpCallType).toHaveBeenCalledWith('bot-1', 'mcp.weather', 'owner');
 });

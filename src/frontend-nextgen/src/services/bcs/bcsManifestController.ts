@@ -83,8 +83,10 @@ export async function getManifest(): Promise<BcsManifest> {
  * 旧 ocb /api/bot-render-screens?bot_id= 路由在 teamclaw 网关不存在（404），已废弃。
  */
 export async function listBotRenderScreens(botId: string): Promise<BotRenderScreen[]> {
-  const pureBotId = botId.split(':')[0];
-  const res = await botEditorController.listRenderScreens(pureBotId);
+  const separatorIndex = botId.indexOf(':');
+  const pureBotId = separatorIndex >= 0 ? botId.slice(0, separatorIndex) : botId;
+  const ownerId = separatorIndex >= 0 ? botId.slice(separatorIndex + 1) : undefined;
+  const res = await botEditorController.listRenderScreens(pureBotId, ownerId);
   // RenderScreenDto 缺 bot_id，按需补齐为 BotRenderScreen（CDN 映射实际只用 name+cdn_url）
   return (res.data?.items ?? []).map((item) => ({
     id: item.id,

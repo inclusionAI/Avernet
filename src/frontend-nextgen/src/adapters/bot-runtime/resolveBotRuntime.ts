@@ -2,16 +2,17 @@ import type { BotRuntime, BotRuntimeSource } from './types';
 
 const DEFAULT_ENGINE = 'unknown';
 const DEFAULT_BOT_ID_PATTERNS = [/^default[-_]/i, /^system[-_]/i];
-const NORMAL_CC_TEMPLATE_TYPES = new Set(['normal', 'normalCC']);
+const NORMAL_CC_TEMPLATE_TYPES = new Set(['normal', 'normalcc']);
 
 export function resolveBotRuntime(source: BotRuntimeSource): BotRuntime {
   const sourceEngine = source.engine?.trim() || DEFAULT_ENGINE;
   const templateType = source.templateType?.trim();
+  const normalizedTemplateType = templateType?.toLowerCase().replace(/[\s_-]/g, '');
   const botId = source.botId;
   const isAgentCodingBot =
     sourceEngine === 'aicoding' ||
     ((sourceEngine === 'claude_code' || sourceEngine === 'claudeCode') &&
-      Boolean(templateType && !NORMAL_CC_TEMPLATE_TYPES.has(templateType)));
+      Boolean(templateType && !NORMAL_CC_TEMPLATE_TYPES.has(normalizedTemplateType ?? '')));
 
   return {
     engine: sourceEngine,

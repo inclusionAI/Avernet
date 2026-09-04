@@ -1,6 +1,6 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import type { BotEditorCli, BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { FileCheck, FileText, Loader2, Plus, Terminal, Trash2, User } from 'lucide-react';
 import { useState } from 'react';
@@ -10,7 +10,9 @@ interface CapabilityMembersProps {
   items: Array<BotEditorSkill | BotEditorMcp | BotEditorCli>;
   editable: boolean;
   identities?: Record<string, 'caller' | 'owner'>;
-  onIdentity?: (id: string) => void;
+  identityEditable?: boolean;
+  updatingIdentityId?: string;
+  onIdentity?: (id: string, identity: 'caller' | 'owner') => Promise<void>;
   onAdd?: () => void;
   onRemove?: (id: string) => Promise<void>;
 }
@@ -21,6 +23,8 @@ export function CapabilityMembers({
   editable,
   identities = {},
   onIdentity,
+  identityEditable = false,
+  updatingIdentityId,
   onAdd,
   onRemove,
 }: CapabilityMembersProps) {
@@ -63,22 +67,58 @@ export function CapabilityMembers({
               <span className="min-w-0 flex-1 truncate text-xs">{item.name}</span>
               {'version' in item && item.version ? <Badge>{item.version}</Badge> : null}
               {kind === 'mcp' ? (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`切换${item.name}调用身份`}
-                        leftIcon={
-                          identity === 'caller' ? <FileCheck className="size-3.5" /> : <User className="size-3.5" />
-                        }
-                        onClick={() => onIdentity?.(id)}
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent>当前以 {identity} 身份调用；本地 Mock，待 OpenAPI 持久化</TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={!editable || !identityEditable || updatingIdentityId === id}
+                      aria-label={`修改${item.name}调用身份`}
+                      leftIcon={
+                        updatingIdentityId === id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : identity === 'caller' ? (
+                          <FileCheck className="size-3.5" />
+                        ) : (
+                          <User className="size-3.5" />
+                        )
+                      }
+                    >
+                      {identity === 'caller' ? 'Caller' : 'Owner'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-72 space-y-2 p-2">
+                    <p className="m-0 px-2 py-1 text-xs text-muted-foreground">
+                      选择该 MCP 执行时使用的身份。修改仅作用于当前草稿。
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto w-full items-start justify-start py-2 text-left"
+                      leftIcon={<User className="mt-0.5 size-3.5" />}
+                      disabled={identity === 'owner'}
+                      onClick={() => void onIdentity?.(id, 'owner')}
+                    >
+                      <span>
+                        <span className="block">Owner 模式</span>
+                        <span className="block font-normal text-muted-foreground">使用 Bot 所有者身份调用</span>
+                      </span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-auto w-full items-start justify-start py-2 text-left"
+                      leftIcon={<FileCheck className="mt-0.5 size-3.5" />}
+                      disabled={identity === 'caller'}
+                      onClick={() => void onIdentity?.(id, 'caller')}
+                    >
+                      <span>
+                        <span className="block">Caller 模式</span>
+                        <span className="block font-normal text-muted-foreground">使用当前对话用户身份调用</span>
+                      </span>
+                    </Button>
+                  </PopoverContent>
+                </Popover>
               ) : null}
               {kind !== 'cli' ? (
                 <Button

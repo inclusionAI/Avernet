@@ -1,10 +1,12 @@
 // 工单详情抽屉：头部 Tag + 已读 Tag + 时间 + 标题；正文 content；
-// 审批类附加 申请人/申请理由/审批人/审批意见/审批时间；通知类底部已读提示。Footer 关闭 + 下一条未读(仅通知)。
-// 详情 content 为结构化对象，由 mapWorkOrderDto 合成为展示文案 + 解析出 applicantName/applyReason。
+// 详情 contentRaw（结构化对象）走 JsonBlock（着色 + 复制 + 展开/收起，key=itemId 重置折叠态），
+// 纯文本 content 原样展示；审批类附加 申请人/申请理由/审批人/审批意见/审批时间；通知类底部已读提示。
+// Footer 关闭 + 下一条未读(仅通知)。
 import { Button, Drawer, DrawerContent, DrawerHeader, DrawerTitle, Skeleton } from '@/components/ui';
 import type { WorkOrder } from '@/domain/admin/models';
 import { formatAbsoluteTime } from '@/utils/format';
 import { Tag } from '../Tag';
+import { JsonBlock } from './JsonBlock';
 
 export interface WorkOrderDetailDrawerProps {
   detail: WorkOrder | null;
@@ -45,9 +47,7 @@ export function WorkOrderDetailDrawer({
         ) : (
           <>
             {detail?.contentRaw ? (
-              <pre className="m-0 max-h-64 overflow-auto rounded-lg bg-muted/60 p-4 text-xs font-mono whitespace-pre-wrap break-all text-foreground">
-                {detail.contentRaw}
-              </pre>
+              <JsonBlock key={detail.itemId} raw={detail.contentRaw} />
             ) : detail?.content ? (
               <div className="rounded-lg bg-muted/60 p-4 text-xs leading-relaxed text-foreground">{detail.content}</div>
             ) : (
@@ -67,10 +67,10 @@ export function WorkOrderDetailDrawer({
                     <dd className="m-0 text-foreground">{detail.applyReason}</dd>
                   </>
                 ) : null}
-                {detail.reviewerUserId ? (
+                {detail.reviewerUserName || detail.reviewerUserId ? (
                   <>
                     <dt className="text-muted-foreground">审批人</dt>
-                    <dd className="m-0 text-foreground">{detail.reviewerUserId}</dd>
+                    <dd className="m-0 text-foreground">{detail.reviewerUserName ?? detail.reviewerUserId}</dd>
                   </>
                 ) : null}
                 {detail.reviewRemark ? (

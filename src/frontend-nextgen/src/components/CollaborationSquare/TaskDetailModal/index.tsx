@@ -1,4 +1,9 @@
-import { formatTaskDate, TaskAvatar, TaskStatusBadge } from '@/components/CollaborationSquare/TaskCard';
+import {
+  formatTaskDate,
+  getTaskEndTimeLabel,
+  TaskAvatar,
+  TaskStatusBadge,
+} from '@/components/CollaborationSquare/TaskCard';
 import { Modal, ModalContent, ModalDescription, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { getPublicTaskStatusPresentation, type PublicTask } from '@/domain/collaborationSquare/types';
@@ -100,7 +105,7 @@ export function TaskDetailModal({ open, task, loading, onClose }: TaskDetailModa
               </DetailRow>
             )}
             {task.completedAt && (
-              <DetailRow label="完成时间">
+              <DetailRow label={getTaskEndTimeLabel(task.status)}>
                 <p className="m-0 text-foreground">{formatTaskDate(task.completedAt)}</p>
               </DetailRow>
             )}

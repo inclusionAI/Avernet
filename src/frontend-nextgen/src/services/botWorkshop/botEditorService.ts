@@ -32,6 +32,19 @@ async function listAllConsumableSpaceSkills(spaceId: string): Promise<SpaceSkill
 }
 
 export const botEditorService = {
+  async getCallerContext(botId: string) {
+    const response = await botEditorController.getCallerContext(botId);
+    return {
+      editable: response.data?.editable ?? false,
+      mcpCallTypes: response.data?.mcp_call_types ?? {},
+      cliCallTypes: response.data?.cli_call_types ?? {},
+    };
+  },
+  async updateMcpCallType(botId: string, serverCode: string, callType: 'caller' | 'owner') {
+    const response = await botEditorController.updateMcpCallType(botId, serverCode, callType);
+    if (!response.data) throw new Error('修改调用身份后未返回结果');
+    return response.data.call_type;
+  },
   async registerRenderScreenLibraries(botId: string) {
     if (!botId) return 0;
     try {

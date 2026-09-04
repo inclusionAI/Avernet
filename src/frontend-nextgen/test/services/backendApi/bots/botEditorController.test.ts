@@ -51,6 +51,12 @@ describe('botEditorController', () => {
       'GET',
     ],
     [
+      'draft caller context',
+      () => botEditorController.getCallerContext('bot-1'),
+      '/openapi/v1/bots/bot-1/caller-context?stage=draft',
+      'GET',
+    ],
+    [
       'engine config',
       () => botEditorController.getEngineConfig('bot-1'),
       '/openapi/v1/bots/bot-1/engine/config',
@@ -124,6 +130,15 @@ describe('botEditorController', () => {
     await invoke();
     expect(fetch).toHaveBeenCalledWith(url, expect.objectContaining({ method }));
   });
+
+  it('render screen list passes owner_id for friend bots', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await botEditorController.listRenderScreens('bot-1', 'owner-1');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/render-screens?owner_id=owner-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
   test('upgrades a running service publication through OpenAPI', async () => {
     const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
     await botEditorController.upgradeLifecycle('bot-1', 17);
@@ -147,6 +162,14 @@ describe('botEditorController', () => {
     expect(fetch).toHaveBeenCalledWith(
       '/openapi/v1/bots/bot-1/lifecycle/approval',
       expect.objectContaining({ method: 'PUT', body: JSON.stringify({ should_approval: true }) }),
+    );
+  });
+  test('updates the MCP caller mode through OpenAPI', async () => {
+    const fetch = jest.spyOn(globalThis, 'fetch').mockImplementation(ok);
+    await botEditorController.updateMcpCallType('bot-1', 'mcp/weather', 'caller');
+    expect(fetch).toHaveBeenCalledWith(
+      '/openapi/v1/bots/bot-1/mcps/mcp%2Fweather/call-type',
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ call_type: 'caller' }) }),
     );
   });
   test('advances a service publication through the lifecycle OpenAPI', async () => {

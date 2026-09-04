@@ -1,5 +1,6 @@
 import { defaultCapabilities } from './defaultCapabilities';
 import type {
+  AdminSections,
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,
@@ -42,6 +43,7 @@ export function sealExtensions(): void {
 
 export { defaultCapabilities };
 export type {
+  AdminSections,
   AgentCodingInternalResources,
   AppCapabilities,
   BotEngineOption,

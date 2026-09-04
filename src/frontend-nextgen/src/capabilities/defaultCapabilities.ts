@@ -4,6 +4,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { AvernetMarkLogo, AvernetWordmarkLogo } from './brandLogos';
 import type {
   AgentCodingInternalResources,
+  AdminSections,
   AppCapabilities,
   BotEngineOption,
   CapabilityResult,
@@ -21,25 +22,14 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
   return { status: 'unsupported', value, reason };
 }
 
-/**
- * Open Core 默认路由重定向：/admin 系（/admin、/admin/spaces、/admin/work-orders 及一切
- * /admin/** 深链）不可直访，经 app.tsx onRouteChange 重定向至 /manage（其自带 route
- * redirect 落 /bot-workshop）。前缀判定用 `pathname === '/admin' || startsWith('/admin/')`，
- * 避免误伤 /administrator 之类路径。internal overlay 必须显式 override 返回 null
- * （src/extensions/internal.ts），否则本默认值经 spread 继承会误伤内部形态的 /admin 访问。
- */
-function getOpenCoreRouteRedirect(pathname: string): string | null {
-  if (pathname === '/admin' || pathname.startsWith('/admin/')) return '/manage';
-  return null;
-}
-
 export const defaultCapabilities: AppCapabilities = {
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
-  // Open Core 默认路由重定向：收敛【管理后台】入口后 /admin 系不可直访（见 getOpenCoreRouteRedirect）；
-  // internal overlay 经 extensions/internal.ts 显式覆盖为 null，保持内部 /admin 可达。
-  getRuntimeRouteRedirect: (context) => ({ status: 'available', value: getOpenCoreRouteRedirect(context.pathname) }),
+  // Open Core 默认路由重定向：当前无收敛项——管理后台入口已开放（getShellVisibility.adminEntry=true），
+  // /admin 可达，不再重定向至 /manage。返回 null。internal overlay 仍显式 override 为 null
+  // 作为防御性回归护栏（见 src/extensions/internal.ts），防未来 Open 默认重引入 /admin 重定向经 spread 误伤 internal。
+  getRuntimeRouteRedirect: () => ({ status: 'available', value: null }),
   getBotHealthCapability: () => ({
     status: 'available',
     value: {
@@ -157,11 +147,19 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: { skipSC: true },
   }),
-  // Open Core（阿里云部署）壳层收敛：不展示【管理后台】导航项、空间切换器与通知中心；
+  // Open Core（阿里云部署）壳层可见性：展示【管理后台】导航项与页头通知中心
+  // （adminEntry/notificationBell=true），不展示侧栏空间切换器（spaceSwitcher=false）；
   // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。
   // internal overlay 覆盖为三项全 true（extensions/internal.ts），内部形态零变化。
   getShellVisibility: (): CapabilityResult<ShellVisibility> => ({
     status: 'available',
-    value: { adminEntry: false, spaceSwitcher: false, notificationBell: false },
+    value: { adminEntry: true, spaceSwitcher: false, notificationBell: true },
+  }),
+  // Open Core（阿里云部署）管理后台页内分区：隐藏【空间管理】Tab、仅保留【工单中心】
+  // （管理后台入口已开放，空间管理收敛在页内完成；空间数据链路不受影响）。
+  // internal overlay 覆盖为 { spaces:true, workOrders:true }（extensions/internal.ts），内部形态两 Tab 均在。
+  getAdminSections: (): CapabilityResult<AdminSections> => ({
+    status: 'available',
+    value: { spaces: false, workOrders: true },
   }),
 };

@@ -61,7 +61,7 @@ describe('botSessionService', () => {
     chatable: true,
   };
 
-  it('listOwnedBots 展示模板名称并兼容历史个人/应用 Coding Bot', async () => {
+  it('listOwnedBots 过滤 AgentCoding Bot，但保留普通 CC', async () => {
     ownedMocked.listBots.mockResolvedValue({
       data: {
         items: [
@@ -76,17 +76,32 @@ describe('botSessionService', () => {
           {
             bot_id: 'personal:2',
             bot_name: '个人实例',
-            engine_type: 'claude_code',
+            engine_type: 'aicoding',
             template_type: 'personalCoding',
             owner_entity_id: '2',
             status: 'ACTIVE',
           },
           {
-            bot_id: 'architect:3',
-            bot_name: '架构实例',
+            bot_id: 'normal:3',
+            bot_name: '普通 CC',
             engine_type: 'claude_code',
-            engine_properties: { template_type: 'architect', template_config: { template_name: '架构 Bot' } },
+            template_type: 'normalCC',
             owner_entity_id: '3',
+            status: 'ACTIVE',
+          },
+          {
+            bot_id: 'normal-empty:4',
+            bot_name: '无模板 CC',
+            engine_type: 'claude_code',
+            owner_entity_id: '4',
+            status: 'ACTIVE',
+          },
+          {
+            bot_id: 'general:5',
+            bot_name: 'General Coding Bot',
+            engine_type: 'claude_code',
+            template_type: 'generalCC',
+            owner_entity_id: '5',
             status: 'ACTIVE',
           },
         ],
@@ -94,14 +109,19 @@ describe('botSessionService', () => {
     });
 
     const res = await botSessionService.listOwnedBots('human_327325');
-    expect(ownedMocked.listBots).toHaveBeenCalledWith({ user_id: '327325', page: 1, page_size: 100 });
-    expect(res.ok && res.data).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ displayName: '应用实例', isAgentCodingBot: true, templateName: '应用 Bot' }),
-        expect.objectContaining({ displayName: '个人实例', isAgentCodingBot: true, templateName: '个人 Coding Bot' }),
-        expect.objectContaining({ displayName: '架构实例', isAgentCodingBot: true, templateName: '架构 Bot' }),
-      ]),
-    );
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data).toEqual([
+      expect.objectContaining({
+        displayName: '普通 CC',
+        isAgentCodingBot: false,
+        templateType: 'normalCC',
+      }),
+      expect.objectContaining({
+        displayName: '无模板 CC',
+        isAgentCodingBot: false,
+        templateType: undefined,
+      }),
+    ]);
   });
 
   it('listSessions 调用 controller 并映射为 BotChatSessionView', async () => {
@@ -248,6 +268,7 @@ describe('botSessionService', () => {
     const res = await botSessionService.listModels(bot, 'human_327325');
     expect(mocked.listBotModels).toHaveBeenCalledWith('20260402_ab', {
       user_id: '327325',
+      owner_id: '2088',
       page: 1,
       page_size: 50,
     });

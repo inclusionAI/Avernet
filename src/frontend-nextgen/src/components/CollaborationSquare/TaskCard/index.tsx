@@ -33,7 +33,7 @@ const TASK_DOT_CLASS: Record<TaskStatusTone, string> = {
 export function TaskStatusBadge({ status }: { status: PlazaTaskStatus }) {
   const { label, tone } = getPublicTaskStatusPresentation(status);
   return (
-    <Badge tone={TASK_BADGE_TONE[tone]} className="gap-1.5">
+    <Badge tone={TASK_BADGE_TONE[tone]} className="gap-1.5 shrink-0 whitespace-nowrap">
       <span aria-hidden className={cn('h-1.5 w-1.5 rounded-full', TASK_DOT_CLASS[tone])} />
       {label}
     </Badge>
@@ -65,6 +65,12 @@ export function formatTaskDate(iso: string | undefined | null): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
     date.getMinutes(),
   )}`;
+}
+
+/** 任务执行结束阶段的时间行标签：已完成(completed)→「完成时间」，待验收(reviewing)→「开始验收时间」。
+ *  值均来自 `completedAt`（后端 `relay_end_time`）；仅在该字段存在时由任务卡与详情弹层渲染。 */
+export function getTaskEndTimeLabel(status: PlazaTaskStatus): '完成时间' | '开始验收时间' {
+  return status === 'reviewing' ? '开始验收时间' : '完成时间';
 }
 
 export interface TaskCardProps {
@@ -133,7 +139,9 @@ export default function TaskCard({ task, onOpenDetail }: TaskCardProps) {
           </div>
         )}
         {task.completedAt && (
-          <p className="m-0 text-xs text-muted-foreground">完成时间：{formatTaskDate(task.completedAt)}</p>
+          <p className="m-0 text-xs text-muted-foreground">
+            {getTaskEndTimeLabel(task.status)}：{formatTaskDate(task.completedAt)}
+          </p>
         )}
       </CardContent>
       <CardFooter className="flex-wrap items-center justify-start gap-2 p-3">

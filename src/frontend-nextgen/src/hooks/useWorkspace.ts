@@ -67,7 +67,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   }, [activeIdentityView, availableViews, view, setView]);
   const isTestUser = isTestUserIdentity(activeIdentityId);
   const isUserIdentity = activeIdentityView?.kind === 'user';
-  const { chatBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
+  const { chatBots, hasAgentCodingBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
   const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(
     activeIdentityId,
     isUserIdentity,
@@ -208,6 +208,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     toggleGroup,
     availableViews,
     chatBots,
+    hasAgentCodingBots,
     friendBots,
     isMyBotsLoading,
     isFriendBotsLoading,

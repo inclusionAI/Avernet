@@ -3,7 +3,7 @@
 import WorkOrderDetailDrawer from '@/components/Admin/WorkOrderTabs/WorkOrderDetailDrawer';
 import { mapWorkOrderDto } from '@/domain/admin/mappers';
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const noop = () => undefined;
 
@@ -197,5 +197,35 @@ describe('WorkOrderDetailDrawer 已读与未读导航', () => {
     render(<WorkOrderDetailDrawer open={false} loading={false} detail={null} onClose={noop} onNextUnread={noop} />);
 
     expect(screen.queryByText('空间加入申请待审批')).not.toBeInTheDocument();
+  });
+});
+
+describe('WorkOrderDetailDrawer JSON 负载块（JsonBlock）', () => {
+  it('长 JSON 默认折叠但不丢内容：头部渲染标题/复制，点「展开」后可「收起」', () => {
+    // > 12 行的 content 对象，触发折叠
+    const bigContent = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`field_${i}`, `value_${i}`]));
+    const detail = buildWorkOrder({ content: bigContent });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    expect(screen.getByText('JSON')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '复制 JSON' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '展开' })).toBeInTheDocument();
+
+    // 折叠只裁视觉，不裁 DOM：原文（含换行缩进）仍完整在文档中
+    expect(document.body.textContent).toContain(JSON.stringify(bigContent, null, 2));
+
+    fireEvent.click(screen.getByRole('button', { name: '展开' }));
+    expect(screen.getByRole('button', { name: '收起' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
+  });
+
+  it('行数少的 JSON 原样展示，不出现展开/收起', () => {
+    const detail = buildWorkOrder({
+      content: { space_id: 6, space_name: '测试空间2', reason: 'test' },
+    });
+    render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
+
+    expect(document.body.textContent).toContain(JSON.stringify({ space_id: 6, space_name: '测试空间2', reason: 'test' }, null, 2));
+    expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
   });
 });

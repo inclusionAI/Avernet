@@ -88,7 +88,7 @@ export const RESULT_STYLES: Record<
 > = {
   pass: { icon: '✓', tone: 'success', label: '通过' },
   warning: { icon: '⚠', tone: 'warning', label: '警告' },
-  fail: { icon: '✕', tone: 'error', label: '错误' },
+  fail: { icon: '✕', tone: 'error', label: '未通过' },
   error: { icon: '!', tone: 'neutral', label: '检测失败' },
   pending: { icon: '○', tone: 'neutral', label: '待检测' },
   running: { icon: '⟳', tone: 'primary', label: '检测中' },
@@ -104,7 +104,7 @@ export const DIM_STATUS_STYLES: Record<
   completed: { label: '已完成', tone: 'success' },
   failed: { label: '检测失败', tone: 'error' },
   warning: { label: '需关注', tone: 'warning' },
-  error: { label: '检测失败', tone: 'error' },
+  error: { label: '异常', tone: 'error' },
   unknown: { label: '未知', tone: 'neutral' },
 };
 

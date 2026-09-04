@@ -1,4 +1,5 @@
 import { registerTaskPanel, TaskPanelAdapter } from '@/assets/TaskPanel';
+import { TaskLoopCard } from '@/components/TaskCards';
 import { defaultCapabilities, getCapabilities } from '@/capabilities';
 import { registerUmdPanelHandler } from '@/services/bcs/UmdPanel';
 import { ensureReactGlobal } from '@/services/workspace';
@@ -66,6 +67,8 @@ export function registerSidePanelWiring(): void {
   ensureReactGlobal();
   registerUmdPanelHandler();
   registerTaskPanel();
+  // Open Core task-loop skill card: public component key replaces the internal cardId loader.
+  registerPanelContent('taskCard.TaskLoopCard', TaskLoopCard as ComponentType<PanelContentProps>);
   // 业务层覆盖注入登录用户工号：协群后端 opening_message.params 不带 userId，副屏下钻需登录人工号
   // 判定群成员归属本人 bot（view_bot_id）与跨用户单聊权限；缺省回填，已有 userId 则沿用。
   registerPanelContent('taskPanel.TaskLoopView', TaskPanelAdapterWithUser);

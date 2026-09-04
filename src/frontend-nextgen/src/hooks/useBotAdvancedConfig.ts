@@ -48,6 +48,8 @@ export function useBotAdvancedConfig(botId: string | null, enabled = true) {
     saveFile,
     createChannel: (input: BotChannelInput) =>
       act(() => botAdvancedConfigService.createChannel(botId!, input), '渠道已绑定'),
+    updateChannel: (id: number, input: BotChannelInput) =>
+      act(() => botAdvancedConfigService.updateChannel(botId!, id, input), '渠道配置已更新'),
     toggleChannel: (channel: BotChannel) =>
       act(() => botAdvancedConfigService.setChannelStatus(botId!, channel), '渠道状态已更新'),
     deleteChannel: (id: number) => act(() => botAdvancedConfigService.deleteChannel(botId!, id), '渠道已删除'),

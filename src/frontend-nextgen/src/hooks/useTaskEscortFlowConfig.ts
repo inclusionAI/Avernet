@@ -1,5 +1,6 @@
 import type { TaskEscortWorkflowItem, TaskEscortWorkflowSpec } from '@/components/BotWorkshop/TaskEscort/types';
-import { taskEscortService } from '@/services/taskEscort';
+import type { CreateWorkflowFromYamlInput, WorkflowImportErrorField } from '@/services/taskEscort';
+import { taskEscortService, WorkflowImportValidationError } from '@/services/taskEscort';
 import { useCallback, useEffect, useState } from 'react';
 
 export interface UseTaskEscortFlowConfigOptions {
@@ -14,9 +15,13 @@ export interface UseTaskEscortFlowConfigReturn {
   spec: TaskEscortWorkflowSpec | null;
   isLoadingList: boolean;
   isLoadingSpec: boolean;
+  isCreatingWorkflow: boolean;
   error: string | null;
   selectWorkflow: (workflowId: string) => void;
   refreshList: () => Promise<void>;
+  createWorkflowFromYaml: (
+    input: Pick<CreateWorkflowFromYamlInput, 'yaml' | 'command' | 'remark'>,
+  ) => Promise<{ ok: true } | { ok: false; field: WorkflowImportErrorField; message: string }>;
 }
 
 export function useTaskEscortFlowConfig({
@@ -29,6 +34,7 @@ export function useTaskEscortFlowConfig({
   const [spec, setSpec] = useState<TaskEscortWorkflowSpec | null>(null);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingSpec, setIsLoadingSpec] = useState(false);
+  const [isCreatingWorkflow, setIsCreatingWorkflow] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
@@ -70,6 +76,33 @@ export function useTaskEscortFlowConfig({
     await loadList();
   }, [loadList]);
 
+  const createWorkflowFromYaml = useCallback(
+    async (input: Pick<CreateWorkflowFromYamlInput, 'yaml' | 'command' | 'remark'>) => {
+      setIsCreatingWorkflow(true);
+      setError(null);
+      try {
+        const created = await taskEscortService.createWorkflowFromYaml({ ...input, botOwnerId, botId }, workflows);
+        setSelectedWorkflowId(created.id);
+        setSpec(created as TaskEscortWorkflowSpec);
+        await loadList();
+        return { ok: true } as const;
+      } catch (cause: unknown) {
+        if (cause instanceof WorkflowImportValidationError) {
+          return { ok: false, field: cause.field, message: cause.message } as const;
+        }
+        setError(cause instanceof Error ? cause.message : '创建工作流失败');
+        return {
+          ok: false,
+          field: 'yaml' as const,
+          message: cause instanceof Error ? cause.message : '创建工作流失败',
+        };
+      } finally {
+        setIsCreatingWorkflow(false);
+      }
+    },
+    [botId, botOwnerId, loadList, workflows],
+  );
+
   useEffect(() => {
     if (enabled) {
       loadList();
@@ -82,8 +115,10 @@ export function useTaskEscortFlowConfig({
     spec,
     isLoadingList,
     isLoadingSpec,
+    isCreatingWorkflow,
     error,
     selectWorkflow,
     refreshList,
+    createWorkflowFromYaml,
   };
 }

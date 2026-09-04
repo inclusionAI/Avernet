@@ -131,6 +131,16 @@ beforeEach(() => {
     ok: true,
     data: [{ botId: 'b:2088', realBotId: 'b', ownerId: '2088', displayName: '复合Bot', online: true, chatable: true }],
   });
+  (botSessionService as unknown as { listOwnedBotsWithMeta: jest.Mock<any> }).listOwnedBotsWithMeta =
+    fn().mockResolvedValue({
+      ok: true,
+      data: {
+        bots: [
+          { botId: 'b:2088', realBotId: 'b', ownerId: '2088', displayName: '复合Bot', online: true, chatable: true },
+        ],
+        hasAgentCodingBots: false,
+      },
+    });
   workspaceService.initWorkspace = fn().mockImplementation(async () => {
     // 直接走真实 store 写入路径（模拟 identityService.loadIdentities 的产出落 store）
     // 注入:真实用户 me + 简单 id bot b1 + 复合 id bot b:2088(均为 mine 返回身份)。

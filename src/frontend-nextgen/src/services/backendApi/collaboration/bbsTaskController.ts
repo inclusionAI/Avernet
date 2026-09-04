@@ -25,7 +25,7 @@ export interface BbsTaskItem {
   goal?: string;
   /** 验收标准列表；缺失回退空数组。 */
   acceptances?: BbsTaskAcceptanceItem[];
-  /** 后端运行态：PENDING/RUNNING/DONE/HUNG 等；未知态由 mapper 丢弃。 */
+  /** 后端运行态：PENDING/RUNNING/DONE/SUCCESS/HUNG 等；未知态由 mapper 丢弃。 */
   status?: string;
   /** 发布者 Bot ID；可能为 null（系统任务等）。 */
   publisher?: string | null;
@@ -68,7 +68,7 @@ export interface ListBbsTasksParams {
   page?: number;
   /** 每页条数，默认 20，范围 1~100，越界 → 422。 */
   page_size?: number;
-  /** BBS 原始态单值过滤（PENDING/RUNNING/DONE/HUNG 等），大小写不敏感；逗号多值 / 非法枚举 → 400。 */
+  /** BBS 原始态单值过滤（PENDING/RUNNING/DONE/SUCCESS/HUNG 等），大小写不敏感；逗号多值 / 非法枚举 → 400。 */
   status?: string;
   /** 关键词，对 task_spec / extend_props 文本大小写不敏感 LIKE；空 / 空白 → 不过滤。 */
   search_word?: string;

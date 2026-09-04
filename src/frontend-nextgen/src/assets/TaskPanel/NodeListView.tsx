@@ -207,20 +207,22 @@ export const NodeListView: React.FC<{
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                    <TruncatedText
-                      value={node.name}
-                      maxLength={20}
-                      style={{
-                        minWidth: 0,
-                        color: C.textPrimary,
-                        fontSize: 13,
-                        fontWeight: 650,
-                        lineHeight: '18px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    />
+                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                      <TruncatedText
+                        value={node.name}
+                        maxLength={15}
+                        style={{
+                          minWidth: 0,
+                          color: C.textPrimary,
+                          fontSize: 13,
+                          fontWeight: 650,
+                          lineHeight: '18px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      />
+                    </div>
                     {runModeLabel && <span style={groupBadgeStyle}>{runModeLabel}</span>}
                     {canOpenSub && <span style={subTaskBadgeStyle}>子任务</span>}
                   </div>

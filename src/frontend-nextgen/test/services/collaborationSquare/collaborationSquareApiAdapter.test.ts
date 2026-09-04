@@ -905,7 +905,7 @@ describe('CollaborationSquareApiAdapter', () => {
           total: 2,
           items: [
             bbsItem({ status: 'RUNNING', assignee_id: 'bot-asg', assignee_name: '运维助手', relay_begin_time: 't1' }),
-            bbsItem({ task_id: 'bbs-2', status: 'DONE', assignee_id: 'bot-asg', relay_end_time: 't2' }),
+            bbsItem({ task_id: 'bbs-2', status: 'SUCCESS', assignee_id: 'bot-asg', relay_end_time: 't2' }),
           ],
         },
         request_id: 'r',
@@ -951,6 +951,21 @@ describe('CollaborationSquareApiAdapter', () => {
         ],
         total: 2,
       });
+    });
+
+    it('DONE 项前向映射为 reviewing 并填完成时间（adapter 级覆盖 DONE→reviewing 分支）', async () => {
+      mockedListBbsTasks.mockResolvedValue({
+        code: 200000,
+        data: { total: 1, items: [bbsItem({ task_id: 'bbs-rev', status: 'DONE', relay_end_time: 't3' })] },
+        request_id: 'r',
+      });
+      mockedQueryCollaborationBots.mockResolvedValue({ code: 20000, data: { items: [] } });
+
+      const result = await new CollaborationSquareApiAdapter().listPublicTasks({}, undefined);
+
+      expect(result.items[0]).toEqual(
+        expect.objectContaining({ id: 'bbs-rev', status: 'reviewing', completedAt: 't3' }),
+      );
     });
 
     it('publisher 为复合 bot_id:owner 时拆 realBotId 反查，结果按复合 id 命中（不透传 :owner）', async () => {
@@ -1074,8 +1089,10 @@ describe('CollaborationSquareApiAdapter', () => {
       const adapter = new CollaborationSquareApiAdapter();
       await adapter.listPublicTasks({ status: 'claimed', offset: 0, limit: 24 }, undefined);
       expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'RUNNING' }, undefined);
-      await adapter.listPublicTasks({ status: 'completed', offset: 0, limit: 24 }, undefined);
+      await adapter.listPublicTasks({ status: 'reviewing', offset: 0, limit: 24 }, undefined);
       expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'DONE' }, undefined);
+      await adapter.listPublicTasks({ status: 'completed', offset: 0, limit: 24 }, undefined);
+      expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'SUCCESS' }, undefined);
       await adapter.listPublicTasks({ status: 'pending_claim', offset: 0, limit: 24 }, undefined);
       expect(mockedListBbsTasks).toHaveBeenLastCalledWith({ page: 1, page_size: 24, status: 'PENDING' }, undefined);
       // all 不下发 status。
