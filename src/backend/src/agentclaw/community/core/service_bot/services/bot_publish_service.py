@@ -25,6 +25,7 @@ from agentclaw.community.core.service_bot.services.publish_exceptions import (
 )
 from agentclaw.community.core.service_bot.services.publish_rollback_mixin import PublishRollbackMixin
 from agentclaw.community.core.service_bot.services.arca_image_pin import (
+    apply_default_image_to_ext,
     apply_image_pin_to_ext,
     clear_image_policy_from_ext,
     copy_image_policy_to_ext,
@@ -1312,6 +1313,27 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
             f"[offline_publish] Publish status updated to released: publish_id={publish_id}"
         )
 
+    def _resolve_upgrade_image_policy_ext(
+        self,
+        bot: Dict[str, Any],
+    ) -> Dict[str, Any] | None:
+        """Resolve the current image policy before personal-to-service conversion.
+
+        Conversion creates a draft immediately, while the service-Bot restart
+        is asynchronous. Persisting the policy together with ``bot_type``
+        prevents ``create_publish`` from observing a service Bot without its
+        policy and incorrectly snapshotting a Pin image.
+
+        Template routing is intentionally not handled here; that is a separate
+        follow-up change.
+        """
+        current_ext = bot.get("ext")
+        if resolve_current_arca_image(
+            self._common_config_service, env=self._env
+        ) is None:
+            return current_ext
+        return apply_default_image_to_ext(current_ext)
+
     def upgrade_bot_to_service(
         self,
         bot_id: str,
@@ -1341,13 +1363,23 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
                 f"aicoding type bot cannot be upgraded to service: bot_id={bot_id}"
             )
 
+        # Resolve the policy before side effects. Restart is asynchronous,
+        # whereas create_publish() runs immediately after the Bot update.
+        is_teclaw = self._bot_service.is_teclaw_bot(active_engine)
+        service_ext = (
+            bot.get("ext") if is_teclaw else self._resolve_upgrade_image_policy_ext(bot)
+        )
+
         # 5. 调用 BCN switch_bot 接口切换绑定
         switch_result = self._bcn_service.switch_bot(teamclaw_bot_uuid=bot_id, owner_workno=owner_id, name=bot.get("bot_name") or bot_id, summary=bot.get("bot_desc") or "")
         logger.info(f"[upgrade_bot_to_service] BCN switch_bot succeeded: bot_id={bot_id}, owner_id={owner_id}, websocket_kicked={switch_result.get('websocket_kicked')}, idempotent_replay={switch_result.get('idempotent_replay')}")
 
         # 6. 更新 bot_type 为 "service"
+        update_fields = {"bot_type": "service"}
+        if service_ext != bot.get("ext"):
+            update_fields["ext"] = service_ext
         updated_bot = self._bot_repo.update_by_owner(
-            bot_id, owner_id, {"bot_type": "service"}
+            bot_id, owner_id, update_fields
         )
         if not updated_bot:
             raise BotNotFoundError(f"Failed to update bot: bot_id={bot_id}")
@@ -1358,7 +1390,7 @@ class BotPublishService(PublishDraftRestoreMixin, PublishRollbackMixin):
         #    （producer/composer 不读 bot_type，出站规则也不区分），个人/服务是同一个容器，
         #    因此 teclaw 不需要重启；一旦重启会 destroy 容器 + 重新分配失败，把 bot 打成
         #    无 binding 的坏状态，并丢掉个人阶段的容器内文件（Dima 2026070100117117968）。
-        if self._bot_service.is_teclaw_bot(active_engine):
+        if is_teclaw:
             logger.info(
                 f"[upgrade_bot_to_service] teclaw bot, skip restart (container is "
                 f"bot_type-agnostic, restart would strand it): bot_id={bot_id}"
