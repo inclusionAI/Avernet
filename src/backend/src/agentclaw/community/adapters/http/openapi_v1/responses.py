@@ -110,7 +110,9 @@ from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotPublicServiceError,
 )
 from agentclaw.community.core.channel.errors import (
+    ChannelBindingConflictError,
     ChannelEditLockedError,
+    ChannelModeViolationError,
     ChannelNotFoundError,
     ChannelSyncError,
 )
@@ -453,6 +455,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotNotFoundError: (404, "Not found"),
     ChannelNotFoundError: (404, "Not found"),
     ChannelSyncError: (502, "Channel synchronization failed"),
+    ChannelModeViolationError: (422, "Channel mode violation"),
+    ChannelBindingConflictError: (409, "Channel binding conflict"),
     # Byte-identical to the line above, deliberately. An application that could
     # tell "I hold no grant for this bot" from "no such bot" would have an
     # enumeration oracle for every bot id in the tenant, so the refusal must be

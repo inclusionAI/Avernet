@@ -1734,6 +1734,16 @@
       "Channel": {
         "description": "One Bot-bound external Channel.",
         "properties": {
+          "binding_mode": {
+            "default": "plugin",
+            "description": "How the Channel connects: 'plugin' or 'bcn_gateway'.",
+            "enum": [
+              "plugin",
+              "bcn_gateway"
+            ],
+            "title": "Binding Mode",
+            "type": "string"
+          },
           "bot_id": {
             "description": "Bot this Channel is bound to.",
             "title": "Bot Id",
@@ -1830,6 +1840,16 @@
         "additionalProperties": false,
         "description": "Create one inactive draft Channel on the Bot named in the path.",
         "properties": {
+          "binding_mode": {
+            "default": "plugin",
+            "description": "How the Channel connects: 'plugin' writes openclaw.json direct config; 'bcn_gateway' syncs a BCS binding (per-sender sessions).",
+            "enum": [
+              "plugin",
+              "bcn_gateway"
+            ],
+            "title": "Binding Mode",
+            "type": "string"
+          },
           "config": {
             "$ref": "#/components/schemas/DingTalkChannelConfigCreate",
             "description": "DingTalk credentials and message behavior."
@@ -1884,6 +1904,22 @@
         "additionalProperties": false,
         "description": "Partial update of an existing draft Channel.",
         "properties": {
+          "binding_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "plugin",
+                  "bcn_gateway"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Must equal the stored mode; the binding mode is immutable after creation.",
+            "title": "Binding Mode"
+          },
           "config": {
             "anyOf": [
               {
@@ -3757,6 +3793,22 @@
             "title": "Enable Streaming Cards",
             "type": "boolean"
           },
+          "group_chat_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "per_sender",
+                  "conversation_shared"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Group-session scoping when binding_mode is 'bcn_gateway'; null otherwise.",
+            "title": "Group Chat Scope"
+          },
           "has_client_secret": {
             "description": "Whether a secret is stored; its value is never returned.",
             "title": "Has Client Secret",
@@ -3767,6 +3819,22 @@
             "description": "Whether the sender's name enters Bot context.",
             "title": "Include Sender Name",
             "type": "boolean"
+          },
+          "outbound_visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full_transcript",
+                  "lead_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outbound visibility when binding_mode is 'bcn_gateway'; null otherwise.",
+            "title": "Outbound Visibility"
           },
           "reply_to_message": {
             "default": true,
@@ -3859,11 +3927,43 @@
             "title": "Enable Streaming Cards",
             "type": "boolean"
           },
+          "group_chat_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "per_sender",
+                  "conversation_shared"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Group-session scoping; only valid when binding_mode is 'bcn_gateway'.",
+            "title": "Group Chat Scope"
+          },
           "include_sender_name": {
             "default": true,
             "description": "Whether the sender's name enters Bot context.",
             "title": "Include Sender Name",
             "type": "boolean"
+          },
+          "outbound_visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full_transcript",
+                  "lead_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outbound transcript visibility; only valid when binding_mode is 'bcn_gateway'.",
+            "title": "Outbound Visibility"
           },
           "reply_to_message": {
             "default": true,
@@ -3995,6 +4095,22 @@
             "description": "Enable or disable streaming cards; omit to keep.",
             "title": "Enable Streaming Cards"
           },
+          "group_chat_scope": {
+            "anyOf": [
+              {
+                "enum": [
+                  "per_sender",
+                  "conversation_shared"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New group-session scoping; omit to keep. bcn_gateway channels only.",
+            "title": "Group Chat Scope"
+          },
           "include_sender_name": {
             "anyOf": [
               {
@@ -4006,6 +4122,22 @@
             ],
             "description": "Whether sender names enter Bot context; omit to keep.",
             "title": "Include Sender Name"
+          },
+          "outbound_visibility": {
+            "anyOf": [
+              {
+                "enum": [
+                  "full_transcript",
+                  "lead_only"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New outbound visibility; omit to keep. bcn_gateway channels only.",
+            "title": "Outbound Visibility"
           },
           "reply_to_message": {
             "anyOf": [
@@ -53486,7 +53618,7 @@
               "application/json": {
                 "example": {
                   "code": 409000,
-                  "message": "Conflict",
+                  "message": "Channel binding conflict",
                   "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
                 },
                 "schema": {
@@ -53494,7 +53626,7 @@
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "BCS rejected the binding because it conflicts with an existing binding."
           },
           "422": {
             "content": {
@@ -53714,7 +53846,7 @@
               "application/json": {
                 "example": {
                   "code": 409000,
-                  "message": "Conflict",
+                  "message": "Channel binding conflict",
                   "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
                 },
                 "schema": {
@@ -53722,7 +53854,7 @@
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "BCS rejected the binding because it conflicts with an existing binding."
           },
           "422": {
             "content": {
@@ -54161,7 +54293,7 @@
               "application/json": {
                 "example": {
                   "code": 409000,
-                  "message": "Conflict",
+                  "message": "Channel binding conflict",
                   "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
                 },
                 "schema": {
@@ -54169,7 +54301,7 @@
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "BCS rejected the binding because it conflicts with an existing binding."
           },
           "422": {
             "content": {
@@ -54399,7 +54531,7 @@
               "application/json": {
                 "example": {
                   "code": 409000,
-                  "message": "Conflict",
+                  "message": "Channel binding conflict",
                   "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
                 },
                 "schema": {
@@ -54407,7 +54539,7 @@
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "BCS rejected the binding because it conflicts with an existing binding."
           },
           "422": {
             "content": {

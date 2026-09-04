@@ -33,6 +33,10 @@ from agentclaw.community.adapters.http.openapi_v1.channels.schemas import (
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
 )
+from agentclaw.community.core.channel.errors import (
+    ChannelBindingConflictError,
+    ChannelModeViolationError,
+)
 from agentclaw.community.core.channel.models import ChannelRecord
 from agentclaw.community.core.engine_runtime.models import BotFacts
 from agentclaw.community.di.config import AixConfig
@@ -160,10 +164,24 @@ class _Channels:
         self.calls.append(("delete", channel_id))
         self.records[channel_id].deleted = 1
 
+    async def remove_channel(self, channel_id: int):
+        self.calls.append(("remove", channel_id))
+        self.delete(channel_id)
+
 
 class _MissingBotChannels(_Channels):
     async def set_channel_status(self, channel_id: int, status: str):
         raise BotNotFoundError("runtime Bot is unavailable")
+
+
+class _ModeViolationChannels(_Channels):
+    async def set_channel_status(self, channel_id: int, status: str):
+        raise ChannelModeViolationError("mode violation")
+
+
+class _ConflictChannels(_Channels):
+    async def set_channel_status(self, channel_id: int, status: str):
+        raise ChannelBindingConflictError("conflict")
 
 
 @pytest.mark.asyncio
@@ -325,6 +343,40 @@ async def test_runtime_bot_lookup_failure_is_normalized_to_upstream_error():
 
 
 @pytest.mark.asyncio
+async def test_update_status_maps_mode_violation_to_422():
+    response = await update_channel_status(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelStatusUpdate(status="active"),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_ModeViolationChannels([_record()]),
+        locks=_Locks(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_status_maps_binding_conflict_to_409():
+    response = await update_channel_status(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelStatusUpdate(status="active"),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=_ConflictChannels([_record()]),
+        locks=_Locks(),
+    )
+    assert response.status_code == 409
+    assert json.loads(response.body)["message"] == "Channel binding conflict"
+
+
+@pytest.mark.asyncio
 async def test_delete_deactivates_active_channel_before_deleting():
     service = _Channels([_record(status="1")])
 
@@ -339,7 +391,7 @@ async def test_delete_deactivates_active_channel_before_deleting():
         locks=_Locks(),
     )
 
-    assert service.calls[-2:] == [("status", "0"), ("delete", 1)]
+    assert service.calls == [("status", "0"), ("remove", 1), ("delete", 1)]
     assert result.code == 200000
     assert result.data.deleted is True
 
@@ -461,3 +513,239 @@ def test_read_contract_never_defines_client_secret():
     config_properties = channel_schema["$defs"][config_ref]["properties"]
     assert "client_secret" not in config_properties
     assert "has_client_secret" in config_properties
+
+
+# ── binding_mode 契约 ──────────────────────────────────────────────
+
+def test_create_defaults_to_plugin_mode():
+    channel = ChannelCreate(
+        type="dingding",
+        config={"client_id": "client-1", "client_secret": "secret-1"},
+    )
+    assert channel.binding_mode == "plugin"
+
+
+def test_create_accepts_minimal_bcn_gateway_config():
+    channel = ChannelCreate(
+        type="dingding",
+        binding_mode="bcn_gateway",
+        config={
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "robot_code": "robot-1",
+        },
+    )
+    assert channel.binding_mode == "bcn_gateway"
+
+
+def test_create_requires_robot_code_for_bcn_gateway_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        )
+    assert "robot_code" in str(exc.value)
+
+
+def test_create_rejects_plugin_fields_for_bcn_gateway_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            binding_mode="bcn_gateway",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "robot_code": "robot-1",
+                "dm_policy": "open",
+            },
+        )
+    assert "dm_policy" in str(exc.value)
+
+
+def test_create_rejects_bcn_fields_for_plugin_mode():
+    with pytest.raises(ValidationError) as exc:
+        ChannelCreate(
+            type="dingding",
+            config={
+                "client_id": "client-1",
+                "client_secret": "secret-1",
+                "group_chat_scope": "per_sender",
+            },
+        )
+    assert "group_chat_scope" in str(exc.value)
+
+
+# ── router binding_mode 投影与不可变校验 ───────────────────────────
+
+def _bcn_body() -> ChannelCreate:
+    return ChannelCreate(
+        type="dingding",
+        binding_mode="bcn_gateway",
+        description="BCN channel",
+        config={
+            "client_id": "client-1",
+            "client_secret": "secret-1",
+            "robot_code": "robot-1",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_bcn_gateway_stores_mode_and_defaults():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=_bcn_body(),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["binding_mode"] == "bcn_gateway"
+    assert create_kwargs["config"]["group_chat_scope"] == "per_sender"
+    assert create_kwargs["config"]["outbound_visibility"] == "full_transcript"
+
+
+@pytest.mark.asyncio
+async def test_create_plugin_omits_bcn_keys():
+    service = _Channels()
+
+    await create_channel(
+        bot_id="bot-1",
+        body=ChannelCreate(
+            type="dingding",
+            config={"client_id": "client-1", "client_secret": "secret-1"},
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    create_kwargs = next(c for name, c in service.calls if name == "create")
+    assert create_kwargs["config"]["binding_mode"] == "plugin"
+    assert "group_chat_scope" not in create_kwargs["config"]
+    assert "outbound_visibility" not in create_kwargs["config"]
+
+
+@pytest.mark.asyncio
+async def test_get_projects_binding_mode():
+    record = _record(config={
+        **_record().config,
+        "binding_mode": "bcn_gateway",
+        "group_chat_scope": "per_sender",
+    })
+    service = _Channels([record])
+
+    response = await get_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+    )
+    payload = json.loads(response.model_dump_json())["data"]
+    assert payload["binding_mode"] == "bcn_gateway"
+    assert payload["config"]["group_chat_scope"] == "per_sender"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_binding_mode_change():
+    service = _Channels([_record(config={**_record().config, "binding_mode": "plugin"})])
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(binding_mode="bcn_gateway"),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+    assert json.loads(response.body)["message"] == "Channel mode violation"
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_plugin_field_on_bcn_channel():
+    service = _Channels([_record(config={
+        **_record().config,
+        "binding_mode": "bcn_gateway",
+        "robot_code": "robot-1",
+    })])
+
+    response = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=ChannelUpdate(
+            config={"client_id": "client-2", "client_secret": "secret-2", "dm_policy": "open"}
+        ),
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_explicit_null_bcn_fields_keep_stored_values():
+    """显式传 null 的 bcn 字段不能把 null 落库/送进 BCS payload。
+
+    ``group_chat_scope=None`` 能通过校验（字段已 provided），但
+    ``_binding_payload`` 的 ``config.get(..., default)`` 对"键存在且为
+    None"返回 None —— payload 会送 null。显式 null 按省略处理，保留存量值。
+    """
+    service = _Channels([_record(status="0", config={
+        **_record().config,
+        "binding_mode": "bcn_gateway",
+        "robot_code": "robot-1",
+        "group_chat_scope": "per_sender",
+        "outbound_visibility": "full_transcript",
+    })])
+    body = ChannelUpdate.model_validate(
+        {
+            "config": {
+                "client_id": "client-2",
+                "client_secret": "secret-2",
+                "group_chat_scope": None,
+            }
+        }
+    )
+
+    result = await update_channel(
+        bot_id="bot-1",
+        channel_id=1,
+        body=body,
+        request=_request(),
+        user_id="owner-1",
+        owner_id="owner-1",
+        relay=_Relay(),
+        service=service,
+        locks=_Locks(),
+        aix_config=AixConfig(),
+    )
+
+    update_args = next(value for name, value in service.calls if name == "update")
+    assert update_args["config"]["group_chat_scope"] == "per_sender"
+    assert update_args["config"]["outbound_visibility"] == "full_transcript"
+    assert update_args["config"]["client_id"] == "client-2"
+    assert result.data.config.group_chat_scope == "per_sender"
