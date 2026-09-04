@@ -166,12 +166,6 @@ class TestFormCoopGroup:
 
 # ===== query_* =====
 class TestQuery:
-    def test_query_status_returns_graph_status(self, svc, graph):
-        runner = TaskRunner(svc)
-        assert runner.query_status("t1") == Status.RUNNING
-        graph.status = Status.DONE
-        assert runner.query_status("t1") == Status.DONE
-
     def test_query_detail_backfills_node(self, svc, graph):
         runner = TaskRunner(svc)
         _dispatch(svc, graph, ["c1"])
@@ -194,10 +188,6 @@ class TestQuery:
         svc.update_task_node_info(_patch("t1", "c1", output_patch={"data": "行业全貌"}))
         ret = runner.query_result(_child("c1"))
         assert ret.run_info.output.get("data") == "行业全貌"
-
-    def test_query_bot_tasks_stub_empty(self, svc):
-        runner = TaskRunner(svc)
-        assert runner.query_bot_tasks("bot_market") == []  # Avernet stub
 
 
 # ===== _build_context 双模式 =====

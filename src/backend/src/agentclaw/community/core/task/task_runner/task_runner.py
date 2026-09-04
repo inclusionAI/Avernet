@@ -91,10 +91,6 @@ class TaskRunner:
 
         return list(await asyncio.gather(*[_deliver_one(n) for n in toDoTaskList]))
 
-    def query_status(self, task_id: str) -> Status:
-        """产品/系统触发:查询某任务及所有子任务的状态(返回图级 status)。"""
-        return self._graph.query_task_dashboard(task_id).status
-
     def query_detail(self, node: TaskNode) -> TaskNode:
         """产品触发:查询任务最新详情(从图回填 node.run_info)。"""
         graph = self._graph.query_task_dashboard(node.task_id)
@@ -106,10 +102,6 @@ class TaskRunner:
     def query_result(self, node: TaskNode) -> TaskNode:
         """产品/系统触发:查询某任务及其所有子任务的产出结果(回填 node.run_info.output)。"""
         return self.query_detail(node)
-
-    def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
-        """获取某个 Bot 下的所有任务实例列表。Avernet stub:返回空列表(后续补全局索引)。"""
-        return []
 
     async def form_coop_group(self, gf: GroupFormation) -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。
