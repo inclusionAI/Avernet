@@ -59,6 +59,7 @@ def _seed_task(
     status: Status = Status.RUNNING,
     task_spec: dict | None = None,
     extend_props: dict | None = None,
+    output: dict | None = None,
 ) -> None:
     """落 task_info(可选) + task_node + task_node_run_info 三行;status 为 task_node 态,
     task_spec/extend_props 控制搜索匹配列(默认 _TASK_SPEC / {"assignee_name":"Alice"})。"""
@@ -93,7 +94,7 @@ def _seed_task(
             task_id=task_id,
             run_mode=run_mode,
             assignee=assignee,
-            output=None,
+            output=output,
             acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
             retry=0,
             session_id=None,
@@ -103,6 +104,25 @@ def _seed_task(
             end_time=None,
         )
     )
+
+
+def test_list_bbs_tasks_overview_injects_output_into_extend_props_when_non_empty(db):
+    """run_info.output 非空时,/bbs/list 投影把它并入 extend_props(key=output,值=output 本身)。"""
+    _seed_task(
+        db, task_id="bbs-1", node_id="n1", run_mode="bbs",
+        output={"output": "存储行业尽调报告正文……"},
+    )
+    rows, total = TaskGraphRepository(db).list_bbs_tasks_overview()
+    assert total == 1
+    assert rows[0].extend_props["output"] == {"output": "存储行业尽调报告正文……"}
+    assert rows[0].extend_props["assignee_name"] == "Alice"  # 原 extend_props 键保留
+
+
+def test_list_bbs_tasks_overview_does_not_inject_output_when_empty(db):
+    """run_info.output 为空时,extend_props 不应多出 output 键。"""
+    _seed_task(db, task_id="bbs-1", node_id="n1", run_mode="bbs")  # output 默认 None
+    rows, _ = TaskGraphRepository(db).list_bbs_tasks_overview()
+    assert "output" not in (rows[0].extend_props or {})
 
 
 def _seed_bbs(db, task_ids: list[str]) -> None:

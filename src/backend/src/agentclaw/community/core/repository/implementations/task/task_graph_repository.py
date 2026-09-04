@@ -672,7 +672,10 @@ class TaskGraphRepository(TaskGraphRepositoryProtocol):
                         assignee_id=run_rec.assignee,
                         status=node_rec.status,
                         acceptance_result=run_rec.acceptance_result,
-                        extend_props=run_rec.extend_props,
+                        extend_props={
+                            **(run_rec.extend_props or {}),
+                            **({"output": run_rec.output} if run_rec.output else {}),
+                        },
                         relay_create_time=node_rec.gmt_create,
                         relay_begin_time=run_rec.gmt_create,
                         relay_end_time=run_rec.gmt_modified,
