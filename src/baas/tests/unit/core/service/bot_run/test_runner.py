@@ -2379,7 +2379,7 @@ class TestEvalSessionLog:
         arca_binding_data,
         context,
     ):
-        """metadata 包含 eval_id 但无 session_id 时记录退化警告。"""
+        """metadata 包含 eval_id 但无 session_id 时记录 DEBUG 日志。"""
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
         eval_log = MagicMock()
 
@@ -2389,13 +2389,20 @@ class TestEvalSessionLog:
             mock_bot_service_plugin,
             eval_session_log=eval_log,
         )
-        await runner.deliver_message(
-            bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            message="hello",
-            context=context,
-            metadata={"eval_id": "eval-002"},
-            message_id="msg-002",
-        )
+        with patch("secbaas.community.core.service.bot_run._runner.logger") as mock_logger:
+            await runner.deliver_message(
+                bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                message="hello",
+                context=context,
+                metadata={"eval_id": "eval-002"},
+                message_id="msg-002",
+            )
+            # 验证 logger.debug 被调用（eval 缺少显式 session_id 降为 debug）
+            debug_calls = [
+                c for c in mock_logger.debug.call_args_list
+                if "eval 对话缺少显式 session_id" in str(c)
+            ]
+            assert len(debug_calls) == 1
 
         # 应依然调用 log_eval_session（session_id 为空字符串）
         eval_log.log_eval_session.assert_called_once_with(
@@ -2543,7 +2550,7 @@ class TestEvalSessionLogStream:
         arca_binding_data,
         context,
     ):
-        """deliver_message_stream 中 eval_id 存在但无 session_id 记录退化警告。"""
+        """deliver_message_stream 中 eval_id 存在但无 session_id 记录 DEBUG 日志。"""
         mock_bot_service_plugin.get_binding.return_value = arca_binding_data
         eval_log = MagicMock()
 
@@ -2554,12 +2561,19 @@ class TestEvalSessionLogStream:
             eval_session_log=eval_log,
         )
 
-        await runner.deliver_message_stream(
-            bot_id=f"{BOT_ID}:{ENTITY_ID}",
-            message="hello",
-            context=context,
-            metadata={"eval_id": "eval-str-2"},
-        )
+        with patch("secbaas.community.core.service.bot_run._runner.logger") as mock_logger:
+            await runner.deliver_message_stream(
+                bot_id=f"{BOT_ID}:{ENTITY_ID}",
+                message="hello",
+                context=context,
+                metadata={"eval_id": "eval-str-2"},
+            )
+            # 验证 logger.debug 被调用
+            debug_calls = [
+                c for c in mock_logger.debug.call_args_list
+                if "eval 对话缺少显式 session_id" in str(c)
+            ]
+            assert len(debug_calls) == 1
 
         # 应调用 log_eval_session（session_id 为空字符串）
         eval_log.log_eval_session.assert_called_once_with(

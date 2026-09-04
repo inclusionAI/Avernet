@@ -1232,6 +1232,269 @@ class TestCreateSessionEngineType:
             )
 
 
+# ==================== TestCreateSessionEffectiveSessionId ====================
+
+
+class TestCreateSessionEffectiveSessionId:
+    """评测流量 effective_session_id：eval_id 存在且 session_id=None 时，
+    consistency_key 被用作 adapter session_id，使引擎返回含 evalId 的 ID。"""
+
+    @pytest.mark.asyncio
+    async def test_effective_session_id_used_when_eval_id_present(
+        self, service, wss_resolver
+    ):
+        """eval_id 存在且 session_id=None 时，consistency_key 作为 adapter session_id。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock adapter 路径
+        expected_eval_session_id = (
+            f"agent:{BOT_UUID}:session:eval-abc123:user:{BOT_UUID}"
+        )
+        mock_adapter = AsyncMock()
+        mock_adapter.create_adapter_session = AsyncMock(
+            return_value=(expected_eval_session_id, False)
+        )
+        mock_adapter.session_consistency_key = MagicMock(
+            return_value=expected_eval_session_id
+        )
+
+        binding = _make_binding_info(engine_type="claude_code")
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_adapter_for", return_value=mock_adapter),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            session = await service.create_session(
+                bot_id=BOT_UUID,
+                session_id=None,
+                metadata={
+                    "tenant": TENANT,
+                    "invoker": INVOKER,
+                    "eval_id": "eval-abc123",
+                },
+                binding_info=binding,
+            )
+            # 验证 adapter.create_adapter_session 收到的是 consistency_key（含 evalId）
+            mock_adapter.create_adapter_session.assert_called_once()
+            call_kwargs = mock_adapter.create_adapter_session.call_args
+            assert call_kwargs.kwargs["session_id"] == expected_eval_session_id
+            assert session.session_id == expected_eval_session_id
+
+    @pytest.mark.asyncio
+    async def test_no_effective_session_id_when_session_id_provided(
+        self, service, wss_resolver
+    ):
+        """session_id 已传入时，不使用 consistency_key 替换。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        caller_session_id = "agent:main:existing-session:user:u1"
+        mock_adapter = AsyncMock()
+        mock_adapter.create_adapter_session = AsyncMock(
+            return_value=(caller_session_id, True)
+        )
+        mock_adapter.session_consistency_key = MagicMock(
+            return_value=caller_session_id
+        )
+
+        binding = _make_binding_info(engine_type="hermes")
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_adapter_for", return_value=mock_adapter),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            session = await service.create_session(
+                bot_id=BOT_UUID,
+                session_id=caller_session_id,
+                metadata={
+                    "tenant": TENANT,
+                    "invoker": INVOKER,
+                    "eval_id": "eval-abc123",
+                },
+                binding_info=binding,
+            )
+            # 验证 adapter 收到的是调用方传入的 session_id，不是 consistency_key
+            call_kwargs = mock_adapter.create_adapter_session.call_args
+            assert call_kwargs.kwargs["session_id"] == caller_session_id
+
+    @pytest.mark.asyncio
+    async def test_no_effective_session_id_when_no_eval_id(
+        self, service, wss_resolver
+    ):
+        """无 eval_id 时，不触发 effective_session_id 逻辑。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.id = "agent:main:sess-new"
+        mock_session_client.create_session = AsyncMock(return_value=mock_session)
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
+        ):
+            session = await service.create_session(
+                bot_id=BOT_UUID,
+                session_id=None,
+                metadata={"tenant": TENANT, "invoker": INVOKER},
+                binding_info=binding,
+            )
+            # 非 adapter 路径：session_id=None → adapter 创建新 session
+            mock_session_client.create_session.assert_called_once()
+
+
+# ==================== TestCreateSessionDegradation ====================
+
+
+class TestCreateSessionDegradation:
+    """session_id 退化检查：调用方传入 session_id，但 adapter 返回了不同值时记录 warning。"""
+
+    @pytest.mark.asyncio
+    async def test_session_id_degradation_logs_warning(
+        self, service, wss_resolver
+    ):
+        """adapter 返回的 session_id 与调用方传入不同时记录 WARNING。
+
+        退化只发生在 adapter 路径（hermes/claude_code/aicoding），
+        非 adapter 路径有 session_id 时直接返回，不会退化。
+        """
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock adapter 路径返回不同 session_id
+        mock_adapter = AsyncMock()
+        mock_adapter.create_adapter_session = AsyncMock(
+            return_value=("agent:hermes-bot:sess-different:user:u1", False)
+        )
+        mock_adapter.session_consistency_key = MagicMock(
+            return_value="agent:hermes-bot:sess-original:user:u1"
+        )
+
+        binding = _make_binding_info(engine_type="hermes")
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_adapter_for", return_value=mock_adapter),
+            patch.object(service, "_persist_session_create", return_value=None),
+            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+        ):
+            await service.create_session(
+                bot_id=BOT_UUID,
+                session_id="agent:hermes-bot:sess-original:user:u1",
+                metadata={"tenant": TENANT, "invoker": INVOKER},
+                binding_info=binding,
+            )
+            # 验证退化 warning 被调用
+            warning_calls = [
+                c for c in mock_logger.warning.call_args_list
+                if "session_id 退化" in str(c)
+            ]
+            assert len(warning_calls) == 1
+            assert "sess-original" in str(warning_calls[0])
+            assert "sess-different" in str(warning_calls[0])
+
+    @pytest.mark.asyncio
+    async def test_session_id_no_degradation_when_matched(
+        self, service, wss_resolver
+    ):
+        """adapter 返回的 session_id 与调用方传入一致时不记录 WARNING。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        # Mock adapter 路径返回相同 session_id
+        mock_adapter = AsyncMock()
+        mock_adapter.create_adapter_session = AsyncMock(
+            return_value=("agent:hermes-bot:sess-same:user:u1", True)
+        )
+        mock_adapter.session_consistency_key = MagicMock(
+            return_value="agent:hermes-bot:sess-same:user:u1"
+        )
+
+        binding = _make_binding_info(engine_type="hermes")
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_adapter_for", return_value=mock_adapter),
+            patch.object(service, "_persist_session_create", return_value=None),
+            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+        ):
+            await service.create_session(
+                bot_id=BOT_UUID,
+                session_id="agent:hermes-bot:sess-same:user:u1",
+                metadata={"tenant": TENANT, "invoker": INVOKER},
+                binding_info=binding,
+            )
+            warning_calls = [
+                c for c in mock_logger.warning.call_args_list
+                if "session_id 退化" in str(c)
+            ]
+            assert len(warning_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_session_id_no_degradation_when_not_provided(
+        self, service, wss_resolver
+    ):
+        """调用方未传 session_id 时不触发退化检查。"""
+        wss_resolver.dispatch_bot_ws_conn_info.return_value = _make_conn_info()
+
+        mock_session_client = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.id = "agent:main:sess-new"
+        mock_session_client.create_session = AsyncMock(return_value=mock_session)
+        mock_session_client.__aenter__ = AsyncMock(return_value=mock_session_client)
+        mock_session_client.__aexit__ = AsyncMock(return_value=False)
+
+        binding = _make_binding_info()
+
+        with (
+            patch.object(
+                service, "_create_session_client", return_value=mock_session_client
+            ),
+            patch.object(service, "_persist_session_create", return_value=None),
+            patch("secbaas.community.core.service.bot_run._baas_service.logger") as mock_logger,
+        ):
+            await service.create_session(
+                bot_id=BOT_UUID,
+                session_id=None,
+                metadata={"tenant": TENANT, "invoker": INVOKER},
+                binding_info=binding,
+            )
+            warning_calls = [
+                c for c in mock_logger.warning.call_args_list
+                if "session_id 退化" in str(c)
+            ]
+            assert len(warning_calls) == 0
+
+
 # ==================== TestCreateSessionInvokerInjection ====================
 
 
