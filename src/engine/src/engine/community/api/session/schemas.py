@@ -18,6 +18,9 @@ class CreateSessionBody(BaseModel):
     agent_id: Optional[str] = None
     model: Optional[str] = None
     runtime: Optional[str] = None
+    # 工作目录：省略时由引擎自行决定默认值（claude_code 引擎在 relay 侧回落到
+    # DEFAULT_CWD）。不暴露工作目录概念的引擎会忽略该字段。
+    cwd: Optional[str] = None
     engine: Optional[str] = None
     uuid: Optional[str] = None
     extInfo: Optional[dict[str, Any]] = None
