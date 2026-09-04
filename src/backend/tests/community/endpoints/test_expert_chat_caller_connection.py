@@ -7,6 +7,9 @@ LocalHttpClient.set_override mechanism for HTTP interactions.
 from typing import Annotated
 
 from agentclaw.community.core.repository.protocols.bot import BotRepository
+from agentclaw.community.core.repository.protocols.chat import (
+    ExpertChatInstanceRepository,
+)
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
 from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.service_bot.repository.models import PublishStatus
@@ -181,6 +184,19 @@ def _seed_happy(world) -> None:
     _install_baas(world)
 
 
+def _seed_existing_caller_instance(world) -> None:
+    """Seed an existing caller container eligible for self-management."""
+    _seed_happy(world)
+    make_staff_user(world, user_id=_USER_ID)
+    world.get(ExpertChatInstanceRepository).upsert_instance(
+        user_id=_USER_ID,
+        bot_id=_BOT_ID,
+        owner_id=_OWNER_ID,
+        status="success",
+        ext={"bot_uuid": _BOT_UUID, "version": 1},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Happy path: super admin successfully gets caller connection
 # ---------------------------------------------------------------------------
@@ -208,6 +224,59 @@ def _seed_happy(world) -> None:
 )
 def test_caller_connection_happy():
     """Super admin can get caller connection for another user."""
+
+
+# ---------------------------------------------------------------------------
+# Happy path: caller can manage their own existing container
+# ---------------------------------------------------------------------------
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/caller-connection",
+    scenario="caller_gets_existing_own_connection",
+    input=CaseInput(
+        query_params={
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
+            "user_id": _USER_ID,
+        },
+        headers={"x-user-id": _USER_ID},
+    ),
+    seed=_seed_existing_caller_instance,
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "success": True,
+            "error_code": 0,
+        },
+    ),
+)
+def test_caller_connection_self_existing_instance():
+    """A caller can obtain their own exact existing container connection."""
+
+
+@endpoint_test(
+    method="POST",
+    path="/api/v1/expert-chats/caller-connection",
+    scenario="caller_without_instance_forbidden",
+    input=CaseInput(
+        query_params={
+            "bot_id": _BOT_ID,
+            "owner_id": _OWNER_ID,
+            "user_id": _USER_ID,
+        },
+        headers={"x-user-id": _USER_ID},
+    ),
+    expect=ExpectError(
+        status=200,
+        json_contains={
+            "success": False,
+            "error_code": 403,
+        },
+    ),
+)
+def test_caller_connection_self_without_instance():
+    """A caller cannot create their first container through this endpoint."""
 
 
 # ---------------------------------------------------------------------------

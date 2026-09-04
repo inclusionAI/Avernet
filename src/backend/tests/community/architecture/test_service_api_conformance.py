@@ -82,6 +82,15 @@ from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayPro
 from agentclaw.community.api.health_diagnosis_service import (
     HealthDiagnosisServiceProtocol,
 )
+from agentclaw.community.api.expert_chat_instance_service import (
+    ExpertChatInstanceServiceProtocol,
+)
+from agentclaw.community.core.expert_chat.expert_chat_instance_service_protocol import (
+    ExpertChatInstanceServiceProtocol as CoreExpertChatInstanceServiceProtocol,
+)
+from agentclaw.community.core.expert_chat.services.expert_chat_instance_service import (
+    ExpertChatInstanceService,
+)
 from agentclaw.community.api.local_bot_workflow_service import (
     LocalBotWorkflowServiceProtocol,
 )
@@ -269,6 +278,7 @@ from agentclaw.community.core.spaces.services import (
 
 # (Protocol, ConcreteService) pairs whose Protocol declares real signatures.
 _PAIRS = [
+    (ExpertChatInstanceServiceProtocol, ExpertChatInstanceService),
     (BotAppGrantServiceProtocol, BotAppGrantService),
     (CollaboratorServiceProtocol, CollaboratorService),
     (BotInventoryServiceProtocol, BotInventoryService),
@@ -378,6 +388,12 @@ def test_protocol_signatures_match_the_implementation(protocol, concrete) -> Non
         f"{concrete.__name__} drifted from {protocol.__name__}:\n  "
         + "\n  ".join(mismatches)
     )
+
+
+@pytest.mark.unit
+def test_expert_chat_instance_api_reexports_owning_core_protocol() -> None:
+    """The adapter and concrete service must share one Protocol authority."""
+    assert ExpertChatInstanceServiceProtocol is CoreExpertChatInstanceServiceProtocol
 
 
 @pytest.mark.unit
