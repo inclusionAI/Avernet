@@ -16,6 +16,18 @@ export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
   const isFailed = ['failed', 'error'].includes((dimension.scanStatus ?? '').toLowerCase());
   const patches = dimension.patches ?? [];
   const hasDimData = dimension.checkItems && dimension.checkItems.length > 0;
+  const showHealthyResult =
+    !isScanning &&
+    !isFailed &&
+    patches.length === 0 &&
+    hasDimData &&
+    status === 'passed' &&
+    (dimension.warningCount ?? 0) === 0 &&
+    (dimension.errorCount ?? 0) === 0;
+
+  if (!isScanning && !isFailed && patches.length === 0 && !showHealthyResult) {
+    return null;
+  }
 
   return (
     <div className="space-y-3">
@@ -88,14 +100,10 @@ export function OptimizationPanel({ dimension }: OptimizationPanelProps) {
         </div>
       ) : null}
 
-      {!isScanning && !isFailed && patches.length === 0 ? (
+      {showHealthyResult ? (
         <Card className="rounded-xl border-[var(--color-border)]">
           <CardContent className="py-6 text-center text-sm text-[var(--color-muted)]">
-            {hasDimData ? (
-              <span className="text-[var(--color-success)]">未发现需要优化的问题，Bot 状态良好！</span>
-            ) : (
-              '暂无优化建议'
-            )}
+            <span className="text-[var(--color-success)]">未发现需要优化的问题，Bot 状态良好！</span>
           </CardContent>
         </Card>
       ) : null}
