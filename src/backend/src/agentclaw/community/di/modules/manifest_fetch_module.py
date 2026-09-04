@@ -23,6 +23,12 @@ from injector import Injector, Module, inject, provider, singleton
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+    CliToolPurger,
+    CliToolService,
+    CliToolServiceFactory,
+)
+from agentclaw.community.api.bot_cli_tool_service import BotCliToolServiceProtocol
 from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
     ManifestIdentityPort,
 )
@@ -41,6 +47,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     GuardedFetcher,
+)
+from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+    BotCliToolRepositoryProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import (
     ManifestContentRepositoryProtocol,
@@ -83,6 +92,9 @@ from agentclaw.community.core.skill_center.direct_activation_service_protocol im
     DirectActivationServiceProtocol,
 )
 from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
+from agentclaw.community.core.bot_startup_script.protocols import (
+    TeclawEngineTestProtocol,
+)
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
 )
@@ -360,6 +372,166 @@ class ManifestFetchModule(Module):
     @singleton
     @provider
     @inject
+    def manifest_cli_tool_service_factory(
+        self,
+        injector: Injector,
+        object_storage: ObjectStoragePlugin,
+        entry_fetcher_provider: Callable[[], EntryFetcher],
+    ) -> CliToolServiceFactory:
+        """W9: the one component both callers install a CLI tool through.
+
+        Parameterised by the delivery binding and by nothing else, because that
+        is the only thing that differs: the table, the object store and the
+        fetch funnel are shared. Three keys, not two:
+
+        * ``"arca"`` — the engine's CLI endpoints, for either caller.
+        * ``"teclaw"`` — the apply path. The port makes **no** artifact push,
+          because ``TeclawDelivery.finish`` makes exactly one at the end of the
+          apply, covering every category it wrote. A push from the port would
+          arrive mid-apply and be followed by the correct one.
+        * ``"teclaw-live"`` — the management API. There is no closing step on
+          that path, so this binding carries the redeliver and the port pushes.
+
+        All of them wrap the same service around the same table, which is what
+        makes the API and a manifest apply converge on one answer.
+
+        The device graph is reached lazily and by function-level import for the
+        reason the resource factory above records: it reaches the device
+        dispatcher graph at import time.
+        """
+        from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+            CliToolStore,
+        )
+        from agentclaw.community.core.bot_config_manifest.cli_tools.teclaw_port import (
+            TeclawCliToolPort,
+        )
+        from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+            BotCliToolRepositoryProtocol,
+        )
+        from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
+
+        store = CliToolStore(
+            object_storage=object_storage, store_base=get_teclaw_bolt_data_prefix
+        )
+
+        def _delivery(family: str):
+            if family == "teclaw":
+                return TeclawCliToolPort()
+            if family == "teclaw-live":
+                # Bound lazily: ``teclaw_bindings`` reaches the device graph,
+                # and asking for it here would close the same import cycle the
+                # function-level imports below exist to avoid.
+                return TeclawCliToolPort(
+                    redeliver=injector.get(TeclawPlatformBindings).redeliver
+                )
+            from agentclaw.community.core.bot_config_manifest.cli_tools.arca_port import (
+                ArcaCliToolPort,
+            )
+            from agentclaw.community.core.devices.services.device_context_resolver import (
+                DeviceContextResolver,
+            )
+            from agentclaw.community.plugin_api.device_adapter_transport import (
+                DeviceAdapterTransport,
+            )
+
+            return ArcaCliToolPort(
+                resolver=injector.get(DeviceContextResolver),
+                transport=injector.get(DeviceAdapterTransport),
+            )
+
+        def _factory(family: str) -> CliToolService:
+            return CliToolService(
+                repo=injector.get(BotCliToolRepositoryProtocol),
+                store=store,
+                delivery=_delivery(family),
+                entry_fetcher=entry_fetcher_provider(),
+            )
+
+        return _factory
+
+    @singleton
+    @provider
+    @inject
+    def cli_tool_purger(
+        self, object_storage: ObjectStoragePlugin, injector: Injector
+    ) -> CliToolPurger:
+        """W9: what a failed creation's discard calls.
+
+        Not the service: a creation that ended without a bot has no container,
+        so this drops rows and objects and reaches no engine at all.
+        """
+        from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+            CliToolStore,
+        )
+        from agentclaw.community.core.storage.path import get_teclaw_bolt_data_prefix
+
+        return CliToolPurger(
+            repo=injector.get(BotCliToolRepositoryProtocol),
+            store=CliToolStore(
+                object_storage=object_storage, store_base=get_teclaw_bolt_data_prefix
+            ),
+        )
+
+    @singleton
+    @provider
+    @inject
+    def bot_cli_tool_repository(
+        self, injector: Injector
+    ) -> BotCliToolRepositoryProtocol:
+        """W9: ``ac_bot_cli_tool``, the platform's record of a bot's tools.
+
+        Bound here rather than beside the other bot repositories because the
+        module that holds them is at its size cap; the table belongs to this
+        feature and every consumer of it is wired in this module.
+        """
+        from agentclaw.community.core.repository.implementations.bot.cli_tool import (
+            BotCliToolRepository,
+        )
+
+        return injector.get(BotCliToolRepository)
+
+    @singleton
+    @provider
+    @inject
+    def bot_cli_tool_service(
+        self,
+        injector: Injector,
+        cli_tool_service_factory: CliToolServiceFactory,
+        teclaw_engine_test_factory: Callable[[], TeclawEngineTestProtocol],
+    ) -> BotCliToolServiceProtocol:
+        """W9: the ``bot_id``-addressed surface the HTTP routes bind to.
+
+        A thin resolver over the same factory the apply service uses, so the
+        management API and a manifest apply reach one implementation of every
+        step. The engine test is the same factory the apply service takes, so
+        the two arms cannot disagree about which family a bot is; the bot
+        service is looked up lazily for the reason every provider in this
+        module is lazy — it reaches the graph that builds this one.
+        """
+        from agentclaw.community.core.bot_config_manifest.cli_tools.bot_service import (
+            BotCliToolService,
+        )
+
+        class _Bots:
+            """Defers the bot-service lookup to the call, not to DI time."""
+
+            def get_bot(self, bot_id: str, owner_id: str) -> dict:
+                from agentclaw.community.api.bot_service import BotServiceProtocol
+
+                return injector.get(BotServiceProtocol).get_bot(bot_id, owner_id)
+
+        return BotCliToolService(
+            bot_service=_Bots(),
+            cli_tool_service_factory=cli_tool_service_factory,
+            # Only for the family answer. Delivery — including the artifact
+            # push a teclaw mutation needs — is the port's, reached through the
+            # ``"teclaw-live"`` binding this surface's factory key selects.
+            is_teclaw=lambda engine: teclaw_engine_test_factory().is_teclaw(engine),
+        )
+
+    @singleton
+    @provider
+    @inject
     def manifest_git_client_factory(
         self, injector: Injector
     ) -> Callable[[], GitSourceClient]:
@@ -394,6 +566,7 @@ class ManifestFetchModule(Module):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
+        cli_tool_service_factory: CliToolServiceFactory,
     ) -> TeclawPlatformBindings:
         """The store-backed ports and the closing redeliver (W8, spec D-7).
 
@@ -424,6 +597,10 @@ class ManifestFetchModule(Module):
                 package_validator=validator,
                 entry_fetcher=entry_fetcher_provider(),
                 resource_service=StoreResourcePort(store),
+                # W9 is always platform-managed and never consults the switch,
+                # as ``mcp`` does not: the artifact is the delivery on this
+                # family whatever the switch says.
+                cli_tool_service=cli_tool_service_factory("teclaw"),
             )
 
         def resolve(bot_id: str, owner_id: str):

@@ -97,6 +97,7 @@ provides:
   - BotFriendRepositoryProtocol
   - BotRepository
   - BotRestartLockRepositoryProtocol
+  - BotCliToolRepositoryProtocol
   - BotStartupScriptRepositoryProtocol
   - CollaboratorRepositoryProtocol
   - ManifestContentRepositoryProtocol
@@ -188,6 +189,7 @@ provides:
   - BotCollabLogRepository
   - BotFriendRepository
   - BotRestartLockRepository
+  - BotCliToolRepository
   - BotStartupScriptRepository
   - CollaboratorRepository
   # spaces / market_favorites

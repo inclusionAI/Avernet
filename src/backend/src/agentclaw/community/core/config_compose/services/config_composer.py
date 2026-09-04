@@ -32,6 +32,7 @@ from agentclaw.community.kernel.bot_config import (
     OwnershipCategory,
     SCHEMA_VERSION,
     BotConfigArtifact,
+    CliToolRef,
     FileRef,
     ResourceRef,
     SkillRef,
@@ -130,6 +131,24 @@ class ConfigComposer:
             for f in self._collector.identity_files(req)
         ]
 
+        # ── cli tools ───────────────────────────────────────────────────────
+        # Collector yields CollectedCliTool(name, store="bot-data", path, md5,
+        # version) straight from ``ac_bot_cli_tool``. ``md5`` is the engine's
+        # change test and ``version`` is audit metadata it ignores; both are the
+        # platform's, computed when the tool was installed. On a publish build
+        # the promotion step replaces these refs with stage-scoped ones — the
+        # objects are copied, the names and the md5s are the same.
+        cli_tools = [
+            CliToolRef(
+                name=tool.name,
+                store=tool.store,
+                path=tool.path,
+                md5=tool.md5,
+                version=tool.version,
+            )
+            for tool in self._collector.cli_tools(req)
+        ]
+
         # ── engine overrides ────────────────────────────────────────────────
         # Opaque per-bot engine knobs, carried through verbatim (copied into a new
         # dict so the artifact never aliases collector state). e.g. {"temperature": 0.2}.
@@ -147,6 +166,7 @@ class ConfigComposer:
             [s.store for s in skills]
             + [r.store for r in resources]
             + [f.store for f in identity_files]
+            + [t.store for t in cli_tools]
         )
         # teclaw's file refs are added to the artifact at **promotion** — AFTER
         # compose — by gathering the running container's files into OSS (the
@@ -171,6 +191,15 @@ class ConfigComposer:
             skills=skills,
             resources=resources,
             identity_files=identity_files,
+            # Not a guard against ``None`` arriving — the collector always
+            # returns a list. It converts the *empty* list to ``None``, which is
+            # what keeps the key off the wire entirely for a bot with no tools,
+            # so such an artifact stays byte-identical to the one this composer
+            # produced before W9. Written ``cli_tools or None`` rather than a
+            # comparison because that is the idiom the neighbours here use; the
+            # transitional ``None`` in the artifact's own docstring is now only
+            # this case.
+            cli_tools=cli_tools or None,
             stores=stores,
             engine_overrides=engine_overrides,
             version=req.version,
@@ -195,15 +224,12 @@ class ConfigComposer:
         does not happen. A collector that cannot answer (the bare/unit
         collector) owns nothing for the platform.
 
-        ``cli_tools`` is written like the other four, deliberately. Before
-        ownership followed the operation the map left it out, so that an
-        absent key kept the CLI contract's own removal rule in force (A5);
-        with ownership decided per operation there is no per-category
-        reason to single it out, and the reviewer's rule is that an
-        operation sets every category. Nothing composes a ``cli_tools``
-        list yet, so a ``platform`` value here rides beside an absent
-        array — the teclaw CLI contract, not this map, says what the engine
-        does with that until the composer populates the list.
+        ``cli_tools`` joins ``mcp`` in the always-platform branch since W9.
+        That category is platform-managed on every occasion and independent of
+        the platform-managed switch — the platform holds the bytes, the table is
+        the desired state, and there is no engine-owned reading of it to fall
+        back to. Writing ``engine`` for it on a runtime edit would tell the
+        engine to keep tools the platform had just removed.
         """
         if req.engine_type != "teclaw":
             return None
@@ -213,7 +239,8 @@ class ConfigComposer:
         return {
             category.value: (
                 OWNERSHIP_PLATFORM
-                if owned or category is OwnershipCategory.MCP
+                if owned
+                or category in (OwnershipCategory.MCP, OwnershipCategory.CLI_TOOLS)
                 else OWNERSHIP_ENGINE
             )
             for category in OwnershipCategory

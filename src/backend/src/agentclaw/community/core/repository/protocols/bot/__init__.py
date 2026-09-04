@@ -38,6 +38,9 @@ from agentclaw.community.core.repository.protocols.bot.collaborator import (
 from agentclaw.community.core.repository.protocols.bot.mcp import (
     UserMCPConfigRepository,
 )
+from agentclaw.community.core.repository.protocols.bot.cli_tool import (
+    BotCliToolRepositoryProtocol,
+)
 from agentclaw.community.core.repository.protocols.bot.startup_script import (
     BotStartupScriptRepositoryProtocol,
 )
@@ -55,6 +58,7 @@ __all__ = [
     "BotFriendRepositoryProtocol",
     "BotRepository",
     "BotRestartLockRepositoryProtocol",
+    "BotCliToolRepositoryProtocol",
     "BotStartupScriptRepositoryProtocol",
     "CollaboratorRepositoryProtocol",
     "DEFAULT_RECORD_LIMIT",

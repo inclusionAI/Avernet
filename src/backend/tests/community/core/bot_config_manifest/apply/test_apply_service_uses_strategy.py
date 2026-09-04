@@ -151,6 +151,7 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
                 FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
             ),
             resource_service=FakeResourceFileService(),
+            cli_tool_service=object(),
         )
 
     service = BotConfigManifestApplyService(
@@ -168,6 +169,7 @@ def _world(*, bot, platform_managed, platform_activation=None, redeliver=None):
             FakeGuardedFetcher(), FakeManifestContent(), FakeCredentials()
         ),
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(bot),

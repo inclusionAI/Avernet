@@ -456,7 +456,11 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Space and Skill version rather than by Bot. Human Chat adds eleven Bot-path
 #: operations while retaining separate caller and Bot-owner identities.
 #: Public BBS list adds one account-level read with no Bot in the path (103→104).
-_BOT_ID_PLACEMENT = {"path": 167, "query": 1, "none": 104}
+#:
+#: W9 (#1477) adds the three ``cli-tools`` operations — install, list and
+#: delete. All three are bot-path-addressed like the config-manifest group they
+#: sit beside, so ``path`` 167 → 170 and nothing else moves.
+_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 104}
 
 
 def _schema() -> dict:
@@ -605,7 +609,11 @@ def test_the_pinned_number_of_operations_take_it():
     # Directory download adds one more user-scoped resource operation.
     # Space Skill Version Copy adds one more user-scoped operation. The isolated
     # Human Chat surface adds eleven caller-owned operations: 230 → 241.
-    assert len(taking) == 241
+    # W9's three cli-tools operations (#1477) are user-scoped for the reason the
+    # config-manifest group beside them is: they may address a *shared* bot, so
+    # the owner arrives on the wire while the caller stays the acting user —
+    # which is what ``installed_by`` records: 241 → 244.
+    assert len(taking) == 244
 
 
 def test_the_exempt_operations_take_none():

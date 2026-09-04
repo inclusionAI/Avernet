@@ -9,12 +9,10 @@ rotation semantics, and the binding's per-hop re-read.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from agentclaw.community.core.bot_config_manifest.credentials.errors import (
     CredentialError,
@@ -26,7 +24,6 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
     PrefixAuthorizationError,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.service import (
-    SourceCredentialBinding,
     SourceCredentialService,
 )
 from agentclaw.community.core.bot_management.token_vault import (

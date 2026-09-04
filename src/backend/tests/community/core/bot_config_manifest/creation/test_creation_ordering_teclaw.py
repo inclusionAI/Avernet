@@ -135,6 +135,7 @@ def _build(db):
             package_validator=real_validator(),
             entry_fetcher=fetcher(),
             resource_service=FakeResourceFileService(),
+            cli_tool_service=object(),
         )
 
     applies = BotConfigManifestApplyService(
@@ -150,6 +151,7 @@ def _build(db):
         package_validator_provider=lambda: real_validator(),
         entry_fetcher_provider=fetcher,
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=bots,
@@ -167,6 +169,7 @@ def _build(db):
         find_job=lambda **_kwargs: None,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
         purge_managed_files=store.purge_owner_bot,
+        purge_cli_tools=lambda entity_id, bot_id: 0,
     )
 
     order: list[str] = []

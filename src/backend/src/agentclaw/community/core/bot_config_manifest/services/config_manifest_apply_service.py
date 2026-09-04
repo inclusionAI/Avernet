@@ -137,6 +137,9 @@ from agentclaw.community.utils.avernet_tenant import (
 from agentclaw.community.utils.env_utils import get_current_env
 
 if TYPE_CHECKING:  # pragma: no cover - import-time cycle, see below
+    from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+        CliToolService,
+    )
     from agentclaw.community.core.task_queue.services.task_queue_service import (
         TaskQueueService,
     )
@@ -199,6 +202,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
         resource_service_provider: Callable[[], ManifestResourcePort],
+        cli_tool_service_factory: Callable[[str], "CliToolService"],
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
         bot_repository: BotRepository,
@@ -234,6 +238,11 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # file service dispatches to devices, another arm of the same
         # bot-configuration graph that made every provider above lazy.
         self._resource_service_provider = resource_service_provider
+        # W9: the same component the management API installs through, built
+        # per engine family because the family decides which delivery port sits
+        # inside it. Held as a factory rather than an instance for the reason
+        # every provider above is lazy — it reaches the device graph.
+        self._cli_tool_service_factory = cli_tool_service_factory
         # W7's git transport, held the same lazy way: the sessions built
         # above reach it by lookup rather than by a held instance, so no
         # client state can outlive the apply that asked for it. The type is
@@ -266,6 +275,9 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             arca_ports=self._arca_ports,
             teclaw_platform_ports=teclaw_platform_ports_provider,
             redeliver=redeliver,
+            # W9: the teclaw-bound CLI service, so a teclaw bot never gets the
+            # ARCA delivery port for this category whatever the switch says.
+            teclaw_cli_tool_service=lambda: cli_tool_service_factory("teclaw"),
         )
 
     # ── starting ────────────────────────────────────────────────────────────
@@ -790,6 +802,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             package_validator=self._package_validator_provider(),
             entry_fetcher=self._entry_fetcher_provider(),
             resource_service=self._resource_service_provider(),
+            cli_tool_service=self._cli_tool_service_factory("arca"),
         )
 
     def _build_materialisers(self, strategy: Optional[DeliveryStrategy] = None):

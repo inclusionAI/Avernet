@@ -37,10 +37,7 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
 from ._fakes import (
     FakeActivationService,
     FakeCapabilityReader,
-    FakeCredentials,
-    FakeGuardedFetcher,
     FakeIdentityService,
-    FakeManifestContent,
     FakeMcpAuth,
     FakeResourceFileService,
     FakeSkillUploadService,
@@ -622,7 +619,7 @@ def test_module_never_imports_the_artifact_contract():
         )
 
 
-def test_build_materialisers_registers_five():
+def test_build_materialisers_registers_six():
     from agentclaw.community.core.bot_config_manifest.apply.registry import (
         build_materialisers,
     )
@@ -640,9 +637,10 @@ def test_build_materialisers_registers_five():
         package_validator=object(),
         entry_fetcher=object(),
         resource_service=object(),
+        cli_tool_service=object(),
     )
     assert ManifestCategory.RESOURCES in registry
-    assert len(registry) == 5
+    assert len(registry) == 6
 
 
 # --- fetch categories and the keep_last contract (review findings) ---
@@ -880,6 +878,7 @@ def _resources_engine(svc, fetcher):
             package_validator=real_validator(),
             entry_fetcher=fetcher,
             resource_service=svc,
+            cli_tool_service=object(),
         ),
         steps=steps_for
     )

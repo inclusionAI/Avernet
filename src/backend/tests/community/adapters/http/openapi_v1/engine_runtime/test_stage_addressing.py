@@ -129,6 +129,13 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/config-manifest/apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/last-apply"),
     ("get", "/openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}"),
+    # W9's CLI tools take the config-manifest group's bars, so they address a
+    # bot that may be someone else's the same way. No ``stage`` for the same
+    # reason: a tool is installed on the bot, not on one of its runtimes — and
+    # the platform does not even know which directory it lands in.
+    ("post", "/openapi/v1/bots/{bot_id}/cli-tools"),
+    ("get", "/openapi/v1/bots/{bot_id}/cli-tools"),
+    ("delete", "/openapi/v1/bots/{bot_id}/cli-tools/{name}"),
     # The product chat reads address a bot that may be shared with the acting
     # user, so they take the owner half of ``(owner, bot_id)`` for the same
     # reason and with the same default — the caller's own bot.

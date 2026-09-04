@@ -157,7 +157,9 @@ def test_put_accepts_a_git_source_document(service, repository):
 
 def test_a_refused_document_is_not_written_at_all(service, repository):
     """All-or-nothing: one unsupported category refuses the whole document."""
-    document = "schema_version: 1\nmanifest:\n  cli_tools: []\n"
+    document = (
+        "schema_version: 1\nmanifest:\n  engine_config:\n    config:\n      model: m\n"
+    )
     with pytest.raises(ManifestValidationError):
         service.put(
             entity_id="ent",

@@ -666,8 +666,8 @@ manifest:
 
 def test_the_archive_form_selects_its_one_file_with_subpath():
     """The flattened shape's own spelling: `subpath` names the file in the
-    package that becomes the command. Refused only because the category has no
-    materializer yet — the entry itself is well-formed."""
+    package that becomes the command. Accepted since W9 materialised the
+    category."""
     document = f"""schema_version: 1
 manifest:
   cli_tools:
@@ -678,7 +678,8 @@ manifest:
       digest: "{_DIGEST}"
       version: "0.9.0"
 """
-    assert _codes(document) == {"unsupported_category"}
+    entry = _accept(document).parsed["manifest"]["cli_tools"][0]
+    assert entry["subpath"] == "bin/tk" and entry["unpack"] == "tar.gz"
 
 
 def test_cli_tools_requires_a_digest():
@@ -694,17 +695,25 @@ manifest:
 # ── capability gating on the write path ─────────────────────────────────────
 
 
-@pytest.mark.parametrize("category", ["cli_tools", "engine_config"])
+@pytest.mark.parametrize("category", ["engine_config"])
 def test_a_category_nothing_can_apply_is_refused_with_its_reason(category):
-    body = (
-        "    - name: mycli\n      source: https://x/mycli\n"
-        if category == "cli_tools"
-        else "    config:\n      model: m\n"
-    )
-    document = f"schema_version: 1\nmanifest:\n  {category}:\n{body}"
-    if category == "engine_config":
-        document = f"schema_version: 1\nmanifest:\n  {category}:\n    config:\n      model: m\n"
+    """``cli_tools`` left this list when W9 materialised it; ``engine_config``
+    is what remains of the first-wave gate table."""
+    document = f"schema_version: 1\nmanifest:\n  {category}:\n    config:\n      model: m\n"
     assert (f"manifest.{category}", "unsupported_category") in _reject(document)
+
+
+def test_a_well_formed_cli_tools_document_is_accepted_since_w9():
+    """The gate flip: the surface never accepts what nothing can apply, and
+    since W9 something can."""
+    document = f"""schema_version: 1
+manifest:
+  cli_tools:
+    - name: mycli
+      source: https://cdn.example.com/mycli
+      digest: "{_DIGEST}"
+"""
+    assert _accept(document).parsed["manifest"]["cli_tools"][0]["name"] == "mycli"
 
 
 def test_an_unknown_category_is_refused_rather_than_ignored():
@@ -780,12 +789,14 @@ def test_too_many_entries_in_one_category_is_refused():
 def test_every_reason_is_reported_at_once():
     """Not the first one. A caller fixes their document in one pass, not in a
     queue of resubmissions."""
-    document = f"""schema_version: 1
+    document = """schema_version: 1
 manifest:
   cli_tools:
     - name: mycli
       source: https://cdn.example.com/mycli
-      digest: "{_DIGEST}"
+  engine_config:
+    config:
+      model: m
   identity:
     - type: MEMORY.md
       content: "hi"
@@ -794,6 +805,7 @@ manifest:
 """
     codes = _codes(document)
     assert {
+        "missing_digest",
         "unsupported_category",
         "reserved_identity_type",
         "source_url_has_userinfo",

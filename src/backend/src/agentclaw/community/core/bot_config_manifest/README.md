@@ -40,11 +40,12 @@ form* with no resolver fails in exactly the same way. That is why
 `capabilities.py` answers per **construct** (category, section, source form)
 rather than per bot or per category.
 
-As of the first wave the unsupported constructs are:
+As of the first wave the unsupported constructs are (`cli_tools` left this
+table when W9 materialised it — the surface accepts it because something now
+applies it):
 
 | Construct | Why nothing can apply it | Unblocked by |
 | --- | --- | --- |
-| category `cli_tools` | delivery deferred by business priority — no materializer, and nothing puts a tool on PATH | its work item |
 | category `engine_config` | moved out of the first wave, so the fetch-free materializer covers only `mcp` and `script` | its materializer returning |
 | `from` naming a **named source** | named sources are resolved by W7 | W7 |
 | a **git** source | same resolver, same work item | W7 |
@@ -540,6 +541,36 @@ below.
 ```yaml
 purpose: Own a bot's configuration manifest — its storage, its schema v1 validation, and which constructs a bot can be told to have at all; plus (W2) the guarded fetch + unpack transport that fetches a manifest's remote sources on the platform's behalf, and (W11) the platform's own durable copy of what was fetched, with its provenance log.
 provides:
+  - BotCliToolModel  # W9: the platform's record of a bot's installed CLI tools
+  - BotCliToolRecord
+  - INSTALLED_BY_MANIFEST  # the installed_by value a manifest apply writes
+  - CliToolStore  # W9: the platform's own copy of a bot's tool bytes
+  - CliToolScope
+  - CliToolStoreError
+  - StoredCliTool
+  - CliToolContext
+  - CliToolDeliveryPort  # W9: the per-family delivery boundary, name-addressed
+  - DeliverableCliTool  # W9 rev 8: one tool as the whole-set call carries it
+  - CliToolDeliveryError
+  - CliToolPlacementError
+  - ArcaCliToolPort
+  - TeclawCliToolPort
+  - CliToolDriftUnobservableError
+  - CliToolService  # W9: the one component both callers install through
+  - CliToolDecl
+  - CliToolOutcome
+  - CliToolStatus
+  - CliToolDrift
+  - verify_amd64_elf  # W9: "can this machine run them", which the digest does not answer
+  - select_subpath
+  - FetchContext  # exactly what a fetch reads off its caller's context (W9 gave it a second caller)
+  - BotCliToolService  # W9: the bot_id-addressed surface the HTTP routes bind to
+  - BotCliToolServiceProtocol
+  - CliToolsMaterialiser
+  - CliToolNotFoundError
+  - CliToolConflictError
+  - CliToolRefusedError
+  - CliToolUnsupportedError
   - BotConfigManifestApplyService
   - BotConfigManifestApplyServiceProtocol
   - BotConfigManifestApplyRecord
@@ -667,7 +698,7 @@ internal_dependencies:
   - agentclaw.community.core.base
   - agentclaw.community.core.config_compose.models  # the collector-shaped refs the managed-files reader yields to the teclaw composer (W8)
   - agentclaw.community.kernel.bot_config  # OwnershipCategory — the artifact's own category names the managed-files reader answers the composer in (W8)
-  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8)
+  - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8), and the cli_tools store keeps a bot's tool bytes in (W9)
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
   - agentclaw.community.core.bot_management.token_vault
@@ -685,6 +716,7 @@ internal_dependencies:
   - agentclaw.community.kernel.lifecycle  # the apply handler registers itself at boot
   - agentclaw.community.log
   - agentclaw.community.plugin_api.database
+  - agentclaw.community.plugin_api.device_adapter_transport  # the one engine channel core can reach; the ARCA cli_tools port POSTs an install through it (W9)
   - agentclaw.community.plugin_api.passport  # the creation job reads its own authorization status; the Plugin API type, not the service graph behind it
   - agentclaw.community.utils.avernet_tenant
   - agentclaw.community.utils.avernet_tenant_guard

@@ -67,6 +67,31 @@ class ImmutableObjectStorageCapability(Protocol):
 
 
 @runtime_checkable
+class ObjectCopyCapability(Protocol):
+    """Optional server-side copy for consumers that duplicate an object.
+
+    Separate from :class:`ObjectStoragePlugin` for the same reason
+    :class:`ImmutableObjectStorageCapability` is: an overlay that implements
+    only the long-standing mutable surface keeps satisfying that contract, and
+    a consumer that wants a copy checks for this one at the call site.
+
+    A consumer must still work without it — reading the source and writing it
+    back is always available — so this is an efficiency capability, not a
+    correctness one. It matters where the objects are large: a copy performed
+    here moves no bytes through the backend.
+    """
+
+    def copy_object(self, source_key: str, dest_key: str) -> bool:
+        """Copy ``source_key`` to ``dest_key`` within the same store.
+
+        Return ``True`` on success. Implementations should swallow
+        transport/SDK errors and a missing source alike into ``False`` rather
+        than raising, mirroring the rest of this module.
+        """
+        ...
+
+
+@runtime_checkable
 class ObjectStoragePlugin(Plugin, Protocol):
     """Object storage operations the backend depends on."""
 

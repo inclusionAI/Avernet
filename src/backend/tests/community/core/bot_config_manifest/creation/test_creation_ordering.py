@@ -225,6 +225,7 @@ def _build(db, *, scripts=None):
         # this suite's document, but the registry registers them and the
         # session is built per apply regardless.
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         git_client_provider=lambda: FakeGitClient(),
         task_queue_provider=lambda: queue,
         bot_repository=_Bots(),
@@ -238,6 +239,7 @@ def _build(db, *, scripts=None):
         start_job=lambda **_kwargs: None,
         find_job=lambda **_kwargs: None,
         authorization_window_seconds=DEFAULT_CREATE_DEADLINE_SECONDS,
+        purge_cli_tools=lambda entity_id, bot_id: 0,
     )
 
     bots = _Bots()

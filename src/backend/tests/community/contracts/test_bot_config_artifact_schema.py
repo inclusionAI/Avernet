@@ -24,6 +24,7 @@ import jsonschema
 import pytest
 
 from agentclaw.community.core.config_compose.models import (
+    CollectedCliTool,
     CollectedFile,
     CollectedSkill,
     ComposeRequest,
@@ -77,18 +78,21 @@ class _FakeCollector:
         mcps: list[McpComposeInput] | None = None,
         resources: list[CollectedFile] | None = None,
         identity_files: list[CollectedFile] | None = None,
+        cli_tools: list[CollectedCliTool] | None = None,
         engine_overrides: dict[str, Any] | None = None,
     ) -> None:
         self._skills = skills or []
         self._mcps = mcps or []
         self._resources = resources or []
         self._identity = identity_files or []
+        self._cli_tools = cli_tools or []
         self._overrides = engine_overrides or {}
 
     def skills(self, req): return self._skills
     def mcps(self, req): return self._mcps
     def resources(self, req): return self._resources
     def identity_files(self, req): return self._identity
+    def cli_tools(self, req): return self._cli_tools
     def engine_overrides(self, req): return self._overrides
 
 

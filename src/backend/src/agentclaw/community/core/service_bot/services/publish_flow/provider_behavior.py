@@ -248,10 +248,23 @@ class TeclawProviderBehavior(ProviderBehavior):
         )
         config_artifact.setdefault("resources", []).extend(refs.resources)
         config_artifact.setdefault("identity_files", []).extend(refs.identity_files)
+        if refs.cli_tools:
+            # **Replaced**, not extended, and that is the difference between a
+            # gather and a copy. The composer already put a ref per tool in this
+            # artifact, pointing at the platform's live prefix; promotion copies
+            # the same objects into the stage's prefix and these refs point at
+            # the copies. Extending would leave two refs per command.
+            #
+            # An empty list leaves the composer's answer alone rather than
+            # writing ``cli_tools: []``: a bot with no tools must compose an
+            # artifact with the key absent, byte-identical to a pre-W9 one.
+            config_artifact["cli_tools"] = list(refs.cli_tools)
         logger.info(
             "[TeclawProviderBehavior.stage_build_files] merged %d resource(s) + "
-            "%d identity file(s) into artifact for bot=%s publish_id=%s",
-            len(refs.resources), len(refs.identity_files), bot_id, publish_id,
+            "%d identity file(s) + %d cli tool(s) into artifact for bot=%s "
+            "publish_id=%s",
+            len(refs.resources), len(refs.identity_files), len(refs.cli_tools),
+            bot_id, publish_id,
         )
 
     def refresh_after_upgrade(self, *, bot_uuid: str, bot: dict) -> None:

@@ -179,6 +179,7 @@ from .bots import router as bots_router
 from .collaboration_bots import public_router as collaboration_public_router
 from .task import task_router
 from .bots.engine_config import router as engine_config_router
+from .bots.cli_tools import router as cli_tools_router
 from .bots.config_manifest import router as config_manifest_router
 from .bots.config_manifest_apply import router as config_manifest_apply_router
 from .bots.create_with_manifest import router as create_with_manifest_router
@@ -357,6 +358,9 @@ _ADDRESSED_BOT_SUBGROUPS = [
     # grant rather than the own-bot one.
     config_manifest_router,
     config_manifest_apply_router,
+    # W9's CLI tools: the same area a manifest's ``cli_tools`` category
+    # converges, reached directly. Same bars, same admission.
+    cli_tools_router,
     # Bot grants lend the delegating user's live Bot permissions. Editors and
     # render screens therefore use the same addressed-owner grant boundary as
     # the other shared-Bot configuration groups; their services still enforce

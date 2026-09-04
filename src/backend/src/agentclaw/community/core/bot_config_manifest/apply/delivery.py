@@ -29,7 +29,7 @@ here, by the factory, and nowhere else.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
@@ -46,6 +46,10 @@ from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
     SkillPackageUploadPort,
+)
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+    CliToolService,
 )
 from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
     BotStartupScriptServiceProtocol,
@@ -108,6 +112,10 @@ class MaterialiserPorts:
     package_validator: SkillPackageValidator
     entry_fetcher: EntryFetcher
     resource_service: ManifestResourcePort
+    #: W9. One field for a whole category, because the service already holds
+    #: the family's delivery port — so the ``cli_tools`` materialiser takes one
+    #: dependency and the family difference stays here, where W6 put it.
+    cli_tool_service: CliToolService
 
     def as_kwargs(self) -> dict[str, Any]:
         return {
@@ -120,6 +128,7 @@ class MaterialiserPorts:
             "package_validator": self.package_validator,
             "entry_fetcher": self.entry_fetcher,
             "resource_service": self.resource_service,
+            "cli_tool_service": self.cli_tool_service,
         }
 
 
@@ -250,10 +259,29 @@ class TeclawDelivery(DeliveryStrategy):
         platform_ports: Callable[[], MaterialiserPorts],
         device_ports: Callable[[], MaterialiserPorts],
         redeliver: Optional[Redeliver] = None,
+        cli_tool_service: Optional[CliToolService] = None,
     ) -> None:
         self._platform_managed = platform_managed
         self._platform_ports = platform_ports
         self._device_ports = device_ports
+        # W9. ``cli_tools`` is always platform-managed on this family, so its
+        # port cannot be whichever the switch selects: with the switch off the
+        # device bundle carries the *ARCA* port, which would call ARCA-only
+        # engine endpoints on a teclaw bot — and, since ``phase_of`` puts this
+        # category before the container, would run with no container to call at
+        # all. Substituted into whichever bundle ``ports`` returns, so the
+        # invariant holds in one place instead of depending on two wiring sites
+        # agreeing.
+        #
+        # ``mcp`` is always platform-managed too and needs none of this,
+        # because it has no port in ``MaterialiserPorts`` at all: on both
+        # families its delivery *is* the artifact, so there is nothing
+        # family-specific to select. ``cli_tools`` is the one category that is
+        # always platform-managed and still has a per-family delivery step —
+        # ARCA installs into a live container over an engine endpoint, teclaw
+        # does nothing — so it owns a port, and a port selected by a switch
+        # this category ignores is the exact mismatch corrected here.
+        self._cli_tool_service = cli_tool_service
         self._redeliver = redeliver
 
     @property
@@ -272,6 +300,17 @@ class TeclawDelivery(DeliveryStrategy):
             # phase is kept as the table says so a declared script still walks
             # the orchestrator's no-support path and is reported, not skipped.
             return step.phase
+        if step.construct == ManifestCategory.CLI_TOOLS:
+            # The artifact is teclaw's delivery and it is composed before
+            # provisioning, so this category is PRE_CONTAINER whatever the
+            # switch says. It has to be stated per category rather than left to
+            # the generic re-phasing below, because that keys on the switch and
+            # this one is always platform-managed — like ``mcp``, and for the
+            # same reason (spec D-6, D-8). The distinction is invisible on an
+            # existing bot, where the two phases run back to back; it decides
+            # something on exactly one path, the W13 creation whose
+            # switch-on sequence has no phase B at all.
+            return ApplyPhase.PRE_CONTAINER
         if self._platform_managed:
             return ApplyPhase.PRE_CONTAINER
         return ApplyPhase.ON_CONTAINER
@@ -285,9 +324,12 @@ class TeclawDelivery(DeliveryStrategy):
         return not self._platform_managed
 
     def ports(self) -> MaterialiserPorts:
-        if self._platform_managed:
-            return self._platform_ports()
-        return self._device_ports()
+        bundle = (
+            self._platform_ports() if self._platform_managed else self._device_ports()
+        )
+        if self._cli_tool_service is None:
+            return bundle
+        return replace(bundle, cli_tool_service=self._cli_tool_service)
 
     async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
         if not self._platform_managed or self._redeliver is None:
@@ -349,6 +391,7 @@ class DeliveryStrategyFactory:
         arca_ports: Callable[[], MaterialiserPorts],
         teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
         redeliver: Optional[Redeliver] = None,
+        teclaw_cli_tool_service: Optional[Callable[[], CliToolService]] = None,
     ) -> None:
         self._is_teclaw = is_teclaw
         self._platform_managed = teclaw_platform_managed
@@ -359,6 +402,10 @@ class DeliveryStrategyFactory:
         # loud, not a quiet fallback.
         self._teclaw_platform_ports = teclaw_platform_ports
         self._redeliver = redeliver
+        # W9: the teclaw-bound CLI service, handed to every teclaw strategy
+        # whatever the switch says. A lazy callable for the reason every other
+        # port here is lazy — it reaches the device graph.
+        self._teclaw_cli_tool_service = teclaw_cli_tool_service
 
     @property
     def teclaw_platform_managed(self) -> bool:
@@ -379,6 +426,11 @@ class DeliveryStrategyFactory:
             platform_ports=self._teclaw_platform_ports or self._arca_ports,
             device_ports=self._arca_ports,
             redeliver=self._redeliver,
+            cli_tool_service=(
+                self._teclaw_cli_tool_service()
+                if self._teclaw_cli_tool_service is not None
+                else None
+            ),
         )
 
     def for_bot(self, bot: Mapping[str, Any]) -> DeliveryStrategy:

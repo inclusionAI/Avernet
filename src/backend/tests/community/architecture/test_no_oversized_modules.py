@@ -72,6 +72,13 @@ _ALLOWLIST: dict[str, str] = {
         "1020 — one ADMISSION row per public operation; grows with the surface",
     "adapters/http/openapi_v1/responses.py":
         "1041 — one row per domain error, plus the ~180 imports naming them",
+    # The third file of that shape, and it crossed for the same reason: W9's
+    # three ``cli-tools`` operations were the first rows added after it reached
+    # exactly 1000. Splitting the ``Check``/``EDIT_LOCK`` vocabulary at the top
+    # from the table below it is the obvious refactor and is still available —
+    # it just should not ride on a feature that adds three rows.
+    "adapters/http/openapi_v1/authorization.py":
+        "1011 — one AUTHORIZATION row per public operation; grows with the surface",
     # ── bot_management cluster ───────────────────────────────────────
     "adapters/http/bot_management/router.py":
         "~2931 lines — biggest router; bot CRUD + lifecycle + status + engine config + ext.",

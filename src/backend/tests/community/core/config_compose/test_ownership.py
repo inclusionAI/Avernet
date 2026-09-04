@@ -25,9 +25,16 @@ from agentclaw.community.kernel.bot_config import BotConfigArtifact
 from tests.community.core.config_compose.test_collector import _collector
 from tests.community.core.config_compose.test_config_composer import _FakeCollector, _STORES
 
+#: What a compose the platform does *not* own reads. Two categories are the
+#: platform's on every occasion and are named here rather than derived: ``mcp``,
+#: because the artifact has carried the whole MCP set since W12 and there is no
+#: engine state for it to keep; and ``cli_tools`` since W9, because the platform
+#: holds the tools' bytes and the table is their desired state — writing
+#: ``engine`` for it on a runtime edit would tell the engine to keep tools the
+#: platform had just removed.
 _ALL_ENGINE = {
     "mcp": "platform", "identity_files": "engine", "resources": "engine", "skills": "engine",
-    "cli_tools": "engine",
+    "cli_tools": "platform",
 }
 _ALL_PLATFORM = {category: "platform" for category in _ALL_ENGINE}
 
@@ -105,7 +112,8 @@ def test_an_arca_artifact_carries_no_map() -> None:
 
 def test_a_teclaw_artifact_from_a_collector_that_owns_nothing_reads_engine() -> None:
     # The bare collector cannot answer "does the platform own this compose":
-    # every category is the engine's, mcp the platform's — pre-W8 behaviour
+    # every category is the engine's except the two that are the platform's on
+    # every occasion (``mcp``, and ``cli_tools`` since W9) — pre-W8 behaviour
     # named, whatever the occasion.
     for occasion in ComposeOccasion:
         artifact = _composer(_FakeCollector()).compose(_req(occasion=occasion))
@@ -117,8 +125,8 @@ def test_a_teclaw_artifact_from_a_collector_that_owns_nothing_reads_engine() -> 
 
 def test_the_map_follows_the_operation_not_the_categories() -> None:
     """A manifest apply's compose is the platform's for every category; a
-    runtime edit's compose is the engine's for every category but ``mcp``,
-    and reads no managed file — whatever the store holds."""
+    runtime edit's compose is the engine's for every category but ``mcp`` and
+    ``cli_tools``, and reads no managed file — whatever the store holds."""
     managed = _FakeManagedFiles(identity=[_RULES], resources=[_FAQ])
     collector = _collector(skill_set_service=_skills_svc([]), managed_files_reader=managed)
 

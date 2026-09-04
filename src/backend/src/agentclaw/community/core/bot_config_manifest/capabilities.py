@@ -140,10 +140,6 @@ _DESKTOP_BOT_TYPE = "desktop"
 # shipped code can act on it. Anyone adding to the vocabulary adds a line here
 # or adds the code that applies it — "let this surface accept something nothing
 # applies" is never the third option.
-_REASON_CLI_TOOLS = (
-    "cli_tools delivery is deferred: nothing materializes a tool, puts it on "
-    "PATH, or carries it in an artifact"
-)
 _REASON_ENGINE_CONFIG = (
     "engine_config was moved out of the first wave, so no materializer writes it"
 )
@@ -282,7 +278,10 @@ def resolve_capabilities(
         ManifestCategory.SKILLS: None,
         ManifestCategory.ENGINE_CONFIG: _REASON_ENGINE_CONFIG,
         ManifestCategory.IDENTITY: None,
-        ManifestCategory.CLI_TOOLS: _REASON_CLI_TOOLS,
+        # Materialised since W9, through ``CliToolService`` — the one
+        # component the management API also installs through. Always
+        # platform-managed, independent of the teclaw switch, as ``mcp`` is.
+        ManifestCategory.CLI_TOOLS: None,
         ManifestSection.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
         # Materialised since W5 (skills/identity) and renamed-since-W7: the
         # declared-source dispatch in ``EntryFetcher.fetch_declared`` resolves

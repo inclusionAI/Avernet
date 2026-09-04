@@ -30,7 +30,7 @@ from agentclaw.community.core.bot_config_manifest.capabilities import (
 
 
 def _ports(tag: str) -> MaterialiserPorts:
-    return MaterialiserPorts(*([tag] * 9))
+    return MaterialiserPorts(*([tag] * 10))
 
 
 _IS_TECLAW = lambda engine: (engine or "").lower() == "teclaw"  # noqa: E731
@@ -76,6 +76,10 @@ def test_teclaw_on_puts_every_non_script_construct_before_the_container() -> Non
 
 
 def test_teclaw_off_is_the_pre_w8_shape() -> None:
+    """...with the one exception W9 added: ``cli_tools`` is always
+    platform-managed, so it is PRE_CONTAINER even here. Every other non-script
+    construct still waits for the container, which is what "the pre-W8 shape"
+    meant."""
     teclaw = TeclawDelivery(
         platform_managed=False,
         platform_ports=lambda: _ports("store"),
@@ -83,14 +87,113 @@ def test_teclaw_off_is_the_pre_w8_shape() -> None:
     )
     on = teclaw.steps_for(frozenset({ApplyPhase.ON_CONTAINER}))
     assert {s.construct for s in on} == {
-        s.construct for s in APPLY_ORDER if s.construct != ManifestSection.SCRIPT
+        s.construct
+        for s in APPLY_ORDER
+        if s.construct not in (ManifestSection.SCRIPT, ManifestCategory.CLI_TOOLS)
     }
     assert [s.construct for s in teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))] == [
-        ManifestSection.SCRIPT
+        ManifestSection.SCRIPT,
+        ManifestCategory.CLI_TOOLS,
     ]
     assert teclaw.creation_sequence is CreationSequence.CREATE_BETWEEN_PHASES
     assert teclaw.needs_container()
     assert teclaw.ports() == _ports("device")
+
+
+def test_cli_tools_is_on_container_on_arca() -> None:
+    """The order table's phase is the ARCA reading, and W9 did not change it:
+    an ARCA tool is a write into a live container."""
+    arca = ArcaDelivery(lambda: _ports("arca"))
+    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    assert arca.phase_of(step) is ApplyPhase.ON_CONTAINER
+
+
+@pytest.mark.parametrize("switch", [True, False])
+def test_cli_tools_is_pre_container_on_teclaw_under_either_switch(switch) -> None:
+    """The artifact is teclaw's delivery and it is composed before
+    provisioning, so this category cannot wait for a container — and it must
+    not key on the switch, because it is always platform-managed, like ``mcp``.
+
+    On an existing bot the two phases run back to back and the distinction is
+    invisible. It decides something on exactly one path: the W13 creation whose
+    switch-on sequence has no phase B at all, where an ON_CONTAINER
+    ``cli_tools`` would simply never run.
+    """
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+    )
+    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    assert teclaw.phase_of(step) is ApplyPhase.PRE_CONTAINER
+
+
+@pytest.mark.parametrize("switch", [True, False])
+def test_a_teclaw_creation_installs_tools_before_it_composes(switch) -> None:
+    """The property the phase rule exists for.
+
+    A teclaw creation composes its **first** artifact from platform state; if
+    ``cli_tools`` ran after the container, a bot created from a manifest would
+    come up without the tools it declared — and under the switch-on sequence it
+    would never run at all, because that sequence has no phase B. So the
+    category has to be in the phase that runs before provisioning, under either
+    switch position.
+    """
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+    )
+    pre = teclaw.steps_for(frozenset({ApplyPhase.PRE_CONTAINER}))
+    assert ManifestCategory.CLI_TOOLS in {s.construct for s in pre}
+
+
+@pytest.mark.parametrize("switch", [True, False])
+def test_teclaw_always_gets_the_teclaw_cli_port_whatever_the_switch(switch) -> None:
+    """The category is always platform-managed, so its *port* cannot follow the
+    switch either.
+
+    With the switch off the device bundle carries the **ARCA** CLI port, which
+    would call ARCA-only engine endpoints on a teclaw bot — and, since
+    ``phase_of`` puts this category before the container, would run with no
+    container to call at all. The strategy substitutes the teclaw port into
+    whichever bundle it hands out.
+    """
+    teclaw_cli = object()
+    teclaw = TeclawDelivery(
+        platform_managed=switch,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+        cli_tool_service=teclaw_cli,
+    )
+    ports = teclaw.ports()
+    assert ports.cli_tool_service is teclaw_cli
+    # Every other port still comes from the bundle the switch selects.
+    assert ports.resource_service == ("store" if switch else "device")
+
+
+def test_arca_keeps_its_own_cli_port() -> None:
+    """The substitution is the teclaw strategy's alone — an ARCA bot's tools do
+    go into its live container."""
+    arca = ArcaDelivery(lambda: _ports("arca"))
+    assert arca.ports().cli_tool_service == "arca"
+
+
+def test_a_teclaw_strategy_with_no_cli_service_bound_leaves_the_bundle_alone() -> None:
+    """The bare wiring (no W9 service bound) behaves as it did before."""
+    teclaw = TeclawDelivery(
+        platform_managed=False,
+        platform_ports=lambda: _ports("store"),
+        device_ports=lambda: _ports("device"),
+    )
+    assert teclaw.ports() == _ports("device")
+
+
+def test_the_order_table_itself_is_untouched_by_w9() -> None:
+    """``order.py`` carries the ARCA reading; the per-family rule lives in the
+    strategy. A change here would silently re-phase ARCA too."""
+    step = next(s for s in APPLY_ORDER if s.construct is ManifestCategory.CLI_TOOLS)
+    assert (step.phase, step.position) == (ApplyPhase.ON_CONTAINER, 6)
 
 
 def test_both_phases_walk_every_construct_on_every_strategy() -> None:

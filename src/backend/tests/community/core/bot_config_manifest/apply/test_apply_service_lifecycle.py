@@ -208,6 +208,7 @@ def world():
         # so the write chain is never reached — but it must exist for the
         # registry to register.
         resource_service_provider=lambda: FakeResourceFileService(),
+        cli_tool_service_factory=lambda family: None,
         # W7's git transport. This suite's document declares no ``sources``,
         # so the client is never *used* — it is constructed per apply and
         # must never be fetched through, which FakeGitClient enforces.
@@ -932,7 +933,7 @@ def test_a_failed_first_phase_survives_the_merge_and_re_derives_the_summary(worl
 
 
 def test_materialised_constructs_reports_what_is_registered_today(world):
-    """W4 registered two; W5 brought the count to four, W6 to five.
+    """W4 registered two; W5 brought the count to four, W6 to five, W9 to six.
 
     Pinned as an equality rather than a subset so a materialiser that lands
     without its documentation, its ordering entry or its capability gate is
@@ -947,6 +948,7 @@ def test_materialised_constructs_reports_what_is_registered_today(world):
         "identity",
         "skills",
         "resources",
+        "cli_tools",
     }
 
 

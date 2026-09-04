@@ -64,7 +64,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
 
 import httpx
 
@@ -104,8 +104,8 @@ from agentclaw.community.core.bot_config_manifest.schema import placeholders
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
-    from agentclaw.community.core.bot_config_manifest.apply.context import (
-        ApplyContext,
+    from agentclaw.community.core.bot_config_manifest.apply.budget import (
+        ApplyFetchBudget,
     )
     from agentclaw.community.core.bot_config_manifest.content.service_protocol import (
         ManifestContentServiceProtocol,
@@ -205,7 +205,40 @@ class GitEntrySource:
         )
 
 
-def scope_of(ctx: "ApplyContext") -> ContentScope:
+@runtime_checkable
+class FetchContext(Protocol):
+    """Exactly what a fetch reads off its caller's context, and nothing more.
+
+    :class:`~agentclaw.community.core.bot_config_manifest.apply.context.ApplyContext`
+    is the original and still the usual one. It is not the only one: W9's
+    ``cli_tools`` service is called by an HTTP route as well as by a
+    materialiser, and both must fetch through *this* funnel — a second fetch
+    path is how two callers of one feature drift apart.
+
+    Declaring the seam rather than leaving the annotation reading
+    ``"ApplyContext"`` while a second type is passed makes the dependency
+    honest in the one direction that matters: a maintainer who adds a
+    ``ctx.something`` read below adds it here too, and the other caller fails
+    to type-check instead of failing at apply time.
+
+    ``budget``, ``apply_id`` and ``source_session`` are legitimately ``None``
+    for a caller that is not an apply — an unbudgeted single install files a
+    receipt with no apply linkage, which is what that column's nullability
+    means.
+    """
+
+    bot_id: str
+    entity_id: str
+    env: str
+    tenant: str
+    engine_type: str
+    actor_id: str
+    apply_id: Optional[str]
+    budget: Optional["ApplyFetchBudget"]
+    source_session: Optional[SourceSession]
+
+
+def scope_of(ctx: "FetchContext") -> ContentScope:
     """The store scope for the bot an apply runs against.
 
     The three axes the bot record already carries — the same scope every store
@@ -237,7 +270,7 @@ class EntryFetcher:
 
     def fetch(
         self,
-        ctx: "ApplyContext",
+        ctx: "FetchContext",
         *,
         source_url: str,
         digest: Optional[str] = None,
@@ -419,7 +452,7 @@ class EntryFetcher:
 
     def fetch_declared(
         self,
-        ctx: "ApplyContext",
+        ctx: "FetchContext",
         *,
         entry: "Mapping[str, Any]",
         category: str,
@@ -608,7 +641,7 @@ class EntryFetcher:
 
     def _git_keep_last(
         self,
-        ctx: "ApplyContext",
+        ctx: "FetchContext",
         *,
         session: SourceSession,
         spec: GitSourceSpec,
@@ -650,7 +683,7 @@ class EntryFetcher:
 
     def file_bytes(
         self,
-        ctx: "ApplyContext",
+        ctx: "FetchContext",
         *,
         content: bytes,
         source_url: str,
@@ -696,7 +729,7 @@ class EntryFetcher:
 
     def _fetch(
         self,
-        ctx: "ApplyContext",
+        ctx: "FetchContext",
         *,
         target: str,
         digest: Optional[str],
@@ -722,7 +755,7 @@ class EntryFetcher:
         )
 
 
-def _substitute(ctx: "ApplyContext", source_url: str) -> str:
+def _substitute(ctx: "FetchContext", source_url: str) -> str:
     """``${BOT_*}`` in a source URL, against this apply's deployment context.
 
     Unknown names are left untouched by the resolver itself — they cannot
@@ -741,6 +774,7 @@ def _substitute(ctx: "ApplyContext", source_url: str) -> str:
 __all__ = [
     "EntryFetchError",
     "EntryFetcher",
+    "FetchContext",
     "FetchedEntry",
     "GitEntrySource",
     "scope_of",

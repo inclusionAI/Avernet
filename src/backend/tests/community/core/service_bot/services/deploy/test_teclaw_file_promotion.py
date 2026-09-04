@@ -1,6 +1,13 @@
 """Unit tests for TeclawFilePromotion (gather engine files → OSS → refs)."""
 from unittest.mock import MagicMock
 
+from agentclaw.community.core.bot_config_manifest.cli_tools.store import (
+    CliToolStore,
+)
+from tests.community.core.bot_config_manifest.cli_tools._fakes import (
+    FakeCliToolRepo,
+)
+
 import pytest
 
 from agentclaw.community.core.service_bot.services.deploy.teclaw_file_promotion import (
@@ -39,7 +46,13 @@ def _oss_ok():
 
 
 def _promo(oss):
-    return TeclawFilePromotion(oss_storage=oss)
+    # W9 collaborators are required, and a bot with no tools is the empty
+    # table rather than an unwired promotion — which is what these cases are.
+    return TeclawFilePromotion(
+        oss_storage=oss,
+        cli_tool_repository=FakeCliToolRepo(),
+        cli_tool_store=CliToolStore(object_storage=oss, store_base=lambda: "base"),
+    )
 
 
 _ARGS = dict(

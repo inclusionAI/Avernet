@@ -192,6 +192,7 @@ internal_dependencies:
   - agentclaw.community.core.bot_public.bot_public_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_service_protocol  # Protocol defined in its owning core module, re-exported here
+  - agentclaw.community.core.bot_config_manifest.cli_tools.service_protocol  # BotCliToolServiceProtocol and the types in its signatures, re-exported here (W9 #1477)
   - agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_credential_protocol  # Protocol defined in its owning core module, re-exported here
   - agentclaw.community.core.caller_identity.caller_iam_token_service_protocol  # Protocol defined in its owning core module, re-exported here

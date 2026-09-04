@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.object_storage import (
+    ObjectCopyCapability,
     ObjectCreateResult,
     ObjectReadResult,
     ObjectReadStatus,
@@ -39,7 +40,7 @@ _ATOMIC_STAGING_DIRECTORY = ".object-create-staging"
 
 
 class CommunityFsObjectStorage(
-    ObjectStoragePlugin, ImmutableObjectStorageCapability
+    ObjectStoragePlugin, ImmutableObjectStorageCapability, ObjectCopyCapability
 ):
     """Object storage backed by the local filesystem under a root directory."""
 
@@ -166,6 +167,27 @@ class CommunityFsObjectStorage(
         except OSError as e:
             logger.error("ObjectStorage read_object failed: key=%s, error=%s", key, e)
             return ObjectReadResult(ObjectReadStatus.FAILED)
+    def copy_object(self, source_key: str, dest_key: str) -> bool:
+        """Copy within the root. A missing source is a failure, not a no-op —
+        the caller asked for a duplicate and would otherwise get an empty one."""
+        source = self._safe_path(source_key)
+        dest = self._safe_path(dest_key)
+        if source is None or dest is None:
+            return False
+        try:
+            if not source.is_file():
+                logger.error("ObjectStorage copy_object: absent source %r", source_key)
+                return False
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, dest)
+            return True
+        except OSError as e:
+            logger.error(
+                "ObjectStorage copy_object failed: %s -> %s, error=%s",
+                source_key, dest_key, e,
+            )
+            return False
+
     def delete_object(self, key: str) -> bool:
         path = self._safe_path(key)
         if path is None:
@@ -242,7 +264,7 @@ class CommunityFsObjectStorage(
 
 
 class CommunityS3ObjectStorage(
-    ObjectStoragePlugin, ImmutableObjectStorageCapability
+    ObjectStoragePlugin, ImmutableObjectStorageCapability, ObjectCopyCapability
 ):
     """Object storage over an S3-compatible service (MinIO / S3 / R2 / OSS).
 
@@ -356,6 +378,28 @@ class CommunityS3ObjectStorage(
             "PreconditionFailed",
             "ConditionalRequestConflict",
         } or status in {409, 412}
+
+    def copy_object(self, source_key: str, dest_key: str) -> bool:
+        """Server-side copy within the bucket.
+
+        ``copy_object`` is the single-part form and S3 caps it at 5 GiB; every
+        consumer here copies an object well under that (a CLI tool is capped at
+        200 MiB by the manifest fetch limits), so no multipart path is needed.
+        """
+        try:
+            self._s3.copy_object(
+                Bucket=self._bucket,
+                Key=dest_key,
+                CopySource={"Bucket": self._bucket, "Key": source_key},
+            )
+            return True
+        except self._errors as e:
+            # Includes a missing source (ClientError NoSuchKey) — swallowed to
+            # False, so the caller decides policy.
+            logger.error(
+                "S3 copy_object failed: %s -> %s, error=%s", source_key, dest_key, e
+            )
+            return False
 
     def delete_object(self, key: str) -> bool:
         try:

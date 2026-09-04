@@ -42,7 +42,7 @@ together.
 | **D3** reconcile verification — *resolved* | #1468 | **W6** resources | #1474 |
 | **D4** pre-boot delivery — *deferred* | #1508 | **W7** named + git sources | #1475 |
 | **W1** manifest document | #1469 | **W8** lifecycle apply points | #1476 |
-| **W2** guarded fetcher | #1470 | **W9** `cli_tools` (deferred — *artifact shape landed*) | #1477 |
+| **W2** guarded fetcher | #1470 | **W9** `cli_tools` ✅ | #1477 |
 | **W3** source credentials | #1471 | **W10** service-layer seam — *merged* | #1509 |
 | | | **W11** platform-side materialisation | #1510 |
 | | | **W12** cross-engine semantics contract — *done* | #1684 |
@@ -1491,7 +1491,6 @@ is applied.
 
   | Construct | Why nothing can apply it | Refused until |
   | --- | --- | --- |
-  | category `cli_tools` | W9 is deferred and unscheduled — no materialiser, no PATH delivery, no artifact field | W9 lands |
   | category `engine_config` | Removed from iteration 1 by the X2/T3 decision (§4), so W4's no-fetch materialisers are `mcp` and `script` only | its materialiser returns |
   | a `from` reference to a **named source** | Named sources are resolved by W7, which may be cut from v1; W5 excludes them explicitly | W7 lands |
   | a **git** source | Same — the git resolver is W7's | W7 lands |
@@ -2276,29 +2275,35 @@ Per criterion:
   surface for a failed closing redeliver beyond the report's `notes`; an ARCA
   pre-binding port.
 
-#### W9 — `cli_tools` — deferred · #1477
+#### W9 — `cli_tools` — ✅ delivered · #1477
 
 **Goal.** Command-line tools the model can invoke, installed declaratively.
 
-**Status.** Schema is settled (§3.7); delivery is deferred by business priority
-in the design itself. Not scheduled.
+**Status.** ✅ Delivered. **Always platform-managed** (like `mcp`), independent
+of the `teclaw_platform_managed` switch.
 
-> **Progress: the artifact shape landed early, nothing else has started** (PR
-> #1734, the same PR as W12 — the schema was aligned there while delivering
-> W12, a **deliberate exception** rather than a new precedent against §8's
-> one-PR-per-item rule). Whoever picks this up, start here:
->
 > | | State |
 > | --- | --- |
-> | `cliToolRef` + optional `cli_tools` in `artifact.schema.json` | ✅ merged |
-> | `CliToolRef` in `artifact.py`; `to_dict` omits the key when undeclared, `from_dict` never reads an absence as `[]` | ✅ merged, pinned by tests |
-> | The three "artifact schema unchanged" statements in `README.zh-CN.md` | ✅ reconciled |
+> | `cliToolRef` + optional `cli_tools` in `artifact.schema.json` | ✅ landed ahead of this item (PR #1734, with W12) |
+> | `CliToolRef` in `artifact.py`; `to_dict` omits the key when undeclared, `from_dict` never reads an absence as `[]` | ✅ as above, pinned by tests |
 > | `SCHEMA_VERSION` 4 → 5 | ➖ **decided against** (2026-08-31) — `cli_tools` rides into v4, compatibility via ignore-unknown-fields |
-> | Manifest-side `cli_tools` (§3.7): storage, validation, materialiser | ❌ not started |
-> | Fetch / `sha256` enforcement / unpack / select `subpath` / compute `md5` / write to store | ❌ not started |
-> | ELF header check, `${BOT_ARCH}` → `amd64` | ❌ not started |
-> | ARCA-side PATH proposal + the usage skill in the default skill set | ❌ not started |
+> | `ac_bot_cli_tool`, its record and its repository | ✅ |
+> | The platform's own copy of the bytes, plus the server-side copy at a publish stage | ✅ |
+> | Fetch / `sha256` / unpack / select `subpath` / `md5` / store / deliver / record | ✅ one implementation in `CliToolService`, two callers |
+> | ELF header + `e_machine` check (`${BOT_ARCH}` → `amd64` landed with W1) | ✅ |
+> | Management API `POST`/`GET`/`DELETE …/cli-tools` (MEMBER to read, ADMIN to write) | ✅ |
+> | The manifest materialiser (full override, removals from the table) + the capability unlock | ✅ |
+> | teclaw: artifact `cli_tools` refs + the object copy at promotion | ✅ |
+> | ARCA: the engine's three name-addressed endpoints (`install`/`delete`/`list`) | ⏳ **engine-side, not yet implemented**; the contract is `engine-requirements.zh-CN.md` A2 |
+> | ARCA-side PATH injection + the usage skill in the default skill set | ➖ **deliberately not in v1**: a skill tells the agent where tools live and it invokes them by absolute path; the cost is written down in schema §3.7 and the user manual §5.6 |
 > | `bcs-cli` adopted as the first consumer | ❌ not started |
+>
+> **Placement is the engine's, not the platform's.** The earlier design made
+> "a platform tools directory, put on PATH" a platform-side answer negotiated
+> per engine. It ended up the other way round: the platform calls the engine's
+> `install` **by command name**, and the directory, the executable bit and
+> exposing the tool to the agent all happen inside that one call. There is no
+> directory constant in platform code, no `chmod` and no shell command.
 >
 > **`SCHEMA_VERSION` is not being bumped — that is settled, not pending.**
 > Decided with the teclaw owner on 2026-08-31: `cli_tools` rides into v4
