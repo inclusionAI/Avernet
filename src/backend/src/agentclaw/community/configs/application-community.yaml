@@ -296,3 +296,30 @@ user_config:
     provider_id_pre: "${BCS_PROVIDER_ID}"
     provider_admin_token_prod: "${BCS_ADMIN_TOKEN}"
     provider_admin_token_pre: "${BCS_ADMIN_TOKEN}"
+
+  # ── Task execution ports (task runner integration) ───────────────
+  # openapi_bot  → task ``single_bot`` dispatch (BaaS Open API: Bearer
+  #   ``api_key`` against /openapi/v1/messages + /openapi/v1/api-keys).
+  #   base_url_* point at the backend serving the BaaS Open API (BASS_URL).
+  #   api_key_secret / api_key_prefix are LITERAL credentials via env (no
+  #   Mist resolution — community has no Mist); empty → OpenApiBotPort None
+  #   (single_bot dispatch degrades; BBS unaffected).
+  # bcs_client   → task ``coop_group`` coordination (BCS HMAC
+  #   X-ECB-Token/Signature). base_url_* = BCS_URL; token_secret /
+  #   secret_secret are LITERAL HMAC key/secret via env (BOTH required or
+  #   BcsClientPort stays None); task_callback_url/_pre = the backend self
+  #   URL BCS posts task results back to (BACKEND_URL). Empty → ports
+  #   degrade to None (no boot failure, task runner falls back to stubs).
+  openapi_bot:
+    base_url: "${BASS_URL:-}"
+    base_url_pre: "${BASS_URL:-}"
+    api_key_secret: "${api_key_secret:-}"
+    api_key_prefix: "${api_key_prefix:-}"
+
+  bcs_client:
+    base_url: "${BCS_URL:-}"
+    base_url_pre: "${BCS_URL:-}"
+    token_secret: "${token_secret:-}"
+    secret_secret: "${secret_secret:-}"
+    task_callback_url: "${BACKEND_URL:-}"
+    task_callback_url_pre: "${BACKEND_URL:-}"
