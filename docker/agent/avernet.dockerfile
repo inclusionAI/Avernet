@@ -130,64 +130,68 @@ RUN cd /tmp/openclaw-channel-bcn \
     && rm -rf /tmp/openclaw-channel-bcn
 
 # Build the taskguard plugin (TaskFlow DAG workflow engine for openclaw).
-# The dist_pack/openclaw/*.tgz artifact is a BUILD OUTPUT and is NOT shipped
-# in git. We must regenerate it here from source by mirroring the project's
-# own `node scripts/dist_pack.mjs openclaw` target:
-#   1) `npm ci` installs all deps incl. devDeps (tshy + esbuild + bundlers)
-#   2) dist_pack.mjs runs `npm run build` (tshy + bundle-runtime + facade
-#      skills + runtime asset copy) and then writes dist_pack/openclaw/
-#      clawmind-<version>.tgz with bundled node_modules inside.
-#   3) Extract the tgz into /opt/openclawExt/taskguard with
-#      --strip-components=1 (the tarball wraps everything in a `package/`
-#      prefix, matching the npm pack convention).
-# The build toolchain is heavier than openclaw-channel-bcn's, but reproducing
-# it here keeps the image self-contained — CI does not need a separate
-# pre-build step before `docker build`.
 #
-# Layer caching: copy ONLY the manifest files first, run `npm ci`, then copy
-# the rest of the source. Source edits do not invalidate the heavy npm ci
-# layer. node_modules / dist / *.tgz are excluded by the repo .dockerignore.
+# Mirrors the bcn pattern above: install → build → prune devDeps → copy.
+#
+# The previous flow ran `node scripts/dist_pack.mjs openclaw`, which uses an
+# in-repo bundleDeps() helper that *shallow*-copies only the entries listed
+# in package.json#bundleDependencies (the 7 direct runtime deps). It does NOT
+# copy their transitive closure. After npm hoists transitive runtime deps
+# (express → cookie/qs/debug/body-parser/send/router/parseurl/..., ajv,
+# ajv-formats, etc.) to the top-level node_modules, those are dropped. The
+# resulting tarball passes the basic manifest checks but fails the moment the
+# runtime reaches `require('cookie')` or `import 'ajv-formats'`, with
+# MODULE_NOT_FOUND.
+#
+# `npm prune --omit=dev` is the correct way to drop devDependencies while
+# preserving every transitive dep reachable from runtime deps. We pair it
+# with a manual `cp -R` of the runtime assets the openclaw plugin loader
+# expects (dist/, configs/, skills/, packs/, scripts/, openclaw.plugin.json,
+# package.json, node_modules/).
+#
+# Layer caching: manifests + scripts/configs → `npm ci` (heavy) → rest of
+# source → build → prune. Source edits do not invalidate the npm ci layer.
+# node_modules / dist / *.tgz are excluded by the repo .dockerignore.
 COPY src/evolverun/taskguard/package.json \
      src/evolverun/taskguard/package-lock.json \
      src/evolverun/taskguard/tsconfig.json \
-     src/evolverun/taskguard/.tshy/ \
      /tmp/taskguard/
-# Pull build scripts + configs before `npm ci` so dist_pack.mjs's `npm run
-# build` can find them (scripts/build/*.mjs are referenced from package.json
-# scripts and read configs/ at runtime).
+# scripts/ ships with the manifest stage so `npm run build` (scripts/build/*.mjs)
+# can be invoked without an extra source layer. configs/ arrives with the
+# full source COPY below.
 COPY src/evolverun/taskguard/scripts /tmp/taskguard/scripts
-COPY src/evolverun/taskguard/configs /tmp/taskguard/configs
 RUN cd /tmp/taskguard \
     && npm ci --no-audit --no-fund --ignore-scripts \
     && npm cache clean --force
 
-# Layer the rest of the source on top. The COPY above copies contents, so
-# node_modules installed by `npm ci` is preserved (not overwritten, because
-# node_modules is .dockerignore'd from the build context anyway).
+# Layer the rest of the source on top. The COPY above does not overwrite
+# node_modules (it is .dockerignore'd from the build context). configs/,
+# skills/, packs/, src/ all land here, ready for `npm run build`.
 COPY src/evolverun/taskguard/ /tmp/taskguard/
 
-# Build + pack the openclaw extension tarball. dist_pack.mjs:
-#   - runs `npm run build` (tshy compile + bundle-runtime + facade skills
-#     + runtime asset copy), emitting dist/esm/
-#   - assembles dist_pack/openclaw/clawmind-<version>.tgz with bundled deps
-# Passing `openclaw` restricts work to that platform (default builds all
-# platforms then filters). `--skip-build` is intentionally NOT used so the
-# tgz always reflects in-source edits rather than a stale dist/.
+# Build (tshy compile + facade skills + runtime asset bundling), then prune
+# devDeps so node_modules keeps ONLY the transitive closure reachable from
+# runtime deps. After this step the source tree shrinks to exactly the
+# assets the openclaw runtime needs.
 RUN cd /tmp/taskguard \
-    && node scripts/dist_pack.mjs openclaw \
-    && TGZ=$(ls -1 dist_pack/openclaw/clawmind-*.tgz 2>/dev/null | head -n1) \
-    && test -n "$TGZ" \
+    && npm run build \
+    && npm prune --omit=dev \
+    && rm -rf src tests docs .tshy dist_pack *.md *.tgz \
+              node_modules/.cache node_modules/.bin/tshy \
+              /root/.npm /root/.cache \
     && mkdir -p /opt/openclawExt/taskguard \
-    && tar xzf "$TGZ" -C /opt/openclawExt/taskguard --strip-components=1 \
+    && cp -R dist openclaw.plugin.json package.json skills packs configs scripts \
+                node_modules /opt/openclawExt/taskguard/ \
     && test -f /opt/openclawExt/taskguard/openclaw.plugin.json \
     && test -d /opt/openclawExt/taskguard/dist \
-    && rm -rf /tmp/taskguard /root/.npm /root/.cache
+    && test -d /opt/openclawExt/taskguard/node_modules \
+    && rm -rf /tmp/taskguard
 
 # Overlay the source-of-truth config so the docker image always ships the
 # latest baseUrl / apiKey / etc. from src/evolverun/taskguard/configs/.
-# The tarball we just extracted may carry a stale placeholder from the last
-# repo snapshot at pack time; the source tree is the single point of truth
-# and wins.
+# The cp -R configs/ above mirrors the source tree, but pinning a single
+# file guarantees application.yaml always reflects repo HEAD even if a
+# future build step mutates configs/ in /tmp.
 COPY src/evolverun/taskguard/configs/application.yaml \
      /opt/openclawExt/taskguard/configs/application.yaml
 
