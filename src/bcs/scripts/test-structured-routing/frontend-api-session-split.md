@@ -29,6 +29,25 @@
 |------|------|------|------|------|
 | `group_strategy` | `"chat"` \| `"manager_worker"` | 否 | `"chat"` | chat 群角色=driver/consultant/observer；manager_worker 群角色=manager/worker/observer |
 
+建群触发首个 responder run 时，兼容响应会同时返回已有的 `session_id`，以及供前端识别建群启动过程的 `initial_session_id` 和 `initial_run`：
+
+```json
+{
+  "id": "group_uuid",
+  "session_id": "session_initial",
+  "initial_session_id": "session_initial",
+  "initial_run": {
+    "run_id": "run_initial",
+    "bot_uuid": "bot_xxx",
+    "activity_kind": "group_bootstrap",
+    "state": "running",
+    "started_at": "2026-09-04T10:00:00Z"
+  }
+}
+```
+
+`initial_run.bot_uuid` 对应 chat 群的 Driver 或 manager-worker 群的 Manager；未启动首个 run 时，新增字段为 `null`，已有 `session_id` 语义保持不变。
+
 ### `GET /bots/{id}/groups` — 查群列表 ⭐ 前端主入口
 
 以 Bot 或 Human 视角拉群。`{id}` = bot_uuid 或 `human_xxx`。默认只返回 normal 群，前端通常不带参数。

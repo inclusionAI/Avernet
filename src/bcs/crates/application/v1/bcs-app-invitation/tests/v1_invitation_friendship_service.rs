@@ -565,10 +565,36 @@ async fn create_session_invitation_session_participant_ok() {
 }
 
 #[tokio::test]
+async fn create_session_invitation_human_owner_of_participant_bot_ok() {
+    // A Human caller who is not itself a session participant may still mint
+    // when one of the Human's owned Bots participates in the session.
+    // staff-1 owns bot-a (see `Fixture::bot_owner`), which is the session's
+    // driver participant.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_legacy_group("grp-1", "bot-a", "human_other")
+        .await;
+    let session_id = fx.create_session("grp-1", "bot-a").await;
+
+    let invitation = fx
+        .service
+        .create_session_invitation(CreateSessionInvitation {
+            caller: Fixture::human_principal("staff-1"),
+            session_id: session_id.clone(),
+            expires_in_seconds: None,
+        })
+        .await
+        .expect("owner of a participant Bot may create session invitation");
+
+    assert_eq!(invitation.target_type, InvitationTargetType::Session);
+    assert_eq!(invitation.target_id, session_id);
+}
+
+#[tokio::test]
 async fn create_session_invitation_non_participant_forbidden() {
-    // The owner of the group's driver Bot (and of the group via
-    // originator-ownership) is still NOT a session participant, and
-    // group-level privilege no longer substitutes for session membership.
+    // A Human caller with no session membership of its own and no owned Bot in
+    // the session is forbidden; group-level privilege does not substitute for
+    // session membership.
     let fx = Fixture::new().await;
     fx.add_bot("bot-a").await;
     fx.store_legacy_group("grp-1", "bot-a", "human_other")
@@ -578,12 +604,12 @@ async fn create_session_invitation_non_participant_forbidden() {
     let error = fx
         .service
         .create_session_invitation(CreateSessionInvitation {
-            caller: Fixture::human_principal("staff-1"),
+            caller: Fixture::human_principal("staff-9"),
             session_id: session_id.clone(),
             expires_in_seconds: None,
         })
         .await
-        .expect_err("non-participant is forbidden even when owning the driver Bot");
+        .expect_err("non-participant without a participant Bot is forbidden");
 
     assert!(
         matches!(error, ApplicationError::Forbidden(_)),

@@ -56,11 +56,11 @@ spec:
           subPath: {{ storage_id }}
         resources:
           requests:
-            cpu: "{{ cpu }}"
-            memory: "{{ memory }}"
+            cpu: "{{ cpu_request }}"
+            memory: "{{ memory_request }}"
           limits:
-            cpu: "{{ cpu }}"
-            memory: "{{ memory }}"
+            cpu: "{{ cpu_limit }}"
+            memory: "{{ memory_limit }}"
       - name: envoy-sidecar
         image: {{ sidecar_image }}
         ports:

@@ -58,6 +58,7 @@ class HttpCallback:
             return
 
         metadata = record.metadata or {}
+        result_extra = record.result_extra or {}
         url: str | None = metadata.get("callback_url")
         if not url:
             logger.warning("[callback] no callback_url in metadata: run_id=%s", run_id)
@@ -69,7 +70,8 @@ class HttpCallback:
             status=record.status,
             result=record.result_content,
             error=record.error,
-            metadata=record.metadata,
+            metadata=metadata,
+            session_id=result_extra.get("session_id"),
         )
         result = await self._send(url, payload)
         if not result.success:

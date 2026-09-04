@@ -151,8 +151,17 @@ async def notify(execution_graph, *, bcn, bot, graph, backend_url: str,
     logger.info("[task][bbs_mode] add_edge, task_id=%s, edges=%s", task_id, edges)
 
     # 任务msg
-    msg = _task_msg(skill_name, execution_graph, backend_url, winner_bot_id, bbs_task_node.task_id, bbs_task_node.node_id,
-                    title=winner.get("title", ""), goal=winner.get("goal", ""), )
+    msg = _task_msg(
+        skill_name,
+        execution_graph,
+        backend_url,
+        winner_bot_id,
+        bbs_task_node.task_id,
+        bbs_task_node.node_id,
+        winner.get("relay_reason", ""),
+        title=winner.get("title", ""),
+        goal=winner.get("goal", ""),
+    )
 
     # 执行bbs，执行完后再更新
     try:
@@ -403,8 +412,18 @@ def _bid_prompt(execution_graph, bot_id: str) -> str:
     )
 
 
-def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, task_id: str, node_id: str,
-              *, title: str = "", goal: str = "") -> str:
+def _task_msg(
+    skill_name: str,
+    execution_graph,
+    backend_url: str,
+    bot_id: str,
+    task_id: str,
+    node_id: str,
+    reason: str,
+    *,
+    title: str = "",
+    goal: str = "",
+) -> str:
     """给胜出 bot 的任务消息:内联任务态快照,skill 据快照归纳剩余事项(免读 dashboard)→ attach → 执行 → result。
 
     task_id/backend_url/bot_id 仍保留供步骤② attach / 步骤④ result 的 API 调用;dashboard 仅作可选兜底深读。
@@ -435,6 +454,8 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, t
 
     snapshot = _build_task_snapshot(execution_graph)
     parts = [f"我自主判断要接力执行的任务信息如下：task_id={task_id}, node_id={node_id} \n"]
+    if reason:
+        parts.append(f"我能够接力执行的原因主要是：{reason}\n")
     parts.append("执行步骤：1、执行任务 2、通过post接口上报结果\n")
     parts.append(f"上报方法参考如下示例：\n {report_instruction} \n")
     if title or goal:
@@ -446,7 +467,7 @@ def _task_msg(skill_name: str, execution_graph, backend_url: str, bot_id: str, t
         "**任务态快照已内联**(下方 JSON):含根 goal(objective+acceptances)、instruction、background、"
         "done_children(已 DONE 子节点+产出)、gaps、loop_round。**直接据快照归纳剩余事项**"
         "(剩余 = goal.acceptances 全集 − done_children 产出并集,再按 gaps 细化),无需先读 dashboard;\n"
-        f"注意：执行完之之后，一定要主动上报执行结果。\n"
+        f"注意：执行完之后，一定要主动通过上述 {callback_url} 接口上报执行结果。\n"
         f"任务态快照如下：\n{json.dumps(snapshot, ensure_ascii=False)}"
     )
     return "".join(parts)

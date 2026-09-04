@@ -7,6 +7,7 @@ principal happy path and an unauthenticated rejection path.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 import jwt
 
@@ -16,6 +17,7 @@ from agentclaw.community.core.task.domain.models import (
     Context,
     Goal,
     Metadata,
+    Status,
     TaskInfo,
     TaskSpec,
 )
@@ -29,6 +31,8 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
+from agentclaw.community.api.task.task_service import TaskServiceProtocol
+from agentclaw.community.core.task.repository.types import BbsTaskOverviewRecord
 
 _BASE = "/openapi/v1/collaboration/tasks"
 _CALLER = "public-task-owner"
@@ -236,4 +240,97 @@ def revoke_happy():
     expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
 )
 def revoke_unauthenticated():
+    pass
+
+
+# ── BBS 接力任务列表(public openapi face 镜像 /api/v1/collaboration/tasks/bbs/list)──
+_BBS_SPEC = {
+    "metadata": {"task_id": "bbs-1", "title": "BBS 任务标题", "instruction": "执行"},
+    "context": {"background": "bg"},
+    "goal": {
+        "objective": "达成目标",
+        "acceptances": [{"id": "a1", "description": "验收1"}],
+    },
+}
+
+
+def _bbs_record() -> BbsTaskOverviewRecord:
+    return BbsTaskOverviewRecord(
+        task_id="bbs-1",
+        node_id="n-bbs-1",
+        run_mode="bbs",
+        retry=0,
+        assignee_id="asg-1",
+        status=Status.RUNNING,
+        acceptance_result={"verdict": "PASS", "acceptances_metric": [], "gaps": []},
+        extend_props={"assignee_name": "Alice"},
+        relay_create_time=datetime(2026, 9, 1, 10, 0, 0),
+        relay_begin_time=datetime(2026, 9, 1, 10, 0, 1),
+        relay_end_time=datetime(2026, 9, 1, 10, 5, 0),
+        task_spec=_BBS_SPEC,
+        publisher="pub-1",
+        publisher_name="Pub One",
+    )
+
+
+def _seed_bbs_list(world) -> None:
+    record = _bbs_record()
+
+    def list_bbs_tasks(_self, page=1, page_size=20, *, search_word=None, status=None):
+        return [record], 1
+
+    bind_overrides(world, TaskServiceProtocol, {"list_bbs_tasks": list_bbs_tasks})
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="authenticated_bbs_list",
+    seed=lambda w: (_boot_verifier(w), _seed_bbs_list(w)),
+    input=CaseInput(headers=_headers()),
+    expect=ExpectSuccess(
+        status=200,
+        json_contains={
+            "code": 200000,
+            "data": {"total": 1, "items": [{"task_id": "bbs-1", "run_mode": "bbs"}]},
+        },
+    ),
+)
+def bbs_list_authenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="unauthenticated",
+    seed=_boot_verifier,
+    input=CaseInput(),
+    expect=ExpectError(status=401, json_contains={"code": 401000, "message": "Unauthorized"}),
+)
+def bbs_list_unauthenticated():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="invalid_status",
+    seed=lambda w: (_boot_verifier(w), _seed_bbs_list(w)),
+    input=CaseInput(headers=_headers(), query_params={"status": "NOPE"}),
+    expect=ExpectError(status=400),
+)
+def bbs_list_invalid_status():
+    pass
+
+
+@endpoint_test(
+    method="GET",
+    path=f"{_BASE}/bbs/list",
+    scenario="multi_value_status",
+    seed=lambda w: (_boot_verifier(w), _seed_bbs_list(w)),
+    input=CaseInput(headers=_headers(), query_params={"status": "RUNNING,DONE"}),
+    expect=ExpectError(status=400),
+)
+def bbs_list_multi_value_status():
     pass

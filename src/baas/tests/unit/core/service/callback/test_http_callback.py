@@ -34,7 +34,7 @@ def _make_record(**overrides):
         "status": "COMPLETED",
         "result_content": "reply",
         "result_content_long": "reply content",
-        "result_extra": {"usage": {"prompt_tokens": 10}},
+        "result_extra": {"session_id": "sess-001", "usage": {"prompt_tokens": 10}},
         "error": None,
         "completed_at": datetime.now(),
     }
@@ -111,6 +111,49 @@ class TestHttpCallbackCall:
         assert payload.result == "reply"
         assert payload.error is None
         assert payload.metadata == {"callback_url": "http://example.com/cb"}
+        assert payload.session_id == "sess-001"
+
+    @pytest.mark.asyncio
+    async def test_session_id_from_result_extra(self):
+        record = _make_record(result_extra={"session_id": "sess-xyz", "other": 1})
+        repo = _make_repo(record=record)
+        cb = HttpCallback(repo)
+        mock_result = CallbackResult(success=True, status_code=200, message="")
+        with patch.object(
+            cb, "_send", new=AsyncMock(return_value=mock_result)
+        ) as mock_send:
+            await cb("run-001")
+
+        payload = mock_send.call_args[0][1]
+        assert payload.session_id == "sess-xyz"
+
+    @pytest.mark.asyncio
+    async def test_session_id_none_when_result_extra_missing_session_id(self):
+        record = _make_record(result_extra={"usage": {"prompt_tokens": 10}})
+        repo = _make_repo(record=record)
+        cb = HttpCallback(repo)
+        mock_result = CallbackResult(success=True, status_code=200, message="")
+        with patch.object(
+            cb, "_send", new=AsyncMock(return_value=mock_result)
+        ) as mock_send:
+            await cb("run-001")
+
+        payload = mock_send.call_args[0][1]
+        assert payload.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_session_id_none_when_result_extra_is_none(self):
+        record = _make_record(result_extra=None)
+        repo = _make_repo(record=record)
+        cb = HttpCallback(repo)
+        mock_result = CallbackResult(success=True, status_code=200, message="")
+        with patch.object(
+            cb, "_send", new=AsyncMock(return_value=mock_result)
+        ) as mock_send:
+            await cb("run-001")
+
+        payload = mock_send.call_args[0][1]
+        assert payload.session_id is None
 
     @pytest.mark.asyncio
     async def test_send_failure_logs_error(self):
@@ -394,6 +437,7 @@ class TestHttpCallbackSendOnce:
             result="done",
             error=None,
             metadata={"key": "val"},
+            session_id="s-1",
         )
         with patch(
             "secbaas.community.core.service.callback._http_callback.httpx.AsyncClient"
@@ -414,6 +458,7 @@ class TestHttpCallbackSendOnce:
         assert body["result"] == "done"
         assert body["error"] is None
         assert body["metadata"] == {"key": "val"}
+        assert body["session_id"] == "s-1"
         assert post_kwargs["headers"]["Content-Type"] == "application/json"
 
     @pytest.mark.asyncio

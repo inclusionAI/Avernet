@@ -299,12 +299,15 @@ _NO_USER_DIMENSION = {
     # measures a dependency the path does not have.
     ("get", f"{PUBLIC_API_PREFIX}/bots/loadtest/hello"),
     # Task public surface: execute submits (owner in body), dashboard reads by
-    # task_id — neither scopes to a caller-supplied user_id. grant/revoke
-    # identify the operator from the verified principal (Cookie/Referer relayed
-    # to secbaas, the api-key held server-side), not a caller-supplied user_id.
-    # list does take a caller-supplied user_id filter, so it is NOT here.
+    # task_id — neither scopes to a caller-supplied user_id. bbs/list is a
+    # tenant-wide paged read of BBS relay tasks (run_mode='bbs'), no user_id
+    # filter. grant/revoke identify the operator from the verified principal
+    # (Cookie/Referer relayed to secbaas, the api-key held server-side), not a
+    # caller-supplied user_id. list does take a caller-supplied user_id filter,
+    # so it is NOT here.
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/execute"),
     ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/dashboard"),
+    ("get", f"{PUBLIC_API_PREFIX}/collaboration/tasks/bbs/list"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/grant"),
     ("post", f"{PUBLIC_API_PREFIX}/collaboration/tasks/revoke"),
 }
@@ -452,11 +455,12 @@ _LOGS_PREFIX = f"{PUBLIC_API_PREFIX}/bots/logs"
 #: Space Skill Version Copy adds one account-level operation; it is addressed by
 #: Space and Skill version rather than by Bot. Human Chat adds eleven Bot-path
 #: operations while retaining separate caller and Bot-owner identities.
+#: Public BBS list adds one account-level read with no Bot in the path (103→104).
 #:
 #: W9 (#1477) adds the three ``cli-tools`` operations — install, list and
 #: delete. All three are bot-path-addressed like the config-manifest group they
 #: sit beside, so ``path`` 167 → 170 and nothing else moves.
-_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 103}
+_BOT_ID_PLACEMENT = {"path": 170, "query": 1, "none": 104}
 
 
 def _schema() -> dict:

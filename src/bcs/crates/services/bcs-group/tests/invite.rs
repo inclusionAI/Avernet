@@ -18,7 +18,8 @@ use bcs_service_api::application::invite::{
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    Group, GroupCoreService, GroupStrategy, Participant, ParticipantRole, SessionKind,
+    BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
+    ParticipantRole, SessionKind,
 };
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
@@ -30,14 +31,15 @@ struct Fixture {
     service: InviteServiceImpl,
     groups: Arc<GroupCore>,
     sessions: Arc<SessionManagementServiceImpl>,
+    bots: Arc<BotCore>,
 }
 
 impl Fixture {
     async fn new() -> Self {
         let group_repo: Arc<dyn GroupRepoPort> = Arc::new(MemoryGroupRepo::new());
         let groups = Arc::new(GroupCore::with_repo(group_repo.clone()));
-        // The session invite path never consults the bot registry; BotCore is
-        // wired in only because the impl struct requires it.
+        // The session invite path consults the bot registry to grant Human
+        // callers whose owned Bot participates in the session.
         let bots = Arc::new(BotCore::memory());
         let session_repo: Arc<dyn SessionRepoPort> = Arc::new(MemorySessionRepo::new());
         let sessions = Arc::new(SessionManagementServiceImpl::new(
@@ -45,7 +47,7 @@ impl Fixture {
             group_repo.clone(),
         ));
         let service = InviteServiceImpl {
-            registry: bots,
+            registry: bots.clone(),
             group: groups.clone(),
             session: sessions.clone(),
             system_message: Arc::new(NoopSystemMessageService),
@@ -59,7 +61,26 @@ impl Fixture {
             service,
             groups,
             sessions,
+            bots,
         }
+    }
+
+    async fn add_owned_bot(&self, bot_uuid: &str, owner_staff_no: &str) {
+        self.bots
+            .register(
+                bot_uuid.to_string(),
+                BotCapabilities {
+                    name: Some(bot_uuid.to_string()),
+                    visibility: "public".into(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("register bot");
+        self.bots
+            .save_created_by(bot_uuid, owner_staff_no, true)
+            .await
+            .expect("assign test Bot owner");
     }
 
     async fn store_group(&self, group_id: &str, driver: &str) {
@@ -216,6 +237,76 @@ async fn session_invite_token_rejects_non_participant() {
         .create_session_invite_token(fx.cmd(&session_id, Some("bot-b")))
         .await
         .expect_err("non-participant is forbidden");
+
+    assert!(
+        matches!(error, InviteUseCaseError::Forbidden(_)),
+        "expected Forbidden, got {error:?}",
+    );
+}
+
+#[tokio::test]
+async fn session_invite_token_allows_human_owner_of_participant_bot() {
+    // A Human caller who is not itself a session participant may still mint a
+    // session invite token when one of the Human's owned Bots participates in
+    // the session.
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-a", "staff-owner").await;
+    fx.add_owned_bot("bot-b", "staff-9").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![
+                Participant::bot("bot-a", ParticipantRole::Driver),
+                Participant::bot("bot-b", ParticipantRole::Consultant),
+            ],
+        )
+        .await;
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: session_id.clone(),
+        ttl_seconds: None,
+    };
+    let result = fx
+        .service
+        .create_session_invite_token(cmd)
+        .await
+        .expect("owner of a participant bot may mint");
+    assert!(result.invite_token.len() > 0);
+    assert!(result.join_url.contains("/sessions/join/"));
+}
+
+#[tokio::test]
+async fn session_invite_token_rejects_human_without_participant_bot() {
+    // A Human caller whose owned Bots are NOT session participants is still
+    // forbidden: ownership alone (without session membership of the owned
+    // Bot) does not grant minting.
+    let fx = Fixture::new().await;
+    fx.add_owned_bot("bot-a", "staff-owner").await;
+    fx.add_owned_bot("bot-c", "staff-9").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        )
+        .await;
+
+    let cmd = CreateInviteTokenCommand {
+        caller_actor_id: None,
+        caller_staff_no: Some("staff-9".to_string()),
+        target_id: session_id.clone(),
+        ttl_seconds: None,
+    };
+    let error = fx
+        .service
+        .create_session_invite_token(cmd)
+        .await
+        .expect_err("human without a participant bot is forbidden");
 
     assert!(
         matches!(error, InviteUseCaseError::Forbidden(_)),

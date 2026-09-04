@@ -4,6 +4,7 @@ Uses real fixture file: tests/utils/moltis_config.toml (same directory as this t
 """
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -15,14 +16,18 @@ from agentclaw.community.utils.toml_utils import TomlFile, TomlUtils
 TEST_DIR = Path(__file__).parent
 MOLTIS_CONFIG_FILE = TEST_DIR / "moltis_config.toml"
 
+# UUID-based values keep the test config free of real-looking credentials.
+TEST_CLIENT_ID = str(uuid.uuid4())
+TEST_CLIENT_SECRET = str(uuid.uuid4())
+
 # The new channel config to add
 NEW_CHANNEL_CONFIG = {
-    "client_id": "dingl6x1pu7l5y9itkut",
-    "client_secret": "cXi3cLfK17vT4i4z-j08qdEy_Pb8Gj-9ZJwl61jpsJHl7oVNLb9MAv4wiMPgoHYF",
+    "client_id": TEST_CLIENT_ID,
+    "client_secret": TEST_CLIENT_SECRET,
     "dm_policy": "open",
     "allowlist": ["*"],
     "reply_to_message": True,
-    "robot_code": "dingl6x1pu7l5y9itkut",
+    "robot_code": TEST_CLIENT_ID,
     "card_template_id": "4d98ff02-25be-437b-933d-9884bac9acca.schema",
     "card_template_key": "content",
     "enable_streaming_cards": True,
@@ -96,15 +101,15 @@ class TestRealMoltisFile:
 
         # New channel added
         assert "[channels.dingtalk.semanticflowali]" in content
-        assert 'client_id = "dingl6x1pu7l5y9itkut"' in content
-        assert 'client_secret = "cXi3cLfK17vT4i4z-j08qdEy_Pb8Gj-9ZJwl61jpsJHl7oVNLb9MAv4wiMPgoHYF"' in content
+        assert f'client_id = "{TEST_CLIENT_ID}"' in content
+        assert f'client_secret = "{TEST_CLIENT_SECRET}"' in content
         assert "allowlist = [" in content
         assert '"*"' in content
 
         # Verify can reload and read
         reloaded = TomlUtils.get(temp_file, "channels.dingtalk.semanticflowali")
         assert reloaded is not None
-        assert reloaded["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert reloaded["client_id"] == TEST_CLIENT_ID
         assert reloaded["enable_streaming_cards"] is True
 
 
@@ -124,7 +129,7 @@ class TestMoltisConfigCRUD:
         channel = TomlUtils.get(moltis_config_file, "channels.dingtalk.semanticflowali")
 
         assert channel is not None
-        assert channel["client_id"] == "dingl6x1pu7l5y9itkut"
+        assert channel["client_id"] == TEST_CLIENT_ID
         assert channel["dm_policy"] == "open"
         assert channel["allowlist"] == ["*"]
         assert channel["reply_to_message"] is True
@@ -144,7 +149,7 @@ class TestMoltisConfigCRUD:
         client_id = TomlUtils.get(
             moltis_config_file, "channels.dingtalk.semanticflowali.client_id"
         )
-        assert client_id == "dingl6x1pu7l5y9itkut"
+        assert client_id == TEST_CLIENT_ID
 
         # Read array field
         allowlist = TomlUtils.get(
@@ -313,7 +318,7 @@ class TestMoltisConfigCRUD:
 
         # Verify new config was added
         assert "[channels.dingtalk.semanticflowali]" in modified_content
-        assert 'client_id = "dingl6x1pu7l5y9itkut"' in modified_content
+        assert f'client_id = "{TEST_CLIENT_ID}"' in modified_content
 
     def test_exists_check(self, moltis_config_file):
         """Test checking if channel exists using generic exists method."""
