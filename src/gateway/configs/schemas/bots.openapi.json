@@ -845,7 +845,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot."
+            "description": "Optional engine-specific properties. Omit for a plain bot; provide template_config (hand-written application-coding or a template-factory snapshot) for a template-backed bot. Combined with bot_type=service on a coding engine, the bot is created through the template path and upgraded to a service bot before the create response."
           },
           "space_id": {
             "anyOf": [
@@ -24133,7 +24133,7 @@
         ]
       },
       "post": {
-        "description": "Create a bot (201), or 202 with authorization URLs when consent is needed.\n\nOn a 202, have the user complete authorization at one of the returned\nURLs, then poll the auth-status endpoint — the bot is only created there,\non ISSUED. Engine-specific creation properties belong under\n\"engine_properties\" and are interpreted by the selected engine;\nengine configuration is managed through the engine-config endpoints after\ncreation.",
+        "description": "Create a bot (201), or 202 with authorization URLs when consent is needed.\n\nOn a 202, have the user complete authorization at one of the returned\nURLs, then poll the auth-status endpoint — the bot is only created there,\non ISSUED. Engine-specific creation properties belong under\n\"engine_properties\" and are interpreted by the selected engine;\nengine configuration is managed through the engine-config endpoints after\ncreation.\n\nA coding template with bot_type=service (create-as-service) is fulfilled\norchestratively: the bot is created through the personal-only template path\nand immediately upgraded to a service bot, which is what the 201 reports. If\nthe upgrade fails the response is a 502 naming the created-as-personal bot —\nretry the lifecycle upgrade instead of re-creating.",
         "operationId": "create_bot_openapi_v1_bots_post",
         "parameters": [
           {
@@ -52421,7 +52421,7 @@
         ]
       },
       "post": {
-        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nA POST because this operation is not a read: on the 202 create flow the\nbot is only actually created here, once authorization is granted. The\ncaller must re-supply the attributes it created with — the body fields\nmirror the create body and are forwarded to completion. Omit them and the\nbot is created with defaults that contradict what was requested, so\nalways echo back engine, cluster_name, bot_name, bot_desc, bot_type and\nspace_id when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, the same\npersonal/service restriction on bot_type, and the same business-space\nresolution.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.",
+        "description": "Poll authorization for a pending creation; the bot is created on ISSUED.\n\nA POST because this operation is not a read: on the 202 create flow the\nbot is only actually created here, once authorization is granted. The\ncaller must re-supply the attributes it created with — the body fields\nmirror the create body and are forwarded to completion. Omit them and the\nbot is created with defaults that contradict what was requested, so\nalways echo back engine, cluster_name, bot_name, bot_desc, bot_type and\nspace_id when polling.\n\nEvery restriction create enforces is re-applied to the echoed values:\nthe same engine registry check, the same engine/cluster pairing, the same\npersonal/service restriction on bot_type, and the same business-space\nresolution. An echoed bot_type=service with engine_properties completes the\nsame orchestrated service upgrade the create endpoint offers.\n\nWhile the authorization service has no status for the bot yet — the\nPassport is not ready — the poll answers PENDING with a message saying\nso, rather than an error: keep polling.",
         "operationId": "poll_bot_auth_status_openapi_v1_bots__bot_id__auth_status_post",
         "parameters": [
           {

@@ -72,6 +72,7 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateDeploymentMode,
     BotCreateSpec,
     BotCreateTemplateValidationMode,
+    ServiceIntakeSeam,
     complete_bot_authorization,
     create_bot_with_authorization,
 )
@@ -86,6 +87,12 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.api.bot_startup_script_service import (
     SUPPORTED,
     BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.api.service_publication_facade import (
+    ServicePublicationFacadeProtocol,
+)
+from agentclaw.community.core.service_bot.errors import (
+    ServicePublicationConflictError,
 )
 from agentclaw.community.api.data_init_service import DataInitServiceProtocol
 from agentclaw.community.core.workspace.constants import (
@@ -197,6 +204,32 @@ def _require_service_capable_engine(bot_type: str, engine: str) -> None:
         raise ServicePublicationUnsupportedError(
             decision.reason or "engine cannot be used by a service bot"
         )
+
+
+class _FacadeServiceIntakeSeam:
+    """Adapt the publication facade to the create flow's service intake seam.
+
+    The completion poll is the retry surface for a create-as-service request,
+    so a replayed conversion hits the facade's already-service conflict — for
+    intake that is success (the goal state is reached), not a failure to
+    surface to the caller.
+    """
+
+    def __init__(self, facade: ServicePublicationFacadeProtocol) -> None:
+        self._facade = facade
+
+    def convert(self, bot_id: str, *, actor_id: str, owner_id: str) -> None:
+        try:
+            self._facade.convert_to_service(
+                bot_id, actor_id=actor_id, owner_id=owner_id
+            )
+        except ServicePublicationConflictError as exc:
+            logger.info(
+                "[service_intake] conversion replay for already-serviced bot: "
+                "bot_id=%s, reason=%s",
+                bot_id,
+                exc,
+            )
 
 
 def _to_bot(d: dict[str, Any], *, space: dict[str, Any] | None = None) -> Bot:
@@ -506,6 +539,9 @@ async def create_bot(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
+    service_publication_facade: ServicePublicationFacadeProtocol = Injected(
+        ServicePublicationFacadeProtocol
+    ),
 ):
     """Create a bot (201), or 202 with authorization URLs when consent is needed.
 
@@ -515,6 +551,12 @@ async def create_bot(
     "engine_properties" and are interpreted by the selected engine;
     engine configuration is managed through the engine-config endpoints after
     creation.
+
+    A coding template with bot_type "service" (开启服务) is fulfilled
+    orchestratively: the bot is created by the personal-only template path and
+    immediately upgraded to a service bot, which is what the 201 reports. If
+    the upgrade fails the response is a 502 naming the created-as-personal
+    bot — retry via the lifecycle upgrade instead of re-creating.
     """
     # Engine-owned creation input is passed through opaquely below; the
     # engine-selected Core strategy owns its semantics and validation, so this
@@ -550,11 +592,13 @@ async def create_bot(
             deployment_mode=BotCreateDeploymentMode.CLOUD,
             space_kind=current_space.kind,
             space_quota=True,
+            service_intake=True,
         ),
         bot_service=bot_service,
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
         skill_set_factory=skill_set_factory,
+        service_intake_seam=_FacadeServiceIntakeSeam(service_publication_facade),
     )
 
     if isinstance(outcome, AuthPending):
@@ -1127,6 +1171,11 @@ def _complete_auth_status(
     passport_plugin: PassportPlugin,
     auth_rel_plugin: AuthRelationshipPlugin,
     space_context: BusinessSpaceContextProtocol,
+    # The POST spelling passes the orchestrating seam so an echoed
+    # bot_type=service coding create completes the upgrade; the retiring GET
+    # is plain-bot-only (no engine_properties to echo), so it passes nothing
+    # and keeps its historical behavior.
+    service_intake_seam: ServiceIntakeSeam | None = None,
 ) -> Envelope[BotAuthStatus] | JSONResponse:
     """Validate the echoed attributes, poll Passport, and map the outcome.
 
@@ -1175,10 +1224,12 @@ def _complete_auth_status(
                 deployment_mode=BotCreateDeploymentMode.CLOUD,
                 space_kind=current_space.kind,
                 space_quota=True,
+                service_intake=True,
             ),
             bot_service=bot_service,
             passport_plugin=passport_plugin,
             auth_rel_plugin=auth_rel_plugin,
+            service_intake_seam=service_intake_seam,
         )
     except AuthStatusUnavailableError:
         # The passport service answered with no status at all — typically the
@@ -1227,6 +1278,9 @@ async def poll_bot_auth_status(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
+    service_publication_facade: ServicePublicationFacadeProtocol = Injected(
+        ServicePublicationFacadeProtocol
+    ),
 ) -> Envelope[BotAuthStatus]:
     """Poll authorization for a pending creation; the bot is created on ISSUED.
 
@@ -1241,7 +1295,8 @@ async def poll_bot_auth_status(
     Every restriction create enforces is re-applied to the echoed values:
     the same engine registry check, the same engine/cluster pairing, the same
     personal/service restriction on bot_type, and the same business-space
-    resolution.
+    resolution. An echoed bot_type "service" coding create completes the
+    same orchestrated upgrade the create endpoint offers.
 
     While the authorization service has no status for the bot yet — the
     Passport is not ready — the poll answers PENDING with a message saying
@@ -1262,6 +1317,7 @@ async def poll_bot_auth_status(
         passport_plugin=passport_plugin,
         auth_rel_plugin=auth_rel_plugin,
         space_context=space_context,
+        service_intake_seam=_FacadeServiceIntakeSeam(service_publication_facade),
     )
 
 
