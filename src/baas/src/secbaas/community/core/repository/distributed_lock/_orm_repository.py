@@ -6,6 +6,8 @@ Corresponds to ZdasDistributedLockRepository (ac_lock_table).
 
 from datetime import datetime
 
+from sqlalchemy import case, func, or_, select
+
 from secbaas.community.core.repository import OrmConnectionMixin, with_orm_session
 from secbaas.community.logger import get_logger
 
@@ -98,6 +100,82 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         log.info("[distributed-lock:delete_lock] result: %s", result)
         return result
 
+    def _build_acquire_upsert(self, lock_name, lock_holder, expire_time, env, now):
+        """Build the dialect-specific atomic acquire upsert for ``ac_lock_table``.
+
+        Mirrors the ``arca_ttl`` dual-dialect upsert convention
+        (``mysql.dialects.insert().on_duplicate_key_update()`` /
+        ``sqlite.dialects.insert().on_conflict_do_update()``). A row is
+        treated as acquirable when the existing holder is the same caller,
+        the row has no ``expire_time``, or the row has already expired; in
+        those cases the holder / expiry / env are overwritten, otherwise the
+        upsert is a no-op that leaves the current holder untouched. Because a
+        dialect upsert does not apply ``Column.onupdate`` (arca_ttl Pitfall 2),
+        ``gmt_modified`` is set explicitly and only refreshed when the row is
+        actually acquired.
+
+        The expiry check compares ``expire_time`` against a caller-supplied
+        app-clock ``now`` rather than the DB ``NOW()``: ``expire_time`` is
+        written in the application's wall-clock domain, and SQLite
+        ``CURRENT_TIMESTAMP`` is UTC, so a DB-side comparison would misclassify
+        unexpired rows as expired (and vice versa) against locally-stamped
+        rows — the same clock-domain rationale arca_ttl documents for its
+        caller-supplied ``now`` gate.
+        """
+        from sqlalchemy.dialects.mysql import insert as mysql_insert
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        is_sqlite = self._session.bind.dialect.name == "sqlite"
+        values = {
+            "lock_name": lock_name,
+            "lock_holder": lock_holder,
+            "expire_time": expire_time,
+            "env": env,
+        }
+
+        if is_sqlite:
+            stmt = sqlite_insert(DistributedLockModel).values(**values)
+            acquirable = or_(
+                DistributedLockModel.lock_holder == stmt.excluded.lock_holder,
+                DistributedLockModel.expire_time.is_(None),
+                DistributedLockModel.expire_time <= now,
+            )
+            return stmt.on_conflict_do_update(
+                index_elements=["lock_name"],
+                set_={
+                    "lock_holder": stmt.excluded.lock_holder,
+                    "expire_time": stmt.excluded.expire_time,
+                    "env": stmt.excluded.env,
+                    "gmt_modified": func.now(),
+                },
+                where=acquirable,
+            )
+
+        stmt = mysql_insert(DistributedLockModel).values(**values)
+        acquirable = or_(
+            DistributedLockModel.lock_holder == stmt.inserted.lock_holder,
+            DistributedLockModel.expire_time.is_(None),
+            DistributedLockModel.expire_time <= now,
+        )
+        return stmt.on_duplicate_key_update(
+            lock_holder=case(
+                (acquirable, stmt.inserted.lock_holder),
+                else_=DistributedLockModel.lock_holder,
+            ),
+            expire_time=case(
+                (acquirable, stmt.inserted.expire_time),
+                else_=DistributedLockModel.expire_time,
+            ),
+            env=case(
+                (acquirable, stmt.inserted.env),
+                else_=DistributedLockModel.env,
+            ),
+            gmt_modified=case(
+                (acquirable, func.now()),
+                else_=DistributedLockModel.gmt_modified,
+            ),
+        )
+
     @with_orm_session
     def try_acquire_lock(
         self,
@@ -106,20 +184,21 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         lock_holder: str,
         expire_time: datetime,
     ) -> bool:
-        """Atomically try to acquire a lock in a single session.
+        """Atomically try to acquire a lock with a single upsert.
 
-        Prefer conditional UPDATE over DELETE + INSERT. Existing lock rows are
-        treated as stable state: an expired row, a row with no expire_time, or
-        a row already held by the same holder can be acquired by updating its
-        holder and expiry. A missing row is initialized by INSERT.
+        Issues one atomic upsert keyed on ``uk_lock_name``: a missing row is
+        initialized by INSERT, while an existing row is overwritten only when
+        it is acquirable (same holder, no ``expire_time``, or expired) and left
+        untouched otherwise. A confirming read SELECT then decides whether the
+        caller now holds the lock.
 
-        Concurrent INSERT conflicts and OceanBase/MySQL-compatible lock wait
-        timeouts are normal lock contention for this try-acquire API and are
-        returned as ``False``.
+        Replacing the former ``UPDATE → SELECT → INSERT`` three-step flow with
+        a single upsert removes the concurrent INSERT that produced the
+        underlying ``uk_lock_name`` 1062 conflict. OceanBase/MySQL-compatible
+        lock wait timeouts (1205) remain normal lock contention for this
+        try-acquire API and are still returned as ``False``.
         """
-        from sqlalchemy import func, or_
         from sqlalchemy.exc import DatabaseError as SADatabaseError
-        from sqlalchemy.exc import IntegrityError as SAIntegrityError
 
         from secbaas.community.core.utils.env_utils import get_current_env
 
@@ -132,76 +211,38 @@ class OrmDistributedLockRepository(OrmConnectionMixin, DistributedLockRepository
         env = get_current_env()
 
         try:
-            updated = (
-                self._session.query(DistributedLockModel)
-                .filter(
-                    DistributedLockModel.lock_name == lock_name,
-                    or_(
-                        DistributedLockModel.lock_holder == lock_holder,
-                        DistributedLockModel.expire_time.is_(None),
-                        DistributedLockModel.expire_time <= now,
-                    ),
-                )
-                .update(
-                    {
-                        "lock_holder": lock_holder,
-                        "expire_time": expire_time,
-                        "gmt_modified": func.now(),
-                        "env": env,
-                    },
-                    synchronize_session=False,
+            self._session.execute(
+                self._build_acquire_upsert(
+                    lock_name, lock_holder, expire_time, env, now
                 )
             )
 
-            if int(updated) > 0:
+            row = self._session.execute(
+                select(DistributedLockModel).where(
+                    DistributedLockModel.lock_name == lock_name
+                )
+            ).scalar_one_or_none()
+
+            if row is None:
+                log.warning(
+                    "[distributed-lock:try_acquire_lock] upsert left no row: lock_name=%s",
+                    lock_name,
+                )
+                return False
+
+            if row.lock_holder == lock_holder:
                 log.info(
-                    "[distributed-lock:try_acquire_lock] acquired by update: lock_name=%s",
+                    "[distributed-lock:try_acquire_lock] acquired: lock_name=%s",
                     lock_name,
                 )
                 return True
 
-            row = (
-                self._session.query(DistributedLockModel)
-                .filter(DistributedLockModel.lock_name == lock_name)
-                .first()
-            )
-            if row is not None:
-                if row.lock_holder == lock_holder:
-                    log.info(
-                        "[distributed-lock:try_acquire_lock] reentrant already held: lock_name=%s",
-                        lock_name,
-                    )
-                    return True
-
-                log.info(
-                    "[distributed-lock:try_acquire_lock] lock held by %s, not acquired",
-                    row.lock_holder,
-                )
-                return False
-
-            new_row = DistributedLockModel(
-                lock_name=lock_name,
-                lock_holder=lock_holder,
-                expire_time=expire_time,
-                env=env,
-            )
-            self._session.add(new_row)
-            self._session.flush()
-
             log.info(
-                "[distributed-lock:try_acquire_lock] acquired by insert: lock_name=%s, id=%s",
-                lock_name,
-                new_row.id,
-            )
-            return True
-
-        except SAIntegrityError:
-            self._session.rollback()
-            log.warning(
-                "[distributed-lock:try_acquire_lock] concurrent INSERT conflict: lock_name=%s",
-                lock_name,
+                "[distributed-lock:try_acquire_lock] lock held by %s, not acquired",
+                row.lock_holder,
             )
             return False
+
         except SADatabaseError as exc:
             if _is_lock_wait_timeout(exc):
                 self._session.rollback()
