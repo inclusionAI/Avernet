@@ -1,6 +1,7 @@
 ########## Avernet Engine + OpenClaw ##########
-# Two-stage build producing an image that runs both the Python engine adapter
-# and the OpenClaw gateway under supervisord.
+# Multi-stage build producing an image that runs both the Python engine adapter
+# and the OpenClaw gateway under supervisord. bcs-cli is compiled from the
+# in-repository Rust source in its own builder stage.
 #
 # Reference: ocb/dockers/arca-openclaw/Dockerfile
 #
@@ -32,7 +33,17 @@
 #   UV_VERSION         uv version for pin (default: latest)
 #   NPM_STRICT_SSL     npm strict-ssl toggle (default true)
 
-# ==================== Stage 1: Builder ====================
+# ==================== Stage 1: BCS CLI Builder ====================
+FROM rust:1.91.0-bookworm AS bcs-cli-builder
+
+WORKDIR /opt/bcs
+
+COPY src/bcs/ /opt/bcs/
+RUN cargo build --locked --release --package bcs-cli \
+    && strip target/release/bcs-cli \
+    && target/release/bcs-cli --help >/dev/null
+
+# ==================== Stage 2: Builder ====================
 FROM node:22-bookworm-slim AS builder
 
 ARG OPENCLAW_VERSION=2026.5.12
@@ -136,7 +147,7 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
 # Create symlink for CA bundle path expected by run.sh / Node (RHEL-style path on Debian).
 RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 
-# ==================== Stage 2: Runtime ====================
+# ==================== Stage 3: Runtime ====================
 FROM node:22-bookworm-slim AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -163,6 +174,13 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
 
 # Bring over installed openclaw + claude-code from builder.
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+
+# Install the source-built BCS CLI and its matching OpenClaw coordination skill.
+COPY --from=bcs-cli-builder /opt/bcs/target/release/bcs-cli /usr/local/bin/bcs-cli
+COPY src/bcs/crates/tools/bcs-cli/bcs-coordination/ /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/
+RUN bcs-cli --help >/dev/null \
+    && test -f /usr/local/lib/node_modules/openclaw/skills/bcs-coordination/SKILL.md
+
 # Recreate npm bin symlink: COPY --from resolves symlinks to files,
 # which breaks the script's __dirname-based dist/ path resolution.
 RUN BIN_REL=$(node -e "\
