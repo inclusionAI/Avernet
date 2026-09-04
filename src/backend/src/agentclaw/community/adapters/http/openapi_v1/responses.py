@@ -111,12 +111,19 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotServiceError,
     DeviceLimitError,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaBusyError,
+    BotQuotaExceededError,
+    BotQuotaUnavailableError,
+)
 from agentclaw.community.core.bot_public.services.bot_public_service import (
     BotNotFoundError as BotPublicBotNotFoundError,
     BotPublicServiceError,
 )
 from agentclaw.community.core.channel.errors import (
+    ChannelBindingConflictError,
     ChannelEditLockedError,
+    ChannelModeViolationError,
     ChannelNotFoundError,
     ChannelSyncError,
 )
@@ -459,6 +466,8 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotNotFoundError: (404, "Not found"),
     ChannelNotFoundError: (404, "Not found"),
     ChannelSyncError: (502, "Channel synchronization failed"),
+    ChannelModeViolationError: (422, "Channel mode violation"),
+    ChannelBindingConflictError: (409, "Channel binding conflict"),
     # Byte-identical to the line above, deliberately. An application that could
     # tell "I hold no grant for this bot" from "no such bot" would have an
     # enumeration oracle for every bot id in the tenant, so the refusal must be
@@ -537,6 +546,9 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     BotNameExistsError: (409, "Bot name already exists"),
     BotNameInvalidError: (400, "Invalid bot name"),
     BotLimitExceededError: (409, "Bot creation limit reached"),
+    BotQuotaExceededError: (409, "Bot quota exceeded for this Space"),
+    BotQuotaBusyError: (409, "Bot quota is being updated; retry"),
+    BotQuotaUnavailableError: (503, "Bot quota service unavailable"),
     DeviceLimitError: (409, "Device limit reached"),
     BotInvalidLifecycleStateError: (
         409,
@@ -1022,7 +1034,7 @@ def _error_data(exc: Exception) -> object | None:
 
     Almost every error on this surface answers with a fixed message and a null
     ``data`` — the message is contract, and anything caller- or
-    internal-specific stays out of it. Two failures are genuinely different:
+    internal-specific stays out of it. A few failures are genuinely different:
     they have a *structured* answer the caller needs in order to act, and it is
     derived entirely from what that caller sent or already knows.
 
@@ -1035,6 +1047,8 @@ def _error_data(exc: Exception) -> object | None:
     if isinstance(exc, ManifestValidationError):
         # The all-or-nothing refusal. The fixed message says a document was
         # rejected; this says which entries and why, in the caller's own terms.
+        return exc.as_payload()
+    if isinstance(exc, BotQuotaExceededError):
         return exc.as_payload()
     return None
 

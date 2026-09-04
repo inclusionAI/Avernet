@@ -11,6 +11,11 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaExceededError,
+    BotQuotaScope,
+    BotQuotaSnapshot,
+)
 from agentclaw.community.core.bot_management.services.bot_space_service import (
     BotSpaceService,
 )
@@ -55,13 +60,14 @@ def _service(*, bot: dict | None = None, space: SpaceRecord | None = None):
     access = MagicMock()
     if space is not None:
         access.require_space_member.return_value = (space, MagicMock())
-    return BotSpaceService(repository, access), repository, access
+    quota = MagicMock()
+    return BotSpaceService(repository, access, quota), repository, access, quota
 
 
 def test_moves_owned_cloud_bot_to_joined_team_space():
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
     target = _space(space_id=42)
-    service, repository, access = _service(bot=bot, space=target)
+    service, repository, access, quota = _service(bot=bot, space=target)
 
     result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
@@ -72,6 +78,7 @@ def test_moves_owned_cloud_bot_to_joined_team_space():
     repository.update_space_by_owner.assert_called_once_with(
         bot_id="b1", owner_id="u1", space_id=42
     )
+    quota.guard_add.assert_called_once()
 
 
 def test_moves_bot_back_to_owners_numeric_personal_space():
@@ -81,7 +88,7 @@ def test_moves_bot_back_to_owners_numeric_personal_space():
         space_type=SpaceType.PERSONAL,
         personal_owner_id="u1",
     )
-    service, repository, _access = _service(bot=bot, space=target)
+    service, repository, _access, quota = _service(bot=bot, space=target)
 
     result = service.change_space(bot_id="b1", owner_id="u1", space_id=8)
 
@@ -89,16 +96,37 @@ def test_moves_bot_back_to_owners_numeric_personal_space():
     repository.update_space_by_owner.assert_called_once_with(
         bot_id="b1", owner_id="u1", space_id=8
     )
+    quota.guard_add.assert_called_once()
+
+
+def test_normalizing_legacy_personal_space_does_not_consume_new_capacity():
+    bot = {"bot_id": "b1", "bot_type": "service", "space_id": None}
+    target = _space(
+        space_id=8,
+        space_type=SpaceType.PERSONAL,
+        personal_owner_id="u1",
+    )
+    service, repository, _access, quota = _service(bot=bot, space=target)
+    quota.guard_add.side_effect = AssertionError("quota must not be consulted")
+
+    result = service.change_space(bot_id="b1", owner_id="u1", space_id=8)
+
+    assert result.changed is True
+    repository.update_space_by_owner.assert_called_once_with(
+        bot_id="b1", owner_id="u1", space_id=8
+    )
+    quota.guard_add.assert_not_called()
 
 
 def test_missing_or_unowned_bot_is_masked_before_space_lookup():
-    service, repository, access = _service(bot=None, space=_space())
+    service, repository, access, quota = _service(bot=None, space=_space())
 
     with pytest.raises(BotNotFoundError):
         service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     repository.update_space_by_owner.assert_not_called()
     access.require_space_member.assert_not_called()
+    quota.guard_add.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -106,13 +134,14 @@ def test_missing_or_unowned_bot_is_masked_before_space_lookup():
 )
 def test_target_space_lookup_and_membership_failures_propagate(error):
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": None}
-    service, repository, access = _service(bot=bot)
+    service, repository, access, quota = _service(bot=bot)
     access.require_space_member.side_effect = error
 
     with pytest.raises(type(error)):
         service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     repository.update_space_by_owner.assert_not_called()
+    quota.guard_add.assert_not_called()
 
 
 def test_another_users_personal_space_is_rejected_even_with_bad_membership_row():
@@ -122,39 +151,42 @@ def test_another_users_personal_space_is_rejected_even_with_bad_membership_row()
         space_type=SpaceType.PERSONAL,
         personal_owner_id="u2",
     )
-    service, repository, _access = _service(bot=bot, space=target)
+    service, repository, _access, quota = _service(bot=bot, space=target)
 
     with pytest.raises(SpaceAccessDeniedError):
         service.change_space(bot_id="b1", owner_id="u1", space_id=8)
 
     repository.update_space_by_owner.assert_not_called()
+    quota.guard_add.assert_not_called()
 
 
 def test_desktop_bot_cannot_move_to_team_space():
     bot = {"bot_id": "b1", "bot_type": "desktop", "space_id": None}
-    service, repository, _access = _service(bot=bot, space=_space())
+    service, repository, _access, quota = _service(bot=bot, space=_space())
 
     with pytest.raises(BotOperationNotAllowedError):
         service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     repository.update_space_by_owner.assert_not_called()
+    quota.guard_add.assert_not_called()
 
 
 def test_same_space_is_idempotent_and_skips_the_write():
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 42}
     target = _space(space_id=42)
-    service, repository, _access = _service(bot=bot, space=target)
+    service, repository, _access, quota = _service(bot=bot, space=target)
 
     result = service.change_space(bot_id="b1", owner_id="u1", space_id=42)
 
     assert result.changed is False
     assert result.bot is bot
     repository.update_space_by_owner.assert_not_called()
+    quota.guard_add.assert_not_called()
 
 
 def test_bot_disappearing_during_write_is_masked_as_not_found():
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
-    service, repository, _access = _service(bot=bot, space=_space())
+    service, repository, _access, _quota = _service(bot=bot, space=_space())
     repository.update_space_by_owner.return_value = None
 
     with pytest.raises(BotNotFoundError):
@@ -163,8 +195,29 @@ def test_bot_disappearing_during_write_is_masked_as_not_found():
 
 def test_persistence_failure_propagates_instead_of_returning_success():
     bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
-    service, repository, _access = _service(bot=bot, space=_space())
+    service, repository, _access, _quota = _service(bot=bot, space=_space())
     repository.update_space_by_owner.side_effect = RuntimeError("database unavailable")
 
     with pytest.raises(RuntimeError, match="database unavailable"):
         service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+
+
+def test_full_target_space_blocks_the_move_before_the_write():
+    bot = {"bot_id": "b1", "bot_type": "personal", "space_id": 7}
+    target = _space(space_id=42)
+    service, repository, _access, quota = _service(bot=bot, space=target)
+    scope = BotQuotaScope(
+        owner_id="u1",
+        space_id=target.id,
+        space_name=target.name,
+        space_type=target.space_type,
+    )
+    quota.guard_add.side_effect = BotQuotaExceededError(
+        BotQuotaSnapshot(scope=scope, ceiling=20, used=20)
+    )
+
+    with pytest.raises(BotQuotaExceededError):
+        service.change_space(bot_id="b1", owner_id="u1", space_id=42)
+
+    repository.update_space_by_owner.assert_not_called()
+    quota.guard_add.assert_called_once_with(owner_id="u1", space_id=42)

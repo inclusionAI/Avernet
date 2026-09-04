@@ -36,6 +36,9 @@ class ChannelEngineOverridesReader:
         """Active DingTalk channels whose ``stage`` ∈ ``accept_stages``, mapped to
         ``{"channels": {"dingding": {"enabled": True, "accounts": [...]}}}``.
 
+        ``binding_mode="bcn_gateway"`` rows are skipped: their credentials ride in
+        BCS, not the plugin direct-connect ``channels`` payload.
+
         Returns ``{}`` when the bot has no matching active channels, so the artifact
         keeps its default (no ``channels`` key).
 
@@ -57,6 +60,10 @@ class ChannelEngineOverridesReader:
         seen_client_ids: set[str] = set()
         for record in records:
             if record.status != "1" or record.stage not in accept_stages:
+                continue
+            if record.config.get("binding_mode") == "bcn_gateway":
+                # bcn_gateway rows ride in BCS, not the engine_overrides payload
+                # (channels.dingding is the plugin direct-connect shape).
                 continue
             account = self._map_channel_account(record.config)
             client_id = account.get("client_id")

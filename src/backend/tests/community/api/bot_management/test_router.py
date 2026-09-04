@@ -1700,6 +1700,8 @@ class TestCreateBot:
             bot_id="default",
             engine_type="teclaw",
             bot_name="NewBot",
+            space_id=None,
+            space_quota=False,
         )
         passport.apply_first_agent_passport.assert_not_called()
         passport.apply_agent_passport.assert_not_called()

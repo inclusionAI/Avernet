@@ -32,6 +32,7 @@ from agentclaw.community.di.modules.bot_inventory_module import BotInventoryModu
 from agentclaw.community.di.modules.bot_management_module import BotManagementModule
 from agentclaw.community.di.modules.manifest_fetch_module import ManifestFetchModule
 from agentclaw.community.di.modules.bot_public_module import BotPublicModule
+from agentclaw.community.di.modules.bot_quota_module import BotQuotaModule
 from agentclaw.community.di.modules.task_module import TaskModule
 from agentclaw.community.di.modules.caller_identity_module import CallerIdentityModule
 from agentclaw.community.di.modules.channel_module import ChannelModule
@@ -117,6 +118,7 @@ def build_injector(
         SystemConfigModule(),
         CommonConfigModule(),
         BotManagementModule(),
+        BotQuotaModule(),
         ManifestFetchModule(),
         BotInventoryModule(),
         SkillsPoolModule(),

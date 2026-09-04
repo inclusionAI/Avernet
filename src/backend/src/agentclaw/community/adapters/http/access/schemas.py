@@ -33,6 +33,12 @@ class SetBotsCeilingRequest(BaseModel):
     ceiling: int = Field(..., gt=0, description="BOT count ceiling (must be > 0)")
 
 
+class SetSpaceBotsCeilingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ceiling: int = Field(..., gt=0, description="Team Space BOT count ceiling")
+
+
 class UserListCorrectionRequest(BaseModel):
     """One authenticated correction of a current-environment user-list entry."""
 

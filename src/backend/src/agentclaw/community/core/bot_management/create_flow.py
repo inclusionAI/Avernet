@@ -23,6 +23,10 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+from agentclaw.community.core.bot_management.create_context import (
+    BotCreateContext,
+    BotCreateDeploymentMode as BotCreateDeploymentMode,
+)
 from agentclaw.community.core.bot_management.engines.provisioning import (
     BotCreateTemplateValidationMode,
     PreparedBotCreate,
@@ -66,21 +70,6 @@ if TYPE_CHECKING:
     from agentclaw.community.plugin_api.passport import PassportPlugin
 
 logger = get_logger()
-
-
-class BotCreateDeploymentMode(StrEnum):
-    """Deployment boundary relevant to Bot creation policy."""
-
-    CLOUD = "cloud"
-    LOCAL = "local"
-
-
-@dataclass(frozen=True)
-class BotCreateContext:
-    """Caller-resolved business context required by creation policy."""
-
-    deployment_mode: BotCreateDeploymentMode
-    space_kind: str
 
 
 def _reject_mixed_create_sources(spec: BotCreateSpec) -> None:
@@ -555,6 +544,8 @@ def create_bot_with_authorization(
         bot_id=bot_id,
         engine_type=spec.engine_type,
         bot_name=bot_name,
+        space_id=spec.space_id,
+        space_quota=context.space_quota,
     )
 
     passport_result = _apply_passport(
@@ -623,6 +614,7 @@ def create_bot_with_authorization(
         template_config=spec.template_config,
         cookie=cookie,
         space_id=spec.space_id,
+        space_quota=context.space_quota,
     )
 
     _record_owner_relationship(
@@ -708,6 +700,8 @@ def submit_bot_creation_with_manifest(
         bot_id=bot_id,
         engine_type=spec.engine_type,
         bot_name=bot_name,
+        space_id=spec.space_id,
+        space_quota=context.space_quota,
     )
 
     # Raises ManifestValidationError with every reason at once. Before Passport.
@@ -865,8 +859,7 @@ def creation_spec_to_payload(
         "template_validation_mode": spec.template_validation_mode.value,
         "space_id": spec.space_id,
         "engine_properties": spec.engine_properties,
-        "deployment_mode": context.deployment_mode.value,
-        "space_kind": context.space_kind,
+        **context.as_payload(),
     }
 
 
@@ -892,10 +885,7 @@ def creation_spec_from_payload(
             space_id=payload.get("space_id"),
             engine_properties=payload.get("engine_properties") or {},
         ),
-        BotCreateContext(
-            deployment_mode=BotCreateDeploymentMode(payload["deployment_mode"]),
-            space_kind=payload["space_kind"],
-        ),
+        BotCreateContext.from_payload(payload),
     )
 
 
@@ -990,6 +980,7 @@ def complete_bot_authorization(
         cookie=cookie,
         space_id=spec.space_id,
         provision=provision,
+        space_quota=context.space_quota,
     )
 
     _record_owner_relationship(

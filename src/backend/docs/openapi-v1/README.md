@@ -1323,7 +1323,7 @@ the other six: this is what "done" looks like per category.
 | POST | `/openapi/v1/bots` | Create a bot; may need Passport authorization | `201 Envelope[Bot]` or `202 Envelope[BotAuthPending]` |
 | GET | `/openapi/v1/bots` | List caller's bots (`keyword`, `engine`, `status`, paged) | `Envelope[Page[Bot]]` |
 | GET | `/openapi/v1/bots/check-name` | Bot-name availability (`name`) | `Envelope[NameCheck]` |
-| GET | `/openapi/v1/bots/ceiling` | Bot-creation quota ceiling | `Envelope[Ceiling]` |
+| GET | `/openapi/v1/bots/ceiling` | Selected Space's Bot ceiling | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | Bot details | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}` | Update bot (engine immutable) | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}/space` | Change the Bot's owning Business Space | `Envelope[BotSpaceAssignment]` |
@@ -1342,6 +1342,26 @@ the other six: this is what "done" looks like per category.
 | PUT | `/openapi/v1/bots/{bot_id}/config-manifest` | Set/replace it; all-or-nothing, `422` lists every violation | `Envelope[ConfigManifest]` |
 | DELETE | `/openapi/v1/bots/{bot_id}/config-manifest` | Clear it | `Envelope[Deleted]` |
 | GET | `/openapi/v1/bots/{bot_id}/config-manifest/capabilities` | Which manifest constructs this bot accepts | `Envelope[ConfigManifestCapabilities]` |
+
+#### Space-scoped Bot quota
+
+Cloud Bot creation is charged to the selected Business Space. Personal Space
+reuses the owner's existing per-user `bots_ceiling` policy and includes both its
+numeric Space rows and legacy `space_id IS NULL` rows. Team Space counts every
+owner's non-deleted cloud Bot assigned to that exact Space, defaults to 20, and
+may be overridden independently through the operator-only
+`PUT /api/v1/access/spaces/{space_id}/bots-ceiling`; `DELETE` removes that
+override and restores 20. Desktop Bots do not consume either quota.
+
+The public create, authorization-completion, manifest-create, and move-in paths
+check capacity against the target Space. The final count and database write are
+serialized by a short Space-scoped distributed lock, so parallel requests
+cannot both consume the last slot. Existing over-limit Spaces remain readable
+and operable; only a new create or move-in is refused. A quota refusal is a 409
+whose `data` includes the Space identity plus its `ceiling` and current `used`
+count; unavailable quota coordination fails closed with 503. The
+legacy `/api` creation path is unchanged and retains its prior owner/device
+checks.
 
 #### Creating an Application Coding Bot
 

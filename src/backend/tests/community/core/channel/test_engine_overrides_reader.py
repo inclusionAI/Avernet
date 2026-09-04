@@ -210,3 +210,41 @@ def test_enabled_flag_present_when_accounts_exist():
         user_id="user1", bot_id="bot1", accept_stages={"verify"}
     )
     assert result["channels"]["dingding"]["enabled"] is True
+
+
+# ── binding mode ────────────────────────────────────────────────────────
+
+
+def test_bcn_gateway_rows_are_skipped():
+    """bcn_gateway 行不进 engine_overrides —— 凭证在 BCS 侧，不在引擎直连配置。"""
+    records = [
+        _record(
+            client_id="bcn-1",
+            stage="draft",
+            config={"binding_mode": "bcn_gateway"},
+        )
+    ]
+    reader, _ = _reader(records)
+    result = reader.overrides_for_stage(
+        user_id="user1", bot_id="bot1", accept_stages=DRAFT_STAGES
+    )
+    assert result == {}
+
+
+def test_plugin_rows_still_delivered():
+    """插件直连行（缺省或显式 binding_mode=plugin）照常进入 channels 载荷。"""
+    records = [
+        _record(client_id="implicit", stage=None),
+        _record(
+            client_id="explicit",
+            stage="draft",
+            config={"binding_mode": "plugin"},
+        ),
+    ]
+    reader, _ = _reader(records)
+    result = reader.overrides_for_stage(
+        user_id="user1", bot_id="bot1", accept_stages=DRAFT_STAGES
+    )
+    assert "dingding" in result["channels"]
+    assert result["channels"]["dingding"]["enabled"] is True
+    assert {a["client_id"] for a in _accounts(result)} == {"implicit", "explicit"}

@@ -86,6 +86,21 @@ class BcnConfig:
 
 
 @dataclass(frozen=True)
+class BcsBindingConfig:
+    """BCS channel-binding orchestration endpoint (yaml ``bcs_binding`` block).
+
+    Neutral empty defaults: the community build embeds no BCS host or service
+    token; corp overlays provide them. Empty ``base_url`` ⇒ the client raises
+    :class:`ChannelSyncError` on use, so ``bcn_gateway`` channels are
+    corp-overlay-only.
+    """
+
+    base_url: str = ""
+    service_token: str = ""
+    timeout_seconds: float = 10.0
+
+
+@dataclass(frozen=True)
 class GatewayConfig:
     """Public API gateway host (the ``gateway`` user_config block).
 

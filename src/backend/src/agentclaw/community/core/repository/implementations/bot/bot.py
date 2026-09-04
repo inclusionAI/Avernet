@@ -53,6 +53,7 @@ from agentclaw.community.core.repository.implementations.bot.device_provider imp
 from agentclaw.community.core.repository.implementations.bot.reachability import (
     BotReachabilityQueries,
 )
+from agentclaw.community.core.repository.implementations.bot.quota import BotQuotaQueries
 from agentclaw.community.core.workspace.constants import SUPPORTED_ENGINE_TYPES
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.database import DatabasePlugin
@@ -94,6 +95,7 @@ def _as_naive(dt: datetime) -> datetime:
 class BotRepository(
     BotDeviceProviderQueries,
     BotReachabilityQueries,
+    BotQuotaQueries,
     BotRepositoryProtocol,
 ):
     """Unified ORM ``BotRepository`` implementation."""
