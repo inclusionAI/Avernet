@@ -21,7 +21,10 @@
             "contextWindow": 200000,
             "maxTokens": 8192
           }
-        ]
+        ],
+        "request": {
+          "allowPrivateNetwork": true
+        }
       }
     }
   },
