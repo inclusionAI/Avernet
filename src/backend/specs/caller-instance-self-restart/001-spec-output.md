@@ -2,7 +2,7 @@
 agent: tc-review
 status: approved-design
 created: 2026-09-04
-baseline: origin/dev@6ecb42630227da0a2030a051659312ac88dea86c
+baseline: github/REL20260904@3c3aeaf109638ea5e1d917a31dd0fd38d971e5ac
 repository: inclusionAI/Avernet
 ---
 
@@ -230,8 +230,8 @@ Reviewer 必须检查：
 
 本次源码位于 Avernet 子模块，采用双仓交付：
 
-1. 在独立 Avernet worktree 分支 `feat/caller-instance-self-restart` 完成源码和测试。
-2. 源码必须推送到 GitHub `inclusionAI/Avernet` 并创建 Avernet PR；不得向 `mirrors/Avernet` 推送源码。
+1. 在独立 Avernet worktree 分支 `rebase/caller-instance-self-restart-on-REL20260904` 完成源码和测试。
+2. 源码必须推送到 GitHub `inclusionAI/Avernet` 并以 `REL20260904` 为 base 创建 Avernet PR；不得向 `mirrors/Avernet` 推送源码。
 3. Avernet PR/CI 通过且提交已同步到 `.gitmodules` 配置的镜像后，才在 OCB 独立 worktree 更新 `ocb-public` git gitlink。
 4. OCB PR 只包含 gitlink 和确有必要的 Corp 回归，不复制 Avernet 源文件。
 5. 部署/预发 QA 必须在用户审核代码后进行；本轮编码完成不自动触发真实 `force_upgrade=true`。

@@ -9,8 +9,8 @@ iteration: 2
 
 ## Worktree 信息
 - 路径: /Users/helloworld/Desktop/codes/teamclaw_worktrees/Avernet_worktrees/caller-instance-self-restart
-- 分支: feat/caller-instance-self-restart
-- 基线: origin/dev@6ecb42630227da0a2030a051659312ac88dea86c
+- 分支: rebase/caller-instance-self-restart-on-REL20260904
+- 最终 PR 基线: github/REL20260904@3c3aeaf109638ea5e1d917a31dd0fd38d971e5ac
 - 复用既有 worktree，未创建新 worktree；保留并更新 `001-spec-output.md` 的 iteration 2 架构约束。
 
 ## Iteration 2 修复摘要
@@ -131,3 +131,12 @@ uv run pytest \
 - 003 必修：API/core Protocol 双权威 → owning core Protocol 单一声明，API 恢复直接 re-export，并加入 conformance gate。
 - 003b 回归：core 未声明 `core.access` 依赖 → Router 解析角色后显式传 `is_super_admin`，core import 删除。
 - 003b 回归：Endpoint 禁止 mock/patch → 日志测试迁移到 API Router 测试目录，Endpoint 只保留真实 world/DI 用例。
+
+
+## REL20260904 Rebase 与最终本地门禁
+
+- 原功能提交 `e23e3ab58` 仅作为 topic，使用 `git rebase --onto github/REL20260904 6ecb42630227da0a2030a051659312ac88dea86c` 重放。
+- Rebase 后功能提交：`abb5fa5608e10d3e648005d938f3eef35bb3ce2a`。
+- `github/REL20260904..HEAD` 仅包含本任务 1 个功能提交，没有夹带 `dev` 的其他提交。
+- REL 基线 Backend CI：case pass `100.00% (17127/17127)`；line coverage `88.55%`；change-line coverage `100.00% (44/44)`；`backend CI gate passed`。
+- Coverage pytest：`17068 passed, 59 skipped, 0 failed`。Acceptance/live Singlebox 场景未启动，不作为本地通过证据。ouchers
