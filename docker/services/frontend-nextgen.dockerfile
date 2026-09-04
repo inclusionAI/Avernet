@@ -7,7 +7,18 @@ WORKDIR /app
 
 # Build context is the repository root, as required by docker/build-image.sh.
 COPY src/frontend-nextgen/package.json src/frontend-nextgen/package-lock.json ./
-RUN npm ci --registry=https://registry.npmjs.org
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+RUN --mount=type=cache,id=frontend-nextgen-npm,target=/root/.npm,sharing=locked \
+    npm ci \
+      --registry="${NPM_REGISTRY}" \
+      --replace-registry-host=always \
+      --prefer-offline \
+      --no-audit \
+      --fund=false \
+      --fetch-retries=5 \
+      --fetch-retry-mintimeout=20000 \
+      --fetch-retry-maxtimeout=120000 \
+      --fetch-timeout=300000
 
 COPY src/frontend-nextgen/ ./
 RUN npm run build
