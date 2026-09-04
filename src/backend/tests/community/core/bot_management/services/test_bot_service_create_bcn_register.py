@@ -1,7 +1,7 @@
 """Unit tests for BCN provider registration during create_bot.
 
 create_bot 在 Bot 落库后、设备分配前，应按与 start_bot 相同的条件注册 BCN Provider:
-- active_engine == "claude_code" 且 template_type == "normalCC"
+- active_engine == "claude_code" 且 template_type 为 "normalCC"、None 或空字符串
 - active_engine == "claude_code" 且 template_type == "personalCoding"
 - active_engine == "aicoding" 且 template_type == "personalCoding"
 - active_engine == "teclaw" (所有 bot_type)
@@ -305,22 +305,45 @@ class TestCreateBotBcnRegister:
             template_type="applicationCoding",
         ) is False
 
-    def test_claude_code_missing_template_type_does_not_trigger_bcn_register(self):
-        """claude_code + 缺失 template_type 创建时不应触发 BCN 注册。"""
+    @pytest.mark.parametrize(
+        ("template_type", "template_type_state"),
+        [(None, "none"), ("", "empty")],
+        ids=["none", "empty"],
+    )
+    def test_claude_code_missing_template_type_triggers_bcn_register(
+        self,
+        template_type: str | None,
+        template_type_state: str,
+        caplog: pytest.LogCaptureFixture,
+    ):
+        """claude_code + 缺失 template_type 与 normalCC 等价。"""
+        caplog.set_level("INFO")
         svc = _make_service()
         _attach_device_service(svc)
+        svc._bcn_service.register_provider_bot.return_value = {
+            "bot_uuid": "u1",
+            "bot_runtime_token": "tok",
+        }
 
         with patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=True):
             svc.create_bot(
                 user_id="u1",
                 nick_name="nick",
                 bot_name="cc-no-template",
-                bot_id="cc-none-1",
+                bot_id="cc-missing-template-1",
                 engine_type="claude_code",
                 bot_type="personal",
+                template_type=template_type,
             )
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="cc-missing-template-1",
+            owner_workno="u1",
+            name="cc-no-template",
+            summary="",
+        )
+        assert "event=legacy_claude_code_missing_template_type" in caplog.text
+        assert f"template_type_state={template_type_state}" in caplog.text
 
     def test_teclaw_personal_triggers_bcn_register(self):
         """teclaw 引擎 personal bot 创建时应触发 BCN 注册（与 claude_code 一致）。"""

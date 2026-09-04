@@ -381,9 +381,13 @@ class TestStartBotBcnRegister:
             ext_update={"bcn_registered": True},
         )
 
-    def test_claude_code_missing_template_type_does_not_trigger_bcn_register(self):
+    def test_claude_code_missing_template_type_triggers_bcn_register(self):
         svc = _make_service()
         svc._bcn_service = MagicMock()
+        svc._bcn_service.register_provider_bot.return_value = {
+            "bot_uuid": "u1",
+            "bot_runtime_token": "tok",
+        }
         bot = _make_bot()
         bot["active_engine"] = "claude_code"
         svc._repository.get_by_id_and_owner.side_effect = [bot, bot]
@@ -392,7 +396,12 @@ class TestStartBotBcnRegister:
              patch.object(BotService, "_is_claude_code_bcn_register_enabled", return_value=True):
             svc.start_bot(bot_id="bot001", user_id="user001")
 
-        svc._bcn_service.register_provider_bot.assert_not_called()
+        svc._bcn_service.register_provider_bot.assert_called_once_with(
+            teamclaw_bot_uuid="bot001",
+            owner_workno="user001",
+            name="TestBot",
+            summary="",
+        )
 
     def test_non_claude_code_does_not_trigger_bcn_register(self):
         svc = _make_service()
