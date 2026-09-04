@@ -23,7 +23,8 @@ use bcs_service_api::{
     GroupDetailCommand, GroupDetailResult, GroupListCommand, GroupListEntry, GroupListResult,
     GroupManagementService, GroupMessage, GroupParticipantModeResult, GroupParticipantView,
     GroupQueryService, GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus,
-    GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand,
+    GroupStatusCommand, GroupTerminateCommand, GroupUpdateLabelCommand, InitialGroupRun,
+    InitialGroupRunActivityKind, InitialGroupRunState,
     GroupUpdateWorkspaceCommand, GroupWorkspaceQueryCommand, GroupWorkspaceResult,
     HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, HumanResponseSource,
     ListPendingHumanNodesCommand, Participant, ParticipantKind, ParticipantMode, ParticipantRole,
@@ -94,6 +95,7 @@ fn static_bot_auth_chain(bot_uuid: &str) -> Arc<AuthPluginChain> {
 struct RecordingGroupManagement {
     create_calls: Mutex<Vec<GroupCreateCommand>>,
     latest_running_session_id: Mutex<Option<String>>,
+    initial_run: Mutex<Option<InitialGroupRun>>,
     create_dm_calls: Mutex<Vec<DmCreateCommand>>,
     status_calls: Mutex<Vec<GroupStatusCommand>>,
     add_member_calls: Mutex<Vec<GroupAddMemberCommand>>,
@@ -484,6 +486,7 @@ impl GroupManagementService for RecordingGroupManagement {
     ) -> Result<GroupDetailResult, bcs_service_api::GroupUseCaseError> {
         let mut result = detail_from_create(&cmd);
         result.latest_running_session_id = self.latest_running_session_id.lock().await.clone();
+        result.initial_run = self.initial_run.lock().await.clone();
         self.create_calls.lock().await.push(cmd);
         Ok(result)
     }
@@ -1020,6 +1023,14 @@ async fn session_state_machine_routes_require_bot_authentication() {
 #[tokio::test]
 async fn post_groups_delegates_to_group_management_create_and_preserves_response_shape() {
     let (app, recorder, _temp_dir) = test_app().await;
+    *recorder.latest_running_session_id.lock().await = Some("session-initial".to_string());
+    *recorder.initial_run.lock().await = Some(InitialGroupRun {
+        run_id: "run-initial".to_string(),
+        bot_uuid: "driver-bot".to_string(),
+        activity_kind: InitialGroupRunActivityKind::GroupBootstrap,
+        state: InitialGroupRunState::Running,
+        started_at: "2026-09-04T10:00:00Z".to_string(),
+    });
 
     let response = app
         .oneshot(
@@ -1065,6 +1076,12 @@ async fn post_groups_delegates_to_group_management_create_and_preserves_response
     );
     assert_eq!(json["context"], "Coordinate the release");
     assert_eq!(json["created"], true);
+    assert_eq!(json["session_id"], "session-initial");
+    assert_eq!(json["initial_session_id"], "session-initial");
+    assert_eq!(json["initial_run"]["run_id"], "run-initial");
+    assert_eq!(json["initial_run"]["bot_uuid"], "driver-bot");
+    assert_eq!(json["initial_run"]["activity_kind"], "group_bootstrap");
+    assert_eq!(json["initial_run"]["state"], "running");
     assert!(json.get("opening_message").is_none());
     assert!(json.get("scene_group_id").is_none());
     assert!(json.get("scene_group_name").is_none());

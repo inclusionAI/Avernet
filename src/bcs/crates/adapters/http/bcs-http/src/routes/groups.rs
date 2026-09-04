@@ -2094,6 +2094,7 @@ fn build_group_chat_url(
 
 fn group_detail_to_create_json(mut result: GroupDetailResult, created: bool) -> Value {
     let opening_message = result.opening_message.take();
+    let initial_session_id = result.latest_running_session_id.take();
     let mut response = serde_json::json!({
         "id": result.group_id,
         "context": result.context,
@@ -2101,7 +2102,9 @@ fn group_detail_to_create_json(mut result: GroupDetailResult, created: bool) -> 
         "participants": result.participants.iter().map(|p| &p.bot_uuid).collect::<Vec<_>>(),
         "context_injected": result.context_injected,
         "chat_url": result.chat_url,
-        "session_id": result.latest_running_session_id,
+        "session_id": initial_session_id.clone(),
+        "initial_session_id": initial_session_id,
+        "initial_run": result.initial_run,
         "group_kind": result.group_kind,
         "dm_pair_key": result.dm_pair_key,
         "created": created
