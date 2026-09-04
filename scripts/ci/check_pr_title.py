@@ -16,10 +16,10 @@ ALLOWED_TYPES = (
     "build",
     "chore",
 )
-OPTIONAL_SCOPE = r"(?:\([^()\s](?:[^()\r\n]*[^()\s])?\))?"
+REQUIRED_SCOPE = r"\([^()\s](?:[^()\r\n]*[^()\s])?\)"
 TITLE_PATTERN = re.compile(
     rf"(?:{'|'.join(ALLOWED_TYPES)})"
-    rf"{OPTIONAL_SCOPE}: "
+    rf"{REQUIRED_SCOPE}: "
     r"\S(?:.*\S)?"
 )
 
@@ -48,12 +48,10 @@ def main() -> int:
 
     allowed_types = " | ".join(ALLOWED_TYPES)
     print(f"ERROR: invalid PR title: {args.title}")
-    print("Expected: <type>: <concise outcome>")
-    print("      or: <type>(<scope>): <concise outcome>")
+    print("Expected: <type>(<scope>): <concise outcome>")
     print(f"Allowed types: {allowed_types}")
-    print("Scope is optional. When present, it must be non-empty and enclosed in ().")
+    print("Scope is required. It must be non-empty and enclosed in ().")
     print("Examples:")
-    print("  feat: add whitelist observed state")
     print("  feat(backend): add whitelist observed state")
     print("  fix(bcs): reject routing updates for unknown bot ids")
     print("  docs(arch): document plugin protocol conformance shape")

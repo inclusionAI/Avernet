@@ -142,9 +142,9 @@ Conformance tests are mandatory for boundary contracts.
 PRs affecting boundaries must include completed structural analysis.
 
 ### Required PR fields
-- title matching `<type>: <concise outcome>` or
-  `<type>(<scope>): <concise outcome>` with an allowed type from `feat`, `fix`,
-  `refactor`, `docs`, `test`, `ci`, `build`, or `chore`; scope is optional
+- title matching `<type>(<scope>): <concise outcome>` with an allowed type from
+  `feat`, `fix`, `refactor`, `docs`, `test`, `ci`, `build`, or `chore`; scope is
+  required
 - whether a contract changed
 - if changed, what kind of contract
 - affected consumers

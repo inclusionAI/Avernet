@@ -16,8 +16,6 @@ CHECKER = REPO_ROOT / "scripts/ci/check_pr_title.py"
 class PullRequestTitleTest(unittest.TestCase):
     def test_accepts_repository_title_convention(self) -> None:
         valid_titles = (
-            "feat: add whitelist observed state",
-            "fix: 修复沙箱环境变量配置丢失问题",
             "feat(backend): add whitelist observed state",
             "fix(aliyun_ack): 修复沙箱环境变量配置丢失问题",
             "docs(bot-config-manifest): add Chinese user manual",
@@ -35,6 +33,8 @@ class PullRequestTitleTest(unittest.TestCase):
     def test_rejects_non_conforming_titles(self) -> None:
         invalid_titles = (
             "Dev haoqian 20260903",
+            "feat: add whitelist observed state",
+            "fix: 修复沙箱环境变量配置丢失问题",
             "fix openapi iam-token aliyun model",
             "perf(bcs): unsupported type",
             "Feat(bcs): uppercase type",
@@ -61,8 +61,10 @@ class PullRequestTitleTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn("Expected: <type>: <concise outcome>", result.stdout)
-        self.assertIn("or: <type>(<scope>): <concise outcome>", result.stdout)
+        self.assertIn(
+            "Expected: <type>(<scope>): <concise outcome>", result.stdout
+        )
+        self.assertIn("Scope is required.", result.stdout)
         self.assertIn(
             "feat | fix | refactor | docs | test | ci | build | chore",
             result.stdout,
