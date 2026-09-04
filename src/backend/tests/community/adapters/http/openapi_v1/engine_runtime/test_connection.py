@@ -18,6 +18,10 @@ from agentclaw.community.api.engine_connection_service import (
     EngineConnectionServiceProtocol,
 )
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
+from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+from agentclaw.community.api.human_bot_friendship_service import (
+    HumanBotFriendshipServiceProtocol,
+)
 from agentclaw.community.core.engine_runtime.errors import EngineDeviceNotReadyError
 from agentclaw.community.core.engine_runtime.models import (
     ConnectionResult,
@@ -75,11 +79,13 @@ def connections(relay):
 
 
 @pytest.fixture
-def client(relay, connections):
+def client(relay, connections, friendships, expert):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineRuntimeRelayProtocol, to=relay)
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
+            binder.bind(ExpertChatServiceProtocol, to=expert)
 
     app = FastAPI()
     app.include_router(router)
@@ -153,3 +159,29 @@ def test_the_service_is_called_with_the_verified_caller_and_named_owner(
         "caller_id": OWNER,
         "stage": "draft",
     }
+
+
+def test_explicit_friend_connection_is_session_scoped(
+    client, connections, friendships, expert
+):
+    friendships.allowed = True
+
+    data = ok(
+        client.get(
+            URL,
+            params={"f_user_id": "friend-1", "session_id": "friend-session"},
+        )
+    )
+
+    assert data["session_id"] == "friend-session"
+    assert data["connection"]["ws_url"].startswith("wss://")
+    assert connections.calls == []
+    connect = next(call for call in expert.calls if call[0] == "connect_chat_session")
+    assert connect[2]["user_id"] == "friend-1"
+
+
+def test_explicit_friend_connection_requires_session_id(client, friendships, expert):
+    friendships.allowed = True
+    response = client.get(URL, params={"f_user_id": "friend-1"})
+    assert fails(response, 404)["message"] == "Not found"
+    assert expert.calls == []

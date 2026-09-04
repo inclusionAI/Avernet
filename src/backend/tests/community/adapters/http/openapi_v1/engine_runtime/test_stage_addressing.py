@@ -23,10 +23,6 @@ from tests.community.adapters.http.openapi_v1.conftest import public_document
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import (
     RuntimeStage,
 )
-from agentclaw.community.adapters.http.openapi_v1.converter_human_chat_policy import (
-    BASE as HUMAN_CHAT_BASE,
-    OPERATIONS as HUMAN_CHAT_OPERATIONS,
-)
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     router as sessions_router,
 )
@@ -215,10 +211,6 @@ _OWNER_ADDRESSED_ELSEWHERE = {
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/activate"),
     ("post", "/openapi/v1/bots/{bot_id}/mcps/{server_code}/deactivate"),
 }
-_OWNER_ADDRESSED_ELSEWHERE |= {
-    (method.lower(), HUMAN_CHAT_BASE + suffix)
-    for method, suffix in HUMAN_CHAT_OPERATIONS
-}
 
 
 @pytest.fixture
@@ -301,6 +293,14 @@ def test_the_connection_build_receives_the_named_stage(relay):
     from agentclaw.community.api.engine_connection_service import (
         EngineConnectionServiceProtocol,
     )
+    from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
+    from agentclaw.community.api.human_bot_friendship_service import (
+        HumanBotFriendshipServiceProtocol,
+    )
+    from tests.community.adapters.http.openapi_v1.engine_runtime.conftest import (
+        FakeExpertChat,
+        FakeFriendships,
+    )
 
     relay.set_bot_type("service")
     connections = op._Connections(relay)
@@ -308,6 +308,8 @@ def test_the_connection_build_receives_the_named_stage(relay):
     class _M(Module):
         def configure(self, binder):
             binder.bind(EngineConnectionServiceProtocol, to=connections)
+            binder.bind(HumanBotFriendshipServiceProtocol, to=FakeFriendships())
+            binder.bind(ExpertChatServiceProtocol, to=FakeExpertChat())
 
     app = FastAPI()
     app.include_router(connection_router)
@@ -446,6 +448,45 @@ def test_neither_parameter_is_ever_a_body_field_or_a_path_segment():
                     f"{field} is a body field on {method.upper()} {path}"
                 )
         assert "{owner_id}" not in path and "{stage}" not in path
+
+
+def test_friend_user_id_is_optional_and_only_on_human_chat_capable_operations():
+    expected = {
+        ("get", "/openapi/v1/bots/{bot_id}/sessions"),
+        ("post", "/openapi/v1/bots/{bot_id}/sessions"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/favorites"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("patch", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}"),
+        ("get", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/messages"),
+        ("put", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
+        ("delete", "/openapi/v1/bots/{bot_id}/sessions/{session_id}/favorite"),
+        ("get", "/openapi/v1/bots/{bot_id}/connection"),
+        ("get", "/openapi/v1/bots/{bot_id}/models"),
+        ("get", "/openapi/v1/bots/{bot_id}/models/{model_id}"),
+        # Retiring component-first aliases re-register the same endpoint
+        # functions, so the optional selector is visible there as well. Calls
+        # that omit it retain their frozen behavior.
+        ("get", "/openapi/v1/bots/sessions/{bot_id}"),
+        ("post", "/openapi/v1/bots/sessions/{bot_id}"),
+        ("get", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"),
+        ("patch", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"),
+        ("delete", "/openapi/v1/bots/sessions/{bot_id}/{session_id}"),
+        ("get", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"),
+        ("delete", "/openapi/v1/bots/sessions/{bot_id}/{session_id}/messages"),
+        ("get", "/openapi/v1/bots/connection/{bot_id}"),
+        ("get", "/openapi/v1/bots/models/{bot_id}"),
+        ("get", "/openapi/v1/bots/models/{bot_id}/{model_id}"),
+    }
+    carrying = set()
+    for path, method, operation in _operations(_schema()):
+        params = _query_params(operation)
+        if "f_user_id" in params:
+            assert not params["f_user_id"].get("required", False), path
+            carrying.add((method, path))
+        assert "/human-chat/" not in path
+    assert carrying == expected
 
 
 def test_the_409_is_documented_on_every_engine_runtime_operation():

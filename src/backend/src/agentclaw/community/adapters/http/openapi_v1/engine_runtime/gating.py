@@ -60,13 +60,10 @@ async def resolve_operable_bot(
     other two.
 
     What *could* be skipped is the relay's ``require_bot_operator``, and it
-    stays on purpose. The **deferred** session handlers turn its refusal into
-    their friend fallback (``sessions/router.py:_resolve_session_backend``):
-    without it this function would return facts for a stranger, and the draft
-    stage would hand them a session. A "the seam already checked" flag to skip
-    it was considered and rejected — a bypass argument on an authorization
-    function is the mechanism this feature exists to remove, and it would be
-    spent to save one row read and, for collaborators, one indexed lookup.
+    stays on purpose. A "the seam already checked" flag to skip it was
+    considered and rejected — a bypass argument on an authorization function
+    is the mechanism this feature exists to remove, and it would be spent to
+    save one row read and, for collaborators, one indexed lookup.
 
     The redundancy therefore ends when the session rows migrate, not through a
     cache. Raised as a P2 in #1366 round 7.

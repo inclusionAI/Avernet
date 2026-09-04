@@ -29,9 +29,6 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import require_pr
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions import (
     router as sessions_router,
 )
-from agentclaw.community.adapters.http.openapi_v1.human_chat import (
-    router as human_chat_router,
-)
 from agentclaw.community.api.bot_app_grant_service import BotAppGrantServiceProtocol
 from agentclaw.community.api.engine_runtime_service import EngineRuntimeRelayProtocol
 from agentclaw.community.api.expert_chat_service import ExpertChatServiceProtocol
@@ -160,17 +157,17 @@ def _sessions(client, **params):
     return client.get(f"/openapi/v1/bots/{BOT}/sessions", params=params)
 
 
-def test_granted_application_can_use_human_chat(
+def test_granted_application_can_use_explicit_friend_chat(
     app_client, grants, friendships, expert
 ):
     """The grant admits the app; BCN still adjudicates its delegating user."""
     grants.grant(app_id=APP_ID, bot_id=BOT, user_id=COLLAB, owner_id=OWNER)
     friendships.allowed = True
-    client = app_client(router=human_chat_router)
+    client = app_client(router=sessions_router)
 
     response = client.get(
-        f"/openapi/v1/bots/{BOT}/human-chat/sessions",
-        params={"owner_id": OWNER},
+        f"/openapi/v1/bots/{BOT}/sessions",
+        params={"owner_id": OWNER, "f_user_id": COLLAB},
     )
 
     assert response.status_code == 200, response.json()
@@ -210,9 +207,7 @@ def test_losing_the_collaboration_ends_the_applications_access(
     refused = _sessions(client, owner_id=OWNER)
     assert refused.status_code == 404, "access ends immediately"
     assert (
-        grants.find(
-            bot_id=BOT, owner_id=OWNER, user_id=COLLAB, app_id=APP_ID
-        )
+        grants.find(bot_id=BOT, owner_id=OWNER, user_id=COLLAB, app_id=APP_ID)
         is not None
     ), "and it ends without the delegation being revoked"
 
@@ -247,9 +242,7 @@ def test_no_grant_is_refused(app_client, relay):
     assert _sessions(app_client()).status_code == 404
 
 
-def test_a_grant_from_another_user_does_not_admit_the_call(
-    app_client, relay, grants
-):
+def test_a_grant_from_another_user_does_not_admit_the_call(app_client, relay, grants):
     """The delegation is keyed on who made it, so someone else's is not yours."""
     grants.grant(app_id=APP_ID, bot_id=BOT, user_id="someone-else", owner_id=OWNER)
     relay.add_operator(COLLAB)

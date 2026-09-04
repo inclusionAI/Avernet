@@ -61,9 +61,10 @@ def test_status_publishes_only_stable_fields(engine_client, relay):
 
 def test_status_of_a_down_engine_is_not_an_error(engine_client, relay):
     relay.results = [EngineResult(data={**RAW_STATUS, "process": {"running": False}})]
-    assert ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))[
-        "running"
-    ] is False
+    assert (
+        ok(engine_client.get(f"/openapi/v1/bots/{BOT}/engine/status"))["running"]
+        is False
+    )
 
 
 # ── engine/capabilities ──────────────────────────────────────────────────────
@@ -143,9 +144,7 @@ def test_list_models(models_client, relay):
     relay.results = [
         EngineResult(
             data={
-                "models": [
-                    {"id": "openai/gpt-5.3", "name": "G", "provider": "openai"}
-                ],
+                "models": [{"id": "openai/gpt-5.3", "name": "G", "provider": "openai"}],
                 "total": 1,
             }
         )
@@ -153,6 +152,22 @@ def test_list_models(models_client, relay):
     data = ok(models_client.get(f"/openapi/v1/bots/{BOT}/models"))
     assert data["total"] == 1
     assert data["items"][0]["model_id"] == "openai/gpt-5.3"
+
+
+def test_owner_can_list_models_for_an_explicit_bcn_friend(
+    models_client, relay, friendships
+):
+    friendships.allowed = True
+    relay.results = [EngineResult(data={"models": [{"id": "model-1"}], "total": 1})]
+
+    data = ok(
+        models_client.get(
+            f"/openapi/v1/bots/{BOT}/models", params={"f_user_id": "friend-1"}
+        )
+    )
+
+    assert data["total"] == 1
+    assert friendships.calls[0]["human_id"] == "friend-1"
 
 
 def test_list_models_prefers_the_engines_total(models_client, relay):
@@ -193,9 +208,10 @@ def test_get_model_id_with_a_slash_survives_routing(models_client, relay):
 
 def test_unknown_model_is_404(models_client, relay):
     relay.results = [EngineResult(data=None)]
-    assert fails(models_client.get(f"/openapi/v1/bots/{BOT}/models/nope"), 404)[
-        "message"
-    ] == "Not found"
+    assert (
+        fails(models_client.get(f"/openapi/v1/bots/{BOT}/models/nope"), 404)["message"]
+        == "Not found"
+    )
 
 
 # ── shared behaviour ─────────────────────────────────────────────────────────
@@ -240,9 +256,7 @@ def test_relay_errors_are_enveloped(models_client, relay, exc, status):
         ("models_client", f"/openapi/v1/bots/{BOT}/models/openai/gpt-5.3"),
     ],
 )
-def test_a_service_bot_is_served_at_its_draft_device(
-    request, relay, client_name, path
-):
+def test_a_service_bot_is_served_at_its_draft_device(request, relay, client_name, path):
     """Every route serves a service bot at its DRAFT binding by default.
 
     A request that names no stage behaves exactly as before stages were
@@ -258,9 +272,7 @@ def test_a_service_bot_is_served_at_its_draft_device(
     assert all(c["stage"] == "draft" for c in relay.calls)
 
 
-def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
-    make_client, relay
-):
+def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(make_client, relay):
     """The flip of the old shared-bot 501: operators are adjudicated per
     caller — a collaborator reads engine state, a stranger's answer is
     byte-identical to a bot that does not exist."""
@@ -282,9 +294,7 @@ def test_a_collaborator_is_served_and_a_stranger_is_the_masked_404(
     assert refused["message"] == "Not found"
 
 
-def test_an_unknown_bot_type_gets_501_without_touching_the_device(
-    models_client, relay
-):
+def test_an_unknown_bot_type_gets_501_without_touching_the_device(models_client, relay):
     relay.set_bot_type("something-new")
     body = fails(models_client.get(f"/openapi/v1/bots/{BOT}/models"), 501)
     assert body["message"] == "Not supported for this bot type"

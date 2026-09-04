@@ -43,19 +43,6 @@ ADMISSION: dict[tuple[str, str], AdmissionMode] = {
     # Tenant-wide lookup returns display fields, never ownership or runtime internals.
     ("POST", "/openapi/v1/bots/metadata/queries"): AdmissionMode.OPEN,
     ("POST", "/openapi/v1/bots/{bot_id}/iam-token"): AdmissionMode.REFUSED,
-    # An application may act for the grant's user, but BCN friendship and
-    # caller-owned session checks still run inside the human-chat handler.
-    ("GET", "/openapi/v1/bots/{bot_id}/human-chat/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("POST", "/openapi/v1/bots/{bot_id}/human-chat/sessions"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/human-chat/sessions/favorites"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("PATCH", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}/connection"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("GET", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}/messages"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}/messages"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("PUT", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}/favorite"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
-    ("DELETE", "/openapi/v1/bots/{bot_id}/human-chat/sessions/{session_id}/favorite"): AdmissionMode.GRANT_CHECKED_ADDRESSED_BOT,
     # The item routes resolve the addressed owner from the asset and perform
     # the grant check against that exact Bot/owner pair in their handler.
     (

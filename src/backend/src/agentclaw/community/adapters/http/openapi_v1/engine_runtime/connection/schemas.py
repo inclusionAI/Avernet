@@ -67,4 +67,12 @@ class Connection(BaseModel):
     )
 
 
-__all__ = ["Connection", "Socket"]
+class FriendConnection(BaseModel):
+    """ExpertChat connection material for an explicitly addressed session."""
+
+    session_id: str
+    need_poll: bool = False
+    connection: dict[str, object] | None = None
+
+
+__all__ = ["Connection", "FriendConnection", "Socket"]
