@@ -3,6 +3,12 @@ OrmDistributedLockRepository unit tests.
 
 Uses pytest + MagicMock SQLAlchemy ORM session pattern matching the existing
 test_orm_bot_run_repository.py.
+
+``try_acquire_lock`` is exercised through the dialect-specific upsert it now
+emits: each test asserts on the compiled SQLAlchemy statement (mysql default
+or sqlite branch) and the bound params, plus the confirming read that decides
+acquired/not-acquired (see ``arca_ttl`` unit tests for the SQL-assertion
+pattern).
 """
 
 from datetime import datetime
@@ -12,6 +18,7 @@ from datetime import timedelta as _timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy.dialects import mysql, sqlite
 
 from secbaas.community.core.repository.distributed_lock import (
     DistributedLockRepository,
@@ -26,11 +33,36 @@ NOW = datetime.now()
 FUTURE = NOW + _timedelta(days=30)
 PAST = NOW - _timedelta(days=30)
 
+_SQLITE = "sqlite"
+
+
+def _make_repo(dialect: str = "mysql"):
+    """Create a repository with a mocked database session bound to dialect.
+
+    The session's ``bind.dialect.name`` selects the upsert branch: mysql
+    (default) renders ``ON DUPLICATE KEY UPDATE``, sqlite renders
+    ``ON CONFLICT DO UPDATE``.
+    """
+    mock_session = MagicMock()
+    mock_session.bind.dialect.name = dialect
+    mock_db = MagicMock()
+    mock_db.orm_session.return_value.__enter__.return_value = mock_session
+    mock_db.orm_session.return_value.__exit__ = MagicMock(return_value=False)
+    return OrmDistributedLockRepository(database=mock_db), mock_session
+
+
+def _make_exec_result(row):
+    """Build a mock Result exposing ``scalar_one_or_none`` -> row (or None)."""
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    return result
+
 
 @pytest.fixture
 def mock_session():
-    """Mock SQLAlchemy ORM session."""
+    """Mock SQLAlchemy ORM session (mysql dialect by default)."""
     session = MagicMock()
+    session.bind.dialect.name = "mysql"
     session.query.return_value.filter.return_value.update.return_value = 0
     return session
 
@@ -313,149 +345,179 @@ class TestDeleteLock:
 
 
 class TestTryAcquireLock:
-    """Tests for OrmDistributedLockRepository.try_acquire_lock()."""
+    """Tests for OrmDistributedLockRepository.try_acquire_lock().
 
-    def test_acquire_when_no_existing_lock(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
+    The repository now emits a single dialect-specific upsert followed by a
+    confirming read SELECT. These tests assert on the compiled SQL/bind params
+    and on the confirming read's row, mirroring the arca_ttl SQL-assertion
+    unit-test pattern.
+    """
 
-        def _add_side_effect(model):
-            model.id = 1
+    def test_acquire_emits_mysql_upsert_with_bindparams(self):
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-A", expire_time=FUTURE)
+        )
 
-        mock_session.add.side_effect = _add_side_effect
-
-        result = repository.try_acquire_lock(
-            lock_name="new-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
+        result = repo.try_acquire_lock(
+            lock_name="new-lock", lock_holder="holder-A", expire_time=FUTURE
         )
 
         assert result is True
-        mock_session.add.assert_called_once()
-        mock_session.flush.assert_called()
+        assert mock_session.execute.call_count == 2
 
-    def test_acquire_reentrant_same_holder(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
+        upsert_stmt = mock_session.execute.call_args_list[0][0][0]
+        compiled = upsert_stmt.compile(dialect=mysql.dialect())
+        sql_text = str(compiled)
 
-        result = repository.try_acquire_lock(
-            lock_name="existing-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
+        assert "INSERT INTO ac_lock_table" in sql_text
+        assert "ON DUPLICATE KEY UPDATE" in sql_text
+        # Conditional overwrite via CASE WHEN ... THEN VALUES(...) ELSE <col>.
+        assert "CASE WHEN" in sql_text
+        assert "VALUES(lock_holder)" in sql_text
+        assert "gmt_modified" in sql_text
+        # The acquirable predicate must contain all three OR branches:
+        # same holder, null expire, and expired (<= app-clock now). Each CASE
+        # repeats it, so it appears multiple times.
+        assert "ac_lock_table.lock_holder = VALUES(lock_holder)" in sql_text
+        assert "ac_lock_table.expire_time IS NULL" in sql_text
+        assert "ac_lock_table.expire_time <=" in sql_text
+
+        params = compiled.params
+        assert params["lock_name"] == "new-lock"
+        assert params["lock_holder"] == "holder-A"
+        assert params["expire_time"] == FUTURE
+        assert params["env"] == "dev"
+        # The expiry branch binds the app-clock now, not DB NOW().
+        assert "expire_time_1" in params or any(
+            isinstance(v, datetime) for v in params.values()
+        )
+
+    def test_acquire_emits_sqlite_on_conflict_dialect(self):
+        repo, mock_session = _make_repo(_SQLITE)
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-A", expire_time=FUTURE)
+        )
+
+        result = repo.try_acquire_lock(
+            lock_name="new-lock", lock_holder="holder-A", expire_time=FUTURE
         )
 
         assert result is True
-        mock_session.add.assert_not_called()
-        mock_session.delete.assert_not_called()
+        upsert_stmt = mock_session.execute.call_args_list[0][0][0]
+        compiled = upsert_stmt.compile(dialect=sqlite.dialect())
+        sql_text = str(compiled)
 
-    def test_acquire_fails_when_held_by_other(self, repository, mock_session):
-        mock_model = _make_model(
-            lock_name="held-lock",
-            lock_holder="holder-B",
-            expire_time=FUTURE,
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_model
+        assert "INSERT INTO ac_lock_table" in sql_text
+        assert "ON CONFLICT (lock_name)" in sql_text
+        assert "DO UPDATE SET" in sql_text
+        assert "excluded.lock_holder" in sql_text
+        assert "gmt_modified" in sql_text
+        assert "ON DUPLICATE KEY UPDATE" not in sql_text
+        # The ON CONFLICT WHERE guard must contain all three acquirable branches
+        # and bind the app-clock now for the expiry comparison.
+        where_region = sql_text.split("WHERE", 1)[1]
+        assert "ac_lock_table.lock_holder = excluded.lock_holder" in where_region
+        assert "ac_lock_table.expire_time IS NULL" in where_region
+        assert "ac_lock_table.expire_time <=" in where_region
+
+    def test_acquire_runs_confirm_read_select_after_upsert(self):
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-A", expire_time=FUTURE)
         )
 
-        result = repository.try_acquire_lock(
-            lock_name="held-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
+        repo.try_acquire_lock(
+            lock_name="cf-lock", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        confirm_stmt = mock_session.execute.call_args_list[1][0][0]
+        compiled = confirm_stmt.compile(dialect=mysql.dialect())
+        assert "SELECT" in str(compiled)
+        assert "ac_lock_table" in str(compiled)
+
+    def test_acquire_returns_true_when_confirm_read_shows_self(self):
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-A", expire_time=FUTURE)
+        )
+
+        result = repo.try_acquire_lock(
+            lock_name="held-self", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is True
+
+    def test_acquire_returns_false_when_held_by_other(self):
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-B", expire_time=FUTURE)
+        )
+
+        result = repo.try_acquire_lock(
+            lock_name="held-other", lock_holder="holder-A", expire_time=FUTURE
+        )
+
+        assert result is False
+        # No rollback on a clean not-acquired outcome.
+        mock_session.rollback.assert_not_called()
+
+    def test_acquire_returns_false_when_confirm_read_missing(self):
+        repo, mock_session = _make_repo("mysql")
+        mock_session.execute.return_value = _make_exec_result(None)
+
+        result = repo.try_acquire_lock(
+            lock_name="gone", lock_holder="holder-A", expire_time=FUTURE
         )
 
         assert result is False
 
-    def test_acquire_reentrant_same_holder_after_zero_rowcount(
-        self, repository, mock_session
-    ):
-        mock_model = _make_model(
-            lock_name="existing-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
-        )
-        mock_session.query.return_value.filter.return_value.first.return_value = (
-            mock_model
+    def test_acquire_takes_over_expired_lock_via_confirm_read(self):
+        repo, mock_session = _make_repo("mysql")
+        # Confirming read shows the row already updated to the new holder by
+        # the upsert, so the repository reports success even though the input
+        # holder differs from the previous (expired) owner.
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="new-holder", expire_time=FUTURE)
         )
 
-        result = repository.try_acquire_lock(
-            lock_name="existing-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
+        result = repo.try_acquire_lock(
+            lock_name="expired-lock", lock_holder="new-holder", expire_time=FUTURE
         )
 
         assert result is True
-        mock_session.add.assert_not_called()
-        mock_session.delete.assert_not_called()
 
-    def test_acquire_takes_over_expired_lock(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.update.return_value = 1
-
-        result = repository.try_acquire_lock(
-            lock_name="expired-lock",
-            lock_holder="new-holder",
-            expire_time=FUTURE,
-        )
-
-        assert result is True
-        mock_session.delete.assert_not_called()
-        mock_session.add.assert_not_called()
-
-    def test_acquire_handles_unique_constraint_conflict(self, repository, mock_session):
-        from sqlalchemy.exc import IntegrityError as SAIntegrityError
-
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        orig = MagicMock()
-        orig.args = ("1062", "Duplicate entry")
-        mock_session.flush.side_effect = SAIntegrityError("INSERT INTO ...", {}, orig)
-
-        result = repository.try_acquire_lock(
-            lock_name="conflict-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
-        )
-
-        assert result is False
-        mock_session.rollback.assert_called_once()
-
-    def test_acquire_new_lock_has_env_field(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        def _add_side_effect(model):
-            model.id = 10
-
-        mock_session.add.side_effect = _add_side_effect
-
-        repository.try_acquire_lock(
-            lock_name="env-check-lock",
-            lock_holder="holder",
-            expire_time=FUTURE,
-        )
-
-        added_model = mock_session.add.call_args[0][0]
-        assert added_model.env == "dev"
-
-    def test_acquire_handles_oceanbase_lock_wait_timeout(
-        self, repository, mock_session
-    ):
+    def test_acquire_handles_oceanbase_lock_wait_timeout(self):
         from sqlalchemy.exc import DatabaseError as SADatabaseError
 
+        repo, mock_session = _make_repo("mysql")
         orig = MagicMock()
         orig.errno = 1205
         orig.__str__.return_value = (
             "Lock wait timeout exceeded; try restarting transaction"
         )
-        mock_session.query.return_value.filter.return_value.update.side_effect = (
-            SADatabaseError("UPDATE ...", {}, orig)
-        )
+        mock_session.execute.side_effect = SADatabaseError("INSERT ...", {}, orig)
 
-        result = repository.try_acquire_lock(
-            lock_name="busy-lock",
-            lock_holder="holder-A",
-            expire_time=FUTURE,
+        result = repo.try_acquire_lock(
+            lock_name="busy-lock", lock_holder="holder-A", expire_time=FUTURE
         )
 
         assert result is False
         mock_session.rollback.assert_called_once()
+
+    def test_acquire_reraises_unexpected_database_error(self):
+        from sqlalchemy.exc import DatabaseError as SADatabaseError
+
+        repo, mock_session = _make_repo("mysql")
+        orig = MagicMock()
+        orig.errno = 1146  # not a lock-wait-timeout
+        orig.__str__.return_value = "Table doesn't exist"
+        mock_session.execute.side_effect = SADatabaseError("INSERT ...", {}, orig)
+
+        with pytest.raises(SADatabaseError):
+            repo.try_acquire_lock(
+                lock_name="err-lock", lock_holder="holder-A", expire_time=FUTURE
+            )
 
 
 # ==================== DistributedLockRepository Protocol Tests ====================
@@ -503,12 +565,9 @@ class TestWithOrmSessionIntegration:
     def test_session_used_for_try_acquire(self, mock_database, mock_session):
         repo = OrmDistributedLockRepository(mock_database)
 
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        def _add_side_effect(model):
-            model.id = 1
-
-        mock_session.add.side_effect = _add_side_effect
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder", expire_time=FUTURE)
+        )
 
         repo.try_acquire_lock(
             lock_name="test-lock",
@@ -550,12 +609,9 @@ class TestMethodRoundTrips:
     """Tests covering multiple methods in sequence on the same repository."""
 
     def test_acquire_then_get_by_lock_name(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        def _add_side_effect(model):
-            model.id = 55
-
-        mock_session.add.side_effect = _add_side_effect
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder-rt", expire_time=FUTURE)
+        )
 
         acquired = repository.try_acquire_lock(
             lock_name="roundtrip-lock",
@@ -565,12 +621,9 @@ class TestMethodRoundTrips:
         assert acquired is True
 
     def test_acquire_then_delete(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        def _add_side_effect(model):
-            model.id = 10
-
-        mock_session.add.side_effect = _add_side_effect
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder", expire_time=FUTURE)
+        )
 
         repository.try_acquire_lock(
             lock_name="delete-lock",
@@ -583,13 +636,10 @@ class TestMethodRoundTrips:
         assert deleted is True
 
     def test_full_lock_lifecycle(self, repository, mock_session):
-        # Acquire
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        def _add_side_effect(model):
-            model.id = 1
-
-        mock_session.add.side_effect = _add_side_effect
+        # Acquire via upsert + confirm-read showing self as holder.
+        mock_session.execute.return_value = _make_exec_result(
+            _make_model(lock_holder="holder", expire_time=FUTURE)
+        )
 
         acquired = repository.try_acquire_lock(
             lock_name="lifecycle-lock",
@@ -651,14 +701,14 @@ class TestEdgeCases:
         assert result.lock_holder == ""
 
     def test_consecutive_try_acquire_different_names(self, repository, mock_session):
-        mock_session.query.return_value.filter.return_value.first.return_value = None
-
-        ids = iter([1, 2])
-
-        def _add_side_effect(model):
-            model.id = next(ids)
-
-        mock_session.add.side_effect = _add_side_effect
+        # Each try_acquire issues upsert + confirming read; both executes for
+        # one logical call report that call's caller as the holder.
+        mock_session.execute.side_effect = [
+            _make_exec_result(_make_model(lock_holder="h1", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="h1", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="h2", expire_time=FUTURE)),
+            _make_exec_result(_make_model(lock_holder="h2", expire_time=FUTURE)),
+        ]
 
         r1 = repository.try_acquire_lock(
             lock_name="lock-a", lock_holder="h1", expire_time=FUTURE

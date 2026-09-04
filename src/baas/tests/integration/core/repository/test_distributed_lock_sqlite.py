@@ -141,3 +141,34 @@ class TestDistributedLockSqliteOrmEquivalence:
     def test_delete_nonexistent_lock(self):
         repo = get_container().repository.distributed_lock_repository()
         assert repo.delete_lock(f"nonexistent_{_generate_uuid()}") is False
+
+    def test_concurrent_acquire_same_new_lock_no_conflict_raised(self):
+        """Two holders racing for the same brand-new lock must not raise and
+        must serialize via the upsert: exactly one acquires, the other gets
+        ``False``, and no IntegrityError escapes the repository (the upsert
+        path replaces the former three-step INSERT that produced 1062).
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        repo = get_container().repository.distributed_lock_repository()
+        lock_name = f"race_{_generate_uuid()[:12]}"
+        expire_time = datetime.now() + timedelta(minutes=5)
+        holders = [f"holder-{_generate_uuid()[:6]}", f"holder-{_generate_uuid()[:6]}"]
+
+        def _bid(holder):
+            # Each thread uses its own holder; the repository yields bool and
+            # must never propagate a unique-constraint IntegrityError.
+            return repo.try_acquire_lock(
+                lock_name=lock_name, lock_holder=holder, expire_time=expire_time
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            results = list(ex.map(_bid, holders))
+
+        assert all(isinstance(r, bool) for r in results)
+        assert sum(1 for r in results if r is True) == 1, results
+        assert sum(1 for r in results if r is False) == 1, results
+
+        record = repo.get_by_lock_name(lock_name)
+        assert record is not None
+        assert record.lock_holder in holders
