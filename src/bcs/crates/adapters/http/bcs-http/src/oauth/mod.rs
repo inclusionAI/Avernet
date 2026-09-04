@@ -204,6 +204,7 @@ impl AuthService for OAuthRouteState {
             src: request.provider.clone(),
             iat: now,
             exp: now + self.config.idle_timeout_secs(),
+            name: user_info.name.clone(),
         };
         let jwt = self.jwt_service.sign(&claims).map_err(|e| {
             warn!(error = %e, "JWT signing failed");
@@ -262,8 +263,8 @@ impl AuthService for OAuthRouteState {
             .verify_no_exp(&jwt)
             .map_err(|_| ApplicationError::Unauthenticated)?;
 
-        match self.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
-            Ok(Some(info)) if info.user_id == claims.sub => {}
+        let info = match self.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
+            Ok(Some(info)) if info.user_id == claims.sub => info,
             Ok(_) => return Err(ApplicationError::Unauthenticated),
             Err(e) => {
                 warn!(error = %e, "refresh: identity lookup failed");
@@ -281,6 +282,7 @@ impl AuthService for OAuthRouteState {
             src: claims.src.clone(),
             iat,
             exp: iat + self.config.idle_timeout_secs(),
+            name: info.user_name.or(info.external_user_name),
         };
         let new_jwt = self.jwt_service.sign(&new_claims).map_err(|e| {
             warn!(error = %e, "refresh: JWT signing failed");
@@ -454,6 +456,7 @@ pub async fn callback_handler(
         src: provider_name.clone(),
         iat: now,
         exp: now + state.config.idle_timeout_secs(),
+        name: user_info.name.clone(),
     };
     let jwt = match state.jwt_service.sign(&claims) {
         Ok(j) => j,
@@ -563,8 +566,8 @@ pub async fn refresh_handler(
     };
 
     // Confirm the presented JWT is the current bound session before renewing.
-    match state.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
-        Ok(Some(info)) if info.user_id == claims.sub => {}
+    let info = match state.user_port.get_identity_by_token(&bcs_jwt::token_hash(&jwt)).await {
+        Ok(Some(info)) if info.user_id == claims.sub => info,
         Ok(_) => return (StatusCode::UNAUTHORIZED, "not authenticated").into_response(),
         Err(e) => {
             warn!(error = %e, "refresh: identity lookup failed");
@@ -581,6 +584,7 @@ pub async fn refresh_handler(
         src: claims.src.clone(),
         iat: now,
         exp: now + state.config.idle_timeout_secs(),
+        name: info.user_name.or(info.external_user_name),
     };
     let new_jwt = match state.jwt_service.sign(&new_claims) {
         Ok(j) => j,
@@ -718,7 +722,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use axum::body::to_bytes;
-    use bcs_auth_api::{AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource};
+    use bcs_auth_api::{
+        AuthError, AuthPlugin, AuthPluginChain, AuthPrincipal, AuthSource, UserIdentityInfo,
+        UserIdentityPort,
+    };
     use bcs_test_support::{MockOAuthProvider, NoopAuthPlugin, NoopUserIdentityPort};
 
     /// A chain plugin that always yields a principal with the given `user_id`
@@ -821,6 +828,22 @@ mod tests {
         assert!(result.set_cookie.starts_with("bcs_session="));
         assert!(result.set_cookie.contains("HttpOnly"));
         assert!(result.set_cookie.contains("SameSite=Lax"));
+
+        // The issued `bcs_session` JWT must carry the user's display name so an
+        // external JWT-only verifier (e.g. a gateway) can populate user_name.
+        let jwt = result
+            .set_cookie
+            .strip_prefix("bcs_session=")
+            .and_then(|rest| rest.split(';').next())
+            .expect("bcs_session cookie value");
+        let claims = JwtService::new("test-secret-key-at-least-32-bytes!!")
+            .verify_no_exp(jwt)
+            .expect("verify issued login jwt");
+        assert_eq!(
+            claims.name.as_deref(),
+            Some("Mock User"),
+            "login JWT must carry the provider's display name"
+        );
     }
 
 
@@ -927,5 +950,162 @@ mod tests {
         let (status, body) = run_current_user(chain_with(Some("u-123".to_string()))).await;
         assert_eq!(status, StatusCode::OK, "real user_id => 200, got {body}");
         assert_eq!(body["user_id"], "u-123");
+    }
+
+    /// In-memory `UserIdentityPort` for refresh tests: binds one session token
+    /// hash to a single user and serves its display name, so `refresh_session`
+    /// (which reads `get_identity_by_token` and re-signs) can be exercised
+    /// without `NoopUserIdentityPort` short-circuiting to `None`.
+    struct BoundTokenIdentityPort {
+        user_id: String,
+        name: Option<String>,
+        bound: tokio::sync::Mutex<Option<String>>,
+    }
+
+    impl BoundTokenIdentityPort {
+        fn new(user_id: &str, name: Option<&str>) -> Self {
+            Self {
+                user_id: user_id.to_string(),
+                name: name.map(str::to_string),
+                bound: tokio::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl UserIdentityPort for BoundTokenIdentityPort {
+        async fn ensure_identity(
+            &self,
+            _auth_source: &str,
+            _external_user_id: &str,
+            _external_user_name: Option<&str>,
+            _avatar: Option<&str>,
+            _env: &str,
+        ) -> Result<String, AuthError> {
+            Ok(self.user_id.clone())
+        }
+
+        async fn lookup_by_user_id(
+            &self,
+            _user_id: &str,
+            _auth_source: &str,
+        ) -> Result<Option<String>, AuthError> {
+            Ok(Some(self.user_id.clone()))
+        }
+
+        async fn get_identity_by_token(
+            &self,
+            token_hash: &str,
+        ) -> Result<Option<UserIdentityInfo>, AuthError> {
+            let bound = self.bound.lock().await;
+            if bound.as_deref() == Some(token_hash) {
+                Ok(Some(UserIdentityInfo {
+                    user_id: self.user_id.clone(),
+                    auth_source: "google".to_string(),
+                    user_name: self.name.clone(),
+                    external_user_name: self.name.clone(),
+                    avatar: None,
+                }))
+            } else {
+                Ok(None)
+            }
+        }
+
+        async fn get_identity_by_user_id(
+            &self,
+            _user_id: &str,
+        ) -> Result<Option<UserIdentityInfo>, AuthError> {
+            Ok(Some(UserIdentityInfo {
+                user_id: self.user_id.clone(),
+                auth_source: "google".to_string(),
+                user_name: self.name.clone(),
+                external_user_name: self.name.clone(),
+                avatar: None,
+            }))
+        }
+
+        async fn update_token(
+            &self,
+            _user_id: &str,
+            token_hash: &str,
+            _expire_at: u64,
+        ) -> Result<(), AuthError> {
+            *self.bound.lock().await = if token_hash.is_empty() {
+                None
+            } else {
+                Some(token_hash.to_string())
+            };
+            Ok(())
+        }
+    }
+
+    /// `refresh_session` must re-sign the JWT carrying the identity row's CURRENT
+    /// display name (so an edited `user_name` re-syncs into the gateway-parsed
+    /// cookie on sliding renewal), regardless of the presented JWT's own `name`.
+    #[tokio::test]
+    async fn refresh_session_emits_current_name_in_jwt() {
+        let jwt_secret = "test-secret-key-at-least-32-bytes!!";
+        let port = Arc::new(BoundTokenIdentityPort::new("u1", Some("The Name")));
+        let state = OAuthRouteState::new(
+            jwt_secret,
+            port.clone(),
+            HashMap::new(),
+            OAuthConfig {
+                jwt_secret: jwt_secret.to_string(),
+                idle_timeout_minutes: 30,
+                base_url: "https://bcs.example.com".to_string(),
+                cookie_secure: false,
+                env: "test".to_string(),
+                success_redirect_path: "/".to_string(),
+            },
+            None,
+        );
+
+        // Issue and bind a login-style JWT; its `name` is irrelevant — refresh
+        // re-derives the name from the identity row via `get_identity_by_token`.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let svc = JwtService::new(jwt_secret);
+        let login_jwt = svc
+            .sign(&Claims {
+                sub: "u1".to_string(),
+                src: "google".to_string(),
+                iat: now,
+                exp: now + 60,
+                name: None,
+            })
+            .expect("sign login jwt");
+        port.update_token("u1", &bcs_jwt::token_hash(&login_jwt), now + 60)
+            .await
+            .expect("bind login token");
+
+        let result = state
+            .refresh_session(RefreshSession {
+                headers: RequestAuthHeaders {
+                    authorization: None,
+                    cookie: Some(format!("bcs_session={login_jwt}")),
+                    forwarded_headers: Vec::new(),
+                },
+            })
+            .await
+            .expect("refresh");
+        assert!(result.set_cookie.starts_with("bcs_session="));
+
+        let new_jwt = result
+            .set_cookie
+            .strip_prefix("bcs_session=")
+            .and_then(|rest| rest.split(';').next())
+            .expect("new bcs_session value");
+        let claims = JwtService::new(jwt_secret)
+            .verify_no_exp(new_jwt)
+            .expect("verify renewed jwt");
+        assert_eq!(claims.sub, "u1");
+        assert_eq!(
+            claims.name.as_deref(),
+            Some("The Name"),
+            "refresh must re-sign the JWT with the identity row's current name"
+        );
     }
 }
