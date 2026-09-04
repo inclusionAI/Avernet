@@ -392,7 +392,7 @@ class SkillEditorRequestRepository(SkillEditorRequestRepositoryProtocol):
                         WorkOrderEventType.SKILL_COLLABORATOR_REVIEWED.value,
                         notification.title,
                     ),
-                    content=notification.content,
+                    content=json.dumps(notification.content, ensure_ascii=False),
                     env=env,
                 )
             )

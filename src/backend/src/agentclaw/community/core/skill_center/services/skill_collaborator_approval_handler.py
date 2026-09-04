@@ -71,7 +71,7 @@ class SkillCollaboratorApprovalHandler(SkillCollaboratorApprovalHandlerProtocol)
             biz_type=WorkOrderBizType.SKILL_COLLABORATOR,
             biz_id=detail.work_order.biz_id,
             title=title,
-            content=content,
+            content={"text": content},
         )
         return self._repository.review_skill_editor_request(
             work_order_id=detail.work_order.id,

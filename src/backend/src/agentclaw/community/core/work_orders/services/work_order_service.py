@@ -646,17 +646,21 @@ class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
     ) -> WorkOrderNotificationDraft:
         if target_status is WorkOrderStatus.APPROVED:
             title = WorkOrderTitleKey.SPACE_JOIN_APPROVED.value
-            content = WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
-                space_name=detail.space_name
-            )
+            content = {
+                "text": WorkOrderMessageContent.SPACE_JOIN_APPROVED.value.format(
+                    space_name=detail.space_name
+                )
+            }
         elif target_status is WorkOrderStatus.REJECTED:
             if review_remark is None:
                 raise WorkOrderInvalidRemarkError("review remark is required")
             title = WorkOrderTitleKey.SPACE_JOIN_REJECTED.value
-            content = WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
-                space_name=detail.space_name,
-                review_remark=review_remark,
-            )
+            content = {
+                "text": WorkOrderMessageContent.SPACE_JOIN_REJECTED.value.format(
+                    space_name=detail.space_name,
+                    review_remark=review_remark,
+                )
+            }
         else:
             raise ValueError(f"unsupported review status: {target_status}")
 
@@ -700,7 +704,7 @@ class WorkOrderNotificationService(WorkOrderNotificationServiceProtocol):
             biz_type=WorkOrderBizType.BOT_COLLABORATOR,
             biz_id=detail.work_order.biz_id,
             title=title,
-            content=content,
+            content={"text": content},
         )
 
     def get_detail(self, *, notification_id: int, actor_id: str):

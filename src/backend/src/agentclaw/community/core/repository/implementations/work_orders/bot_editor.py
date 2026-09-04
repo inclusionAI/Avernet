@@ -338,7 +338,7 @@ class _BotEditorWorkOrderRepository:
                         getattr(notification.event_type, "value", notification.event_type),
                         notification.title,
                     ),
-                    content=notification.content,
+                    content=json.dumps(notification.content, ensure_ascii=False),
                     env=env,
                 )
             )

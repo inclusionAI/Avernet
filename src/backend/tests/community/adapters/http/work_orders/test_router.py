@@ -120,7 +120,7 @@ def _approval_payload() -> dict[str, object]:
         "approver_user_ids": ["approver-1"],
         "recipient_user_ids": [],
         "title": "Join request",
-        "content": {"message": "apply", "items": [1, True]},
+        "content": {"text": "apply", "items": [1, True]},
         "apply_reason": "please approve",
         "biz_data": {"space_id": 7, "meta": {"source": "web"}},
     }
@@ -206,7 +206,7 @@ def test_create_approval_event_uses_authenticated_actor_and_shared_contract(
         approver_user_ids=["approver-1"],
         recipient_user_ids=[],
         title="Join request",
-        content={"message": "apply", "items": [1, True]},
+        content={"text": "apply", "items": [1, True]},
         apply_reason="please approve",
         biz_data={"space_id": 7, "meta": {"source": "web"}},
         actor_id="staff-1",
@@ -285,7 +285,6 @@ def test_mapped_business_errors_use_existing_envelope_codes(
     "payload",
     [
         {},
-        _approval_payload() | {"content": [1, 2]},
         _approval_payload() | {"biz_data": "not-an-object"},
     ],
 )

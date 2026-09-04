@@ -373,9 +373,9 @@ class WorkOrderListItem(_UtcResponseModel):
         description="Originating event, or null when no notification is attached."
     )
     title: str = Field(description="Canonical notification title.")
-    summary: str = Field(default="你有一条新的通知，请查看详情。", description="Stable notification summary.")
-    content: dict[str, Any] | None = Field(
-        description="Notification JSON object, or null when unavailable."
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        description="Original notification content, either text or a JSON object."
     )
     status: WorkOrderStatus | None = Field(
         description="Related work-order status, when one exists."
@@ -409,9 +409,9 @@ class WorkOrderDetailResponse(_UtcResponseModel):
         default=None, description="Legacy originating event, when available."
     )
     title: str = Field(description="Canonical display title of the work order.")
-    summary: str = Field(default="你有一条新的通知，请查看详情。", description="Stable notification summary.")
-    content: dict[str, Any] | None = Field(
-        default=None, description="Notification JSON object, when available."
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        default=None, description="Original notification content, when available."
     )
     biz_data: dict[str, Any] | None = Field(
         default=None, description="Work-order business JSON object, when available."
@@ -446,9 +446,9 @@ class NotificationDetailResponse(BaseModel):
     )
     event_type: str = Field(description="Legacy event represented by the notification.")
     title: str = Field(description="Canonical display title of the notification.")
-    summary: str = Field(default="你有一条新的通知，请查看详情。", description="Stable notification summary.")
-    content: dict[str, Any] | None = Field(
-        description="Notification JSON object, when present."
+    summary: str = Field(default="你有一条新的通知", description="Stable notification summary.")
+    content: str | dict[str, Any] | None = Field(
+        description="Original notification content, either text or a JSON object."
     )
     is_read: bool = Field(
         description="Whether the recipient has read the notification."
