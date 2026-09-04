@@ -73,11 +73,13 @@ _upstream_dir() {
 
 _upstream_env() {
     case "$1" in
-        # The community overlay requires a deployment-supplied DATABASE_URL (it is
-        # the Aliyun/OceanBase profile, so its url placeholder has no default).
-        # Dumping the schema only imports the app; no connection is opened, so a
-        # placeholder DSN is enough to get past config resolution.
-        backend) echo "DEPLOY_PROFILE=community DATABASE_URL=mysql+pymysql://dump:dump@127.0.0.1:3306/agentclaw" ;;
+        # The community overlay carries four placeholders with no default —
+        # DATABASE_URL (it is the Aliyun/OceanBase profile) and the three BCS_*
+        # values. Config resolution is strict and raises on any one of them being
+        # unset, so all four must be present or the dump dies before it imports
+        # the app. Dumping the schema only imports the app; no connection is
+        # opened and no BCS call is made, so placeholders are enough.
+        backend) echo "DEPLOY_PROFILE=community DATABASE_URL=mysql+pymysql://dump:dump@127.0.0.1:3306/agentclaw BCS_URL=http://127.0.0.1:0 BCS_ADMIN_TOKEN=dump BCS_PROVIDER_ID=dump" ;;
         baas)    echo "SECBAAS_RUN_MODE=bare" ;;
         bcn)     echo "" ;;
         bcn-internal) echo "" ;;
@@ -136,9 +138,16 @@ main() {
     fi
 
     # ── backend ────────────────────────────────────────────────────────────────
-    # bots domain — the harness operations sit under /openapi/v1/bots/{bot_id}/harness
-    # and are part of this dump; there is no separate harness artifact.
-    _dump_upstream backend --path-prefix /openapi/v1/bots
+    # The whole public /openapi/v1 surface, not just /openapi/v1/bots: the backend
+    # publishes ONE artifact and the gateway hands the same file to several
+    # domains, each of which filters it to its own prefix at serve time (see
+    # `upstreams.domains.org` in configs/application.yaml). Narrowing the dump to
+    # /openapi/v1/bots would strip the org and collaboration paths the other
+    # domains serve from this file, and the compat gate rightly refuses that as a
+    # breaking change. The harness operations sit under
+    # /openapi/v1/bots/{bot_id}/harness and are part of this dump; there is no
+    # separate harness artifact.
+    _dump_upstream backend
     if ! $DRY_RUN; then
         _gate_and_publish \
             backend \
