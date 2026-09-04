@@ -393,6 +393,49 @@ def test_count_by_owner_excludes_desktop(repo):
     assert repo.count_by_owner("emp1", exclude_bot_type="desktop") == 1
 
 
+def test_personal_space_count_includes_legacy_null_and_numeric_rows(repo, db):
+    repo.insert(_data(bot_id="legacy", owner_id="alice", space_id=None))
+    repo.insert(_data(bot_id="personal", owner_id="alice", space_id=11))
+    repo.insert(_data(bot_id="failed", owner_id="alice", space_id=11, status="FAILED"))
+    repo.insert(_data(bot_id="team", owner_id="alice", space_id=12))
+    repo.insert(_data(bot_id="other-owner", owner_id="bob", space_id=11))
+    repo.insert(
+        _data(bot_id="desktop", owner_id="alice", space_id=11, bot_type="desktop")
+    )
+    repo.insert(_data(bot_id="deleted", owner_id="alice", space_id=11, is_delete=1))
+    nullable = repo.insert(
+        _data(bot_id="legacy-null-type", owner_id="alice", space_id=11)
+    )
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == nullable["id"]).update(
+            {BotModel.bot_type: None}
+        )
+
+    assert (
+        repo.count_cloud_bots_in_personal_space(
+            owner_id="alice", personal_space_id=11
+        )
+        == 4
+    )
+
+
+def test_team_space_count_spans_owners_and_ignores_status(repo, db):
+    repo.insert(_data(bot_id="alice", owner_id="alice", space_id=22))
+    repo.insert(_data(bot_id="bob", owner_id="bob", space_id=22, status="FAILED"))
+    nullable = repo.insert(_data(bot_id="legacy", owner_id="carol", space_id=22))
+    repo.insert(
+        _data(bot_id="desktop", owner_id="alice", space_id=22, bot_type="desktop")
+    )
+    repo.insert(_data(bot_id="deleted", owner_id="alice", space_id=22, is_delete=1))
+    repo.insert(_data(bot_id="other-space", owner_id="alice", space_id=23))
+    with db.orm_session() as session:
+        session.query(BotModel).filter(BotModel.id == nullable["id"]).update(
+            {BotModel.bot_type: None}
+        )
+
+    assert repo.count_cloud_bots_by_space(space_id=22) == 3
+
+
 def test_exists_by_owner_and_bot_type_only_matches_live_requested_type(repo):
     repo.insert(_data(bot_id="service", bot_type="service"))
     repo.insert(_data(bot_id="deleted-personal", bot_type="personal", is_delete=1))

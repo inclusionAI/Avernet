@@ -31,6 +31,7 @@ from agentclaw.community.adapters.http.openapi_v1.deprecated.auth_status import 
 )
 from agentclaw.community.adapters.http.openapi_v1.dependencies import require_principal
 from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.bot_space_service import BotSpaceServiceProtocol
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.api.skill_set_service_factory import (
@@ -41,10 +42,16 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
     BotOperationNotAllowedError,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaExceededError,
+    BotQuotaScope,
+    BotQuotaSnapshot,
+)
 from agentclaw.community.core.spaces.errors import (
     SpaceAccessDeniedError,
     SpaceNotFoundError,
 )
+from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.bot_inventory.adapters.noop_business_space import (
     NoopBusinessSpaceContext,
 )
@@ -54,7 +61,6 @@ from agentclaw.community.core.bot_inventory.errors import (
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
 )
-from agentclaw.community.core.bot_inventory.types import BusinessSpaceRef
 from agentclaw.community.api.engine_config_service import EngineConfigServiceProtocol
 from agentclaw.community.api.bot_startup_script_service import (
     BotStartupScriptServiceProtocol,
@@ -133,6 +139,22 @@ def bot_space():
 
 
 @pytest.fixture
+def quota():
+    service = MagicMock()
+    service.inspect.return_value = BotQuotaSnapshot(
+        scope=BotQuotaScope(
+            owner_id="u1",
+            space_id=None,
+            space_name="Personal",
+            space_type=SpaceType.PERSONAL,
+        ),
+        ceiling=7,
+        used=2,
+    )
+    return service
+
+
+@pytest.fixture
 def skill_set_factory():
     m = MagicMock()
     m.create.return_value.get_bot_mcp_codes.return_value = []
@@ -191,6 +213,7 @@ class _CountingNoopSpace(NoopBusinessSpaceContext):
 @pytest.fixture
 def client(
     svc,
+    quota,
     bot_space,
     policy,
     passport,
@@ -205,6 +228,7 @@ def client(
     class _M(Module):
         def configure(self, binder):
             binder.bind(BotServiceProtocol, to=svc)
+            binder.bind(BotQuotaServiceProtocol, to=quota)
             binder.bind(BotSpaceServiceProtocol, to=bot_space)
             binder.bind(PolicyServiceProtocol, to=policy)
             binder.bind(PassportPlugin, to=passport)
@@ -412,8 +436,9 @@ def test_check_name(client):
     assert data == {"name": "Foo", "exists": True}
 
 
-def test_ceiling(client):
-    assert _ok(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 7
+def test_ceiling(client, quota):
+    assert _ok(client.get("/openapi/v1/bots/ceiling")) == {"ceiling": 7}
+    quota.inspect.assert_called_once_with(owner_id="u1", space_id=None)
 
 
 def test_status(client):
@@ -604,24 +629,40 @@ def test_create_bot_201(client, svc, passport):
     assert body["data"]["bot_id"] == "b1"
     svc.create_bot.assert_called_once()
     assert svc.create_bot.call_args.kwargs["space_id"] is None
+    assert svc.create_bot.call_args.kwargs["space_quota"] is True
 
 
-def test_real_space_reference_exposes_numeric_id():
-    assert (
-        BusinessSpaceRef(space_id="42", name="Team", kind="team").numeric_id == 42
+def test_create_bot_returns_structured_quota_conflict_before_passport(
+    client, svc, passport
+):
+    scope = BotQuotaScope(
+        owner_id="u1",
+        space_id=None,
+        space_name="Personal",
+        space_type=SpaceType.PERSONAL,
+    )
+    svc.check_create_bot_preflight.side_effect = BotQuotaExceededError(
+        BotQuotaSnapshot(scope=scope, ceiling=5, used=5)
     )
 
+    response = client.post("/openapi/v1/bots", json=_CREATE_BODY)
 
-def test_synthetic_personal_reference_has_no_numeric_id():
-    assert (
-        BusinessSpaceRef(
-            space_id="personal:u1",
-            name="Personal",
-            kind="personal",
-        ).numeric_id
-        is None
-    )
-
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": 409000,
+        "message": "Bot quota exceeded for this Space",
+        "data": {
+            "space_id": "personal:u1",
+            "space_name": "Personal",
+            "space_type": "PERSONAL",
+            "ceiling": 5,
+            "used": 5,
+        },
+        "request_id": "",
+    }
+    passport.apply_first_agent_passport.assert_not_called()
+    passport.apply_passport.assert_not_called()
+    svc.create_bot.assert_not_called()
 
 def test_create_bot_owner_relationship_failure_is_enveloped_502(
     client, passport, auth_rel
@@ -1726,16 +1767,20 @@ def test_update_omitting_a_field_still_leaves_it_unchanged(client, svc):
     assert kw["bot_desc"] is None  # untouched
 
 
-def test_ceiling_uses_the_limit_creation_enforces(client, svc):
-    """R10/F42: reporting must not resolve the quota differently from create.
-
-    ``PolicyService.get_bots_ceiling`` defaults to a hardcoded 5; creation falls
-    back to the configured ``max_devices_per_entity``. Reading the policy service
-    directly advertised 5 to a deployment that allows something else.
-    """
-    svc.get_bots_ceiling_for_owner.return_value = 12
+def test_ceiling_uses_the_limit_creation_enforces(client, quota):
+    """Reporting and creation resolve capacity through the same quota service."""
+    quota.inspect.return_value = BotQuotaSnapshot(
+        scope=BotQuotaScope(
+            owner_id="u1",
+            space_id=None,
+            space_name="Personal",
+            space_type=SpaceType.PERSONAL,
+        ),
+        ceiling=12,
+        used=3,
+    )
     assert _ok(client.get("/openapi/v1/bots/ceiling"))["ceiling"] == 12
-    svc.get_bots_ceiling_for_owner.assert_called_once_with("u1")
+    quota.inspect.assert_called_once_with(owner_id="u1", space_id=None)
 
 
 # ----- round-13 review regressions ------------------------------------------

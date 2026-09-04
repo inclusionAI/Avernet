@@ -29,6 +29,10 @@ from agentclaw.community.core.bot_management.engines.registry import (
     normalize_engine_type,
     resolve_baas_engine_bucket,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaError,
+    BotQuotaUnavailableError,
+)
 from agentclaw.community.core.bot_management.services.template_service import TemplateService
 from agentclaw.community.core.bot_management.services.aicoding.workspace_hosting_service import WorkspaceHostingService
 from agentclaw.community.core.desktop_bot.device_status_client import DeviceStatusClient
@@ -64,6 +68,9 @@ if TYPE_CHECKING:
     # ``SkillSetServiceFactory`` below.
     from agentclaw.community.di import config as cfg
     from agentclaw.community.core.access.policy_service_protocol import PolicyServiceProtocol
+    from agentclaw.community.core.bot_management.bot_quota_service_protocol import (
+        BotQuotaServiceProtocol,
+    )
 from agentclaw.community.core.bot_management.repository.models import BotRestartLockRecord
 from agentclaw.community.core.repository.protocols.bot import BotRestartLockRepositoryProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -349,6 +356,7 @@ class BotService(BotServiceProtocol):
         common_config_service: "CommonConfigService | None" = None,
         runtime_reconciler: "CoreBotRuntimeProjectorProtocol | None" = None,
         runtime_reconciler_provider: "Callable[[], CoreBotRuntimeProjectorProtocol] | None" = None,
+        bot_quota_service: "BotQuotaServiceProtocol | None" = None,
     ) -> None:
         self._repository = repository
         self._allocation_config = allocation_config
@@ -413,6 +421,7 @@ class BotService(BotServiceProtocol):
         self._common_config_service = common_config_service
         self._runtime_reconciler = runtime_reconciler
         self._runtime_reconciler_provider = runtime_reconciler_provider
+        self._bot_quota_service = bot_quota_service
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1078,6 +1087,8 @@ class BotService(BotServiceProtocol):
         bot_id: Optional[str] = None,
         engine_type: Optional[str] = None,
         bot_name: Optional[str] = None,
+        space_id: int | None = None,
+        space_quota: bool = False,
     ) -> None:
         """Validate whether a bot creation request can start external auth.
 
@@ -1093,7 +1104,12 @@ class BotService(BotServiceProtocol):
         check stays where it is — this one narrows the window, it does not close
         it, since another create can take the name in between.
         """
-        self._check_bot_count_limit(user_id)
+        if space_quota:
+            self._require_bot_quota_service().assert_can_add(
+                owner_id=user_id, space_id=space_id
+            )
+        else:
+            self._check_bot_count_limit(user_id)
         if bot_name and bot_name.strip():
             if self._repository.get_by_bot_name(bot_name.strip()):
                 raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
@@ -1104,6 +1120,12 @@ class BotService(BotServiceProtocol):
         """Reject Teclaw Cloud as the engine of the reserved Default Bot."""
         if bot_id == "default" and self.is_teclaw_bot(engine_type):
             raise DefaultBotTeclawNotAllowedError()
+
+    def _require_bot_quota_service(self) -> "BotQuotaServiceProtocol":
+        service = self._bot_quota_service
+        if service is None:
+            raise BotQuotaUnavailableError("Bot quota service is not configured")
+        return service
 
     def _check_device_limit(self, entity_id: str, entity_type: str, owner_id: str) -> None:
         """
@@ -1275,6 +1297,7 @@ class BotService(BotServiceProtocol):
         cookie: Optional[str] = None,
         space_id: Optional[int] = None,
         provision: bool = True,
+        space_quota: bool = False,
     ) -> Dict[str, Any]:
         """
         Create a new bot with async device allocation.
@@ -1336,6 +1359,8 @@ class BotService(BotServiceProtocol):
             user_id=user_id,
             bot_id=bot_id,
             engine_type=resolved_active_engine,
+            space_id=space_id,
+            space_quota=space_quota,
         )
 
         # Resolve entity info
@@ -1386,8 +1411,11 @@ class BotService(BotServiceProtocol):
             if self._repository.exists_by_bot_name(bot_name.strip()):
                 raise BotNameExistsError(f"Bot name '{bot_name}' already exists")
 
-        # Check device limit before creating bot (based on user's existing bots)
-        self._check_device_limit(resolved_entity_id, resolved_entity_type, user_id)
+        # The legacy route keeps its established owner/device limit. A Space-aware
+        # OpenAPI create has already checked the target Space's Bot rows and must
+        # not be blocked again by the owner's personal ceiling.
+        if not space_quota:
+            self._check_device_limit(resolved_entity_id, resolved_entity_type, user_id)
 
         logger.info(f"[bot_service.create_bot] Creating bot {bot_id} for user {user_id}, "
                    f"entity={resolved_entity_type}/{resolved_entity_id}, engines={resolved_engine_types}, "
@@ -1418,7 +1446,15 @@ class BotService(BotServiceProtocol):
                 "space_id": space_id,  # Business-space ownership: NULL -> personal fallback
             }
 
-            bot_record = self._repository.insert(bot_data)
+            if not space_quota:
+                bot_record = self._repository.insert(bot_data)
+            else:
+                # Serialize only the final count + row insert. Passport and
+                # device provisioning stay outside this short quota lease.
+                with self._require_bot_quota_service().guard_add(
+                    owner_id=user_id, space_id=space_id
+                ):
+                    bot_record = self._repository.insert(bot_data)
             logger.info(f"[bot_service.create_bot] Bot {bot_id} created with PENDING status")
 
             # Step 1.5: Create template record if template_config is provided
@@ -1526,7 +1562,7 @@ class BotService(BotServiceProtocol):
                 cookie=cookie,
             )
 
-        except BotServiceError:
+        except (BotServiceError, BotQuotaError):
             raise
         except Exception as e:
             logger.error(f"[bot_service.create_bot] Failed to create bot record: {e}")

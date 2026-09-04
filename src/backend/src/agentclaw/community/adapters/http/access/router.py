@@ -6,9 +6,9 @@ Replaces:
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Callable
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 
 from agentclaw.community.adapters.http.access.schemas import (
     AllowDisallowData,
@@ -16,6 +16,7 @@ from agentclaw.community.adapters.http.access.schemas import (
     ApiResponse,
     QuotaData,
     SetBotsCeilingRequest,
+    SetSpaceBotsCeilingRequest,
     UpsertUserRequest,
     UserItem,
     UserListCheckData,
@@ -25,6 +26,7 @@ from agentclaw.community.adapters.http.access.schemas import (
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user, require_operator
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
+from agentclaw.community.api.bot_quota_service import BotQuotaServiceProtocol
 from agentclaw.community.api.user_list_service import UserListServiceProtocol
 from agentclaw.community.api.user_service import UserServiceProtocol
 from agentclaw.community.core.access.errors import UserNotFoundError
@@ -282,3 +284,75 @@ async def set_bots_ceiling(
             error_code=500,
             data=None,
         )
+
+
+@access_router.put("/spaces/{space_id}/bots-ceiling", response_model=ApiResponse[dict])
+async def set_space_bots_ceiling(
+    space_id: Annotated[int, Path(gt=0)],
+    req: SetSpaceBotsCeilingRequest,
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
+    service: BotQuotaServiceProtocol = Injected(BotQuotaServiceProtocol),
+) -> ApiResponse[dict]:
+    """Set one Team Space override; only configured operators may call it."""
+    return _change_space_bots_ceiling(
+        action="set",
+        actor_id=user.staffId,
+        space_id=space_id,
+        mutate=lambda: service.set_team_ceiling(
+            space_id=space_id, ceiling=req.ceiling
+        ),
+    )
+
+
+@access_router.delete(
+    "/spaces/{space_id}/bots-ceiling", response_model=ApiResponse[dict]
+)
+async def reset_space_bots_ceiling(
+    space_id: Annotated[int, Path(gt=0)],
+    user: AuthenticatedUser = Depends(require_operator),  # noqa: B008
+    service: BotQuotaServiceProtocol = Injected(BotQuotaServiceProtocol),
+) -> ApiResponse[dict]:
+    """Remove one Team Space override and restore its deployment default."""
+    return _change_space_bots_ceiling(
+        action="reset",
+        actor_id=user.staffId,
+        space_id=space_id,
+        mutate=lambda: service.reset_team_ceiling(space_id=space_id),
+    )
+
+
+def _change_space_bots_ceiling(
+    *,
+    action: str,
+    actor_id: str,
+    space_id: int,
+    mutate: Callable[[], int],
+) -> ApiResponse[dict]:
+    try:
+        ceiling = mutate()
+    except Exception:
+        logger.exception(
+            "[access_router.space_bots_ceiling] action=%s space_id=%s failed",
+            action,
+            space_id,
+        )
+        return ApiResponse(
+            success=False,
+            message="更新团队空间 BOT 上限失败",
+            error_code=500,
+            data=None,
+        )
+    logger.info(
+        "[access_router.space_bots_ceiling] action=%s operator=%s "
+        "space_id=%s ceiling=%s",
+        action,
+        actor_id,
+        space_id,
+        ceiling,
+    )
+    return ApiResponse(
+        success=True,
+        message="OK",
+        error_code=200,
+        data={"spaceId": space_id, "ceiling": ceiling},
+    )

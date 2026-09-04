@@ -305,6 +305,29 @@ class BotRepository(Protocol):
         ...
 
     @abstractmethod
+    def count_cloud_bots_in_personal_space(
+        self,
+        *,
+        owner_id: str,
+        personal_space_id: int | None,
+    ) -> int:
+        """Count an owner's live Bots in their logical Personal Space.
+
+        Legacy rows with ``space_id IS NULL`` belong to that same scope and are
+        included alongside the numeric Personal Space id when one exists.
+        """
+        ...
+
+    @abstractmethod
+    def count_cloud_bots_by_space(
+        self,
+        *,
+        space_id: int,
+    ) -> int:
+        """Count all live Bots assigned to one exact Space across owners."""
+        ...
+
+    @abstractmethod
     def exists_by_owner_and_bot_id(self, owner_id: str, bot_id: str) -> bool:
         """Check if a bot with specific bot_id exists for the owner."""
         ...

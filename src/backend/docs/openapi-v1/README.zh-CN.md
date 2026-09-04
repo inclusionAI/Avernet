@@ -783,7 +783,7 @@ Bot 核心路由已接到内部服务上。这里保留下来，是作为其余�
 | POST | `/openapi/v1/bots` | 创建 Agent；可能需要 Passport 授权 | `201 Envelope[Bot]` 或 `202 Envelope[BotAuthPending]` |
 | GET | `/openapi/v1/bots` | 列出调用者的 Agent（`keyword`、`engine`、`status`、分页） | `Envelope[Page[Bot]]` |
 | GET | `/openapi/v1/bots/check-name` | 重名检查（`name`） | `Envelope[NameCheck]` |
-| GET | `/openapi/v1/bots/ceiling` | 创建配额上限 | `Envelope[Ceiling]` |
+| GET | `/openapi/v1/bots/ceiling` | 当前空间的 Bot 上限 | `Envelope[Ceiling]` |
 | GET | `/openapi/v1/bots/{bot_id}` | 获取详情 | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}` | 更新（`engine` 不可改） | `Envelope[Bot]` |
 | PUT | `/openapi/v1/bots/{bot_id}/space` | 变更 Bot 的归属业务空间 | `Envelope[BotSpaceAssignment]` |
@@ -795,6 +795,20 @@ Bot 核心路由已接到内部服务上。这里保留下来，是作为其余�
 | GET | `/openapi/v1/bots/{bot_id}/passport` | 获取 Agent Passport | `Envelope[Passport]` |
 | GET | `/openapi/v1/bots/{bot_id}/engine/config` | 读取引擎配置（自由格式 JSON） | `Envelope[dict]` |
 | PUT | `/openapi/v1/bots/{bot_id}/engine/config` | 写入引擎配置（自由格式 JSON） | `Envelope[dict]` |
+
+#### 按空间计算的 Bot 上限
+
+云端 Bot 创建会占用当前业务空间的额度。Personal Space 沿用 owner 现有的个人
+`bots_ceiling` 策略，计数同时包含数值型个人空间记录和历史 `space_id IS NULL` 记录；
+Team Space 按该空间下所有 owner 的未删除云端 Bot 统一计数，默认上限为 20。Operator 可通过
+`PUT /api/v1/access/spaces/{space_id}/bots-ceiling` 单独覆盖团队空间上限，通过 `DELETE`
+删除覆盖并恢复默认值 20。桌面 Bot 不占用这两类额度。
+
+公开创建、授权完成、manifest 创建及迁入空间链路均校验目标空间额度。最终计数与数据库写入由
+短时的空间级分布式锁串行化，避免并发请求同时占用最后一个名额。已经超限的空间仍可读取和进行
+既有操作，只拒绝继续创建或迁入。额度不足返回 409，`data` 会提供 `space_id`、
+`space_name`、`space_type`、`ceiling` 和 `used`；配额协调设施不可用时按失败关闭
+返回 503。旧 `/api` 创建链路不变，继续使用原有 owner/device 上限校验。
 
 #### 创建 Application Coding Bot
 

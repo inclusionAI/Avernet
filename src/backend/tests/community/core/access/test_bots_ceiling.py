@@ -1,14 +1,19 @@
 """Tests for PolicyService.get_bots_ceiling / set_bots_ceiling / allow-disallow merge."""
 import json
-import pytest
 from unittest.mock import MagicMock
 
 from agentclaw.community.core.access.services.policy_service import PolicyService
 from agentclaw.community.core.access.models import AccessControlPolicyRecord
 
 
-def _record(entity_id: str = "u1", policy: str | None = None) -> AccessControlPolicyRecord:
-    return AccessControlPolicyRecord(id=1, entity_id=entity_id, entity_type="staff", policy=policy)
+def _record(
+    entity_id: str = "u1",
+    policy: str | None = None,
+    entity_type: str = "staff",
+) -> AccessControlPolicyRecord:
+    return AccessControlPolicyRecord(
+        id=1, entity_id=entity_id, entity_type=entity_type, policy=policy
+    )
 
 
 def _make_service(get_result: AccessControlPolicyRecord | None = None) -> PolicyService:
@@ -77,6 +82,45 @@ class TestSetBotsCeiling:
         policy_json = json.loads(svc._repo.upsert_policy.call_args.kwargs["policy"])
         assert policy_json["policy"] == "on"
         assert policy_json["bots_ceiling"] == "12"
+
+    def test_team_space_uses_the_same_entity_typed_storage(self):
+        svc = _make_service(
+            get_result=_record(
+                entity_id="42",
+                entity_type="space",
+                policy=json.dumps({"policy": "on"}),
+            )
+        )
+
+        svc.set_bots_ceiling(entity_type="space", entity_id="42", ceiling=20)
+
+        svc._repo.get_by_entity.assert_called_once_with(
+            entity_type="space", entity_id="42"
+        )
+        assert svc._repo.upsert_policy.call_args.kwargs["entity_type"] == "space"
+
+
+class TestClearBotsCeiling:
+    def test_removes_only_ceiling_and_preserves_other_keys(self):
+        svc = _make_service(
+            get_result=_record(
+                entity_id="42",
+                entity_type="space",
+                policy=json.dumps({"policy": "on", "bots_ceiling": "25"}),
+            )
+        )
+
+        assert svc.clear_bots_ceiling(entity_type="space", entity_id="42") is True
+
+        written = json.loads(svc._repo.upsert_policy.call_args.kwargs["policy"])
+        assert written == {"policy": "on"}
+        assert svc._repo.upsert_policy.call_args.kwargs["entity_type"] == "space"
+
+    def test_missing_override_is_an_idempotent_noop(self):
+        svc = _make_service(get_result=_record(policy=json.dumps({"policy": "on"})))
+
+        assert svc.clear_bots_ceiling(entity_id="u1") is False
+        svc._repo.upsert_policy.assert_not_called()
 
 
 class TestAllowDisallowMerge:

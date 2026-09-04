@@ -18,6 +18,7 @@ the real error handler renders the 403.
 from __future__ import annotations
 
 from tests.community.factories.access import make_staff_user
+from agentclaw.community.api.space_service import SpaceServiceProtocol
 from tests.community.framework import (
     CaseInput,
     ExpectError,
@@ -50,6 +51,36 @@ def _seed_non_operator(world):
 
     make_staff_user(world, user_id="u_operator")
     make_staff_user(world, user_id="u_target")
+    world.get(AuthPlugin).set_response("is_operator_allowed", False)
+
+
+def _seed_operator_and_team(world):
+    _seed_operator(world)
+    world.get(SpaceServiceProtocol).create_team(
+        name="Quota Team", creator_id="u_operator", create_sc_team=False
+    )
+
+
+def _seed_non_operator_and_team(world):
+    _seed_operator_and_team(world)
+    from agentclaw.community.plugin_api.auth import AuthPlugin
+
+    world.get(AuthPlugin).set_response("is_operator_allowed", False)
+
+
+def _seed_team_with_override(world):
+    _seed_operator_and_team(world)
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    world.get(PolicyService).set_bots_ceiling(
+        entity_type="space", entity_id="1", ceiling=33
+    )
+
+
+def _seed_non_operator_team_with_override(world):
+    _seed_team_with_override(world)
+    from agentclaw.community.plugin_api.auth import AuthPlugin
+
     world.get(AuthPlugin).set_response("is_operator_allowed", False)
 
 
@@ -126,6 +157,52 @@ def _assert_ceiling_not_written(response, world):
 
     svc = world.get(PolicyService)
     assert svc.get_bots_ceiling(entity_id="u_target", default=5) == 5
+
+
+def _assert_space_ceiling_persisted(response, world):
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    assert response.json()["data"] == {"spaceId": 1, "ceiling": 25}
+    assert (
+        world.get(PolicyService).get_bots_ceiling(
+            entity_type="space", entity_id="1", default=20
+        )
+        == 25
+    )
+
+
+def _assert_space_ceiling_not_written(response, world):
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    assert (
+        world.get(PolicyService).get_bots_ceiling(
+            entity_type="space", entity_id="1", default=20
+        )
+        == 20
+    )
+
+
+def _assert_space_ceiling_reset(response, world):
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    assert response.json()["data"] == {"spaceId": 1, "ceiling": 20}
+    assert (
+        world.get(PolicyService).get_bots_ceiling(
+            entity_type="space", entity_id="1", default=20
+        )
+        == 20
+    )
+
+
+def _assert_space_ceiling_override_preserved(response, world):
+    from agentclaw.community.core.access.services.policy_service import PolicyService
+
+    assert (
+        world.get(PolicyService).get_bots_ceiling(
+            entity_type="space", entity_id="1", default=20
+        )
+        == 33
+    )
 
 
 # ============================================================================
@@ -225,3 +302,78 @@ def set_bots_ceiling_ok():
 )
 def set_bots_ceiling_forbidden_non_operator():
     """A caller outside the operator allowlist is rejected before any write."""
+
+
+# ============================================================================
+# PUT / DELETE /api/v1/access/spaces/{space_id}/bots-ceiling
+# ============================================================================
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
+    scenario="operator_sets_team_space_ceiling",
+    seed=_seed_operator_and_team,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        json_body={"ceiling": 25},
+        headers={"x-user-id": "u_operator"},
+    ),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_space_ceiling_persisted,),
+)
+def set_team_space_ceiling_ok():
+    """An operator can set a ceiling for one existing Team Space."""
+
+
+@endpoint_test(
+    method="PUT",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
+    scenario="non_operator_cannot_set_team_space_ceiling",
+    seed=_seed_non_operator_and_team,
+    input=CaseInput(
+        path_params={"space_id": 1},
+        json_body={"ceiling": 25},
+        headers={"x-user-id": "u_operator"},
+    ),
+    expect=ExpectError(
+        status=403,
+        json_contains={"detail": "权限不足：您没有操作员权限"},
+    ),
+    extra_assertions=(_assert_space_ceiling_not_written,),
+)
+def set_team_space_ceiling_forbidden_non_operator():
+    """Team membership does not replace the existing operator authorization."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
+    scenario="operator_resets_team_space_ceiling",
+    seed=_seed_team_with_override,
+    input=CaseInput(
+        path_params={"space_id": 1}, headers={"x-user-id": "u_operator"}
+    ),
+    expect=ExpectSuccess(status=200, json_contains={"success": True}),
+    extra_assertions=(_assert_space_ceiling_reset,),
+)
+def reset_team_space_ceiling_ok():
+    """Deleting an override restores the Team Space default of twenty."""
+
+
+@endpoint_test(
+    method="DELETE",
+    path="/api/v1/access/spaces/{space_id}/bots-ceiling",
+    scenario="non_operator_cannot_reset_team_space_ceiling",
+    seed=_seed_non_operator_team_with_override,
+    input=CaseInput(
+        path_params={"space_id": 1}, headers={"x-user-id": "u_operator"}
+    ),
+    expect=ExpectError(
+        status=403,
+        json_contains={"detail": "权限不足：您没有操作员权限"},
+    ),
+    extra_assertions=(_assert_space_ceiling_override_preserved,),
+)
+def reset_team_space_ceiling_forbidden_non_operator():
+    """A rejected reset leaves the existing Team Space override untouched."""

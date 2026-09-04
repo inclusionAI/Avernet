@@ -1714,13 +1714,13 @@
         "type": "object"
       },
       "Ceiling": {
-        "description": "Per-user bot creation quota.",
+        "description": "Bot creation quota for the selected business Space.",
         "example": {
-          "ceiling": 5
+          "ceiling": 20
         },
         "properties": {
           "ceiling": {
-            "description": "Maximum number of live bots the named user may own in this deployment; creation is refused (409) at the limit. Desktop bots do not count toward it. A value of 0 or less means the limit is disabled.",
+            "description": "Maximum number of non-deleted cloud Bots in this Space. A value of 0 or less means the limit is disabled.",
             "title": "Ceiling",
             "type": "integer"
           }
@@ -23720,6 +23720,93 @@
         ],
         "title": "SourceCredentialWrite",
         "description": "Register or rotate one named credential.\n\nOne body schema for every mechanism the endpoint will ever carry: the\ndiscriminating key is the authentication mechanism (type), and the\nstorage type is not the source type (git/oss/url is a *source* axis).\nRotation is the same request under the same name — no apply runs and\nthe next fetch uses the new value. Fails (422) when the type is a\nreserved future mechanism or the input is invalid."
+      },
+      "BotQuotaExceededData": {
+        "description": "Actionable capacity facts returned when a Space cannot accept a Bot.",
+        "properties": {
+          "ceiling": {
+            "description": "Configured Bot ceiling for the Space.",
+            "exclusiveMinimum": 0.0,
+            "title": "Ceiling",
+            "type": "integer"
+          },
+          "space_id": {
+            "description": "Identifier of the full target Space.",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "space_name": {
+            "description": "Display name of the full target Space.",
+            "title": "Space Name",
+            "type": "string"
+          },
+          "space_type": {
+            "description": "Whether the quota belongs to a Personal or Team Space.",
+            "enum": [
+              "PERSONAL",
+              "TEAM"
+            ],
+            "title": "Space Type",
+            "type": "string"
+          },
+          "used": {
+            "description": "Current non-deleted cloud Bot count.",
+            "minimum": 0.0,
+            "title": "Used",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "space_id",
+          "space_name",
+          "space_type",
+          "ceiling",
+          "used"
+        ],
+        "title": "BotQuotaExceededData",
+        "type": "object"
+      },
+      "Envelope_BotQuotaExceededData_": {
+        "description": "Uniform response wrapper for every endpoint: `code`/`message` say how the call went, `data` carries the payload named in the wrapper's title, and `request_id` identifies the request for support.",
+        "properties": {
+          "code": {
+            "description": "6-digit code: HTTP status (3) + business subcode (3).",
+            "example": 200000,
+            "title": "Code",
+            "type": "integer"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BotQuotaExceededData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Response payload; present but null on errors or empty results."
+          },
+          "message": {
+            "description": "Human-readable status; always English (e.g. \"OK\").",
+            "example": "OK",
+            "title": "Message",
+            "type": "string"
+          },
+          "request_id": {
+            "description": "Trace id; mirrors the X-Trace-Id response header.",
+            "example": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "data",
+          "request_id"
+        ],
+        "title": "Envelope[BotQuotaExceededData]",
+        "type": "object"
       }
     }
   },
@@ -24101,17 +24188,12 @@
           "409": {
             "content": {
               "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "The target Space has no capacity for another Bot."
           },
           "422": {
             "content": {
@@ -25895,7 +25977,7 @@
     },
     "/openapi/v1/bots/ceiling": {
       "get": {
-        "description": "Get the named user's bot-creation quota ceiling.\n\nThe number creation actually enforces: creating a bot while the user owns\nthis many live bots is refused (409). A ceiling of 0 or less means the\nlimit is disabled. For an application caller, reading it requires holding\nat least one live delegation from the named user; without one the user is\nanswered as if they did not exist.",
+        "description": "Get the Bot ceiling for the selected business Space.\n\nPersonal Space keeps the named user's configured ceiling. Team Space uses\nits own ceiling and counts Bots created by every member. For an application\ncaller, reading it still requires at least one live delegation from the\nnamed user; without one the user is answered as if they did not exist.",
         "operationId": "get_bots_ceiling_openapi_v1_bots_ceiling_get",
         "parameters": [
           {
@@ -25908,6 +25990,24 @@
               "minLength": 1,
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Business-space context; omit to use the personal space.",
+            "in": "header",
+            "name": "X-Space-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Business-space context; omit to use the personal space.",
+              "title": "X-Space-Id"
             }
           }
         ],
@@ -52163,17 +52263,12 @@
           "409": {
             "content": {
               "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "The target Space has no capacity for another Bot."
           },
           "422": {
             "content": {
@@ -52356,17 +52451,12 @@
           "409": {
             "content": {
               "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "The target Space has no capacity for another Bot."
           },
           "422": {
             "content": {
@@ -82891,17 +82981,12 @@
           "409": {
             "content": {
               "application/json": {
-                "example": {
-                  "code": 409000,
-                  "message": "Conflict",
-                  "request_id": "b0a6d2f4e8c94b1a9f3d5e7c60218a4d"
-                },
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
+                  "$ref": "#/components/schemas/Envelope_BotQuotaExceededData_"
                 }
               }
             },
-            "description": "Conflicts with current state"
+            "description": "The target Space has no capacity for another Bot."
           },
           "422": {
             "content": {

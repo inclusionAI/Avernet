@@ -1,7 +1,8 @@
 """Tests for LocalPolicyService — singlebox 全开放 PolicyService 实现。
 
-覆盖 6 个公开方法(check / allow / disallow / get_bots_ceiling /
-set_bots_ceiling / get_quota)的快乐路径 + structural Protocol conformance。
+覆盖 7 个公开方法(check / allow / disallow / get_bots_ceiling /
+set_bots_ceiling / clear_bots_ceiling / get_quota)的快乐路径 + structural
+Protocol conformance。
 """
 from agentclaw.community.api.policy_service import PolicyServiceProtocol
 from agentclaw.community.plugins.local.policy_service import LocalPolicyService
@@ -46,6 +47,11 @@ def test_get_bots_ceiling_returns_high_limit():
 def test_set_bots_ceiling_is_noop():
     svc = LocalPolicyService()
     assert svc.set_bots_ceiling(entity_id="user-1", ceiling=10) is None
+
+
+def test_clear_bots_ceiling_is_noop():
+    svc = LocalPolicyService()
+    assert svc.clear_bots_ceiling(entity_id="user-1") is False
 
 
 def test_get_quota_returns_high_limits():

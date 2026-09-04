@@ -22,6 +22,15 @@ from agentclaw.community.core.bot_management.services.bot_service import (
     DeviceLimitError,
     validate_bot_name,
 )
+from agentclaw.community.core.bot_management.bot_quota import (
+    BotQuotaExceededError,
+    BotQuotaScope,
+    BotQuotaSnapshot,
+)
+from agentclaw.community.core.bot_management.bot_quota_service_protocol import (
+    BotQuotaServiceProtocol,
+)
+from agentclaw.community.core.spaces.models import SpaceType
 from agentclaw.community.core.devices.models import DeviceBindingStatus
 
 
@@ -50,7 +59,17 @@ def _make_service(max_bots: int = 5, current_bots: int = 0, policy_service=None)
     )
     svc._teclaw_provision_provider = lambda: teclaw_provision
     svc._policy_service = policy_service
+    svc._bot_quota_service = None
     return svc
+
+
+def _team_quota_scope() -> BotQuotaScope:
+    return BotQuotaScope(
+        owner_id="u1",
+        space_id=42,
+        space_name="Team",
+        space_type=SpaceType.TEAM,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,6 +241,45 @@ class TestCreateBotValidation:
         svc = _make_service(max_bots=3, current_bots=3)
         with pytest.raises(BotLimitExceededError):
             svc.check_create_bot_preflight("u1", "bot001", "openclaw")
+
+    def test_space_aware_preflight_uses_quota_instead_of_legacy_owner_count(self):
+        svc = _make_service(max_bots=1, current_bots=99)
+        quota = MagicMock(spec=BotQuotaServiceProtocol)
+        svc._bot_quota_service = quota
+
+        svc.check_create_bot_preflight(
+            "u1", "bot001", "openclaw", space_id=42, space_quota=True
+        )
+
+        quota.assert_can_add.assert_called_once_with(owner_id="u1", space_id=42)
+        svc._repository.count_by_owner.assert_not_called()
+
+    def test_final_quota_race_is_not_wrapped_as_a_device_error(self):
+        svc = _make_service(max_bots=1, current_bots=99)
+        quota = MagicMock(spec=BotQuotaServiceProtocol)
+        scope = _team_quota_scope()
+        error = BotQuotaExceededError(
+            BotQuotaSnapshot(scope=scope, ceiling=20, used=20)
+        )
+        quota.guard_add.side_effect = error
+        svc._bot_quota_service = quota
+        svc._repository.exists_by_bot_name.return_value = False
+
+        with pytest.raises(BotQuotaExceededError) as raised:
+            svc.create_bot(
+                user_id="u1",
+                nick_name="U1",
+                bot_name="Quota race",
+                bot_id="bot001",
+                space_id=42,
+                space_quota=True,
+            )
+
+        assert raised.value is error
+        svc._repository.insert.assert_not_called()
+        svc._repository.soft_delete_by_owner.assert_not_called()
+        svc._repository.count_by_owner.assert_not_called()
+        quota.guard_add.assert_called_once_with(owner_id="u1", space_id=42)
 
     def test_preflight_rejects_teclaw_for_default_bot(self):
         svc = _make_service()

@@ -487,16 +487,26 @@ class BotStatus(BaseModel):
 
 
 class Ceiling(BaseModel):
-    """Per-user bot creation quota."""
+    """Bot creation quota for the selected business Space."""
 
-    model_config = ConfigDict(json_schema_extra={"example": {"ceiling": 5}})
+    model_config = ConfigDict(json_schema_extra={"example": {"ceiling": 20}})
 
     ceiling: int = Field(
-        description="Maximum number of live bots the named user may own in "
-        "this deployment; creation is refused (409) at the limit. Desktop "
-        "bots do not count toward it. A value of 0 or less means the limit "
-        "is disabled."
+        description="Maximum number of non-deleted cloud Bots in this Space. "
+        "A value of 0 or less means the limit is disabled."
     )
+
+
+class BotQuotaExceededData(BaseModel):
+    """Actionable capacity facts returned when a Space cannot accept a Bot."""
+
+    space_id: str = Field(description="Identifier of the full target Space.")
+    space_name: str = Field(description="Display name of the full target Space.")
+    space_type: Literal["PERSONAL", "TEAM"] = Field(
+        description="Whether the quota belongs to a Personal or Team Space."
+    )
+    ceiling: int = Field(gt=0, description="Configured Bot ceiling for the Space.")
+    used: int = Field(ge=0, description="Current non-deleted cloud Bot count.")
 
 
 class Passport(BaseModel):

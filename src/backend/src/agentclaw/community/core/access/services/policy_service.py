@@ -86,8 +86,14 @@ class PolicyService(PolicyServiceProtocol):
         except (json.JSONDecodeError, AttributeError):
             return {}
 
-    def get_bots_ceiling(self, *, entity_id: str, default: int = 5) -> int:
-        """获取指定用户的 BOT 数量上限。
+    def get_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        default: int = 5,
+        entity_type: str = "staff",
+    ) -> int:
+        """获取指定实体的 BOT 数量上限。
 
         读取 ``ac_access_control_policy.policy`` 中的 ``bots_ceiling`` 字段：
         - 无该用户记录 → 返回 default
@@ -97,7 +103,9 @@ class PolicyService(PolicyServiceProtocol):
         - ``bots_ceiling`` <= 0 → 返回 default
         - ``bots_ceiling`` > 0 → 返回该值
         """
-        record = self._repo.get_by_entity(entity_id=entity_id, entity_type="staff")
+        record = self._repo.get_by_entity(
+            entity_id=entity_id, entity_type=entity_type
+        )
         if not record or not record.policy:
             return default
 
@@ -110,8 +118,9 @@ class PolicyService(PolicyServiceProtocol):
             ceiling = int(raw_ceiling)
         except (ValueError, TypeError):
             logger.warning(
-                "[get_bots_ceiling] invalid bots_ceiling value for entity_id=%s: %r",
-                entity_id, raw_ceiling,
+                "[get_bots_ceiling] invalid bots_ceiling value for "
+                "entity_type=%s entity_id=%s: %r",
+                entity_type, entity_id, raw_ceiling,
             )
             return default
 
@@ -120,24 +129,59 @@ class PolicyService(PolicyServiceProtocol):
 
         return ceiling
 
-    def set_bots_ceiling(self, *, entity_id: str, ceiling: int) -> None:
-        """设置指定用户的 BOT 数量上限（merge 进现有 policy JSON）。
+    def set_bots_ceiling(
+        self,
+        *,
+        entity_id: str,
+        ceiling: int,
+        entity_type: str = "staff",
+    ) -> None:
+        """设置指定实体的 BOT 数量上限（merge 进现有 policy JSON）。
 
         保留现有 policy 中的其他 key（如 ``policy``），仅更新 ``bots_ceiling``。
         如果用户尚无 policy 记录，则创建一条。
         """
-        record = self._repo.get_by_entity(entity_id=entity_id, entity_type="staff")
+        record = self._repo.get_by_entity(
+            entity_id=entity_id, entity_type=entity_type
+        )
         existing = self._parse_policy_json(record.policy) if record else {}
 
         updated = {**existing, "bots_ceiling": str(ceiling)}
         self._repo.upsert_policy(
             entity_id=entity_id,
-            entity_type="staff",
+            entity_type=entity_type,
             policy=json.dumps(updated, ensure_ascii=False),
         )
         logger.info(
-            "[set_bots_ceiling] entity_id=%s, ceiling=%d", entity_id, ceiling,
+            "[set_bots_ceiling] entity_type=%s, entity_id=%s, ceiling=%d",
+            entity_type, entity_id, ceiling,
         )
+
+    def clear_bots_ceiling(
+        self, *, entity_id: str, entity_type: str = "staff"
+    ) -> bool:
+        """Remove only ``bots_ceiling`` while preserving other policy keys."""
+        record = self._repo.get_by_entity(
+            entity_id=entity_id, entity_type=entity_type
+        )
+        if record is None:
+            return False
+
+        existing = self._parse_policy_json(record.policy)
+        if "bots_ceiling" not in existing:
+            return False
+
+        del existing["bots_ceiling"]
+        self._repo.upsert_policy(
+            entity_id=entity_id,
+            entity_type=entity_type,
+            policy=json.dumps(existing, ensure_ascii=False),
+        )
+        logger.info(
+            "[clear_bots_ceiling] entity_type=%s, entity_id=%s",
+            entity_type, entity_id,
+        )
+        return True
 
     def _try_compete(self, *, entity_id: str) -> bool:
         """尝试竞争名额。"""

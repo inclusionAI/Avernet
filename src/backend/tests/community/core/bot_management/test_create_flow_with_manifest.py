@@ -19,6 +19,8 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateContext,
     BotCreateDeploymentMode,
     BotCreateSpec,
+    creation_spec_from_payload,
+    creation_spec_to_payload,
     submit_bot_creation_with_manifest,
 )
 
@@ -211,3 +213,17 @@ def test_a_successful_submission_starts_the_job_and_discards_nothing():
     # creation has to be supplied again by the poll.
     assert started["bot_id"] == seam.persisted[0]["bot_id"]
     assert started["spec"]["engine_type"]
+
+
+def test_the_background_job_preserves_space_quota_enforcement():
+    context = BotCreateContext(
+        deployment_mode=BotCreateDeploymentMode.CLOUD,
+        space_kind="team",
+        space_quota=True,
+    )
+
+    payload = creation_spec_to_payload(_SPEC, context)
+    restored_spec, restored_context = creation_spec_from_payload(payload)
+
+    assert restored_spec == _SPEC
+    assert restored_context == context
