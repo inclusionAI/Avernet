@@ -250,6 +250,10 @@ class WorkOrderMessageTitle(StrEnum):
     SKILL_COLLABORATOR_PENDING = "Skill 共同编辑申请待审批"
     SKILL_COLLABORATOR_APPROVED = "Skill 共同编辑申请已通过"
     SKILL_COLLABORATOR_REJECTED = "Skill 共同编辑申请未通过"
+    HUMAN_FRIEND_APPROVED = "人机好友申请已通过"
+    HUMAN_FRIEND_REJECTED = "人机好友申请未通过"
+    BOT_FRIEND_APPROVED = "Bot 好友申请已通过"
+    BOT_FRIEND_REJECTED = "Bot 好友申请未通过"
 
 
 class WorkOrderMessageContent(StrEnum):
@@ -276,6 +280,10 @@ class WorkOrderMessageContent(StrEnum):
     SKILL_COLLABORATOR_REJECTED = (
         "你共同编辑 Skill「{skill_name}」的申请未通过。拒绝原因：{review_remark}"
     )
+    HUMAN_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
+    HUMAN_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
+    BOT_FRIEND_APPROVED = "你的 Bot 好友申请已通过。"
+    BOT_FRIEND_REJECTED = "你的 Bot 好友申请未通过。"
 
 
 def skill_collaborator_applicant_display(

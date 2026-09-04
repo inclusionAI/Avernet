@@ -51,6 +51,8 @@ from agentclaw.community.core.work_orders.models import (
     WorkOrderApproverStatus,
     WorkOrderEventCreatedResult,
     WorkOrderEventType,
+    WorkOrderMessageContent,
+    WorkOrderMessageTitle,
     reviewed_event_type_for,
     notification_title_for,
 )
@@ -339,6 +341,50 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                 source_event_type=source_event_type,
                 biz_type=order.biz_type,
             )
+            result_title = notification_title_for(
+                reviewed_event_type, f"{order.biz_type} {target.value}"
+            )
+            result_content = review_remark
+            if (
+                order.biz_type == WorkOrderBizType.BOT_FRIEND.value
+                and reviewed_event_type
+                in {
+                    WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED.value,
+                    WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value,
+                }
+            ):
+                is_human_friend = (
+                    reviewed_event_type
+                    == WorkOrderEventType.HUMAN2BOT_FRIEND_REVIEWED.value
+                )
+                if target is WorkOrderStatus.APPROVED:
+                    result_title = (
+                        WorkOrderMessageTitle.HUMAN_FRIEND_APPROVED.value
+                        if is_human_friend
+                        else WorkOrderMessageTitle.BOT_FRIEND_APPROVED.value
+                    )
+                    result_text = (
+                        WorkOrderMessageContent.HUMAN_FRIEND_APPROVED.value
+                        if is_human_friend
+                        else WorkOrderMessageContent.BOT_FRIEND_APPROVED.value
+                    )
+                else:
+                    result_title = (
+                        WorkOrderMessageTitle.HUMAN_FRIEND_REJECTED.value
+                        if is_human_friend
+                        else WorkOrderMessageTitle.BOT_FRIEND_REJECTED.value
+                    )
+                    result_text = (
+                        WorkOrderMessageContent.HUMAN_FRIEND_REJECTED.value
+                        if is_human_friend
+                        else WorkOrderMessageContent.BOT_FRIEND_REJECTED.value
+                    )
+                result_payload = {"text": result_text}
+                if review_remark is not None:
+                    result_payload["review_remark"] = review_remark
+                result_content = json.dumps(
+                    result_payload, ensure_ascii=False
+                )
             db.add(
                 self._Notification(
                     work_order_id=work_order_id,
@@ -347,10 +393,8 @@ class WorkOrderRepository(WorkOrderRepositoryProtocol):
                     event_type=reviewed_event_type,
                     biz_type=order.biz_type,
                     biz_id=order.biz_id,
-                    title=notification_title_for(
-                        reviewed_event_type, f"{order.biz_type} {target.value}"
-                    ),
-                    content=review_remark,
+                    title=result_title,
+                    content=result_content,
                     env=env,
                 )
             )

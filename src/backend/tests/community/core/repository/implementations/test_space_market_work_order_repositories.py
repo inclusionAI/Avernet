@@ -1409,17 +1409,72 @@ def test_friend_approval_context_and_reviewed_event_use_original_applied_event(
     )
 
     with db.orm_session() as session:
-        result_event_type = (
-            session.query(WorkOrderNotificationModel.event_type)
+        result = (
+            session.query(
+                WorkOrderNotificationModel.event_type,
+                WorkOrderNotificationModel.title,
+                WorkOrderNotificationModel.content,
+            )
             .filter(
                 WorkOrderNotificationModel.work_order_id == created.work_order_id,
                 WorkOrderNotificationModel.recipient_user_id == "applicant-friend",
                 WorkOrderNotificationModel.notification_category
                 == NotificationCategory.NOTICE.value,
             )
-            .scalar()
+            .one()
         )
-    assert result_event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.title == "Bot 好友申请已通过"
+    assert json.loads(result.content) == {"text": "你的 Bot 好友申请已通过。"}
+
+
+def test_friend_rejection_persists_status_specific_content(db) -> None:
+    repository = WorkOrderRepository(db, _skill_editor_requests(db))
+    created = repository.create_work_order_event(
+        event_category=NotificationCategory.APPROVAL,
+        biz_type=WorkOrderBizType.BOT_FRIEND.value,
+        biz_id="legacy-id-reject",
+        event_type=WorkOrderEventType.BOT2BOT_FRIEND_APPLIED.value,
+        applicant_user_id="applicant-reject",
+        approver_user_ids=["reviewer-reject"],
+        recipient_user_ids=[],
+        title="friend approval",
+        content=None,
+        apply_reason=None,
+        biz_data=json.dumps({"request_ids": ["request-reject"]}),
+        env="dev",
+    )
+    assert created.work_order_id is not None
+
+    repository.process_approval(
+        work_order_id=created.work_order_id,
+        reviewer_user_id="reviewer-reject",
+        decision=WorkOrderDecision.REJECTED,
+        review_remark="审批备注",
+        env="dev",
+    )
+
+    with db.orm_session() as session:
+        result = (
+            session.query(
+                WorkOrderNotificationModel.event_type,
+                WorkOrderNotificationModel.title,
+                WorkOrderNotificationModel.content,
+            )
+            .filter(
+                WorkOrderNotificationModel.work_order_id == created.work_order_id,
+                WorkOrderNotificationModel.recipient_user_id == "applicant-reject",
+                WorkOrderNotificationModel.notification_category
+                == NotificationCategory.NOTICE.value,
+            )
+            .one()
+        )
+    assert result.event_type == WorkOrderEventType.BOT2BOT_FRIEND_REVIEWED.value
+    assert result.title == "Bot 好友申请未通过"
+    assert json.loads(result.content) == {
+        "text": "你的 Bot 好友申请未通过。",
+        "review_remark": "审批备注",
+    }
 
 
 def test_get_approval_context_rejects_missing_order(db) -> None:
