@@ -1,8 +1,9 @@
+import { latestAttemptEvents, mergePublicOutputEvents } from './currentRound';
 import type {
   ActorViewModel,
-  HostActor,
   PendingHumanNode,
   PlayerActor,
+  PlayerState,
   PublicOutputEvent,
   SessionMessage,
   StateMachineNode,
@@ -10,155 +11,138 @@ import type {
   UndercoverGamePanelParams,
   UndercoverGameViewModel,
   VoteCandidate,
-  PlayerState,
 } from './types';
 
-const TERMINAL_STATUSES = new Set(['completed', 'failed', 'aborted']);
+const TERMINAL = new Set(['completed', 'failed', 'aborted']);
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function stateMachineMetadata(message: SessionMessage): Record<string, unknown> | undefined {
-  return asRecord(asRecord(message.metadata)?.state_machine);
+  return record(record(message.metadata)?.state_machine);
 }
 
-function outputText(content: unknown): string | undefined {
-  if (typeof content === 'string') return content;
-  const record = asRecord(content);
-  if (record && typeof record.text === 'string') return record.text;
-  return undefined;
-}
-
-function eventTimestamp(message: SessionMessage): number | undefined {
-  const value = message.created_at ?? message.timestamp;
-  return typeof value === 'number' ? value : undefined;
-}
-
-function eventIdentity(runId: string, gameSessionId: string | undefined, nodeId: string, attempt: number): string {
-  return `${gameSessionId ?? 'phase'}:${runId}:${nodeId}:${attempt}`;
+function outputText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  const object = record(value);
+  return object && typeof object.text === 'string' ? object.text : undefined;
 }
 
 function compareEvents(left: PublicOutputEvent, right: PublicOutputEvent): number {
-  if (left.sequence !== undefined || right.sequence !== undefined) {
-    return (left.sequence ?? Number.NEGATIVE_INFINITY) - (right.sequence ?? Number.NEGATIVE_INFINITY);
-  }
-  if (left.timestamp !== undefined || right.timestamp !== undefined) {
-    return (left.timestamp ?? Number.NEGATIVE_INFINITY) - (right.timestamp ?? Number.NEGATIVE_INFINITY);
-  }
-  return left.identity.localeCompare(right.identity);
+  return (left.sequence ?? Infinity) - (right.sequence ?? Infinity)
+    || (left.timestamp ?? -Infinity) - (right.timestamp ?? -Infinity)
+    || left.identity.localeCompare(right.identity);
 }
 
-/**
- * Extract only state-machine-tagged output events. No natural-language output
- * is inspected for phase, vote, identity, role, word, or elimination facts.
- */
 export function mapPublicOutputEvents(
   messages: SessionMessage[],
   params: UndercoverGamePanelParams,
 ): PublicOutputEvent[] {
-  const byIdentity = new Map<string, PublicOutputEvent>();
+  const events = new Map<string, PublicOutputEvent>();
+  const voting = params.phase.toLowerCase().includes('vot');
   for (const message of messages) {
     const metadata = stateMachineMetadata(message);
-    if (
-      !metadata ||
-      metadata.event !== 'output' ||
-      metadata.run_id !== params.runId ||
-      metadata.visibility === 'private' ||
-      metadata.public === false
-    ) continue;
+    if (!metadata || metadata.event !== 'output' || metadata.run_id !== params.runId
+      || metadata.visibility === 'private' || metadata.public === false) continue;
     const nodeId = typeof metadata.node_id === 'string' ? metadata.node_id : '';
-    const actorId = nodeId ? params.nodeActorMap[nodeId] : undefined;
-    const text = outputText(message.content);
-    if (!nodeId || !actorId || !text) continue;
+    const actorId = params.nodeActorMap[nodeId];
+    const rawOutput = outputText(message.content)?.trim();
+    if (!nodeId || !actorId || !rawOutput) continue;
+
+    const isHost = actorId === params.host.actorId;
+    if (voting && !isHost) continue;
+    if (isHost && params.display?.showHostOutput === false) continue;
+
     const attempt = typeof metadata.attempt === 'number' && metadata.attempt > 0 ? metadata.attempt : 1;
+    const identity = `${params.gameSessionId ?? 'phase'}:${params.runId}:${nodeId}:${attempt}`;
     const event: PublicOutputEvent = {
-      identity: eventIdentity(params.runId, params.gameSessionId, nodeId, attempt),
+      identity,
       runId: params.runId,
       nodeId,
       attempt,
       actorId,
-      text,
+      text: rawOutput,
       pending: Boolean(metadata.pending ?? message.pending),
       sequence: typeof message.sequence === 'number' ? message.sequence : undefined,
-      timestamp: eventTimestamp(message),
+      timestamp: typeof (message.created_at ?? message.timestamp) === 'number'
+        ? message.created_at ?? message.timestamp
+        : undefined,
       messageId: message.id ?? message.message_id,
+      source: 'session-message',
     };
-    const previous = byIdentity.get(event.identity);
-    if (!previous || compareEvents(event, previous) >= 0) byIdentity.set(event.identity, event);
+    const previous = events.get(identity);
+    if (!previous || compareEvents(event, previous) >= 0) events.set(identity, event);
   }
-  return [...byIdentity.values()].sort(compareEvents);
+  return latestAttemptEvents([...events.values()].sort(compareEvents));
 }
 
-function nodesForActor(nodes: StateMachineNode[], params: UndercoverGamePanelParams, actorId: string): StateMachineNode[] {
-  return nodes.filter((node) => params.nodeActorMap[node.node_id] === actorId);
-}
-
-function latestNode(nodes: StateMachineNode[], params: UndercoverGamePanelParams, actorId: string): StateMachineNode | undefined {
-  return nodesForActor(nodes, params, actorId).reduce<StateMachineNode | undefined>((latest, node) => {
-    if (!latest) return node;
-    const latestTime = latest.completed_at ?? latest.started_at ?? Number.NEGATIVE_INFINITY;
-    const nodeTime = node.completed_at ?? node.started_at ?? Number.NEGATIVE_INFINITY;
-    if (nodeTime !== latestTime) return nodeTime > latestTime ? node : latest;
-    const latestAttempt = latest.attempt ?? 0;
-    const nodeAttempt = node.attempt ?? 0;
-    if (nodeAttempt !== latestAttempt) return nodeAttempt > latestAttempt ? node : latest;
-    return node.node_id.localeCompare(latest.node_id) > 0 ? node : latest;
-  }, undefined);
+function latestNode(nodes: StateMachineNode[], params: UndercoverGamePanelParams, actorId: string) {
+  return nodes.filter((node) => params.nodeActorMap[node.node_id] === actorId)
+    .reduce<StateMachineNode | undefined>((latest, node) => {
+      if (!latest) return node;
+      const latestTime = latest.completed_at ?? latest.started_at ?? -Infinity;
+      const nodeTime = node.completed_at ?? node.started_at ?? -Infinity;
+      if (nodeTime !== latestTime) return nodeTime > latestTime ? node : latest;
+      return (node.attempt ?? 0) >= (latest.attempt ?? 0) ? node : latest;
+    }, undefined);
 }
 
 function playerState(
   player: PlayerActor,
-  nodes: StateMachineNode[],
-  pendingHumanNode: PendingHumanNode | undefined,
+  node: StateMachineNode | undefined,
+  pending: boolean,
   params: UndercoverGamePanelParams,
 ): PlayerState {
-  if (player.eliminated === true || player.alive === false || player.state === 'eliminated') return 'eliminated';
+  if (player.eliminated || player.alive === false) return 'eliminated';
   if (player.state) return player.state;
-  if (player.voted === true) return 'voted';
-  if (pendingHumanNode && params.nodeActorMap[pendingHumanNode.node_id] === player.actorId) {
-    return params.phase.toLowerCase().includes('vot') ? 'waiting_for_vote' : 'waiting';
-  }
-  const latest = latestNode(nodes, params, player.actorId);
-  if (latest?.status === 'running') return 'active_speech';
-  if (latest?.status === 'retry_scheduled') return 'retrying';
-  if (latest?.status === 'failed') return 'error';
-  if (latest?.status === 'completed') {
-    return params.phase.toLowerCase().includes('vot') ? 'voted' : 'completed_speech';
-  }
-  return 'waiting';
+  if (pending) return 'action_required';
+  if (node?.status === 'running') return 'active_speech';
+  if (node?.status === 'retry_scheduled' || ((node?.attempt ?? 1) > 1 && node?.status !== 'completed')) return 'retrying';
+  if (node?.status === 'failed') return 'error';
+  if (node?.status === 'completed') return params.phase.toLowerCase().includes('vot') ? 'voted' : 'completed_speech';
+  return params.phase.toLowerCase().includes('vot') ? 'waiting_for_vote' : 'waiting';
 }
 
 export function normalizeUndercoverGameViewModel(
   params: UndercoverGamePanelParams,
   graph?: StateMachineRunGraph,
-  pendingHumanNodes: PendingHumanNode[] = [],
+  pendingNodes: PendingHumanNode[] = [],
   messages: SessionMessage[] = [],
+  resolvedEvents: PublicOutputEvent[] = [],
 ): UndercoverGameViewModel {
-  const pendingHumanNode = pendingHumanNodes.length === 1 ? pendingHumanNodes[0] : undefined;
-  const publicEvents = mapPublicOutputEvents(messages, params);
-  const outputsByActor = new Map<string, PublicOutputEvent[]>();
-  for (const event of publicEvents) {
-    const outputs = outputsByActor.get(event.actorId) ?? [];
-    outputs.push(event);
-    outputsByActor.set(event.actorId, outputs);
-  }
+  const pendingHumanNode = pendingNodes.find((node) => Boolean(params.nodeActorMap[node.node_id]));
+  const pendingActorId = pendingHumanNode ? params.nodeActorMap[pendingHumanNode.node_id] : undefined;
+  const events = latestAttemptEvents(mergePublicOutputEvents(mapPublicOutputEvents(messages, params), resolvedEvents));
+  const byActor = new Map<string, PublicOutputEvent[]>();
+  for (const event of events) byActor.set(event.actorId, [...(byActor.get(event.actorId) ?? []), event]);
+
   const nodes = graph?.nodes ?? [];
-  const playerMap = new Map(params.players.map((player) => [player.actorId, player]));
+  const players = new Map(params.players.map((player) => [player.actorId, player]));
+  const historyByActor = new Map<string, typeof params.publicHistory[number]['speeches']>();
+  for (const round of params.publicHistory) {
+    for (const speech of round.speeches) {
+      historyByActor.set(speech.actorId, [...(historyByActor.get(speech.actorId) ?? []), speech]);
+    }
+  }
+
   const actors: ActorViewModel[] = params.seatOrder.map((actorId, seatIndex) => {
-    const player = playerMap.get(actorId) as PlayerActor;
-    const history = outputsByActor.get(actorId) ?? [];
+    const actor = players.get(actorId)!;
+    const node = latestNode(nodes, params, actorId);
+    const outputHistory = byActor.get(actorId) ?? [];
     return {
-      actor: player,
+      actor,
       kind: 'player',
       seatIndex,
-      state: playerState(player, nodes, pendingHumanNode, params),
-      node: latestNode(nodes, params, actorId),
-      latestOutput: history[history.length - 1],
-      outputHistory: history,
+      state: playerState(actor, node, pendingActorId === actorId, params),
+      node,
+      latestOutput: outputHistory[outputHistory.length - 1],
+      outputHistory,
+      publicHistory: historyByActor.get(actorId) ?? [],
     };
   });
-  const hostHistory = outputsByActor.get(params.host.actorId) ?? [];
+
+  const hostHistory = byActor.get(params.host.actorId) ?? [];
   actors.push({
     actor: params.host,
     kind: 'host',
@@ -166,28 +150,30 @@ export function normalizeUndercoverGameViewModel(
     node: latestNode(nodes, params, params.host.actorId),
     latestOutput: hostHistory[hostHistory.length - 1],
     outputHistory: hostHistory,
+    publicHistory: [],
   });
+
+  const completedTurns = params.turnOrder.filter((actorId) => latestNode(nodes, params, actorId)?.status === 'completed').length;
   const status = graph?.run.status ?? 'pending';
   return {
     params,
     run: graph?.run,
     status,
-    terminal: TERMINAL_STATUSES.has(status),
+    terminal: TERMINAL.has(status),
     phase: params.phase,
     round: params.round,
     actors,
     pendingHumanNode,
-    pendingHumanActorId: pendingHumanNode ? params.nodeActorMap[pendingHumanNode.node_id] : undefined,
-    publicEvents,
+    pendingHumanActorId: pendingActorId,
+    publicEvents: events,
+    completedTurns,
+    totalTurns: params.turnOrder.length,
     lastUpdatedAt: graph?.run.updated_at,
   };
 }
 
 export function eligibleVoteCandidates(candidates: VoteCandidate[] = []): VoteCandidate[] {
-  return candidates.filter((candidate) => candidate.eligible === true && candidate.eliminated !== true);
+  return candidates.filter((candidate) => candidate.eligible && !candidate.eliminated);
 }
 
-export function serializeVoteContent(targetActorId: string): string {
-  if (!targetActorId.trim()) throw new Error('A vote target is required.');
-  return JSON.stringify({ kind: 'vote', target_actor_id: targetActorId.trim() });
-}
+export { serializeVoteTarget as serializeVoteContent } from './actionContext';

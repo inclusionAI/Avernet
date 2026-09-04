@@ -1,466 +1,71 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react';
 import styled from 'styled-components';
-import {
-  ApiRequestError,
-  fetchNodeDetail,
-  fetchPendingHumanNodes,
-  fetchRunGraph,
-  fetchSessionMessages,
-  respondToHumanNode,
-} from './api';
+import { ApiRequestError, fetchNodeDetail, fetchPendingHumanNodes, fetchRunGraph, fetchSessionMessages, respondToHumanNode } from './api';
+import { parsePrivateActionContext, serializeVoteAbstain, serializeVoteTarget, unicodeLength, validateSpeech } from './actionContext';
 import { PanelParamsError, normalizePanelParams } from './contracts';
+import { completedMappedNodes, normalizeCurrentRoundUpstream, publicEventFromNodeDetail } from './currentRound';
 import { getSeatCoordinates, truncateBubbleText } from './layout';
-import { eligibleVoteCandidates, normalizeUndercoverGameViewModel, serializeVoteContent } from './viewModel';
-import type {
-  ActorViewModel,
-  PlayerState,
-  StateMachineNodeDetailResponse,
-  UndercoverGamePanelProps,
-  UndercoverGamePanelParams,
-  UndercoverGameViewModel,
-  PlayerActor,
-} from './types';
+import { eligibleVoteCandidates, normalizeUndercoverGameViewModel } from './viewModel';
+import type { ActorViewModel, PanelAction, PlayerActor, PlayerState, PublicOutputEvent, StateMachineNodeDetailResponse, UndercoverGamePanelParams, UndercoverGamePanelProps, UndercoverGameViewModel } from './types';
 
-const Container = styled.section`
-  box-sizing: border-box;
-  min-height: 100%;
-  width: 100%;
-  overflow: auto;
-  padding: 12px;
-  color: #f8f4e8;
-  background: #161827;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  image-rendering: pixelated;
-`;
-const Header = styled.header`
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-  padding: 10px;
-  border: 3px solid #504768;
-  background: #26273c;
-  box-shadow: 4px 4px 0 #0c0d16;
-`;
-const HeaderTitle = styled.div`min-width: 0;`;
-const Eyebrow = styled.div`color: #f2b36c; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;`;
-const Title = styled.h1`margin: 3px 0 0; font-size: 16px; line-height: 1.2; overflow-wrap: anywhere;`;
-const Meta = styled.div`margin-top: 5px; color: #b9bdd1; font-size: 11px; line-height: 1.4;`;
-const ActionButton = styled.button`
-  cursor: pointer;
-  border: 2px solid #f2b36c;
-  padding: 6px 8px;
-  color: #211b29;
-  background: #f2b36c;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  &:disabled { cursor: wait; opacity: 0.55; }
-`;
-const ErrorBox = styled.div`margin: 10px 0; padding: 9px; border: 2px solid #e87979; color: #ffd6d6; background: #3d2334; font-size: 12px; line-height: 1.45;`;
-const Notice = styled.div`margin: 8px 0; padding: 7px 9px; border-left: 3px solid #f2b36c; color: #f6dfb4; background: #322b3a; font-size: 11px; line-height: 1.4;`;
-const Room = styled.div`
-  position: relative;
-  min-height: 560px;
-  overflow: hidden;
-  border: 4px solid #504768;
-  background:
-    linear-gradient(90deg, rgba(255,255,255,.035) 2px, transparent 2px) 0 0 / 24px 24px,
-    linear-gradient(rgba(255,255,255,.035) 2px, transparent 2px) 0 0 / 24px 24px,
-    #39324b;
-  box-shadow: inset 0 0 0 4px #211f32, 6px 6px 0 #0c0d16;
-  @media (max-width: 620px) {
-    min-height: 620px;
-  }
-`;
-const Window = styled.div`position: absolute; top: 5%; left: 7%; width: 25%; height: 17%; border: 5px solid #201c30; background: #5e7697; box-shadow: inset 0 0 0 5px #9db7c3;`;
-const WindowCross = styled.div`position: absolute; inset: 42% 0 auto; height: 5px; background: #201c30; &::after { content: ''; position: absolute; left: 48%; top: -20px; width: 5px; height: 45px; background: #201c30; }`;
-const Lamp = styled.div`position: absolute; top: 3%; left: 49%; width: 52px; height: 30px; border: 4px solid #201c30; background: #f2b36c; box-shadow: 0 12px 0 -4px #201c30;`;
-const HostArea = styled.div`position: absolute; top: 8%; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; width: 40%; min-width: 190px; z-index: 3;`;
-const Podium = styled.div`display: flex; align-items: center; gap: 8px; border: 4px solid #201c30; padding: 8px 12px; background: #b35d5d; box-shadow: 5px 5px 0 #201c30;`;
-const HostSprite = styled.div`display: grid; place-items: center; width: 40px; height: 40px; border: 4px solid #201c30; color: #201c30; background: #f2d18a; font-size: 21px; font-weight: 900;`;
-const HostCopy = styled.div`min-width: 0;`;
-const HostName = styled.div`font-size: 12px; font-weight: 800; overflow-wrap: anywhere;`;
-const HostStatus = styled.div`margin-top: 3px; color: #ffe6bd; font-size: 10px;`;
-const HostBubble = styled.button`max-width: 230px; margin-top: 8px; border: 3px solid #201c30; padding: 7px 9px; color: #201c30; background: #f9edcf; font-size: 11px; line-height: 1.35; box-shadow: 3px 3px 0 #201c30;`;
-const Table = styled.div`position: absolute; left: 50%; top: 59%; width: 62%; height: 33%; transform: translate(-50%, -50%); border: 8px solid #201c30; border-radius: 50%; background: #8b5260; box-shadow: inset 0 0 0 9px #bf7967, 8px 8px 0 #201c30;`;
-const TableTop = styled.div`position: absolute; inset: 18% 18%; border: 5px solid #201c30; border-radius: 50%; background: #b67865;`;
-const Seat = styled.button<{ $left: number; $top: number; $compactLeft: number; $compactTop: number; $compact?: boolean; $active?: boolean }>`
-  position: absolute;
-  left: ${({ $left, $compact, $compactLeft }) => ($compact ? `${$compactLeft}%` : `${$left}%`)};
-  top: ${({ $top, $compact, $compactTop }) => ($compact ? `${$compactTop}%` : `${$top}%`)};
-  transform: translate(-50%, -50%);
-  z-index: 4;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100px;
-  border: 0;
-  padding: 0;
-  color: #fff8e8;
-  background: transparent;
-  font: inherit;
-  cursor: pointer;
-  ${({ $active }) => $active ? 'filter: drop-shadow(0 0 7px #f2b36c);' : ''}
-  @media (max-width: 620px) { width: 92px; }
-`;
-const Sprite = styled.div<{ $state: PlayerState | 'host'; $human?: boolean }>`
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
-  border: 4px solid #201c30;
-  color: #201c30;
-  background: ${({ $state }) => $state === 'eliminated' ? '#777789' : $state === 'error' ? '#e87979' : $state === 'active_speech' ? '#f2b36c' : '#80b6a1'};
-  font-size: 22px;
-  font-weight: 900;
-  ${({ $human }) => $human ? 'outline: 3px dashed #fff1a8; outline-offset: 3px;' : ''}
-`;
-const SeatLabel = styled.span`max-width: 104px; margin-top: 4px; padding: 2px 4px; border: 2px solid #201c30; background: #26273c; font-size: 10px; line-height: 1.15; overflow-wrap: anywhere;`;
-const StateMarker = styled.span`max-width: 104px; margin-top: 2px; color: #f6dfb4; font-size: 9px; line-height: 1.15;`;
-const Bubble = styled.button<{ $left: number; $top: number; $compactLeft: number; $compactTop: number; $compact?: boolean; $pending?: boolean }>`
-  position: absolute;
-  left: ${({ $left, $compact, $compactLeft }) => ($compact ? `${$compactLeft}%` : `${$left}%`)};
-  top: ${({ $top, $compact, $compactTop }) => ($compact ? `${$compactTop}%` : `${$top}%`)};
-  transform: translate(-50%, -100%);
-  z-index: 5;
-  max-width: 150px;
-  border: 3px solid #201c30;
-  padding: 5px 7px;
-  color: #201c30;
-  background: ${({ $pending }) => $pending ? '#f2d18a' : '#f9edcf'};
-  font: inherit;
-  font-size: 10px;
-  line-height: 1.3;
-  text-align: left;
-  box-shadow: 3px 3px 0 #201c30;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-  @media (max-width: 620px) { max-width: 116px; }
-`;
-const Footer = styled.div`display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 12px; color: #b9bdd1; font-size: 10px;`;
-const Legend = styled.span`padding: 3px 5px; border: 1px solid #504768; background: #26273c;`;
-const ModalBackdrop = styled.div`position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 12px; background: rgba(8, 8, 17, .78);`;
-const Modal = styled.div`width: min(560px, 100%); max-height: 90vh; overflow: auto; border: 4px solid #f2b36c; padding: 13px; color: #f8f4e8; background: #26273c; box-shadow: 7px 7px 0 #0c0d16;`;
-const ModalHeader = styled.div`display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;`;
-const ModalTitle = styled.h2`margin: 0; font-size: 15px;`;
-const CloseButton = styled.button`border: 2px solid #aab0c8; padding: 3px 6px; color: #f8f4e8; background: transparent; font: inherit; cursor: pointer;`;
-const DetailGrid = styled.dl`display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin: 13px 0; font-size: 11px; dt { color: #f2b36c; } dd { margin: 0; overflow-wrap: anywhere; }`;
-const History = styled.ol`margin: 8px 0 14px; padding-left: 20px; font-size: 11px; line-height: 1.4; li { margin-bottom: 6px; }`;
-const Form = styled.form`display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 2px solid #504768;`;
-const TextArea = styled.textarea`box-sizing: border-box; width: 100%; min-height: 94px; resize: vertical; border: 2px solid #aab0c8; padding: 8px; color: #201c30; background: #f9edcf; font: inherit; font-size: 12px;`;
-const CandidateList = styled.div`display: grid; gap: 6px;`;
-const Candidate = styled.label<{ $selected?: boolean }>`display: flex; gap: 7px; align-items: center; border: 2px solid ${({ $selected }) => $selected ? '#f2b36c' : '#504768'}; padding: 7px; background: ${({ $selected }) => $selected ? '#4b3d46' : '#202135'}; font-size: 11px; cursor: pointer;`;
-const Small = styled.div`color: #b9bdd1; font-size: 10px; line-height: 1.4;`;
+const Container = styled.section`position:relative;box-sizing:border-box;display:flex;flex-direction:column;height:100%;min-height:0;width:100%;overflow:hidden;padding:12px;color:#f8f4e8;background:#161827;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;image-rendering:pixelated;@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}`;
+const Header = styled.header`flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:10px;padding:10px;border:3px solid #504768;background:#26273c;box-shadow:4px 4px 0 #0c0d16;`;
+const Scene=styled.div`min-height:0;flex:1 1 auto;overflow:auto;padding:0 6px 8px 0;`;
+const Title = styled.h1`margin:3px 0 0;font-size:16px;`; const Eyebrow=styled.div`color:#f2b36c;font-size:10px;letter-spacing:.08em;`; const Meta=styled.div`margin-top:5px;color:#b9bdd1;font-size:11px;line-height:1.5;`;
+const Button=styled.button`cursor:pointer;border:2px solid #f2b36c;padding:7px 9px;color:#211b29;background:#f2b36c;font:inherit;font-size:11px;font-weight:700;&:disabled{cursor:not-allowed;opacity:.55}`;
+const SecondaryButton=styled(Button)`color:#f8f4e8;background:transparent;border-color:#aab0c8;`;
+const Notice=styled.div`margin:8px 0;padding:8px 10px;border-left:3px solid #f2b36c;color:#f6dfb4;background:#322b3a;font-size:11px;line-height:1.5;`;
+const ErrorBox=styled(Notice)`border-color:#e87979;color:#ffd6d6;background:#3d2334;`;
+const Room=styled.div<{ $compact:boolean }>`position:relative;min-height:${p=>p.$compact?'auto':'560px'};padding:${p=>p.$compact?'122px 10px 12px':'0'};overflow:hidden;border:4px solid #504768;background:linear-gradient(90deg,rgba(255,255,255,.035) 2px,transparent 2px) 0 0/24px 24px,linear-gradient(rgba(255,255,255,.035) 2px,transparent 2px) 0 0/24px 24px,#39324b;box-shadow:inset 0 0 0 4px #211f32,6px 6px 0 #0c0d16;`;
+const HostArea=styled.div<{ $compact:boolean }>`position:${p=>p.$compact?'absolute':'absolute'};top:12px;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;width:min(86%,380px);z-index:3;`;
+const Podium=styled.div`display:flex;align-items:center;gap:8px;border:4px solid #201c30;padding:8px 12px;background:#b35d5d;box-shadow:5px 5px 0 #201c30;`; const HostBubble=styled.button`max-width:300px;margin-top:7px;border:3px solid #201c30;padding:7px;color:#201c30;background:#f9edcf;font:inherit;font-size:11px;`;
+const Table=styled.div`position:absolute;left:50%;top:60%;width:62%;height:33%;transform:translate(-50%,-50%);border:8px solid #201c30;border-radius:50%;background:#8b5260;box-shadow:inset 0 0 0 9px #bf7967,8px 8px 0 #201c30;`;
+const CompactList=styled.div`display:grid;gap:8px;`;
+const Seat=styled.button<{ $left:number;$top:number;$active:boolean;$compact:boolean }>`position:${p=>p.$compact?'relative':'absolute'};left:${p=>p.$compact?'auto':`${p.$left}%`};top:${p=>p.$compact?'auto':`${p.$top}%`};transform:${p=>p.$compact?'none':'translate(-50%,-50%)'};z-index:4;display:flex;${p=>p.$compact?'flex-direction:row;justify-content:flex-start;gap:10px;width:100%;padding:8px;':'flex-direction:column;align-items:center;width:105px;padding:0;'}border:${p=>p.$compact?'2px solid #504768':'0'};color:#fff8e8;background:${p=>p.$compact?'#26273c':'transparent'};font:inherit;cursor:pointer;${p=>p.$active?'filter:drop-shadow(0 0 7px #f2b36c);':''}`;
+const Sprite=styled.span<{ $state:PlayerState }>`display:grid;place-items:center;flex:0 0 auto;width:42px;height:42px;border:4px solid #201c30;color:#201c30;background:${p=>p.$state==='eliminated'?'#777789':p.$state==='error'?'#e87979':p.$state==='active_speech'||p.$state==='action_required'?'#f2b36c':'#80b6a1'};font-size:21px;font-weight:900;`;
+const SeatText=styled.span`display:flex;flex-direction:column;gap:3px;font-size:10px;text-align:left;`; const State=styled.span`color:#f6dfb4;`; const Bubble=styled.button<{ $left:number;$top:number }>`position:absolute;left:${p=>p.$left}%;top:${p=>p.$top-7}%;transform:translate(-50%,-100%);z-index:5;max-width:150px;border:3px solid #201c30;padding:5px 7px;color:#201c30;background:#f9edcf;font:inherit;font-size:10px;`;
+const Dock=styled.section`flex:0 1 min(48%,390px);min-height:150px;max-height:min(48%,390px);display:flex;flex-direction:column;overflow:hidden;margin-top:12px;border:4px solid #f2b36c;background:#202135;box-shadow:6px 6px 0 #0c0d16;`; const DockHead=styled.div`flex:0 0 auto;display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding:10px 12px 8px;border-bottom:2px solid #504768;`; const DockForm=styled.form`display:flex;flex:1 1 auto;min-height:0;flex-direction:column;`; const DockBody=styled.div`flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:10px 12px;`; const DockFooter=styled.div`flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 12px;border-top:2px solid #504768;background:#191a2b;`; const DockTitle=styled.h2`margin:0;font-size:14px;`; const Grid=styled.div`display:grid;gap:8px;`; const TextArea=styled.textarea`box-sizing:border-box;width:100%;min-height:90px;border:2px solid #aab0c8;padding:8px;color:#201c30;background:#f9edcf;font:inherit;`; const Candidates=styled.div`display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:7px;`; const Candidate=styled.label<{ $selected:boolean }>`display:flex;gap:7px;align-items:center;border:2px solid ${p=>p.$selected?'#f2b36c':'#504768'};padding:8px;background:${p=>p.$selected?'#4b3d46':'#26273c'};font-size:11px;cursor:pointer;`; const Word=styled.div`padding:8px;border:2px dashed #f2b36c;background:#322b3a;font-size:13px;`; const Small=styled.div`color:#b9bdd1;font-size:10px;line-height:1.45;`; const History=styled.ol`margin:5px 0;padding-left:20px;font-size:11px;`;
+const ModalBackdrop=styled.div`position:absolute;inset:0;z-index:30;display:grid;place-items:center;overflow:hidden;padding:12px;background:rgba(8,8,17,.78);`; const Modal=styled.div`box-sizing:border-box;width:min(560px,100%);max-height:calc(100% - 24px);overflow:auto;border:4px solid #f2b36c;padding:13px;background:#26273c;`; const Detail=styled.dl`display:grid;grid-template-columns:100px 1fr;gap:6px;font-size:11px;dt{color:#f2b36c}dd{margin:0;overflow-wrap:anywhere}`;
 
-const STATE_LABELS: Record<PlayerState, string> = {
-  waiting: '◌ 等待',
-  active_speech: '▶ 发言中',
-  completed_speech: '✓ 已发言',
-  waiting_for_vote: '◇ 等待投票',
-  voted: '◆ 已投票',
-  eliminated: '✕ 已淘汰',
-  retrying: '↻ 重试中',
-  error: '! 出错',
-};
+const LABELS:Record<PlayerState,string>={waiting:'◌ 等待',action_required:'! 需要你操作',active_speech:'▶ 发言中',completed_speech:'✓ 已发言',waiting_for_vote:'◇ 等待投票',voted:'◆ 已投票',eliminated:'✕ 已淘汰',retrying:'↻ 需要重试',error:'! 出错'};
+function errorMessage(e:unknown){return e instanceof Error?e.message:'请求失败。'}
+function deadlineText(value?:number){if(!value)return '未设置截止时间';const s=Math.max(0,Math.ceil((value-Date.now())/1000));return s<=0?'已到期':`剩余 ${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+function byteLength(value:string){return typeof TextEncoder!=='undefined'?new TextEncoder().encode(value).length:unescape(encodeURIComponent(value)).length;}
+function initial(actor:ActorViewModel){return Array.from(actor.actor.displayName)[0]||'?';}
+function transitionText(params:UndercoverGamePanelParams,status:string){if(status==='failed'||status==='aborted')return '本阶段未正常完成，请刷新或告诉主持人卡住了。';if(params.phase.toLowerCase().includes('speak'))return '本轮发言已结束，主持人正在打开投票。';if(params.phase.toLowerCase().includes('vot'))return '投票已收齐，主持人正在计票或准备下一轮。';return '主持人正在准备下一阶段。';}
+function InvalidPanel({error,className,style}:{error:string;className?:string;style?:CSSProperties}){return <Container className={className} style={style}><ErrorBox role="alert"><strong>面板参数无效</strong><br/>{error}</ErrorBox></Container>}
 
-function formatDeadline(deadlineAt?: number): string {
-  if (!deadlineAt) return '无截止时间';
-  const remaining = deadlineAt - Date.now();
-  if (remaining <= 0) return '已到期';
-  const seconds = Math.ceil(remaining / 1000);
-  return `剩余 ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+function GamePanel({params,className,style,onInteraction,onAction}:{params:UndercoverGamePanelParams;className?:string;style?:CSSProperties;onInteraction?:UndercoverGamePanelProps['onInteraction'];onAction?:UndercoverGamePanelProps['onAction']}){
+ const [graph,setGraph]=useState<Awaited<ReturnType<typeof fetchRunGraph>>>(); const [pending,setPending]=useState<Awaited<ReturnType<typeof fetchPendingHumanNodes>>>([]); const [messages,setMessages]=useState<Awaited<ReturnType<typeof fetchSessionMessages>>>([]); const [resolvedEvents,setResolvedEvents]=useState<PublicOutputEvent[]>([]); const [loading,setLoading]=useState(true); const [refreshing,setRefreshing]=useState(false); const [error,setError]=useState<string|null>(null); const [selected,setSelected]=useState<string|null>(null); const [detail,setDetail]=useState<StateMachineNodeDetailResponse|null>(null); const [speech,setSpeech]=useState(''); const [vote,setVote]=useState(''); const [confirmed,setConfirmed]=useState(false); const [submitted,setSubmitted]=useState(false); const [submitting,setSubmitting]=useState(false); const [actionError,setActionError]=useState<string|null>(null); const [stale,setStale]=useState(false); const [showWord,setShowWord]=useState(false); const [compact,setCompact]=useState(false); const [recovery,setRecovery]=useState<'idle'|'sending'|'accepted'|'failed'|'unavailable'>('idle');
+ const rootRef=useRef<HTMLElement|null>(null); const requestRef=useRef<AbortController|null>(null); const snapshotRef=useRef<{runId:string;model:UndercoverGameViewModel}|null>(null); const inputRef=useRef<HTMLTextAreaElement|null>(null); const closeRef=useRef<HTMLButtonElement|null>(null); const returnFocusRef=useRef<HTMLElement|null>(null); const focusedActionRef=useRef(''); const recoverySendingRef=useRef(false); const outputCacheRef=useRef(new Map<string,PublicOutputEvent>()); const outputRequestsRef=useRef(new Map<string,Promise<PublicOutputEvent|undefined>>()); const pollTimerRef=useRef<number|null>(null); const pollGenerationRef=useRef(0);
+ const resolveOutputs=useCallback(async(g:Awaited<ReturnType<typeof fetchRunGraph>>,c:AbortController)=>{await Promise.all(completedMappedNodes(g.nodes??[],params).map(async node=>{const attempt=typeof node.attempt==='number'&&node.attempt>0?node.attempt:1;const key=`${params.runId}:${node.node_id}:${attempt}`;if(outputCacheRef.current.has(key))return;let request=outputRequestsRef.current.get(key);if(!request){request=fetchNodeDetail(params.apiBaseUrl??'',params.runId,node.node_id,c.signal).then(d=>publicEventFromNodeDetail(d,params)).then(event=>{if(event&&!c.signal.aborted)outputCacheRef.current.set(key,event);return event}).catch(e=>{if(e instanceof Error&&e.name==='AbortError')throw e;return undefined}).finally(()=>outputRequestsRef.current.delete(key));outputRequestsRef.current.set(key,request)}await request}));return [...outputCacheRef.current.values()].filter(event=>event.runId===params.runId)},[params]);
+ const refresh=useCallback(async(initial=false):Promise<boolean>=>{requestRef.current?.abort();const c=new AbortController();requestRef.current=c;setError(null);initial?setLoading(true):setRefreshing(true);try{const [g,p,m]=await Promise.all([fetchRunGraph(params.apiBaseUrl??'',params.runId,c.signal),fetchPendingHumanNodes(params.apiBaseUrl??'',params.runId,c.signal),fetchSessionMessages(params.apiBaseUrl??'',params.sessionId,c.signal)]);const outputs=await resolveOutputs(g,c);if(requestRef.current!==c||c.signal.aborted)return false;const model=normalizeUndercoverGameViewModel(params,g,p,m,outputs);snapshotRef.current={runId:params.runId,model};setGraph(g);setPending(p);setMessages(m);setResolvedEvents(outputs);setStale(false);return model.terminal}catch(e){if(e instanceof Error&&e.name==='AbortError')return false;if(requestRef.current===c)setError(errorMessage(e));return false}finally{if(requestRef.current===c){setLoading(false);setRefreshing(false)}}},[params,resolveOutputs]);
+ useEffect(()=>{const generation=++pollGenerationRef.current;if(pollTimerRef.current!==null)window.clearTimeout(pollTimerRef.current);requestRef.current?.abort();outputCacheRef.current.clear();outputRequestsRef.current.clear();setResolvedEvents([]);setSpeech('');setVote('');setConfirmed(false);setSubmitted(false);setStale(false);setShowWord(false);setActionError(null);focusedActionRef.current='';const schedule=()=>{if(!params.autoRefresh||generation!==pollGenerationRef.current)return;pollTimerRef.current=window.setTimeout(async()=>{const terminal=await refresh(false);if(!terminal&&generation===pollGenerationRef.current)schedule()},params.pollingInterval)};void refresh(true).then(terminal=>{if(!terminal&&generation===pollGenerationRef.current)schedule()});return()=>{pollGenerationRef.current+=1;if(pollTimerRef.current!==null)window.clearTimeout(pollTimerRef.current);pollTimerRef.current=null;requestRef.current?.abort()}},[params.runId,params.phase,params.attempt,params.autoRefresh,params.pollingInterval]);
+ const model=useMemo(()=>normalizeUndercoverGameViewModel(params,graph,pending,messages,resolvedEvents),[params,graph,pending,messages,resolvedEvents]); const fallback=snapshotRef.current?.runId===params.runId?snapshotRef.current.model:null; const shown=error?(fallback??model):model;
+ useEffect(()=>{const node=rootRef.current;if(!node)return;const classify=(width:number)=>setCompact(width<620);classify(node.getBoundingClientRect().width||800);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver((entries)=>classify(entries[0]?.contentRect.width??800));observer.observe(node);return()=>observer.disconnect()}const handler=()=>classify(node.getBoundingClientRect().width||window.innerWidth);window.addEventListener('resize',handler);return()=>window.removeEventListener('resize',handler)},[loading]);
+ const action=shown.pendingHumanActorId===params.currentViewerActorId?shown.pendingHumanNode:undefined; const parsed=useMemo(()=>parsePrivateActionContext(action?.instruction),[action?.instruction]); const actionKind=parsed.context?.action??params.currentAction?.type??(params.phase.toLowerCase().includes('vot')?'vote':'speech'); const actionKey=action?`${params.runId}:${action.node_id}:${action.attempt??params.attempt}:${actionKind}`:'';
+ const upstream=useMemo(()=>normalizeCurrentRoundUpstream(action?.upstream_artifacts,params),[action?.upstream_artifacts,params]);
+ useEffect(()=>{if(!actionKey||submitted||stale||focusedActionRef.current===actionKey)return;focusedActionRef.current=actionKey;if(actionKind==='speech')inputRef.current?.focus();else (rootRef.current?.querySelector('[name="vote-choice"]') as HTMLElement|null)?.focus()},[actionKey,actionKind,stale,submitted]);
+ const actors=shown.actors.filter(a=>a.kind==='player'); const host=shown.actors.find(a=>a.kind==='host'); const coords=useMemo(()=>getSeatCoordinates(params.seatOrder),[params.seatOrder]); const candidates=useMemo(()=>eligibleVoteCandidates(params.voteCandidates).filter(c=>c.actorId!==params.currentViewerActorId),[params.voteCandidates,params.currentViewerActorId]); const selectedActor=shown.actors.find(a=>a.actor.actorId===selected);
+ useEffect(()=>{if(!selectedActor?.node?.node_id){setDetail(null);return}const c=new AbortController();void fetchNodeDetail(params.apiBaseUrl??'',params.runId,selectedActor.node.node_id,c.signal).then(setDetail).catch(()=>setDetail(null));return()=>c.abort()},[params.apiBaseUrl,params.runId,selectedActor?.node?.node_id]);
+ useEffect(()=>{if(!selectedActor)return;const handler=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();setSelected(null);window.setTimeout(()=>returnFocusRef.current?.focus(),0)}};window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler)},[selectedActor]);
+ const openDetail=(id:string,type:'select-actor'|'select-bubble',element:HTMLElement)=>{returnFocusRef.current=element;setSelected(id);onInteraction?.({type,actorId:id,runId:params.runId});window.setTimeout(()=>closeRef.current?.focus(),0)}; const closeDetail=()=>{setSelected(null);window.setTimeout(()=>returnFocusRef.current?.focus(),0)};
+ const submit=async(event:FormEvent)=>{event.preventDefault();if(!action||submitting||submitted||stale||parsed.error)return;let content:string;let interactionAction:'speech'|'vote'|'abstain';if(actionKind==='vote'){if(!confirmed||!vote){setActionError('请选择一位可投玩家或弃权，并确认选择。');return}content=vote==='__abstain__'?serializeVoteAbstain():serializeVoteTarget(vote);interactionAction=vote==='__abstain__'?'abstain':'vote'}else{const ctx=parsed.context?.action==='speech'?parsed.context:undefined;const max=ctx?.maxChars??params.rules.speechMaxChars??25;const valid=validateSpeech(speech,max,ctx?.word,ctx?.forbidOwnWord??params.rules.forbidOwnWord);if(!valid.valid){setActionError(valid.error==='empty'?'发言内容不能为空。':valid.error==='too_long'?`发言不能超过 ${max} 个 Unicode 字符。`:'发言不能包含你自己的词。');return}if(byteLength(speech.trim())>(params.maxResponseBytes??65536)){setActionError('发言超过传输大小限制。');return}content=speech.trim();interactionAction='speech'}setSubmitting(true);setActionError(null);try{await respondToHumanNode(params.apiBaseUrl??'',params.runId,action.node_id,content);setSubmitted(true);setSpeech('');setVote('');setConfirmed(false);onInteraction?.({type:'submit-human-input',actorId:params.currentViewerActorId,nodeId:action.node_id,runId:params.runId,action:interactionAction});await refresh(false)}catch(e){if(e instanceof ApiRequestError&&e.conflict){setStale(true);setActionError('这个操作已经过期或被处理，请等待最新状态。');void refresh(false)}else setActionError(errorMessage(e))}finally{setSubmitting(false)}};
+ const recover=async()=>{if(recoverySendingRef.current)return;if(!onAction){setRecovery('unavailable');return}if(typeof window.confirm==='function'&&!window.confirm('确认告诉主持人“卡住了”？'))return;recoverySendingRef.current=true;setRecovery('sending');try{const actionPayload:PanelAction={type:'send_message',content:'卡住了'};await onAction(actionPayload);setRecovery('accepted');onInteraction?.({type:'recovery',runId:params.runId})}catch{setRecovery('failed')}finally{recoverySendingRef.current=false}};
+ if(loading&&!fallback)return <Container><Notice>正在加载游戏房间…</Notice></Container>;
+ const terminalCopy=shown.terminal?transitionText(params,shown.status):null; const deadline=action?.timeout_deadline_ms??params.currentAction?.deadlineAt??params.deadlineAt;
+ return <Container ref={rootRef} className={className} style={style} data-layout={compact?'compact':'full'} data-panel-viewport="true">
+  <div aria-live="polite" style={{position:'absolute',width:1,height:1,overflow:'hidden'}}>{action?`轮到你${actionKind==='vote'?'投票':'发言'}`:`${shown.completedTurns}/${shown.totalTurns} 位玩家已完成`}</div>
+  <Header><div><Eyebrow>UNDERCOVER GAME ROOM</Eyebrow><Title>谁是卧底 · 第 {shown.round} 轮 · {params.phase.toLowerCase().includes('vot')?'投票':'发言'}</Title><Meta>{shown.completedTurns}/{shown.totalTurns} 位存活玩家已完成 · {compact?'紧凑布局':'圆桌布局'}<br/>{deadlineText(deadline)}</Meta></div><Button type="button" onClick={()=>{onInteraction?.({type:'refresh',runId:params.runId});void refresh(false)}} disabled={refreshing}>{refreshing?'刷新中…':'↻ 刷新'}</Button></Header>
+  <Scene data-region="panel-scene">
+  {error&&<ErrorBox role="alert">刷新失败：{error}。已保留最近一次成功的房间状态。</ErrorBox>}{terminalCopy&&<Notice role="status">{terminalCopy}</Notice>}
+  <Room $compact={compact} aria-label="谁是卧底游戏房间"><HostArea $compact={compact}><Podium><span aria-hidden="true">♟</span><div><strong>{host?.actor.displayName??params.host.displayName}</strong><Small>主持人 · {shown.terminal?'阶段交接中':'主持进行中'}</Small></div></Podium>{host?.latestOutput&&params.display?.showHostOutput!==false&&<HostBubble type="button" onClick={e=>openDetail(host.actor.actorId,'select-bubble',e.currentTarget)}>{truncateBubbleText(host.latestOutput.text).text}</HostBubble>}</HostArea>{!compact&&<Table aria-hidden="true"/>}<CompactList>{actors.map((actor,index)=>{const p=actor.actor as PlayerActor;const coord=coords[index];return <React.Fragment key={p.actorId}>{!compact&&actor.latestOutput&&<Bubble $left={coord.left} $top={coord.top} type="button" onClick={e=>openDetail(p.actorId,'select-bubble',e.currentTarget)} aria-label={`${p.displayName} 的本阶段公开状态`}>{truncateBubbleText(actor.latestOutput.text).text}</Bubble>}<Seat $compact={compact} $left={coord.left} $top={coord.top} $active={actor.state==='active_speech'||actor.state==='action_required'||p.actorId===params.currentViewerActorId} type="button" onClick={e=>openDetail(p.actorId,'select-actor',e.currentTarget)} aria-label={`打开 ${p.seatNumber}号 ${p.displayName} 详情`} disabled={false}><Sprite $state={actor.state as PlayerState}>{initial(actor)}</Sprite><SeatText><strong>{p.seatNumber}号 · {p.displayName}{p.actorId===params.currentViewerActorId?'（你）':''}</strong><State>{LABELS[actor.state as PlayerState]}</State>{compact&&actor.latestOutput&&<span>{truncateBubbleText(actor.latestOutput.text,44).text}</span>}</SeatText></Seat></React.Fragment>})}</CompactList></Room>
+  </Scene>
+  <Dock aria-label="玩家操作区" data-region="action-dock"><DockHead data-region="dock-header"><div><Eyebrow>ACTION DOCK</Eyebrow><DockTitle>{action?(actionKind==='vote'?'轮到你投票':'轮到你发言'):submitted?'已提交，等待其他玩家':'等待主持人或其他玩家'}</DockTitle></div><Small role="status">{deadlineText(deadline)}</Small></DockHead>
+   {parsed.error?<><DockBody data-region="dock-body"><ErrorBox role="alert">{parsed.error}</ErrorBox></DockBody></>:action&&!submitted&&!stale?<DockForm onSubmit={submit}><DockBody data-region="dock-body"><Grid>{actionKind==='speech'?<>{parsed.context?.word&&<Word><strong>你的词：</strong>{showWord?parsed.context.word:'••••'} <SecondaryButton type="button" aria-pressed={showWord} onClick={()=>setShowWord(v=>!v)}>{showWord?'隐藏':'显示'}</SecondaryButton></Word>}<Small>不超过 {parsed.context?.action==='speech'?parsed.context.maxChars:params.rules.speechMaxChars??25} 个 Unicode 字符{params.rules.bluntness?` · 本轮钝度 ${params.rules.bluntness}`:''} · 不要说出自己的词</Small>{upstream.length?<div><strong>本轮此前发言</strong><History>{upstream.map(x=><li key={`${x.nodeId}-${x.actorId}`}>{x.seatNumber}号 {x.displayName}：{x.text}</li>)}</History></div>:null}{params.publicHistory.length?<details><summary>查看历轮公开发言</summary>{params.publicHistory.map(r=><div key={r.round}><strong>第 {r.round} 轮</strong><History>{r.speeches.map(x=><li key={`${r.round}-${x.actorId}`}>{x.seatNumber}号 {x.displayName}：{x.text}</li>)}</History></div>)}</details>:null}<TextArea ref={inputRef} value={speech} onChange={e=>{setSpeech(e.target.value);setActionError(null)}} aria-label="你的公开发言" disabled={submitting}/><Small>{unicodeLength(speech)} / {parsed.context?.action==='speech'?parsed.context.maxChars:params.rules.speechMaxChars??25} 字符</Small></>:<><Candidates role="radiogroup" aria-label="选择投票对象">{candidates.map(c=><Candidate key={c.actorId} $selected={vote===c.actorId}><input name="vote-choice" type="radio" value={c.actorId} checked={vote===c.actorId} onChange={()=>{setVote(c.actorId);setConfirmed(false)}} disabled={submitting}/>{c.seatNumber}号 · {c.displayName}</Candidate>)}<Candidate $selected={vote==='__abstain__'}><input name="vote-choice" type="radio" value="__abstain__" checked={vote==='__abstain__'} onChange={()=>{setVote('__abstain__');setConfirmed(false)}} disabled={submitting}/>弃权</Candidate></Candidates><Candidate $selected={confirmed}><input type="checkbox" checked={confirmed} onChange={e=>setConfirmed(e.target.checked)} disabled={!vote||submitting}/>确认：{vote==='__abstain__'?'本轮弃权':candidates.find(c=>c.actorId===vote)?`投给 ${candidates.find(c=>c.actorId===vote)?.seatNumber}号 ${candidates.find(c=>c.actorId===vote)?.displayName}`:'尚未选择'}</Candidate></>}{actionError&&<ErrorBox role="alert">{actionError}</ErrorBox>}</Grid></DockBody><DockFooter data-region="dock-footer"><Button type="submit" disabled={submitting||(actionKind==='vote'&&(!vote||!confirmed))}>{submitting?'提交中…':actionKind==='vote'?'确认并投票':'提交发言'}</Button><SecondaryButton type="button" onClick={()=>void recover()} disabled={recovery==='sending'}>{recovery==='sending'?'正在通知…':'告诉主持人卡住了'}</SecondaryButton>{recovery==='accepted'&&<Small role="status">主持人已收到“卡住了”。</Small>}{recovery==='unavailable'&&<Small role="status">当前面板没有可用的主持人消息桥。</Small>}{recovery==='failed'&&<Small role="alert">通知失败，请稍后重试或回到聊天发送“卡住了”。</Small>}</DockFooter></DockForm>:<><DockBody data-region="dock-body"><Notice>{stale?'操作已失效，请等待刷新后的新操作。':submitted?'提交成功，等待其他玩家和主持人。':terminalCopy??'游戏仍在进行，操作区会在轮到你时自动切换。'}</Notice></DockBody></>}
+   {(!action||submitted||stale||parsed.error)&&<DockFooter data-region="dock-footer"><SecondaryButton type="button" onClick={()=>void recover()} disabled={recovery==='sending'}>{recovery==='sending'?'正在通知…':'告诉主持人卡住了'}</SecondaryButton>{recovery==='accepted'&&<Small role="status">主持人已收到“卡住了”。</Small>}{recovery==='unavailable'&&<Small role="status">当前面板没有可用的主持人消息桥。</Small>}{recovery==='failed'&&<Small role="alert">通知失败，请稍后重试或回到聊天发送“卡住了”。</Small>}</DockFooter>}
+  </Dock>
+  {selectedActor&&<ModalBackdrop data-region="panel-overlay" onMouseDown={e=>{if(e.target===e.currentTarget)closeDetail()}}><Modal role="dialog" aria-modal="true" aria-label={`${selectedActor.actor.displayName} 详情`}><div style={{display:'flex',justifyContent:'space-between'}}><DockTitle>{selectedActor.actor.displayName}</DockTitle><SecondaryButton ref={closeRef} type="button" onClick={closeDetail}>关闭</SecondaryButton></div><Detail><dt>座位与身份</dt><dd>{selectedActor.kind==='host'?'主持人':`${(selectedActor.actor as PlayerActor).seatNumber}号 · ${(selectedActor.actor as PlayerActor).isHuman?'Human 玩家':'Bot 玩家'}`}</dd><dt>公开状态</dt><dd>{selectedActor.kind==='host'?'主持中':LABELS[selectedActor.state as PlayerState]}</dd><dt>最近发言</dt><dd>{selectedActor.latestOutput?.text??selectedActor.publicHistory[selectedActor.publicHistory.length-1]?.text??'暂无'}</dd></Detail>{selectedActor.publicHistory.length>0&&<><strong>公开历史</strong><History>{selectedActor.publicHistory.map((x,i)=><li key={`${x.actorId}-${i}`}>第 {params.publicHistory.find(r=>r.speeches.includes(x))?.round??'?'} 轮：{x.text}</li>)}</History></>}<details><summary>技术详情</summary><Detail><dt>节点</dt><dd>{selectedActor.node?.node_id??'无'}</dd><dt>尝试</dt><dd>{selectedActor.node?.attempt??params.attempt}</dd><dt>状态</dt><dd>{selectedActor.node?.status??'unknown'}</dd><dt>开始时间</dt><dd>{detail?.node.started_at?new Date(detail.node.started_at).toLocaleString():'未提供'}</dd></Detail></details></Modal></ModalBackdrop>}
+ </Container>
 }
-
-function byteLength(value: string): number {
-  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(value).length;
-  return unescape(encodeURIComponent(value)).length;
-}
-
-function actorInitial(actor: ActorViewModel): string {
-  return Array.from(actor.actor.displayName)[0] || '?';
-}
-
-function nodeStatus(node: ActorViewModel['node']): string {
-  if (!node) return '未绑定节点';
-  return `${node.status ?? 'unknown'}${node.attempt ? ` / attempt ${node.attempt}` : ''}`;
-}
-
-function requestErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '请求失败。';
-}
-
-function InvalidPanel({ error, className, style }: { error: string; className?: string; style?: CSSProperties }) {
-  return <Container className={className} style={style}><ErrorBox role="alert"><strong>Undercover panel 参数无效</strong><br />{error}<br /><Small>请修正 runId、groupId、sessionId、seatOrder 与公开参与者参数后重新打开本阶段面板。</Small></ErrorBox></Container>;
-}
-
-function GamePanel({ params, className, style, onInteraction }: { params: UndercoverGamePanelParams; className?: string; style?: CSSProperties; onInteraction?: UndercoverGamePanelProps['onInteraction'] }) {
-  const [graph, setGraph] = useState<Awaited<ReturnType<typeof fetchRunGraph>> | undefined>();
-  const [pendingNodes, setPendingNodes] = useState<Awaited<ReturnType<typeof fetchPendingHumanNodes>>>([]);
-  const [messages, setMessages] = useState<Awaited<ReturnType<typeof fetchSessionMessages>>>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedActorId, setSelectedActorId] = useState<string | null>(null);
-  const [nodeDetail, setNodeDetail] = useState<StateMachineNodeDetailResponse | null>(null);
-  const [nodeDetailLoading, setNodeDetailLoading] = useState(false);
-  const [nodeDetailError, setNodeDetailError] = useState<string | null>(null);
-  const [speechText, setSpeechText] = useState('');
-  const [voteTarget, setVoteTarget] = useState('');
-  const [voteConfirmed, setVoteConfirmed] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [staleAction, setStaleAction] = useState(false);
-  const requestRef = useRef<AbortController | null>(null);
-  const pollingRequestRef = useRef<AbortController | null>(null);
-  const autoRefreshEnabledRef = useRef(params.autoRefresh);
-  const detailRequestRef = useRef<AbortController | null>(null);
-  const snapshotRef = useRef<{ runId: string; viewModel: UndercoverGameViewModel } | null>(null);
-
-  const refresh = useCallback(async (initial = false, fromPolling = false) => {
-    requestRef.current?.abort();
-    const controller = new AbortController();
-    requestRef.current = controller;
-    if (fromPolling) pollingRequestRef.current = controller;
-    setError(null);
-    if (initial) setLoading(true); else setRefreshing(true);
-    try {
-      const [nextGraph, nextPending, nextMessages] = await Promise.all([
-        fetchRunGraph(params.apiBaseUrl ?? '', params.runId, controller.signal),
-        fetchPendingHumanNodes(params.apiBaseUrl ?? '', params.runId, controller.signal),
-        fetchSessionMessages(params.apiBaseUrl ?? '', params.sessionId, controller.signal),
-      ]);
-      if (requestRef.current !== controller) return;
-      snapshotRef.current = {
-        runId: params.runId,
-        viewModel: normalizeUndercoverGameViewModel(params, nextGraph, nextPending, nextMessages),
-      };
-      setGraph(nextGraph);
-      setPendingNodes(nextPending);
-      setMessages(nextMessages);
-      setStaleAction(false);
-    } catch (requestError) {
-      if (requestError instanceof Error && requestError.name === 'AbortError') return;
-      if (requestRef.current === controller) setError(requestErrorMessage(requestError));
-    } finally {
-      if (pollingRequestRef.current === controller) pollingRequestRef.current = null;
-      if (requestRef.current === controller) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [params, params.apiBaseUrl, params.runId, params.sessionId]);
-
-  useEffect(() => {
-    void refresh(true);
-    return () => {
-      requestRef.current?.abort();
-      detailRequestRef.current?.abort();
-    };
-  }, [refresh]);
-
-  const viewModel = useMemo(() => normalizeUndercoverGameViewModel(params, graph, pendingNodes, messages), [params, graph, pendingNodes, messages]);
-
-  useEffect(() => {
-    const autoRefreshWasDisabled = autoRefreshEnabledRef.current && !params.autoRefresh;
-    autoRefreshEnabledRef.current = params.autoRefresh;
-    if (!params.autoRefresh || viewModel.terminal) {
-      pollingRequestRef.current?.abort();
-      if (viewModel.terminal || autoRefreshWasDisabled) requestRef.current?.abort();
-      return undefined;
-    }
-    const timer = window.setTimeout(() => { void refresh(false, true); }, params.pollingInterval);
-    return () => window.clearTimeout(timer);
-  }, [params.autoRefresh, params.pollingInterval, refresh, viewModel.terminal]);
-
-  const fallbackSnapshot = snapshotRef.current?.runId === params.runId ? snapshotRef.current.viewModel : null;
-  const displaySnapshot = error ? fallbackSnapshot ?? viewModel : viewModel;
-  const selectedActor = useMemo(() => displaySnapshot.actors.find((actor) => actor.actor.actorId === selectedActorId), [displaySnapshot.actors, selectedActorId]);
-  const isDetailOpen = Boolean(selectedActor);
-  const selectedNodeId = selectedActor?.node?.node_id;
-  const currentViewerAction = displaySnapshot.pendingHumanActorId === params.currentViewerActorId && displaySnapshot.pendingHumanNode;
-  const voteMode = params.phase.toLowerCase().includes('vot');
-  const candidates = useMemo(() => eligibleVoteCandidates(params.voteCandidates), [params.voteCandidates]);
-  const compactLayout = typeof window !== 'undefined' && window.innerWidth <= 620;
-  const coordinates = useMemo(() => getSeatCoordinates(params.seatOrder), [params.seatOrder]);
-
-  useEffect(() => {
-    if (!isDetailOpen || !selectedNodeId) return;
-    detailRequestRef.current?.abort();
-    const controller = new AbortController();
-    detailRequestRef.current = controller;
-    setNodeDetailLoading(true);
-    setNodeDetailError(null);
-    void fetchNodeDetail(params.apiBaseUrl ?? '', params.runId, selectedNodeId, controller.signal)
-      .then((detail) => {
-        if (detailRequestRef.current === controller) setNodeDetail(detail);
-      })
-      .catch((requestError) => {
-        if (requestError instanceof Error && requestError.name === 'AbortError') return;
-        if (detailRequestRef.current === controller) setNodeDetailError(requestErrorMessage(requestError));
-      })
-      .finally(() => {
-        if (detailRequestRef.current === controller) setNodeDetailLoading(false);
-      });
-    return () => controller.abort();
-  }, [isDetailOpen, params.apiBaseUrl, params.runId, selectedNodeId]);
-
-  const selectActor = useCallback((actorId: string, interactionType: 'select-actor' | 'select-bubble') => {
-    setSelectedActorId(actorId);
-    onInteraction?.({ type: interactionType, actorId, runId: params.runId });
-  }, [onInteraction, params.runId]);
-
-  const submitHumanInput = useCallback(async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!currentViewerAction || submitting || staleAction) return;
-    let content = '';
-    if (voteMode) {
-      if (!voteConfirmed || !candidates.some((candidate) => candidate.actorId === voteTarget)) {
-        setActionError('请选择一个仍然符合公开资格的候选人，并确认投票。');
-        return;
-      }
-      content = serializeVoteContent(voteTarget);
-    } else {
-      content = speechText.trim();
-      if (!content) { setActionError('发言内容不能为空。'); return; }
-      if (byteLength(content) > (params.maxResponseBytes ?? 64 * 1024)) {
-        setActionError(`发言不能超过 ${params.maxResponseBytes ?? 64 * 1024} UTF-8 bytes。`);
-        return;
-      }
-    }
-    setSubmitting(true);
-    setActionError(null);
-    try {
-      await respondToHumanNode(params.apiBaseUrl ?? '', params.runId, currentViewerAction.node_id, content);
-      setSpeechText('');
-      setVoteTarget('');
-      setVoteConfirmed(false);
-      setStaleAction(false);
-      onInteraction?.({ type: 'submit-human-input', actorId: params.currentViewerActorId, nodeId: currentViewerAction.node_id, runId: params.runId });
-      await refresh(false);
-    } catch (requestError) {
-      if (requestError instanceof Error && requestError.name === 'AbortError') return;
-      const message = requestErrorMessage(requestError);
-      if (requestError instanceof ApiRequestError && requestError.conflict) {
-        setStaleAction(true);
-        setActionError(`此操作已失效或与当前运行冲突：${message} 请刷新后查看最新阶段状态。`);
-        void refresh(false);
-      } else {
-        setActionError(message);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }, [candidates, currentViewerAction, onInteraction, params.apiBaseUrl, params.currentViewerActorId, params.maxResponseBytes, params.runId, refresh, speechText, staleAction, submitting, voteConfirmed, voteMode, voteTarget]);
-
-  if (loading && !fallbackSnapshot) {
-    return <Container className={className} style={style}><Notice>正在加载本阶段公开状态…</Notice></Container>;
-  }
-
-  const statusText = displaySnapshot.terminal ? `阶段已${displaySnapshot.status === 'completed' ? '完成' : displaySnapshot.status === 'aborted' ? '中止' : '结束'}` : (refreshing ? '刷新中…' : '进行中');
-  const host = displaySnapshot.actors.find((actor) => actor.kind === 'host');
-  const playerActors = displaySnapshot.actors.filter((actor) => actor.kind === 'player');
-
-  return (
-    <Container className={className} style={style}>
-      <Header>
-        <HeaderTitle>
-          <Eyebrow>UNDERCOVER / PUBLIC ROOM</Eyebrow>
-          <Title>谁是卧底 · {displaySnapshot.phase}</Title>
-          <Meta>第 {displaySnapshot.round} 轮 · {statusText} · {params.gameSessionId ? `game ${params.gameSessionId}` : 'phase run'}<br />{params.display?.showTimer !== false ? formatDeadline(params.deadlineAt) : '计时器隐藏'}</Meta>
-        </HeaderTitle>
-        <ActionButton type="button" onClick={() => { onInteraction?.({ type: 'refresh', runId: params.runId }); void refresh(false); }} disabled={refreshing}>↻ 刷新</ActionButton>
-      </Header>
-
-      {error && <ErrorBox role="alert">公开状态刷新失败：{error}<br /><Small>保留最近一次成功快照；可以手动重试。</Small><br /><ActionButton type="button" onClick={() => { onInteraction?.({ type: 'retry', runId: params.runId }); void refresh(false); }}>重试</ActionButton></ErrorBox>}
-      {staleAction && <Notice role="status">当前 HumanInput 已被服务器接受、过期或发生冲突；操作已禁用，请查看刷新后的阶段状态。</Notice>}
-
-      <Room aria-label="谁是卧底像素房间">
-        <Window><WindowCross /></Window>
-        <Lamp />
-        {host && (
-          <HostArea>
-            <Podium>
-              <HostSprite aria-hidden="true">♟</HostSprite>
-              <HostCopy><HostName>{host.actor.displayName}</HostName><HostStatus>主持 Bot · {statusText}</HostStatus></HostCopy>
-            </Podium>
-            {params.display?.showHostOutput !== false && host.latestOutput && (
-              <HostBubble type="button" onClick={() => selectActor(host.actor.actorId, 'select-bubble')}>
-                {truncateBubbleText(host.latestOutput.text).text}
-                {truncateBubbleText(host.latestOutput.text).truncated ? ' 点击查看全部' : ''}
-              </HostBubble>
-            )}
-          </HostArea>
-        )}
-        <Table aria-hidden="true"><TableTop /></Table>
-        {playerActors.map((actor, index) => {
-          const coordinate = coordinates[index];
-          const player = actor.actor as PlayerActor;
-          const bubble = actor.latestOutput;
-          const compactLeft = coordinate.compactLeft;
-          const compactTop = coordinate.compactTop;
-          return <React.Fragment key={player.actorId}>
-            {bubble && <Bubble type="button" $left={coordinate.left} $top={coordinate.top - 6} $compactLeft={compactLeft} $compactTop={compactTop - 7} $compact={compactLayout} $pending={bubble.pending} onClick={() => selectActor(player.actorId, 'select-bubble')} aria-label={`${player.displayName} 的公开输出`}>
-              {bubble.pending ? '⌛ ' : ''}{truncateBubbleText(bubble.text).text}{truncateBubbleText(bubble.text).truncated ? ' …' : ''}
-            </Bubble>}
-            <Seat type="button" $left={coordinate.left} $top={coordinate.top} $compactLeft={compactLeft} $compactTop={compactTop} $compact={compactLayout} $active={actor.state === 'active_speech' || actor.actor.actorId === params.currentViewerActorId} onClick={() => selectActor(player.actorId, 'select-actor')} aria-label={`打开 ${player.displayName} 详情`}>
-              <Sprite $state={actor.state} $human={player.isHuman}>{actorInitial(actor)}</Sprite>
-              <SeatLabel>{player.displayName}</SeatLabel>
-              <StateMarker>{STATE_LABELS[actor.state as PlayerState] ?? `• ${actor.state}`}{player.isHuman && actor.actor.actorId === params.currentViewerActorId ? ' · 你' : ''}</StateMarker>
-            </Seat>
-          </React.Fragment>;
-        })}
-      </Room>
-
-      <Footer>
-        <Legend>▶ 发言中</Legend><Legend>◇ 待操作</Legend><Legend>↻ 重试</Legend><Legend>✕ 淘汰</Legend><Legend>虚线 = 当前玩家</Legend>
-        <span>节点输出仅按显式 run/node/attempt 映射展示。</span>
-      </Footer>
-
-      {isDetailOpen && selectedActor && (
-        <ModalBackdrop role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedActorId(null); }}>
-          <Modal role="dialog" aria-modal="true" aria-label={`${selectedActor.actor.displayName} 详情`}>
-            <ModalHeader><div><Eyebrow>{selectedActor.kind === 'host' ? 'HOST DETAIL' : 'PLAYER DETAIL'}</Eyebrow><ModalTitle>{selectedActor.actor.displayName}</ModalTitle></div><CloseButton type="button" onClick={() => setSelectedActorId(null)}>关闭</CloseButton></ModalHeader>
-            <DetailGrid>
-              <dt>当前阶段</dt><dd>{displaySnapshot.phase} · 第 {displaySnapshot.round} 轮</dd>
-              <dt>公开状态</dt><dd>{selectedActor.kind === 'host' ? '主持 Bot' : STATE_LABELS[selectedActor.state as PlayerState] ?? selectedActor.state}</dd>
-              <dt>关联节点</dt><dd>{selectedNodeId ?? '无'}</dd>
-              <dt>运行状态</dt><dd>{nodeStatus(selectedActor.node)}</dd>
-              {selectedActor.kind === 'player' && <><dt>公开身份</dt><dd>{(selectedActor.actor as PlayerActor).isHuman ? 'HumanInput 可用（若当前 viewer 获授权）' : 'Bot 玩家'}</dd></>}
-            </DetailGrid>
-            {selectedActor.latestOutput && <Notice>最近公开输出：{selectedActor.latestOutput.text}</Notice>}
-            <Small>公开输出历史（{selectedActor.outputHistory.length}）</Small>
-            <History>{selectedActor.outputHistory.length ? selectedActor.outputHistory.slice().reverse().map((event) => <li key={event.identity}>{event.pending ? '⌛ ' : ''}{event.text}<br /><Small>node {event.nodeId} · attempt {event.attempt}{event.timestamp ? ` · ${new Date(event.timestamp).toLocaleTimeString()}` : ''}</Small></li>) : <li>暂无公开输出。</li>}</History>
-            {nodeDetailLoading && <Notice>正在加载选中节点详情…</Notice>}
-            {nodeDetailError && <ErrorBox>节点详情加载失败：{nodeDetailError}<br /><Small>场景与最近公开摘要仍然保留。</Small></ErrorBox>}
-            {nodeDetail && selectedNodeId === nodeDetail.node.node_id && <DetailGrid><dt>节点公开摘要</dt><dd>{selectedActor.latestOutput?.text ?? '未提供公开输出'}</dd><dt>开始时间</dt><dd>{nodeDetail.node.started_at ? new Date(nodeDetail.node.started_at).toLocaleString() : '未提供'}</dd><dt>完成时间</dt><dd>{nodeDetail.node.completed_at ? new Date(nodeDetail.node.completed_at).toLocaleString() : '未提供'}</dd><dt>尝试次数</dt><dd>{nodeDetail.node.attempt ?? '未提供'}</dd></DetailGrid>}
-
-            {currentViewerAction && selectedActor.actor.actorId === params.currentViewerActorId && selectedActor.kind === 'player' && !displaySnapshot.terminal && (
-              <Form onSubmit={submitHumanInput}>
-                <strong>{voteMode ? '你的投票' : '你的发言'}</strong>
-                <Small>{params.phase} 阶段 · 当前 HumanInput：{currentViewerAction.node_id}</Small>
-                {voteMode ? <>
-                  <CandidateList>{candidates.length ? candidates.map((candidate) => <Candidate key={candidate.actorId} $selected={voteTarget === candidate.actorId}><input type="radio" name="vote-target" value={candidate.actorId} checked={voteTarget === candidate.actorId} onChange={() => { setVoteTarget(candidate.actorId); setVoteConfirmed(false); }} disabled={submitting || staleAction} />{candidate.displayName}</Candidate>) : <Small>没有显式提供的可投候选人。</Small>}</CandidateList>
-                  <Candidate $selected={voteConfirmed}><input type="checkbox" checked={voteConfirmed} onChange={(event) => setVoteConfirmed(event.target.checked)} disabled={submitting || staleAction || !voteTarget} />我确认这是我要提交的公开候选人</Candidate>
-                </> : <><TextArea value={speechText} onChange={(event) => { setSpeechText(event.target.value); setActionError(null); }} placeholder="输入公开发言…" disabled={submitting || staleAction} /><Small>{byteLength(speechText)} / {params.maxResponseBytes ?? 64 * 1024} UTF-8 bytes</Small></>}
-                {actionError && <ErrorBox>{actionError}</ErrorBox>}
-                <ActionButton type="submit" disabled={submitting || staleAction || (voteMode && !candidates.length)}>{submitting ? '提交中…' : voteMode ? '确认并投票' : '提交发言'}</ActionButton>
-              </Form>
-            )}
-            {displaySnapshot.pendingHumanActorId && displaySnapshot.pendingHumanActorId !== params.currentViewerActorId && <Notice>当前待处理输入属于另一位公开参与者；本面板不会替其提交操作。</Notice>}
-          </Modal>
-        </ModalBackdrop>
-      )}
-    </Container>
-  );
-}
-
-export default function UndercoverGamePanel(props: UndercoverGamePanelProps) {
-  const normalized = useMemo(() => {
-    try { return { params: normalizePanelParams(props), error: null }; }
-    catch (error) { return { params: null, error: error instanceof PanelParamsError || error instanceof Error ? error.message : 'Invalid panel parameters.' }; }
-  }, [props]);
-  if (normalized.error || !normalized.params) return <InvalidPanel error={normalized.error ?? 'Invalid panel parameters.'} className={props.className} style={props.style} />;
-  return <GamePanel params={normalized.params} className={props.className} style={props.style} onInteraction={props.onInteraction} />;
-}
+export default function UndercoverGamePanel(props:UndercoverGamePanelProps){const normalized=useMemo(()=>{try{return{params:normalizePanelParams(props),error:null}}catch(e){return{params:null,error:e instanceof PanelParamsError||e instanceof Error?e.message:'Invalid panel parameters.'}}},[props]);if(!normalized.params)return <InvalidPanel error={normalized.error??'Invalid panel parameters.'} className={props.className} style={props.style}/>;return <GamePanel params={normalized.params} className={props.className} style={props.style} onInteraction={props.onInteraction} onAction={props.onAction}/>}

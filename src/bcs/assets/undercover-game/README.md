@@ -1,108 +1,59 @@
 # `undercoverGame.UndercoverGamePanel`
 
-A standalone UMD side panel for a public, phase-level 谁是卧底 (Undercover)
-game projection. It keeps the generic `bcsPanel.StateMachineRunView`
-unchanged and consumes only the existing BCS state-machine/session contracts.
+A dependency-free React UMD side panel for the existing BCS 谁是卧底 state-machine workflow. The exported component remains `undercoverGame.UndercoverGamePanel`.
 
-## Usage
+## Stable game-session panel
 
-Each speech or vote phase is a bounded one-shot state-machine run. Open one
-new panel instance for each phase:
+The referee opens one non-closable tab per game session and reuses it for speech, vote, later rounds, and retries. Phase/round remain in the title, while every submission keeps its own run-specific parameter file:
 
 ```bash
-bcs collaboration run ./phase.yaml \
-  --session <session-id> \
+bcs collaborate run ./phase.yaml \
+  --session session-example \
   --panel-component undercoverGame.UndercoverGamePanel \
-  --panel-params @phase-panel-params.json
+  --panel-params @phase-panel-params.json \
+  --panel-tab-id undercover-game-session-example \
+  --panel-tab-title '谁是卧底 · 第 1 轮发言' \
+  --panel-tab-closable false
 ```
 
-`phase-panel-params.json` is a public JSON object. Use placeholders in public
-examples; never put real Bot IDs, credentials, or private endpoints in a
-published parameter file.
+Public parameters include the complete original roster, explicit `seatNumber`, stable `seatOrder`, living `turnOrder`, referee node mappings, sanitized `publicHistory`, public rules, and eligible non-self vote candidates. They never include words, roles, raw speech, raw votes, or private reasoning.
 
-```json
-{
-  "runId": "run-example",
-  "groupId": "group-example",
-  "sessionId": "session-example",
-  "gameSessionId": "game-example",
-  "phase": "speaking",
-  "round": 1,
-  "host": { "actorId": "host-example", "displayName": "主持人" },
-  "seatOrder": ["player-a", "player-b", "player-c"],
-  "players": [
-    { "actorId": "player-a", "displayName": "玩家甲", "isHuman": true },
-    { "actorId": "player-b", "displayName": "玩家乙" },
-    { "actorId": "player-c", "displayName": "玩家丙" }
-  ],
-  "nodeActorMap": {
-    "speech-player-a": "player-a",
-    "speech-player-b": "player-b",
-    "speech-player-c": "player-c"
-  },
-  "voteCandidates": [
-    { "actorId": "player-b", "displayName": "玩家乙", "eligible": true },
-    { "actorId": "player-c", "displayName": "玩家丙", "eligible": true }
-  ],
-  "apiBaseUrl": "/bcnproxy",
-  "currentViewerActorId": "player-a",
-  "display": {
-    "showTimer": true,
-    "showPublicReveal": false,
-    "showVoteResults": false
-  }
-}
-```
+## Private HumanInput context
 
-The caller must supply `runId`, `groupId`, `sessionId`, `phase`, `round`, a
-host descriptor, an ordered `seatOrder`, public player descriptors, and the
-stable node-to-actor mapping. Missing identity data produces a visible,
-recoverable error instead of fabricated state.
+The current viewer's pending HumanInput instruction may append a delimited `UNDERCOVER_UI_CONTEXT_V1` JSON block. The panel parses that authenticated, viewer-private boundary to show the owning player's word, speech limits, round/seat context, or vote action. Unsupported or malformed recognized blocks produce a safe recoverable error. Private values are not placed in public params, storage, URLs, console output, errors, or `onInteraction` records.
 
-## Existing BCS contracts consumed
+Pending speech nodes may also provide ordered `upstream_artifacts`; sanitized cross-round context comes from public params. The word is hidden by default and cleared whenever the run/action identity changes.
 
-The asset uses these existing endpoints relative to `apiBaseUrl`:
+## Player actions
+
+The persistent Action Dock is independent of actor details:
+
+- speech: word reveal/hide, deadline, upstream speeches, public history, Unicode count, empty/length/own-word validation, and one HumanInput submission;
+- vote: eligible seat/name cards, explicit abstain, confirmation, and canonical content:
+  - `{"kind":"vote","target_actor_id":"player-b"}`
+  - `{"kind":"vote","abstain":true}`
+- recovery: confirmed `onAction({type:'send_message', content:'卡住了'})` through the existing host bridge.
+
+Server-side HumanInput validation remains authoritative. Expired/conflicting submissions become stale and trigger refresh. Vote targets and raw structured vote output remain hidden during active collection.
+
+## Runtime and accessibility
+
+The panel polls non-terminal runs, preserves the last good room on refresh failure, keeps eliminated players in their original seats, maps multiple referee nodes to the host area, and shows neutral speech-to-vote and vote-to-tally/next-round bridge states. Layout follows the panel container using `ResizeObserver` with a resize fallback. Controls have accessible names/states, turn changes use `aria-live`, details restore focus, and reduced-motion mode removes nonessential motion.
+
+## Existing contracts
+
+The asset uses only existing BCS endpoints:
 
 - `GET /state-machine-runs/{run_id}/graph`
 - `GET /state-machine-runs/{run_id}/pending-human-nodes`
-- `GET /state-machine-runs/{run_id}/nodes/{node_id}` (lazy selected detail)
+- `GET /state-machine-runs/{run_id}/nodes/{node_id}`
 - `GET /sessions/{session_id}/messages?include_pending=true`
-- `POST /state-machine-runs/{run_id}/nodes/{node_id}/respond` with `{ "content": "..." }`
+- `POST /state-machine-runs/{run_id}/nodes/{node_id}/respond`
 
-Responses may be raw JSON or the existing `{ code, message, data, request_id }`
-envelope. HTTP failures are surfaced with their status and server message. A
-vote is submitted through the existing HumanInput route using a canonical
-structured string, for example:
+No backend endpoint, graph topology, generic frontend behavior, or runtime dependency is added.
 
-```json
-{"kind":"vote","target_actor_id":"player-b"}
-```
+## Real-run output and bounded-layout behavior
 
-The state-machine workflow remains responsible for authorization and semantic
-validation. A display name is never submitted as a vote identity.
+The panel does not assume that manager-worker one-shot node outputs are copied into ordinary session messages. For completed nodes explicitly listed in `nodeActorMap`, it incrementally reads the existing authenticated node-detail endpoint, caches by `(runId, nodeId, attempt)`, and merges those results with the session-message compatibility path. Speech artifacts become phase-local player bubbles; vote artifacts become only `已投票` until an authorized host tally/result is public. Host and unknown artifacts are never inferred as player speech.
 
-## Public/privacy boundary
-
-Only explicit public panel parameters and explicitly tagged state-machine output
-messages are rendered. The panel does not parse natural-language output to
-derive phase, actor identity, elimination, roles, words, or votes. Hidden roles,
-hidden words, private host reasoning, and unrevealed vote targets/results stay
-absent until each field is explicitly marked as publicly revealed.
-
-The example above contains no real UUIDs, tokens, private URLs, hidden game
-facts, or remote image references. The package contains only local CSS pixel-art
-primitives, with integer scaling and `image-rendering: pixelated`; there is no
-runtime remote asset dependency.
-
-## Runtime behavior
-
-The panel polls the current phase run while it is active and stops polling when
-the run is completed, failed, or aborted. A manual refresh remains available.
-A refresh failure keeps the last successful public snapshot visible. Selecting a
-player, host, or bubble opens a detail surface; selected node detail loads lazily
-and failure is shown inline without closing the game scene.
-
-Human speech is validated as non-empty and by UTF-8 byte length before submit.
-Human votes show only explicit eligible public candidates and require a separate
-confirmation click. Stale/conflicting actions are disabled, explained, and
-followed by a state refresh.
+The panel root is its own bounded viewport. The room scrolls inside the scene region, while the Action Dock uses a fixed header, internally scrollable context body, and non-scrolling footer for submit/confirmation and recovery controls. Actor details use an absolute panel-local overlay, close with Escape, and restore focus to the invoking seat or bubble. Automatic refresh is run-owned and continues after unchanged non-terminal snapshots; it stops on terminal state, run replacement, disabled refresh, or unmount.

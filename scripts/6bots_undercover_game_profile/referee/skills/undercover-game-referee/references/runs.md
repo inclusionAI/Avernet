@@ -1,5 +1,18 @@
 # 两个临时自定义协作的形状
 
+## 持久副屏与公开/私有边界
+
+每个游戏 session 只有一个 `undercover-game-<session>` 标签，提交时固定 `--panel-tab-closable false`。每次发言、投票、后续轮次或 `--retry` 仍生成独立 YAML/input/panel-params 文件，但用同一标签更新到新的 run；标题继续显示轮次与阶段。
+
+`public_panel_projection` 是公开参数的唯一入口：发布完整原始座位 `seatOrder`、存活行动顺序 `turnOrder`、显式座位号、主持节点映射、脱敏 `publicHistory`、公开规则和人类可投候选人。它不发布词、身份、原始发言、原始票面、未公开票向或私有推理。
+
+人类发言/投票节点在自然语言 instruction 末尾追加 `UNDERCOVER_UI_CONTEXT_V1` JSON 块。这个块只属于该 HumanInput 的认证读取边界，用于副屏显示本人词、轮次、座位和输入约束；Bot 节点 instruction、运行 input、公开参数与普通历史不复制该块。人类投票提交 `{"kind":"vote","target_actor_id":"<actor-id>"}` 或 `{"kind":"vote","abstain":true}`，事实层先严格解析并校验存活/非自己目标，再对非结构化 Bot 文本使用原有票号/名字解析。
+
+手动 `开始`、阶段机节点/边、超时、收尾回灌与主持人唤醒顺序都不变。
+
+副屏使用 `nodeActorMap` 作为唯一节点身份依据：`speak_N` / `vote_N` 映射到稳定玩家 actor，`speak_open` / `collect` / `vote_open` / `tally` 映射到主持人 actor；再用 `turnOrder` 对当前轮玩家内容排序并以 `seatNumber + displayName` 标注。manager-worker one-shot 即使普通 session messages 没有逐节点产物，副屏也只通过现有认证 node-detail 读取显式映射且已完成的节点。发言产物可成为本阶段玩家气泡，投票产物只能显示无目标的「已投票」，主持入口、汇总、计票和未知节点不会混入玩家发言。
+
+
 YAML 由 `open-round` / `open-vote`（内部是 `render-speak-run` / `render-vote-run`）生成，**不要手写**。这份文档解释它们为什么长这样，方便出问题时判断是不是渲染出了偏差。
 
 ## 一条贯穿两个运行的原则：流程推进只由我做

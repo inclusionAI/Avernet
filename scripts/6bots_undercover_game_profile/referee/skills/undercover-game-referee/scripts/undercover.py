@@ -531,41 +531,53 @@ CN_DIGITS = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 
 
 
 def parse_vote(state: dict[str, Any], voter_seat: int | None, text: str) -> tuple[int | None, str | None]:
-    """从一句人话里解析出被投座位。返回 (座位号或 None, 说明)。"""
+    """Parse canonical Human votes first, then retain legacy Bot text parsing."""
     if not text or not text.strip():
         return None, "没有内容"
-
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            structured = json.loads(stripped)
+        except (ValueError, TypeError):
+            return None, "结构化投票格式错误"
+        if not isinstance(structured, dict) or structured.get("kind") != "vote":
+            return None, "结构化投票格式错误"
+        allowed = {"kind", "target_actor_id", "abstain"}
+        if set(structured) - allowed:
+            return None, "结构化投票格式错误"
+        has_target = "target_actor_id" in structured
+        has_abstain = structured.get("abstain") is True
+        if has_target == has_abstain:
+            return None, "结构化投票必须二选一"
+        if has_abstain:
+            if structured != {"kind": "vote", "abstain": True}:
+                return None, "结构化弃权格式错误"
+            return None, "弃权"
+        actor_id = structured.get("target_actor_id")
+        if not isinstance(actor_id, str) or not actor_id.strip():
+            return None, "结构化投票目标无效"
+        for seat in alive_seats(state):
+            if actor_id_for(seat, state) == actor_id.strip():
+                if seat["seat"] == voter_seat:
+                    return None, "投了自己"
+                return int(seat["seat"]), None
+        return None, "结构化投票目标无效"
     if re.search(r"弃权", text):
         return None, "弃权"
-
     living = {s["seat"] for s in alive_seats(state)}
-
     def acceptable(n: int) -> bool:
         return n in living and n != voter_seat
-
-    # 1) 「我投N号」这类锚点，取「投」之后最近的数字
     for m in re.finditer(r"投[^0-9零一二两三四五六七八九]{0,4}([0-9]+|[零一二两三四五六七八九])", text):
-        tok = m.group(1)
-        n = int(tok) if tok.isdigit() else CN_DIGITS[tok]
-        if acceptable(n):
-            return n, None
-
-    # 2) 名字匹配
-    for s in state["seats"]:
-        if s["display"] and s["display"] in text and acceptable(s["seat"]):
-            return s["seat"], None
-
-    # 3) 全文里恰好只出现一个合法座位号
+        tok = m.group(1); n = int(tok) if tok.isdigit() else CN_DIGITS[tok]
+        if acceptable(n): return n, None
+    for seat in state["seats"]:
+        if seat["display"] and seat["display"] in text and acceptable(seat["seat"]): return seat["seat"], None
     nums = set()
     for tok in re.findall(r"[0-9]+|[零一二两三四五六七八九]", text):
         n = int(tok) if tok.isdigit() else CN_DIGITS[tok]
-        if acceptable(n):
-            nums.add(n)
-    if len(nums) == 1:
-        return nums.pop(), None
-
-    if voter_seat is not None and re.search(rf"投[^0-9]{{0,4}}{voter_seat}\b", text):
-        return None, "投了自己"
+        if acceptable(n): nums.add(n)
+    if len(nums) == 1: return nums.pop(), None
+    if voter_seat is not None and re.search(rf"投[^0-9]{{0,4}}{voter_seat}\b", text): return None, "投了自己"
     return None, "读不出投给谁"
 
 
@@ -599,6 +611,14 @@ def forbid_line(word: str) -> str:
 
 PANEL_COMPONENT = "undercoverGame.UndercoverGamePanel"
 RUN_ID_TEMPLATE = "{{bcs.run_id}}"
+UI_CONTEXT_OPEN = "[UNDERCOVER_UI_CONTEXT_V1]"
+UI_CONTEXT_CLOSE = "[/UNDERCOVER_UI_CONTEXT_V1]"
+
+
+def append_ui_context(instruction: str, context: dict[str, Any]) -> str:
+    """Append viewer-private machine context to a HumanInput instruction."""
+    payload = json.dumps(context, ensure_ascii=False, separators=(",", ":"))
+    return f"{instruction.rstrip()}\n\n{UI_CONTEXT_OPEN}\n{payload}\n{UI_CONTEXT_CLOSE}"
 
 
 def actor_id_for(seat: dict[str, Any], state: dict[str, Any]) -> str:
@@ -606,76 +626,38 @@ def actor_id_for(seat: dict[str, Any], state: dict[str, Any]) -> str:
 
 
 def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> dict[str, Any]:
-    """Build the game panel's public, whitelisted phase projection.
-
-    Never serialize a referee state object directly: it contains role, word, raw
-    speech, and unrevealed votes. This function is the only source for panel
-    params, so every key below is intentionally public and renderable.
-    """
-    living = sorted(alive_seats(state), key=lambda seat: seat["seat"])
+    """Build the complete whitelist-only public projection for one phase."""
+    all_seats = sorted(state["seats"], key=lambda seat: seat["seat"])
+    living = [seat for seat in all_seats if seat["alive"]]
     phase = "speaking" if kind == "speak" else "voting"
     node_prefix = "speak" if kind == "speak" else "vote"
-    seat_order = [actor_id_for(seat, state) for seat in living]
-    players = [
-        {
-            "actorId": actor_id_for(seat, state),
-            "displayName": f"{seat['seat']}号 {seat['display']}",
-            "isHuman": seat["kind"] == "human",
-            "alive": bool(seat["alive"]),
-            "eliminated": not bool(seat["alive"]),
-            "publicFields": {"seat": seat["seat"]},
-        }
-        for seat in sorted(state["seats"], key=lambda seat: seat["seat"])
-    ]
-    node_actor_map = {
-        f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state)
-        for seat in living
-    }
+    seat_order = [actor_id_for(seat, state) for seat in all_seats]
+    turn_order = [actor_id_for(seat, state) for seat in living]
+    players = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "isHuman": seat["kind"] == "human", "alive": bool(seat["alive"]), "eliminated": not bool(seat["alive"])} for seat in all_seats]
+    node_actor_map = {f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state) for seat in living}
+    for node_id in (("speak_open", "collect") if kind == "speak" else ("vote_open", "tally")):
+        node_actor_map[node_id] = state["referee_uuid"]
     human = next((seat for seat in living if seat["kind"] == "human"), None)
-    current_action = None
-    if human is not None:
-        current_action = {
-            "actorId": actor_id_for(human, state),
-            "type": "speech" if kind == "speak" else "vote",
-            "nodeId": f"{node_prefix}_{human['seat']}",
-        }
+    current_action = None if human is None else {"actorId": actor_id_for(human, state), "type": "speech" if kind == "speak" else "vote", "nodeId": f"{node_prefix}_{human['seat']}"}
+    history = [{"round": entry["round"], "speeches": [{"actorId": actor_id_for(seat_of(state, item["seat"]), state), "seatNumber": item["seat"], "displayName": item["player"], "text": item["text"]} for item in entry["speeches"]]} for entry in public_history(state)]
     params: dict[str, Any] = {
-        "runId": RUN_ID_TEMPLATE,
-        "apiBaseUrl": "/bcnproxy",
-        "groupId": state["group_id"] or "{{bcs.group_id}}",
-        "sessionId": state["session_id"],
-        "gameSessionId": state["session_id"],
-        "phase": phase,
-        "round": state["round"],
-        "attempt": attempt,
-        "host": {"actorId": state["referee_uuid"], "displayName": "主持人"},
-        "seatOrder": seat_order,
-        "players": players,
-        "nodeActorMap": node_actor_map,
-        "currentViewerActorId": state["human_actor_id"],
-        "currentAction": current_action,
+        "runId": RUN_ID_TEMPLATE, "apiBaseUrl": "/bcnproxy", "groupId": state["group_id"] or "{{bcs.group_id}}", "sessionId": state["session_id"], "gameSessionId": state["session_id"],
+        "phase": phase, "round": state["round"], "attempt": attempt,
+        "host": {"actorId": state["referee_uuid"], "displayName": "主持人"}, "seatOrder": seat_order, "turnOrder": turn_order, "players": players, "nodeActorMap": node_actor_map,
+        "publicHistory": history, "rules": {"speechMaxChars": SPEECH_MAX_CHARS, "voteMaxChars": VOTE_MAX_CHARS, "forbidOwnWord": kind == "speak", "bluntness": bluntness_n(state["round"])},
+        "currentViewerActorId": state["human_actor_id"], "currentAction": current_action,
+        "display": {"showVoteResults": False, "showHostOutput": True, "showTimer": True},
     }
     if kind == "vote" and human is not None:
         viewer_id = actor_id_for(human, state)
-        params["voteCandidates"] = [
-            {
-                "actorId": actor_id_for(seat, state),
-                "displayName": f"{seat['seat']}号 {seat['display']}",
-                "eligible": True,
-                "publicFields": {"seat": seat["seat"]},
-            }
-            for seat in living
-            if actor_id_for(seat, state) != viewer_id
-        ]
+        params["voteCandidates"] = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "eligible": True} for seat in living if actor_id_for(seat, state) != viewer_id]
     return params
 
 
 def panel_tab_metadata(state: dict[str, Any], kind: str, attempt: int) -> dict[str, str]:
     phase = "发言" if kind == "speak" else "投票"
-    return {
-        "id": f"undercover-{state['session_id']}-{kind}-r{state['round']}-a{attempt}-{RUN_ID_TEMPLATE}",
-        "title": f"谁是卧底 · 第 {state['round']} 轮{phase}",
-    }
+    safe_session = re.sub(r"[^A-Za-z0-9_.-]", "-", state["session_id"])
+    return {"id": f"undercover-game-{safe_session}", "title": f"谁是卧底 · 第 {state['round']} 轮{phase}"}
 
 
 def write_run_files(
@@ -756,7 +738,7 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             # 白名单）是写给模型看的硬约束，人类读到一半就跳过了——实测他两轮都
             # 直接给了定义句。他需要的只是：我是几号、我的词、一句话多长、别说出
             # 那个词、说钝一点。字面泄词有 check_text 兜底，不必在这里枚举。
-            instruction = (
+            instruction = append_ui_context((
                 f"【你的词语】{s['word']}\n\n"
                 f"第 {rnd} 轮 · 你是 {s['seat']} 号 · 轮到你发言了。\n"
                 "上面能看到本轮在你之前的人说了什么。\n\n"
@@ -764,7 +746,7 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
                 "别把这个词说出来，也别拆开来说。\n"
                 f"说钝一点：这句话得能同时套在至少 {bluntness_n(rnd)} 样别的东西上。\n"
                 "别提身份、别点评别人，只说你的词。"
-            )
+            ), {"action": "speech", "round": rnd, "seatNumber": s["seat"], "word": s["word"], "maxChars": SPEECH_MAX_CHARS, "forbidOwnWord": True, "bluntness": bluntness_n(rnd)})
             nodes.append(
                 f"      {nid}:\n"
                 f"        kind: human_input\n"
@@ -897,14 +879,14 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         nid = node_ids[idx]
         others = "、".join(f"{o['seat']}号" for o in living if o["seat"] != s["seat"])
         if s["kind"] == "human":
-            instruction = (
+            instruction = append_ui_context((
                 f"【你的词语】{s['word']}\n\n"
                 f"第 {rnd} 轮投票 · 你是 {s['seat']} 号。\n"
                 "大家说过的话，主持人刚在群里念过一遍。\n\n"
                 f"可以投的人：{others}，不能投自己。\n"
                 "只写「我投N号」，N 是阿拉伯数字，不用写理由。\n"
                 "不想投就写「我弃权」。"
-            )
+            ), {"action": "vote", "round": rnd, "seatNumber": s["seat"], "word": s["word"], "allowAbstain": True})
             nodes.append(
                 f"      {nid}:\n"
                 f"        kind: human_input\n"
@@ -1027,7 +1009,7 @@ def run_command(
         "--panel-params", "@" + shlex.quote(panel_params_path),
         "--panel-tab-id", shlex.quote(panel_tab["id"]),
         "--panel-tab-title", shlex.quote(panel_tab["title"]),
-        "--panel-tab-closable", "true",
+        "--panel-tab-closable", "false",
     ]
     return " ".join(parts)
 
@@ -1155,7 +1137,7 @@ def submit_run(
         "--panel-params", "@" + panel_params_path,
         "--panel-tab-id", panel_tab["id"],
         "--panel-tab-title", panel_tab["title"],
-        "--panel-tab-closable", "true",
+        "--panel-tab-closable", "false",
     ]
     code, out, err = bcs_cli(*args)
     data = last_json(out)

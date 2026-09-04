@@ -1,124 +1,29 @@
-import type { UndercoverGamePanelParams, UndercoverGamePanelProps, PlayerActor } from './types';
-
-// Browser panels are served by the frontend, so use its BCS proxy by default.
-// Direct /api/v1 routes target the management gateway and are unavailable in
-// standalone BCN deployments.
+import type { PlayerActor, PublicHistoryRound, UndercoverGamePanelParams, UndercoverGamePanelProps, VoteCandidate } from './types';
 export const DEFAULT_API_BASE_URL = '/bcnproxy';
 export const DEFAULT_POLLING_INTERVAL = 3000;
 export const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024;
-
-export class PanelParamsError extends Error {
-  readonly code = 'INVALID_PANEL_PARAMS';
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'PanelParamsError';
-  }
-}
-
-function mergeParams(props: UndercoverGamePanelProps): Record<string, unknown> {
-  const data = props.data && typeof props.data === 'object' ? props.data : {};
-  return { ...data, ...props } as Record<string, unknown>;
-}
-
+export class PanelParamsError extends Error { readonly code = 'INVALID_PANEL_PARAMS'; constructor(message: string) { super(message); this.name = 'PanelParamsError'; } }
+function mergeParams(props: UndercoverGamePanelProps): Record<string, unknown> { const data = props.data && typeof props.data === 'object' ? props.data : {}; return { ...data, ...props } as Record<string, unknown>; }
+function requireText(value: unknown, field: string): string { if (typeof value !== 'string' || !value.trim()) throw new PanelParamsError(`${field} is required.`); return value.trim(); }
+function positiveInt(value: unknown, fallback: number): number { return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback; }
 function normalizePlayers(value: unknown): PlayerActor[] {
-  if (Array.isArray(value)) {
-    return value as PlayerActor[];
-  }
-  if (value && typeof value === 'object') {
-    return Object.values(value as Record<string, PlayerActor>);
-  }
-  return [];
+  const raw = Array.isArray(value) ? value : value && typeof value === 'object' ? Object.values(value as Record<string, unknown>) : [];
+  return raw.map((item, index) => { const p = item as Record<string, unknown>; const publicFields = p.publicFields && typeof p.publicFields === 'object' ? p.publicFields as Record<string, unknown> : {}; return {
+    ...(p as unknown as PlayerActor), actorId: requireText(p.actorId, `players[${index}].actorId`), displayName: requireText(p.displayName, `players[${index}].displayName`),
+    seatNumber: positiveInt(p.seatNumber ?? publicFields.seat, index + 1), alive: p.alive !== false, eliminated: p.eliminated === true || p.alive === false,
+  }; });
 }
-
-function requireText(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new PanelParamsError(`${field} is required.`);
-  }
-  return value.trim();
-}
-
+function normalizeCandidates(value: unknown): VoteCandidate[] { if (!Array.isArray(value)) return []; return value.map((item, index) => { const c = item as Record<string, unknown>; const pf = c.publicFields && typeof c.publicFields === 'object' ? c.publicFields as Record<string, unknown> : {}; return { actorId: requireText(c.actorId, `voteCandidates[${index}].actorId`), displayName: requireText(c.displayName, `voteCandidates[${index}].displayName`), seatNumber: positiveInt(c.seatNumber ?? pf.seat, index + 1), eligible: c.eligible === true, eliminated: c.eliminated === true }; }); }
+function normalizeHistory(value: unknown): PublicHistoryRound[] { if (!Array.isArray(value)) return []; return value.flatMap((round) => { if (!round || typeof round !== 'object') return []; const r = round as Record<string, unknown>; if (!Array.isArray(r.speeches)) return []; return [{ round: typeof r.round === 'number' ? r.round : 0, speeches: r.speeches.flatMap((speech) => { if (!speech || typeof speech !== 'object') return []; const x = speech as Record<string, unknown>; if (typeof x.text !== 'string' || !x.text.trim()) return []; return [{ actorId: requireText(x.actorId, 'publicHistory.actorId'), seatNumber: positiveInt(x.seatNumber ?? x.seat, 1), displayName: requireText(x.displayName ?? x.player, 'publicHistory.displayName'), text: x.text.trim() }]; }) }]; }); }
 export function normalizePanelParams(props: UndercoverGamePanelProps): UndercoverGamePanelParams {
-  const raw = mergeParams(props);
-  const runId = requireText(raw.runId ?? raw.stateMachineRunId ?? raw.smRunId, 'runId');
-  const groupId = requireText(raw.groupId, 'groupId');
-  const sessionId = requireText(raw.sessionId, 'sessionId');
-  const phase = requireText(raw.phase, 'phase');
-  const round = typeof raw.round === 'number' && Number.isFinite(raw.round) && raw.round >= 0 ? raw.round : NaN;
-  if (!Number.isFinite(round)) {
-    throw new PanelParamsError('round must be a finite non-negative number.');
-  }
-
-  const hostValue = raw.host;
-  if (!hostValue || typeof hostValue !== 'object') {
-    throw new PanelParamsError('host is required.');
-  }
-  const hostObject = hostValue as Record<string, unknown>;
-  const host = {
-    actorId: requireText(hostObject.actorId, 'host.actorId'),
-    displayName: requireText(hostObject.displayName, 'host.displayName'),
-    subtitle: typeof hostObject.subtitle === 'string' ? hostObject.subtitle : undefined,
-    avatar: typeof hostObject.avatar === 'string' ? hostObject.avatar : undefined,
-  };
-
-  if (!Array.isArray(raw.seatOrder) || raw.seatOrder.length === 0) {
-    throw new PanelParamsError('seatOrder must contain at least one player actor.');
-  }
-  const seatOrder = raw.seatOrder.map((actorId) => requireText(actorId, 'seatOrder actorId'));
-  if (new Set(seatOrder).size !== seatOrder.length) {
-    throw new PanelParamsError('seatOrder must not contain duplicate actor IDs.');
-  }
-
-  const players = normalizePlayers(raw.players);
-  const playerMap = new Map(players.map((player) => [player.actorId, player]));
-  for (const actorId of seatOrder) {
-    const player = playerMap.get(actorId);
-    if (!player || !player.displayName) {
-      throw new PanelParamsError(`players must define public data for seat ${actorId}.`);
-    }
-  }
-
-  if (!raw.nodeActorMap || typeof raw.nodeActorMap !== 'object' || Array.isArray(raw.nodeActorMap)) {
-    throw new PanelParamsError('nodeActorMap is required and must be an object.');
-  }
-  const nodeActorMap = Object.fromEntries(
-    Object.entries(raw.nodeActorMap as Record<string, unknown>).map(([nodeId, actorId]) => [
-      requireText(nodeId, 'nodeActorMap nodeId'),
-      requireText(actorId, `nodeActorMap.${nodeId}`),
-    ]),
-  );
-
-  const currentActionValue = raw.currentAction;
-  const currentAction = currentActionValue && typeof currentActionValue === 'object' && !Array.isArray(currentActionValue)
-    ? {
-        actorId: requireText((currentActionValue as Record<string, unknown>).actorId, 'currentAction.actorId'),
-        type: requireText((currentActionValue as Record<string, unknown>).type, 'currentAction.type'),
-        nodeId: requireText((currentActionValue as Record<string, unknown>).nodeId, 'currentAction.nodeId'),
-        deadlineAt: typeof (currentActionValue as Record<string, unknown>).deadlineAt === 'number'
-          ? (currentActionValue as Record<string, unknown>).deadlineAt as number
-          : undefined,
-      }
-    : undefined;
-
-  return {
-    runId,
-    groupId,
-    sessionId,
-    gameSessionId: typeof raw.gameSessionId === 'string' && raw.gameSessionId.trim() ? raw.gameSessionId.trim() : undefined,
-    phase,
-    round,
-    deadlineAt: typeof raw.deadlineAt === 'number' ? raw.deadlineAt : undefined,
-    host,
-    seatOrder,
-    players,
-    nodeActorMap,
-    voteCandidates: Array.isArray(raw.voteCandidates) ? raw.voteCandidates as UndercoverGamePanelParams['voteCandidates'] : [],
-    apiBaseUrl: typeof raw.apiBaseUrl === 'string' && raw.apiBaseUrl.trim() ? raw.apiBaseUrl.trim() : DEFAULT_API_BASE_URL,
-    currentViewerActorId: typeof raw.currentViewerActorId === 'string' ? raw.currentViewerActorId : undefined,
-    currentAction,
-    display: raw.display && typeof raw.display === 'object' ? raw.display as UndercoverGamePanelParams['display'] : {},
-    pollingInterval: typeof raw.pollingInterval === 'number' && raw.pollingInterval > 0 ? raw.pollingInterval : DEFAULT_POLLING_INTERVAL,
-    autoRefresh: raw.autoRefresh !== false,
-    maxResponseBytes: typeof raw.maxResponseBytes === 'number' && raw.maxResponseBytes > 0 ? raw.maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES,
-  };
+  const raw = mergeParams(props); const runId = requireText(raw.runId ?? raw.stateMachineRunId ?? raw.smRunId, 'runId'); const groupId = requireText(raw.groupId, 'groupId'); const sessionId = requireText(raw.sessionId, 'sessionId'); const phase = requireText(raw.phase, 'phase');
+  const round = typeof raw.round === 'number' && Number.isFinite(raw.round) && raw.round >= 0 ? raw.round : NaN; if (!Number.isFinite(round)) throw new PanelParamsError('round must be a finite non-negative number.');
+  if (!raw.host || typeof raw.host !== 'object') throw new PanelParamsError('host is required.'); const h = raw.host as Record<string, unknown>; const host = { actorId: requireText(h.actorId, 'host.actorId'), displayName: requireText(h.displayName, 'host.displayName'), subtitle: typeof h.subtitle === 'string' ? h.subtitle : undefined, avatar: typeof h.avatar === 'string' ? h.avatar : undefined };
+  if (!Array.isArray(raw.seatOrder) || !raw.seatOrder.length) throw new PanelParamsError('seatOrder must contain at least one player actor.'); const seatOrder = raw.seatOrder.map((x) => requireText(x, 'seatOrder actorId')); if (new Set(seatOrder).size !== seatOrder.length) throw new PanelParamsError('seatOrder must not contain duplicate actor IDs.');
+  const players = normalizePlayers(raw.players); const playerMap = new Map(players.map((p) => [p.actorId, p])); for (const id of seatOrder) if (!playerMap.has(id)) throw new PanelParamsError(`players must define public data for seat ${id}.`);
+  const turnOrder = Array.isArray(raw.turnOrder) ? raw.turnOrder.map((x) => requireText(x, 'turnOrder actorId')) : seatOrder.filter((id) => playerMap.get(id)?.alive !== false); if (turnOrder.some((id) => !seatOrder.includes(id))) throw new PanelParamsError('turnOrder actors must exist in seatOrder.');
+  if (!raw.nodeActorMap || typeof raw.nodeActorMap !== 'object' || Array.isArray(raw.nodeActorMap)) throw new PanelParamsError('nodeActorMap is required and must be an object.'); const nodeActorMap = Object.fromEntries(Object.entries(raw.nodeActorMap as Record<string, unknown>).map(([node, actor]) => [requireText(node, 'nodeActorMap nodeId'), requireText(actor, `nodeActorMap.${node}`)]));
+  const a = raw.currentAction && typeof raw.currentAction === 'object' ? raw.currentAction as Record<string, unknown> : undefined; const currentAction = a ? { actorId: requireText(a.actorId, 'currentAction.actorId'), type: requireText(a.type, 'currentAction.type'), nodeId: requireText(a.nodeId, 'currentAction.nodeId'), deadlineAt: typeof a.deadlineAt === 'number' ? a.deadlineAt : undefined } : undefined;
+  const rules = raw.rules && typeof raw.rules === 'object' ? raw.rules as UndercoverGamePanelParams['rules'] : {};
+  return { runId, groupId, sessionId, gameSessionId: typeof raw.gameSessionId === 'string' && raw.gameSessionId.trim() ? raw.gameSessionId.trim() : undefined, phase, round, attempt: positiveInt(raw.attempt, 1), deadlineAt: typeof raw.deadlineAt === 'number' ? raw.deadlineAt : undefined, host, seatOrder, turnOrder, players, nodeActorMap, publicHistory: normalizeHistory(raw.publicHistory), rules, voteCandidates: normalizeCandidates(raw.voteCandidates), apiBaseUrl: typeof raw.apiBaseUrl === 'string' && raw.apiBaseUrl.trim() ? raw.apiBaseUrl.trim() : DEFAULT_API_BASE_URL, currentViewerActorId: typeof raw.currentViewerActorId === 'string' ? raw.currentViewerActorId : undefined, currentAction, display: raw.display && typeof raw.display === 'object' ? raw.display as UndercoverGamePanelParams['display'] : {}, pollingInterval: typeof raw.pollingInterval === 'number' && raw.pollingInterval > 0 ? raw.pollingInterval : DEFAULT_POLLING_INTERVAL, autoRefresh: raw.autoRefresh !== false, maxResponseBytes: typeof raw.maxResponseBytes === 'number' && raw.maxResponseBytes > 0 ? raw.maxResponseBytes : DEFAULT_MAX_RESPONSE_BYTES };
 }

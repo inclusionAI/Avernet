@@ -1,235 +1,60 @@
-import assert from 'node:assert/strict';
-import React, { act } from 'react';
-import { createRoot } from 'react-dom/client';
-import { createRequire } from 'node:module';
-import { JSDOM } from 'jsdom';
+import assert from 'node:assert/strict';import{createRequire}from'node:module';import{JSDOM}from'jsdom';
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'http://local.test/'});Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Node:dom.window.Node,getComputedStyle:dom.window.getComputedStyle,IS_REACT_ACT_ENVIRONMENT:true});window.confirm=()=>true;HTMLElement.prototype.attachEvent=function(){};HTMLElement.prototype.detachEvent=function(){};
+let resizeCallback;globalThis.ResizeObserver=class{constructor(cb){resizeCallback=cb}observe(){}disconnect(){}};window.ResizeObserver=globalThis.ResizeObserver;
+const ReactModule=await import('react');const React=ReactModule.default;const {act}=ReactModule;const {createRoot}=await import('react-dom/client');
+const require=createRequire(import.meta.url);const{UndercoverGamePanel}=require('../dist/index.umd.js');
+const base={runId:'run-component',groupId:'group',sessionId:'session',gameSessionId:'session',phase:'speaking',round:1,attempt:1,host:{actorId:'host',displayName:'主持人'},seatOrder:['a','b','c'],turnOrder:['a','b'],players:[{actorId:'a',displayName:'小甲',seatNumber:1,isHuman:true},{actorId:'b',displayName:'小乙',seatNumber:2},{actorId:'c',displayName:'小丙',seatNumber:3,alive:false,eliminated:true}],nodeActorMap:{'node-a':'a','node-b':'b','node-host':'host'},currentViewerActorId:'a',rules:{speechMaxChars:5,forbidOwnWord:true,bluntness:4},publicHistory:[{round:1,speeches:[{actorId:'c',seatNumber:3,displayName:'小丙',text:'历史发言'}]}],pollingInterval:5,autoRefresh:false,display:{showVoteResults:false,showHostOutput:true}};
+function response(body,status=200){return new Response(JSON.stringify({code:20000,data:body}),{status,headers:{'content-type':'application/json'}})}
+function mount(props){const container=document.createElement('div');document.body.appendChild(container);Object.defineProperty(container,'getBoundingClientRect',{value:()=>({width:800,height:700,top:0,left:0,right:800,bottom:700,x:0,y:0,toJSON(){}})});const root=createRoot(container);root.render(React.createElement(UndercoverGamePanel,props));return{container,render:p=>root.render(React.createElement(UndercoverGamePanel,p)),unmount:()=>{root.unmount();container.remove()}}}
+function setInputValue(element,value){const setter=Object.getOwnPropertyDescriptor(element.constructor.prototype,'value').set;setter.call(element,value);element.dispatchEvent(new window.Event('input',{bubbles:true}))}
+const settle=async(ms=0)=>{await Promise.resolve();await Promise.resolve();if(ms)await new Promise(r=>setTimeout(r,ms));await Promise.resolve()};const text=p=>p.container.textContent??'';const button=(p,label)=>[...p.container.querySelectorAll('button')].find(b=>b.textContent?.includes(label));
+function fetchFor(snapshots,posts){let index=0;return async(url,init={})=>{const path=new URL(url,'http://local.test').pathname;if(init.method==='POST'&&path.endsWith('/respond')){posts.push(JSON.parse(init.body));return response({accepted:true})}const snapshot=snapshots[Math.min(index,snapshots.length-1)];if(path.endsWith('/graph'))return response(snapshot.graph);if(path.endsWith('/pending-human-nodes'))return response(snapshot.pending);if(path.endsWith('/messages')){index+=1;return response(snapshot.messages??[])}const nodeId=path.split('/').at(-1);return response({node:snapshot.graph.nodes.find(n=>n.node_id===nodeId)??{node_id:nodeId,status:'ready'}})}}
+const originalFetch=globalThis.fetch;
+try{
+ const speechInstruction=`请发言\n[UNDERCOVER_UI_CONTEXT_V1]\n{"action":"speech","round":1,"seatNumber":1,"word":"苹果","maxChars":5,"forbidOwnWord":true,"bluntness":4}\n[/UNDERCOVER_UI_CONTEXT_V1]`;const posts=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'ready',attempt:1},{node_id:'node-b',status:'completed'}]},pending:[{node_id:'node-a',attempt:1,instruction:speechInstruction,timeout_deadline_ms:Date.now()+60000,upstream_artifacts:[{node_id:'node-b',text:'上游发言'}]}],messages:[{content:'主持开场',metadata:{state_machine:{event:'output',run_id:'run-component',node_id:'node-host'}}}]},{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'completed'},{node_id:'node-b',status:'completed'}]},pending:[],messages:[]}],posts);
+ let p;await act(async()=>{p=mount(base);await settle(15)});assert.match(text(p),/轮到你发言/);assert.match(text(p),/上游发言/);assert.match(text(p),/历史发言/);assert.equal(document.activeElement?.getAttribute('aria-label'),'你的公开发言');assert.match(text(p),/••••/);await act(async()=>{button(p,'显示').click();await settle()});assert.match(text(p),/苹果/);
+ const textarea=p.container.querySelector('textarea');await act(async()=>{setInputValue(textarea,'苹果很好');await settle();p.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle()});assert.match(text(p),/不能包含你自己的词/);assert.equal(posts.length,0);
+ await act(async()=>{const ta=p.container.querySelector('textarea');setInputValue(ta,'😀中');await settle();p.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});assert.deepEqual(posts,[{content:'😀中'}]);assert.match(text(p),/提交成功|等待主持人/);
+ await act(async()=>{resizeCallback([{contentRect:{width:400}}]);await settle()});assert.equal(p.container.firstElementChild?.getAttribute('data-layout'),'compact');assert.match(text(p),/3号 · 小丙/);
+ const seat=button(p,'3号 · 小丙');await act(async()=>{seat.click();await settle()});assert.match(text(p),/公开历史/);assert.doesNotMatch(text(p),/节点node-a/);assert.match(text(p),/技术详情/);const close=button(p,'关闭');await act(async()=>{close.click();await settle()});assert.equal(document.activeElement,seat);await act(async()=>p.unmount());
 
-const dom = new JSDOM('<!doctype html><html><head></head><body></body></html>', { url: 'http://local.test/' });
-globalThis.window = dom.window;
-globalThis.document = dom.window.document;
-globalThis.HTMLElement = dom.window.HTMLElement;
-globalThis.Node = dom.window.Node;
-globalThis.getComputedStyle = dom.window.getComputedStyle;
-globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+ const votePosts=[];const voteParams={...base,phase:'voting',voteCandidates:[{actorId:'b',displayName:'小乙',seatNumber:2,eligible:true},{actorId:'c',displayName:'小丙',seatNumber:3,eligible:false,eliminated:true}]};const voteInstruction=`投票\n[UNDERCOVER_UI_CONTEXT_V1]\n{"action":"vote","round":1,"seatNumber":1,"word":"苹果","allowAbstain":true}\n[/UNDERCOVER_UI_CONTEXT_V1]`;globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'ready'},{node_id:'node-b',status:'completed'}]},pending:[{node_id:'node-a',instruction:voteInstruction}],messages:[{content:'{"kind":"vote","target_actor_id":"b"}',metadata:{state_machine:{event:'output',run_id:'run-component',node_id:'node-b'}}}]}],votePosts);let v;await act(async()=>{v=mount(voteParams);await settle(5)});assert.match(text(v),/2号 · 小乙/);assert.doesNotMatch(text(v),/3号 · 小丙.*选择投票对象/);assert.doesNotMatch(text(v),/target_actor_id/);
+ const radio=v.container.querySelector('input[value="b"]');const confirm=v.container.querySelector('input[type="checkbox"]');await act(async()=>{radio.click();confirm.click();await settle();v.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});assert.deepEqual(votePosts,[{content:'{"kind":"vote","target_actor_id":"b"}'}]);await act(async()=>v.unmount());
 
-const require = createRequire(import.meta.url);
-const { UndercoverGamePanel } = require('../dist/index.umd.js');
+ const abstainPosts=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'running'},nodes:[{node_id:'node-a',status:'ready'}]},pending:[{node_id:'node-a',instruction:voteInstruction}],messages:[]}],abstainPosts);let a;await act(async()=>{a=mount(voteParams);await settle(5)});await act(async()=>{a.container.querySelector('input[value="__abstain__"]').click();a.container.querySelector('input[type="checkbox"]').click();await settle();a.container.querySelector('form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true}));await settle(5)});assert.deepEqual(abstainPosts,[{content:'{"kind":"vote","abstain":true}'}]);await act(async()=>a.unmount());
 
-const params = {
-  runId: 'run-component',
-  groupId: 'group-component',
-  sessionId: 'session-component',
-  phase: 'speaking',
-  round: 1,
-  host: { actorId: 'host', displayName: 'Host' },
-  seatOrder: ['a'],
-  players: [{ actorId: 'a', displayName: 'A', isHuman: true }],
-  nodeActorMap: { 'node-a': 'a', 'node-b': 'a', 'node-host': 'host' },
-  currentViewerActorId: 'a',
-  pollingInterval: 5,
-};
+ const actions=[];globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-component',status:'completed'},nodes:[]},pending:[],messages:[]}],[]);let r;await act(async()=>{r=mount({...base,onAction:async x=>{actions.push(x)}});await settle(5)});assert.match(text(r),/主持人正在打开投票/);await act(async()=>{button(r,'告诉主持人卡住了').click();button(r,'告诉主持人卡住了').click();await settle(5)});assert.deepEqual(actions,[{type:'send_message',content:'卡住了'}]);assert.match(text(r),/主持人已收到/);await act(async()=>r.unmount());
 
-function publicMessage(nodeId, text) {
-  return [{
-    id: `${nodeId}-${text}`,
-    sequence: 1,
-    content: text,
-    metadata: { state_machine: { event: 'output', run_id: 'run-component', node_id: nodeId, attempt: 1 } },
-  }];
-}
 
-function response(body) {
-  return new Response(JSON.stringify({ code: 20000, data: body }), { status: 200, headers: { 'content-type': 'application/json' } });
-}
+ // Manager-worker one-shot: no session output messages, completed mapped nodes resolve through node detail.
+ const detailCalls=new Map();let oneShotPolls=0;
+ globalThis.fetch=async(url,init={})=>{const path=new URL(url,'http://local.test').pathname;if(path.endsWith('/graph')){oneShotPolls+=1;return response({run:{run_id:'run-detail',status:'running',updated_at:1},nodes:[{node_id:'node-a',status:'completed',attempt:1},{node_id:'node-b',status:'completed',attempt:1},{node_id:'node-host',status:'completed',attempt:1}]})}if(path.endsWith('/pending-human-nodes'))return response([]);if(path.endsWith('/messages'))return response([]);const nodeId=path.split('/').at(-1);detailCalls.set(nodeId,(detailCalls.get(nodeId)??0)+1);const artifact=nodeId==='node-a'?'人类公开发言':nodeId==='node-b'?'Bot 公开发言':'主持人公告';return response({node:{node_id:nodeId,run_id:'run-detail',status:'completed',attempt:1,artifact_text:artifact}})};
+ const detailParams={...base,runId:'run-detail',autoRefresh:true,pollingInterval:5,style:{height:'280px'}};let d;await act(async()=>{d=mount(detailParams);await settle(8)});await act(async()=>{await settle(35)});assert.match(text(d),/人类公开发言/);assert.match(text(d),/Bot 公开发言/);assert.match(text(d),/主持人公告/);assert.ok(oneShotPolls>=2,`unchanged non-terminal snapshots must keep polling (got ${oneShotPolls})`);assert.equal(detailCalls.get('node-a'),1);assert.equal(detailCalls.get('node-b'),1);assert.equal(detailCalls.get('node-host'),1);
+ const dockBody=d.container.querySelector('[data-region="dock-body"]');const dockFooter=d.container.querySelector('[data-region="dock-footer"]');assert.ok(dockBody);assert.ok(dockFooter);assert.equal(getComputedStyle(dockBody).overflowY,'auto');assert.equal(d.container.firstElementChild.style.height,'280px');assert.match(dockFooter.textContent,/告诉主持人卡住了/);
+ const bubble=[...d.container.querySelectorAll('button')].find(x=>x.textContent?.includes('人类公开发言'));await act(async()=>{bubble.click();await settle()});const overlay=d.container.querySelector('[data-region="panel-overlay"]');assert.ok(overlay);assert.equal(getComputedStyle(overlay).position,'absolute');assert.match(text(d),/人类公开发言/);await act(async()=>{window.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await settle()});assert.equal(d.container.querySelector('[data-region="panel-overlay"]'),null);assert.equal(document.activeElement,bubble);await act(async()=>d.unmount());
 
-function controlledFetch(snapshots) {
-  let index = 0;
-  return async (url) => {
-    const path = new URL(url, 'http://local.test').pathname;
-    const snapshot = snapshots[Math.min(index, snapshots.length - 1)];
-    if (path.endsWith('/graph')) return response(snapshot.graph);
-    if (path.endsWith('/pending-human-nodes')) return response(snapshot.pending);
-    if (path.endsWith('/messages')) {
-      index += 1;
-      return response(snapshot.messages);
-    }
-    const nodeId = path.split('/').at(-1);
-    return response({ node: snapshot.graph.nodes.find((node) => node.node_id === nodeId) ?? { node_id: nodeId, status: 'ready' } });
-  };
-}
+ // Later attempts replace the earlier phase-local bubble and each identity is fetched once.
+ const attemptCalls=[];let attemptSnapshot=0;let currentGraphAttempt=1;
+ globalThis.fetch=async(url)=>{const path=new URL(url,'http://local.test').pathname;if(path.endsWith('/graph')){currentGraphAttempt=attemptSnapshot===0?1:2;return response({run:{run_id:'run-attempt',status:'running',updated_at:1},nodes:[{node_id:'node-a',status:'completed',attempt:currentGraphAttempt}]})}if(path.endsWith('/pending-human-nodes'))return response([]);if(path.endsWith('/messages')){attemptSnapshot+=1;return response([])};const attempt=currentGraphAttempt;attemptCalls.push(`${path.split('/').at(-1)}:${attempt}`);return response({node:{node_id:'node-a',run_id:'run-attempt',status:'completed',attempt,artifact_text:attempt===1?'第一次尝试':'第二次尝试'}})};
+ let retryPanel;await act(async()=>{retryPanel=mount({...base,runId:'run-attempt',autoRefresh:true,pollingInterval:5});await settle(8)});await act(async()=>{await settle(25)});assert.match(text(retryPanel),/第二次尝试/);assert.doesNotMatch(text(retryPanel),/第一次尝试/);assert.equal(attemptCalls.filter(x=>x==='node-a:1').length,1);assert.equal(attemptCalls.filter(x=>x==='node-a:2').length,1);await act(async()=>retryPanel.unmount());
 
-function mountPanel(props) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  return {
-    container,
-    render(nextProps) {
-      root.render(React.createElement(UndercoverGamePanel, nextProps));
-    },
-    unmount() {
-      root.unmount();
-      container.remove();
-    },
-  };
-}
+ // A failed node-detail read is retried by the next poll without overlapping fan-out.
+ let recoverableDetailCalls=0;
+ globalThis.fetch=async(url)=>{const path=new URL(url,'http://local.test').pathname;if(path.endsWith('/graph'))return response({run:{run_id:'run-recoverable',status:'running'},nodes:[{node_id:'node-a',status:'completed',attempt:1}]});if(path.endsWith('/pending-human-nodes')||path.endsWith('/messages'))return response([]);recoverableDetailCalls+=1;if(recoverableDetailCalls===1)return response({message:'temporary'},500);return response({node:{node_id:'node-a',run_id:'run-recoverable',status:'completed',attempt:1,artifact_text:'重试后可见'}})};
+ let recoverable;await act(async()=>{recoverable=mount({...base,runId:'run-recoverable',autoRefresh:true,pollingInterval:5});await settle(8)});await act(async()=>{await settle(25)});assert.equal(recoverableDetailCalls,2);assert.match(text(recoverable),/重试后可见/);await act(async()=>recoverable.unmount());
 
-function renderedText(panel) {
-  return panel.container.textContent ?? '';
-}
+ // Rebinding the stable panel to a new run clears old bubbles and output cache.
+ globalThis.fetch=async(url)=>{const path=new URL(url,'http://local.test').pathname;const runId=path.includes('run-new')?'run-new':'run-old';if(path.endsWith('/graph'))return response({run:{run_id:runId,status:'running'},nodes:[{node_id:'node-a',status:'completed',attempt:1}]});if(path.endsWith('/pending-human-nodes')||path.endsWith('/messages'))return response([]);return response({node:{node_id:'node-a',run_id:runId,status:'completed',attempt:1,artifact_text:runId==='run-old'?'旧运行气泡':'新运行气泡'}})};
+ let rebound;await act(async()=>{rebound=mount({...base,runId:'run-old',autoRefresh:false});await settle(8)});assert.match(text(rebound),/旧运行气泡/);await act(async()=>{rebound.render({...base,runId:'run-new',autoRefresh:false});await settle(8)});assert.match(text(rebound),/新运行气泡/);assert.doesNotMatch(text(rebound),/旧运行气泡/);await act(async()=>rebound.unmount());
 
-function findButton(panel, predicate) {
-  const button = [...panel.container.querySelectorAll('button')].find(predicate);
-  if (!button) throw new Error('Expected panel button was not found.');
-  return button;
-}
+ // Vote-node artifacts are reduced to target-free completion markers.
+ globalThis.fetch=async(url)=>{const path=new URL(url,'http://local.test').pathname;if(path.endsWith('/graph'))return response({run:{run_id:'run-vote-detail',status:'running'},nodes:[{node_id:'node-b',status:'completed',attempt:1}]});if(path.endsWith('/pending-human-nodes')||path.endsWith('/messages'))return response([]);return response({node:{node_id:'node-b',run_id:'run-vote-detail',status:'completed',attempt:1,artifact_text:'{"kind":"vote","target_actor_id":"a"}'}})};
+ let privateVote;await act(async()=>{privateVote=mount({...voteParams,runId:'run-vote-detail',autoRefresh:false});await settle(5)});assert.match(text(privateVote),/已投票/);assert.doesNotMatch(text(privateVote),/target_actor_id|run-vote-detail.*node-b/);await act(async()=>privateVote.unmount());
 
-async function settle() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
+ // Labeled upstream rows exclude host/unknown/entry/collector artifacts and follow turnOrder.
+ const orderedInstruction=`发言\n[UNDERCOVER_UI_CONTEXT_V1]\n{"action":"speech","round":1,"seatNumber":1,"word":"苹果","maxChars":20,"forbidOwnWord":true}\n[/UNDERCOVER_UI_CONTEXT_V1]`;
+ globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-upstream',status:'running'},nodes:[{node_id:'node-a',status:'ready'},{node_id:'node-b',status:'completed'}]},pending:[{node_id:'node-a',instruction:orderedInstruction,upstream_artifacts:[{node_id:'node-host',text:'不要显示主持人'},{node_id:'node-b',text:'二号线索'},{node_id:'unknown',text:'不要显示未知'},{node_id:'speak_open',text:'不要显示入口'},{node_id:'node-a',text:'一号线索'},{node_id:'collect',text:'不要显示汇总'}]}],messages:[]}],[]);
+ let u;await act(async()=>{u=mount({...base,runId:'run-upstream',style:{height:'280px'},nodeActorMap:{...base.nodeActorMap,speak_open:'host',collect:'host'},autoRefresh:false});await settle(5)});const upstreamText=text(u);assert.match(upstreamText,/1号 小甲：一号线索/);assert.match(upstreamText,/2号 小乙：二号线索/);assert.ok(upstreamText.indexOf('1号 小甲：一号线索')<upstreamText.indexOf('2号 小乙：二号线索'));assert.doesNotMatch(upstreamText,/不要显示主持人|不要显示未知|不要显示入口|不要显示汇总/);assert.ok(u.container.querySelector('[data-region="dock-body"]'));assert.match(u.container.querySelector('[data-region="dock-footer"]').textContent,/提交发言/);await act(async()=>u.unmount());
 
-const originalFetch = globalThis.fetch;
-try {
-  globalThis.fetch = controlledFetch([
-    {
-      graph: { run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-a', status: 'running', attempt: 1 }] },
-      pending: [],
-      messages: publicMessage('node-a', 'old public clue'),
-    },
-    {
-      graph: { run: { run_id: 'run-component', status: 'completed' }, nodes: [{ node_id: 'node-a', status: 'completed', attempt: 1 }] },
-      pending: [],
-      messages: publicMessage('node-a', 'final public clue'),
-    },
-  ]);
-  let terminalRenderer;
-  await act(async () => {
-    terminalRenderer = mountPanel({ ...params, autoRefresh: false });
-    terminalRenderer.render({ ...params, autoRefresh: false });
-    await settle();
-  });
-  assert.match(renderedText(terminalRenderer), /old public clue/);
-  const refreshButton = findButton(terminalRenderer, (button) => button.textContent === '↻ 刷新');
-  await act(async () => {
-    refreshButton.click();
-    await settle();
-  });
-  assert.match(renderedText(terminalRenderer), /final public clue/);
-  assert.match(renderedText(terminalRenderer), /阶段已完成/);
-
-  globalThis.fetch = controlledFetch([
-    {
-      graph: { run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-a', status: 'ready', attempt: 1 }] },
-      pending: [{ node_id: 'node-a', instruction: 'first action' }],
-      messages: [],
-    },
-    {
-      graph: { run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-b', status: 'ready', attempt: 1 }] },
-      pending: [{ node_id: 'node-b', instruction: 'current action' }],
-      messages: [],
-    },
-  ]);
-  let actionRenderer;
-  await act(async () => {
-    actionRenderer = mountPanel({ ...params, autoRefresh: false });
-    actionRenderer.render({ ...params, autoRefresh: false });
-    await settle();
-  });
-  const seat = findButton(actionRenderer, (button) => button.getAttribute('aria-label') === '打开 A 详情');
-  await act(async () => {
-    seat.click();
-    await settle();
-  });
-  const actionRefresh = findButton(actionRenderer, (button) => button.textContent === '↻ 刷新');
-  await act(async () => {
-    actionRefresh.click();
-    await settle();
-  });
-  assert.match(renderedText(actionRenderer), /当前 HumanInput：node-b/);
-  assert.doesNotMatch(renderedText(actionRenderer), /当前 HumanInput：node-a/);
-
-  globalThis.fetch = controlledFetch([
-    {
-      graph: { run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-a', status: 'running', attempt: 1 }] },
-      pending: [],
-      messages: publicMessage('node-a', 'before polling'),
-    },
-    {
-      graph: { run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-a', status: 'completed', attempt: 1 }] },
-      pending: [],
-      messages: publicMessage('node-a', 'after unchanged-count polling'),
-    },
-  ]);
-  let pollingRenderer;
-  await act(async () => {
-    pollingRenderer = mountPanel({ ...params, autoRefresh: true });
-    pollingRenderer.render({ ...params, autoRefresh: true });
-    await settle();
-  });
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    await settle();
-  });
-  assert.match(renderedText(pollingRenderer), /after unchanged-count polling/);
-  assert.match(renderedText(pollingRenderer), /已发言/);
-  await act(async () => pollingRenderer.unmount());
-
-  let disabledPollingWasAborted = false;
-  let initialRequestsRemaining = 3;
-  globalThis.fetch = async (url, init = {}) => {
-    if (initialRequestsRemaining > 0) {
-      initialRequestsRemaining -= 1;
-      const path = new URL(url, 'http://local.test').pathname;
-      if (path.endsWith('/graph')) return response({ run: { run_id: 'run-component', status: 'running' }, nodes: [{ node_id: 'node-a', status: 'running', attempt: 1 }] });
-      if (path.endsWith('/pending-human-nodes')) return response([]);
-      return response(publicMessage('node-a', 'disable polling after this request'));
-    }
-    return new Promise((_, reject) => {
-      init.signal?.addEventListener('abort', () => {
-        disabledPollingWasAborted = true;
-        const error = new Error('aborted');
-        error.name = 'AbortError';
-        reject(error);
-      }, { once: true });
-    });
-  };
-  let disableRenderer;
-  await act(async () => {
-    disableRenderer = mountPanel({ ...params, autoRefresh: true });
-    disableRenderer.render({ ...params, autoRefresh: true });
-    await settle();
-  });
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    await settle();
-  });
-  await act(async () => {
-    disableRenderer.render({ ...params, autoRefresh: false });
-    await settle();
-  });
-  assert.equal(disabledPollingWasAborted, true);
-  await act(async () => disableRenderer.unmount());
-
-  let wasAborted = false;
-  globalThis.fetch = async (_url, init = {}) => new Promise((_, reject) => {
-    init.signal?.addEventListener('abort', () => {
-      wasAborted = true;
-      const error = new Error('aborted');
-      error.name = 'AbortError';
-      reject(error);
-    }, { once: true });
-  });
-  let cleanupRenderer;
-  await act(async () => {
-    cleanupRenderer = mountPanel({ ...params, autoRefresh: true });
-    cleanupRenderer.render({ ...params, autoRefresh: true });
-    await Promise.resolve();
-  });
-  await act(async () => cleanupRenderer.unmount());
-  assert.equal(wasAborted, true);
-} finally {
-  globalThis.fetch = originalFetch;
-}
-
-console.log('Component lifecycle tests passed: refreshed rendering, terminal state, current action, unchanged-count polling, auto-refresh disablement, cleanup.');
+}finally{globalThis.fetch=originalFetch}
+console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');
