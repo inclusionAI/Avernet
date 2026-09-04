@@ -538,11 +538,24 @@ setup_bcn_plugin() {
                 return 1
             fi
 
+            # The dev tree this build needs is 2051 packages / 348 MB / 56k
+            # files (.npmrc pins install-strategy=nested, so nothing dedupes).
+            # Only `ws` ships, so the tree has to be reduced before it is copied
+            # back — but `npm prune --omit=dev` reduces it by reconciling that
+            # whole tree, which takes ~7m (measured: 423s, and the same
+            # "up to date in 7m" line appears in CI run 33837445531). Deleting
+            # node_modules and reinstalling prod-only lands the same shipped
+            # tree in 4s — `ws` and nothing else, where prune also left a few
+            # empty scope dirs behind — because it resolves one package
+            # instead of 2051.
+            # --no-audit/--no-fund drop two registry round-trips whose output
+            # nobody reads out of a throwaway build dir.
             if (
                 cd "${work}" &&
-                    npm install --registry="${NPM_REGISTRY_URL}" &&
+                    npm install --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund &&
                     npm run build &&
-                    npm prune --omit=dev
+                    rm -rf "${work}/node_modules" &&
+                    npm install --omit=dev --registry="${NPM_REGISTRY_URL}" --no-audit --no-fund
             ); then
                 rm -rf "${plugin_src}/dist" "${plugin_src}/node_modules"
                 if ! cp -R "${work}/dist" "${work}/node_modules" "${plugin_src}/"; then
