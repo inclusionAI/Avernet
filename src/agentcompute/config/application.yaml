@@ -1,0 +1,28 @@
+# Base configuration for the agentcompute HTTP service.
+# Environment overlay: config/application-{env}.yaml is deep-merged when
+# DEPLOY_ENV / SERVER_ENV / ALIPAY_APP_ENV is set.
+
+app:
+  name: "agentcompute"
+  port: 8000
+  workers: 1
+
+log:
+  level: "INFO"
+  log_dir: "~/logs/agentcompute"
+
+user_config:
+  plugins:
+    logger: "stdlib"
+    tracer: "stdlib"
+    database: "sqlite"
+    llm:
+      provider: "openai"
+      model: "gpt-4o-mini"
+  database:
+    database_url: "sqlite:///agentcompute.db"
+  default_agents:
+    - name: "searcher"
+      role: "Searches sources"
+    - name: "summarizer"
+      role: "Summarizes findings"

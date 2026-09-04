@@ -1,0 +1,11 @@
+# Test overlay — deep-merged onto application.yaml when DEPLOY_ENV=test.
+log:
+  level: "DEBUG"
+
+user_config:
+  plugins:
+    llm:
+      provider: "stub"
+      model: "gpt-4o-mini"
+  database:
+    database_url: "sqlite:///:memory:"

@@ -1,0 +1,4 @@
+# E2E scenario overlay (SOFAPY_CONFIG_OVERLAY=e2e-sqlite): in-memory SQLite + stub LLM.
+user_config:
+  database:
+    database_url: "sqlite:///:memory:"

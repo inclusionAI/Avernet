@@ -1,0 +1,4 @@
+# IT scenario overlay (SOFAPY_CONFIG_OVERLAY=it-sqlite): temp-file SQLite + stub LLM.
+user_config:
+  database:
+    database_url: "sqlite:////tmp/agentcompute_it.db"

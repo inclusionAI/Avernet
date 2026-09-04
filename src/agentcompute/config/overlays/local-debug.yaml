@@ -1,0 +1,3 @@
+# Local dev scenario overlay (SOFAPY_CONFIG_OVERLAY=local-debug): DEBUG log level.
+log:
+  level: "DEBUG"

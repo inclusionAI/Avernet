@@ -1,0 +1,295 @@
+set export
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+provider := "openai"
+agents := "searcher:Searches sources,summarizer:Summarizes findings"
+max_workers := "8"
+host := "0.0.0.0"
+port := "8000"
+base_url := "http://127.0.0.1:8000"
+pid_file := ".acd.pid"
+# All justfile recipes default to the local-debug overlay (config/overlays/
+# local-debug.yaml) which sets log.level=DEBUG. Normal/production deployments
+# invoke the CLI directly without this overlay and fall back to
+# application.yaml's INFO level.
+SOFAPY_CONFIG_OVERLAY := "local-debug"
+
+default:
+    @just --list
+
+install:
+    uv sync
+
+# inline run (no server)
+run goal:
+    uv run acd "{{goal}}" -a "{{agents}}" --provider "{{provider}}" --max-workers "{{max_workers}}" --plan output/plan.json --viz output/dag.html --report output/result.md
+
+# inline run with the dynamic driver (replans between waves)
+run-dynamic goal driver_options="{}" replanner_options="{}":
+    uv run acd "{{goal}}" -a "{{agents}}" --provider "{{provider}}" --max-workers "{{max_workers}}" --driver dynamic --replanner dynamic --driver-options '{{driver_options}}' --replanner-options '{{replanner_options}}' --plan output/plan.json --viz output/dag.html --report output/result.md
+
+example:
+    @just run "Summarize the top AI trends for 2026"
+
+# dynamic-driver example: multi-round case where the initial plan can't cover all
+# steps — the replanner must extend after the "find most popular" fan-in completes,
+# because the "research runtime X" fan-out can only be planned once X is known.
+example-dynamic:
+    @just run-dynamic "Find the most popular async runtime for each of Rust, Go, Zig, and Erlang/OTP. For each runtime found, research: its scheduler architecture, channel/actor primitives with code examples, memory model, and one real-world production post-mortem where it was decisive. Then produce a final trade-off matrix recommending which runtime to use for: a chat server, a database engine, and an embedded controller." '{"replan_min_calls": 2}' '{"force_extension_until_calls": 2}'
+
+# server lifecycle
+start env="":
+    @just _serve-bg "{{env}}"
+
+_serve-bg env:
+    @if [ -f "{{pid_file}}" ] && kill -0 "$(cat "{{pid_file}}")" 2>/dev/null; then \
+        echo "already running (pid $(cat "{{pid_file}}"))"; \
+    else \
+        rm -f "{{pid_file}}"; \
+        DEPLOY_ENV="{{env}}" nohup .venv/bin/acd serve --config config/application.yaml --host {{host}} --port {{port}} > /tmp/agentcompute.log 2>&1 & \
+        bgpid=$!; \
+        up=0; \
+        for i in $(seq 1 50); do \
+            if curl -sf "http://127.0.0.1:{{port}}/health" >/dev/null 2>&1; then up=1; break; fi; \
+            sleep 0.2; \
+        done; \
+        if [ "$up" -eq 1 ]; then \
+            echo "$bgpid" > "{{pid_file}}"; \
+            echo "started (pid $bgpid) on {{host}}:{{port}}"; \
+        else \
+            echo "server did not come up on :{{port}} (see /tmp/agentcompute.log)"; \
+            kill "$bgpid" 2>/dev/null; \
+            exit 1; \
+        fi; \
+    fi
+
+stop:
+    @killed=0; \
+    if [ -f "{{pid_file}}" ]; then \
+        pid="$(cat "{{pid_file}}")"; \
+        if kill "$pid" 2>/dev/null; then echo "stopped pid $pid"; killed=1; fi; \
+        rm -f "{{pid_file}}"; \
+    fi; \
+    port_pid=$(lsof -t -i :{{port}} 2>/dev/null | head -1 || true); \
+    if [ -n "$port_pid" ]; then \
+        if kill "$port_pid" 2>/dev/null; then echo "stopped port-holder pid $port_pid"; killed=1; fi; \
+    fi; \
+    if [ "$killed" -eq 0 ]; then echo "not running"; fi
+
+restart env="":
+    @just stop
+    @just start "{{env}}"
+
+# serve (foreground)
+serve env="":
+    DEPLOY_ENV="{{env}}" uv run acd serve --config config/application.yaml --host {{host}} --port {{port}}
+
+# check whether the app is running (liveness + pid)
+status:
+    @if [ -f "{{pid_file}}" ] && kill -0 "$(cat "{{pid_file}}")" 2>/dev/null; then \
+        pid="$(cat "{{pid_file}}")"; \
+        if curl -sf "http://127.0.0.1:{{port}}/health" >/dev/null 2>&1; then \
+            echo "running (pid $pid, healthy: http://127.0.0.1:{{port}}/health)"; \
+        else \
+            echo "running (pid $pid, but /health not responding)"; \
+        fi; \
+    else \
+        echo "not running"; \
+    fi
+
+# /jobs client
+job-submit goal="Summarize the top AI trends for 2026": start
+    @curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}]}"
+
+job-status job_id: start
+    @curl -s "{{base_url}}/jobs/{{job_id}}"
+
+job-report job_id: start
+    @curl -s "{{base_url}}/jobs/{{job_id}}/report" -o output/report-{{job_id}}.html && echo "saved output/report-{{job_id}}.html"
+
+# stream per-node progress (SSE) until the job completes; Ctrl-C to stop early
+job-stream job_id: start
+    @curl -N -s "{{base_url}}/jobs/{{job_id}}/stream"
+
+# interactive OpenAPI docs (Swagger UI)
+docs: start
+    @echo "OpenAPI docs: http://127.0.0.1:{{port}}/docs"
+    @open http://127.0.0.1:{{port}}/docs
+
+# fetch the raw OpenAPI schema (JSON)
+openapi: start
+    @curl -s "{{base_url}}/openapi.json" | python3 -m json.tool
+
+# submit a job, wait for it to finish, then fetch status + report
+job-submit-and-wait goal="Summarize the top AI trends for 2026": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}]}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# submit a job with the dynamic driver (replans between waves), wait, fetch status + report
+job-submit-dynamic-and-wait goal="Find the most popular async runtime for each of Rust, Go, Zig, and Erlang/OTP. For each runtime found, research: its scheduler architecture, channel/actor primitives with code examples, memory model, and one real-world production post-mortem where it was decisive. Then produce a final trade-off matrix recommending which runtime to use for: a chat server, a database engine, and an embedded controller.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 5, \"replan_min_calls\": 3}, \"replanner_options\": {\"force_extension_until_calls\": 3}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic driver, replans when no ready work)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# === dynamic driver demos (simple → hard) ===
+# Demo 1 (simple): one research round + summary. Small replan budget, no forced
+# extension — the driver can halt as soon as the initial wave finishes. Use this
+# to confirm the dynamic path wires up end-to-end without stressing the planner.
+job-submit-dynamic-and-wait-1 goal="Research the top 3 Python web frameworks and summarize what each is best at.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 2, \"replan_min_calls\": 0, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 0}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic demo 1/simple: at most 2 replans, no forced extension)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# Demo 2 (medium): fan-out across 3 languages then fan-in to a comparison
+# table. The replanner MUST extend after the initial "find popular runtime" wave
+# because the per-language event-loop summaries can only be planned once each
+# runtime is known. Forces 2 extension passes.
+job-submit-dynamic-and-wait-2 goal="For each of Python, JavaScript, and Rust, find the most popular async runtime and summarize its event-loop model with one short code example. Then produce a cross-language comparison table covering scheduler model, concurrency primitive, and typical use case.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 4, \"replan_min_calls\": 2, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 2}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic demo 2/medium: fan-out 3 langs, force 2 extensions)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# Demo 3 (hard): 4 languages × 4 deep research subtasks + final trade-off matrix.
+# Two nested fan-out/fan-in cycles: (1) find most popular runtime per language,
+# (2) research scheduler/channels/memory/post-mortem per runtime found, then a
+# final fan-in to the recommendation matrix. Maximum replan pressure: 8 replan
+# calls allowed, 4 forced extensions, 4 min replans.
+job-submit-dynamic-and-wait-3 goal="Find the most popular async runtime for each of Rust, Go, Zig, and Erlang/OTP. For each runtime found, research: its scheduler architecture, channel/actor primitives with code examples, memory model, and one real-world production post-mortem where it was decisive. Then produce a final trade-off matrix recommending which runtime to use for: a chat server, a database engine, and an embedded controller.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"searcher\",\"role\":\"Searches sources\"},{\"name\":\"summarizer\",\"role\":\"Summarizes findings\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 8, \"replan_min_calls\": 4, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 4, \"max_extensions\": 12, \"max_total_nodes\": 80}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic demo 3/hard: 4 langs × 4 subtasks, force 4 extensions)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# === dynamic driver demos with diverse role rosters ===
+# Demo (research): 4 roles — researcher, analyst, critic, writer.
+# Multi-round investigation where each round needs independent critique
+# (critic), synthesis across sources (analyst), and prose drafting (writer).
+# Forces parallel fan-out when the critic surfaces multiple independent gaps.
+job-submit-dynamic-and-wait-research goal="Investigate the trade-offs of adopting WebAssembly (Wasm) as a universal compile target for server-side workloads in 2026. Cover: (1) cold-start and JIT performance vs native and vs V8/PyPy, (2) language-host integration story (Go, Rust, Python, JS), (3) plugin sandboxing in production (Envoy, Falco, Shopify YJIT), (4) one real post-mortem where Wasm was decisive, and (5) one where it was rolled back. Produce a final 1-page brief explaining when to pick Wasm and when to avoid it.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"researcher\",\"role\":\"Searches primary sources, papers, post-mortems, release notes\"},{\"name\":\"analyst\",\"role\":\"Synthesizes findings across sources into structured comparisons\"},{\"name\":\"critic\",\"role\":\"Challenges claims, identifies missing evidence, flags overstated results\"},{\"name\":\"writer\",\"role\":\"Drafts the final brief in plain prose\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 6, \"replan_min_calls\": 3, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 3, \"max_extensions\": 10, \"max_total_nodes\": 60}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic research: 4 roles — researcher/analyst/critic/writer)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# Demo (engineering): 4 roles — architect, coder, tester, reviewer.
+# Build-and-validate cycle: architect designs, coder implements, tester writes
+# tests, reviewer audits. Multiple revisions are expected — reviewer and
+# tester run in parallel on each revision.
+job-submit-dynamic-and-wait-engineering goal="Design and verify (on paper) a rate-limiter library that supports both token-bucket and sliding-window algorithms behind a single uniform interface. Deliver: (1) the interface and trait/protocol shape, (2) a reference implementation sketch in Python, (3) a property-based test plan, and (4) a security review of the public API for misuse (e.g. negative capacities, integer overflow on counter rollover). Then critique the design and produce a final approval document sign-off.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"architect\",\"role\":\"Designs the public interface and module structure\"},{\"name\":\"coder\",\"role\":\"Writes reference implementation code\"},{\"name\":\"tester\",\"role\":\"Designs test plans and edge cases\"},{\"name\":\"reviewer\",\"role\":\"Audits design and implementation for correctness and misuse\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 6, \"replan_min_calls\": 3, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 3, \"max_extensions\": 10, \"max_total_nodes\": 50}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic engineering: 4 roles — architect/coder/tester/reviewer)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# Demo (debate): 4 roles — proposer, skeptic, fact-checker, moderator.
+# Adversarial analysis where the skeptic and fact-checker must run in
+# parallel on different dimensions. The moderator only fires after both
+# return. Maximum fan-out pressure — proposer advances a thesis, skeptic
+# challenges it, fact-checker independently verifies cites, moderator
+# synthesizes only after both sides complete.
+job-submit-dynamic-and-wait-debate goal="Debate the claim: 'By 2030, the majority of new internal enterprise tools will be built by AI agents rather than human developers.' Take a clear position (support OR refute), backed by: (1) named analyst projections (Gartner, Forrester, IDC) with citations, (2) at least 3 real enterprise case studies (any of: Klarna, Shopify, Amazon, JP Morgan, UnitedHealth), (3) challenges to the strongest counter-argument, and (4) a final verdict statement. The skeptic and fact-checker MUST independently evaluate the case studies and the analyst projections respectively.": start
+    @resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d "{\"goal\": \"{{goal}}\", \"agents\": [{\"name\":\"proposer\",\"role\":\"Argues the main thesis with evidence\"},{\"name\":\"skeptic\",\"role\":\"Challenges the thesis and case studies\"},{\"name\":\"fact-checker\",\"role\":\"Verifies specific named citations and numbers\"},{\"name\":\"moderator\",\"role\":\"Synthesizes only after both sides complete\"}], \"driver\": \"dynamic\", \"replanner\": \"dynamic\", \"driver_options\": {\"replan_max_calls\": 6, \"replan_min_calls\": 3, \"replan_cooldown_waves\": 1}, \"replanner_options\": {\"force_extension_until_calls\": 3, \"max_extensions\": 10, \"max_total_nodes\": 50}}")"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id; streaming progress (dynamic debate: 4 roles — proposer/skeptic/fact-checker/moderator)..."; \
+    curl -N -s "{{base_url}}/jobs/$job_id/stream"; \
+    echo ""; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# start + submit + poll + report
+example-full:
+    @just start
+    @echo "submit job:" && \
+    resp="$(curl -s -X POST "{{base_url}}/jobs" -H 'Content-Type: application/json' \
+        -d '{"goal": "Research and summarize the top Python web frameworks", "agents": [{"name":"searcher","role":"Searches web sources"},{"name":"summarizer","role":"Summarizes findings"}]}')"; \
+    echo "$resp"; \
+    job_id="$(echo "$resp" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')"; \
+    echo "job_id: $job_id"; \
+    echo "status:" && curl -s "{{base_url}}/jobs/$job_id"; \
+    echo ""; \
+    echo "report: http://127.0.0.1:{{port}}/jobs/$job_id/report"; \
+    curl -s "{{base_url}}/jobs/$job_id/report" -o "output/report-$job_id.html" && echo "saved output/report-$job_id.html"
+
+# quality gates
+test:
+    DEPLOY_ENV=test SOFAPY_CONFIG_OVERLAY=e2e-sqlite uv run pytest -v
+
+e2e:
+    DEPLOY_ENV=test SOFAPY_CONFIG_OVERLAY=e2e-sqlite uv run pytest tests/test_e2e_api.py -v
+
+smoke:
+    ./scripts/smoke.sh
+
+coverage:
+    uv run pytest --cov=agentcompute --cov-report=term-missing
+
+lint:
+    uv run ruff check src/ tests/
+
+format:
+    uv run ruff format src/ tests/
+
+typecheck:
+    uv run mypy
+
+pyright:
+    uv run basedpyright
+
+# format + lint + type + pyright
+check: format lint typecheck pyright
+    @echo "all checks passed"
+
+run-openai goal:
+    uv run acd "{{goal}}" -a "{{agents}}" --provider openai --plan output/plan.json --viz output/dag.html

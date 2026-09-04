@@ -1,0 +1,86 @@
+[project]
+name = "agentcompute"
+description = "Spark-style driver/executor demo over LLM-backed agent executors, following the BAAS hex/DI/SPI/plugin architecture."
+requires-python = ">=3.12"
+version = "0.1.0"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.20",
+    "httpx2>=2.12",
+    "mypy>=1.10",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.8.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentcompute"]
+
+[tool.hatch.build]
+exclude = [
+    "*.log",
+    "tests",
+]
+
+[project.scripts]
+acd = "agentcompute:main"
+
+[project.entry-points."agentcompute.runner"]
+bare = "agentcompute.community.plugins.runner:BareAppRunnerPlugin"
+
+[project.entry-points."agentcompute.logger"]
+stdlib = "agentcompute.community.plugins.logger:StdlibLoggerPlugin"
+
+[project.entry-points."agentcompute.tracer"]
+stdlib = "agentcompute.community.plugins.tracer:StdlibTracerPlugin"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+    "error",
+    "ignore:unclosed <socket.socket:ResourceWarning",
+    "ignore::pytest.PytestUnraisableExceptionWarning",
+]
+
+[tool.coverage.run]
+source = ["src/agentcompute"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+strict = true
+show_error_codes = true
+pretty = true
+ignore_missing_imports = true
+
+[tool.basedpyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"

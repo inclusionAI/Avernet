@@ -1,0 +1,9 @@
+# Dev/local overlay (deep-merged onto application.yaml when DEPLOY_ENV=dev).
+log:
+  level: "DEBUG"
+
+user_config:
+  plugins:
+    llm:
+      provider: "stub"
+      model: "gpt-4o-mini"
