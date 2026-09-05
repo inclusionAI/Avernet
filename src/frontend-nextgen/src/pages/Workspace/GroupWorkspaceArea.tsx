@@ -3,7 +3,6 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupPanelKind } from '@/pages/Workspace/components/GroupHeader';
 import { sessionService } from '@/services/workspace/sessionService';
-import type { Identity } from '@/services/workspace/workspaceModel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import React, { useState } from 'react';
 import { GroupChatPane } from './components/GroupChatPane';
@@ -24,10 +23,6 @@ export function GroupWorkspaceArea({
   view,
   onViewChange,
   availableViews,
-  identities,
-  activeIdentityId,
-  onChangeIdentity,
-  onOpenPermissions,
   userAvatarUrl,
   userIdentityId,
   onAddFriend,
@@ -37,10 +32,6 @@ export function GroupWorkspaceArea({
   view: 'chat' | 'group';
   onViewChange: (v: 'chat' | 'group') => void;
   availableViews: WorkspaceView[];
-  identities?: Identity[];
-  activeIdentityId?: string | null;
-  onChangeIdentity?: (id: string) => void;
-  onOpenPermissions?: () => void;
   userAvatarUrl?: string;
   userIdentityId?: string | null;
   onAddFriend: () => void;
@@ -49,8 +40,6 @@ export function GroupWorkspaceArea({
   onCloseMobileList: () => void;
 }) {
   const ws = useGroupWorkspace();
-  const identityItems = identities ?? [];
-  const handleChangeIdentity = onChangeIdentity ?? (() => {});
   const expandedGroupIds = React.useMemo(
     () => ws.groups.filter((g) => ws.expandedGroupIds[g.groupId]).map((g) => g.groupId),
     [ws.groups, ws.expandedGroupIds],
@@ -151,13 +140,10 @@ export function GroupWorkspaceArea({
     view,
     onViewChange,
     availableViews,
-    identities: identityItems,
-    activeIdentityId: activeIdentityId ?? null,
-    onChangeIdentity: handleChangeIdentity,
-    onOpenPermissions,
-    userAvatarUrl,
     groups: ws.groups,
     isLoading: ws.isLoadingGroups,
+    groupsError: ws.groupsError,
+    onRetryGroups: ws.retryGroups,
     onSelectGroup: (id) => void ws.onSelectGroup(id),
     groupSearchText: ws.groupSearchText,
     onSearchTextChange: ws.setGroupSearchText,
@@ -174,6 +160,9 @@ export function GroupWorkspaceArea({
     totalSessionsByGroupId: sessions.totalSessionsByGroupId,
     isLoadingMoreSessionsByGroupId: sessions.isLoadingMoreSessionsByGroupId,
     onLoadMoreSessions: sessions.loadMoreSessions,
+    errorByGroupId: sessions.errorByGroupId,
+    loadMoreErrorByGroupId: sessions.loadMoreErrorByGroupId,
+    onReloadSession: sessions.reloadGroup,
     sessionTabsByGroup,
     onSessionTabForGroup: setSessionTabForGroup,
     favoriteSessionIds: sessions.favoriteSessionIds,

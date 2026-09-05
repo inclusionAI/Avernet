@@ -48,11 +48,15 @@ describe('PermissionCard', () => {
 
     const capabilityHeading = screen.getByRole('heading', { level: 4, name: '协作能力' });
     const publicationHeading = screen.getByRole('heading', { level: 4, name: '公开范围' });
+    const cardColumns = capabilityHeading.closest('section')?.parentElement;
 
     expect(capabilityHeading).toHaveClass('text-xs', 'text-muted-foreground', 'tracking-wide');
     expect(publicationHeading).toHaveClass('text-xs', 'text-muted-foreground', 'tracking-wide');
+    expect(cardColumns).toHaveClass('grid', 'lg:grid-cols-2', 'gap-6');
+    expect(cardColumns?.lastElementChild).toHaveClass('lg:border-l', 'lg:pl-6');
     expect(capabilityHeading.parentElement).toHaveClass('mb-3');
     expect(publicationHeading.parentElement).toHaveClass('mb-3');
+    expect(screen.getByText('参与协作群聊').closest('div.flex.items-start')).toHaveClass('first:pt-0');
     expect(capabilityHeading.parentElement).not.toHaveClass('border-b');
     expect(publicationHeading.parentElement).not.toHaveClass('border-b');
     expect(screen.getByText('参与协作群聊')).toHaveClass('text-sm', 'text-foreground');

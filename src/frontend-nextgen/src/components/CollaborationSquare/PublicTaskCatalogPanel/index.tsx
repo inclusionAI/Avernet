@@ -1,14 +1,13 @@
 import TaskCard from '@/components/CollaborationSquare/TaskCard';
 import { TaskDetailModal } from '@/components/CollaborationSquare/TaskDetailModal';
+import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
-import { IconButton } from '@/components/ui/IconButton';
-import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { TASK_STATUS_CONFIG, type PublicTask, type TaskStatusFilter } from '@/domain/collaborationSquare/types';
-import { RefreshCw, Search, X } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 const STATUS_OPTIONS: { value: TaskStatusFilter; label: string }[] = [
   { value: 'all', label: '全部' },
@@ -76,28 +75,20 @@ export function PublicTaskCatalogPanel({ vm }: { vm: TaskCatalogViewModel }) {
 
   return (
     <>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="relative min-w-0 flex-1 md:max-w-md">
-          <Search aria-hidden className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label="搜索任务"
-            value={taskQuery}
-            placeholder="搜索任务..."
-            onChange={(event) => vm.setTaskQuery(event.target.value)}
-            className="pl-9 pr-10"
-          />
-          {taskQuery && (
-            <IconButton
-              label="清除搜索"
-              icon={<X aria-hidden className="h-4 w-4" />}
-              onClick={() => vm.setTaskQuery('')}
-              className="absolute right-0 top-0"
-            />
-          )}
-        </div>
-        <div role="group" aria-label="任务状态筛选">
-          <Segmented value={taskStatusFilter} options={STATUS_OPTIONS} onChange={vm.setTaskStatusFilter} />
-        </div>
+      <div className="flex min-h-8 flex-col gap-3 md:flex-row md:flex-nowrap md:items-center md:justify-between">
+        <SquareSearchBar
+          resource="task"
+          query={taskQuery}
+          onQueryChange={vm.setTaskQuery}
+          className="flex-1"
+        />
+        <Segmented
+          aria-label="任务状态筛选"
+          value={taskStatusFilter}
+          className="shrink-0"
+          options={STATUS_OPTIONS}
+          onChange={vm.setTaskStatusFilter}
+        />
       </div>
 
       {vm.loading && <TaskLoadingState />}

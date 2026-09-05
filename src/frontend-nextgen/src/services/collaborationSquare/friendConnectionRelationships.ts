@@ -85,12 +85,11 @@ export async function listFriendBotRelationships(actor: FriendRequestActor, sign
   if (!Array.isArray(connections))
     throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的数据');
   for (const connection of connections) {
-    if (!connection || (connection.status !== 'approved' && connection.status !== 'public_no_edge')) {
-      throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的状态');
+    if (!connection?.actor || typeof connection.actor.id !== 'string' || !connection.actor.id.trim()) {
+      throw new CollaborationSquareError('protocol_error', '好友连接接口返回了无法识别的参与方');
     }
-    if (connection.status === 'approved') {
-      friendIds.add(getOtherActorId(connection.from_actor, connection.to_actor, actor.id));
-    }
+    // 已建立连接列表直接返回连接另一端 actor；仅回填 Bot，Human 关系不影响 Bot 卡片。
+    if (connection.actor.type === 'bot') friendIds.add(connection.actor.id.trim());
   }
 
   const applyingIds = await listPendingFriendBotRelationships(actor, signal);

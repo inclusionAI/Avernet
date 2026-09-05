@@ -284,6 +284,22 @@ export function mapBotProfileTransport(value: BotProfileTransport): PublicBotPro
   };
 }
 
+/**
+ * 分享深链只依赖公开 Catalog 摘要。Catalog 不提供能力 ID/引擎信息，不能伪造成完整画像。
+ */
+export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotProfile {
+  return {
+    id: bot.id,
+    name: bot.name,
+    ownerName: bot.ownerName,
+    description: bot.description,
+    ...(bot.friendRequestBotId ? { friendRequestBotId: bot.friendRequestBotId } : {}),
+    ...(bot.isOwnedByViewer ? { isOwnedByViewer: true } : {}),
+    ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
+    capabilities: [],
+  };
+}
+
 export function mapGroupTransport(value: PublicGroupTransport): PublicGroup {
   return {
     id: value.group_id,
@@ -324,5 +340,6 @@ export function parseSquareDeepLink(search: string, expected: SquareResource): S
   const params = new URLSearchParams(search);
   const resource = params.get('resource');
   const id = params.get('id')?.trim();
-  return resource === expected && id ? { resource, id } : null;
+  const searchHint = params.get('name')?.trim();
+  return resource === expected && id ? { resource, id, ...(searchHint ? { searchHint } : {}) } : null;
 }

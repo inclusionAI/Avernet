@@ -98,7 +98,10 @@ export const useCollaborationSquareStore = create<CollaborationSquareState>((set
   setDetailLoading: (detailLoading) => set({ detailLoading }),
   setError: (error) => set({ error }),
   setQuery: (resource, query) => set(resource === 'bot' ? { botQuery: query } : { groupQuery: query }),
-  setBotSearchMode: (botSearchMode) => set({ botSearchMode }),
+  setBotSearchMode: (botSearchMode) =>
+    set((state) =>
+      state.botSearchMode === botSearchMode ? { botSearchMode } : { botSearchMode, botQuery: '' },
+    ),
   setSelectedBotId: (selectedBotId) => set({ selectedBotId, botProfile: null }),
   setSelectedGroupId: (selectedGroupId) => set({ selectedGroupId, groupMembers: [] }),
   setBusy: (key, busy) =>

@@ -1,4 +1,4 @@
-import { getCapabilities } from '@/capabilities';
+import { getCapabilities, type TaskClaimGrantStrategy } from '@/capabilities';
 import { backendRequest } from '../httpClient';
 import type { BackendApiEnvelope } from '../types';
 
@@ -27,8 +27,35 @@ export interface TaskClaimGrantResultDto {
   gmt_modified: string;
 }
 
+/** 任务认领授权策略解析;skip=开源直发短路,secbaas-relay=内部透传 secbaas。请求期读 capability(避免启动期未装填)。 */
+function resolveTaskClaimGrantStrategy(): TaskClaimGrantStrategy {
+  return getCapabilities().getTaskClaimGrantStrategy().value ?? 'skip';
+}
+
+/** 开源短路信封:api-key 直发无 secbaas,api_key_prefix/operator 留空;上层 enable/disable 仅检 data 真值即放行 PATCH。 */
+function syntheticTaskClaimResult(
+  body: { bcs_bot_id: string },
+  grantStatus: 'granted' | 'revoked',
+): BackendApiEnvelope<TaskClaimGrantResultDto> {
+  return {
+    success: true,
+    code: 200000,
+    message: 'OK',
+    data: {
+      bcs_bot_id: body.bcs_bot_id,
+      api_key_prefix: '',
+      grant_status: grantStatus,
+      operator: '',
+      gmt_modified: '',
+    },
+  };
+}
+
 /** 开启任务认领：grant 公共 api-key 给目标 Bot；幂等（已 granted 不报错）。 */
 export function grantTaskClaim(body: { bcs_bot_id: string }, signal?: AbortSignal) {
+  if (resolveTaskClaimGrantStrategy() === 'skip') {
+    return Promise.resolve(syntheticTaskClaimResult(body, 'granted'));
+  }
   return backendRequest<BackendApiEnvelope<TaskClaimGrantResultDto>>(`${taskApiBase()}/${TASK_GRANT_ENDPOINTS.grant}`, {
     method: 'POST',
     data: body,
@@ -39,6 +66,9 @@ export function grantTaskClaim(body: { bcs_bot_id: string }, signal?: AbortSigna
 
 /** 关闭任务认领：真 revoke（secbaas .../allowed-bots/revoke），置 task_bot_grant.revoked。 */
 export function revokeTaskClaim(body: { bcs_bot_id: string }, signal?: AbortSignal) {
+  if (resolveTaskClaimGrantStrategy() === 'skip') {
+    return Promise.resolve(syntheticTaskClaimResult(body, 'revoked'));
+  }
   return backendRequest<BackendApiEnvelope<TaskClaimGrantResultDto>>(
     `${taskApiBase()}/${TASK_GRANT_ENDPOINTS.revoke}`,
     {

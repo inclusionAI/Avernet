@@ -17,16 +17,17 @@ export function IdentityAvatar({
   userAvatarUrl,
 }: {
   identity: Identity;
-  size?: 'sm' | 'md';
+  size?: 'xs' | 'sm' | 'md';
   userAvatarUrl?: string;
 }) {
   const avatarUrl = identity.kind === 'user' ? userAvatarUrl : identity.avatar;
+  const avatarSize = size === 'xs' ? 24 : size === 'sm' ? 32 : 36;
   return (
     <span className="shrink-0">
       <Avatar
         name={identity.name}
         src={avatarUrl && isAvatarUrl(avatarUrl) ? avatarUrl : undefined}
-        size={size === 'sm' ? 32 : 36}
+        size={avatarSize}
       />
     </span>
   );
@@ -36,12 +37,12 @@ function BotRuntimeStatus({ identity }: { identity: Identity }) {
   const isOnline = identity.chatStatus === 'online';
   const runtimeStatus = (
     <span
-      aria-label={`Bot 运行状态：${isOnline ? '在线' : '不在线'}`}
+      aria-label={`Bot ${isOnline ? '在线' : '不在线'}`}
       className="inline-flex items-center gap-1"
       tabIndex={isOnline ? undefined : 0}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', isOnline ? 'bg-success' : 'bg-muted-foreground')} aria-hidden />
-      运行状态：{isOnline ? '在线' : '不在线'}
+      {isOnline ? '在线' : '不在线'}
     </span>
   );
 
@@ -57,7 +58,15 @@ function BotRuntimeStatus({ identity }: { identity: Identity }) {
   );
 }
 
-export function IdentityDetails({ identity, compact = false }: { identity: Identity; compact?: boolean }) {
+export function IdentityDetails({
+  identity,
+  compact = false,
+  summaryOnly = false,
+}: {
+  identity: Identity;
+  compact?: boolean;
+  summaryOnly?: boolean;
+}) {
   const identityLabel = identity.kind === 'user' ? '用户' : getBotTypeLabel(identity.botType);
   const engineLabel = identity.kind === 'bot' ? getBotEngineLabel(identity.engine) : undefined;
   return (
@@ -66,21 +75,21 @@ export function IdentityDetails({ identity, compact = false }: { identity: Ident
         <span className={cn('truncate font-medium text-foreground', compact ? 'text-xs' : 'text-sm')}>
           {identity.name}
         </span>
-        {identityLabel ? (
+        {identityLabel && !summaryOnly ? (
           <Badge
             tone={identity.kind === 'user' ? 'primary' : 'neutral'}
-            className="rounded-sm px-1 py-0 text-[10px] font-normal leading-4"
+            className="shrink-0 whitespace-nowrap rounded-sm px-1 py-0 text-[10px] font-normal leading-4"
           >
             {identityLabel}
           </Badge>
         ) : null}
       </span>
-      {identity.kind === 'user' && (
+      {!summaryOnly && identity.kind === 'user' && (
         <span className="mt-0.5 block truncate text-[10px] text-muted-foreground">
           工号：{resolveOpenApiUserId(identity.id)}
         </span>
       )}
-      {identity.kind === 'bot' && (
+      {!summaryOnly && identity.kind === 'bot' && (
         <span className="mt-0.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
           <span className="truncate">{engineLabel || '引擎类型暂无'}</span>
           <BotRuntimeStatus identity={identity} />

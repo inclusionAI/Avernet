@@ -19,16 +19,9 @@ import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
 import { useHumanIdentity } from './useHumanIdentity';
 import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
-export interface UseWorkspaceOptions {
-  /**
-   * 副屏 onAction(send_message) 的自定义回流。
-   *
-   * 产线默认走 sendMessage → chat.onRequest（真实对话 provider）。
-   * 自测面板可注入只 toast/log 的回调，不触碰真实对话链路，便于零对话依赖自测 send_message 回流。
-   * fill_input 不在此注入（始终走本地 setDraft）。
-   */
-  onPanelSend?: (content: string) => void;
-}
+import type { UseWorkspaceOptions } from './useWorkspace.options';
+import { TEST_SUPPORT_TARGET } from './useWorkspace.constants';
+export type { UseWorkspaceOptions } from './useWorkspace.options';
 export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const {
     activeIdentityId,
@@ -67,8 +60,19 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   }, [activeIdentityView, availableViews, view, setView]);
   const isTestUser = isTestUserIdentity(activeIdentityId);
   const isUserIdentity = activeIdentityView?.kind === 'user';
-  const { chatBots, hasAgentCodingBots, isLoading: isMyBotsLoading } = useOwnedBots(activeIdentityId, isUserIdentity);
-  const { friendBots, isLoading: isFriendBotsLoading } = useFriendBots(
+  const {
+    chatBots,
+    hasAgentCodingBots,
+    isLoading: isMyBotsLoading,
+    error: myBotsError,
+    reload: reloadMyBots,
+  } = useOwnedBots(activeIdentityId, isUserIdentity);
+  const {
+    friendBots,
+    isLoading: isFriendBotsLoading,
+    error: friendBotsError,
+    reload: reloadFriendBots,
+  } = useFriendBots(
     activeIdentityId,
     isUserIdentity,
     view !== 'group',
@@ -166,17 +170,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
   };
 
   const botChatTarget = useMemo<ConversationTarget | null>(() => {
-    if (isTestUser)
-      return {
-        id: TEST_USER_SUPPORT_TARGET_ID,
-        name: '客服测试',
-        avatar: 'TS',
-        engine: 'OpenClaw',
-        group: 'mine',
-        status: 'available',
-        summary: '测试客服',
-        kind: 'single',
-      } as ConversationTarget;
+    if (isTestUser) return TEST_SUPPORT_TARGET;
     if (!selectedChatBot) return null;
     return buildBotChatTarget(selectedChatBot);
   }, [isTestUser, selectedChatBot]);
@@ -211,7 +205,11 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     hasAgentCodingBots,
     friendBots,
     isMyBotsLoading,
+    myBotsError,
+    reloadMyBots,
     isFriendBotsLoading,
+    friendBotsError,
+    reloadFriendBots,
     expandedBotIds,
     expandedBotSectionKey,
     toggleBotExpanded: onToggleBotExpanded,

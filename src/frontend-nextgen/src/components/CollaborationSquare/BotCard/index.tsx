@@ -61,8 +61,8 @@ export default function SquareBotCard({ bot, busy, onShare, onPrimaryAction }: S
           </dd>
           {bot.shortProfile && (
             <>
-              <dt className="font-medium text-[var(--color-muted)]">Profile</dt>
-              <dd className="m-0 line-clamp-2 text-[var(--color-fg)]" title={bot.shortProfile}>
+              <dt className="font-medium text-muted-foreground">Profile</dt>
+              <dd className="m-0 line-clamp-2 text-foreground" title={bot.shortProfile}>
                 {bot.shortProfile}
               </dd>
             </>

@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 import type { PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
+import { notifyError, notifySuccess } from '@/components/ui/notify';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import {
@@ -11,13 +12,16 @@ import {
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 jest.mock('@/hooks/useHumanIdentity', () => ({ useHumanIdentity: jest.fn() }));
+jest.mock('@/components/ui/notify', () => ({ notifyError: jest.fn(), notifySuccess: jest.fn() }));
 
 const mockedUseHumanIdentity = useHumanIdentity as jest.MockedFunction<typeof useHumanIdentity>;
+const mockedNotifyError = notifyError as jest.MockedFunction<typeof notifyError>;
+const mockedNotifySuccess = notifySuccess as jest.MockedFunction<typeof notifySuccess>;
 const humanContext = { actorId: 'human_327325', userId: '327325' };
 const viewerFields = { viewerActorType: 'human', viewerActorId: '327325' };
 
@@ -76,6 +80,9 @@ describe('useCollaborationSquare Bot Search', () => {
       identity: { userId: '327325', displayName: '当前用户', online: true },
       status: 'ready',
     });
+    mockedNotifyError.mockClear();
+    mockedNotifySuccess.mockClear();
+    window.history.replaceState({}, '', '/collaboration-square/bots');
   });
 
   afterEach(() => {
@@ -127,6 +134,163 @@ describe('useCollaborationSquare Bot Search', () => {
     unmount();
   });
 
+  test('分享链接携带 Bot 名称提示，Clipboard 成功后只提示复制成功', async () => {
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.share('bot', 'bot:target', '项目助手');
+      await Promise.resolve();
+    });
+
+    expect(writeText).toHaveBeenCalledWith(
+      `${window.location.origin}/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B`,
+    );
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('分享链接已复制');
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('分享链接 Clipboard 失败时提示权限错误且不误报成功', async () => {
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    const writeText = jest.fn().mockRejectedValue(new Error('clipboard denied'));
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.share('bot', 'bot:target', '项目助手');
+      await Promise.resolve();
+    });
+
+    expect(mockedNotifyError).toHaveBeenCalledWith('复制失败，请检查浏览器剪贴板权限');
+    expect(mockedNotifySuccess).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('Bot 分享深链用名称调用真实 Search，并按 ID 精确命中后展示 Catalog 公开摘要', async () => {
+    const target = {
+      ...resultBot('bot:target'),
+      name: '项目助手',
+      description: '公开描述',
+      capabilities: ['任务拆解'],
+    };
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    const resolveSharedBot = jest.spyOn(collaborationSquareBotService, 'resolveSharedBot').mockResolvedValue(target);
+    const legacyProfile = jest.spyOn(collaborationSquareService, 'getBotProfile');
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    expect(useCollaborationSquareStore.getState().loading).toBe(false);
+
+    await waitFor(() =>
+      expect(resolveSharedBot).toHaveBeenCalledWith(
+        'bot:target',
+        '项目助手',
+        humanContext,
+        viewerFields,
+        expect.any(AbortSignal),
+      ),
+    );
+    await waitFor(() => expect(useCollaborationSquareStore.getState().selectedBotId).toBe('bot:target'));
+    expect(useCollaborationSquareStore.getState().botProfile).toEqual(
+      expect.objectContaining({
+        id: 'bot:target',
+        name: '项目助手',
+        description: '公开描述',
+        capabilities: [],
+      }),
+    );
+    expect(legacyProfile).not.toHaveBeenCalled();
+    expect(mockedNotifyError).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  test('Bot 分享深链已在当前页精确命中时不重复发起 Search', async () => {
+    const target = { ...resultBot('bot:loaded'), name: '当前页助手' };
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([target]));
+    const resolveSharedBot = jest.spyOn(collaborationSquareBotService, 'resolveSharedBot');
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Aloaded&name=%E5%BD%93%E5%89%8D%E9%A1%B5%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(useCollaborationSquareStore.getState().selectedBotId).toBe('bot:loaded'));
+    expect(resolveSharedBot).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().botProfile).toEqual(
+      expect.objectContaining({ id: 'bot:loaded', name: '当前页助手' }),
+    );
+    unmount();
+  });
+
+  test('Bot 分享深链 Search 失败时展示真实错误，不误判为目标失效', async () => {
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    jest
+      .spyOn(collaborationSquareBotService, 'resolveSharedBot')
+      .mockRejectedValue(new Error('Catalog Search 暂不可用'));
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockedNotifyError).toHaveBeenCalledWith('Catalog Search 暂不可用'));
+    expect(mockedNotifyError).not.toHaveBeenCalledWith('内容已取消公开或不可访问');
+    expect(window.location.search).toContain('id=bot%3Atarget');
+    unmount();
+  });
+
+  test('Bot 分享深链名称搜索无精确 ID 命中时才按目标失效处理', async () => {
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    jest.spyOn(collaborationSquareBotService, 'resolveSharedBot').mockResolvedValue(null);
+    window.history.replaceState(
+      {},
+      '',
+      '/collaboration-square/bots?resource=bot&id=bot%3Atarget&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B',
+    );
+
+    const { unmount } = renderHook(() => useCollaborationSquare('bot'));
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(mockedNotifyError).toHaveBeenCalledWith('内容已取消公开或不可访问'));
+    expect(window.location.search).toBe('');
+    expect(useCollaborationSquareStore.getState().selectedBotId).toBeNull();
+    unmount();
+  });
+
   test('首屏使用 24 条并在加载更多时请求下一页且去重合并', async () => {
     const listBots = jest.spyOn(collaborationSquareBotService, 'listBotPage').mockImplementation(async (query) => {
       if (query?.page === 1)
@@ -161,6 +325,38 @@ describe('useCollaborationSquare Bot Search', () => {
     expect(useCollaborationSquareStore.getState().bots).toHaveLength(25);
     expect(useCollaborationSquareStore.getState().bots.map((bot) => bot.id)).toContain('page-2-0');
     expect(result.current.hasMore).toBe(false);
+
+    unmount();
+  });
+
+  test('名称搜索与智能搜索互相切换时清空已有输入', async () => {
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([]));
+    jest.spyOn(collaborationSquareBotService, 'discoverBots').mockResolvedValue([]);
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+    });
+
+    act(() => {
+      result.current.setQuery('bot', '旧名称');
+      result.current.setBotSearchMode('smart');
+    });
+    expect(result.current.botSearchMode).toBe('smart');
+    expect(result.current.botQuery).toBe('');
+
+    act(() => {
+      result.current.setQuery('bot', '能力描述');
+      result.current.setBotSearchMode('name');
+    });
+    expect(result.current.botSearchMode).toBe('name');
+    expect(result.current.botQuery).toBe('');
+
+    act(() => {
+      result.current.setQuery('bot', '保留当前模式输入');
+      result.current.setBotSearchMode('name');
+    });
+    expect(result.current.botQuery).toBe('保留当前模式输入');
 
     unmount();
   });

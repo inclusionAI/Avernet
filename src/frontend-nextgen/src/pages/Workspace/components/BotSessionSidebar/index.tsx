@@ -1,12 +1,13 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
-import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import type { Identity } from '@/services/workspace/workspaceModel';
-import { ArrowRight, Search } from 'lucide-react';
+import { Info, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { WorkspaceActionButton } from '../WorkspaceActionButton';
+import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
 import { BotListSection } from './BotListSection';
 
@@ -16,14 +17,15 @@ export interface BotSessionSidebarProps {
   availableViews?: WorkspaceView[];
   identities?: Identity[];
   activeIdentityId?: string | null;
-  onChangeIdentity?: (id: string) => void;
-  onOpenPermissions?: () => void;
-  userAvatarUrl?: string;
   chatBots: ChatBotView[];
   hasAgentCodingBots?: boolean;
   friendBots: ChatBotView[];
   isMyBotsLoading: boolean;
+  myBotsError?: string | null;
+  onRetryMyBots?: () => void;
   isFriendBotsLoading: boolean;
+  friendBotsError?: string | null;
+  onRetryFriendBots?: () => void;
   expandedBotIds: Record<string, true>;
   expandedBotSectionKey: Record<string, string>;
   sessionsByBotId: Record<string, BotChatSessionView[]>;
@@ -42,7 +44,7 @@ export interface BotSessionSidebarProps {
   onToggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
   onLoadFavorites: (botId: string) => Promise<void>;
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
-  onManageBot?: (bot: ChatBotView) => void;
+  onReloadBot?: (botId: string) => Promise<void>;
   onOpenBotWorkshop?: () => void;
   onCreateGroup: () => void;
   onAddFriend: () => void;
@@ -56,14 +58,15 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     availableViews,
     identities = [],
     activeIdentityId = null,
-    onChangeIdentity = () => {},
-    onOpenPermissions = () => {},
-    userAvatarUrl,
     chatBots,
     hasAgentCodingBots = false,
     friendBots,
     isMyBotsLoading,
+    myBotsError,
+    onRetryMyBots,
     isFriendBotsLoading,
+    friendBotsError,
+    onRetryFriendBots,
     expandedBotIds,
     expandedBotSectionKey,
     sessionsByBotId,
@@ -82,8 +85,8 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     onToggleFavorite,
     onLoadFavorites,
     onLoadMoreSessions,
-    onManageBot,
-    onOpenBotWorkshop = () => {},
+    onReloadBot,
+    onOpenBotWorkshop,
     onCreateGroup,
     onAddFriend,
   } = props;
@@ -115,42 +118,34 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     onToggleFavorite,
     onLoadFavorites,
     onLoadMoreSessions,
-    onManageBot,
+    onReloadBot,
   };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-[18px] pb-3 pt-4">
-        <WorkspaceIdentitySelector
-          identities={identities}
-          activeId={activeIdentityId}
-          onChange={onChangeIdentity}
-          onOpenPermissions={onOpenPermissions}
-          userAvatarUrl={userAvatarUrl}
-          layout="sidebar"
-        />
-      </div>
-      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted">
-        {showViewSwitch && (
-          <div className="sticky top-0 z-20 mb-2 flex items-center gap-2 bg-muted px-[18px]">
-            <WorkspacePrimaryTabs
-              value={view as WorkspaceView}
-              options={availableViews ?? []}
-              onChange={onViewChange}
-            />
-            <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
-          </div>
-        )}
-        <div className="my-2 px-[18px]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              className="pl-9"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索 Bot 名称"
-              aria-label="搜索 Bot"
-            />
+      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
+        <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
+          {showViewSwitch && (
+            <div className="flex h-10 items-center gap-2 px-[18px]">
+              <WorkspacePrimaryTabs
+                value={view as WorkspaceView}
+                options={availableViews ?? []}
+                onChange={onViewChange}
+              />
+              <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
+            </div>
+          )}
+          <div className="my-2 px-[18px]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                className="h-9 pl-9"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="搜索 Bot 名称"
+                aria-label="搜索 Bot"
+              />
+            </div>
           </div>
         </div>
         {(isSessionsLoading || isMyBotsLoading) && chatBots.length === 0 && friendBots.length === 0 ? (
@@ -170,21 +165,41 @@ export function BotSessionList(props: BotSessionSidebarProps) {
                 count={filteredMine.length}
                 bots={filteredMine}
                 isLoading={isMyBotsLoading}
-                footer={
+                error={myBotsError}
+                onRetry={onRetryMyBots}
+                headerHint={
                   hasAgentCodingBots ? (
-                    <Button
-                      variant="ghost"
-                      className="group mx-[18px] mb-3 mt-3 flex h-auto w-[calc(100%-36px)] cursor-pointer items-center justify-between gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2.5 text-left text-foreground transition-colors hover:bg-primary/10"
-                      onClick={onOpenBotWorkshop}
-                    >
-                      <span className="text-xs font-medium leading-5 text-foreground">
-                        AgentCoding Bot 请前往 Bot 工坊使用
-                      </span>
-                      <ArrowRight
-                        className="h-4 w-4 shrink-0 text-foreground/70 transition-colors group-hover:text-primary"
-                        aria-hidden="true"
-                      />
-                    </Button>
+                    <TooltipProvider delayDuration={0}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label="AgentCoding Bot 使用提示"
+                            className="h-7 w-7 rounded-md text-muted-foreground hover:text-primary"
+                          >
+                            <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[240px]">
+                          <span>AgentCoding Bot 请前往 </span>
+                          <a
+                            href="/bot-workshop"
+                            className="font-medium text-primary underline underline-offset-2"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (onOpenBotWorkshop) {
+                                event.preventDefault();
+                                onOpenBotWorkshop();
+                              }
+                            }}
+                          >
+                            Bot 工坊
+                          </a>
+                          <span> 使用</span>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   ) : null
                 }
                 {...sectionProps}
@@ -196,6 +211,8 @@ export function BotSessionList(props: BotSessionSidebarProps) {
               count={filteredFriends.length}
               bots={filteredFriends}
               isLoading={isFriendBotsLoading}
+              error={friendBotsError}
+              onRetry={onRetryFriendBots}
               {...sectionProps}
             />
           </div>
@@ -208,8 +225,8 @@ export function BotSessionList(props: BotSessionSidebarProps) {
 /** 内流会话列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 BotSessionList。 */
 export function BotSessionSidebar(props: BotSessionSidebarProps) {
   return (
-    <aside className="hidden w-[360px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/20 lg:flex">
+    <ResizableWorkspaceSidebar ariaLabel="Bot 会话侧栏">
       <BotSessionList {...props} />
-    </aside>
+    </ResizableWorkspaceSidebar>
   );
 }

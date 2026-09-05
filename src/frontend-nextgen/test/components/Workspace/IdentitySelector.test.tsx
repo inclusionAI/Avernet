@@ -64,16 +64,16 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.getByText('个人 Bot')).toBeInTheDocument();
     expect(screen.getByText('个人 Bot')).toHaveClass('rounded-sm', 'px-1', 'py-0', 'text-[10px]');
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
-    expect(screen.getByText('运行状态：在线')).toBeInTheDocument();
+    expect(screen.getByText('在线')).toBeInTheDocument();
     expect(screen.queryByText('Bot ID：')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
     expect(
-      screen.queryByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('隐藏 Bot')).toBeInTheDocument();
     expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
-    expect(screen.getByText('运行状态：不在线')).toBeInTheDocument();
+    expect(screen.getByText('不在线')).toBeInTheDocument();
   });
 
   it('将 bots 接口的引擎枚举统一为可读标签', () => {
@@ -136,30 +136,49 @@ describe('WorkspaceIdentitySelector', () => {
     fireEvent.pointerMove(infoTrigger);
 
     expect(
-      await screen.findByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/我参与的会话|当前身份可见/)).not.toBeInTheDocument();
   });
 
-  it('侧栏身份区不常显身份标签，说明收纳在下拉菜单的信息图标中', async () => {
+  it('侧栏身份区突出头像、名称和身份类型，并明确影响工作下全部页面', async () => {
     render(
       <WorkspaceIdentitySelector
         identities={identities}
-        activeId="human_447147"
+        activeId="bot-online"
         onChange={() => {}}
         layout="sidebar"
       />,
     );
 
-    expect(screen.queryByText('协作身份')).not.toBeInTheDocument();
-    expect(screen.queryByText('可切换身份')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：风太' }));
-    const infoTrigger = await screen.findByLabelText('协作身份说明');
-    fireEvent.pointerMove(infoTrigger);
+    expect(screen.getByText('工作身份')).toBeInTheDocument();
+    expect(screen.getByLabelText('工作身份说明')).toHaveClass('top-px', 'text-muted-foreground/70');
+    expect(screen.getByLabelText('工作身份说明').querySelector('svg')).toHaveClass('h-3', 'w-3');
     expect(
-      await screen.findByText('当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+    ).not.toBeInTheDocument();
+    fireEvent.pointerMove(screen.getByLabelText('工作身份说明'));
+    expect(
+      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
     ).toBeInTheDocument();
+    expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '24px', height: '24px' });
+    expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');
+    expect(screen.queryByText('个人 Bot')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '当前协作身份：协作 Bot' })).toHaveClass(
+      'rounded-lg',
+      'border',
+      'bg-muted/60',
+      'min-h-9',
+      'px-2.5',
+      'py-1.5',
+    );
+    expect(screen.queryByText('OpenClaw')).not.toBeInTheDocument();
+    expect(screen.queryByText('在线')).not.toBeInTheDocument();
+    expect(screen.queryByText('切换身份')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
+    expect(await screen.findByText('个人 Bot')).toBeInTheDocument();
+    expect(screen.queryByLabelText('协作身份说明')).not.toBeInTheDocument();
   });
 
   it('只有一个协作身份时不显示切换提示', () => {
@@ -188,7 +207,7 @@ describe('WorkspaceIdentitySelector', () => {
       />,
     );
 
-    expect(screen.getByText('运行状态：在线')).toBeInTheDocument();
+    expect(screen.getByText('在线')).toBeInTheDocument();
     expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
     expect(screen.getByText('桌面 Bot')).toBeInTheDocument();
   });
@@ -211,9 +230,9 @@ describe('WorkspaceIdentitySelector', () => {
       />,
     );
 
-    expect(screen.getByText('运行状态：不在线')).toBeInTheDocument();
+    expect(screen.getByText('不在线')).toBeInTheDocument();
     expect(screen.queryByText(/可参与群聊/)).not.toBeInTheDocument();
-    fireEvent.pointerMove(screen.getByLabelText('Bot 运行状态：不在线'));
+    fireEvent.pointerMove(screen.getByLabelText('Bot 不在线'));
     expect(await screen.findByText('请检查 Bot 实例状态')).toBeInTheDocument();
   });
 

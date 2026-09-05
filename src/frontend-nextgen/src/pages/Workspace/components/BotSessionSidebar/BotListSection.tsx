@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
+import { ListErrorState } from '../ListErrorState';
 import { BotItem } from './BotItem';
 
 interface BotListSectionProps {
@@ -12,6 +13,8 @@ interface BotListSectionProps {
   count: number;
   bots: ChatBotView[];
   isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
   defaultCollapsed?: boolean;
   expandedBotIds: Record<string, true>;
   expandedBotSectionKey: Record<string, string>;
@@ -30,7 +33,8 @@ interface BotListSectionProps {
   onToggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
   onLoadFavorites: (botId: string) => Promise<void>;
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
-  onManageBot?: (bot: ChatBotView) => void;
+  onReloadBot?: (botId: string) => Promise<void>;
+  headerHint?: ReactNode;
   footer?: ReactNode;
 }
 
@@ -40,6 +44,8 @@ export function BotListSection({
   count,
   bots,
   isLoading,
+  error,
+  onRetry,
   defaultCollapsed,
   expandedBotIds,
   expandedBotSectionKey,
@@ -58,38 +64,43 @@ export function BotListSection({
   onToggleFavorite,
   onLoadFavorites,
   onLoadMoreSessions,
-  onManageBot,
+  onReloadBot,
+  headerHint,
   footer,
 }: BotListSectionProps) {
   const [collapsed, setCollapsed] = useState(!!defaultCollapsed);
 
   return (
     <div>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() => setCollapsed((v) => !v)}
-        aria-expanded={!collapsed}
-        aria-label={`${title} (${count})`}
-        aria-controls={`bot-section-${sectionKey}`}
-        className="flex h-auto min-h-10 w-full items-center gap-1 rounded-none border-b border-border/70 bg-muted/10 px-[18px] py-2 text-xs font-medium text-foreground hover:bg-accent/50"
-      >
-        {collapsed ? (
-          <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <span className="flex-1 text-left">{title}</span>
-        <span className="text-muted-foreground">{count} 个 Bot</span>
-      </Button>
+      <div className="flex min-h-9 items-center border-b border-border/70 bg-muted/10">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setCollapsed((v) => !v)}
+          aria-expanded={!collapsed}
+          aria-label={`${title} (${count})`}
+          aria-controls={`bot-section-${sectionKey}`}
+          className="flex h-auto min-h-9 min-w-0 flex-1 items-center gap-1 rounded-none border-0 bg-transparent px-[18px] py-2 text-xs font-medium text-foreground hover:bg-accent/50"
+        >
+          {collapsed ? (
+            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-left">{title} ({count})</span>
+        </Button>
+        {headerHint && <div className="shrink-0 pr-3">{headerHint}</div>}
+      </div>
       {!collapsed && (
         <div id={`bot-section-${sectionKey}`}>
-          {isLoading ? (
+          {error ? (
+            <ListErrorState message={error} onRetry={onRetry} />
+          ) : isLoading ? (
             <div className="overflow-hidden border-y border-border bg-background">
               {[1, 2].map((i) => (
                 <Skeleton.Block
                   key={i}
-                  className="h-[72px] w-full rounded-none border-b border-border last:border-b-0"
+                  className="h-16 w-full rounded-none border-b border-border last:border-b-0"
                 />
               ))}
             </div>
@@ -119,7 +130,7 @@ export function BotListSection({
                   onToggleFavorite={onToggleFavorite}
                   onLoadFavorites={onLoadFavorites}
                   onLoadMoreSessions={onLoadMoreSessions}
-                  onManageBot={onManageBot}
+                  onReloadBot={onReloadBot}
                 />
               ))}
             </div>

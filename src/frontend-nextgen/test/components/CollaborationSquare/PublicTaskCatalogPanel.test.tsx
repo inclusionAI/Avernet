@@ -71,6 +71,13 @@ function buildVm(overrides: Partial<TaskCatalogViewModel> = {}): TaskCatalogView
 }
 
 describe('PublicTaskCatalogPanel', () => {
+  test('搜索工具栏保持统一最小高度，状态筛选不改变搜索区高度', () => {
+    const { container } = render(<PublicTaskCatalogPanel vm={buildVm()} />);
+    const toolbar = container.firstElementChild as HTMLElement;
+    expect(toolbar).toHaveClass('flex', 'min-h-8');
+    expect(screen.getByRole('group', { name: '任务状态筛选' })).toHaveClass('shrink-0');
+  });
+
   test('加载态渲染骨架占位网格', () => {
     render(<PublicTaskCatalogPanel vm={buildVm({ loading: true })} />);
     expect(screen.getByLabelText('正在加载任务广场')).toBeInTheDocument();

@@ -3,6 +3,7 @@ import { Button, IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
 import type { NavigationArea, NavigationItem } from './navigation';
 import { SpaceSwitcher } from './SpaceSwitcher';
+import { WorkspaceIdentitySwitcher } from './WorkspaceIdentitySwitcher';
 
 interface SidebarNavListProps {
   area: NavigationArea;
@@ -46,6 +47,11 @@ export function SidebarNavList({ area, activePath, items, onNavigate, collapsed 
         aria-label={area === 'work' ? '工作导航' : '管理导航'}
         className="app-scrollbar flex-1 overflow-y-auto px-3 py-3"
       >
+        {(area === 'work' || showSpaceSwitcher) && (
+          <div className="mb-3 border-b border-[var(--color-border)] pb-3">
+            {area === 'work' ? <WorkspaceIdentitySwitcher /> : <SpaceSwitcher />}
+          </div>
+        )}
         <p className="px-3 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-muted)]">
           {area === 'work' ? '工作' : '管理'}
         </p>
@@ -71,11 +77,6 @@ export function SidebarNavList({ area, activePath, items, onNavigate, collapsed 
           })}
         </div>
       </nav>
-      {showSpaceSwitcher && (
-        <div className="mt-auto border-t border-[var(--color-border)] px-3 pb-3 pt-2">
-          <SpaceSwitcher />
-        </div>
-      )}
     </>
   );
 }

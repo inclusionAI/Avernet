@@ -1,63 +1,12 @@
-import type { GroupSessionPage, SessionView } from '@/domain/collaboration';
 import { groupService } from '@/services/workspace/groupService';
-import type { DomainError } from '@/services/workspace/identityService';
-import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
-import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import { toast } from 'sonner';
+import { useCallback, useEffect, useRef } from 'react';
+import {
+  type UseSessionMapRequestsOptions,
+  normalizePage,
+  notifyError,
+  SESSION_PAGE_SIZE,
+} from './sessionMapRequests.utils';
 import { useExpandedGroupSessionRequests } from './useExpandedGroupSessionRequests';
-
-const SESSION_PAGE_SIZE = 10;
-
-interface SessionPageMeta {
-  total: number;
-  hasMore: boolean;
-  /** 后端分页游标，避免本地新建/删除导致 offset 与服务端列表错位。 */
-  nextOffset: number;
-  isLoadingMore: boolean;
-}
-
-type SessionMap = Record<string, SessionView[]>;
-type SessionMapRef = MutableRefObject<SessionMap>;
-type SessionMetaMapRef = MutableRefObject<Record<string, SessionPageMeta>>;
-
-interface UseSessionMapRequestsOptions {
-  groupId: string | null;
-  expandedGroupIds: string[];
-  activeIdentityId: string | null;
-  rawByGroupId: SessionMap;
-  rawByGroupIdRef: SessionMapRef;
-  pageMetaByGroupIdRef: SessionMetaMapRef;
-  inFlightRef: MutableRefObject<Map<string, number>>;
-  loadingMoreRef: MutableRefObject<Set<string>>;
-  requestVersionRef: MutableRefObject<Map<string, number>>;
-  identityEpochRef: MutableRefObject<number>;
-  setIsLoading: Dispatch<SetStateAction<boolean>>;
-  setRawByGroupId: Dispatch<SetStateAction<SessionMap>>;
-  setPageMetaByGroupId: Dispatch<SetStateAction<Record<string, SessionPageMeta>>>;
-  beginGroupRequest: (groupId: string) => number;
-  isCurrentRequest: (groupId: string, version: number, epoch: number) => boolean;
-  replaceGroupPage: (groupId: string, data: GroupSessionPage | SessionView[]) => void;
-}
-
-function notifyError(err: DomainError): void {
-  // 未登录（oauth-provider + 非 authenticated）静默：会话失效后的 sessions 加载失败 toast
-  // 统一由 ExternalLoginPromptModal 承担（见 loginToastGate）；已登录 / ace-gateway 照常提示。
-  if (shouldMuteNonAuthedToast()) return;
-  toast.error(err.friendlyMessage);
-}
-
-function normalizePage(data: GroupSessionPage | SessionView[], fallbackOffset = 0): GroupSessionPage {
-  if (Array.isArray(data)) {
-    return {
-      items: data,
-      offset: fallbackOffset,
-      limit: SESSION_PAGE_SIZE,
-      total: fallbackOffset + data.length,
-      hasMore: data.length >= SESSION_PAGE_SIZE,
-    };
-  }
-  return data;
-}
 
 export function useSessionMapRequests({
   groupId,
@@ -73,6 +22,8 @@ export function useSessionMapRequests({
   setIsLoading,
   setRawByGroupId,
   setPageMetaByGroupId,
+  setErrorByGroupId,
+  setLoadMoreErrorByGroupId,
   beginGroupRequest,
   isCurrentRequest,
   replaceGroupPage,
@@ -99,11 +50,23 @@ export function useSessionMapRequests({
       .then((res) => {
         // 切群后同身份的旧请求仍可回填旧群；身份切换或更新请求后的旧响应必须丢弃。
         if (!isCurrentRequest(groupId, requestVersion, requestEpoch)) return;
-        if (res.ok) replaceGroupPage(groupId, res.data);
+        if (res.ok) {
+          setErrorByGroupId((current) => {
+            const next = { ...current };
+            delete next[groupId];
+            return next;
+          });
+          setLoadMoreErrorByGroupId((current) => {
+            const next = { ...current };
+            delete next[groupId];
+            return next;
+          });
+          replaceGroupPage(groupId, res.data);
+        }
         else if (cancelled) replaceGroupPage(groupId, []);
         else {
           notifyError(res.error);
-          replaceGroupPage(groupId, []);
+          setErrorByGroupId((current) => ({ ...current, [groupId]: res.error.friendlyMessage }));
         }
       })
       .finally(() => {
@@ -122,6 +85,8 @@ export function useSessionMapRequests({
     inFlightRef,
     isCurrentRequest,
     replaceGroupPage,
+    setErrorByGroupId,
+    setLoadMoreErrorByGroupId,
     setIsLoading,
   ]);
 
@@ -135,6 +100,7 @@ export function useSessionMapRequests({
     beginGroupRequest,
     isCurrentRequest,
     replaceGroupPage,
+    setErrorByGroupId,
   });
 
   const reloadGroup = useCallback(
@@ -143,9 +109,22 @@ export function useSessionMapRequests({
       const requestVersion = beginGroupRequest(gid);
       const res = await groupService.loadGroupSessionsOrBcs(gid, activeIdentityId ?? undefined);
       if (!isCurrentRequest(gid, requestVersion, requestEpoch)) return;
-      if (res.ok) replaceGroupPage(gid, res.data);
+      if (res.ok) {
+        setErrorByGroupId((current) => {
+          const next = { ...current };
+          delete next[gid];
+          return next;
+        });
+        setLoadMoreErrorByGroupId((current) => {
+          const next = { ...current };
+          delete next[gid];
+          return next;
+        });
+        replaceGroupPage(gid, res.data);
+      }
       else {
         notifyError(res.error);
+        setErrorByGroupId((current) => ({ ...current, [gid]: res.error.friendlyMessage }));
         const currentMeta = pageMetaByGroupIdRef.current[gid];
         if (currentMeta?.isLoadingMore) {
           const nextMeta = {
@@ -164,6 +143,8 @@ export function useSessionMapRequests({
       isCurrentRequest,
       pageMetaByGroupIdRef,
       replaceGroupPage,
+      setErrorByGroupId,
+      setLoadMoreErrorByGroupId,
       setPageMetaByGroupId,
     ],
   );
@@ -192,8 +173,14 @@ export function useSessionMapRequests({
         }
         if (!res.ok) {
           notifyError(res.error);
+          setLoadMoreErrorByGroupId((current) => ({ ...current, [gid]: res.error.friendlyMessage }));
           return;
         }
+        setLoadMoreErrorByGroupId((current) => {
+          const next = { ...current };
+          delete next[gid];
+          return next;
+        });
         const page = normalizePage(res.data, meta.nextOffset);
         const existing = rawByGroupIdRef.current[gid] ?? [];
         const seen = new Set(existing.map((session) => session.sessionId));
@@ -237,6 +224,7 @@ export function useSessionMapRequests({
       requestVersionRef,
       setPageMetaByGroupId,
       setRawByGroupId,
+      setLoadMoreErrorByGroupId,
     ],
   );
 

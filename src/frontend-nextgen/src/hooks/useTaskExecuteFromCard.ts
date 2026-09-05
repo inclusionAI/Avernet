@@ -3,11 +3,15 @@
  *
  * 卡片 task_ready 点「执行」→ aixBridge.submit('执行任务', {__taskAction:'execute', task})
  * → chatBridge.ts 拦截层调本 hook 注入的 setTaskExecuteHandler(task)
- * → task JSON → TaskComposerForm → 大促 OKR 前置判断 Mock（本地 assistant 回复）→ executeTaskService（补 taskComposerContext）
+ * → 任务 JSON → TaskComposerForm → 大促 OKR 前置判断 Mock（本地 assistant 回复）→ executeTaskService（补 taskComposerContext）
  * → 成功拿 task_id → submitPanelMessage 发 <AixUI type="panel" component="taskPanel.TaskLoopView"> 给 bot
  * → 本地插入 user 消息（SDK 自动）→ MarkdownRender 解析 → 副屏弹出
  * → 消息发后端落库 → loadHistory 拉回 → 副屏持久（切会话/刷新可恢复）。
+ *
+ * 执行前门禁：校验当前会话所属 Bot 是否开启「任务认领」（task_claim_mode），
+ * 未开启则提示去任务协作页授权并阻断执行（不进入 preflight / execute）。
  */
+import { isBotTaskClaimEnabled } from '@/services/tasks/taskClaimQuery';
 import type { TaskComposerContext, TaskComposerForm } from '@/services/tasks/taskMapper';
 import { buildTaskPanelAixUI } from '@/services/tasks/taskPanelMessage';
 import { runTaskPreflightMock } from '@/services/tasks/taskPreflightMock';
@@ -37,6 +41,8 @@ export interface UseTaskExecuteFromCardOptions {
   appendAssistantMessage?: (content: string) => void;
   /** 演示用：以流式方式追加 assistant 回复，不通过聊天网络请求。 */
   streamAssistantMessage?: (content: string) => Promise<void>;
+  /** 执行前门禁未通过时，toast「去开启」按钮的跳转回调（跳任务协作页）。无则 toast 无跳转 action。 */
+  onOpenCollaborationPermissions?: () => void;
 }
 
 export function useTaskExecuteFromCard({
@@ -44,6 +50,7 @@ export function useTaskExecuteFromCard({
   submitPanelMessage,
   appendAssistantMessage,
   streamAssistantMessage,
+  onOpenCollaborationPermissions,
 }: UseTaskExecuteFromCardOptions): void {
   const inFlightRef = useRef(false);
 
@@ -57,26 +64,39 @@ export function useTaskExecuteFromCard({
         inFlightRef.current = false;
         return;
       }
-      // task JSON → TaskComposerForm
-      const form: TaskComposerForm = {
-        title: (task.goal ?? '').slice(0, 80) || '任务执行',
-        objective: task.goal ?? '',
-        instruction: [
-          task.goal ? `目标：${task.goal}` : '',
-          task.deliverables?.length ? `交付物：${task.deliverables.join('；')}` : '',
-          task.acceptance_criteria?.length ? `验收标准：${task.acceptance_criteria.join('；')}` : '',
-          task.constraints?.length ? `约束：${task.constraints.join('；')}` : '',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-        acceptances: task.acceptance_criteria ?? [],
-        taskType: task.task_type === 'workflow' ? 'workflow' : 'dynamic',
-        workflowId: task.workflow_id,
-        // task_ready.task.constraints is the TaskInfo background payload.
-        background: task.constraints?.filter((item) => item.trim()).join('；') ?? '',
-      };
       void (async () => {
         try {
+          // 执行前门禁：当前会话所属 Bot 未开启任务认领 → 提示去任务协作页授权并阻断执行。
+          if (context.ownerBotId) {
+            const enabled = await isBotTaskClaimEnabled(context.ownerBotId);
+            if (!enabled) {
+              toast.warning('当前 Bot 未开启任务认领，请先去任务协作页对当前 Bot 授权开启后再执行', {
+                action: onOpenCollaborationPermissions
+                  ? { label: '去开启', onClick: () => onOpenCollaborationPermissions() }
+                  : undefined,
+              });
+              return;
+            }
+          }
+
+          // task JSON → TaskComposerForm
+          const form: TaskComposerForm = {
+            title: (task.goal ?? '').slice(0, 80) || '任务执行',
+            objective: task.goal ?? '',
+            instruction: [
+              task.goal ? `目标：${task.goal}` : '',
+              task.deliverables?.length ? `交付物：${task.deliverables.join('；')}` : '',
+              task.acceptance_criteria?.length ? `验收标准：${task.acceptance_criteria.join('；')}` : '',
+              task.constraints?.length ? `约束：${task.constraints.join('；')}` : '',
+            ]
+              .filter(Boolean)
+              .join('\n'),
+            acceptances: task.acceptance_criteria ?? [],
+            taskType: task.task_type === 'workflow' ? 'workflow' : 'dynamic',
+            workflowId: task.workflow_id,
+            // task_ready.task.constraints is the TaskInfo background payload.
+            background: task.constraints?.filter((item) => item.trim()).join('；') ?? '',
+          };
           // 演示用：命中大促 OKR 时，本地模拟当前 Bot 的需求分析和委派回复。
           // 不发送隐藏指令，不请求专家 Bot；回复完成后仍使用原 context 调用真实 execute。
           const preflight = await runTaskPreflightMock(form);
@@ -123,5 +143,5 @@ export function useTaskExecuteFromCard({
     };
     setTaskExecuteHandler(handler);
     return () => setTaskExecuteHandler(null);
-  }, [appendAssistantMessage, context, streamAssistantMessage, submitPanelMessage]);
+  }, [appendAssistantMessage, context, streamAssistantMessage, submitPanelMessage, onOpenCollaborationPermissions]);
 }

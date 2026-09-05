@@ -248,7 +248,7 @@ export function ChatPanel({
         {/* 单聊输入框用原生 <Sender>(forwardRef,暴露 SenderRef)替代 <ChatLayout.Sender>(普通函数组件,非 forwardRef,
             ref 恒 null)。ref={senderRef} 经 useChatBridge.setInputRef 注册到全局桥,使 aixcore 卡片
             bridge.getInputRef().insert(text) 填入主屏输入框(根因 5 修复,对齐 open-claw ChatInputArea)。 */}
-        <div className="flex shrink-0 flex-col gap-2 border-t border-border bg-background px-3 py-3 sm:px-6 sm:py-4">
+        <div className="flex shrink-0 flex-col gap-2 bg-background px-3 py-1.5 sm:px-6 sm:py-2">
           {editingMessageId ? <MessageEditBar onCancel={cancelEdit} /> : null}
           <MessageQuoteBar quote={messageInteractions.quote} onClear={messageInteractions.clearQuote} />
           <Sender

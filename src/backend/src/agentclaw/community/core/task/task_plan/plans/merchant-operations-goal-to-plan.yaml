@@ -1,5 +1,5 @@
 template_id: merchant-operations-goal-to-plan
-entry_bot_id: 20260901_kcvvkqqs
+entry_bot_id: "${store_owner_bot_id}"
 entry_name: 店主Bot
 # 每个节点只描述本角色工作边界;上游正文由 StaticPlanRuntime 统一透传(接自/上游产出正文/本角色任务),
 # 不在 task 里替下游预写专业 checklist。输入=上一Bot输出(handoff 接力)。
@@ -14,7 +14,7 @@ nodes:
     name: 店主Bot
     title: 店主·定红线封任务单
     type: bot
-    bot_id: 20260901_kcvvkqqs
+    bot_id: "${store_owner_bot_id}"
     depends_on: []
     input:
       okr: $.input.okr
@@ -37,7 +37,7 @@ nodes:
     name: 门店运营Bot
     title: 门店运营·测产能出画像·带营销约束
     type: bot
-    bot_id: 20260901_5r6cdh02
+    bot_id: "${store_ops_bot_id}"
     depends_on: [set_redlines]
     input:
       handoff: $.set_redlines.output.handoff
@@ -50,7 +50,7 @@ nodes:
     name: 营销Bot
     title: 营销·在能力内出方案
     type: bot
-    bot_id: 20260901_mylvdi1o
+    bot_id: "${marketing_bot_id}"
     depends_on: [ops_capacity]
     input:
       handoff: $.ops_capacity.output.handoff
@@ -65,7 +65,7 @@ nodes:
     type: collaboration
     depends_on: [marketing_plan]
     collaboration:
-      bot_ids: [20260901_sesl8hmo, 20260901_4tn4mnnj]
+      bot_ids: ["${mall_ops_bot_id}", "${online_platform_bot_id}"]
       bot_names: [商场运营Bot, 线上平台Bot]
       mode: chat
       completion: report
@@ -80,7 +80,7 @@ nodes:
     name: 店主Bot
     title: 店主·利润核算·授权划界
     type: bot
-    bot_id: 20260901_kcvvkqqs
+    bot_id: "${store_owner_bot_id}"
     depends_on: [review_group]
     input:
       handoff: $.review_group.output.handoff
@@ -93,7 +93,7 @@ nodes:
     name: 投放实施
     title: 投放实施·执行
     type: bot
-    bot_id: 20260828_k9c2slro
+    bot_id: "${launch_bot_id}"
     depends_on: [profit_accounting]
     input:
       handoff: $.profit_accounting.output.handoff
@@ -106,7 +106,7 @@ nodes:
     name: 补齐周年活动券重复领取拦截能力
     title: 周年活动券重复领取拦截能力缺口
     type: bbs_handoff
-    bot_id: 20260828_f7wfi27d
+    bot_id: "${coupon_dup_claim_bot_id}"
     depends_on: [launch]
     input:
       handoff: $.launch.output.handoff

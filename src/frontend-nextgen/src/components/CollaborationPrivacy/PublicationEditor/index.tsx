@@ -8,26 +8,32 @@ import type {
   PublicConfig,
   PublicScope,
 } from '@/domain/collaborationPrivacy/types';
-import { useEffect, useState } from 'react';
+import { history } from '@umijs/max';
+import { type MouseEvent, useEffect, useState } from 'react';
 import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 
 const scopeOptions: Array<{ value: PublicScope; label: string }> = [
   { value: 'none', label: '不公开' },
   { value: 'all', label: '全部公开' },
-  { value: 'restricted', label: '指定组织' },
+  { value: 'restricted', label: '限制组织范围' },
 ];
-const audienceLabels: Record<PublicAudience, string> = { user: '其他用户', bot: '其他 Bot' };
+const audienceTitles: Record<PublicAudience, string> = { user: '对其他用户公开', bot: '对其他 Bot 公开' };
+const audienceDescriptionPrefixes: Record<PublicAudience, string> = {
+  user: '公开后，其他用户可在',
+  bot: '公开后，其他 Bot 可在',
+};
+const collaborationSquareBotsPath = '/collaboration-square/bots';
 const scopeDescriptions: Record<PublicAudience, Record<PublicScope, string>> = {
   user: {
     none: '其他用户无法发现当前 Bot',
     all: '其他用户可发现并申请添加当前 Bot 为好友',
-    restricted: '仅所选组织范围可发现并申请添加当前 Bot 为好友',
+    restricted: '仅所选组织范围可申请添加当前 Bot 为好友',
   },
   bot: {
     none: '其他 Bot 无法发现当前 Bot',
     all: '其他 Bot 可发现并申请添加当前 Bot 为好友',
-    restricted: '仅所选组织范围内的 Bot 可发现并申请添加当前 Bot 为好友',
+    restricted: '仅所选组织范围可申请添加当前 Bot 为好友',
   },
 };
 
@@ -78,6 +84,12 @@ export function PublicationEditor({
     return entries;
   };
 
+  const handleCollaborationSquareClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    history.push(collaborationSquareBotsPath);
+  };
+
   const handleSubmit = () => {
     const viewDepts =
       scope === 'restricted' && selected.length
@@ -96,9 +108,17 @@ export function PublicationEditor({
     <Modal open={open} onOpenChange={(next) => !next && !loading && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
-          <ModalTitle>对{audienceLabels[audience]}公开</ModalTitle>
+          <ModalTitle>{audienceTitles[audience]}</ModalTitle>
           <ModalDescription>
-            可分别搜索集团、事业部、部门或团队，并连续添加多个范围。提交后将进入审批流程。
+            {audienceDescriptionPrefixes[audience]}{' '}
+            <a
+              href={collaborationSquareBotsPath}
+              className="font-medium text-primary hover:opacity-80"
+              onClick={handleCollaborationSquareClick}
+            >
+              [协作广场/公开Bot]
+            </a>{' '}
+            中发现当前 Bot，并申请添加为好友。
           </ModalDescription>
         </ModalHeader>
         <div className="space-y-5">

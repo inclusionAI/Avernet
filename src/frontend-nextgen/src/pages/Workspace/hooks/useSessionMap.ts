@@ -37,6 +37,8 @@ export interface UseSessionMapResult {
   hasMoreByGroupId: Record<string, boolean>;
   /** 下一页加载状态。 */
   isLoadingMoreByGroupId: Record<string, boolean>;
+  errorByGroupId: Record<string, string>;
+  loadMoreErrorByGroupId: Record<string, string>;
   /** 后端返回的会话总数，按群维护；未加载过的群不包含在 map 中。 */
   totalByGroupId: Record<string, number>;
   /** 按 10 条追加指定群的下一页会话。 */
@@ -56,6 +58,8 @@ export function useSessionMap(
   const [rawByGroupId, setRawByGroupId] = useState<Record<string, SessionView[]>>({});
   const [pageMetaByGroupId, setPageMetaByGroupId] = useState<Record<string, SessionPageMeta>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [errorByGroupId, setErrorByGroupId] = useState<Record<string, string>>({});
+  const [loadMoreErrorByGroupId, setLoadMoreErrorByGroupId] = useState<Record<string, string>>({});
   const inFlightRef = useRef<Map<string, number>>(new Map());
   const loadingMoreRef = useRef<Set<string>>(new Set());
   const requestVersionRef = useRef<Map<string, number>>(new Map());
@@ -71,6 +75,8 @@ export function useSessionMap(
     requestVersionRef.current.clear();
     setRawByGroupId({});
     setPageMetaByGroupId({});
+    setErrorByGroupId({});
+    setLoadMoreErrorByGroupId({});
     rawByGroupIdRef.current = {};
     pageMetaByGroupIdRef.current = {};
     inFlightRef.current.clear();
@@ -141,6 +147,8 @@ export function useSessionMap(
     setIsLoading,
     setRawByGroupId,
     setPageMetaByGroupId,
+    setErrorByGroupId,
+    setLoadMoreErrorByGroupId,
     beginGroupRequest,
     isCurrentRequest,
     replaceGroupPage,
@@ -190,6 +198,8 @@ export function useSessionMap(
     hasMoreByGroupId,
     isLoadingMoreByGroupId,
     totalByGroupId,
+    errorByGroupId,
+    loadMoreErrorByGroupId,
     loadMoreSessions,
   };
 }

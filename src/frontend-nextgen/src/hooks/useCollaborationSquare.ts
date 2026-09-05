@@ -7,6 +7,7 @@ import {
   type PublicGroup,
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
+import { mapPublicBotCatalogSummaryToProfile } from '@/domain/collaborationSquare/mapper';
 import { useCollaborationSquareList } from '@/hooks/useCollaborationSquareList';
 import { useCollaborationSquareTask } from '@/hooks/useCollaborationSquareTask';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
@@ -23,6 +24,7 @@ import {
   clearCollaborationSquareTargetingSearch,
   getCollaborationBotConversationUrl,
   getCollaborationSquareErrorMessage,
+  getCollaborationSquareShareUrl,
 } from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
 import { useCallback, useMemo } from 'react';
@@ -102,6 +104,14 @@ export function useCollaborationSquare(resource: SquareResource) {
     [handleTargetInvalid, store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
   );
 
+  const openSharedBot = useCallback(
+    (bot: PublicBot) => {
+      store.setSelectedBotId(bot.id);
+      store.setDetailLoading(false);
+      store.setBotProfile(mapPublicBotCatalogSummaryToProfile(bot));
+    },
+    [store.setBotProfile, store.setDetailLoading, store.setSelectedBotId],
+  );
   const openGroupMembers = useCallback(
     async (group: PublicGroup) => {
       store.setSelectedGroupId(group.id);
@@ -120,7 +130,14 @@ export function useCollaborationSquare(resource: SquareResource) {
     [handleTargetInvalid, store.setDetailLoading, store.setGroupMembers, store.setSelectedGroupId],
   );
 
-  useSquareDeepLink({ resource, openBotProfile, openGroupMembers, handleTargetInvalid });
+  useSquareDeepLink({
+    resource,
+    humanBotContext,
+    viewer: viewer ?? undefined,
+    openSharedBot,
+    openGroupMembers,
+    handleTargetInvalid,
+  });
 
   const runBusy = useCallback(
     async (key: string, task: () => Promise<void>, invalidTargetId?: string) => {
@@ -192,10 +209,9 @@ export function useCollaborationSquare(resource: SquareResource) {
     }
   }, []);
   const share = useCallback(
-    (targetResource: SquareResource, id: string) => {
-      const pathname = targetResource === 'bot' ? '/collaboration-square/bots' : '/collaboration-square/groups';
+    (targetResource: SquareResource, id: string, searchHint?: string) => {
       const origin = typeof window === 'undefined' ? '' : window.location.origin;
-      void copyText(`${origin}${pathname}?resource=${targetResource}&id=${encodeURIComponent(id)}`, '分享链接已复制');
+      void copyText(getCollaborationSquareShareUrl(origin, targetResource, id, searchHint), '分享链接已复制');
     },
     [copyText],
   );

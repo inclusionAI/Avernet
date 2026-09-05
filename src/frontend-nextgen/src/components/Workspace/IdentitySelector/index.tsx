@@ -37,7 +37,28 @@ export function WorkspaceIdentitySelector({
 
   return (
     <div className="space-y-1">
-      {!sidebarLayout ? (
+      {sidebarLayout ? (
+        <TooltipProvider delayDuration={300}>
+          <div className="flex items-center gap-1 px-1 pb-1 text-xs font-semibold text-foreground">
+            <span>工作身份</span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  role="img"
+                  aria-label="工作身份说明"
+                  tabIndex={0}
+                  className="relative top-px inline-flex cursor-help items-center text-muted-foreground/70"
+                >
+                  <Info className="h-3 w-3" aria-hidden />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        </TooltipProvider>
+      ) : (
         <TooltipProvider delayDuration={300}>
           <div className="flex items-center gap-1 px-1 text-xs font-medium text-foreground">
             <span>当前协作身份</span>
@@ -56,12 +77,12 @@ export function WorkspaceIdentitySelector({
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+                当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
               </TooltipContent>
             </Tooltip>
           </div>
         </TooltipProvider>
-      ) : null}
+      )}
       {activeIdentity ? (
         <>
           <Popover open={open} onOpenChange={setOpen}>
@@ -71,24 +92,22 @@ export function WorkspaceIdentitySelector({
                 aria-expanded={open}
                 aria-label={`当前协作身份：${activeIdentity.name}`}
                 className={cn(
-                  'h-auto min-h-10 w-full justify-between gap-2 py-1 text-left',
-                  sidebarLayout ? 'rounded-md px-0 hover:bg-accent/60' : 'rounded-lg px-2',
+                  'h-auto w-full justify-between gap-2 text-left',
+                  sidebarLayout
+                    ? 'min-h-9 rounded-lg border border-border bg-muted/60 px-2.5 py-1.5 text-foreground hover:bg-muted hover:text-foreground'
+                    : 'min-h-10 rounded-lg px-2 py-1',
+                  sidebarLayout && open && 'border-primary',
                 )}
               >
-                <IdentityAvatar identity={activeIdentity} size="sm" userAvatarUrl={userAvatarUrl} />
-                <IdentityDetails identity={activeIdentity} />
-                {sidebarLayout ? (
-                  <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-foreground">
-                    切换身份
-                    <ChevronDown
-                      className={cn('h-4 w-4 text-muted-foreground transition-transform', open && 'rotate-180')}
-                    />
-                  </span>
-                ) : (
-                  <ChevronDown
-                    className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')}
-                  />
-                )}
+                <IdentityAvatar identity={activeIdentity} size={sidebarLayout ? 'xs' : 'sm'} userAvatarUrl={userAvatarUrl} />
+                <IdentityDetails identity={activeIdentity} compact={sidebarLayout} summaryOnly={sidebarLayout} />
+                <ChevronDown
+                  className={cn(
+                    sidebarLayout ? 'h-3.5 w-3.5' : 'h-4 w-4',
+                    'shrink-0 text-muted-foreground transition-transform',
+                    open && 'rotate-180',
+                  )}
+                />
               </Button>
             </PopoverTrigger>
             <PopoverContent
@@ -102,23 +121,25 @@ export function WorkspaceIdentitySelector({
               <div className="mb-2 flex items-center justify-between gap-2 border-b border-border px-2.5 pb-2">
                 <div className="flex min-w-0 items-center gap-1">
                   <p className="text-xs font-medium text-foreground">切换协作身份</p>
-                  <TooltipProvider delayDuration={300}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span
-                          role="img"
-                          aria-label="协作身份说明"
-                          tabIndex={0}
-                          className="inline-flex cursor-help items-center text-muted-foreground"
-                        >
-                          <Info className="h-3.5 w-3.5" aria-hidden />
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        当前协作身份决定在下方对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  {!sidebarLayout ? (
+                    <TooltipProvider delayDuration={300}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            role="img"
+                            aria-label="协作身份说明"
+                            tabIndex={0}
+                            className="inline-flex cursor-help items-center text-muted-foreground"
+                          >
+                            <Info className="h-3.5 w-3.5" aria-hidden />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ) : null}
                 </div>
                 {onOpenPermissions ? (
                   <Button

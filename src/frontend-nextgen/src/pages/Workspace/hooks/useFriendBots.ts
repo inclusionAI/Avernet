@@ -2,11 +2,13 @@ import { getCapabilities } from '@/capabilities';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { splitBotId } from '@/services/workspace/botSessionService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 export interface UseFriendBotsResult {
   friendBots: ChatBotView[];
   isLoading: boolean;
+  error: string | null;
+  reload: () => void;
 }
 
 function toChatBotView(bot: {
@@ -42,10 +44,13 @@ export function useFriendBots(
 ): UseFriendBotsResult {
   const [friendBots, setFriendBots] = useState<ChatBotView[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     if (!enabled) {
       setFriendBots([]);
+      setError(null);
       return;
     }
     let actorId = activeIdentityId;
@@ -57,10 +62,12 @@ export function useFriendBots(
     }
     if (!actorId || actorId === 'me') {
       setFriendBots([]);
+      setError(null);
       return;
     }
     let cancelled = false;
     setIsLoading(true);
+    setError(null);
     collaborationCandidateService
       .listFriends(actorId, {
         actorType: isUserIdentity ? 'human' : 'bot',
@@ -69,7 +76,11 @@ export function useFriendBots(
       })
       .then((res) => {
         if (cancelled) return;
-        setFriendBots(res.ok ? res.data.items.map(toChatBotView) : []);
+        if (res.ok) setFriendBots(res.data.items.map(toChatBotView));
+        else {
+          setFriendBots([]);
+          setError(res.error.friendlyMessage);
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -77,7 +88,9 @@ export function useFriendBots(
     return () => {
       cancelled = true;
     };
-  }, [activeIdentityId, isUserIdentity, enabled]);
+  }, [activeIdentityId, isUserIdentity, enabled, reloadNonce]);
 
-  return { friendBots, isLoading };
+  const reload = useCallback(() => setReloadNonce((current) => current + 1), []);
+
+  return { friendBots, isLoading, error, reload };
 }

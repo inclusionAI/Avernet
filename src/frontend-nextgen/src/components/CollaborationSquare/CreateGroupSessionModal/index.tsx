@@ -55,7 +55,7 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
         </ModalHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <label htmlFor="create-session-title" className="m-0 text-sm font-medium text-[var(--color-fg)]">
+            <label htmlFor="create-session-title" className="m-0 text-sm font-medium text-foreground">
               会话名称
             </label>
             <Input
@@ -69,7 +69,7 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
             />
           </div>
           <div className="space-y-2">
-            <label htmlFor="create-session-query" className="m-0 text-sm font-medium text-[var(--color-fg)]">
+            <label htmlFor="create-session-query" className="m-0 text-sm font-medium text-foreground">
               协作目标
             </label>
             <Textarea

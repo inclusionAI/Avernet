@@ -121,6 +121,14 @@ export interface MetricsDashboardSpec {
 export type LoginStrategy = 'ace-gateway' | 'oauth-provider';
 
 /**
+ * 任务认领授权策略：决定「任务认领」开关的 grant/revoke 是否经 secbaas 做 per-bot api-key 授权。
+ * - `secbaas-relay`：内部部署，api-key 须经 secbaas `allowed-bots/grant` 授权才能调某 bot；grant/revoke 透传人类 Cookie(spanner) 到 secbaas。
+ * - `skip`：Open Core / 开源部署，api-key 直发消息无需 per-bot 授权（secbaas 链路不通且无必要）；grant/revoke 短路 no-op，开关只写 BCS `task_claim_mode`。
+ * Open Core 默认 `skip`；internal overlay 经 `src/extensions/internal.ts` 覆盖为 `secbaas-relay`。
+ */
+export type TaskClaimGrantStrategy = 'skip' | 'secbaas-relay';
+
+/**
  * Bot 工坊引擎「可选清单」单项（筛选下拉、创建弹窗共用）。value 与后端 engine 字段
  * 字符串契约一致（openclaw/aicoding/hermes/teclaw），label 为两处消费方
  * 共用的展示文案。选项见 `getBotEngineOptions` capability。
@@ -250,6 +258,12 @@ export interface AppCapabilities {
    * 同步签名：不发请求；taskController/taskGrantController 拼端点路径时读取（请求期调用，避免启动期 capability 未装填）。
    */
   getTaskApiBase: () => CapabilityResult<string>;
+  /**
+   * 任务认领授权策略（见 `TaskClaimGrantStrategy`）。
+   * Open Core 默认 `skip`（api-key 直发,grant/revoke 短路 no-op）；internal overlay 覆盖为 `secbaas-relay`（经 secbaas 透传人类 Cookie 授权）。
+   * 同步签名：不发请求；taskGrantController 在 grant/revoke 出口读取决定是否短路,避免开源部署打到不通的 secbaas 端点。
+   */
+  getTaskClaimGrantStrategy: () => CapabilityResult<TaskClaimGrantStrategy>;
   /**
    * 内部专属侧栏一级导航项（Open Core 不应展示的内部入口）。
    * Open Core 默认 `[]`（不渲染任何内部导航项，符合 open-core-export-plan §5.2

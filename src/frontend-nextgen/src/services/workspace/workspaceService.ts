@@ -48,6 +48,11 @@ export const workspaceService = {
   persistIdentity(id: string) {
     identityService.persistLastIdentityId(id);
   },
+  /** 全局协作身份入口的切换用例：持久化选择并重置对应工作区状态。 */
+  switchIdentity(id: string) {
+    identityService.persistLastIdentityId(id);
+    useWorkspaceStore.getState().setActiveIdentity(id);
+  },
   getOverview() {
     return {
       module: 'workspace',

@@ -192,7 +192,7 @@ export function GroupChatComposer({
   );
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-border bg-background px-3 py-3 sm:px-6 sm:py-4">
+    <div className="flex shrink-0 flex-col gap-2 bg-background px-3 py-1.5 sm:px-6 sm:py-2">
       {editingMessageId ? <MessageEditBar onCancel={onCancelEdit ?? (() => {})} /> : null}
       <MessageQuoteBar quote={quote ?? null} onClear={onClearQuote ?? (() => {})} />
       <Sender

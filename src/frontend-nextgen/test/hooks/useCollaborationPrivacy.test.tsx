@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
-import type { CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
+import type { CollaborationBot, CollaborationPrivacyOverview } from '@/domain/collaborationPrivacy/types';
 import { useCollaborationPrivacy } from '@/hooks/useCollaborationPrivacy';
 import * as identityModule from '@/hooks/useHumanIdentity';
 import { collaborationPrivacyService } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { afterAll, afterEach, describe, expect, it, jest } from '@jest/globals';
 import { renderHook, waitFor } from '@testing-library/react';
 
@@ -15,9 +16,32 @@ const overview = {
   bots: [],
 } as CollaborationPrivacyOverview;
 
+const makeBot = (id: string, name: string): CollaborationBot => ({
+  id,
+  name,
+  engine: 'OpenClaw',
+  joinedBcn: true,
+  collaborationStatus: 'online',
+  profilePublic: true,
+  taskClaimingEnabled: false,
+  dreamModelEnabled: false,
+  publication: {
+    user: { scope: 'all', organizationPaths: [] },
+    bot: { scope: 'none', organizationPaths: [] },
+  },
+  pendingPublications: {},
+  friendApproval: { mode: 'all', exemptOrganizationPaths: [] },
+});
+
+const overviewWithBots: CollaborationPrivacyOverview = {
+  ...overview,
+  bots: [makeBot('bot-1', 'Bot A'), makeBot('bot-2', 'Bot B')],
+};
+
 afterEach(() => {
   jest.clearAllMocks();
   useCollaborationPrivacyStore.getState().reset();
+  useWorkspaceStore.getState().reset();
 });
 
 afterAll(() => {
@@ -44,5 +68,40 @@ describe('useCollaborationPrivacy identity wiring', () => {
 
     expect(collaborationPrivacyService.loadOverview).not.toHaveBeenCalled();
     expect(useCollaborationPrivacyStore.getState().loading).toBe(true);
+  });
+
+  it('用户身份只显示用户内容，不显示 Bot 管理卡片', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '447147', displayName: '真实用户', online: true },
+    });
+    useWorkspaceStore.setState({
+      activeIdentityId: 'human-1',
+      identities: [{ id: 'human-1', kind: 'user', displayName: '真实用户', online: true }],
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
+
+    const { result } = renderHook(() => useCollaborationPrivacy());
+
+    await waitFor(() => expect(result.current.showIdentityCard).toBe(true));
+    expect(result.current.visibleBots).toEqual([]);
+  });
+
+  it('Bot 身份只显示当前 Bot 的管理卡片', async () => {
+    mockedUseHumanIdentity.mockReturnValue({
+      status: 'ready',
+      identity: { userId: '447147', displayName: '真实用户', online: true },
+    });
+    useWorkspaceStore.setState({
+      activeIdentityId: 'bot-1:447147',
+      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+    });
+    jest.spyOn(collaborationPrivacyService, 'loadOverview').mockResolvedValue(overviewWithBots);
+
+    const { result } = renderHook(() => useCollaborationPrivacy());
+
+    await waitFor(() => expect(result.current.visibleBots).toHaveLength(1));
+    expect(result.current.showIdentityCard).toBe(false);
+    expect(result.current.visibleBots[0].id).toBe('bot-1');
   });
 });

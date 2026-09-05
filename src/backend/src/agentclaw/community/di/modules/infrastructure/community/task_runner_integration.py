@@ -37,6 +37,7 @@ Auth split (do NOT conflate with the ``bcn`` block):
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
@@ -55,6 +56,7 @@ from agentclaw.community.core.task.task_runner.client.ports import (
 from agentclaw.community.di.config import (
     BcnConfig,
     BcsClientConfig,
+    MerchantTaskBotBindingsConfig,
     OpenApiBotConfig,
 )
 from agentclaw.community.di.modules.config_module import _block
@@ -194,6 +196,41 @@ class TaskRunnerIntegrationModule(Module):
             secret_secret=block.get("secret_secret", ""),
             task_callback_url=block.get("task_callback_url", ""),
             task_callback_url_pre=block.get("task_callback_url_pre", ""),
+        )
+
+    @singleton
+    @provider
+    def merchant_task_bot_bindings(self) -> MerchantTaskBotBindingsConfig:
+        """Read the ``merchant_task_bot_bindings`` block -> role_key -> bot uuid map.
+
+        Public community profile: the block is a SINGLE env-injected JSON string
+        (``${MERCHANT_TASK_BOT_BINDINGS:-}`` -> ``{"store_owner_bot_id": "...", ...}``);
+        decoded here so the open-source config never carries our demo bot mapping.
+        Internal profiles may instead write a structured YAML sub-tree (dict) of
+        the same keys; both shapes decode to the same map. Empty/absent -> empty
+        map: a bare boot never expands ``${...}`` (only ``from_file``/``from_yaml``
+        with a non-None bindings map and matching placeholders do), so non-merchant
+        plans resolve unchanged and unconfigured community singlebox/CI degrades.
+        A malformed JSON string is logged and treated as empty (degrade, not boot halt).
+        """
+        block = _block("merchant_task_bot_bindings")
+        mapping: dict[str, object] = {}
+        if isinstance(block, str):
+            raw = block.strip()
+            if raw:
+                try:
+                    decoded = json.loads(raw)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "[task][bot-bindings] merchant_task_bot_bindings JSON decode failed; "
+                        "static-plan placeholders stay literal (len=%d)", len(raw),
+                    )
+                    decoded = {}
+                mapping = decoded if isinstance(decoded, dict) else {}
+        elif isinstance(block, dict):
+            mapping = block
+        return MerchantTaskBotBindingsConfig(
+            bot_id_by_role={k: str(v) for k, v in mapping.items() if isinstance(k, str)},
         )
 
     # ── port providers (construct adapters, bind Ports) ────────────────────

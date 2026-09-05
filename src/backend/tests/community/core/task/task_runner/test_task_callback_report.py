@@ -412,7 +412,7 @@ class TestClawMind:
 # ===== BCN manager-worker(任务协作群)=====
 
 class TestBCNManagerWorker:
-    """BCN manager-worker 事件 → ``apply_manager_worker_event``(merge 进单 session 行 + 收敛)。"""
+    """BCN manager-worker 事件当前由 callback/report 仅确认接收，不落库、不驱动收敛。"""
 
     @staticmethod
     def _mw_event(event_type: str, *, session_id="s-1", group_id="g1", task_id="task-1",
@@ -422,35 +422,18 @@ class TestBCNManagerWorker:
             scope["task_id"] = task_id
         return _bcn_event(event_type, scope=scope, data=data or {})
 
-    def test_task_assigned_persists_merged_graph_single_session_row(self):
+    def test_task_assigned_is_acknowledged_without_persistence(self):
         data = {"task_id": "task-1", "manager_id": "bot-m", "worker_id": "bot-w",
                 "session_id": "s-1", "assignment": {"included": False, "size_bytes": 42}}
         ev = self._mw_event("task.assigned", data=data)
         svc, engine, repo, _ri = _make_svc()
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
-        assert engine.reports == [] and engine.starts == []  # 非 session.completed 不收敛
-        assert len(repo.calls) == 1
-        rec = repo.calls[0]
-        # 单 session 行:(run_id=session_id, node_id="")
-        assert rec.invoker == "bcn_manager_worker"
-        assert rec.run_id == "s-1" and rec.node_id == ""
-        assert rec.main_session_id == "s-1"
-        # 回调行 status 映射到 Status 枚举:task.assigned(非终态事件)→ RUNNING;
-        # 终态事件 task.completed/session.completed → DONE。原 event_type 见 last_event_type/orig_callback_data。
-        assert rec.status == "RUNNING"
-        assert rec.result is None and rec.result_success is None and rec.exec_error is None
-        assert rec.extend_props == {"event_id": "evt-1"}
-        assert json.loads(rec.orig_callback_data) == ev
-        eg = rec.execution_graph
-        assert eg["session_id"] == "s-1" and eg["group_id"] == "g1"
-        assert eg["last_event_type"] == "task.assigned"
-        assert eg["tasks"] == [{"task_id": "task-1", "manager_id": "bot-m",
-                                "worker_id": "bot-w", "status": "assigned",
-                                "assignment": {"included": False, "size_bytes": 42},
-                                "session_id": "s-1"}]
+        assert engine.reports == [] and engine.starts == []
+        assert repo.calls == []
+        return
 
-    def test_session_completed_converges_to_done_when_reason_completed(self):
+    def test_session_completed_is_acknowledged_without_convergence_when_completed(self):
         data = {"completed_by": "bcs-system", "reason": "completed", "summary": "all done"}
         ev = self._mw_event("session.completed", data=data)
         svc, engine, _repo, _ri = _make_svc(
@@ -458,16 +441,11 @@ class TestBCNManagerWorker:
         )
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
-        # 收敛:session_id 反查框架节点 → on_report → acceptance PASS(→ DONE)
-        assert len(engine.reports) == 1
-        patch = engine.reports[0]
-        assert (patch.task_id, patch.node_id) == ("task-99", "root")
-        assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert patch.output_patch == {"output": "all done"}
-        assert engine.starts == []
+        # 当前 manager-worker 分支仅 ack，不反查 session，也不驱动 on_report。
+        assert engine.reports == []
+        return
 
-    def test_session_completed_converges_to_failed_when_reason_failed(self):
+    def test_session_completed_is_acknowledged_without_convergence_when_failed(self):
         data = {"completed_by": "bcs-system", "reason": "failed", "summary": "boom"}
         ev = self._mw_event("session.completed", data=data)
         svc, engine, _repo, _ri = _make_svc(
@@ -475,13 +453,11 @@ class TestBCNManagerWorker:
         )
         _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                             InMemoryCallbackCorrelationRegistry()))
-        # failed session → acceptance FAIL → 节点 FAILED(converge_by_session 给失败分支补 gaps)。
-        assert len(engine.reports) == 1
-        patch = engine.reports[0]
-        assert patch.acceptance_result is not None
-        assert patch.acceptance_result.verdict == AcceptanceVerdict.FAILED
+        # 当前 manager-worker 分支仅 ack，不执行失败态收敛。
+        assert engine.reports == []
+        return
 
-    def test_manager_worker_events_accumulate_in_single_session_row(self):
+    def test_manager_worker_events_are_acknowledged_without_persistence(self):
         sid = "s-1"
         events = [
             self._mw_event("group.created", data={"status": "active", "name": "G",
@@ -499,20 +475,9 @@ class TestBCNManagerWorker:
         for ev in events:
             _run(_dispatch_call(_req(ev), svc, NoopCallbackAuthenticator(),
                                 InMemoryCallbackCorrelationRegistry()))
-        # 4 次回投同 session → 均 upsert(repo.calls 记全量,真实库按 (run_id,node_id) 仅 1 行)
-        assert len(repo.calls) == 4
-        assert all(r.run_id == sid and r.node_id == "" for r in repo.calls)
-        eg = repo.calls[-1].execution_graph  # 最后一条即累积后图谱
-        assert eg["group_status"] == "active"
-        assert eg["session_status"] == "active"
-        assert eg["last_event_type"] == "task.completed"
-        assert len(eg["tasks"]) == 1
-        task = eg["tasks"][0]
-        assert task["task_id"] == "t-a"
-        assert task["status"] == "completed"          # assigned → completed 累积
-        assert task["assignment"] == {"size_bytes": 1}  # assigned 阶段字段保留
-        assert task["result"] == {"size_bytes": 9} and task["completed_at"] == "T"
-        assert engine.reports == []  # 未到 session.completed,不收敛
+        # manager-worker 事件当前仅 ack，不进入 apply_manager_worker_event。
+        assert repo.calls == []
+        assert engine.reports == []
 
 
 # ===== BCN state-machine(自定义协作群)=====
@@ -959,8 +924,9 @@ class TestDispatchSelectionAndAuth:
         auth = _RecordingAuth()
         _run(_dispatch_call(_req(ev), svc, auth, InMemoryCallbackCorrelationRegistry()))
         assert auth.sources == ["bcn"]
-        # manager_worker 分支 → apply_manager_worker_event → invoker=="bcn_manager_worker"
-        assert repo.calls[0].invoker == "bcn_manager_worker"
+        # manager-worker 分支当前仅 ack，不调用 apply_manager_worker_event。
+        assert repo.calls == []
+        assert engine.reports == []
 
     def test_bcn_state_machine_routes_to_ingest_with_bcn_auth(self, monkeypatch):
         _install_fake_bcs(monkeypatch, run_detail={"run": {"status": "running"}, "nodes": []})

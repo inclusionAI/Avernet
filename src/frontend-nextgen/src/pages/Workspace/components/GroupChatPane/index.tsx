@@ -12,6 +12,7 @@ import type { MentionConfig } from '@tc-chat/ui';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { GroupHeader } from '../GroupHeader';
 import { CollabPanel } from './CollabPanel';
 import { FuseSlot } from './FuseSlot';
@@ -53,6 +54,9 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     userAvatarUrl,
     userIdentityId,
   } = props;
+
+  const navigate = useNavigate();
+  const openCollaborationPermissions = () => navigate('/collaboration-privacy');
 
   const collabPanel = useCollabPanel(
     session,
@@ -98,6 +102,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     submitPanelMessage,
     appendAssistantMessage,
     streamAssistantMessage,
+    onOpenCollaborationPermissions: openCollaborationPermissions,
   });
 
   const [draft, setDraft] = useState('');

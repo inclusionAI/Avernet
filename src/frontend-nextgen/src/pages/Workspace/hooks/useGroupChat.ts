@@ -9,12 +9,14 @@ import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { toast } from 'sonner';
 import {
   buildEchoAttachments,
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
+import { prependUniqueMessages } from './groupChatHistoryUtils';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 
@@ -50,6 +52,7 @@ export function useGroupChat(session: SessionView | null) {
 
   const [supportState, setSupportState] = useState<GroupChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
+  const smoothedConnectionStatus = useConnectionStatusSmoothing(connectionStatus);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
@@ -193,13 +196,7 @@ export function useGroupChat(session: SessionView | null) {
     setIsLoadingMoreHistory(true);
     try {
       const older: ChatMessage[] = await provider.loadMoreHistory();
-      if (older.length > 0) {
-        chat.setMessages((prev) => {
-          const ids = new Set(prev.map((message) => message.id));
-          const fresh = older.filter((message) => !ids.has(message.id));
-          return fresh.length > 0 ? [...fresh, ...prev] : prev;
-        });
-      }
+      if (older.length > 0) chat.setMessages((prev) => prependUniqueMessages(prev, older));
       setHasMoreHistory(provider.hasMoreHistory);
     } catch (error: unknown) {
       setHasMoreHistory(provider.hasMoreHistory);
@@ -233,7 +230,7 @@ export function useGroupChat(session: SessionView | null) {
     inputRef,
     chatBridge,
     supportState,
-    connectionStatus,
+    connectionStatus: smoothedConnectionStatus,
     send,
     stop,
     submitPanelMessage,

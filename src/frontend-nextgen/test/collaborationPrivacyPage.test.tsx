@@ -19,6 +19,8 @@ import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { Switch } from '../src/components/ui/Switch';
 import type { CollaborationBot } from '../src/domain/collaborationPrivacy/types';
 
+jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+
 Object.assign(globalThis, { TextDecoder, TextEncoder });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
@@ -145,9 +147,16 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('border-b border-border pb-2');
     expect(html).toContain('divide-y divide-border');
 
-    const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
-    expect(hookSource).toContain('开启后可加入新协作群，并在已加入的协作群会话中回复消息。好友单聊不受影响。');
-    expect(hookSource).toContain('关闭后无法加入新协作群，并停止在已加入的协作群会话中回复消息。好友单聊不受影响。');
+    const collaborationPrivacyHelpersSource = readFileSync(
+      path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'),
+      'utf8',
+    );
+    expect(collaborationPrivacyHelpersSource).toContain(
+      '开启后可加入新协作群，并在已加入的协作群会话中回复消息。好友单聊不受影响。',
+    );
+    expect(collaborationPrivacyHelpersSource).toContain(
+      '关闭后无法加入新协作群，并停止在已加入的协作群会话中回复消息。好友单聊不受影响。',
+    );
   });
 
   test('身份卡展示 user_id 工号和原始 dept_name，部门同步入口保持紧凑', () => {
@@ -170,7 +179,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).toContain('alt="示例管理员"');
     expect(html).not.toContain('UserRound');
     expect(html).not.toContain('title="同步用户部门信息"');
-    expect(html).toContain('h-7 w-7');
+    expect(html).toContain('h-5 w-5 shrink-0 rounded-md p-0');
     expect(html).toContain('text-base font-semibold text-foreground');
     expect(html).toContain('text-xs text-muted-foreground');
     expect(html).toContain('text-xs leading-5 text-muted-foreground');
@@ -321,7 +330,7 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(userHtml).toContain('其他用户无法发现当前 Bot');
     expect(userHtml).toContain('其他用户可发现并申请添加当前 Bot 为好友');
-    expect(userHtml).toContain('仅所选组织范围可发现并申请添加当前 Bot 为好友');
+    expect(userHtml).toContain('仅所选组织范围可申请添加当前 Bot 为好友');
     expect(userHtml).not.toContain('该受众');
     expect(userHtml).not.toContain('所有主体');
 
@@ -337,7 +346,7 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(botHtml).toContain('其他 Bot 无法发现当前 Bot');
     expect(botHtml).toContain('其他 Bot 可发现并申请添加当前 Bot 为好友');
-    expect(botHtml).toContain('仅所选组织范围内的 Bot 可发现并申请添加当前 Bot 为好友');
+    expect(botHtml).toContain('仅所选组织范围可申请添加当前 Bot 为好友');
   });
 
   test('公开范围编辑器阻止无变化提交并提供级联多选入口', () => {
@@ -352,7 +361,6 @@ describe('collaboration privacy accessible UI', () => {
       />,
     );
     expect(html).toContain('选择组织范围');
-    expect(html).toContain('可分别搜索集团、事业部、部门或团队，并连续添加多个范围。提交后将进入审批流程。');
     expect(html).toContain('已选组织范围（1）');
     expect(html).toContain('示例集团 / 事业部 / 部门 / 团队');
     expect(html).toContain('配置未发生变化，无需提交审批');

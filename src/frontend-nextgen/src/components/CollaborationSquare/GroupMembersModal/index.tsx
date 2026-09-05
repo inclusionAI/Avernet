@@ -25,17 +25,17 @@ export function GroupMembersModal({ open, group, members, loading, onClose }: Gr
             <Skeleton.ListItem />
           </div>
         ) : members.length === 0 ? (
-          <p className="m-0 text-sm leading-6 text-[var(--color-muted)]">暂无成员信息。</p>
+          <p className="m-0 text-sm leading-6 text-muted-foreground">暂无成员信息。</p>
         ) : (
           <div className="space-y-2">
             {members.map((member) => (
               <div
                 key={member.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] p-3"
+                className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
               >
                 <div className="min-w-0">
-                  <p className="m-0 truncate text-sm font-medium text-[var(--color-fg)]">{member.displayName}</p>
-                  <p className="m-0 mt-1 text-xs text-[var(--color-muted)]">
+                  <p className="m-0 truncate text-sm font-medium text-foreground">{member.displayName}</p>
+                  <p className="m-0 mt-1 text-xs text-muted-foreground">
                     {member.type === 'human' ? '用户' : 'Bot'}
                   </p>
                 </div>

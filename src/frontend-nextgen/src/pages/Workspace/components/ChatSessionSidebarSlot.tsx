@@ -6,7 +6,6 @@ import {
   BotSessionSidebar,
   type BotSessionSidebarProps,
 } from '@/pages/Workspace/components/BotSessionSidebar';
-import type { ChatBotView } from '@/services/workspace/botSessionService';
 
 interface ChatSessionSidebarSlotProps {
   /** Reactive workspace model（chatBots / friendBots / botSessions 等会话侧栏所需数据）。 */
@@ -19,9 +18,6 @@ interface ChatSessionSidebarSlotProps {
   onMobileListClose: () => void;
   onOpenCreateGroup: () => void;
   onOpenAddFriend: () => void;
-  onOpenPermissions: () => void;
-  userAvatarUrl?: string;
-  onManageBot?: (bot: ChatBotView) => void;
   onOpenBotWorkshop?: () => void;
 }
 
@@ -38,9 +34,6 @@ export function ChatSessionSidebarSlot({
   onMobileListClose,
   onOpenCreateGroup,
   onOpenAddFriend,
-  onOpenPermissions,
-  userAvatarUrl,
-  onManageBot,
   onOpenBotWorkshop,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
@@ -50,14 +43,15 @@ export function ChatSessionSidebarSlot({
     availableViews,
     identities: workspace.identities,
     activeIdentityId: workspace.activeIdentityId,
-    onChangeIdentity: workspace.setActiveIdentityId,
-    onOpenPermissions,
-    userAvatarUrl,
     chatBots: workspace.chatBots,
     hasAgentCodingBots: workspace.hasAgentCodingBots,
     friendBots: workspace.friendBots,
     isMyBotsLoading: workspace.isMyBotsLoading,
+    myBotsError: workspace.myBotsError,
+    onRetryMyBots: workspace.reloadMyBots,
     isFriendBotsLoading: workspace.isFriendBotsLoading,
+    friendBotsError: workspace.friendBotsError,
+    onRetryFriendBots: workspace.reloadFriendBots,
     expandedBotIds: workspace.expandedBotIds,
     expandedBotSectionKey: workspace.expandedBotSectionKey,
     sessionsByBotId: botSessions.sessionsByBotId,
@@ -91,7 +85,6 @@ export function ChatSessionSidebarSlot({
     onToggleFavorite: (botId, sessionId) => botSessions.toggleFavorite(botId, sessionId),
     onLoadFavorites: (botId) => botSessions.loadFavoriteSessions(botId),
     onLoadMoreSessions: botSessions.loadMoreSessions,
-    onManageBot,
     onOpenBotWorkshop,
     onCreateGroup: onOpenCreateGroup,
     onAddFriend: onOpenAddFriend,

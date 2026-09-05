@@ -2,8 +2,11 @@
 import { SquarePageShell } from '@/components/CollaborationSquare/SquarePageShell';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { fireEvent, render } from '@testing-library/react';
+import type { ReactNode } from 'react';
 
-jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+jest.mock('@umijs/max', () => ({
+  Link: ({ to, children }: { to: string; children: ReactNode }) => <a href={to}>{children}</a>,
+}));
 jest.mock('@/hooks/useCollaborationSquare', () => ({ useCollaborationSquare: jest.fn() }));
 jest.mock('@/components/CollaborationSquare/BotCard', () => () => <div>Bot card</div>);
 jest.mock('@/components/CollaborationSquare/GroupCard', () => () => <div>Group card</div>);

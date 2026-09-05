@@ -1,4 +1,5 @@
 import type {
+  BotCatalogViewer,
   FriendRequestActor,
   HumanBotActionContext,
   PublicBotDiscoveryQuery,
@@ -37,6 +38,39 @@ export class CollaborationSquareService {
   }
   listBotPage(query?: PublicBotSearchQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
     return this.gateway.listBotPage(query, context, signal);
+  }
+  async resolveSharedBot(
+    targetId: string,
+    searchHint: string,
+    context?: HumanBotActionContext,
+    viewer?: BotCatalogViewer,
+    signal?: AbortSignal,
+  ) {
+    const id = targetId.trim();
+    const search = searchHint.trim();
+    if (!id || !search) return null;
+
+    const pageSize = 100;
+    let page = 1;
+    while (!signal?.aborted) {
+      const result = await this.gateway.listBotPage(
+        {
+          search,
+          page,
+          pageSize,
+          ...(viewer
+            ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId }
+            : {}),
+        },
+        context,
+        signal,
+      );
+      const matched = result.items.find((bot) => bot.id === id);
+      if (matched) return matched;
+      if (page * pageSize >= result.total || result.items.length === 0) return null;
+      page += 1;
+    }
+    return null;
   }
   discoverBots(query: PublicBotDiscoveryQuery, context?: HumanBotActionContext, signal?: AbortSignal) {
     return this.gateway.discoverBots(query, context, signal);

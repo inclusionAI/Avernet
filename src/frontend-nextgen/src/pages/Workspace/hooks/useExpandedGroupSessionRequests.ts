@@ -1,7 +1,7 @@
 import type { GroupSessionPage, SessionView } from '@/domain/collaboration';
 import { groupService } from '@/services/workspace/groupService';
 import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
-import { useEffect, type MutableRefObject } from 'react';
+import { useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { toast } from 'sonner';
 
 interface ExpandedGroupSessionRequestsOptions {
@@ -14,6 +14,7 @@ interface ExpandedGroupSessionRequestsOptions {
   beginGroupRequest: (groupId: string) => number;
   isCurrentRequest: (groupId: string, version: number, epoch: number) => boolean;
   replaceGroupPage: (groupId: string, data: GroupSessionPage | SessionView[]) => void;
+  setErrorByGroupId: Dispatch<SetStateAction<Record<string, string>>>;
 }
 
 export function useExpandedGroupSessionRequests({
@@ -26,6 +27,7 @@ export function useExpandedGroupSessionRequests({
   beginGroupRequest,
   isCurrentRequest,
   replaceGroupPage,
+  setErrorByGroupId,
 }: ExpandedGroupSessionRequestsOptions) {
   useEffect(() => {
     if (!activeIdentityId) return;
@@ -38,9 +40,17 @@ export function useExpandedGroupSessionRequests({
         .loadGroupSessionsOrBcs(gid, activeIdentityId)
         .then((res) => {
           if (!isCurrentRequest(gid, requestVersion, requestEpoch)) return;
-          if (res.ok) replaceGroupPage(gid, res.data);
+          if (res.ok) {
+            setErrorByGroupId((current) => {
+              const next = { ...current };
+              delete next[gid];
+              return next;
+            });
+            replaceGroupPage(gid, res.data);
+          }
           else {
             replaceGroupPage(gid, []);
+            setErrorByGroupId((current) => ({ ...current, [gid]: res.error.friendlyMessage }));
             // 未登录（oauth-provider + 非 authenticated）静默：会话失效后展开群 sessions 的
             // 失败 toast 统一由 ExternalLoginPromptModal 承担（见 loginToastGate）。
             if (!shouldMuteNonAuthedToast()) toast.error(res.error.friendlyMessage);
@@ -60,5 +70,6 @@ export function useExpandedGroupSessionRequests({
     isCurrentRequest,
     rawByGroupId,
     replaceGroupPage,
+    setErrorByGroupId,
   ]);
 }

@@ -30,9 +30,9 @@ export function BotProfileModal({ open, profile, loading, onClose, onCopyId }: B
         {!loading && profile && (
           <div className="space-y-5 text-sm">
             <div>
-              <p className="mb-1 text-xs text-[var(--color-muted)]">Bot UUID</p>
+              <p className="mb-1 text-xs text-muted-foreground">Bot UUID</p>
               <div className="flex flex-wrap items-center gap-2">
-                <code className="break-all text-[var(--color-fg)]">{profile.id}</code>
+                <code className="break-all text-foreground">{profile.id}</code>
                 <Button
                   variant="secondary"
                   size="sm"
@@ -45,17 +45,17 @@ export function BotProfileModal({ open, profile, loading, onClose, onCopyId }: B
             </div>
             <dl className="grid gap-3 sm:grid-cols-2">
               <div>
-                <dt className="text-xs text-[var(--color-muted)]">Owner用户</dt>
-                <dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.ownerName}</dd>
+                <dt className="text-xs text-muted-foreground">Owner用户</dt>
+                <dd className="m-0 mt-1 text-foreground">{profile.ownerName}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--color-muted)]">引擎类型</dt>
-                <dd className="m-0 mt-1 text-[var(--color-fg)]">{profile.engine ?? '未公开'}</dd>
+                <dt className="text-xs text-muted-foreground">引擎类型</dt>
+                <dd className="m-0 mt-1 text-foreground">{profile.engine ?? '未公开'}</dd>
               </div>
             </dl>
             <div>
-              <p className="mb-1 text-xs text-[var(--color-muted)]">公开描述</p>
-              <p className="m-0 leading-6 text-[var(--color-fg)]">{profile.description || '暂无公开描述'}</p>
+              <p className="mb-1 text-xs text-muted-foreground">公开描述</p>
+              <p className="m-0 leading-6 text-foreground">{profile.description || '暂无公开描述'}</p>
             </div>
           </div>
         )}

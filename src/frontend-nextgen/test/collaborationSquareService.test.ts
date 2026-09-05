@@ -1,4 +1,5 @@
 import type { CollaborationSquareGateway } from '../src/services/collaborationSquare/collaborationSquareGateway';
+import type { PublicBot } from '../src/domain/collaborationSquare/types';
 import {
   CollaborationSquareError,
   CollaborationSquareService,
@@ -6,6 +7,15 @@ import {
 import { MockCollaborationSquareAdapter } from '../src/services/collaborationSquare/mockCollaborationSquareAdapter';
 
 const humanContext = { actorId: 'human_327325', userId: '327325' };
+
+const publicBot = (id: string, name = '项目助手'): PublicBot => ({
+  id,
+  name,
+  ownerName: 'Owner',
+  description: '',
+  capabilities: [],
+  relationshipStatus: 'none',
+});
 
 function createGateway(overrides: Partial<CollaborationSquareGateway> = {}): CollaborationSquareGateway {
   return {
@@ -164,6 +174,62 @@ describe('collaboration square service', () => {
       total: 48,
     });
     await expect(service.listGroupPage({ offset: 0, limit: 24 })).resolves.toEqual({ items: [], total: 36 });
+  });
+
+  test('分享 Bot 用公开名称检索，并以 canonical ID 精确匹配同名结果', async () => {
+    const listBotPage = jest.fn(async () => ({
+      items: [publicBot('same-name-other'), publicBot('bot:target')],
+      total: 2,
+    }));
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+    const signal = new AbortController().signal;
+
+    await expect(
+      service.resolveSharedBot(
+        'bot:target',
+        '  项目助手  ',
+        humanContext,
+        { viewerActorType: 'human', viewerActorId: '327325' },
+        signal,
+      ),
+    ).resolves.toEqual(expect.objectContaining({ id: 'bot:target' }));
+    expect(listBotPage).toHaveBeenCalledWith(
+      {
+        search: '项目助手',
+        page: 1,
+        pageSize: 100,
+        viewerActorType: 'human',
+        viewerActorId: '327325',
+      },
+      humanContext,
+      signal,
+    );
+  });
+
+  test('分享 Bot 首页未命中时继续搜索后续页，最终仍只接受 ID 精确匹配', async () => {
+    const listBotPage = jest
+      .fn()
+      .mockResolvedValueOnce({ items: [publicBot('same-name-other')], total: 101 })
+      .mockResolvedValueOnce({ items: [publicBot('bot:target')], total: 101 });
+    const service = new CollaborationSquareService(createGateway({ listBotPage }));
+
+    await expect(service.resolveSharedBot('bot:target', '项目助手', humanContext)).resolves.toEqual(
+      expect.objectContaining({ id: 'bot:target' }),
+    );
+    expect(listBotPage).toHaveBeenNthCalledWith(
+      2,
+      { search: '项目助手', page: 2, pageSize: 100 },
+      humanContext,
+      undefined,
+    );
+  });
+
+  test('分享 Bot 名称搜索只有同名不同 ID 时返回未命中', async () => {
+    const service = new CollaborationSquareService(
+      createGateway({ listBotPage: jest.fn(async () => ({ items: [publicBot('other')], total: 1 })) }),
+    );
+
+    await expect(service.resolveSharedBot('target', '项目助手', humanContext)).resolves.toBeNull();
   });
 
   test('Bot Discovery 与公开群查询原样交给 Gateway', async () => {

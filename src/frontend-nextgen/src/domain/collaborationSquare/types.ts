@@ -204,6 +204,8 @@ export interface CreateSessionResult {
 export interface SquareDeepLink {
   resource: SquareResource;
   id: string;
+  /** Bot 分享链接附带的公开名称，仅作为 Catalog Search 提示；最终仍按 id 精确匹配。 */
+  searchHint?: string;
 }
 
 /**

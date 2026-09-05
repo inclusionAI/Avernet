@@ -217,7 +217,12 @@ describe('collaboration square model', () => {
     ).toBe('自定义协同');
   });
 
-  test('深链只接受当前资源类型和非空 id', () => {
+  test('深链只接受当前资源类型和非空 id，并解析 Bot 名称搜索提示', () => {
+    expect(parseSquareDeepLink('?resource=bot&id=b1&name=%E9%A1%B9%E7%9B%AE%E5%8A%A9%E6%89%8B', 'bot')).toEqual({
+      resource: 'bot',
+      id: 'b1',
+      searchHint: '项目助手',
+    });
     expect(parseSquareDeepLink('?resource=bot&id=b1', 'bot')).toEqual({ resource: 'bot', id: 'b1' });
     expect(parseSquareDeepLink('?resource=group&id=g1', 'bot')).toBeNull();
     expect(parseSquareDeepLink('?resource=bot&id=', 'bot')).toBeNull();

@@ -112,6 +112,7 @@
     "mcp": {
       "registry_config_path": ""
     },
+    "merchant_task_bot_bindings": "${MERCHANT_TASK_BOT_BINDINGS:-}",
     "nas_mount_root": "./data/nas",
     "object_storage": {
       "backend": "fs",

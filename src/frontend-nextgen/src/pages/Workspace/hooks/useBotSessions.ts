@@ -2,36 +2,17 @@ import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSe
 import { botSessionService } from '@/services/workspace/botSessionService';
 import type { DomainError } from '@/services/workspace/identityService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useBotSessionMap } from './useBotSessionMap';
+import type { UseBotSessionsResult } from './useBotSessions.types';
 function notifyError(err: DomainError): void {
   toast.error(err.friendlyMessage);
 }
 function errOf(res: { ok: false; error: DomainError }): DomainError {
   return res.error;
 }
-export interface UseBotSessionsResult {
-  sessionsByBotId: Record<string, BotChatSessionView[]>;
-  favoriteSessionsByBotId: Record<string, BotChatSessionView[]>;
-  sessionPageMetaByBotId: ReturnType<typeof useBotSessionMap>['pageMetaByBotId'];
-  favoriteSessionPageMetaByBotId: ReturnType<typeof useBotSessionMap>['favoritePageMetaByBotId'];
-  isSessionsLoading: boolean;
-  selectedBotSessionId: string | null;
-  selectedSession: BotChatSessionView | null;
-  selectSession: (id: string | null) => void;
-  openSession: (botId: string, sessionId: string) => void;
-  createSession: (bot: ChatBotView, title?: string) => Promise<BotChatSessionView | null>;
-  deleteSession: (bot: ChatBotView, sessionId: string) => Promise<boolean>;
-  renameSession: (bot: ChatBotView, sessionId: string, title: string) => Promise<boolean>;
-  clearContext: (bot: ChatBotView, sessionId: string) => Promise<boolean>;
-  toggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
-  loadFavoriteSessions: (botId: string) => Promise<void>;
-  loadMoreSessions: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
-  updateSessionModel: (botId: string, sessionId: string, model: string) => void;
-  reloadBot: (botId: string) => Promise<void>;
-  toggleBotExpanded: (botId: string, sectionKey?: string) => void;
-}
+export type { UseBotSessionsResult } from './useBotSessions.types';
 /** useBotSessions 编排 bot 单聊会话列表:展开懒加载、选中、新建/删除(镜像 useGroupSessions)。 */
 export function useBotSessions(
   chatBots: ChatBotView[],
@@ -59,6 +40,15 @@ export function useBotSessions(
     return rawByBotId[selectedBotId]?.find((s) => s.sessionId === selectedBotSessionId) ?? null;
   }, [selectedBotId, rawByBotId, selectedBotSessionId]);
   const selectSession = useCallback((id: string | null) => selectBotSession(id), [selectBotSession]);
+
+  // 与协作群一致：Bot 展开并完成会话加载后，当前无选择时自动打开首条会话。
+  useEffect(() => {
+    if (selectedBotSessionId) return;
+    const expandedBotId = expandedBotIds[0];
+    if (!expandedBotId) return;
+    const first = rawByBotId[expandedBotId]?.[0];
+    if (first) selectBotSession(first.sessionId);
+  }, [expandedBotIds, rawByBotId, selectedBotSessionId, selectBotSession]);
   const openSession = useCallback(
     (botId: string, sessionId: string) => {
       // 确保 bot 已展开

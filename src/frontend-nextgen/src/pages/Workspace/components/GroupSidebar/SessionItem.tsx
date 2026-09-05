@@ -4,7 +4,7 @@ import type { SessionView } from '@/domain/collaboration/types';
 import { cn } from '@/utils/cn';
 import { MoreHorizontal, Settings2, Star } from 'lucide-react';
 import React, { useState } from 'react';
-import { formatMonthDayTime, SessionCard } from '../SessionCard';
+import { formatSessionTime, formatSessionTimeTooltip, SessionCard } from '../SessionCard';
 
 interface SessionItemProps {
   session: SessionView;
@@ -33,7 +33,8 @@ export const SessionItem = React.memo(function SessionItem({
     setMenuOpen(false);
     onToggleFavorite(session.sessionId);
   };
-  const createdTime = formatMonthDayTime(session.lastMessageAt ?? session.createdAt);
+  const sessionTime = session.lastMessageAt ?? session.createdAt;
+  const createdTime = formatSessionTime(sessionTime);
 
   return (
     <SessionCard
@@ -41,7 +42,9 @@ export const SessionItem = React.memo(function SessionItem({
       subtitle=""
       compact
       dateText={createdTime}
+      dateTooltip={formatSessionTimeTooltip(sessionTime)}
       selected={selected}
+      indicator="message"
       onSelect={() => onSelectSession(session.sessionId)}
       trailing={
         <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>

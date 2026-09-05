@@ -60,33 +60,39 @@ export default function CollaborationPrivacyPage() {
         )}
         {!privacy.loading && !privacy.error && overview && (
           <>
-            <IdentityCard
-              identity={overview.currentUser}
-              avatarUrl={accountIdentity?.avatarUrl}
-              syncing={privacy.busyAction === 'syncDepartment'}
-              onSync={() => void privacy.syncDepartment()}
-            />
-            {overview.bots.length === 0 ? (
-              <Card>
-                <Empty title="暂无可配置的 Bot" description="创建 Bot 后，可在这里管理协作权限。" />
-              </Card>
-            ) : (
-              <div className="grid items-start gap-5 xl:grid-cols-2">
-                {overview.bots.map((bot) => (
-                  <PermissionCard
-                    key={bot.id}
-                    bot={bot}
-                    busyAction={privacy.busyAction}
-                    onCopyId={(botId) => void privacy.copyBotId(botId)}
-                    onRefresh={(targetBot) => void privacy.refreshBot(targetBot)}
-                    onToggleDirect={privacy.toggleDirect}
-                    onEditPublication={privacy.openPublicationEditor}
-                    onEditFriendApproval={privacy.openFriendEditor}
-                    onViewScope={privacy.openScopeViewer}
-                    onViewFriendApprovalScope={privacy.openFriendScopeViewer}
-                  />
-                ))}
-              </div>
+            {privacy.showIdentityCard && (
+              <IdentityCard
+                identity={overview.currentUser}
+                avatarUrl={accountIdentity?.avatarUrl}
+                syncing={privacy.busyAction === 'syncDepartment'}
+                onSync={() => void privacy.syncDepartment()}
+              />
+            )}
+            {privacy.activeIdentity?.kind === 'bot' && (
+              <>
+                {privacy.visibleBots.length === 0 ? (
+                  <Card>
+                    <Empty title="暂无当前 Bot 的协作权限" description="当前 Bot 暂无可配置的协作权限内容。" />
+                  </Card>
+                ) : (
+                  <div className="grid items-start gap-5">
+                    {privacy.visibleBots.map((bot) => (
+                      <PermissionCard
+                        key={bot.id}
+                        bot={bot}
+                        busyAction={privacy.busyAction}
+                        onCopyId={(botId) => void privacy.copyBotId(botId)}
+                        onRefresh={(targetBot) => void privacy.refreshBot(targetBot)}
+                        onToggleDirect={privacy.toggleDirect}
+                        onEditPublication={privacy.openPublicationEditor}
+                        onEditFriendApproval={privacy.openFriendEditor}
+                        onViewScope={privacy.openScopeViewer}
+                        onViewFriendApprovalScope={privacy.openFriendScopeViewer}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

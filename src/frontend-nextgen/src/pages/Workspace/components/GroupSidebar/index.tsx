@@ -1,14 +1,14 @@
 import { Button, Empty, Input, Skeleton } from '@/components/ui';
-import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
 import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
-import type { Identity } from '@/services/workspace/workspaceModel';
 import { Search } from 'lucide-react';
 import { WorkspaceActionButton } from '../WorkspaceActionButton';
+import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
 import { GroupItem } from './GroupItem';
 import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
+import { ListErrorState } from '../ListErrorState';
 
 export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
@@ -18,13 +18,10 @@ export interface GroupSidebarProps {
   onViewChange: (v: 'chat' | 'group') => void;
   /** 当前身份可见视图；Bot 仅协作群时不再渲染「会话」切换项。 */
   availableViews?: WorkspaceView[];
-  identities?: Identity[];
-  activeIdentityId?: string | null;
-  onChangeIdentity?: (id: string) => void;
-  onOpenPermissions?: () => void;
-  userAvatarUrl?: string;
   groups: GroupView[];
   isLoading: boolean;
+  groupsError?: string | null;
+  onRetryGroups?: () => Promise<void>;
   onSelectGroup: (groupId: string) => void;
   groupSearchText: string;
   onSearchTextChange: (v: string) => void;
@@ -40,6 +37,9 @@ export interface GroupSidebarProps {
   hasMoreSessionsByGroupId?: Record<string, boolean>;
   totalSessionsByGroupId?: Record<string, number>;
   isLoadingMoreSessionsByGroupId?: Record<string, boolean>;
+  errorByGroupId?: Record<string, string>;
+  loadMoreErrorByGroupId?: Record<string, string>;
+  onReloadSession?: (groupId: string) => Promise<void>;
   onLoadMoreSessions?: (groupId: string) => Promise<void>;
   sessionTabsByGroup: Record<string, SessionTab>;
   onSessionTabForGroup: (groupId: string, tab: SessionTab) => void;
@@ -70,13 +70,10 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     view,
     onViewChange,
     availableViews: availableViewsProp,
-    identities = [],
-    activeIdentityId = null,
-    onChangeIdentity = () => {},
-    onOpenPermissions = () => {},
-    userAvatarUrl,
     groups,
     isLoading,
+    groupsError,
+    onRetryGroups,
     onSelectGroup,
     groupSearchText,
     onSearchTextChange,
@@ -90,6 +87,9 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     hasMoreSessionsByGroupId = {},
     totalSessionsByGroupId = {},
     isLoadingMoreSessionsByGroupId = {},
+    errorByGroupId = {},
+    loadMoreErrorByGroupId = {},
+    onReloadSession,
     onLoadMoreSessions = async () => {},
     sessionTabsByGroup,
     onSessionTabForGroup,
@@ -113,29 +113,23 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="shrink-0 px-[18px] pb-3 pt-4">
-        <WorkspaceIdentitySelector
-          identities={identities}
-          activeId={activeIdentityId}
-          onChange={onChangeIdentity}
-          onOpenPermissions={onOpenPermissions}
-          userAvatarUrl={userAvatarUrl}
-          layout="sidebar"
-        />
-      </div>
-      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted">
-        <div className="sticky top-0 z-20 mb-2 flex items-center gap-2 bg-muted px-[18px]">
-          <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
-          <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
+      <div className="app-scrollbar min-h-0 flex-1 overflow-y-auto bg-muted/20">
+        <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
+          <div className="flex h-10 items-center gap-2 px-[18px]">
+            <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
+            <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
+          </div>
+          <GroupSidebarFilters
+            groupSearchText={groupSearchText}
+            onSearchTextChange={onSearchTextChange}
+            kindFilter={kindFilter}
+            onKindFilterChange={onKindFilterChange}
+            membership={membership}
+            onMembershipChange={onMembershipChange}
+          />
         </div>
-        <GroupSidebarFilters
-          groupSearchText={groupSearchText}
-          onSearchTextChange={onSearchTextChange}
-          kindFilter={kindFilter}
-          onKindFilterChange={onKindFilterChange}
-          membership={membership}
-          onMembershipChange={onMembershipChange}
-        />
+
+        {!isLoading && groupsError && <ListErrorState message={groupsError} onRetry={() => void onRetryGroups?.()} />}
 
         {sessionSearchText !== '' && (
           <div className="mb-2 space-y-1">
@@ -166,7 +160,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             ))}
           </div>
         ) : groups.length === 0 ? (
-          groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
+          groupsError ? null : groupSearchText !== '' || kindFilter !== 'all' || membership !== 'direct' ? (
             <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
               <p className="m-0 text-base font-medium text-foreground">没有匹配的协作群</p>
               <p className="mt-2 text-sm text-muted-foreground">试试调整搜索词或筛选条件。</p>
@@ -185,9 +179,8 @@ export function GroupSidebarList(props: GroupSidebarProps) {
           )
         ) : (
           <>
-            <div className="flex items-center justify-between border-b border-border px-[18px] py-2 text-xs">
-              <span className="font-medium text-foreground">协作群</span>
-              <span className="text-muted-foreground">{groups.length} 个群</span>
+            <div className="flex min-h-9 items-center border-b border-border/70 bg-muted/10 px-[18px] py-2 text-xs font-medium text-foreground">
+              协作群 ({groups.length})
             </div>
             <div className="divide-y divide-border/70 overflow-hidden border-b border-border bg-muted/10">
               {groups.map((group) => {
@@ -215,6 +208,9 @@ export function GroupSidebarList(props: GroupSidebarProps) {
                     totalSessionCount={totalSessionsByGroupId[group.groupId]}
                     hasMoreSessions={hasMoreSessionsByGroupId[group.groupId] ?? false}
                     isLoadingMoreSessions={isLoadingMoreSessionsByGroupId[group.groupId] ?? false}
+                    error={errorByGroupId[group.groupId]}
+                    loadMoreError={loadMoreErrorByGroupId[group.groupId]}
+                    onRetrySessions={() => onReloadSession?.(group.groupId) ?? Promise.resolve()}
                     onLoadMoreSessions={() => onLoadMoreSessions(group.groupId)}
                   />
                 );
@@ -230,8 +226,8 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <aside className="hidden w-[360px] shrink-0 flex-col overflow-hidden border-r border-border bg-muted/20 lg:flex">
+    <ResizableWorkspaceSidebar ariaLabel="协作群会话侧栏">
       <GroupSidebarList {...props} />
-    </aside>
+    </ResizableWorkspaceSidebar>
   );
 }

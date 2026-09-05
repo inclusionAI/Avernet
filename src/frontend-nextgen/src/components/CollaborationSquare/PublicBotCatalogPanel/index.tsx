@@ -116,13 +116,13 @@ export function PublicBotCatalogPanel({ vm, scrollRootRef, smartEmptyHint }: Pub
       )}
       {showGrid && hasMore && <div ref={sentinelRef} aria-hidden="true" className="h-1" />}
       {!loading && !error && !smartEmpty && loadingMore && (
-        <div aria-live="polite" className="text-center text-xs text-[var(--color-muted)]">
+        <div aria-live="polite" className="text-center text-xs text-muted-foreground">
           正在加载更多...
         </div>
       )}
       {!loading && !error && !smartEmpty && vm.loadMoreError && (
         <Card className="flex items-center justify-between gap-3 p-4">
-          <p className="m-0 text-sm text-[var(--color-muted)]">{vm.loadMoreError}</p>
+          <p className="m-0 text-sm text-muted-foreground">{vm.loadMoreError}</p>
           <Button variant="secondary" size="sm" onClick={loadMore}>
             重试
           </Button>

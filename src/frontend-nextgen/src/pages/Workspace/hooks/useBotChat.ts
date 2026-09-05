@@ -6,6 +6,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { toast } from 'sonner';
 
 export interface SendFileRefs {
@@ -50,6 +51,7 @@ export function useBotChat(
 
   const [supportState, setSupportState] = useState<BotChatState>({ phase: 'idle', error: null });
   const [connectionStatus, setConnectionStatus] = useState<ProviderConnectionStatus>('disconnected');
+  const smoothedConnectionStatus = useConnectionStatusSmoothing(connectionStatus);
 
   const provider = useMemo(() => {
     if (!bot || !sessionId || !identityId) return null;
@@ -165,5 +167,5 @@ export function useBotChat(
     }
   };
 
-  return { chat, supportState, connectionStatus, send, stop, reconnect, reloadHistory };
+  return { chat, supportState, connectionStatus: smoothedConnectionStatus, send, stop, reconnect, reloadHistory };
 }

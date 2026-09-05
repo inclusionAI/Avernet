@@ -71,7 +71,10 @@ describe('collaboration friend connection controller', () => {
   });
 
   it('lists current Human friend connections without injecting user_id', async () => {
-    backendRequest.mockResolvedValue({ code: 20000, data: { items: [], total: 0 } });
+    backendRequest.mockResolvedValue({
+      code: 20000,
+      data: { items: [{ actor: { type: 'bot', id: 'bot-1' }, is_online: false }], total: 1 },
+    });
 
     await listFriendConnections({ actor_type: 'human', actor_id: '327325' });
 

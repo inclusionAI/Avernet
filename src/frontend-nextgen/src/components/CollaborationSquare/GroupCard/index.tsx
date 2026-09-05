@@ -35,13 +35,13 @@ export default function GroupCard({ group, busy, onOpenMembers, onShare, onCreat
         <Badge>{group.typeLabel}</Badge>
       </CardHeader>
       <CardContent className="flex-1 space-y-4">
-        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-lg bg-[var(--color-panel-muted)] p-3 text-xs">
-          <dt className="font-medium text-[var(--color-muted)]">群主 Bot</dt>
-          <dd className="m-0 min-w-0 truncate text-[var(--color-fg)]" title={group.ownerBotName}>
+        <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-lg bg-muted p-3 text-xs">
+          <dt className="font-medium text-muted-foreground">群主 Bot</dt>
+          <dd className="m-0 min-w-0 truncate text-foreground" title={group.ownerBotName}>
             {group.ownerBotName}
           </dd>
-          <dt className="font-medium text-[var(--color-muted)]">协作目标</dt>
-          <dd className="m-0 min-w-0 line-clamp-2 text-[var(--color-fg)]" title={group.goal}>
+          <dt className="font-medium text-muted-foreground">协作目标</dt>
+          <dd className="m-0 min-w-0 line-clamp-2 text-foreground" title={group.goal}>
             {group.goal || '—'}
           </dd>
         </dl>
