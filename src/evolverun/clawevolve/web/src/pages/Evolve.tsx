@@ -11,7 +11,6 @@ import BenchTemplateDetail from './BenchTemplateDetail'
 import BenchRunDetail from './BenchRunDetail'
 import SessionAnalysis from './SessionAnalysis'
 import Repair from './Repair'
-import TCLog from './TCLog'
 import { evolveTaskRegistry, isEvolveTaskType } from '../features/evolve/task-registry'
 import EvolveBotPicker from '../components/EvolveBotPicker'
 import { evolveBotOptionKey } from '../components/evolveBotIdentity'
@@ -2548,8 +2547,6 @@ function EvolveShell({ children }: { children: ReactNode }) {
           <EvolveSidebarComingSoon label="Skill 进化" />
           <EvolveSidebarComingSoon label="Memory 进化" />
           <EvolveSidebarComingSoon label="Context 进化" />
-          <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">系统工具</div>
-          <EvolveSidebarLink to="/evolve/tools/tclog" label="TCLog" icon="file" />
         </nav>
         {available && <div className={`mt-3 shrink-0 rounded-xl border p-3 ${enabled ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-gray-50'}`}>
           <label className="flex cursor-pointer items-center justify-between gap-2 text-xs font-semibold text-gray-700">
@@ -2610,7 +2607,6 @@ export default function Evolve() {
   let content: ReactNode
   if (location.pathname.startsWith('/evolve/packs/')) content = <PackDetail />
   else if (location.pathname === '/evolve/packs') content = <PackManagement />
-  else if (location.pathname === '/evolve/tools/tclog') content = <TCLog />
   else if (location.pathname === '/evolve/tasks') content = <TaskList />
   else if (location.pathname.startsWith('/evolve/repair-runs/')) content = <Repair view="detail" />
   else if (location.pathname.startsWith('/evolve/session-runs/')) content = <SessionAnalysis view="detail" />
