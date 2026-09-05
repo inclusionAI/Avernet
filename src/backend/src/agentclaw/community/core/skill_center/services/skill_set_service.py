@@ -3,6 +3,7 @@
 Migrated from: services/openclawserver/server/services/skill_set_service.py
 """
 import asyncio
+import time
 import zlib
 from datetime import datetime
 from pathlib import Path
@@ -1699,32 +1700,53 @@ class SkillSetService:
                 "SkillSetServiceFactory"
             )
         effective_engine = engine_type if engine_type is not None else self.engine_type
+        started_at = time.perf_counter()
         effective_ext_info = self._get_default_capabilities_ext_info(
             effective_engine,
             bot_id,
             strict=strict_policy_context,
         )
+        self._log_effective_mcp_timing(
+            stage="default_ext_info", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, has_value=effective_ext_info is not None,
+        )
+        started_at = time.perf_counter()
         effective_template_type = self._get_default_capabilities_template_type(
             bot_id,
             strict=strict_policy_context,
         )
+        self._log_effective_mcp_timing(
+            stage="default_template_type", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, has_value=effective_template_type is not None,
+        )
+        started_at = time.perf_counter()
         active_skill_sets = self._get_all_active_skill_sets_with_default_fallback(
             user_id=entity_id,
             bolt_id=bot_id,
             engine_type=effective_engine,
+        )
+        self._log_effective_mcp_timing(
+            stage="active_skill_sets", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, item_count=len(active_skill_sets),
         )
 
         # This Bot's exclusions silence a Default member entirely — the row
         # half too: ``get_set_mcp_servers`` filters only the static default
         # codes, and the flush already treats an exclusion as the Default
         # Set's per-Bot deactivation.
+        started_at = time.perf_counter()
         excluded_codes = set(self.skill_set_repo.get_all_excluded_mcps(user_id, bot_id))
+        self._log_effective_mcp_timing(
+            stage="default_mcp_exclusions", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, item_count=len(excluded_codes),
+        )
 
         # Each phase appends entries and marks their codes in
         # ``seen_server_codes``, so a later phase never duplicates an earlier
         # one; ordering is the union's precedence (rows, policy, installed).
         active_mcps: List[dict] = []
         seen_server_codes: set = set()
+        started_at = time.perf_counter()
         active_mcps.extend(
             self._default_set_mcp_rows(
                 active_skill_sets,
@@ -1737,6 +1759,11 @@ class SkillSetService:
                 seen_server_codes=seen_server_codes,
             )
         )
+        self._log_effective_mcp_timing(
+            stage="default_set_mcp_rows", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, item_count=len(active_mcps),
+        )
+        started_at = time.perf_counter()
         active_mcps.extend(
             self._default_policy_mcp_entries(
                 engine_type=effective_engine,
@@ -1746,16 +1773,40 @@ class SkillSetService:
                 seen_server_codes=seen_server_codes,
             )
         )
+        self._log_effective_mcp_timing(
+            stage="default_policy_mcp_entries", bot_id=bot_id,
+            engine_type=effective_engine, started_at=started_at,
+            item_count=len(active_mcps),
+        )
+        started_at = time.perf_counter()
+        active_skill_assets = self._active_skill_assets(
+            entity_id=entity_id, bot_id=bot_id, user_id=user_id
+        )
+        self._log_effective_mcp_timing(
+            stage="active_skill_assets", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, item_count=len(active_skill_assets),
+        )
+        started_at = time.perf_counter()
+        installed_mcp_codes = self._installed_mcp_codes(
+            entity_id=entity_id, bot_id=bot_id, user_id=user_id
+        )
+        self._log_effective_mcp_timing(
+            stage="installed_mcp_codes", bot_id=bot_id, engine_type=effective_engine,
+            started_at=started_at, item_count=len(installed_mcp_codes),
+        )
+        started_at = time.perf_counter()
         effective_non_default_codes = resolve_effective_mcp_server_codes(
             RuntimeDesiredState(
-                skills=self._active_skill_assets(
-                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
-                ),
-                installed_mcp_server_codes=self._installed_mcp_codes(
-                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
-                ),
+                skills=active_skill_assets,
+                installed_mcp_server_codes=installed_mcp_codes,
             )
         )
+        self._log_effective_mcp_timing(
+            stage="resolve_non_default_codes", bot_id=bot_id,
+            engine_type=effective_engine, started_at=started_at,
+            item_count=len(effective_non_default_codes),
+        )
+        started_at = time.perf_counter()
         active_mcps.extend(
             self._non_default_effective_mcp_entries(
                 effective_codes=effective_non_default_codes,
@@ -1763,12 +1814,38 @@ class SkillSetService:
                 seen_server_codes=seen_server_codes,
             )
         )
+        self._log_effective_mcp_timing(
+            stage="non_default_mcp_entries", bot_id=bot_id,
+            engine_type=effective_engine, started_at=started_at,
+            item_count=len(active_mcps),
+        )
 
         logger.info(
             f"[collect_bot_active_mcps] bot_id={bot_id}, engine_type={effective_engine}, "
             f"total_mcps={len(active_mcps)}, codes={[m.get('server_code') for m in active_mcps]}"
         )
         return active_mcps
+
+    @staticmethod
+    def _log_effective_mcp_timing(
+        *,
+        stage: str,
+        bot_id: str,
+        engine_type: str | None,
+        started_at: float,
+        item_count: int | None = None,
+        has_value: bool | None = None,
+    ) -> None:
+        logger.info(
+            "[collect_bot_active_mcps] timing stage=%s bot_id=%s engine_type=%s "
+            "duration_ms=%s item_count=%s has_value=%s",
+            stage,
+            bot_id,
+            engine_type,
+            round((time.perf_counter() - started_at) * 1000),
+            item_count,
+            has_value,
+        )
 
     def _default_set_mcp_rows(
         self,

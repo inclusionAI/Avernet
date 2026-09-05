@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
-import time
 
 from injector import inject
 
@@ -423,13 +422,19 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # Resolved here, with the other pre-flight checks, because it can fail:
         # doing it at the Passport call would abort after the device allow-list
         # was already written, and compensation would hit the same failure.
+        started_at = time.perf_counter()
         identity_modes = self._resolve_mcp_identity_modes(
             bot=bot, bot_id=bot_id, engine=engine
+        )
+        self._log_plan_timing(
+            stage="resolve_mcp_identity_modes", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", mcp_count=len(identity_modes),
         )
         # The legacy SkillSet service remains the authority for effective
         # System Defaults during Phase 1. It resolves template presets and
         # applies ac_default_skillset_mcp_exclusion.
         try:
+            started_at = time.perf_counter()
             effective_mcp_entries = service.collect_bot_active_mcps(
                 entity_id=str(bot.get("entity_id") or owner_id),
                 bot_id=bot_id,
@@ -439,25 +444,47 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 strict_policy_context=True,
             )
         except Exception as exc:
+            self._log_plan_timing(
+                stage="collect_effective_mcps", bot_id=bot_id, engine=engine,
+                started_at=started_at, outcome="error",
+            )
             raise SkillSetRuntimeReconcileError() from exc
+        self._log_plan_timing(
+            stage="collect_effective_mcps", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", mcp_count=len(effective_mcp_entries),
+        )
         effective_default_mcp_codes = frozenset(
             str(item.get("server_code") or item.get("serverCode") or "").strip()
             for item in effective_mcp_entries
             if item.get("server_code") or item.get("serverCode")
         )
         try:
+            started_at = time.perf_counter()
             # Passport is the authority for the effective Default CLI scope.
             effective_cli_items = self._passport.query_passport_clis(bot_id, owner_id)
         except Exception as exc:
+            self._log_plan_timing(
+                stage="query_passport_clis", bot_id=bot_id, engine=engine,
+                started_at=started_at, outcome="error",
+            )
             raise SkillSetRuntimeReconcileError() from exc
+        self._log_plan_timing(
+            stage="query_passport_clis", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", cli_count=len(effective_cli_items),
+        )
+        started_at = time.perf_counter()
+        installed_mcp_codes = frozenset(
+            self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+        )
+        self._log_plan_timing(
+            stage="read_installed_mcps", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", mcp_count=len(installed_mcp_codes),
+        )
+        started_at = time.perf_counter()
         projection = RuntimeProjectionResolver().resolve(
             RuntimeDesiredState(
                 skills=skill_plan.projection.skill_assets,
-                installed_mcp_server_codes=frozenset(
-                    self._repository.list_installed_mcps(
-                        bot_id=bot_id, owner_id=owner_id
-                    )
-                ),
+                installed_mcp_server_codes=installed_mcp_codes,
                 system_default_mcp_server_codes=effective_default_mcp_codes,
                 system_default_cli_commands=tuple(
                     str(item["cli_code"])
@@ -465,6 +492,10 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                     if item.get("cli_code")
                 ),
             )
+        )
+        self._log_plan_timing(
+            stage="resolve_effective_capabilities", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", mcp_count=len(projection.mcp_server_codes),
         )
 
         return ResolvedCapabilityPlan(

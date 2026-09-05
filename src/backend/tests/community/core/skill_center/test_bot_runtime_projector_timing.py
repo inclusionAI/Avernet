@@ -83,7 +83,15 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
 
     assert isinstance(plan, ResolvedCapabilityPlan)
     messages = [record.getMessage() for record in caplog.records]
-    for stage in ("build_skill_plan", "build_mcp_plan"):
+    for stage in (
+        "build_skill_plan",
+        "build_mcp_plan",
+        "resolve_mcp_identity_modes",
+        "collect_effective_mcps",
+        "query_passport_clis",
+        "read_installed_mcps",
+        "resolve_effective_capabilities",
+    ):
         assert any(
             "[BotRuntimeProjector] timing" in message
             and f"stage={stage}" in message
