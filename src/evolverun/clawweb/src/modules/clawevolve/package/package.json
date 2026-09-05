@@ -37,9 +37,7 @@
     }
   },
   "files": [
-    "dist/",
-    "README.md",
-    "COPY_MANIFEST.tsv"
+    "dist/"
   ],
   "scripts": {
     "check": "bash scripts/check-public-boundary.sh && tsc -p tsconfig.json --noEmit",
