@@ -53,6 +53,14 @@ it('展开 bot 时懒加载会话并缓存', async () => {
   await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
 });
 
+it('展开 bot 并加载会话后自动选中首条', async () => {
+  const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toHaveLength(2));
+  await waitFor(() => expect(result.current.selectedBotSessionId).toBe('s2'));
+  expect(result.current.selectedSession?.sessionId).toBe('s2');
+});
+
 it('createSession 选中新建会话并前置', async () => {
   const { result } = renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
   await waitFor(() => expect(result.current.sessionsByBotId['b:1']).toBeDefined());

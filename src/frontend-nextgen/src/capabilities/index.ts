@@ -18,6 +18,7 @@ import type {
   ReleaseNotesData,
   SearchedUser,
   ShellVisibility,
+  TaskClaimGrantStrategy,
   UserSearchCapability,
 } from './types';
 
@@ -62,5 +63,6 @@ export type {
   ReleaseNotesData,
   SearchedUser,
   ShellVisibility,
+  TaskClaimGrantStrategy,
   UserSearchCapability,
 };

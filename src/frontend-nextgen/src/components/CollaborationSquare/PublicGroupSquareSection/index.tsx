@@ -100,13 +100,13 @@ export function PublicGroupSquareSection({ square, scrollRootRef, canLoadMore }:
         <div ref={sentinelRef} aria-hidden="true" className="h-1" />
       )}
       {!square.loading && !square.error && square.loadingMore && (
-        <div aria-live="polite" className="text-center text-xs text-[var(--color-muted)]">
+        <div aria-live="polite" className="text-center text-xs text-muted-foreground">
           正在加载更多...
         </div>
       )}
       {!square.loading && !square.error && square.loadMoreError && (
         <Card className="flex items-center justify-between gap-3 p-4">
-          <p className="m-0 text-sm text-[var(--color-muted)]">{square.loadMoreError}</p>
+          <p className="m-0 text-sm text-muted-foreground">{square.loadMoreError}</p>
           <Button variant="secondary" size="sm" onClick={() => void square.loadMore()}>
             重试
           </Button>

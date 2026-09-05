@@ -19,12 +19,26 @@ export function getCollaborationGroupConversationUrl(groupId: string | null | un
   return `/workspace?${params.toString()}`;
 }
 
+export function getCollaborationSquareShareUrl(
+  origin: string,
+  resource: SquareResource,
+  id: string,
+  searchHint?: string,
+): string {
+  const pathname = resource === 'bot' ? '/collaboration-square/bots' : '/collaboration-square/groups';
+  const params = new URLSearchParams({ resource, id });
+  const normalizedSearchHint = searchHint?.trim();
+  if (resource === 'bot' && normalizedSearchHint) params.set('name', normalizedSearchHint);
+  return `${origin}${pathname}?${params.toString()}`;
+}
+
 export function clearCollaborationSquareTargetingSearch(resource: SquareResource, id: string): void {
   if (typeof window === 'undefined') return;
   const params = new URLSearchParams(window.location.search);
   if (params.get('resource') !== resource || params.get('id') !== id) return;
   params.delete('resource');
   params.delete('id');
+  params.delete('name');
   const search = params.toString();
   window.history.replaceState(
     window.history.state,

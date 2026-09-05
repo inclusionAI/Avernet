@@ -154,4 +154,10 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toBeNull();
     useExternalAuthStore.getState().reset();
   });
+
+  test('getTaskClaimGrantStrategy 默认 skip（Open Core api-key 直发,secbaas grant 短路 no-op）', () => {
+    const r = defaultCapabilities.getTaskClaimGrantStrategy();
+    expect(r.status).toBe('available');
+    expect(r.value).toBe('skip');
+  });
 });

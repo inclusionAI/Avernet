@@ -18,10 +18,10 @@ const KIND_OPTIONS: KindFilter[] = ['all', 'free_chat', 'task_master_slave', 'ta
 
 const kindChipClass = (active: boolean) =>
   cn(
-    'h-7 flex-none whitespace-nowrap rounded-none border-0 px-0 text-xs',
+    'h-7 flex-none whitespace-nowrap rounded-md border-0 px-2 text-xs',
     active
-      ? 'bg-transparent font-medium text-primary hover:bg-transparent hover:text-primary'
-      : 'bg-transparent font-normal text-muted-foreground hover:bg-transparent hover:text-foreground',
+      ? 'bg-background font-medium text-primary shadow-sm hover:bg-background hover:text-primary'
+      : 'bg-transparent font-normal text-muted-foreground hover:bg-background/70 hover:text-foreground',
   );
 
 interface GroupSidebarFiltersProps {
@@ -108,14 +108,13 @@ export function GroupSidebarFilters({
       </div>
 
       {filtersOpen && (
-        <div id={filterPanelId} className="mt-2 space-y-2 border-y border-border/80 bg-muted px-[18px] py-3">
-          <div
-            className="grid min-h-7 min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-1"
-            role="radiogroup"
-            aria-label="协作群类型"
-          >
-            <p className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">协作群类型</p>
-            <div className="flex min-w-0 flex-nowrap gap-x-2 overflow-x-auto scrollbar-hide">
+        <div
+          id={filterPanelId}
+          className="mx-[18px] mt-2 space-y-3 rounded-lg border border-border/70 bg-muted/50 px-3 py-3 shadow-sm"
+        >
+          <div className="min-w-0" role="radiogroup" aria-label="协作群类型">
+            <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">协作群类型</p>
+            <div className="app-scrollbar flex min-w-0 flex-nowrap gap-x-1 overflow-x-auto pb-1 touch-pan-x">
               {KIND_OPTIONS.map((kind) => (
                 <Button
                   key={kind}
@@ -132,13 +131,9 @@ export function GroupSidebarFilters({
               ))}
             </div>
           </div>
-          <div
-            className="grid min-h-7 min-w-0 grid-cols-[4rem_minmax(0,1fr)] items-center gap-1"
-            role="radiogroup"
-            aria-label="协作群参与方式"
-          >
-            <p className="whitespace-nowrap text-[11px] font-medium text-muted-foreground">参与方式</p>
-            <div className="flex min-w-0 flex-nowrap gap-x-2 overflow-x-auto scrollbar-hide">
+          <div className="min-w-0 border-t border-border/60 pt-3" role="radiogroup" aria-label="协作群参与方式">
+            <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">参与方式</p>
+            <div className="app-scrollbar flex min-w-0 flex-nowrap gap-x-1 overflow-x-auto pb-1 touch-pan-x">
               {(
                 [
                   ['direct', '固定群成员'],

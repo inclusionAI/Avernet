@@ -1,43 +1,15 @@
-import type { GroupKind, GroupView, IdentityView } from '@/domain/collaboration';
+import type { GroupView, IdentityView } from '@/domain/collaboration';
 import { groupService, type PolicyResult } from '@/services/workspace/groupService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useSelectedGroupDetail } from './useSelectedGroupDetail';
+import type { UseGroupWorkspaceResult } from './useGroupWorkspace.types';
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export interface UseGroupWorkspaceResult {
-  identities: IdentityView[];
-  activeIdentityId: string | null;
-  activeIdentity: IdentityView | null;
-  groups: GroupView[];
-  isLoadingGroups: boolean;
-  selectedGroupId: string | null;
-  selectedGroup: GroupView | null;
-  groupSearchText: string;
-  setGroupSearchText: (v: string) => void;
-  kindFilter: 'all' | GroupKind;
-  setKindFilter: (k: 'all' | GroupKind) => void;
-  sortMode: 'lastActivity' | 'createdAt';
-  setSortMode: (m: 'lastActivity' | 'createdAt') => void;
-  membership: 'direct' | 'session_only';
-  setMembership: (m: 'direct' | 'session_only') => void;
-  expandedGroupIds: Record<string, true>;
-  toggleGroupExpanded: (groupId: string) => void;
-  onSelectGroup: (groupId: string) => void;
-  refreshGroups: () => Promise<void>;
-  /** 重拉群详情并写回本地 groups。管理面板打开/更新后就地刷新；可传 groupId 直接刷新指定群
-   *  （默认刷新当前选中群）。群详情含 participants/owner/driver，仅查看/编辑时按需调用。 */
-  reloadSelectedGroup: (groupId?: string) => Promise<void>;
-  dissolveGroup: (groupId: string) => Promise<void>;
-  /** Service 政策结果：当前选中群 + 当前身份是否有管理权限（policy 计算归 Hook，组件只消费）。 */
-  canManageGroup: PolicyResult;
-  /** Service 政策结果：当前选中群 + 当前身份是否可解散（policy 计算归 Hook，组件只消费）。 */
-  canDissolveGroup: PolicyResult;
-}
-
+export type { UseGroupWorkspaceResult } from './useGroupWorkspace.types';
 /**
  * useGroupWorkspace 负责协作群列表的编排：拉取、防抖搜索、身份切换重载、
  * 选中群详情兜底、以及解散群的政策校验与 Toast 反馈。
@@ -59,6 +31,7 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   const membership = useWorkspaceStore((s) => s.membership);
   const expandedGroupIds = useWorkspaceStore((s) => s.expandedGroupIds);
   const isGroupsLoading = useWorkspaceStore((s) => s.isGroupsLoading);
+  const [groupsError, setGroupsError] = useState<string | null>(null);
 
   const setGroupSearchText = useWorkspaceStore((s) => s.setGroupSearchText);
   const setKindFilter = useWorkspaceStore((s) => s.setGroupKindFilter);
@@ -100,16 +73,21 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   const loadGroups = useCallback(
     async (identityId: string | null, q?: string) => {
       const identity = resolveIdentity(identityId);
-      if (!identity) return;
+      if (!identity) {
+        setGroupsError(null);
+        return;
+      }
       useWorkspaceStore.getState().setIsGroupsLoading(true);
+      setGroupsError(null);
       try {
         const res = await groupService.loadGroups(identity, { q, membership });
         if (res.ok) {
           setSessionGroups(res.data);
-        } else if (!shouldMuteNonAuthedToast()) {
+        } else {
+          setGroupsError(res.error.friendlyMessage);
           // 未登录（oauth-provider + 非 authenticated）静默：会话失效后「加载协作群失败」
           // 等业务 toast 噪音统一由 ExternalLoginPromptModal 承担（见 loginToastGate）。
-          toast.error(res.error.friendlyMessage);
+          if (!shouldMuteNonAuthedToast()) toast.error(res.error.friendlyMessage);
         }
       } finally {
         useWorkspaceStore.getState().setIsGroupsLoading(false);
@@ -180,6 +158,10 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
     await loadGroups(activeIdentityId, lastSearchRef.current || undefined);
   }, [loadGroups, activeIdentityId]);
 
+  const retryGroups = useCallback(async () => {
+    await loadGroups(activeIdentityId, lastSearchRef.current || undefined);
+  }, [activeIdentityId, loadGroups]);
+
   const reloadSelectedGroup = useCallback(
     async (groupId?: string) => {
       const gid = groupId ?? selectedGroupId;
@@ -226,6 +208,7 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
     activeIdentity,
     groups,
     isLoadingGroups: isGroupsLoading,
+    groupsError,
     selectedGroupId,
     selectedGroup,
     groupSearchText,
@@ -240,6 +223,7 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
     toggleGroupExpanded,
     onSelectGroup,
     refreshGroups,
+    retryGroups,
     reloadSelectedGroup,
     dissolveGroup,
     canManageGroup,

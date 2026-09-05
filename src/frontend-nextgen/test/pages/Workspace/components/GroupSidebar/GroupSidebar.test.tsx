@@ -4,6 +4,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 
 const baseGroup = {
@@ -94,6 +95,32 @@ describe('GroupSidebar', () => {
     expect(onCreateGroup).toHaveBeenCalled();
   });
 
+  it('群列表错误不伪装成空态，并提供重试入口', () => {
+    const onRetryGroups = jest.fn().mockResolvedValue(undefined);
+    render(<GroupSidebar {...makeProps({ groups: [], groupsError: '协作群加载失败', onRetryGroups })} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('协作群加载失败');
+    expect(screen.queryByText('暂无协作群')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(onRetryGroups).toHaveBeenCalledTimes(1);
+  });
+
+  it('群会话错误保留父对象并提供局部重试', () => {
+    const onReloadSession = jest.fn().mockResolvedValue(undefined);
+    render(
+      <GroupSidebar
+        {...makeProps({
+          sessionsByGroupId: {},
+          errorByGroupId: { g1: '群会话加载失败' },
+          onReloadSession,
+        })}
+      />,
+    );
+    expect(screen.getByText('主站群')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent('群会话加载失败');
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+    expect(onReloadSession).toHaveBeenCalledWith('g1');
+  });
+
   it('顶部蓝色 + 触发发起协作', () => {
     const onCreateGroup = jest.fn();
     render(<GroupSidebar {...makeProps({ onCreateGroup })} />);
@@ -137,6 +164,21 @@ describe('GroupSidebar', () => {
     expect(groupTrigger.textContent).toMatch(/主站群.*公开.*任务协作.*固定群成员/);
     expect(groupTrigger.textContent).not.toContain('6 个成员');
     expect(screen.queryByLabelText('6 个成员')).not.toBeInTheDocument();
+  });
+
+  it('协作群标签截断时可通过 hover 查看完整内容', async () => {
+    render(
+      <GroupSidebar
+        {...makeProps({
+          groups: [{ ...baseGroup, isPublic: true, kind: 'task_dag' as const, membership: 'session_only' as const }],
+        })}
+      />,
+    );
+
+    const metadata = screen.getByLabelText('协作群标签：公开 · 自定义协同 · 仅参与临时会话');
+    expect(metadata).toHaveClass('truncate');
+    await userEvent.setup().hover(metadata);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('公开 · 自定义协同 · 仅参与临时会话');
   });
 
   it('does not render session member count', () => {
@@ -193,7 +235,11 @@ describe('GroupSidebar', () => {
     const onManageGroup = jest.fn();
     const onToggleGroupExpanded = jest.fn();
     render(<GroupSidebar {...makeProps({ onCreateSession, onManageGroup, onToggleGroupExpanded })} />);
-    expect(screen.getByRole('button', { name: '协作群操作' })).toHaveClass('rounded-md');
+    expect(screen.getByRole('button', { name: '协作群操作' })).toHaveClass(
+      'rounded-md',
+      'hover:bg-primary/10',
+      'hover:text-primary',
+    );
     expect(
       screen.getByRole('button', { name: '主站群' }).querySelector('svg.lucide-chevron-right'),
     ).not.toBeInTheDocument();
@@ -202,8 +248,17 @@ describe('GroupSidebar', () => {
     expect(onManageGroup).toHaveBeenCalledWith('g1');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
     const createSessionButton = screen.getByRole('button', { name: '新建会话' });
-    expect(createSessionButton).toHaveClass('h-7', 'w-7', 'rounded-md');
-    expect(screen.getByRole('group', { name: '会话范围筛选' })).toBeInTheDocument();
+    expect(createSessionButton).toHaveClass(
+      'h-7',
+      'w-7',
+      'rounded-md',
+      'text-muted-foreground',
+      'hover:bg-primary/10',
+      'hover:text-primary',
+    );
+    const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
+    expect(scopeButton).toHaveClass('h-7', 'w-7');
+    expect(scopeButton.querySelector('svg.lucide-list-filter')).toBeInTheDocument();
     fireEvent.click(createSessionButton);
     expect(onCreateSession).toHaveBeenCalledWith('g1');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
@@ -221,10 +276,12 @@ describe('GroupSidebar', () => {
     const secondGroup = { ...baseGroup, groupId: 'g2', name: '新品发布协作组', sessions: [] };
     render(<GroupSidebar {...makeProps({ groups: [baseGroup, secondGroup] })} />);
 
-    const groupList = screen.getByText('协作群', { selector: 'span.font-medium' }).parentElement?.nextElementSibling;
+    const groupList = screen.getByText(/^协作群 \(\d+\)$/).nextElementSibling;
     expect(groupList).toHaveClass('divide-y', 'divide-border/70');
     const sessionList = screen.getByLabelText('协作群会话列表：主站群');
-    expect(sessionList).not.toHaveClass('ml-[60px]', 'border-l');
+    expect(sessionList).toHaveClass('border-t');
+    expect(sessionList).not.toHaveClass('border-b', 'ml-[60px]', 'border-l', 'pl-2');
+    expect(sessionList.firstElementChild).not.toHaveClass('border-b');
   });
 
   it('clicking a session does not collapse its group (no bubble to card)', () => {
@@ -248,31 +305,26 @@ describe('GroupSidebar', () => {
       '协作群参与方式',
     ]);
     const filterPanel = screen.getByRole('radiogroup', { name: '协作群参与方式' }).parentElement;
-    expect(filterPanel).toHaveClass('bg-muted', 'border-y', 'px-[18px]', 'py-3');
-    expect(screen.getByRole('radiogroup', { name: '协作群类型' })).toHaveClass(
-      'grid',
-      'min-w-0',
-      'grid-cols-[4rem_minmax(0,1fr)]',
-      'gap-1',
-    );
+    expect(filterPanel).toHaveClass('mx-[18px]', 'rounded-lg', 'border', 'bg-muted/50', 'px-3', 'py-3', 'shadow-sm');
+    expect(screen.getByRole('radiogroup', { name: '协作群类型' })).toHaveClass('min-w-0');
     expect(screen.getByRole('radiogroup', { name: '协作群类型' }).querySelector('.flex')).toHaveClass(
+      'app-scrollbar',
       'min-w-0',
       'flex-nowrap',
       'overflow-x-auto',
-      'scrollbar-hide',
-      'gap-x-2',
+      'gap-x-1',
+      'pb-1',
+      'touch-pan-x',
     );
-    expect(screen.getByRole('radiogroup', { name: '协作群参与方式' })).toHaveClass(
-      'min-w-0',
-      'grid-cols-[4rem_minmax(0,1fr)]',
-      'gap-1',
-    );
+    expect(screen.getByRole('radiogroup', { name: '协作群参与方式' })).toHaveClass('min-w-0', 'border-t', 'pt-3');
     expect(screen.getByRole('radiogroup', { name: '协作群参与方式' }).querySelector('.flex')).toHaveClass(
+      'app-scrollbar',
       'min-w-0',
       'flex-nowrap',
       'overflow-x-auto',
-      'scrollbar-hide',
-      'gap-x-2',
+      'gap-x-1',
+      'pb-1',
+      'touch-pan-x',
     );
     expect(screen.getByRole('radio', { name: '全部' }).querySelector('svg')).toBeInTheDocument();
   });
@@ -285,15 +337,15 @@ describe('GroupSidebar', () => {
 
   it('顶部视图切换与新增按钮等高，未选中 Tab 保持清晰对比', () => {
     render(<GroupSidebar {...makeProps()} />);
-    const inactiveTab = screen.getByRole('tab', { name: '对话' });
-    const activeTab = screen.getByRole('tab', { name: '协作群' });
+    const inactiveTab = screen.getByRole('button', { name: '对话' });
+    const activeTab = screen.getByRole('button', { name: '协作群' });
     const actionButton = screen.getByRole('button', { name: '添加好友或发起协作' });
-    expect(inactiveTab).toHaveClass('h-9', 'border-transparent', 'text-muted-foreground');
-    expect(inactiveTab).toHaveClass('hover:bg-transparent', 'hover:text-foreground');
-    expect(activeTab).toHaveClass('h-9', 'border-primary', 'text-primary');
-    expect(activeTab).toHaveClass('hover:bg-transparent', 'hover:text-primary');
-    expect(actionButton).toHaveClass('h-9', 'w-9');
-    expect(actionButton).toHaveClass('border-input', 'bg-background', 'text-muted-foreground');
+    expect(inactiveTab).toHaveAttribute('aria-pressed', 'false');
+    expect(activeTab).toHaveAttribute('aria-pressed', 'true');
+    expect(activeTab).toHaveClass('bg-background', 'text-primary', 'shadow-sm');
+    expect(inactiveTab).toHaveClass('text-muted-foreground');
+    expect(actionButton).toHaveClass('h-9', 'w-9', 'rounded-md');
+    expect(actionButton).toHaveClass('border-primary/20', 'bg-primary/5', 'text-primary');
     expect(actionButton).not.toHaveClass('bg-primary', 'text-primary-foreground');
     expect(actionButton).not.toHaveClass('lg:hidden');
   });
@@ -304,21 +356,30 @@ describe('GroupSidebar', () => {
     expect(screen.getByRole('button', { name: '筛选' })).toHaveClass('h-9');
   });
 
-  it('协作身份保持紧凑，群卡片保留可读间距并降低标题字重', () => {
+  it('协作身份移出二级侧栏，群卡片保留可读间距并降低标题字重', () => {
+    render(
+      <GroupSidebar {...makeProps()} />,
+    );
+    expect(screen.queryByRole('button', { name: '当前协作身份：风太' })).not.toBeInTheDocument();
+    const groupTrigger = screen.getByRole('button', { name: /主站群/ });
+    expect(groupTrigger.parentElement).toHaveClass('min-h-16', 'bg-primary/5', 'px-4', 'py-2.5');
+    expect(groupTrigger).toHaveClass('px-0', 'py-1');
+    expect(screen.getByText('主站群')).toHaveClass('text-sm', 'font-semibold');
+    expect(screen.getByText('自由聊天').parentElement).toHaveClass('text-xs', 'leading-4');
+  });
+
+  it('选中协作群暂无会话时展示明确空态', () => {
     render(
       <GroupSidebar
         {...makeProps({
-          identities: [{ id: 'me', name: '风太', kind: 'user', avatar: '风' }],
-          activeIdentityId: 'me',
+          selectedGroupId: 'g1',
+          sessionsByGroupId: { g1: [] },
         })}
       />,
     );
-    expect(screen.getByRole('button', { name: '当前协作身份：风太' })).toHaveClass('min-h-10');
-    const groupTrigger = screen.getByRole('button', { name: /主站群/ });
-    expect(groupTrigger.parentElement).toHaveClass('min-h-[72px]', 'px-[18px]', 'py-3');
-    expect(groupTrigger).toHaveClass('px-0', 'py-1');
-    expect(screen.getByText('主站群')).toHaveClass('font-medium');
-    expect(screen.getByText('主站群')).not.toHaveClass('font-semibold');
+
+    expect(screen.getByText('当前协作群暂无会话')).toBeInTheDocument();
+    expect(screen.queryByText('暂无协作群临时会话')).not.toBeInTheDocument();
   });
 
   it('group collapse toggle hides sessions', () => {
@@ -338,7 +399,7 @@ describe('GroupSidebar', () => {
     expect(onMembershipChange).toHaveBeenCalledWith('session_only');
   });
 
-  it('per-group favorite tab shows only favorite sessions and fires onSessionTabForGroup', () => {
+  it('对象行会话范围 Icon 按群过滤收藏会话', () => {
     const onSessionTabForGroup = jest.fn();
     render(
       <GroupSidebar
@@ -349,25 +410,26 @@ describe('GroupSidebar', () => {
         })}
       />,
     );
-    // 收藏 tab 下仅 s1 可见，s2 被隐藏
     expect(screen.getByText('会话一')).toBeInTheDocument();
     expect(screen.queryByText('会话二')).not.toBeInTheDocument();
-    // 切回全部触发 onSessionTabForGroup('g1', 'all')；群会话 Tab 不重复显示数量
-    const favoriteTab = screen.getByRole('button', { name: /已收藏会话/ });
-    const allTab = screen.getByRole('button', { name: /全部会话/ });
-    expect(favoriteTab).toHaveClass('text-primary');
-    expect(allTab).toHaveClass('text-muted-foreground');
-    fireEvent.click(allTab);
+    const scopeButton = screen.getByRole('button', { name: '会话范围：已收藏会话' });
+    expect(scopeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(scopeButton.textContent).toBe('');
+    fireEvent.click(scopeButton);
+    expect(screen.getByRole('radio', { name: /已收藏会话/ })).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByRole('radio', { name: /全部会话/ }));
     expect(onSessionTabForGroup).toHaveBeenCalledWith('g1', 'all');
   });
 
-  it('会话范围筛选使用弱化的行内文字样式并保留水平内边距', () => {
+  it('会话范围使用对象行纯 Icon，选项在 Popover 中展示', () => {
     render(<GroupSidebar {...makeProps({ totalSessionsByGroupId: { g1: 12 } })} />);
 
-    const allTab = screen.getByRole('button', { name: '全部会话 12' });
-    const favoriteTab = screen.getByRole('button', { name: '已收藏会话 0' });
-    expect(allTab).toHaveClass('px-2.5', 'border-0', 'rounded-none', 'text-primary');
-    expect(favoriteTab).toHaveClass('px-2.5', 'border-0', 'rounded-none', 'text-muted-foreground');
+    const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
+    expect(scopeButton.textContent).toBe('');
+    fireEvent.click(scopeButton);
+    expect(screen.getByRole('radiogroup', { name: '会话范围' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '全部会话 12' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '已收藏会话 0' })).toBeInTheDocument();
   });
 
   it('renders all and favorite session counts beside collaboration session tabs', () => {
@@ -379,15 +441,17 @@ describe('GroupSidebar', () => {
         })}
       />,
     );
-    expect(screen.getByRole('button', { name: '全部会话 12' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '已收藏会话 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '会话范围：全部会话' }));
+    expect(screen.getByRole('radio', { name: '全部会话 12' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '已收藏会话 1' })).toBeInTheDocument();
   });
 
   it('群会话总数未知时使用占位符，不用当前已加载条数冒充总数', () => {
     render(<GroupSidebar {...makeProps({ favoriteSessionIds: ['s1'] })} />);
 
-    expect(screen.getByRole('button', { name: '全部会话 …' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '已收藏会话 1' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '会话范围：全部会话' }));
+    expect(screen.getByRole('radio', { name: '全部会话 …' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '已收藏会话 1' })).toBeInTheDocument();
   });
 
   it('does not present the loaded-page favorite count as a total while more group sessions remain', () => {
@@ -400,25 +464,72 @@ describe('GroupSidebar', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '全部会话 …' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '已收藏会话 …' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '会话范围：全部会话' }));
+    expect(screen.getByRole('radio', { name: '全部会话 …' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '已收藏会话 …' })).toBeInTheDocument();
+  });
+
+  it('收起协作群切换会话范围后自动展开对象', () => {
+    const onSessionTabForGroup = jest.fn();
+    const onToggleGroupExpanded = jest.fn();
+    render(
+      <GroupSidebar
+        {...makeProps({
+          expandedGroupIds: {},
+          onSessionTabForGroup,
+          onToggleGroupExpanded,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '会话范围：全部会话' }));
+    fireEvent.click(screen.getByRole('radio', { name: '已收藏会话 0' }));
+
+    expect(onSessionTabForGroup).toHaveBeenCalledWith('g1', 'favorite');
+    expect(onToggleGroupExpanded).toHaveBeenCalledWith('g1');
+  });
+
+  it('收藏范围仅检查已加载分页时展示明确空态', () => {
+    render(
+      <GroupSidebar
+        {...makeProps({
+          sessionTabsByGroup: { g1: 'favorite' },
+          favoriteSessionIds: [],
+          hasMoreSessionsByGroupId: { g1: true },
+        })}
+      />,
+    );
+
+    expect(screen.getByText('当前已加载会话中暂无收藏')).toBeInTheDocument();
+  });
+
+  it('展开会话区不再渲染旧会话范围工具栏', () => {
+    render(<GroupSidebar {...makeProps()} />);
+
+    expect(screen.queryByRole('group', { name: '会话范围筛选' })).not.toBeInTheDocument();
+  });
+
+  it('协作群会话与 Bot 会话统一使用消息 Icon', () => {
+    const { container } = render(<GroupSidebar {...makeProps()} />);
+
+    expect(container.querySelectorAll('svg.lucide-message-square')).toHaveLength(2);
+    expect(container.querySelector('[data-session-indicator].rounded-full')).not.toBeInTheDocument();
   });
 
   it('群会话没有次行内容时使用紧凑行高', () => {
     render(<GroupSidebar {...makeProps()} />);
 
     const sessionTrigger = screen.getByRole('button', { name: /会话一/ });
-    expect(sessionTrigger).toHaveClass('min-h-[56px]', 'py-2');
-    expect(sessionTrigger.parentElement).toHaveClass('min-h-[56px]');
+    expect(sessionTrigger).toHaveClass('min-h-12', 'py-2');
+    expect(sessionTrigger.parentElement).toHaveClass('min-h-12');
     expect(sessionTrigger.textContent).not.toContain('个成员');
   });
 
   it('协作群列表向下滚动时一级 Tab 吸顶', () => {
     render(<GroupSidebar {...makeProps()} />);
 
-    const tabList = screen.getByRole('tablist', { name: '工作区类型' });
-    expect(tabList.parentElement).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted');
-    expect(tabList.parentElement?.parentElement).toHaveClass('bg-muted');
+    const tabGroup = screen.getByRole('group', { name: '工作区类型' });
+    expect(tabGroup.parentElement?.parentElement).toHaveClass('sticky', 'top-0', 'z-20', 'bg-muted/20');
   });
 
   it('closes the filter panel after selecting a filter', () => {
@@ -474,7 +585,7 @@ describe('GroupSidebar', () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
+    fireEvent.click(screen.getByRole('button', { name: '加载更多会话' }));
     expect(onLoadMoreSessions).toHaveBeenCalledWith('g1');
     expect(onToggleGroupExpanded).not.toHaveBeenCalled();
   });

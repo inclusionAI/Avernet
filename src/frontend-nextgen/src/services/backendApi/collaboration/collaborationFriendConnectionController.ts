@@ -20,12 +20,10 @@ export interface FriendConnectionRequestDto {
   updated_at?: number | string;
 }
 
+/** 已建立好友连接列表项。接口返回连接另一端 actor，不返回 status/from_actor/to_actor。 */
 export interface FriendConnectionDto {
-  edge_id?: string;
-  from_actor: FriendConnectionActor;
-  to_actor: FriendConnectionActor;
-  status?: 'approved' | 'public_no_edge';
-  created_at?: number | string;
+  actor: FriendConnectionActor;
+  is_online?: boolean;
 }
 
 export interface FriendConnectionSummaryDto {

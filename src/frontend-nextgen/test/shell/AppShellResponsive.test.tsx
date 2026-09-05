@@ -39,6 +39,9 @@ jest.mock('@/shell/HelpMenu', () => ({ HelpMenu: () => <div data-testid="help" /
 // 内流一级侧栏桩化（避免 <lg 时内流与抽屉重复渲染同名导航项）；抽屉内容用的是真实 SidebarNavList。
 jest.mock('@/shell/AppSidebar', () => ({ AppSidebar: () => <aside data-testid="app-sidebar" /> }));
 jest.mock('@/shell/SpaceSwitcher', () => ({ SpaceSwitcher: () => <div data-testid="space-switcher" /> }));
+jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
+  WorkspaceIdentitySwitcher: () => <div data-testid="identity-switcher" />,
+}));
 
 // Drawer 原语桩化为受控组件：open=true 渲染 children，open=false 渲染 null。
 // 规避 Radix Dialog 在 jsdom 下退出动画不触发导致内容不卸载的问题。

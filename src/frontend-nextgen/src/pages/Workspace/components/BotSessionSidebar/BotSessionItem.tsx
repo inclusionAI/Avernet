@@ -15,7 +15,7 @@ import type { BotChatSessionView } from '@/services/workspace/botSessionService'
 import { cn } from '@/utils/cn';
 import { Eraser, MoreHorizontal, Pencil, Star, Trash2 } from 'lucide-react';
 import React, { useState } from 'react';
-import { formatMonthDayTime, SessionCard } from '../SessionCard';
+import { formatSessionTime, formatSessionTimeTooltip, SessionCard } from '../SessionCard';
 
 interface Props {
   session: BotChatSessionView;
@@ -96,8 +96,10 @@ export const BotSessionItem = React.memo(function BotSessionItem({
       <SessionCard
         title={session.title}
         subtitle={session.messageCount > 0 ? `${session.messageCount} 条消息` : '暂无消息'}
-        dateText={formatMonthDayTime(session.gmtModified || session.gmtCreate)}
+        dateText={formatSessionTime(session.gmtModified || session.gmtCreate)}
+        dateTooltip={formatSessionTimeTooltip(session.gmtModified || session.gmtCreate)}
         selected={selected}
+        indicator="message"
         onSelect={() => onSelect(session.sessionId)}
         trailing={
           <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>

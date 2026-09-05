@@ -17,7 +17,11 @@ import {
   collaborationSquareService,
 } from '@/services/collaborationSquare';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { getCollaborationBotConversationUrl, getCollaborationSquareErrorMessage } from '@/utils/collaborationSquare';
+import {
+  getCollaborationBotConversationUrl,
+  getCollaborationSquareErrorMessage,
+  getCollaborationSquareShareUrl,
+} from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -163,10 +167,7 @@ export function usePublicBotCatalog({ activeIdentity, enabled }: UsePublicBotCat
   const share = useCallback(
     (bot: PublicBot) => {
       const origin = typeof window === 'undefined' ? '' : window.location.origin;
-      void copyText(
-        `${origin}/collaboration-square/bots?resource=bot&id=${encodeURIComponent(bot.id)}`,
-        '分享链接已复制',
-      );
+      void copyText(getCollaborationSquareShareUrl(origin, 'bot', bot.id, bot.name), '分享链接已复制');
     },
     [copyText],
   );

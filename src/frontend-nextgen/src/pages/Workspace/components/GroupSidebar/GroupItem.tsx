@@ -1,4 +1,4 @@
-import { Button, IconButton, Skeleton } from '@/components/ui';
+import { Button, IconButton } from '@/components/ui';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,52 +11,17 @@ import {
 } from '@/components/ui/AlertDialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import type { GroupView, SessionView } from '@/domain/collaboration/types';
-import type { DomainResult } from '@/services/workspace/identityService';
 import { cn } from '@/utils/cn';
 import { MoreHorizontal, Plus, Settings2, Share2, Trash2, Users } from 'lucide-react';
 import React, { useState } from 'react';
 import { AvatarTile } from '../AvatarTile';
 import { ShareDialog } from '../ManagePanel/ShareDialog';
-import { SessionToolbar } from '../SessionToolbar';
-import { SessionItem } from './SessionItem';
+import { SessionScopeFilter } from '../SessionScopeFilter';
+import { GroupSessionsList } from './GroupSessionsList';
+import type { GroupItemProps, SessionTab } from './GroupItem.types';
+import { KIND_LABEL, MEMBERSHIP_LABEL } from './GroupItem.types';
 
-export type SessionTab = 'all' | 'favorite';
-
-interface GroupItemProps {
-  group: GroupView;
-  expanded: boolean;
-  sessions: SessionView[] | undefined;
-  sessionTab: SessionTab;
-  onSessionTabChange: (t: SessionTab) => void;
-  favoriteSessionIds: string[];
-  selectedGroupId: string | null;
-  selectedSessionId: string | null;
-  onSelectGroup: (groupId: string) => void;
-  onToggleGroupExpanded: (groupId: string) => void;
-  onSelectSession: (groupId: string, sessionId: string) => void;
-  onToggleFavorite: (sessionId: string) => void;
-  onCreateSession: (groupId: string) => void;
-  onManageGroup: (groupId: string) => void;
-  onManageSession: (groupId: string, sessionId: string) => void;
-  onShareGroup: (groupId: string) => Promise<DomainResult<{ invitationUrl: string }>>;
-  onDissolveGroup: (groupId: string) => void;
-  totalSessionCount?: number;
-  hasMoreSessions: boolean;
-  isLoadingMoreSessions: boolean;
-  onLoadMoreSessions: () => Promise<void>;
-}
-
-const KIND_LABEL: Record<GroupView['kind'], string> = {
-  free_chat: '自由聊天',
-  task_master_slave: '任务协作',
-  task_dag: '自定义协同',
-};
-
-const MEMBERSHIP_LABEL: Record<NonNullable<GroupView['membership']>, string> = {
-  direct: '固定群成员',
-  session_only: '仅参与临时会话',
-};
+export type { SessionTab } from './GroupItem.types';
 
 export const GroupItem = React.memo(function GroupItem({
   group,
@@ -80,26 +45,33 @@ export const GroupItem = React.memo(function GroupItem({
   hasMoreSessions,
   isLoadingMoreSessions,
   onLoadMoreSessions,
+  error,
+  loadMoreError,
+  onRetrySessions,
 }: GroupItemProps) {
   const [actionsOpen, setActionsOpen] = useState(false);
   const [dissolveOpen, setDissolveOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
-  const loaded = sessions !== undefined;
   const safeSessions = sessions ?? [];
-  const visibleSessions =
-    sessionTab === 'favorite' ? safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)) : safeSessions;
   // 群接口只返回当前页会话的收藏状态；仍有下一页时，收藏总数尚不能确定。
   const favoriteCount = hasMoreSessions
     ? undefined
     : safeSessions.filter((s) => favoriteSessionIds.includes(s.sessionId)).length;
   const membershipLabel = MEMBERSHIP_LABEL[group.membership ?? 'direct'];
+  const metadataLabel = [group.isPublic ? '公开' : null, KIND_LABEL[group.kind], membershipLabel]
+    .filter(Boolean)
+    .join(' · ');
   const selected = selectedGroupId === group.groupId;
 
   const handleCardClick = () => {
     if (selectedGroupId !== group.groupId) onSelectGroup(group.groupId);
     onToggleGroupExpanded(group.groupId);
+  };
+  const handleSessionScopeChange = (tab: SessionTab) => {
+    onSessionTabChange(tab);
+    if (!expanded) onToggleGroupExpanded(group.groupId);
   };
   const handleShare = async () => {
     setActionsOpen(false);
@@ -119,8 +91,8 @@ export const GroupItem = React.memo(function GroupItem({
     <div>
       <div
         className={cn(
-          'group relative flex min-h-[72px] items-center gap-3 border-b border-transparent px-[18px] py-3 transition-colors',
-          selected ? 'bg-primary/5' : 'bg-transparent hover:bg-accent/50',
+          'group relative flex min-h-16 items-center gap-3 px-4 py-2.5 transition-colors',
+          selected || expanded ? 'bg-primary/5' : 'bg-background hover:bg-accent/50',
         )}
       >
         {selected && (
@@ -130,47 +102,68 @@ export const GroupItem = React.memo(function GroupItem({
           variant="ghost"
           aria-label={group.name}
           aria-expanded={expanded}
+          aria-current={selected ? 'page' : undefined}
           onClick={handleCardClick}
-          className="flex h-auto min-w-0 flex-1 items-center justify-start gap-2.5 rounded-none px-0 py-1 text-left hover:bg-transparent"
+          className="flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent"
         >
-          <AvatarTile label={group.name} fallbackContent={<Users className="h-4 w-4" aria-hidden="true" />} />
+          <AvatarTile
+            label={group.name}
+            className="rounded-full bg-secondary text-secondary-foreground ring-1 ring-border"
+            fallbackContent={<Users className="h-4 w-4" aria-hidden="true" />}
+          />
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{group.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{group.name}</span>
                   </TooltipTrigger>
                   <TooltipContent>{group.name}</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             </div>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground">
-              {group.isPublic && (
-                <>
-                  <span className="shrink-0 text-primary">公开</span>
-                  <span aria-hidden="true" className="text-muted-foreground/50">
-                    ·
-                  </span>
-                </>
-              )}
-              <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
-              <span aria-hidden="true" className="text-muted-foreground/50">
-                ·
-              </span>
-              <span className="shrink-0">{membershipLabel}</span>
-            </div>
+            <TooltipProvider delayDuration={0}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div
+                    aria-label={`协作群标签：${metadataLabel}`}
+                    className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground"
+                  >
+                    {group.isPublic && (
+                      <>
+                        <span className="shrink-0 text-primary">公开</span>
+                        <span aria-hidden="true" className="text-muted-foreground/50">
+                          ·
+                        </span>
+                      </>
+                    )}
+                    <span className="shrink-0">{KIND_LABEL[group.kind]}</span>
+                    <span aria-hidden="true" className="text-muted-foreground/50">
+                      ·
+                    </span>
+                    <span className="shrink-0">{membershipLabel}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>{metadataLabel}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </Button>
         <IconButton
           label="新建会话"
           size="sm"
           icon={<Plus className="h-4 w-4" />}
-          className="rounded-md"
+          className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
           onClick={(event) => {
             event.stopPropagation();
             onCreateSession(group.groupId);
           }}
+        />
+        <SessionScopeFilter
+          value={sessionTab}
+          onChange={handleSessionScopeChange}
+          allCount={totalSessionCount}
+          favoriteCount={favoriteCount}
         />
         <Popover open={actionsOpen} onOpenChange={setActionsOpen}>
           <PopoverTrigger asChild>
@@ -178,7 +171,7 @@ export const GroupItem = React.memo(function GroupItem({
               label="协作群操作"
               size="sm"
               icon={<MoreHorizontal className="h-4 w-4" />}
-              className="rounded-md"
+              className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
               onClick={(event) => event.stopPropagation()}
             />
           </PopoverTrigger>
@@ -215,57 +208,22 @@ export const GroupItem = React.memo(function GroupItem({
       </div>
 
       {expanded && (
-        <div aria-label={`协作群会话列表：${group.name}`} className="border-b border-border/60 bg-background">
-          <SessionToolbar
-            value={sessionTab}
-            onChange={onSessionTabChange}
-            allCount={totalSessionCount}
-            favoriteCount={favoriteCount}
-          />
-          <div className="overflow-hidden border-b border-border/60 bg-background">
-            {!loaded ? (
-              <div>
-                {[1, 2, 3].map((i) => (
-                  <Skeleton.Block key={i} className="h-16 w-full rounded-none border-b border-border last:border-b-0" />
-                ))}
-              </div>
-            ) : visibleSessions.length === 0 ? (
-              <div className="px-3 py-5">
-                <span className="text-xs text-muted-foreground">
-                  {sessionTab === 'favorite' ? '暂无已收藏会话' : '暂无协作群临时会话'}
-                </span>
-              </div>
-            ) : (
-              visibleSessions.map((session) => (
-                <SessionItem
-                  key={session.sessionId}
-                  session={session}
-                  favorite={favoriteSessionIds.includes(session.sessionId)}
-                  selected={selectedSessionId === session.sessionId}
-                  onSelectSession={(sessionId) => onSelectSession(group.groupId, sessionId)}
-                  onToggleFavorite={onToggleFavorite}
-                  onManageSession={(sessionId) => onManageSession(group.groupId, sessionId)}
-                />
-              ))
-            )}
-          </div>
-          {hasMoreSessions && (
-            <div className="flex justify-center border-b border-border/60 px-[18px] pb-1 pt-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={isLoadingMoreSessions}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void onLoadMoreSessions();
-                }}
-                className="h-8 rounded-none px-3 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-              >
-                {isLoadingMoreSessions ? '正在加载…' : '加载更多'}
-              </Button>
-            </div>
-          )}
-        </div>
+        <GroupSessionsList
+          group={group}
+          sessions={sessions}
+          sessionTab={sessionTab}
+          favoriteSessionIds={favoriteSessionIds}
+          selectedSessionId={selectedSessionId}
+          hasMoreSessions={hasMoreSessions}
+          isLoadingMoreSessions={isLoadingMoreSessions}
+          onLoadMoreSessions={onLoadMoreSessions}
+          error={error}
+          loadMoreError={loadMoreError}
+          onRetrySessions={onRetrySessions}
+          onSelectSession={onSelectSession}
+          onToggleFavorite={onToggleFavorite}
+          onManageSession={onManageSession}
+        />
       )}
 
       <ShareDialog

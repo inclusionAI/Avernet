@@ -30,6 +30,7 @@ export function IdentityCard({ identity, avatarUrl, syncing, onSync }: IdentityC
                 label="同步用户部门信息"
                 icon={syncing ? null : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
                 size="sm"
+                className="h-5 w-5 shrink-0 rounded-md p-0"
                 loading={syncing}
                 onClick={onSync}
               />

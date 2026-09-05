@@ -13,6 +13,7 @@ import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
+import { formatAutoGroupName } from './groupNaming';
 import { GroupParticipantPicker } from './GroupParticipantPicker';
 import { summarizeYaml } from './groupYamlUtils';
 
@@ -167,12 +168,13 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     }
     const participantIds = Array.from(new Set(memberIds));
     const participants = participantIds.map((id) => ({ actor_id: id }));
+    const participantName = (id: string) => (id === activeIdentity?.id ? activeIdentity.displayName : allBotName(id));
     const participantBindingsArr = Object.entries(binding.participantBindings)
       .filter(([, botId]) => Boolean(botId))
       .map(([binding, botId]) => ({ binding, actor_ids: [botId] }));
     const res = await run(
       {
-        name: name.trim(),
+        name: name.trim() || formatAutoGroupName(participantIds, effectiveLeader, kind === 'task_dag', participantName),
         strategy: kind === 'free_chat' ? 'chat' : kind === 'task_master_slave' ? 'manager_worker' : 'state_machine',
         deliveryPolicy,
         definitionYaml,

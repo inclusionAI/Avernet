@@ -15,6 +15,7 @@ import type {
   ProductBrand,
   ReleaseNotesCapability,
   ShellVisibility,
+  TaskClaimGrantStrategy,
   UserSearchCapability,
 } from './types';
 
@@ -117,6 +118,9 @@ export const defaultCapabilities: AppCapabilities = {
   // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
   // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
   getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),
+  // Open Core / 开源部署:api-key 直发消息,无 secbaas per-bot 授权闭环 → grant/revoke 短路 no-op,开关只写 BCS task_claim_mode。
+  // internal overlay 覆盖为 'secbaas-relay'(经 secbaas 透传人类 Cookie 授权 api-key 调某 bot)。
+  getTaskClaimGrantStrategy: (): CapabilityResult<TaskClaimGrantStrategy> => ({ status: 'available', value: 'skip' }),
   // Open Core 默认不暴露内部侧栏导航项（能力工坊/能力市场），符合 open-core-export-plan §5.2
   // 「导航中的内部入口」按开源模式分隔的强约束。internal overlay 经 extensions/internal.ts 覆盖注入。
   getInternalNavigationItems: () => ({ status: 'available', value: [] }),

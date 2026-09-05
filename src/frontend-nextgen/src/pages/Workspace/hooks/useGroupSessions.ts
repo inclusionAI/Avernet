@@ -1,4 +1,4 @@
-import type { ParticipantMode, SessionView } from '@/domain/collaboration';
+import type { SessionView } from '@/domain/collaboration';
 import type { DomainError, DomainResult } from '@/services/workspace/identityService';
 import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -6,40 +6,10 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useSessionMutations } from './useSessionLeave';
 import { useSessionMap } from './useSessionMap';
+import type { UseGroupSessionsResult } from './useGroupSessions.types';
 import { useSessionMemberSync } from './useSessionMemberSync';
 
-export interface UseGroupSessionsResult {
-  sessions: SessionView[];
-  /** 多群展开展示使用：每个已加载群的会话（已按 search 过滤；收藏过滤在 GroupItem 按群独立处理）。 */
-  sessionsByGroupId: Record<string, SessionView[]>;
-  hasMoreSessionsByGroupId: Record<string, boolean>;
-  isLoadingMoreSessionsByGroupId: Record<string, boolean>;
-  totalSessionsByGroupId: Record<string, number>;
-  loadMoreSessions: (groupId: string) => Promise<void>;
-  isSessionsLoading: boolean;
-  selectedSessionId: string | null;
-  selectedSession: SessionView | null;
-  favoriteSessionIds: string[];
-  sessionSearchText: string;
-  setSessionSearchText: (v: string) => void;
-  selectSession: (sessionId: string | null) => void;
-  /** 打开某群下的会话：必要时先切换选中群（chat pane 跟随），再选中会话。 */
-  openSession: (groupId: string, sessionId: string) => void;
-  createSession: (title?: string, contextQuery?: string) => Promise<SessionView | null>;
-  /** 在指定群内创建会话（侧栏每个群的「新建会话」入口）；创建后选中该群与这条新会话。 */
-  createSessionIn: (groupId: string, title?: string, contextQuery?: string) => Promise<SessionView | null>;
-  renameSession: (sessionId: string, title: string) => Promise<boolean>;
-  deleteSession: (sessionId: string) => Promise<boolean>;
-  /** 退出会话（移除自己）：从侧边栏移除该会话并清空选中。 */
-  leaveSession: (sessionId: string, actorId: string) => Promise<boolean>;
-  toggleFavorite: (sessionId: string) => Promise<void>;
-  /** 更新会话成员姿态/发言模式（参考 open-claw 我的协作：bot auto↔muted、human present↔absent）。 */
-  updateMemberMode: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>;
-  /** 用后端返回的会话详情就地替换指定会话数据（成员增删后就地刷新）。 */
-  applySessionUpdate: (sessionId: string, session: SessionView) => void;
-  reloadSessions: () => Promise<void>;
-}
-
+export type { UseGroupSessionsResult } from './useGroupSessions.types';
 function notifyError(err: DomainError): void {
   toast.error(err.friendlyMessage);
 }
@@ -76,6 +46,8 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     isLoadingMoreByGroupId,
     totalByGroupId,
     loadMoreSessions,
+    errorByGroupId,
+    loadMoreErrorByGroupId,
   } = useSessionMap(groupId, expandedGroupIds, activeIdentityId);
 
   // 会话成员详情补齐与 mode 更新(从本 Hook 拆出以控体积,详见 useSessionMemberSync)。
@@ -227,6 +199,8 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     hasMoreSessionsByGroupId: hasMoreByGroupId,
     isLoadingMoreSessionsByGroupId: isLoadingMoreByGroupId,
     totalSessionsByGroupId: totalByGroupId,
+    errorByGroupId,
+    loadMoreErrorByGroupId,
     loadMoreSessions,
     isSessionsLoading: isLoading,
     selectedSessionId,
@@ -245,5 +219,6 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     updateMemberMode,
     applySessionUpdate,
     reloadSessions,
+    reloadGroup,
   };
 }

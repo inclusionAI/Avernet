@@ -1,15 +1,15 @@
 import { Button, IconButton, Skeleton } from '@/components/ui';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import { getBotEngineLabel } from '@/domain/botEngine';
 import { getBotTypeLabel } from '@/domain/botType';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { cn } from '@/utils/cn';
-import { MoreHorizontal, Plus, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
 import { AvatarTile } from '../AvatarTile';
-import { SessionToolbar } from '../SessionToolbar';
+import { ListErrorState } from '../ListErrorState';
+import { SessionScopeFilter } from '../SessionScopeFilter';
 import { BotSessionItem } from './BotSessionItem';
 
 interface BotItemProps {
@@ -30,7 +30,7 @@ interface BotItemProps {
   onToggleFavorite: (botId: string, sessionId: string) => Promise<boolean>;
   onLoadFavorites: (botId: string) => Promise<void>;
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
-  onManageBot?: (bot: ChatBotView) => void;
+  onReloadBot?: (botId: string) => Promise<void>;
 }
 
 /** Bot 行与协作群行共享同一高度和信息层级；AgentCoding Bot 由工作台引导使用。 */
@@ -52,7 +52,7 @@ export const BotItem = React.memo(function BotItem({
   onToggleFavorite,
   onLoadFavorites,
   onLoadMoreSessions,
-  onManageBot,
+  onReloadBot,
 }: BotItemProps) {
   const [sessionTab, setSessionTab] = useState<'all' | 'favorite'>('all');
   const favoritePrefetchRef = useRef(false);
@@ -76,44 +76,53 @@ export const BotItem = React.memo(function BotItem({
   const isUnavailable = !bot.chatable;
   const botEngineLabel = getBotEngineLabel(bot.engine);
   const botTypeLabel = getBotTypeLabel(bot.botType);
+  const isCurrent = [sessions, favoriteSessions]
+    .filter(Boolean)
+    .some((list) => list?.some((session) => session.sessionId === selectedBotSessionId));
+  const handleSessionScopeChange = (tab: 'all' | 'favorite') => {
+    setSessionTab(tab);
+    if (tab === 'favorite') void onLoadFavorites(bot.botId);
+    if (!expanded) onToggleBotExpanded(bot.botId);
+  };
 
   return (
-    <div className={cn(isUnavailable && 'opacity-50')}>
+    <div>
       <div
         className={cn(
-          'group relative flex min-h-[72px] items-center gap-3 border-b border-transparent px-[18px] py-3 transition-colors',
-          expanded ? 'bg-primary/5' : 'bg-transparent hover:bg-accent/50',
+          'group relative flex min-h-16 items-center gap-3 px-4 py-2.5 transition-colors',
+          isCurrent || expanded ? 'bg-primary/5' : 'bg-background hover:bg-accent/50',
         )}
       >
-        {expanded && (
+        {(isCurrent || expanded) && (
           <span aria-hidden="true" className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-sm bg-primary" />
         )}
         <Button
           variant="ghost"
           aria-label={bot.chatable ? bot.displayName : '不可用 Bot'}
           aria-expanded={expanded}
+          aria-current={isCurrent ? 'page' : undefined}
           aria-disabled={isUnavailable}
           onClick={toggle}
           className={cn(
-            'flex h-auto min-w-0 flex-1 items-center justify-start gap-2.5 rounded-none px-0 py-1 text-left hover:bg-transparent',
+            'flex h-auto min-w-0 flex-1 items-center justify-start gap-3 rounded-none px-0 py-1 text-left hover:bg-transparent',
             isUnavailable && 'cursor-not-allowed',
           )}
         >
           <AvatarTile
             src={bot.avatarUrl}
             label={bot.displayName}
-            fallbackContent={<span className="text-[9px] font-semibold tracking-[0.08em]">BOT</span>}
+            fallbackContent={<span className="text-[10px] font-semibold tracking-[0.08em]">BOT</span>}
           />
           <div className="min-w-0 flex-1">
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="block truncate text-sm font-medium text-foreground">{bot.displayName}</span>
+                  <span className="block truncate text-sm font-semibold text-foreground">{bot.displayName}</span>
                 </TooltipTrigger>
                 <TooltipContent>{bot.chatable ? bot.displayName : '该 Bot 暂不支持单聊'}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <div className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground">
+            <div className="mt-1 flex min-w-0 items-center gap-1 truncate text-xs leading-4 text-muted-foreground">
               {(bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel) && (
                 <span className="shrink-0">
                   {bot.isAgentCodingBot ? bot.templateName || 'AgentCoding' : botEngineLabel}
@@ -139,63 +148,47 @@ export const BotItem = React.memo(function BotItem({
               )}
             </div>
           </div>
+          {bot.chatable && !bot.isAgentCodingBot && (
+            expanded ? (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            )
+          )}
         </Button>
         {bot.chatable && !bot.isAgentCodingBot && (
-          <IconButton
-            label="新建会话"
-            size="sm"
-            icon={<Plus className="h-4 w-4" />}
-            className="rounded-md"
-            onClick={(event) => {
-              event.stopPropagation();
-              onCreateSession(bot.botId);
-            }}
-          />
-        )}
-        {bot.chatable && (
-          <Popover>
-            <PopoverTrigger asChild>
-              <IconButton
-                label="Bot操作"
-                size="sm"
-                icon={<MoreHorizontal className="h-4 w-4" />}
-                className="rounded-md"
-                onClick={(event) => event.stopPropagation()}
-              />
-            </PopoverTrigger>
-            <PopoverContent align="end" className="w-40 p-1">
-              <Button
-                variant="ghost"
-                className="h-auto w-full justify-start gap-2 px-2 py-2 text-xs"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onManageBot?.(bot);
-                }}
-              >
-                <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-                管理 Bot
-              </Button>
-            </PopoverContent>
-          </Popover>
+          <>
+            <IconButton
+              label="新建会话"
+              size="sm"
+              icon={<Plus className="h-4 w-4" />}
+              className="rounded-md text-muted-foreground hover:bg-primary/10 hover:text-primary"
+              onClick={(event) => {
+                event.stopPropagation();
+                onCreateSession(bot.botId);
+              }}
+            />
+            <SessionScopeFilter
+              value={sessionTab}
+              onChange={handleSessionScopeChange}
+              allCount={allSessionMeta?.total}
+              favoriteCount={favoriteSessionMeta?.total}
+            />
+          </>
         )}
       </div>
 
       {expanded && bot.chatable && (
-        <div aria-label={`Bot会话列表：${bot.displayName}`} className="border-b border-border/60 bg-background">
-          <SessionToolbar
-            value={sessionTab}
-            onChange={(tab) => {
-              setSessionTab(tab);
-              if (tab === 'favorite') void onLoadFavorites(bot.botId);
-            }}
-            allCount={allSessionMeta?.total}
-            favoriteCount={favoriteSessionMeta?.total}
-          />
-          <div className="overflow-hidden border-b border-border/60 bg-background">
-            {sessionTab === 'all' && sessions === undefined ? (
+        <div aria-label={`Bot会话列表：${bot.displayName}`} className="border-t border-border/60 bg-background">
+          <div className="overflow-hidden bg-background">
+            {sessionTab === 'all' && allSessionMeta?.error ? (
+              <ListErrorState message={allSessionMeta.error} onRetry={() => void onReloadBot?.(bot.botId)} />
+            ) : sessionTab === 'favorite' && favoriteSessionMeta?.error ? (
+              <ListErrorState message={favoriteSessionMeta.error} onRetry={() => void onLoadFavorites(bot.botId)} />
+            ) : sessionTab === 'all' && sessions === undefined ? (
               <div>
                 {[1, 2, 3].map((i) => (
-                  <Skeleton.Block key={i} className="h-16 w-full rounded-none border-b border-border last:border-b-0" />
+                  <Skeleton.Block key={i} className="h-[60px] w-full rounded-none border-b border-border last:border-b-0" />
                 ))}
               </div>
             ) : sessionTab === 'favorite' && favoriteSessions === undefined ? (
@@ -225,7 +218,7 @@ export const BotItem = React.memo(function BotItem({
             )}
           </div>
           {((sessionTab === 'all' ? allSessionMeta : favoriteSessionMeta)?.hasMore ?? false) && (
-            <div className="flex justify-center border-b border-border/60 px-[18px] pb-1 pt-3">
+            <div className="flex justify-center border-t border-border/60 bg-muted/20 px-[18px] pb-2 pt-2">
               <Button
                 variant="ghost"
                 size="sm"
@@ -234,13 +227,19 @@ export const BotItem = React.memo(function BotItem({
                   event.stopPropagation();
                   void onLoadMoreSessions?.(bot.botId, sessionTab);
                 }}
-                className="h-8 rounded-none px-3 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                className="h-8 rounded-md border border-input bg-background px-3 text-xs text-foreground hover:bg-accent"
               >
                 {(sessionTab === 'all' ? allSessionMeta : favoriteSessionMeta)?.isLoadingMore
                   ? '正在加载…'
-                  : '加载更多'}
+                  : '加载更多会话'}
               </Button>
             </div>
+          )}
+          {(sessionTab === 'all' ? allSessionMeta : favoriteSessionMeta)?.loadMoreError && (
+            <ListErrorState
+              message={(sessionTab === 'all' ? allSessionMeta : favoriteSessionMeta)?.loadMoreError ?? ''}
+              onRetry={() => void onLoadMoreSessions?.(bot.botId, sessionTab)}
+            />
           )}
         </div>
       )}

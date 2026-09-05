@@ -513,7 +513,7 @@ describe('CollaborationSquareApiAdapter', () => {
     expect(result.map((bot) => bot.friendRequestBotId)).toEqual([undefined, undefined]);
   });
 
-  it('still enriches Discovery results with approved and pending Friend Connections', async () => {
+  it('enriches Discovery results with connected actors and pending Friend Connection requests', async () => {
     mockedDiscoverPublicBots.mockResolvedValue({
       code: 200000,
       data: {
@@ -563,9 +563,8 @@ describe('CollaborationSquareApiAdapter', () => {
       data: {
         items: [
           {
-            from_actor: { type: 'human', id: '327325' },
-            to_actor: { type: 'bot', id: 'bot-friend:e1' },
-            status: 'approved',
+            actor: { type: 'bot', id: 'bot-friend:e1' },
+            is_online: false,
           },
         ],
         total: 1,

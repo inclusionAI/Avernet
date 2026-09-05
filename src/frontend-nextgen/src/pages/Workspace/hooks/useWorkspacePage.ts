@@ -39,6 +39,15 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   // URL 残留 session= 导致反复切回用户身份。
   const isFirstUrlSyncRef = useRef(true);
 
+  // 挂载时一次性快照协作群外链参数。外链/邀请直达（session= 且无 bot=）才需要把身份切回用户；
+  // 用户后续手动点击协作群产生的 session= 属于内部选中，不应切身份，否则会把手动选中的 bot 身份切回用户。
+  const initialGroupUrlRef = useRef({
+    session: sessionParam,
+    bot: botParam,
+    group: groupParam,
+    membership: membershipParam,
+  });
+
   // view：以 store.view 为权威（身份切换/记忆恢复都写入 store）。URL 中的 tab=group
   // / group= 仅作为外链直达初始化（见下方 URL → store view effect）。
   const view: WorkspaceView = storeView;
@@ -93,32 +102,33 @@ export function useWorkspacePage(): UseWorkspacePageResult {
     // 协作群会话（协作广场跳转 / 邀请链接）：仅在首次挂载时执行一次，后续身份切换
     // 不应再触发——否则用户手动切到 bot 角色后，URL 残留的 session= 会导致反复切回
     // 用户身份（isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
-    if (isFirstUrlSyncRef.current && sessionParam && !botParam) {
+    const initialGroupUrl = initialGroupUrlRef.current;
+    if (isFirstUrlSyncRef.current && initialGroupUrl.session && !initialGroupUrl.bot) {
       isFirstUrlSyncRef.current = false;
       const store = useWorkspaceStore.getState();
       const me = store.identities.find((i) => i.kind === 'user');
       if (me && store.activeIdentityId !== me.id) store.setActiveIdentityId(me.id);
       const fresh = useWorkspaceStore.getState();
       fresh.setView('group');
-      if (membershipParam === 'session_only' || membershipParam === 'direct') {
-        useWorkspaceStore.getState().setMembership(membershipParam);
+      if (initialGroupUrl.membership === 'session_only' || initialGroupUrl.membership === 'direct') {
+        useWorkspaceStore.getState().setMembership(initialGroupUrl.membership);
       }
-      if (groupParam) {
-        fresh.selectGroup(groupParam);
-        ensureGroupExpanded(groupParam);
+      if (initialGroupUrl.group) {
+        fresh.selectGroup(initialGroupUrl.group);
+        ensureGroupExpanded(initialGroupUrl.group);
       } else {
         // 无 group 参数（邀请链接）：异步反查 groupId 后选中。
-        void sessionService.getSessionDetail(sessionParam).then((res) => {
+        void sessionService.getSessionDetail(initialGroupUrl.session).then((res) => {
           if (!res.ok) return;
           const s2 = useWorkspaceStore.getState();
           s2.selectGroup(res.data.groupId);
-          s2.selectSession(sessionParam);
+          s2.selectSession(initialGroupUrl.session);
           ensureGroupExpanded(res.data.groupId);
           s2.bumpHistoryRefresh();
         });
         return;
       }
-      fresh.selectSession(sessionParam);
+      fresh.selectSession(initialGroupUrl.session);
       fresh.bumpHistoryRefresh();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

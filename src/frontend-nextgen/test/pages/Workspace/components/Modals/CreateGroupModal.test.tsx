@@ -141,6 +141,22 @@ it('task_master_slave uses the selected manager as driver_bot_uuid', async () =>
   );
 });
 
+it('falls back to participant names when the bot identity creates a group without a name', async () => {
+  gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9' } });
+  renderModal({ activeIdentity: botIdentity });
+
+  fireEvent.click(await screen.findByRole('button', { name: /Alpha/ }));
+  fireEvent.click(screen.getByRole('button', { name: '确认创建' }));
+
+  await waitFor(() =>
+    expect(gs.createGroup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'Alpha、我 Bot',
+      }),
+    ),
+  );
+});
+
 it('leader options only contain the currently selected bots', async () => {
   renderModal({ activeIdentity: botIdentity });
   await screen.findByRole('button', { name: /Alpha/ });

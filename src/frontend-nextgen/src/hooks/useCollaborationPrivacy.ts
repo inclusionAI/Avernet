@@ -8,9 +8,13 @@ import type {
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { collaborationPrivacyService, type DirectSetting } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  buildDirectConfirmation,
+  directSettingLabel,
   errorMessage,
+  matchesBotIdentity,
   type Confirmation,
   type PublicationEditorState,
   type ScopeViewerState,
@@ -19,11 +23,14 @@ import {
 export function useCollaborationPrivacy() {
   const store = useCollaborationPrivacyStore();
   const { identity, status: identityStatus, error: identityError } = useHumanIdentity();
+  const activeIdentityId = useWorkspaceStore((state) => state.activeIdentityId);
+  const identityViews = useWorkspaceStore((state) => state.identities);
   const userId = identity?.userId.trim() || null;
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [publicationEditor, setPublicationEditor] = useState<PublicationEditorState | null>(null);
   const [scopeViewer, setScopeViewer] = useState<ScopeViewerState | null>(null);
   const [friendEditorBotId, setFriendEditorBotId] = useState<string | null>(null);
+  const previousActiveIdentityId = useRef(activeIdentityId);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -80,12 +87,6 @@ export function useCollaborationPrivacy() {
 
   const executeDirect = useCallback(
     (bot: CollaborationBot, setting: DirectSetting, value: Confirmation['value']) => {
-      const labels: Record<DirectSetting, string> = {
-        collaborationStatus: value === 'online' ? '已开启参与协作群聊' : '已停止参与协作群聊',
-        profilePublic: value ? '已公开 Bot 画像' : '已关闭 Bot 画像公开',
-        taskClaimingEnabled: value ? '已开启任务认领' : '已关闭任务认领',
-        dreamModelEnabled: value ? '已开启 Dream Model' : '已关闭 Dream Model',
-      };
       if (setting === 'taskClaimingEnabled') {
         return runBotAction(
           `${bot.id}:taskClaimingEnabled`,
@@ -93,13 +94,13 @@ export function useCollaborationPrivacy() {
             value
               ? collaborationPrivacyService.enableTaskClaim(bot.id)
               : collaborationPrivacyService.disableTaskClaim(bot.id),
-          labels[setting],
+          directSettingLabel(setting, value),
         );
       }
       return runBotAction(
         `${bot.id}:${setting}`,
         () => collaborationPrivacyService.updateDirectSetting({ botId: bot.id, setting, value }),
-        labels[setting],
+        directSettingLabel(setting, value),
       );
     },
     [runBotAction],
@@ -107,27 +108,9 @@ export function useCollaborationPrivacy() {
 
   const toggleDirect = useCallback(
     (bot: CollaborationBot, setting: DirectSetting, value: Confirmation['value']) => {
-      if (setting === 'collaborationStatus' || setting === 'profilePublic') {
-        const target =
-          setting === 'collaborationStatus'
-            ? value === 'online'
-              ? '允许参与协作群聊'
-              : '停止参与协作群聊'
-            : value
-            ? '公开 Bot 画像'
-            : '关闭 Bot 画像公开';
-        setConfirmation({
-          bot,
-          setting,
-          value,
-          title: `确认${target}？`,
-          description:
-            setting === 'collaborationStatus'
-              ? value === 'online'
-                ? `${bot.name} 开启后可加入新协作群，并在已加入的协作群会话中回复消息。好友单聊不受影响。`
-                : `${bot.name} 关闭后无法加入新协作群，并停止在已加入的协作群会话中回复消息。好友单聊不受影响。`
-              : `${bot.name} 的画像公开状态将影响发现、推荐与协作匹配。`,
-        });
+      const next = buildDirectConfirmation(bot, setting, value);
+      if (next) {
+        setConfirmation(next);
         return;
       }
       void executeDirect(bot, setting, value);
@@ -216,7 +199,22 @@ export function useCollaborationPrivacy() {
     () => store.overview?.bots.find((bot) => bot.id === scopeViewer?.botId),
     [scopeViewer?.botId, store.overview],
   );
-
+  const activeIdentity = useMemo(
+    () => identityViews.find((item) => item.id === activeIdentityId) ?? null,
+    [activeIdentityId, identityViews],
+  );
+  useEffect(() => {
+    if (previousActiveIdentityId.current === activeIdentityId) return;
+    previousActiveIdentityId.current = activeIdentityId;
+    setConfirmation(null);
+    setPublicationEditor(null);
+    setScopeViewer(null);
+    setFriendEditorBotId(null);
+  }, [activeIdentityId]);
+  const visibleBots = useMemo(() => {
+    if (activeIdentity?.kind !== 'bot' || !store.overview) return [];
+    return store.overview.bots.filter((bot) => matchesBotIdentity(bot.id, activeIdentity.id));
+  }, [activeIdentity, store.overview]);
   return {
     ...store,
     load,
@@ -226,6 +224,9 @@ export function useCollaborationPrivacy() {
     scopeViewer,
     scopeViewerBot,
     friendEditorBot,
+    activeIdentity,
+    showIdentityCard: activeIdentity?.kind !== 'bot',
+    visibleBots,
     refreshBot,
     toggleDirect,
     confirmDirect,

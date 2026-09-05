@@ -24,13 +24,13 @@ export const taskCardTextareaClass =
   'min-h-0 w-full p-1.5 rounded-lg border-blue-200 px-1.5 text-[11px] text-gray-700 resize-none focus-visible:border-blue-300 focus-visible:ring-2 focus-visible:ring-blue-300/50';
 
 export const taskCardDiscardBtnClass =
-  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-2 py-1.5 rounded-lg border border-red-200 text-red-500 text-[11px] font-medium hover:bg-red-50 hover:scale-105 active:scale-95 transition-all duration-300 leading-none';
+  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-1.5 py-1 rounded-lg border border-red-200 text-red-500 text-[11px] font-medium hover:bg-red-50 hover:scale-105 active:scale-95 transition-all duration-300 leading-none';
 
 export const taskCardSaveBtnClass =
-  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-2 py-1.5 rounded-lg border border-gray-200 text-gray-500 text-[11px] font-medium hover:bg-muted/50 hover:scale-105 active:scale-95 transition-all duration-300 leading-none';
+  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-1.5 py-1 rounded-lg border border-gray-200 text-gray-500 text-[11px] font-medium hover:bg-muted/50 hover:scale-105 active:scale-95 transition-all duration-300 leading-none';
 
 export const taskCardExecuteBtnClass =
-  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-2 py-1.5 rounded-lg bg-blue-500 text-white text-[11px] font-medium hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all duration-300 shadow-sm leading-none border-transparent';
+  'flex-1 inline-flex items-center justify-center gap-0.5 h-auto px-1.5 py-1 rounded-lg bg-blue-500 text-white text-[11px] font-medium hover:bg-blue-600 hover:scale-105 active:scale-95 transition-all duration-300 shadow-sm leading-none border-transparent';
 
 /** 编辑态「确认 / 取消」二按组合。 */
 export function EditFieldControls({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {

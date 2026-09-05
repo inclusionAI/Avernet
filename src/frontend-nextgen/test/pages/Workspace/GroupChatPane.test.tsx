@@ -10,6 +10,7 @@ import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
 
 // Stub SDK UI primitives: tests focus on GroupChatPane header/empty dispatch + Sender presence,
 // not on SDK bubble/markdown rendering. Stubs avoid pulling ESM @tc-chat/ui into jsdom.
@@ -136,26 +137,28 @@ function makeChat(overrides: Partial<Record<string, unknown>> = {}) {
 function renderPane(overrides: Partial<React.ComponentProps<typeof GroupChatPane>> = {}) {
   const { panelRef, ...rest } = overrides;
   return render(
-    <GroupChatPane
-      group={group}
-      session={session}
-      chat={makeChat()}
-      supportState={supportState}
-      connectionStatus="connected"
-      send={() => {}}
-      submitPanelMessage={() => {}}
-      stop={() => {}}
-      reconnect={() => {}}
-      reloadHistory={() => {}}
-      canManageGroup={{ allowed: false }}
-      activePanel="none"
-      onTogglePanel={() => {}}
-      onRequestDissolve={() => {}}
-      onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
-      onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
-      panelRef={panelRef ?? React.createRef<PanelHandle>()}
-      {...rest}
-    />,
+    <MemoryRouter>
+      <GroupChatPane
+        group={group}
+        session={session}
+        chat={makeChat()}
+        supportState={supportState}
+        connectionStatus="connected"
+        send={() => {}}
+        submitPanelMessage={() => {}}
+        stop={() => {}}
+        reconnect={() => {}}
+        reloadHistory={() => {}}
+        canManageGroup={{ allowed: false }}
+        activePanel="none"
+        onTogglePanel={() => {}}
+        onRequestDissolve={() => {}}
+        onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
+        onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
+        panelRef={panelRef ?? React.createRef<PanelHandle>()}
+        {...rest}
+      />
+    </MemoryRouter>,
   );
 }
 

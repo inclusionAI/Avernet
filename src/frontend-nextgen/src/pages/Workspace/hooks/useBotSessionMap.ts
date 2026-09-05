@@ -5,31 +5,9 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectSessionFallback } from './useDirectSessionFallback';
 
-export interface BotSessionPageMeta {
-  total: number;
-  hasMore: boolean;
-  nextPage: number;
-  isLoadingMore: boolean;
-}
-
-export interface UseBotSessionMapResult {
-  rawByBotId: Record<string, BotChatSessionView[]>;
-  favoriteByBotId: Record<string, BotChatSessionView[]>;
-  pageMetaByBotId: Record<string, BotSessionPageMeta>;
-  favoritePageMetaByBotId: Record<string, BotSessionPageMeta>;
-  isLoading: boolean;
-  updateBotSessions: (botId: string, fn: (list: BotChatSessionView[]) => BotChatSessionView[]) => void;
-  updateBotFavoriteSessions: (botId: string, fn: (list: BotChatSessionView[]) => BotChatSessionView[]) => void;
-  reloadBot: (bot: ChatBotView, userId: string) => Promise<void>;
-  loadFavoriteSessions: (bot: ChatBotView, userId: string) => Promise<void>;
-  loadMoreSessions: (bot: ChatBotView, userId: string, mode: 'all' | 'favorite') => Promise<void>;
-  /** 按 section 展开 bot，记录归属 section 并懒加载会话。 */
-  toggleBotExpanded: (botId: string, sectionKey?: string) => void;
-}
-
-function hasMoreForPage(itemCount: number, total: number, page: number): boolean {
-  return itemCount > 0 && page * BOT_SESSION_PAGE_SIZE < total;
-}
+import { hasMoreForPage, errorBotPageMeta, successBotPageMeta } from './useBotSessionMap.utils';
+import type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
+export type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
 
 /** 以 botId 键控缓存各 bot 会话；首屏及追加均使用 10 条，身份切换清缓存。 */
 export function useBotSessionMap(
@@ -78,12 +56,12 @@ export function useBotSessionMap(
           setRawByBotId((current) => ({ ...current, [key]: res.data.items }));
           setPageMetaByBotId((current) => ({
             ...current,
-            [key]: {
-              total: res.data.total,
-              hasMore: hasMoreForPage(res.data.items.length, res.data.total, 1),
-              nextPage: 2,
-              isLoadingMore: false,
-            },
+            [key]: successBotPageMeta(res.data.total, hasMoreForPage(res.data.items.length, res.data.total, 1), 2),
+          }));
+        } else {
+          setPageMetaByBotId((current) => ({
+            ...current,
+            [key]: errorBotPageMeta(current[key], res.error.friendlyMessage),
           }));
         }
       } finally {
@@ -151,7 +129,20 @@ export function useBotSessionMap(
       syncLoadingState();
       try {
         const res = await botSessionService.listFavoriteSessionsPage(bot, userId, 1, BOT_SESSION_PAGE_SIZE);
-        if (generation !== generationRef.current || !res.ok) return;
+        if (generation !== generationRef.current) return;
+        if (!res.ok) {
+          setFavoritePageMetaByBotId((current) => ({
+            ...current,
+            [key]: {
+              total: current[key]?.total ?? 0,
+              hasMore: false,
+              nextPage: current[key]?.nextPage ?? 1,
+              isLoadingMore: false,
+              error: res.error.friendlyMessage,
+            },
+          }));
+          return;
+        }
         setFavoriteByBotId((current) => ({ ...current, [key]: res.data.items }));
         setFavoritePageMetaByBotId((current) => ({
           ...current,
@@ -160,6 +151,8 @@ export function useBotSessionMap(
             hasMore: hasMoreForPage(res.data.items.length, res.data.total, 1),
             nextPage: 2,
             isLoadingMore: false,
+            error: undefined,
+            loadMoreError: undefined,
           },
         }));
         const favoriteIds = new Set(res.data.items.map((session) => session.sessionId));
@@ -203,20 +196,21 @@ export function useBotSessionMap(
           }
           setMeta((current) => ({
             ...current,
-            [key]: {
-              total: res.data.total,
-              hasMore: hasMoreForPage(res.data.items.length, res.data.total, meta.nextPage),
-              nextPage: meta.nextPage + 1,
-              isLoadingMore: false,
-            },
+            [key]: successBotPageMeta(res.data.total, hasMoreForPage(res.data.items.length, res.data.total, meta.nextPage), meta.nextPage + 1),
           }));
           if (mode === 'favorite') favoriteLoadedRef.current.add(key);
         } else {
-          setMeta((current) => ({ ...current, [key]: { ...current[key], isLoadingMore: false } }));
+          setMeta((current) => ({
+            ...current,
+            [key]: { ...current[key], isLoadingMore: false, loadMoreError: res.error.friendlyMessage },
+          }));
         }
       } catch {
         if (generation === generationRef.current)
-          setMeta((current) => ({ ...current, [key]: { ...current[key], isLoadingMore: false } }));
+          setMeta((current) => ({
+            ...current,
+            [key]: { ...current[key], isLoadingMore: false, loadMoreError: '加载更多会话失败，请重试' },
+          }));
       } finally {
         inFlightRef.current.delete(requestKey);
         syncLoadingState();

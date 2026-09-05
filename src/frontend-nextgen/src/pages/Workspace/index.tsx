@@ -83,6 +83,7 @@ const WorkspacePage: React.FC = () => {
     submitPanelMessage: workspace.submitPanelMessage,
     appendAssistantMessage: workspace.appendAssistantMessage,
     streamAssistantMessage: workspace.streamAssistantMessage,
+    onOpenCollaborationPermissions: openCollaborationPermissions,
   });
   const taskComposerDisabledReason = !taskComposerContext && !workspace.isTestUser ? '请先选择一个 Bot 会话' : null;
   const handleSend = useComposerSend(taskExecution, {
@@ -184,9 +185,6 @@ const WorkspacePage: React.FC = () => {
           onMobileListClose={() => setMobileListOpen(false)}
           onOpenCreateGroup={() => setCreateGroupOpen(true)}
           onOpenAddFriend={() => setAddFriendOpen(true)}
-          onOpenPermissions={openCollaborationPermissions}
-          userAvatarUrl={workspace.currentUserAvatarUrl}
-          onManageBot={(bot) => navigate(`/bot-workshop/detail?type=view&id=${encodeURIComponent(bot.realBotId)}`)}
           onOpenBotWorkshop={() => navigate('/bot-workshop')}
         />
         {workspace.selectedAgentCodingBot ? (
@@ -250,10 +248,6 @@ const WorkspacePage: React.FC = () => {
             view={view}
             onViewChange={setView}
             availableViews={availableViews}
-            identities={workspace.identities}
-            activeIdentityId={workspace.activeIdentityId}
-            onChangeIdentity={workspace.setActiveIdentityId}
-            onOpenPermissions={openCollaborationPermissions}
             userAvatarUrl={workspace.currentUserAvatarUrl}
             userIdentityId={workspace.activeIdentityId}
             onAddFriend={() => setAddFriendOpen(true)}
