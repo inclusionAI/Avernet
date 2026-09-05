@@ -294,3 +294,41 @@ def test_rule_dispatch_single_candidate_keeps_hit_after_40_percent_threshold(mon
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id in set(RULE_POOL)
+
+
+def test_load_rule_test_pool_returns_claim_enabled_bot_ids():
+    """``_load_rule_test_pool`` 动态取 task_claim_mode=true & visibility=public 的 product:owner。"""
+    bcn = _Bcn([{"bot_id": "A:Ao"}, {"bot_id": "B:Bo"}])
+
+    pool = _run(_strat(bcn)._load_rule_test_pool())
+
+    assert pool == ["A:Ao", "B:Bo"]
+    assert bcn.call_args[-1] == {
+        "claim": True,
+        "dream": None,
+        "match": "all",
+        "visibility": "public",
+    }
+
+
+def test_load_rule_test_pool_empty_when_bcn_missing():
+    """bcn 未注入(stub/测试) → 空池,由 _rule_based_search_result 兜底。"""
+    assert _run(_strat(None)._load_rule_test_pool()) == []
+
+
+def test_load_rule_test_pool_empty_on_roster_failure():
+    """BCS roster 取异常 → best-effort 空池,不阻断派发。"""
+    bcn = _Bcn(exc=RuntimeError("roster down"))
+
+    assert _run(_strat(bcn)._load_rule_test_pool()) == []
+
+
+def test_rule_based_search_result_empty_pool_degrades_to_miss():
+    """claim 池为空(无 claim+public bot) → MISS(no_claim_pool),不产出空协作群。"""
+    result = _rule_based_search_result(
+        [{"bot_id": "candidate-a"}, {"bot_id": "candidate-b"}], []
+    )
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_claim_pool"
+    assert result.group_formation is None
