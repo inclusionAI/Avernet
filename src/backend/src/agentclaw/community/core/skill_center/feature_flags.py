@@ -15,6 +15,9 @@ class SkillCenterFlags:
     symlink_verify_auto_fix: bool
     write_skill_uuid: bool  # 双写控制，不关
     space_skill_enabled: bool = False
+    # Migration gate for Installation backfill.  It remains false until the
+    # operator has completed and accepted the environment backfill.
+    installation_default_sync_only: bool = False
 
     @classmethod
     def from_env(cls) -> "SkillCenterFlags":
@@ -26,6 +29,10 @@ class SkillCenterFlags:
             symlink_verify_auto_fix=os.environ.get("SC_SYMLINK_AUTO_FIX", "false").lower() == "true",
             write_skill_uuid=os.environ.get("SC_WRITE_SKILL_UUID", "true").lower() == "true",
             space_skill_enabled=os.environ.get("SC_SPACE_SKILL_ENABLED", "false").lower() == "true",
+            installation_default_sync_only=(
+                os.environ.get("SC_INSTALLATION_DEFAULT_SYNC_ONLY", "false").lower()
+                == "true"
+            ),
         )
 
     def any_blocking_enabled(self) -> bool:

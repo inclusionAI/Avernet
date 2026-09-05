@@ -19,15 +19,18 @@ class TestSkillCenterFlags:
     def test_from_env_reads_env_vars(self):
         os.environ["SC_NAS_SYNC_ENABLED"] = "true"
         os.environ["SC_PROPAGATION_ENABLED"] = "true"
+        os.environ["SC_INSTALLATION_DEFAULT_SYNC_ONLY"] = "true"
         try:
             flags = SkillCenterFlags.from_env()
             assert flags.nas_sync_enabled is True
             assert flags.propagation_enabled is True
             assert flags.center_uri_enabled is False
             assert flags.space_skill_enabled is False
+            assert flags.installation_default_sync_only is True
         finally:
             del os.environ["SC_NAS_SYNC_ENABLED"]
             del os.environ["SC_PROPAGATION_ENABLED"]
+            del os.environ["SC_INSTALLATION_DEFAULT_SYNC_ONLY"]
 
     def test_any_blocking_enabled_true_when_any_flag_on(self):
         flags = SkillCenterFlags(

@@ -16,19 +16,38 @@ if TYPE_CHECKING:
 class BotCapabilityStateReaderProtocol(Protocol):
     """The one read model for a Bot's active capabilities.
 
-    Installation is the active-identity source of truth; the tables are not
-    backfilled, so every read first flushes SkillSet configuration into
-    Installation, then answers from Installation alone. Center identities are
-    resolved to an exact PUBLISHED Version before they leave this seam. The
-    reader never triggers a runtime projection.
+    Installation is the active-identity source of truth.  The configured
+    migration mode materializes either full legacy SkillSet state or only the
+    applicable Default+exclusion state before effective reads.  The reader
+    never triggers a runtime projection.
     """
 
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
-        """Flush, then answer which Skills the Bot's Sets bring to it.
+        """Read which Skills the Bot's Sets bring to it, without a flush.
 
         The listing filter needs this half of the flush plan: a bridged
         Skill belongs on the page even though only a Set ties it to the Bot.
         """
+        ...
+
+    def initialize_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Initialize a newly persisted Bot's Installation rows without Runtime I/O."""
+        ...
+
+    def synchronize_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Materialize the configured reader scope before an effective read."""
         ...
 
     def active_skill_assets(

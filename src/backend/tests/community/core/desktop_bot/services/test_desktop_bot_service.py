@@ -350,6 +350,51 @@ class TestCreate:
         )
         assert bot_insert_call["ext"]["desktop_template_uuid"] == "desk-tpl-001"
 
+    def test_desktop_create_initializes_installations_after_the_local_insert(self):
+        service, mocks = _make_service_with_mocks()
+        mocks["passport"].query_agent_passport.return_value = {"agent_code": "ac-1"}
+        mocks["baas"].post_bots_api.return_value = {"bot_uuid": "bu-1"}
+        mocks["binding_repo"].insert_binding.return_value = 20
+
+        service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_003", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        mocks["skill_set_factory"].initialize_installations.assert_called_once_with(
+            bot_id="desktop_bot_003", owner_id="u001"
+        )
+
+    def test_desktop_create_retry_repairs_installations_without_a_second_baas_create(self):
+        service, mocks = _make_service_with_mocks()
+        existing = {
+            "bot_id": "desktop_bot_retry",
+            "owner_id": "u001",
+            "device_id": "bu-existing",
+            "binding_id": 20,
+            "ext": {"passport": {"agent_code": "ac-existing"}},
+        }
+        mocks["bot_repo"].get_by_id_and_owner.return_value = existing
+
+        result = service.create_after_authorization(
+            bot={"bot_id": "desktop_bot_retry", "bot_name": "Desktop"},
+            user_id="u001",
+            machine_id="m-002",
+        )
+
+        assert result == {
+            "bot_uuid": "bu-existing",
+            "binding_id": 20,
+            "bot_id": "desktop_bot_retry",
+            "agent_code": "ac-existing",
+        }
+        mocks["skill_set_factory"].initialize_installations.assert_called_once_with(
+            bot_id="desktop_bot_retry", owner_id="u001", bot=existing
+        )
+        mocks["baas"].post_bots_api.assert_not_called()
+        mocks["passport"].query_agent_passport.assert_not_called()
+
     def test_create_continue_with_custom_mount_path(self):
         service, mocks = _make_service_with_mocks()
         mocks["passport"].query_agent_passport.return_value = {
