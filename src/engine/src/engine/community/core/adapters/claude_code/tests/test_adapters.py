@@ -9,7 +9,6 @@ Mirrors the structure of ``core/adapters/openclaw/tests/``.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -61,13 +60,8 @@ from engine.community.kernel.frames import EventFrame, ResponseFrame
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-@dataclass
-class _FakeAuth:
-    token: str | None = None
-
-
-def _auth(token: str | None = None) -> AuthContext:
-    return _FakeAuth(token=token)  # type: ignore[return-value]
+def _auth(token: str | None = None, user_id: str | None = "u1") -> AuthContext:
+    return AuthContext(token=token, user_id=user_id)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -84,10 +78,12 @@ class _FakeSessionPort:
 
     async def sessions_list(
         self, token=None, offset=0, limit=50, agent_id=None, session_key=None,
+        source=None, actor_user_id=None,
     ) -> list[dict]:
         self.calls.append({
             "method": "sessions_list", "token": token, "offset": offset,
             "limit": limit, "agent_id": agent_id, "session_key": session_key,
+            "source": source, "actor_user_id": actor_user_id,
         })
         return self._sessions
 
@@ -162,9 +158,12 @@ class TestSessionAdapter:
     def test_parse_session_key_short_form_returns_none(self):
         assert _parse_session_key("session:uuid-only") == (None, None)
 
+    def test_parse_session_key_without_agent_recovers_trailing_user(self):
+        assert _parse_session_key("session:uuid-only:user:u1") == ("u1", None)
+
     def test_relay_session_to_session_builds_dto(self):
         raw = _make_raw_session()
-        s = _relay_session_to_session(raw, user_id="default")
+        s = _relay_session_to_session(raw)
         assert s.id == raw["key"]
         assert s.agent_id == "bot1"
         assert s.user_id == "u1"
@@ -213,6 +212,29 @@ class TestSessionAdapter:
         assert port.calls[0]["token"] == "tok-1"
         assert port.calls[0]["agent_id"] == "b1"
         assert port.calls[0]["limit"] == 10
+
+    async def test_list_source_requires_actor_without_trusting_request_user(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        with pytest.raises(PermissionError, match="actor"):
+            await adapter.list(
+                SessionListRequest(user_id="u1", source="all_but_others"),
+            )
+
+        assert port.calls == []
+
+    async def test_list_forwards_source_and_trusted_actor_to_port(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        await adapter.list(
+            SessionListRequest(user_id="trusted-user", source="all_but_others"),
+            auth=_auth(user_id="trusted-user"),
+        )
+
+        assert port.calls[0]["source"] == "all_but_others"
+        assert port.calls[0]["actor_user_id"] == "trusted-user"
 
     async def test_list_forwards_session_key_to_port(self):
         port = _FakeSessionPort()
@@ -264,6 +286,42 @@ class TestSessionAdapter:
         assert port.calls[0]["method"] == "session_create"
         assert port.calls[0]["token"] == "tok-2"
         assert port.calls[0]["model"] == "m1"
+
+    async def test_create_without_agent_builds_user_scoped_key(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        session = await adapter.create(
+            SessionCreateRequest(user_id=None, uuid="fixed-uuid"),
+            auth=_auth(user_id="u1"),
+        )
+
+        assert session.id == "session:fixed-uuid:user:u1"
+        assert session.user_id == "u1"
+        assert port.calls[0]["key"] == "session:fixed-uuid:user:u1"
+
+    async def test_create_requires_authenticated_actor(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        with pytest.raises(PermissionError, match="actor"):
+            await adapter.create(
+                SessionCreateRequest(user_id=None), auth=AuthContext()
+            )
+
+        assert port.calls == []
+
+    async def test_create_rejects_user_id_mismatch_before_port(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        with pytest.raises(PermissionError, match="match"):
+            await adapter.create(
+                SessionCreateRequest(user_id="body-user"),
+                auth=AuthContext(user_id="actor-user"),
+            )
+
+        assert port.calls == []
 
     async def test_delete_delegates(self):
         port = _FakeSessionPort()

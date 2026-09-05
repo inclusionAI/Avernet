@@ -18,7 +18,7 @@ class Session(BaseModel):
     id: str
     key: str
     agent_id: str | None = None
-    user_id: str
+    user_id: str | None = None
     title: str | None = None
     status: Literal["active", "archived", "closed"] = "active"
     created_at: datetime
@@ -54,7 +54,7 @@ class SessionListRequest(BaseModel):
     user_id: str | None = None
     agent_id: str | None = None
     session_key: str | None = None
-    source: str | None = None
+    source: Literal["all_but_others"] | None = None
     status: Literal["active", "archived", "all"] = "active"
     limit: int = 20
     offset: int = 0
@@ -62,7 +62,7 @@ class SessionListRequest(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     title: str | None = None
-    user_id: str = "default"
+    user_id: str | None = None
     agent_id: str | None = None
     model: str | None = None
     runtime: str | None = None

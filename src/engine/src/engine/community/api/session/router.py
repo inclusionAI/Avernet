@@ -8,15 +8,22 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
+import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Literal, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from engine.community.api.caps import check_capability
 from engine.community.api.response import ApiResponse
 from engine.community.api.session.schemas import CreateSessionBody
 from engine.community.core.engine.capability import Capability
+from engine.community.core.engine.exceptions import SessionActorError
+from engine.community.core.engine.context import (
+    AUTHENTICATED_PRINCIPAL_SCOPE_KEY,
+    AuthContext,
+    AuthenticatedPrincipal,
+)
 from engine.community.core.session.models import (
     SessionClearRequest,
     SessionCreateRequest,
@@ -35,6 +42,69 @@ from engine.community.shared.utils import (
 log = logging.getLogger("web-sessions")
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+def _auth_context_from_request(request: Request) -> AuthContext:
+    principal = request.scope.get(AUTHENTICATED_PRINCIPAL_SCOPE_KEY)
+    if not isinstance(principal, AuthenticatedPrincipal):
+        return AuthContext()
+    return AuthContext(token=principal.token, user_id=principal.user_id)
+
+
+def require_session_actor(
+    request: Request, requested_user_id: str | None,
+    *, operation: Literal["list", "create"], started_at: float | None = None,
+) -> AuthContext:
+    """Resolve the trusted actor and reject absent or mismatched identities."""
+    auth = _auth_context_from_request(request)
+    actor_user_id = auth.user_id
+    if not isinstance(actor_user_id, str) or not actor_user_id.strip():
+        log.warning(
+            "event=engine.sessions.%s.denied operation=%s reason=missing_actor "
+            "status=401 requested_user_present=%s duration_ms=%.3f",
+            operation,
+            operation,
+            requested_user_id is not None,
+            (time.monotonic() - started_at) * 1000
+            if started_at is not None else 0.0,
+        )
+        raise HTTPException(status_code=401, detail="Session authentication required")
+    if requested_user_id is not None and requested_user_id != actor_user_id:
+        log.warning(
+            "event=engine.sessions.%s.denied operation=%s "
+            "reason=identity_mismatch status=403 requested_user_present=true "
+            "duration_ms=%.3f",
+            operation,
+            operation,
+            (time.monotonic() - started_at) * 1000
+            if started_at is not None else 0.0,
+        )
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return auth
+
+
+def _session_actor_http_error(
+    operation: Literal["list", "create"],
+    error: SessionActorError | PermissionError,
+    started_at: float,
+) -> HTTPException:
+    if isinstance(error, SessionActorError):
+        reason = error.reason
+        status_code = error.status_code
+    else:
+        reason = "actor_unavailable"
+        status_code = 401
+    log.warning(
+        "event=engine.sessions.%s.denied operation=%s reason=%s status=%s "
+        "duration_ms=%.3f",
+        operation,
+        operation,
+        reason,
+        status_code,
+        (time.monotonic() - started_at) * 1000,
+    )
+    detail = "Forbidden" if status_code == 403 else "Session authentication required"
+    return HTTPException(status_code=status_code, detail=detail)
 
 
 def _get_session_api(engine: Optional[str] = None):
@@ -138,42 +208,102 @@ def _message_to_dict(msg) -> Dict:
 
 @router.get("")
 async def list_sessions(
+    request: Request,
     user_id: Optional[str] = None,
     agent_id: Optional[str] = None,
     session_key: str | None = None,
-    source: str | None = None,
+    source: Literal["all_but_others"] | None = None,
     limit: int = 20,
     offset: int = 0,
     engine: Optional[str] = None,
 ) -> ApiResponse:
-    log.info(f"[list_sessions] 收到请求: user_id={user_id}, agent_id={agent_id}, limit={limit}, offset={offset}, engine={engine}")
+    started_at = time.monotonic()
+    legacy_unauthenticated = source is None and user_id is None
+    auth = None if legacy_unauthenticated else require_session_actor(
+        request, user_id, operation="list", started_at=started_at
+    )
+    actor_user_id = auth.user_id if auth is not None else None
+    actor_present = bool(
+        auth is not None and isinstance(auth.user_id, str) and auth.user_id.strip()
+    )
+    log.info(
+        "event=engine.sessions.list.request system=engine direction=inbound "
+        "operation=sessions.list method=GET route=/api/sessions "
+        "source=%s actor_present=%s requested_user_present=%s offset=%s limit=%s "
+        "duration_ms=%.3f",
+        source,
+        str(actor_present).lower(),
+        user_id is not None,
+        offset,
+        limit,
+        (time.monotonic() - started_at) * 1000,
+    )
     warning = check_capability(Capability.SESSION_LIST)
     try:
         api = _get_session_api(engine)
-        sessions = await api.list(SessionListRequest(
-            user_id=user_id,
+        session_request = SessionListRequest(
+            user_id=actor_user_id,
             agent_id=agent_id,
             session_key=session_key,
             source=source,
             limit=limit,
             offset=offset,
-        ))
-        log.info(f"[list_sessions] 查询完成, 返回 {len(sessions)} 条会话")
+        )
+        if auth is None:
+            sessions = await api.list(session_request)
+        else:
+            sessions = await api.list(session_request, auth=auth)
+        log.info(
+            "event=engine.sessions.list.success operation=sessions.list status=200 "
+            "returned_count=%s source=%s actor_present=%s duration_ms=%.3f",
+            len(sessions),
+            source,
+            str(actor_present).lower(),
+            (time.monotonic() - started_at) * 1000,
+        )
         return ApiResponse(
             success=True,
             data=[_session_to_dict(s) for s in sessions],
             warning=warning,
         )
     except (ConnectionError, TimeoutError) as e:
-        log.error(f"[list_sessions] gateway unavailable: {e}", exc_info=True)
+        log.error(
+            "event=engine.sessions.list.failure operation=sessions.list status=503 "
+            "reason=gateway_unavailable error_type=%s duration_ms=%.3f",
+            type(e).__name__,
+            (time.monotonic() - started_at) * 1000,
+        )
         raise HTTPException(status_code=503, detail="Session gateway unavailable") from e
+    except SessionActorError as e:
+        raise _session_actor_http_error("list", e, started_at) from e
+    except PermissionError as e:
+        raise _session_actor_http_error("list", e, started_at) from e
     except Exception as e:
-        log.error(f"[list_sessions] 执行异常: {e}", exc_info=True)
+        log.error(
+            "event=engine.sessions.list.failure operation=sessions.list status=500 "
+            "reason=unexpected error_type=%s duration_ms=%.3f",
+            type(e).__name__,
+            (time.monotonic() - started_at) * 1000,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("")
-async def create_session(body: CreateSessionBody) -> ApiResponse:
+async def create_session(request: Request, body: CreateSessionBody) -> ApiResponse:
+    started_at = time.monotonic()
+    auth = require_session_actor(
+        request, body.user_id, operation="create", started_at=started_at
+    )
+    actor_user_id = auth.user_id
+    log.info(
+        "event=engine.sessions.create.request system=engine direction=inbound "
+        "operation=sessions.create method=POST route=/api/sessions "
+        "actor_present=%s requested_user_present=%s agent_present=%s duration_ms=%.3f",
+        str(auth.user_id is not None).lower(),
+        body.user_id is not None,
+        body.agent_id is not None,
+        (time.monotonic() - started_at) * 1000,
+    )
     warning = check_capability(Capability.SESSION_CREATE)
     # Outside the try: this route's ``except Exception`` maps everything to 500,
     # which would turn a rejected cwd into a server error instead of a 400.
@@ -184,19 +314,33 @@ async def create_session(body: CreateSessionBody) -> ApiResponse:
         raise HTTPException(status_code=400, detail=str(e)) from e
     try:
         api = _get_session_api(body.engine)
-        log.info(f"[create_session] 收到请求: title={body.title}, user_id={body.user_id}, agent_id={body.agent_id}, model={body.model}, runtime={body.runtime}, cwd={body.cwd}, engine={body.engine}, uuid={body.uuid}")
         session = await api.create(SessionCreateRequest(
-            title=body.title, user_id=body.user_id or "default", agent_id=body.agent_id, model=body.model,
+            title=body.title, user_id=actor_user_id, agent_id=body.agent_id, model=body.model,
             runtime=body.runtime,
             cwd=cwd,
             uuid=body.uuid,
             extInfo=body.extInfo,
             payload=body.payload,
-        ))
-        log.info(f"[create_session] 创建成功: session_id={session.id}")
+        ), auth=auth)
+        log.info(
+            "event=engine.sessions.create.success operation=sessions.create status=200 "
+            "actor_present=%s generated_key_format=%s duration_ms=%.3f",
+            str(auth.user_id is not None).lower(),
+            "agent_user" if body.agent_id else "session_user",
+            (time.monotonic() - started_at) * 1000,
+        )
         return ApiResponse(success=True, data=_session_to_dict(session), warning=warning)
+    except SessionActorError as e:
+        raise _session_actor_http_error("create", e, started_at) from e
+    except PermissionError as e:
+        raise _session_actor_http_error("create", e, started_at) from e
     except Exception as e:
-        log.error(f"[create_session] 执行异常: {e}", exc_info=True)
+        log.error(
+            "event=engine.sessions.create.failure operation=sessions.create status=500 "
+            "reason=unexpected error_type=%s duration_ms=%.3f",
+            type(e).__name__,
+            (time.monotonic() - started_at) * 1000,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
