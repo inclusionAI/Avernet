@@ -23,15 +23,6 @@
 /src/evolverun/ @archer910517-ctrl @wienyang @fudp @shanzong @ZhaosenLin
 
 # Task goal-driven execution framework — dedicated owners.
-# These rules override the /src/backend/ fallback above for the
-# task goal-driven execution framework code paths.
-/src/backend/src/agentclaw/community/adapters/http/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/api/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/adapters/http/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/api/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/core/task/ @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/di/modules/task_*.py                      @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/core/repository/protocols/task.py        @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/specs/*task*/                                                    @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/tests/community/repository/task/                                @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/**/task*.py @totalfrank @regrecall @msjbear @jiangj0627

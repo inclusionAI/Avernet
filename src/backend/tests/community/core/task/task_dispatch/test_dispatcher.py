@@ -34,6 +34,18 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+class _ClaimBcn:
+    """Fake BcnService: 返回 task_claim_mode=true & visibility=public 的 product:owner 池,供 rule 派发。"""
+
+    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any", visibility=None):
+        return [
+            {"bot_id": "rule-a:1"},
+            {"bot_id": "rule-b:2"},
+            {"bot_id": "rule-c:3"},
+            {"bot_id": "rule-d:4"},
+        ]
+
+
 def _task_info(task_id: str = "t1") -> TaskInfo:
     return TaskInfo(
         task_spec=TaskSpec(
@@ -211,7 +223,7 @@ def test_search_strategy_default_rule_samples_one_test_bot_for_one_or_two_candid
         "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
         lambda population, count: sampled[:count],
     )
-    result = _run(SearchBasedDispatchStrategy(bot, _Discover()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(bot, _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "default:146836"
@@ -247,7 +259,7 @@ def test_search_strategy_default_rule_samples_all_count_as_manager_worker_for_mo
         "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
         lambda population, count: sampled[:count],
     )
-    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover()).apply(_node("c1"), graph))
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation is not None

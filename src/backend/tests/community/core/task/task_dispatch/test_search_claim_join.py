@@ -35,9 +35,20 @@ class _Bcn:
     def __init__(self, entries=None, exc=None) -> None:
         self._entries, self._exc = entries, exc
         self.calls = 0
+        self.call_args = []
 
-    def list_bots_by_task_modes(self, *, claim=None, dream=None, match="any"):
+    def list_bots_by_task_modes(
+        self, *, claim=None, dream=None, match="any", visibility=None
+    ):
         self.calls += 1
+        self.call_args.append(
+            {
+                "claim": claim,
+                "dream": dream,
+                "match": match,
+                "visibility": visibility,
+            }
+        )
         if self._exc is not None:
             raise self._exc
         return self._entries or []
@@ -50,6 +61,10 @@ CANDS = [
     {"bot_id": "B", "bot_name": "BN", "owner_id": "Bo", "owner_name": "BON"},
     {"bot_id": "X", "bot_name": "XN", "owner_id": "Xo", "owner_name": "XON"},
 ]
+
+# Rule 模式动态 claim 池(模拟 ``task_claim_mode=true & visibility=public`` 的 product:owner 名单)。
+RULE_POOL = ["rule-a:1", "rule-b:2", "rule-c:3", "rule-d:4"]
+
 
 
 def _single(bot_id):
@@ -73,6 +88,20 @@ def _group(gid):
 
 def _strat(bcn=None, gate=None):
     return SearchBasedDispatchStrategy(bcn=bcn, join_gate=gate)
+
+
+def test_join_on_queries_claim_enabled_public_bots_with_all_match():
+    b = _Bcn(CLAIM_ON)
+    r = _run(_strat(b, _Gate(True))._apply_claim_join(_single("A"), CANDS))
+    assert r.outcome == SearchOutcome.HIT_SINGLE and r.bot_id == "A"
+    assert b.call_args == [
+        {
+            "claim": True,
+            "dream": None,
+            "match": "all",
+            "visibility": "public",
+        }
+    ]
 
 
 def test_join_on_single_in_keeps():
@@ -117,7 +146,7 @@ def test_join_on_multi_none_in_miss():
 
 
 def test_join_on_single_out_rule_pool_owner_from_suffix():
-    """规则派发(``_RULE_TEST_BOT_POOL`` 的 ``product:owner``)bot 不在 prefetch 候选内时,
+    """规则派发(动态 claim 池的 ``product:owner``)bot 不在 prefetch 候选内时,
     unauthorized_bots 的 owner_user_id 从 bot_id 的 ``:owner`` 后缀解析,不再落空串。"""
     r = _run(
         _strat(_Bcn(CLAIM_ON), _Gate(True))._apply_claim_join(
@@ -216,7 +245,7 @@ def test_rule_dispatch_single_candidate_random_miss_allows_bbs_escalation(monkey
         lambda: 0.39,
     )
 
-    result = _rule_based_search_result([{"bot_id": "candidate-a"}])
+    result = _rule_based_search_result([{"bot_id": "candidate-a"}], [])
 
     assert result.outcome == SearchOutcome.MISS
     assert result.bot_id is None
@@ -241,7 +270,8 @@ def test_rule_dispatch_multi_candidate_caps_fixed_pool_group_at_three(monkeypatc
     )
 
     result = _rule_based_search_result(
-        [{"bot_id": f"candidate-{index}"} for index in range(8)]
+        [{"bot_id": f"candidate-{index}"} for index in range(8)],
+        RULE_POOL,
     )
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
@@ -260,16 +290,45 @@ def test_rule_dispatch_single_candidate_keeps_hit_after_40_percent_threshold(mon
         lambda values, count: list(values)[:count],
     )
 
-    result = _rule_based_search_result([{"bot_id": "candidate-a"}])
+    result = _rule_based_search_result([{"bot_id": "candidate-a"}], RULE_POOL)
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id in {
-        "20260825_bohtfhe6:35983",
-        "default:35983",
-        "default:146836",
-        "20260825_p8e63hms:35983",
-        "20260823_1c4am0ei:146836",
-        "20260826_q3tbj2da:146836",
-        "20260826_fmszf5aq:146836",
-        "20260826_20rphqo0:146836",
+    assert result.bot_id in set(RULE_POOL)
+
+
+def test_load_rule_test_pool_returns_claim_enabled_bot_ids():
+    """``_load_rule_test_pool`` 动态取 task_claim_mode=true & visibility=public 的 product:owner。"""
+    bcn = _Bcn([{"bot_id": "A:Ao"}, {"bot_id": "B:Bo"}])
+
+    pool = _run(_strat(bcn)._load_rule_test_pool())
+
+    assert pool == ["A:Ao", "B:Bo"]
+    assert bcn.call_args[-1] == {
+        "claim": True,
+        "dream": None,
+        "match": "all",
+        "visibility": "public",
     }
+
+
+def test_load_rule_test_pool_empty_when_bcn_missing():
+    """bcn 未注入(stub/测试) → 空池,由 _rule_based_search_result 兜底。"""
+    assert _run(_strat(None)._load_rule_test_pool()) == []
+
+
+def test_load_rule_test_pool_empty_on_roster_failure():
+    """BCS roster 取异常 → best-effort 空池,不阻断派发。"""
+    bcn = _Bcn(exc=RuntimeError("roster down"))
+
+    assert _run(_strat(bcn)._load_rule_test_pool()) == []
+
+
+def test_rule_based_search_result_empty_pool_degrades_to_miss():
+    """claim 池为空(无 claim+public bot) → MISS(no_claim_pool),不产出空协作群。"""
+    result = _rule_based_search_result(
+        [{"bot_id": "candidate-a"}, {"bot_id": "candidate-b"}], []
+    )
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_claim_pool"
+    assert result.group_formation is None
