@@ -1,3 +1,0 @@
-module	source_path	target_path	source_commit	copy_mode
-workflow	ClawWeb:src/pages/WorkflowWorkspace.tsx,src/components/workflow-workspace/** and relative import closure	Avernet:src/evolverun/workflow/src/**	46b072308c35b8e6856145b56653a20550465d6c	exact-copy
-workflow	ClawWeb:server Task Guard/workflow/run/dashboard/analysis routes, services, repositories, tests and relative import closure	Avernet:src/evolverun/workflow/server/**	46b072308c35b8e6856145b56653a20550465d6c	exact-copy

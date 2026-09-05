@@ -1,3 +1,0 @@
-module	source_path	target_path	source_commit	copy_mode
-clawinsight	ClawWeb:src/pages/InsightCenter/**,src/api/insight.ts,src/types/insight.ts and relative import closure	Avernet:src/evolverun/clawinsight/src/**	46b072308c35b8e6856145b56653a20550465d6c	exact-copy
-clawinsight	ClawWeb:server Insight/Repair/Evidence/Session integration routes, services, repositories, fixtures, tests and relative import closure	Avernet:src/evolverun/clawinsight/server/**	46b072308c35b8e6856145b56653a20550465d6c	exact-copy

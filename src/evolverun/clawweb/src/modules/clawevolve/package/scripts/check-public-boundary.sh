@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-evolverun_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+modules_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 roots=(
-  "$evolverun_root/clawevolve"
-  "$evolverun_root/clawinsight"
-  "$evolverun_root/workflow"
+  "$modules_root/clawevolve"
+  "$modules_root/clawinsight"
+  "$modules_root/workflow"
 )
 credential_pattern='(AKIA|ASIA|LTAI)[A-Z0-9]{12,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|(^|[^A-Za-z0-9_])sk-[A-Za-z0-9_-]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}|DEFAULT_[A-Z0-9_]*(TOKEN|SECRET|API_KEY)[[:space:]]*=[[:space:]]*"[^"]{12,}"|huamei_api_token.{0,100}[A-Za-z0-9+/]{40,}'
 if grep -RIE \
