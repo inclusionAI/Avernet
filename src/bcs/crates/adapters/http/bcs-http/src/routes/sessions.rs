@@ -46,6 +46,7 @@ fn session_to_json(sess: &bcs_service_api::Session) -> Value {
 fn session_to_json_with_state_machine_run(
     sess: &bcs_service_api::Session,
     run: Option<&StateMachineRunView>,
+    initial_run: Option<&bcs_service_api::InitialSessionRun>,
 ) -> Value {
     let mut v = session_to_json(sess);
     if let (Some(obj), Some(run)) = (v.as_object_mut(), run) {
@@ -56,6 +57,12 @@ fn session_to_json_with_state_machine_run(
         obj.insert(
             "state_machine_run".into(),
             serde_json::to_value(run).unwrap_or(Value::Null),
+        );
+    }
+    if let (Some(obj), Some(initial_run)) = (v.as_object_mut(), initial_run) {
+        obj.insert(
+            "initial_run".into(),
+            serde_json::to_value(initial_run).unwrap_or(Value::Null),
         );
     }
     v
@@ -272,6 +279,7 @@ pub async fn create_session_for_group(
             Json(session_to_json_with_state_machine_run(
                 &outcome.session,
                 outcome.state_machine_run.as_ref(),
+                outcome.initial_run.as_ref(),
             )),
         )
             .into_response(),

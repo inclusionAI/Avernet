@@ -22,11 +22,13 @@ use bcs_service_api::{
     AuthenticatedHumanCaller, BotCapabilities, BotRegistryCoreService,
     CancelStateMachineRunCommand, CollaborationDefinition, CollaborationRuntimeError,
     CollaborationRuntimeService, ConfigureGroupRuntimeCommand, ConfigureGroupRuntimeOutcome,
-    CreateOrReactivateCommand, CreateOrReactivateOutcome, Group, GroupCoreService, GroupStrategy,
-    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, Participant, ParticipantMode,
-    ParticipantRole, Session, SessionHistoryResult, SessionKind, SessionManagementService,
-    SessionStatus, SessionUseCaseError, StartStateMachineRunCommand, StartStateMachineRunOutcome,
-    StateMachineDeliveryCorrelation, StateMachineRun, StateMachineRunStatus, StateMachineRunView,
+    CreateOrReactivateCommand, CreateOrReactivateOutcome, DeliveryType, Group, GroupCoreService,
+    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, Participant,
+    ParticipantMode, ParticipantRole, ServiceResult, Session, SessionHistoryResult, SessionKind,
+    SessionManagementService, SessionStatus, SessionUseCaseError, StartStateMachineRunCommand,
+    StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
+    StateMachineRunStatus, StateMachineRunView, SystemMessageDispatchOutcome, SystemMessageEvent,
+    SystemMessageRecipientResult, SystemMessageService,
 };
 use bcs_services_container::Services;
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
@@ -145,6 +147,7 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
     services.registry = registry.clone();
     services.group = group_store.clone();
     services.session_management = sessions.clone();
+    services.system_message = Arc::new(InitialRunSystemMessage);
     services.session_launch = Arc::new(SessionLaunchApplication::new(
         registry,
         group_store,
@@ -170,6 +173,13 @@ async fn create_session_allows_human_who_owns_a_participant_bot() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["session_id"], "group-1:abcdef12");
+    assert_eq!(body["initial_run"]["run_id"], "session-context-run");
+    assert_eq!(body["initial_run"]["bot_uuid"], "driver-bot");
+    assert_eq!(body["initial_run"]["activity_kind"], "session_context");
+    assert_eq!(body["initial_run"]["state"], "running");
 }
 
 #[tokio::test]
@@ -571,6 +581,42 @@ impl UserIdentityPort for StaticHumanIdentity {
 #[derive(Default)]
 struct MockSessions {
     create_calls: Mutex<Vec<CreateOrReactivateCommand>>,
+}
+
+struct InitialRunSystemMessage;
+
+#[async_trait::async_trait]
+impl SystemMessageService for InitialRunSystemMessage {
+    async fn notify(
+        &self,
+        _group_id: &str,
+        _event: SystemMessageEvent,
+        _session_id: &str,
+        _participants: &[Participant],
+    ) -> ServiceResult<usize> {
+        Ok(1)
+    }
+
+    async fn notify_with_outcome(
+        &self,
+        _group_id: &str,
+        _event: SystemMessageEvent,
+        _session_id: &str,
+        _participants: &[Participant],
+    ) -> ServiceResult<SystemMessageDispatchOutcome> {
+        Ok(SystemMessageDispatchOutcome {
+            total_recipients: 1,
+            successful_deliveries: 1,
+            failed_deliveries: 0,
+            recipient_results: vec![SystemMessageRecipientResult {
+                recipient_id: "driver-bot".to_string(),
+                run_id: "session-context-run".to_string(),
+                delivery_type: DeliveryType::Send,
+                delivered: true,
+                error: None,
+            }],
+        })
+    }
 }
 
 #[async_trait::async_trait]
