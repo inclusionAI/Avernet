@@ -1,7 +1,6 @@
-"""POST /api/v1/collaboration/tasks/callback/report 上 manager_worker(BCN 任务协作群)CloudEvent 分流
-+ 落库(单 session 行 upsert、execution_graph 累积 merge)+ session.completed 收敛 单测。
+"""POST /api/v1/collaboration/tasks/callback/report 上 manager_worker CloudEvent 的当前契约测试。
 
-复用 dashboard-execution-graph harness(TaskModule + _StubModule + 可累积的 _FakeCallbackRepo)。"""
+当前 callback/report 对 manager-worker 事件只返回 200 ack，不落库、不触发任务收敛。"""
 from __future__ import annotations
 
 import uuid
@@ -97,38 +96,23 @@ def _ce(event_type: str, scope: dict, data: dict | None = None, event_id: str | 
     }
 
 
-def test_manager_worker_cloud_events_merge_into_single_session_row(harness):
-    c, inj, fake = harness
+def test_manager_worker_cloud_events_are_acknowledged_without_persistence(harness):
+    c, _inj, fake = harness
     sid = "sess-mw-1"
-    c.post("/api/v1/collaboration/tasks/callback/report",
-           json=_ce("group.created", {"group_id": "g1", "session_id": sid}, {"status": "active"}))
-    c.post("/api/v1/collaboration/tasks/callback/report",
-           json=_ce("session.created", {"group_id": "g1", "session_id": sid}, {"status": "active"}))
-    c.post("/api/v1/collaboration/tasks/callback/report",
-           json=_ce("task.assigned", {"group_id": "g1", "session_id": sid, "task_id": "t1"},
-                    {"task_id": "t1", "manager_id": "m", "worker_id": "w"}))
-    c.post("/api/v1/collaboration/tasks/callback/report",
-           json=_ce("task.completed", {"group_id": "g1", "session_id": sid, "task_id": "t1"},
-                    {"task_id": "t1", "result": {"ok": 1}, "completed_at": "ts"}))
-    r = c.post("/api/v1/collaboration/tasks/callback/report",
-               json=_ce("session.completed", {"group_id": "g1", "session_id": sid},
-                        {"reason": "completed", "completed_by": "bcs-system", "summary": {"n": 1}}))
-    assert r.status_code == 200, r.text
-    rec = fake.get_latest_by_session(sid)
-    assert rec is not None
-    # 回调行 status 映射到 Status 枚举:最后一条事件 session.completed(终态)→ DONE。
-    assert rec.status == "DONE"
-    g = rec.execution_graph
-    assert g["group_status"] == "active"
-    assert g["session_status"] == "completed"
-    assert g["last_event_type"] == "session.completed"
-    assert len(g["tasks"]) == 1
-    assert g["tasks"][0]["task_id"] == "t1"
-    assert g["tasks"][0]["status"] == "completed"
-    assert g["tasks"][0]["result"] == {"ok": 1}
-    # 单 session 行(run_id=session_id, node_id=""),5 事件都走 upsert 此行
-    assert (sid, "") in fake.rows
-    assert len(fake.upserts) == 5
+    events = [
+        _ce("group.created", {"group_id": "g1", "session_id": sid}, {"status": "active"}),
+        _ce("session.created", {"group_id": "g1", "session_id": sid}, {"status": "active"}),
+        _ce("task.assigned", {"group_id": "g1", "session_id": sid, "task_id": "t1"},
+             {"task_id": "t1", "manager_id": "m", "worker_id": "w"}),
+        _ce("task.completed", {"group_id": "g1", "session_id": sid, "task_id": "t1"},
+             {"task_id": "t1", "result": {"ok": 1}, "completed_at": "ts"}),
+        _ce("session.completed", {"group_id": "g1", "session_id": sid},
+             {"reason": "completed", "completed_by": "bcs-system", "summary": {"n": 1}}),
+    ]
+    for event in events:
+        response = c.post("/api/v1/collaboration/tasks/callback/report", json=event)
+        assert response.status_code == 200, response.text
+    assert fake.upserts == []
 
 
 def test_manager_worker_state_machine_event_not_diverted(harness):
@@ -144,32 +128,15 @@ def test_manager_worker_state_machine_event_not_diverted(harness):
     assert all(not getattr(rec, "invoker", "") == "bcn_manager_worker" for rec in fake.upserts)
 
 
-@pytest.mark.parametrize(
-    ("event_type", "expected_status"),
-    [
-        ("group.created", "RUNNING"),
-        ("session.created", "RUNNING"),
-        ("task.assigned", "RUNNING"),
-        ("task.completed", "DONE"),
-        ("session.completed", "DONE"),
-    ],
-)
-def test_manager_worker_callback_status_maps_to_status_enum(harness, event_type, expected_status):
-    """回调行 ``task_callback.status`` 按 manager_worker 事件映射到 Status 枚举(对齐 state_machine
-    ``_bcn_state_machine_status`` 的粗粒度审计投影):终态事件 ``task.completed`` / ``session.completed``
-    → ``DONE``,其余 ``group.created`` / ``session.created`` / ``task.assigned`` → ``RUNNING``。
-    单事件独占一个 session,取该 session 最新回调行断言其 status。"""
+def test_manager_worker_callback_status_events_are_acknowledged_without_persistence(harness):
     c, _inj, fake = harness
-    sid = f"sess-mw-status-{event_type}"
-    scope = {"group_id": "g1", "session_id": sid}
-    if event_type.startswith("task."):
-        scope["task_id"] = "t1"
-    data = {"reason": "completed"} if event_type == "session.completed" else {}
-    r = c.post(
-        "/api/v1/collaboration/tasks/callback/report",
-        json=_ce(event_type, scope, data),
-    )
-    assert r.status_code == 200, r.text
-    rec = fake.get_latest_by_session(sid)
-    assert rec is not None
-    assert rec.status == expected_status
+    for event_type in ("group.created", "session.created", "task.assigned", "task.completed", "session.completed"):
+        scope = {"group_id": "g1", "session_id": f"sess-mw-status-{event_type}"}
+        if event_type.startswith("task."):
+            scope["task_id"] = "t1"
+        response = c.post(
+            "/api/v1/collaboration/tasks/callback/report",
+            json=_ce(event_type, scope, {"reason": "completed"} if event_type == "session.completed" else {}),
+        )
+        assert response.status_code == 200, response.text
+    assert fake.upserts == []
