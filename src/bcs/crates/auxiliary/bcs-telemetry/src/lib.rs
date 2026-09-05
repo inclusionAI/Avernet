@@ -1,7 +1,8 @@
 //! Transport-neutral observations and OpenTelemetry semantic attribute encoders.
 //!
 //! This crate owns no exporter, transport client, or BCS business behavior.
-//! Operation observations use the tracing/metrics subscribers installed by bootstrap;
+//! Operation observations emit logs through the subscriber installed by bootstrap;
+//! they do not create spans or record metrics. Existing trace IDs may be read for correlation;
 //! arguments, return values and raw errors are never recorded.
 
 mod operation;

@@ -7,7 +7,7 @@ use opentelemetry::trace::{Status, TraceContextExt};
 use opentelemetry_http::HeaderExtractor;
 use std::time::Duration;
 use tower_http::trace::{MakeSpan, OnResponse};
-use tracing::{Instrument, Span, info_span};
+use tracing::{Span, debug_span, info_span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const TRUNCATION_MARKER: &str = "...[TRUNCATED]...";
@@ -17,7 +17,6 @@ pub(crate) const SPAN_CONTENT_LIMIT_BYTES: usize = 4096;
 pub enum BusinessTraceOperation {
     GatewayDispatch,
     BotResponse,
-    HttpRequest,
 }
 
 impl BusinessTraceOperation {
@@ -25,7 +24,6 @@ impl BusinessTraceOperation {
         match self {
             Self::GatewayDispatch => "bcn.gateway.dispatch",
             Self::BotResponse => "bcn.bot.response",
-            Self::HttpRequest => "http.request",
         }
     }
 }
@@ -70,15 +68,28 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
         if path == "/bot/events/coordination" {
             return Span::none();
         }
-        let operation = classify_business_request(path).unwrap_or(BusinessTraceOperation::HttpRequest);
+        let Some(operation) = classify_business_request(path) else {
+            return debug_span!(
+                target: "bcs_http_access",
+                "http.request",
+                http.request.method = %method,
+                url.path = %path,
+            );
+        };
+
         let parent = global::get_text_map_propagator(|propagator| {
             propagator.extract(&HeaderExtractor(request.headers()))
         });
+        if matches!(path, "/bot/events") || path.ends_with("/chat-async") {
+            if !parent.span().span_context().is_valid() {
+                return Span::none();
+            }
+        }
+
         let span = match operation {
             BusinessTraceOperation::GatewayDispatch if path.ends_with("/chat-async") => info_span!(
                 target: "bcn_otel",
                 "bcn.gateway.dispatch",
-                request_id = tracing::field::Empty, trace_id = tracing::field::Empty,
                 otel.kind = "server",
                 http.request.method = %method,
                 http.route = "/bots/{id}/chat-async",
@@ -86,36 +97,19 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
             BusinessTraceOperation::GatewayDispatch => info_span!(
                 target: "bcn_otel",
                 "bcn.gateway.dispatch",
-                request_id = tracing::field::Empty, trace_id = tracing::field::Empty,
                 otel.kind = "server",
                 http.request.method = %method,
                 url.path = %path,
             ),
-            BusinessTraceOperation::HttpRequest => info_span!(
-                target: "bcn_otel", "http.request", otel.kind = "server",
-                request_id = tracing::field::Empty, trace_id = tracing::field::Empty,
-                http.request.method = %method,
-                http.route = request.extensions().get::<axum::extract::MatchedPath>()
-                    .map(|route| route.as_str()).unwrap_or("unmatched"),
-            ),
             BusinessTraceOperation::BotResponse => info_span!(
                 target: "bcn_otel",
                 "bcn.bot.response",
-                request_id = tracing::field::Empty, trace_id = tracing::field::Empty,
                 otel.kind = "server",
                 http.request.method = %method,
                 url.path = %path,
             ),
         };
         let _ = span.set_parent(parent);
-        if let Some(request_id) = request.headers().get("x-request-id").and_then(|v| v.to_str().ok()) {
-            span.record("request_id", request_id);
-        }
-        let context = span.context();
-        let context_span = context.span();
-        if context_span.span_context().is_valid() {
-            span.record("trace_id", context_span.span_context().trace_id().to_string());
-        }
         span
     }
 }
@@ -132,21 +126,19 @@ pub async fn observe_request(
         .map(str::to_owned).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let header = axum::http::HeaderValue::from_str(&request_id).expect("validated request ID");
     request.headers_mut().insert("x-request-id", header.clone());
-    let span = BcnMakeSpan.make_span(&request);
-    let trace_id = span.context().span().span_context().trace_id().to_string();
+    let trace_id = bcs_telemetry::current_trace_id();
     let route = request.extensions().get::<axum::extract::MatchedPath>()
         .map(|route| route.as_str()).unwrap_or("unmatched").to_owned();
     let mut observation = RequestObservation {
-        request_id: request_id.clone(), trace_id, route, span: span.clone(),
+        request_id: request_id.clone(), trace_id, route,
         started: std::time::Instant::now(), completed: false,
     };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         trace_id = %observation.trace_id, route = %observation.route,
         method = %request.method(), "http.request.started");
     let mut response = bcs_telemetry::with_request_context(request_id,
-        next.run(request)).instrument(span.clone()).await;
+        next.run(request)).await;
     let elapsed = observation.started.elapsed();
-    BcnOnResponse.on_response(&response, elapsed, &span);
     response.headers_mut().insert("x-request-id", header);
     observation.completed = true;
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
@@ -161,17 +153,16 @@ struct RequestObservation {
     request_id: String,
     trace_id: String,
     route: String,
-    span: Span,
     started: std::time::Instant,
     completed: bool,
 }
 impl Drop for RequestObservation {
     fn drop(&mut self) {
         if !self.completed {
-            self.span.in_scope(|| tracing::warn!(target: "bcs_http_access",
+            tracing::warn!(target: "bcs_http_access",
                 request_id = %self.request_id, trace_id = %self.trace_id, route = %self.route,
                 duration_ms = self.started.elapsed().as_secs_f64() * 1000.0,
-                outcome = "cancelled", "http.request.cancelled"));
+                outcome = "cancelled", "http.request.cancelled");
         }
     }
 }
@@ -416,12 +407,11 @@ mod tests {
     }
 
     #[test]
-    fn requests_without_valid_traceparent_create_root_spans() {
-        assert_request_creates_root_span("/bots/bot-1/chat-async", None);
-        assert_request_creates_root_span("/bot/events", None);
-        assert_request_creates_root_span("/bots/bot-1/chat-async", Some("malformed"));
-        assert_request_creates_root_span("/bot/events", Some("malformed"));
-        assert_request_creates_root_span("/bots/query", None);
+    fn gated_routes_without_valid_traceparent_do_not_create_spans() {
+        assert_request_creates_no_span("/bots/bot-1/chat-async", None);
+        assert_request_creates_no_span("/bot/events", None);
+        assert_request_creates_no_span("/bots/bot-1/chat-async", Some("malformed"));
+        assert_request_creates_no_span("/bot/events", Some("malformed"));
     }
 
     #[test]
@@ -479,7 +469,7 @@ mod tests {
         );
     }
 
-    fn assert_request_creates_root_span(path: &str, traceparent: Option<&str>) {
+    fn assert_request_creates_no_span(path: &str, traceparent: Option<&str>) {
         global::set_text_map_propagator(TraceContextPropagator::new());
         let exporter = InMemorySpanExporterBuilder::new().build();
         let provider = SdkTracerProvider::builder()
@@ -498,15 +488,12 @@ mod tests {
             let request = builder.body(()).unwrap();
             let mut make_span = BcnMakeSpan::default();
             let span = make_span.make_span(&request);
-            assert!(!span.is_disabled());
+            assert!(span.is_disabled());
             drop(span);
         });
 
         provider.force_flush().unwrap();
-        let spans = exporter.get_finished_spans().unwrap();
-        assert_eq!(spans.len(), 1);
-        assert!(spans[0].span_context.is_valid());
-        assert_eq!(spans[0].parent_span_id, opentelemetry::trace::SpanId::INVALID);
+        assert!(exporter.get_finished_spans().unwrap().is_empty());
     }
 
     #[test]

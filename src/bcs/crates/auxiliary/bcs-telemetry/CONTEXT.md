@@ -2,18 +2,18 @@
 
 ## Provides
 
-- Transport-neutral operation timing, termination, request aggregation and correlation.
+- Transport-neutral operation timing, termination, request aggregation and correlation in logs.
 - Parent/child observation IDs and propagation into explicitly wrapped spawned tasks.
 - Existing OpenTelemetry semantic attribute encoders.
 
 ## Consumes
 
-- The tracing subscriber, OpenTelemetry layer and metrics recorder installed by bootstrap.
+- The log subscriber and existing trace context installed by bootstrap.
 - Tokio task-local context and a diagnostic timer; no operation deadline is imposed.
 
 ## Allowed dependencies
 
-- Tracing, metrics, OpenTelemetry APIs, async timing, UUID and serialization utilities.
+- Tracing logging APIs, existing OpenTelemetry context, async timing, UUID and serialization utilities.
 
 ## Forbidden dependencies
 
@@ -25,11 +25,13 @@
 
 This utility observes caller-owned operations and preserves their result, cancellation
 and awaits the caller-owned future. Operation names and outcomes must be bounded constants. It
-never inspects or logs operation arguments, values or raw errors. Subscribers,
-export, sampling and metrics exposure remain owned by bootstrap. Services and
+never inspects or logs operation arguments, values or raw errors. The observations
+do not create spans or record metrics; existing trace IDs are read only for log
+correlation. Subscribers, export and sampling remain owned by bootstrap. Services and
 adapters may use this utility without importing each other's implementations.
 
 ## Tests
 
 `cargo test -p bcs-telemetry --test operations` covers cancellation, stalled calls,
-result preservation, redaction, nested/spawned correlation and non-Send outputs.
+result preservation, redaction, nested/spawned correlation, absence of new spans
+and non-Send outputs.

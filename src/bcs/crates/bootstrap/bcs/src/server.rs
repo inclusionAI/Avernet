@@ -21,6 +21,7 @@ use axum::{
 use tokio::sync::Mutex;
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::cors::{AllowHeaders, AllowMethods, AllowOrigin, CorsLayer};
+use tower_http::trace::TraceLayer;
 use tracing::{debug, info, warn};
 
 use crate::Result;
@@ -917,7 +918,6 @@ async fn metrics_handler(State(state): State<Arc<BcsServerState>>) -> Response {
     let Some(metrics) = state.metrics.clone() else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    crate::logging::record_writer_metrics();
     metrics.refresh_on_scrape(&state).await;
     (
         [(CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
@@ -4992,6 +4992,11 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                 http_metrics_middleware,
             ))
             .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request))
+            .layer(
+                TraceLayer::new_for_http()
+                    .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)
+                    .on_response(bcs_http::gateway_trace::BcnOnResponse),
+            )
             .layer(
                 CorsLayer::new()
                     .allow_origin(AllowOrigin::predicate(move |origin, _| {

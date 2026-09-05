@@ -37,7 +37,7 @@ use bcs_service_api::{
     is_mock_token,
 };
 
-fn metrics_bot_cache_source(source: &'static str) {
+fn log_bot_cache_source(source: &'static str) {
     bcs_telemetry::count("bot.memory", source);
     debug!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), source, "bot.load.source");
 }
@@ -1562,14 +1562,14 @@ impl BotRepoPort for PersistentBotRepo {
 
         if let Some(bot) = bots.get(bot_id) {
             if !bot.is_expired() {
-                metrics_bot_cache_source("memory_hit");
+                log_bot_cache_source("memory_hit");
                 return Ok(Some(bot.to_registered_bot()));
             }
         }
 
         // Fallback: load from database + cache
         drop(bots);
-        metrics_bot_cache_source("memory_miss");
+        log_bot_cache_source("memory_miss");
 
         // Code-Review fix #1: take actor_kind/status from the database instead of
         // returning defaults; otherwise O.5/P.3/F.3 will misclassify any actor
