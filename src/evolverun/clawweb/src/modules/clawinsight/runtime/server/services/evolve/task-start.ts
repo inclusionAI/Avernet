@@ -7,7 +7,7 @@ import type {
 import {
   dispatchEvolveCommand,
   type EvolveDispatchInput,
-} from "../evolve-dispatcher.js";
+} from "@avernet/clawevolve";
 
 type Dispatch = typeof dispatchEvolveCommand;
 

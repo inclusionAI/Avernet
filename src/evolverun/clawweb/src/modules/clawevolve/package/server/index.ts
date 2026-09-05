@@ -3,6 +3,15 @@ export type { ClawevolveModule, ClawevolveModuleOptions } from "./create-module.
 export type { ClawInsightInternalApi, ClawEvolveInternalApi } from "./internal/module-api.js";
 export type { IDatabase, ExecResult, Row } from "./db.js";
 export { SqliteDatabase, runMigrations } from "./db.js";
+export {
+  cancelEvolveExecution,
+  dispatchEvolveCommand,
+  dispatchEvolveTaskLogArchive,
+  parseArcaRunnerCallback,
+  resolveEvolveTransport,
+  type EvolveDispatchInput,
+  type EvolveTaskLogDispatchInput,
+} from "./services/evolve-dispatcher.js";
 export { BenchDomainRepository } from "./repositories/bench-domain-repository.js";
 export { BenchTemplateRepository } from "./repositories/bench-template-repository.js";
 export { BenchTemplateVersionRepository } from "./repositories/bench-template-version-repository.js";

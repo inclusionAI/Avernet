@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getClawWebPublicBaseUrl } from "../../env.js";
 import type { EvolveRepository, EvolveTaskRow } from "../../repositories/evolve-repository.js";
-import { dispatchEvolveCommand } from "../evolve-dispatcher.js";
+import { dispatchEvolveCommand } from "@avernet/clawevolve";
 import { renderCommand, type NodeCommandYamls } from "./command.js";
 import { startInitialEvolveStep } from "./task-start.js";
 

@@ -4,7 +4,7 @@ import { getClawWebPublicBaseUrl } from "../../env.js";
 import type { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { WorkflowEvolutionRepository } from "../../repositories/workflow-evolution-repository.js";
-import { dispatchEvolveCommand, type EvolveDispatchInput } from "../evolve-dispatcher.js";
+import { dispatchEvolveCommand, type EvolveDispatchInput } from "@avernet/clawevolve";
 import {
   digestCanonicalJson,
   WORKFLOW_EVOLUTION_ANALYSIS_VERSION,
