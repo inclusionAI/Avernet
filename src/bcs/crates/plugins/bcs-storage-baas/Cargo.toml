@@ -6,6 +6,7 @@ license     = "MIT"
 publish     = false
 
 [dependencies]
+bcs-telemetry = { workspace = true }
 async-trait      = { workspace = true }
 anyhow           = { workspace = true }
 bcs-domain       = { workspace = true }

@@ -10,6 +10,7 @@ version.workspace = true
 workspace = true
 
 [dependencies]
+bcs-telemetry = { workspace = true }
 bcs-config-api = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

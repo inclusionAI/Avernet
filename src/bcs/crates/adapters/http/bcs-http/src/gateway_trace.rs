@@ -114,6 +114,59 @@ impl<B> MakeSpan<B> for BcnMakeSpan {
     }
 }
 
+/// Correlates extractor/auth failures and cancellation before a handler is entered.
+pub async fn observe_request(
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    if request.uri().path() == "/bot/events/coordination" { return next.run(request).await; }
+    let request_id = request.headers().get("x-request-id").and_then(|v| v.to_str().ok())
+        .filter(|value| !value.is_empty() && value.len() <= 128
+            && value.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c)))
+        .map(str::to_owned).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let header = axum::http::HeaderValue::from_str(&request_id).expect("validated request ID");
+    request.headers_mut().insert("x-request-id", header.clone());
+    let trace_id = bcs_telemetry::current_trace_id();
+    let route = request.extensions().get::<axum::extract::MatchedPath>()
+        .map(|route| route.as_str()).unwrap_or("unmatched").to_owned();
+    let mut observation = RequestObservation {
+        request_id: request_id.clone(), trace_id, route,
+        started: std::time::Instant::now(), completed: false,
+    };
+    tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
+        trace_id = %observation.trace_id, route = %observation.route,
+        method = %request.method(), "http.request.started");
+    let mut response = bcs_telemetry::with_request_context(request_id,
+        next.run(request)).await;
+    let elapsed = observation.started.elapsed();
+    response.headers_mut().insert("x-request-id", header);
+    observation.completed = true;
+    tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
+        trace_id = %observation.trace_id, route = %observation.route,
+        status = response.status().as_u16(), duration_ms = elapsed.as_secs_f64() * 1000.0,
+        outcome = if response.status().is_success() { "success" } else { "http_error" },
+        "http.request.response_ready");
+    response
+}
+
+struct RequestObservation {
+    request_id: String,
+    trace_id: String,
+    route: String,
+    started: std::time::Instant,
+    completed: bool,
+}
+impl Drop for RequestObservation {
+    fn drop(&mut self) {
+        if !self.completed {
+            tracing::warn!(target: "bcs_http_access",
+                request_id = %self.request_id, trace_id = %self.trace_id, route = %self.route,
+                duration_ms = self.started.elapsed().as_secs_f64() * 1000.0,
+                outcome = "cancelled", "http.request.cancelled");
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BcnOnResponse;
 

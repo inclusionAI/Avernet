@@ -18,6 +18,7 @@ prometheus-metrics = ["dep:metrics", "dep:metrics-exporter-prometheus"]
 test-utils = []
 
 [dependencies]
+bcs-telemetry = { workspace = true }
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
