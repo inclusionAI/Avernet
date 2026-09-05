@@ -14,8 +14,7 @@
 
 begin / open-round / open-vote 会自己调 bcs-cli（认证仍由 CLI 负责，本脚本不碰
 token）。把探测、渲染、提交合成一条命令不是为了省事：裁判的每一次工具调用和它的
-输出都会被转发成群里的事件，来回越多、人类看到的无关文字越多；而且入口节点是裁判
-自己的，提交之后每多一个来回，开场就晚一个来回。
+输出都会被转发成群里的事件，来回越多、人类看到的无关文字越多；运行直接从玩家节点开始，主持人只播报返回的公开开场。
 """
 
 from __future__ import annotations
@@ -36,6 +35,9 @@ from typing import Any
 
 STATE_VERSION = 5
 
+# 发言提交后没有主持人入口任务；只播报公开开场并释放当前激活。
+SUBMITTED_NEXT_ACTION = "原样播报 announcement 后结束激活；不追加工具调用，不宣称任何玩家已经完成。"
+
 PHASES = (
     "AWAIT_START",
     "SPEAK_RUNNING",
@@ -46,7 +48,7 @@ PHASES = (
 )
 
 NEXT_ACTION = {
-    "AWAIT_START": "开第一轮：先把人类自己的词念给他（init 返回的 human_word，或 my-word），再 open-round。",
+    "AWAIT_START": "开第一轮：先用工具调用前的消息告诉人类座位和 human_word，然后最后调用 open-round；不要把发牌告知留到提交后的最终回复。",
     "SPEAK_RUNNING": "等发言协作把汇总节点派给你；拿到全部发言后调 speeches-set。",
     "AWAIT_VOTE_START": "**如果这次激活是「本轮发言汇总」节点：念完汇总稿就结束激活，不要在那里开投。**你正占着协作槽位，在那个节点里跑 open-vote 一定失败，重试会卡死整局。其余情况（汇总稿的回灌、人类说话）：直接开投，不用等人类说话，跑 open-vote。",
     "VOTE_RUNNING": "等投票协作把计票节点派给你；计票节点上调 votes-set。运行超时未回就走卡住诊断。",
@@ -65,22 +67,9 @@ SPEECH_MAX_CHARS = 25
 VOTE_MAX_CHARS = 10
 MASK = "○"
 
-# SELF_INJECT_NOTE：`bcs_assign_task` 不是免费的工具调用。
-#
-# 每派出一条任务，BCS 会立刻往裁判**自己**的会话里回灌一条 `[任务状态]`（裁判是
-# 这个主从群的 driver，账本状态只发给它）。那条回灌是直接改会话文件的，会打断裁判
-# 当时正在跑的那次激活。任务的**回执**到达时还会再回灌一条。
-#
-# 2026-08-31 那一局里，5 次激活被打断，4 次是裁判自己派单打断了自己（两次遗言、
-# 两次看门狗），第 5 次是看门狗回执打断了 `vote_open` 入口节点——那次整局就死在
-# 那里。协作节点的派发不会回灌，只有 `bcs_assign_task` 会。
-#
-# 由此有两条硬纪律，写进了 phase-machine.md 和 RULES.md：
-#   1. `bcs_assign_task` 必须是本次激活的最后一个工具调用；
-#   2. **派任务的那一刻，身后不能有节点在排队等裁判让路。** 提交过运行的那次激活
-#      里一律不派任务——回执随时会到，撞上入口节点就是整个运行失败。
-# 第 2 条把看门狗整个否掉了：它只能在开投提交之后派，而那时 `vote_open` 正排在
-# 后面。投票运行失败的兜底因此统一交给人类。
+# SELF_INJECT_NOTE：派遗言的状态与回执可能回灌到主持人当前会话。
+# 只在上一运行结束后派遗言，并作为最后一个工具调用；提交后不派看门狗。
+# 旧实现曾由主持人执行 speak_open/vote_open，现已移除该自派入口路径。
 
 # 节点超时与重试。
 #
@@ -96,10 +85,7 @@ BOT_NODE_TIMEOUT_MS = 420_000
 # 裁判的通道最挤：人类的自由聊天、节点任务、以及它自己 final_output 的回灌都走
 # 这一条，所以派给裁判的节点额外放宽。
 CONTENDED_NODE_TIMEOUT_MS = 600_000
-# 入口节点是裁判自己的（整局的流程推进只能由主持人做），而运行是在裁判的一次激活
-# 里同步提交的：入口节点在提交那一刻就派出去，排在提交它的那次激活后面等自己让路。
-# 实测正常交接 3–5 秒；最坏的一次是 Bot 通道在激活结束后泄漏了 6 分钟。15 分钟把
-# 两种情况都盖住，也留出裁判自己那条通道被人类插话占用的余量。
+# 投票入口归主持人，留出当前提交激活的交接时间。
 ENTRY_NODE_TIMEOUT_MS = 900_000
 HUMAN_NODE_TIMEOUT_MS = 900_000
 NODE_MAX_ATTEMPTS = 1
@@ -618,7 +604,7 @@ def public_panel_projection(state: dict[str, Any], kind: str, attempt: int) -> d
     turn_order = [actor_id_for(seat, state) for seat in living]
     players = [{"actorId": actor_id_for(seat, state), "displayName": seat["display"], "seatNumber": int(seat["seat"]), "isHuman": seat["kind"] == "human", "alive": bool(seat["alive"]), "eliminated": not bool(seat["alive"])} for seat in all_seats]
     node_actor_map = {f"{node_prefix}_{seat['seat']}": actor_id_for(seat, state) for seat in living}
-    for node_id in (("speak_open", "collect") if kind == "speak" else ("vote_open", "tally")):
+    for node_id in (("collect",) if kind == "speak" else ("vote_open", "tally")):
         node_actor_map[node_id] = state["referee_uuid"]
     human = next((seat for seat in living if seat["kind"] == "human"), None)
     current_action = None if human is None else {"actorId": actor_id_for(human, state), "type": "speech" if kind == "speak" else "vote", "nodeId": f"{node_prefix}_{human['seat']}"}
@@ -660,6 +646,19 @@ def write_run_files(
     return str(yaml_path), str(input_path), str(panel_params_path)
 
 
+def opening_announcement(state: dict[str, Any], kind: str, attempt: int) -> str:
+    """Only public phase information; shared with players and spoken after submission."""
+    retry = ("本轮之前的发言作废，请重新发言。" if kind == "speak" else
+             "本轮之前的票作废，请重新投票。") if attempt > 1 else ""
+    if kind == "vote":
+        return retry + f"第 {state['round']} 轮投票开始，请在副屏投票，全部提交后统一计票。"
+    living = sorted(alive_seats(state), key=lambda seat: seat["seat"])
+    roster = "、".join(f"{seat['seat']}号 {seat['display']}" for seat in living)
+    lead = living[0]
+    return (retry + f"第 {state['round']} 轮发言开始，场上还有：{roster}。"
+            f"从 {lead['seat']}号 {lead['display']} 开始依次发言；轮到你时请在副屏填写。")
+
+
 def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
     rnd = state["round"]
     living = sorted(alive_seats(state), key=lambda s: s["seat"])
@@ -675,42 +674,8 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             )
     participants.append('  referee:\n    display_name: "主持人"\n    required: true')
 
-    seat_roster = "、".join(f"{s['seat']}号 {s['display']}" for s in living)
-    lead = living[0]
-
-    # 入口节点归主持人。整局的流程推进只由主持人做——玩家 Bot 不当任何一个运行的
-    # 门房。它的产物就是本轮的开场稿：提交完运行裁判不必再说话，人类在群里看到的
-    # 第一句是「第 N 轮开始」，而不是裁判把活干完之后的收尾。
-    #
-    # 这段话会作为 [Upstream Outputs] 流给每一个发言节点，所以只准写全场都已经知道
-    # 的东西：第几轮、还剩哪几号、谁先说。
-    open_instruction = (
-        "【主持人节点 · 回合开场】\n"
-        f"第 {rnd} 轮开始。这是本轮发言运行的入口，你在这里只说一句开场，"
-        "不要调用任何脚本、不要做任何判断。\n"
-        f"场上还剩：{seat_roster}。第一个发言的是 {lead['seat']}号 {lead['display']}。\n"
-        "说清三件事：第几轮 / 还剩谁 / 谁先说。不超过 3 句话。\n"
-        + (
-            "第一轮可以再带一句副屏提示（发言框在右边副屏、词写在框最上面），之后不再提。\n"
-            if rnd == 1
-            else ""
-        )
-        + "这段话会原样转给每一位玩家，所以只能包含上面这些公开信息。\n"
-        "不要提任何人的词、身份、发言倾向或谁可疑，也不要出现阶段编号、节点名或运行 ID。"
-    )
-    nodes: list[str] = [
-        "      speak_open:\n"
-        "        kind: bot_task\n"
-        '        display_name: "回合开场"\n'
-        "        assignee:\n"
-        "          type: bot_binding\n"
-        "          binding: referee\n"
-        f"        node_timeout_ms: {ENTRY_NODE_TIMEOUT_MS}\n"
-        f"        instruction: |\n{block(open_instruction, 10)}\n"
-        "        transitions:\n"
-        "          complete:\n"
-        "            targets: [" + ", ".join(node_ids) + "]"
-    ]
+    # 首位玩家直接作为入口，避免向仍在提交运行的主持人自派任务。
+    nodes: list[str] = []
     for idx, s in enumerate(living):
         nid = node_ids[idx]
         targets = node_ids[idx + 1 :] + ["collect"]
@@ -743,7 +708,7 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
         else:
             instruction = (
                 f"你是 {s['seat']} 号，你的词是【{s['word']}】。第 {rnd} 轮发言。\n"
-                "[Upstream Outputs]：第一条是主持人开场，其余是本轮排在你前面的人的原话。"
+                "[Input] 含公开规则和开场；[Upstream Outputs] 只含本轮排在你前面的人的原话。"
                 "[Input]：历史轮次的发言。\n"
                 f"输出一句话，不超过 {SPEECH_MAX_CHARS} 字，描述你的词。\n"
                 f"{forbid_line(s['word'])}\n\n"
@@ -1381,7 +1346,9 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
         state["phase"] = "SPEAK_RUNNING"
         attempt = bump_render(state, "speak")
         yaml_text, bindings = render_speak_yaml(state)
+        announcement = opening_announcement(state, "speak", attempt)
         run_input = {
+            "opening": announcement,
             "game": "谁是卧底",
             "round": state["round"],
             "alive": [f"{s['seat']}号 {s['display']}" for s in living],
@@ -1402,6 +1369,7 @@ def prepare_speak_run(session_id: str, retry: bool) -> dict[str, Any]:
         "phase": "SPEAK_RUNNING",
         "round": state["round"],
         "attempt": attempt,
+        "announcement": announcement,
         "yaml_path": yaml_path,
         "input_path": input_path,
         "panel_params_path": panel_params_path,
@@ -1416,7 +1384,7 @@ def cmd_render_speak_run(args: argparse.Namespace) -> None:
     payload = prepare_speak_run(args.session, args.retry)
     payload.pop("bindings", None)
     payload["note"] = (
-        "YAML 里含词语，不要读它、不要贴它。开场稿由运行的入口节点产出，提交完不要再说话。"
+        "YAML 里含词语，不要读它、不要贴它。提交成功后只播报 announcement 并结束。"
     )
     emit(payload, compact=True)
 
@@ -1880,13 +1848,7 @@ def cmd_begin(args: argparse.Namespace) -> None:
 
 
 def cmd_open_round(args: argparse.Namespace) -> None:
-    """开一轮发言：查槽位 → 渲染 → 提交，一条命令做完。
-
-    合成这一条不是为了省事，是为了把「提交」和「激活结束」之间的距离压到零。
-    入口节点是裁判自己的，它在提交那一刻就排进裁判的通道；裁判在提交之后每多花
-    一个来回，入口节点就多等一个来回。所以提交必须是本次激活的最后一个动作，
-    而最省事的保证办法就是让它和前面几步待在同一条命令里。
-    """
+    """查槽位、渲染并提交；直接启动玩家，不向当前主持人激活自派入口。"""
     # 开下一轮的正常入口是遗言回执那次激活；如果裁判在开票节点里就开下一轮，
     # 和 collect 节点里开投是同一条死锁，见 SELF_LOCK。
     busy = None if args.retry else self_lock_hint(args.session, "AWAIT_NEXT_ROUND")
@@ -1906,9 +1868,9 @@ def cmd_open_round(args: argparse.Namespace) -> None:
             "round": payload["round"],
             "attempt": payload["attempt"],
             "submitted": True,
+            "announcement": payload["announcement"],
             "run_id": result.get("run_id") or (result.get("nodes") or [{}])[0].get("run_id"),
-            "next_action": "本轮开场稿由运行的入口节点产出，你现在什么都不用说。"
-            "收尾只留一个字都行，立刻结束激活——你多占一秒通道，开场就晚一秒。",
+            "next_action": SUBMITTED_NEXT_ACTION,
         },
         compact=True,
     )

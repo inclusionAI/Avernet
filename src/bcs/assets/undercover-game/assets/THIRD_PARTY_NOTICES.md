@@ -23,3 +23,7 @@ Only the listed source pixels and license evidence are retained. The downloaded 
 ## Original club artwork
 
 The paneled wall, parquet floor, brass-trimmed felt table, night window, room rug, sconces, table cards, club sign, and finale trophy are original SVG/CSS geometry under the package Apache-2.0 license. Atlas geometry is reproducible from `scripts/generate-atlases.mjs`; scene decorations live in `src/RoomScene.tsx` and the trophy in `src/GameOverDialog.tsx`. No additional third-party asset pack was needed.
+
+The original `src/assets/speech-frame.svg` and `speech-tail.svg` provide the stretchable pixel speech frame and directional tail, under the package Apache-2.0 license. They are embedded into the UMD with no runtime downloads.
+
+The wall-side host uses the original pixel knight sculpture in `src/assets/knight-statue.svg`: stone armor, shield, sword and pedestal, licensed under the package Apache-2.0 license. The older crowned host atlas cell is retained for compatibility but is no longer rendered as the room host.

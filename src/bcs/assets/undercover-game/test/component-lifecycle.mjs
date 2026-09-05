@@ -94,5 +94,34 @@ try{
  assert.ok(hiddenReveal);assert.doesNotMatch(hiddenReveal.textContent,/最后一轮找到了卧底|平民阵营获胜/);
  await act(async()=>finalePanel.unmount());
 
+ // Latest speech expands once; old speech markers switch the bubble's speaker in place.
+ globalThis.fetch=fetchFor([{graph:{run:{run_id:'bubble-run',status:'running'},nodes:[{node_id:'node-a',status:'completed'},{node_id:'node-b',status:'completed'}]},pending:[],messages:[
+   {content:'一号的公开线索',sequence:1,metadata:{state_machine:{event:'output',run_id:'bubble-run',node_id:'node-a'}}},
+   {content:'二号的最新线索',sequence:2,metadata:{state_machine:{event:'output',run_id:'bubble-run',node_id:'node-b'}}},
+ ]}],[]);
+ let bubbles;await act(async()=>{bubbles=mount({...base,runId:'bubble-run'});await settle(5)});
+ assert.match(bubbles.container.querySelector('[data-region="speech-bubble"]').textContent,/最新 · 2号 小乙/);
+ assert.equal(bubbles.container.querySelectorAll('[data-region="speech-bubble"]').length,1);
+ const oldMarker=[...bubbles.container.querySelectorAll('button')].find(node=>node.getAttribute('aria-label')==='回看 1号 小甲 的发言');
+ await act(async()=>{oldMarker.click();await settle()});
+ assert.match(bubbles.container.querySelector('[data-region="speech-bubble"]').textContent,/回看 · 1号 小甲/);
+ await act(async()=>{button(bubbles,'刷新').click();await settle(5)});
+ assert.match(bubbles.container.querySelector('[data-region="speech-bubble"]').textContent,/回看 · 1号 小甲/);
+ await act(async()=>{bubbles.render({...base,runId:'bubble-run',phase:'voting'});await settle(5)});
+ assert.equal(bubbles.container.querySelector('[data-region="speech-bubble"]'),null);
+ await act(async()=>bubbles.unmount());
+
+ // Speech state indicators are exclusive, even if a running node has public text.
+ globalThis.fetch=fetchFor([{graph:{run:{run_id:'marker-run',status:'running'},nodes:[{node_id:'node-a',status:'running'},{node_id:'node-b',status:'completed'},{node_id:'node-c',status:'completed'}]},pending:[],messages:['a','b','c'].map((id,index)=>({content:`${id}的公开发言`,sequence:index+1,metadata:{state_machine:{event:'output',run_id:'marker-run',node_id:`node-${id}`}}}))}],[]);
+ let markers;await act(async()=>{markers=mount({...base,runId:'marker-run',players:base.players.map(player=>({...player,eliminated:false,alive:true})),nodeActorMap:{...base.nodeActorMap,'node-c':'c'}});await settle(5)});
+ assert.equal(markers.container.querySelectorAll('[data-state-marker="active_speech"]').length,1);
+ assert.equal(markers.container.querySelectorAll('[data-state-marker="completed_speech"]').length,0);
+ assert.ok(markers.container.querySelector('[data-host-statue]'));
+ assert.doesNotMatch(markers.container.querySelector('[data-actor-id="b"]').textContent,/✓/);
+ assert.equal(markers.container.querySelector('[aria-label="回看 1号 小甲 的发言"]'),null);
+ assert.ok(markers.container.querySelector('[aria-label="回看 2号 小乙 的发言"]'));
+ assert.match(markers.container.querySelector('[data-region="speech-bubble"]').textContent,/3号 小丙/);
+ await act(async()=>markers.unmount());
+
 }finally{globalThis.fetch=originalFetch}
 console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');

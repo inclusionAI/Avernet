@@ -13,3 +13,5 @@ const stable=api.assignBotAppearances(ids);assert.deepEqual(stable,api.assignBot
 const actors=[{actor:{actorId:'a'},kind:'player',state:'completed_speech',latestOutput:{sequence:1},outputHistory:[],publicHistory:[]},{actor:{actorId:'b'},kind:'player',state:'completed_speech',latestOutput:{sequence:2},outputHistory:[],publicHistory:[]},{actor:{actorId:'c'},kind:'player',state:'active_speech',latestOutput:{sequence:0},outputHistory:[],publicHistory:[]}];assert.equal(api.primaryOutputActor(actors),'c');actors[2].latestOutput=undefined;assert.equal(api.primaryOutputActor(actors),'b');
 assert.equal(baseline.shortHeight.dockFooter,'visible');assert.equal(baseline.reducedMotion.staticMarkers,true);
 console.log('Visual regression baseline passed: deterministic wide/medium/narrow geometry, non-overlap, appearance, output priority, short Dock, and reduced motion.');
+
+await import('./speech-layout.mjs');

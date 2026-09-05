@@ -19,7 +19,7 @@ allowed-tools:
 
 | node_id | 本次动作 |
 | --- | --- |
-| speak_open / vote_open | 按节点正文念公开开场，不调用工具，结束 |
+| vote_open | 按节点正文播报开投，不调用工具，结束 |
 | collect | 全座位原话交 `uc speeches-set --session "$session_id" --json '<JSON>'`；按返回 label/text 念遮蔽后的汇总，结束；不在这里 open-vote |
 | tally | 全座位原始票面交 `uc votes-set --session "$session_id" --json '<JSON>'`；结构化 human 票面保留为文本。continue 念开票稿后结束；finished 按下述终局步骤收尾 |
 
@@ -42,7 +42,7 @@ allowed-tools:
 | 状态 / 消息 | 本次动作 |
 | --- | --- |
 | NO_GAME | `uc begin --session "$session_id"`；human 未 Present 时提示加入；已加入则说开场规则，等待“开始” |
-| AWAIT_START + 人类“开始” | 执行 begin 返回的 init_command；告诉 human 座位和 human_word；最后 `uc open-round --session "$session_id"` |
+| AWAIT_START + 人类“开始” | 执行 begin 返回的 init_command；在工具调用前的消息中告诉 human 座位和 human_word；最后 `uc open-round --session "$session_id"` |
 | AWAIT_VOTE_START + 汇总稿回灌/人类消息 | `uc open-vote --session "$session_id"`，结束 |
 | AWAIT_NEXT_ROUND + 开票稿回灌 | pending_ping 非空：`uc render-ping --session "$session_id"`，将 message 原样 bcs_assign_task 给 target_bot，结束；为空：最后 `uc open-round --session "$session_id"` |
 | AWAIT_NEXT_ROUND + 遗言回执 | `uc mask --session "$session_id" --seat N --text '<原话>'`；只念返回 text，不附和；最后 `uc open-round --session "$session_id"` |
@@ -61,9 +61,13 @@ allowed-tools:
 
 collect/tally 不启动下一个运行、不派任务，下一步由最终产物回灌触发。
 open-* 和 bcs_assign_task 都是本次最后一个工具调用；提交后无状态查询、sleep 或轮询。
+open-round 成功后播报 announcement；open-vote 提交后按返回提示立即结束激活，开投稿由 vote_open 主持人节点播报。
+发言从玩家直接开始；投票必须先由主持人 vote_open 开场，再全员并行投票。
+发牌告知在 open-round 调用前发出。发言重开说明在 announcement；投票重开时按返回提示告知旧票作废。
+提交失败如实报告，不播报成功开场；submitted=true 也不代表任何玩家已完成。
 派遗言时身后不能有等待执行的节点。遗言回执公开，词与身份不可泄露。
 
 “卡住了”：查 status，SPEAK_RUNNING 用 open-round --retry；VOTE_RUNNING 用 open-vote --retry；
 AWAIT_VOTE_START 用 open-vote（不加 --retry）。都带当前 --session。
 IN_COLLECT_NODE / IN_TALLY_NODE 立即结束，不重试；RUN_SLOT_BUSY 说明仍在等待，结束。
-重开最多两次，告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。
+重开最多两次，按对应阶段的开场告知旧票/发言作废；仍失败请新建会话，不猜测推进。细节见阶段机 SX。

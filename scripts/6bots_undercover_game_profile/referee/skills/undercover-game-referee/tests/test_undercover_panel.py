@@ -53,7 +53,7 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         self.assertTrue(speech["players"][2]["eliminated"])
         self.assertEqual(speech["nodeActorMap"], {
             "speak_1": "human-1", "speak_2": "bot-a",
-            "speak_open": "referee-1", "collect": "referee-1",
+            "collect": "referee-1",
         })
         self.assertEqual(vote["nodeActorMap"], {
             "vote_1": "human-1", "vote_2": "bot-a",
@@ -96,7 +96,7 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         pattern = re.escape(undercover.UI_CONTEXT_OPEN) + r"\n\s*(.*?)\n\s*" + re.escape(undercover.UI_CONTEXT_CLOSE)
         return [json.loads(item.strip()) for item in re.findall(pattern, yaml_text)]
 
-    def test_human_yaml_context_is_versioned_private_and_topology_unchanged(self) -> None:
+    def test_human_yaml_context_is_versioned_private_with_direct_player_entry(self) -> None:
         speech, _ = undercover.render_speak_yaml(self.state)
         vote, _ = undercover.render_vote_yaml(self.state)
         speech_contexts = self._ui_contexts(speech); vote_contexts = self._ui_contexts(vote)
@@ -104,8 +104,8 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         self.assertEqual(vote_contexts, [{"action": "vote", "round": 1, "seatNumber": 1, "word": "secret-civilian-word", "allowAbstain": True}])
         self.assertEqual(speech.count("secret-undercover-word"), 0)  # eliminated Bot has no node
         self.assertGreaterEqual(speech.count("secret-civilian-word"), 2)
-        self.assertIn("targets: [speak_1, speak_2]", speech)
-        self.assertIn("targets: [vote_1, vote_2]", vote)
+        self.assertIn("targets: [speak_2, collect]", speech)
+        self.assertEqual(vote.count("targets: [tally]"), 2)
         self.assertNotIn(undercover.UI_CONTEXT_OPEN, speech.split("speak_2:", 1)[1])
 
     def test_structured_and_legacy_votes(self) -> None:

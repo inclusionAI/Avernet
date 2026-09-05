@@ -75,7 +75,7 @@ Crossing a threshold changes presentation only. Speech drafts, vote selection an
 - `（你）` plus the framed portrait: current viewer identity;
 - `!` triangle: Human action required;
 - waveform: Bot speaking;
-- check: speech completed;
+- clickable small speech bubble: completed public speech; no separate check marker;
 - sealed envelope: private vote submitted (never a target);
 - cross: eliminated, with the original seat retained;
 - circular arrow / warning: retry or error.
@@ -114,3 +114,31 @@ The game-over dialog opens after a completed run only when the phase explicitly 
 The dialog shows only the existing public host summary and honors `showPublicReveal` and `showHostOutput`. It traps keyboard focus, supports Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to the mounted game session and survives refreshes and phase updates; no private data is persisted.
 
 Preview `?width=760&height=660&mode=finished` for the finale fixture, or `?width=900&height=950&mode=observe` for the club room.
+
+### Character speech bubbles
+
+The table has no text overlay. A single expanded pixel speech bubble follows its
+speaker, using original nine-slice frame and directional tail SVG assets. Placement
+uses measured player/host bounds and chooses a nearby clear position, shrinking
+the frame when needed. Latest output expands automatically; older output stays in
+small speech markers that can be clicked to review in place. Clicking the expanded
+bubble opens the full public speech. Text previews are limited to two lines. A new
+latest output resets manual review; unchanged refreshes retain it. Voting continues
+to hide player speech bubbles and vote targets. Narrow panels retain the labeled
+roster, and reduced-motion preferences suppress bubble entrance animation.
+
+Use `?width=560&height=950&mode=bubbles&bubbleSeat=5` to preview all speech
+markers; `bubbleSeat=1` through `6` selects the newest speaker for layout checks.
+
+### Host sculpture and speech status
+
+The host is an original stone knight centered against the north wall, with a
+pedestal and a compact plaque beneath the club sign. Narrow layouts use a smaller
+sculpture alongside the plaque. The host still opens the same public detail view.
+
+During speech collection, a running player has only the waveform marker, even if
+partial public text is already available. Completed, non-pending public speech can
+expand into a bubble; other completed speakers have clickable small bubbles. The
+completed-speech check sprite and check prefix are removed. Other lifecycle markers
+(vote, eliminated, retry, action required) remain distinct. Preview `mode=markers`
+to inspect a running speaker alongside completed speeches.

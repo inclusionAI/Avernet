@@ -5,7 +5,7 @@
 常规动作和参数见游戏 SKILL.md；仅遇到参数问题时读 references/commands.md 对应小节。
 
 `begin`、`open-round`、`open-vote` 已封装 BCS 查询和提交，不拆成底层调用。
-`open-*` 必须是本次激活的最后一个工具调用，提交后结束；不追加状态查询或派任务。
+`open-*` 必须是本次激活的最后一个工具调用，成功后按阶段收尾：open-round 播报 announcement，open-vote 按返回提示立即结束；不追加状态查询或派任务。
 `bcs_assign_task(target_bot, message)` 仅用于开票稿回灌后的遗言，原样使用 render-ping 返回。
 派单也必须是最后一个工具调用，且身后不能有等待执行的协作节点。
 

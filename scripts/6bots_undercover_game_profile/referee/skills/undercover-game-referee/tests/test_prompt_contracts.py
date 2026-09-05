@@ -155,6 +155,97 @@ class PromptContractsTest(unittest.TestCase):
                     for constraint in ("10", "不能投自己", "我弃权", "全部历轮", "不写理由"):
                         self.assertIn(constraint, node)
 
+    def test_successful_submission_starts_players_and_returns_public_announcement(self) -> None:
+        for kind, command in (("speak", undercover.cmd_open_round), ("vote", undercover.cmd_open_vote)):
+            for retry in (False, True):
+                with self.subTest(kind=kind, retry=retry):
+                    state = copy.deepcopy(self.fixtures[0]["state"])
+                    state["rounds"][0]["speeches"] = {}
+                    state["rounds"][0]["renders"] = {kind: 1} if retry else {}
+                    state["phase"] = (
+                        "SPEAK_RUNNING" if retry else "AWAIT_NEXT_ROUND"
+                    ) if kind == "speak" else "AWAIT_VOTE_START"
+                    if kind == "vote" and retry:
+                        state["phase"] = "VOTE_RUNNING"
+                    undercover.save_state(state)
+                    with patch.object(undercover, "require_run_slot"), \
+                         patch.object(undercover, "self_lock_hint", return_value=None), \
+                         patch.object(undercover, "submit_run", return_value={"run_id": "test-run"}) as submit, \
+                         patch.object(undercover, "emit") as emit:
+                        command(argparse.Namespace(session=state["session_id"], retry=retry))
+                    submit.assert_called_once()
+                    result = emit.call_args.args[0]
+                    self.assertTrue(result["submitted"])
+                    self.assertEqual(result["run_id"], "test-run")
+                    yaml_text = Path(submit.call_args.args[1]).read_text()
+                    run_input = json.loads(Path(submit.call_args.args[2]).read_text())
+                    self.assertNotIn("vote_ready", yaml_text)
+                    self.assertNotIn("准备完成", yaml_text)
+                    if kind == "speak":
+                        self.assertEqual(result["next_action"], undercover.SUBMITTED_NEXT_ACTION)
+                        self.assertEqual("作废" in result["announcement"], retry)
+                        self.assertEqual(run_input["opening"], result["announcement"])
+                        self.assertNotIn("      speak_open:", yaml_text)
+                        public_text = result["announcement"]
+                    else:
+                        self.assertNotIn("announcement", result)
+                        self.assertNotIn("opening", run_input)
+                        self.assertIn("立刻结束激活", result["next_action"])
+                        public_text = yaml_text.split("      vote_open:\n", 1)[1].split("        transitions:", 1)[0]
+                        self.assertIn("binding: referee", public_text)
+                        self.assertNotIn("作废", public_text)
+                        self.assertEqual("之前的票作废" in result["next_action"], retry)
+                    for secret in state["words"].values():
+                        self.assertNotIn(secret, public_text)
+                        self.assertNotIn(secret, json.dumps(run_input, ensure_ascii=False))
+
+    def test_graph_preserves_player_speech_entry_and_referee_vote_entry(self) -> None:
+        for fixture in self.fixtures:
+            for human_first in (False, True):
+                state = copy.deepcopy(fixture["state"])
+                if human_first:
+                    human = next(seat for seat in state["seats"] if seat["kind"] == "human")
+                    human["alive"] = True
+                    first = min(state["seats"], key=lambda seat: seat["seat"])
+                    first["seat"], human["seat"] = human["seat"], first["seat"]
+                living = sorted(undercover.alive_seats(state), key=lambda seat: seat["seat"])
+                for kind, render in (("speak", undercover.render_speak_yaml), ("vote", undercover.render_vote_yaml)):
+                    text, _ = render(state)
+                    blocks = dict(re.findall(r"(?m)^      (\w+):\n([\s\S]*?)(?=^      \w+:\n|\Z)", text))
+                    parents = {node: set() for node in blocks}
+                    for node, body in blocks.items():
+                        targets = re.search(r"targets: \[(.*?)\]", body)
+                        for target in targets[1].split(", ") if targets else []:
+                            parents[target].add(node)
+                    players = [f"{kind}_{seat['seat']}" for seat in living]
+                    self.assertEqual({node for node, upstream in parents.items() if not upstream},
+                                     {players[0]} if kind == "speak" else {"vote_open"})
+                    terminal = "collect" if kind == "speak" else "tally"
+                    self.assertEqual(parents[terminal], set(players))
+                    for idx, player in enumerate(players):
+                        self.assertEqual(parents[player], set(players[:idx]) if kind == "speak" else {"vote_open"})
+                        self.assertNotIn("binding: referee", blocks[player])
+                    self.assertIn("binding: referee", blocks[terminal])
+                    if kind == "vote":
+                        self.assertIn("binding: referee", blocks["vote_open"])
+                        self.assertEqual(undercover.public_panel_projection(state, kind, 1)["nodeActorMap"]["vote_open"], state["referee_uuid"])
+                        for secret in state["words"].values():
+                            self.assertNotIn(secret, blocks["vote_open"])
+
+    def test_failed_submission_does_not_emit_success_handoff(self) -> None:
+        for command, prepare in ((undercover.cmd_open_round, "prepare_speak_run"),
+                                 (undercover.cmd_open_vote, "prepare_vote_run")):
+            with self.subTest(command=command.__name__):
+                payload = dict.fromkeys(("yaml_path", "input_path", "panel_params_path", "panel_tab", "bindings"))
+                with patch.object(undercover, "require_run_slot"), \
+                     patch.object(undercover, "self_lock_hint", return_value=None), \
+                     patch.object(undercover, prepare, return_value=payload), \
+                     patch.object(undercover, "submit_run", side_effect=RuntimeError("delivery failed")), \
+                     patch.object(undercover, "emit") as emit:
+                    with self.assertRaisesRegex(RuntimeError, "delivery failed"):
+                        command(argparse.Namespace(session="test-session", retry=False))
+                emit.assert_not_called()
+
     def test_player_common_instructions_are_consistent(self) -> None:
         players = sorted(PROFILES.glob("player-*"))
         self.assertEqual(len(players), 5)
