@@ -19,9 +19,7 @@ def _creds(token: str | None) -> CredentialBundle:
     return CredentialBundle(headers={}, cookies=cookies, query={})
 
 
-def _token(
-    *, sub: str = "user-123", src: str = "google", name: str = "alice"
-) -> str:
+def _token(*, sub: str = "user-123", src: str = "google", name: str = "alice") -> str:
     now = datetime.now(tz=UTC)
     claims = {
         "sub": sub,
