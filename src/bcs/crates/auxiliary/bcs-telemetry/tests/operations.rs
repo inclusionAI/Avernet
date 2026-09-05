@@ -17,10 +17,27 @@ async fn capture(future: impl Future<Output = ()>) -> String {
     let buffer = Buffer::default();
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::fmt().json().with_max_level(tracing::Level::TRACE)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
         .with_writer(move || writer.clone()).finish();
     future.with_subscriber(subscriber).await;
     let bytes = buffer.0.lock().unwrap().clone();
     String::from_utf8(bytes).unwrap()
+}
+
+#[tokio::test]
+async fn observations_emit_logs_without_creating_spans() {
+    let logs = capture(bcs_telemetry::with_request_context("logs-only".into(), async {
+        bcs_telemetry::observe_result("test.parent", async {
+            bcs_telemetry::count("test.cache", "miss");
+            bcs_telemetry::observe_value("test.child", async {}).await;
+            Ok::<_, ()>(())
+        }).await.unwrap();
+    })).await;
+    let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(events.iter().any(|event| event["fields"]["message"] == "http.request.operations"));
+    assert_eq!(events.iter().filter(|event| event["fields"]["message"] == "bcs.operation.finished").count(), 2);
+    assert!(events.iter().all(|event| event.get("span").is_none() && event.get("spans").is_none()),
+        "operation logging must not create spans: {logs}");
 }
 
 #[tokio::test]

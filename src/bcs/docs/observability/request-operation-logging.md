@@ -19,11 +19,11 @@ retry policy, authorization decisions or business return values.
    it does not currently emit an aggregate snapshot. Background operations that
    finish after the response are not included in the already emitted snapshot.
 4. Use `operation_id` and `parent_operation_id` to reconstruct nested stages from
-   operation events. `trace_id` links to the existing OpenTelemetry exporter when
-   enabled. Query/chat now create root spans even without an incoming TraceContext.
-   Downstream TraceContext keeps the TraceId and uses the newly inserted client
-   operation span as its remote parent, with a chain back to the gateway span.
-   `in_current_context` carries request/operation/trace context into selected
+   log events. These observations do not create tracing spans or record metrics.
+   `trace_id` reads an existing trace context when available and is otherwise empty;
+   request and operation IDs provide correlation even without tracing enabled.
+   Existing gateway span selection and downstream TraceContext propagation are
+   unchanged. `in_current_context` carries request/operation/existing trace context into selected
    detached work; detached run duration remains distinct from request latency.
 
 A parent stage contains its children. Parallel child durations overlap. Do not
@@ -66,19 +66,16 @@ the source for delivery disposition and terminal Run results.
   historical payload logging elsewhere in the application.
 - Observed futures are boxed at the wrapper boundary to bound nested adapter
   Future stack size; this adds one allocation per instrumented operation.
-- Use fixed names only; request/operation IDs are log/span fields, never metric
-  labels. Metrics are `bcs_operation_total`, `bcs_operation_duration_ms`,
-  `bcs_operation_inflight` and `bcs_observation_total`. Histograms/counts observe
-  every instrumented completion regardless of log filtering; in-flight gauges
-  count client futures, not remote outstanding commands or a driver's real queue.
+- Use fixed names only; request/operation IDs are log fields. Durations and
+  outcomes are written to completion logs and accumulated for the request summary.
+  `count` adds an outcome count to that summary only. No operation counters,
+  histograms or gauges are exported to `/metrics` by these helpers.
 
 File outputs now use a bounded nonblocking writer (4,096 queued lines/output).
 The worker performs rotation and writes; retained shutdown guards flush the queue.
 If the sink stalls, lines can be dropped instead of blocking request workers.
-`bcs_log_dropped_lines_total{output}` exposes the writer's dropped-line counter
-when the existing metrics endpoint is scraped. Console output and disk/collector
-health are separate concerns; the counter is not an exporter-drop or disk-error
-counter. Do not infer completeness from logs when it increases.
+No dropped-line metric is exported. Console output and disk/collector health are
+separate concerns; logs are not guaranteed complete when the file queue is full.
 
 ## Deployment
 

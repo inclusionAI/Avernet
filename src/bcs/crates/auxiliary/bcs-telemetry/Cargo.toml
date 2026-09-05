@@ -17,7 +17,6 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 tokio = { workspace = true }
-metrics = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

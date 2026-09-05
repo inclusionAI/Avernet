@@ -296,7 +296,7 @@ async fn provider_abort_rejects_unrelated_gone_response() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn provider_delivery_injects_observed_context_under_current_gateway() {
+async fn provider_delivery_injects_current_gateway_span_context() {
     use opentelemetry::{
         global,
         trace::{TraceContextExt as _, TracerProvider as _},
@@ -309,7 +309,7 @@ async fn provider_delivery_injects_observed_context_under_current_gateway() {
     global::set_text_map_propagator(TraceContextPropagator::new());
     let exporter = InMemorySpanExporterBuilder::new().build();
     let provider = SdkTracerProvider::builder()
-        .with_simple_exporter(exporter.clone())
+        .with_simple_exporter(exporter)
         .build();
     let tracer = provider.tracer("bcn-provider-transport-test");
     let subscriber =
@@ -352,20 +352,7 @@ async fn provider_delivery_injects_observed_context_under_current_gateway() {
     let fields: Vec<_> = traceparent.split('-').collect();
     assert_eq!(fields[0], "00");
     assert_eq!(fields[1], expected_trace_id);
-    // A client operation span becomes the remote parent. It must retain the
-    // gateway TraceId and a complete parent chain back to the gateway span.
-    let spans = exporter.get_finished_spans().unwrap();
-    let mut parent_id = fields[2].to_string();
-    let mut visited = std::collections::HashSet::new();
-    while parent_id != expected_parent_span_id {
-        assert!(visited.insert(parent_id.clone()), "trace parent cycle");
-        let parent = spans.iter().find(|span| span.span_context.span_id().to_string() == parent_id)
-            .expect("forwarded parent must be one of our completed client spans");
-        assert_eq!(parent.span_context.trace_id().to_string(), expected_trace_id);
-        assert_eq!(parent.name.as_ref(), "bcs.operation");
-        parent_id = parent.parent_span_id.to_string();
-    }
-    assert!(!visited.is_empty(), "client operation must be traced before forwarding");
+    assert_eq!(fields[2], expected_parent_span_id);
     server.abort();
 }
 

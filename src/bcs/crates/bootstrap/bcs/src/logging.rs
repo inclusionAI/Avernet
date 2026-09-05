@@ -200,17 +200,6 @@ pub struct LoggingGuard {
     _workers: Vec<tracing_appender::non_blocking::WorkerGuard>,
 }
 
-static DROP_COUNTERS: std::sync::OnceLock<Vec<(String, tracing_appender::non_blocking::ErrorCounter)>> = std::sync::OnceLock::new();
-
-pub fn record_writer_metrics() {
-    if let Some(counters) = DROP_COUNTERS.get() {
-        for (name, counter) in counters {
-            metrics::counter!("bcs_log_dropped_lines_total", "output" => name.clone())
-                .absolute(counter.dropped_lines() as u64);
-        }
-    }
-}
-
 fn buffered_writer(writer: impl Write + Send + 'static) -> (tracing_appender::non_blocking::NonBlocking, tracing_appender::non_blocking::WorkerGuard) {
     tracing_appender::non_blocking::NonBlockingBuilder::default()
         .buffered_lines_limit(4096)
@@ -237,7 +226,6 @@ fn timer_for_output<F: Clone>(
 /// Console, file, and BCN OpenTelemetry output use independent layer filters.
 pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
     let mut workers = Vec::new();
-    let mut drop_counters = Vec::new();
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
@@ -260,7 +248,6 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
             }
 
             let (writer, guard) = buffered_writer(RotatingFileWriter::new(&dir, &output.file));
-            drop_counters.push((output.name.clone(), writer.error_counter()));
             workers.push(guard);
 
             let filter = build_output_targets_filter(output);
@@ -310,7 +297,6 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
         .with(file_layers)
         .with(otel_layer)
         .init();
-    let _ = DROP_COUNTERS.set(drop_counters);
     LoggingGuard { _workers: workers }
 }
 

@@ -1,4 +1,4 @@
-//! Transport-neutral operation observations. Never records arguments or errors.
+//! Log-only operation observations. Never creates spans or records metrics/payloads.
 use std::future::Future;
 use std::time::{Duration, Instant};
 use opentelemetry::trace::TraceContextExt;
@@ -48,7 +48,6 @@ fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static st
 }
 
 pub fn count(name: &'static str, outcome: &'static str) {
-    metrics::counter!("bcs_observation_total", "operation" => name, "outcome" => outcome).increment(1);
     let _ = REQUEST_CONTEXT.try_with(|context| accumulate(context, name, outcome, 0.0));
 }
 
@@ -93,7 +92,6 @@ pub struct Operation {
     context: Option<RequestContext>,
     trace_id: String,
     started: Instant,
-    span: Span,
     finished: bool,
 }
 
@@ -103,21 +101,9 @@ impl Operation {
         let parent_operation_id = current_operation_id();
         let request_id = current_request_id();
         let context_data = REQUEST_CONTEXT.try_with(Clone::clone).ok();
-        let span = tracing::info_span!(target: "bcn_otel", "bcs.operation",
-            operation = name, operation_id = %id, parent_operation_id = %parent_operation_id, request_id = %request_id,
-            trace_id = tracing::field::Empty,
-            outcome = tracing::field::Empty, duration_ms = tracing::field::Empty);
-        let context = span.context();
-        let context_span = context.span();
-        let trace_id = if context_span.span_context().is_valid() { context_span.span_context().trace_id().to_string() } else { String::new() };
-        if context_span.span_context().is_valid() {
-            span.record("trace_id", context_span.span_context().trace_id().to_string());
-        }
-        metrics::gauge!("bcs_operation_inflight", "operation" => name).increment(1.0);
-        Self { name, id, parent_operation_id, request_id, context: context_data, trace_id, started: Instant::now(), span, finished: false }
+        let trace_id = current_trace_id();
+        Self { name, id, parent_operation_id, request_id, context: context_data, trace_id, started: Instant::now(), finished: false }
     }
-
-    pub fn span(&self) -> Span { self.span.clone() }
 
     pub fn elapsed_ms(&self) -> f64 { self.started.elapsed().as_secs_f64() * 1000.0 }
 
@@ -130,23 +116,13 @@ impl Operation {
         self.finished = true;
         let duration_ms = self.elapsed_ms();
         if let Some(context) = &self.context { accumulate(context, self.name, outcome, duration_ms); }
-        self.span.record("outcome", outcome);
-        if matches!(outcome, "error" | "panicked") {
-            self.span.set_status(opentelemetry::trace::Status::error(outcome));
+        if matches!(outcome, "error" | "cancelled" | "panicked") || duration_ms >= 100.0 {
+            tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
+                duration_ms, "bcs.operation.finished");
+        } else {
+            tracing::debug!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
+                duration_ms, "bcs.operation.finished");
         }
-        self.span.record("duration_ms", duration_ms);
-        metrics::gauge!("bcs_operation_inflight", "operation" => self.name).decrement(1.0);
-        metrics::counter!("bcs_operation_total", "operation" => self.name, "outcome" => outcome).increment(1);
-        metrics::histogram!("bcs_operation_duration_ms", "operation" => self.name).record(duration_ms);
-        self.span.in_scope(|| {
-            if matches!(outcome, "error" | "cancelled" | "panicked") || duration_ms >= 100.0 {
-                tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
-                    duration_ms, "bcs.operation.finished");
-            } else {
-                tracing::debug!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
-                    duration_ms, "bcs.operation.finished");
-            }
-        });
     }
 }
 
@@ -163,7 +139,6 @@ async fn wait<T>(operation: &Operation, future: impl Future<Output = T>) -> T {
 }
 
 async fn wait_inner<T>(operation: &Operation, future: impl Future<Output = T>) -> T {
-    let future = future.instrument(operation.span());
     tokio::pin!(future);
     // One warning per operation, with no per-operation spawned watchdog task.
     // This timer is diagnostic only: the original future still owns its deadline.
@@ -176,9 +151,9 @@ async fn wait_inner<T>(operation: &Operation, future: impl Future<Output = T>) -
         }
         if !warned && warning.as_mut().poll(cx).is_ready() {
             warned = true;
-            operation.span.in_scope(|| tracing::warn!(target: "bcs_observation",
+            tracing::warn!(target: "bcs_observation",
                 operation = operation.name, operation_id = %operation.id, parent_operation_id = %operation.parent_operation_id, request_id = %operation.request_id, trace_id = %operation.trace_id, duration_ms = operation.elapsed_ms(),
-                "bcs.operation.stalled"));
+                "bcs.operation.stalled");
         }
         std::task::Poll::Pending
     }).await

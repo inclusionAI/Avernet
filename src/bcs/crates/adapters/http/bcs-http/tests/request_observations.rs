@@ -23,7 +23,9 @@ fn app() -> Router {
 async fn malformed_body_is_correlated_before_handler_and_payload_is_not_logged() {
     let buffer = Buffer::default();
     let writer = buffer.clone();
-    let subscriber = tracing_subscriber::fmt().json().with_writer(move || writer.clone()).finish();
+    let subscriber = tracing_subscriber::fmt().json()
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
+        .with_writer(move || writer.clone()).finish();
     async {
         let request = Request::builder().method("POST").uri("/bots/query?secret=private-query")
             .header("content-type", "application/json").header("x-request-id", "request-42")
@@ -38,6 +40,11 @@ async fn malformed_body_is_correlated_before_handler_and_payload_is_not_logged()
     assert!(logs.contains("http.request.operations"));
     assert!(logs.contains("request-42"));
     assert!(!logs.contains("private-"));
+    for line in logs.lines() {
+        let event: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(event.get("span").is_none() && event.get("spans").is_none(),
+            "request logging must not create spans: {line}");
+    }
 }
 
 #[tokio::test]
