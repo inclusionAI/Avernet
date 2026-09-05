@@ -94,3 +94,23 @@ npm run verify
 ```
 
 The scan enforces complete provenance, no tracked source-pack archives, a 120 KiB combined atlas budget, no third-party runtime image URLs, and a 250 KiB minified UMD budget.
+
+### Local design preview
+
+Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open
+`http://127.0.0.1:4178/test/visual-preview.html`. The preview uses synthetic
+players and local mock responses; submissions do not affect a real game.
+Use `width=320&height=600&mode=speech` or `width=560&height=600&mode=vote`
+in the query string to inspect input layouts; `mode=observe` shows the waiting
+state. The panel preserves pixel room art while using readable typography,
+a round progress bar, independent host broadcasts, and a persistent action footer.
+
+### Club room and game finale
+
+The room uses original paneled walls, parquet, brass-trimmed green felt, a geometric rug and warm window lighting with the existing CC0 characters. All art remains embedded in the UMD bundle.
+
+The game-over dialog opens after a completed run only when the phase explicitly denotes a whole-game finish (`complete`, `completed`, `finished`, `game_over`), or the current run has a non-pending mapped host output with an explicit Chinese game-end declaration and a civilian/undercover victory verdict. Ordinary phase completion, player claims, private messages and conditional rule explanations do not trigger it. This is a conservative compatibility path for the existing host prose, not an inference from player count or round number. Other wording remains available in the host broadcast without an automatic popup.
+
+The dialog shows only the existing public host summary and honors `showPublicReveal` and `showHostOutput`. It traps keyboard focus, supports Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to the mounted game session and survives refreshes and phase updates; no private data is persisted.
+
+Preview `?width=760&height=660&mode=finished` for the finale fixture, or `?width=900&height=950&mode=observe` for the club room.

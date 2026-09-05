@@ -57,5 +57,42 @@ try{
  globalThis.fetch=fetchFor([{graph:{run:{run_id:'run-upstream',status:'running'},nodes:[{node_id:'node-a',status:'ready'},{node_id:'node-b',status:'completed'}]},pending:[{node_id:'node-a',instruction:orderedInstruction,upstream_artifacts:[{node_id:'node-host',text:'不要显示主持人'},{node_id:'node-b',text:'二号线索'},{node_id:'unknown',text:'不要显示未知'},{node_id:'speak_open',text:'不要显示入口'},{node_id:'node-a',text:'一号线索'},{node_id:'collect',text:'不要显示汇总'}]}],messages:[]}],[]);
  let u;await act(async()=>{u=mount({...base,runId:'run-upstream',style:{height:'280px'},nodeActorMap:{...base.nodeActorMap,speak_open:'host',collect:'host'},autoRefresh:false});await settle(5)});const upstreamText=text(u);assert.match(upstreamText,/1号 小甲：一号线索/);assert.match(upstreamText,/2号 小乙：二号线索/);assert.ok(upstreamText.indexOf('1号 小甲：一号线索')<upstreamText.indexOf('2号 小乙：二号线索'));assert.doesNotMatch(upstreamText,/不要显示主持人|不要显示未知|不要显示入口|不要显示汇总/);assert.ok(u.container.querySelector('[data-region="dock-body"]'));assert.match(u.container.querySelector('[data-region="dock-footer"]').textContent,/提交发言/);await act(async()=>u.unmount());
 
+ // A phase completion is not a game finale; only a completed public host verdict opens it.
+ const finale='🎉 游戏结束！平民胜利！\n🏆 终局揭秘\n主持人公开复盘：最后一轮找到了卧底。';
+ const finishGraph={run:{run_id:'run-finale',status:'completed'},nodes:[{node_id:'node-host',status:'completed'}]};
+ const hostMessage=content=>({content,metadata:{state_machine:{event:'output',run_id:'run-finale',node_id:'node-host'}}});
+ for(const snapshot of [
+   {graph:finishGraph,pending:[],messages:[hostMessage('投票已收齐，主持人正在计票或准备下一轮。')]},
+   {graph:finishGraph,pending:[],messages:[hostMessage('如果游戏结束，平民胜利就公布身份。')]},
+   {graph:finishGraph,pending:[],messages:[{...hostMessage(finale),pending:true}]},
+   {graph:finishGraph,pending:[],messages:[{content:finale,metadata:{state_machine:{event:'output',run_id:'run-finale',node_id:'node-b'}}}]},
+   {graph:finishGraph,pending:[],messages:[{content:finale,metadata:{state_machine:{event:'output',run_id:'run-finale',node_id:'node-host',visibility:'private'}}}]},
+   {graph:{...finishGraph,run:{run_id:'run-finale',status:'running'}},pending:[],messages:[hostMessage(finale)]},
+ ]){
+   globalThis.fetch=fetchFor([snapshot],[]);let ordinary;
+   await act(async()=>{ordinary=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
+   assert.equal(ordinary.container.querySelector('[aria-label="游戏结束"]'),null);
+   await act(async()=>ordinary.unmount());
+ }
+ globalThis.fetch=fetchFor([{graph:finishGraph,pending:[],messages:[hostMessage(finale)]}],[]);
+ let finalePanel;await act(async()=>{finalePanel=mount({...base,runId:'run-finale',phase:'voting'});await settle(5)});
+ assert.match(finalePanel.container.querySelector('[aria-label="游戏结束"]').textContent,/平民阵营获胜/);
+ assert.equal(document.activeElement,button(finalePanel,'回到圆桌'));
+ assert.ok([...finalePanel.container.querySelectorAll('[data-game-content]')].every(node=>node.hasAttribute('inert')));
+ await act(async()=>{document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));await settle()});
+ assert.equal(document.activeElement?.getAttribute('aria-label'),'终局公开复盘');
+ await act(async()=>{document.activeElement.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await settle()});
+ assert.equal(finalePanel.container.querySelector('[aria-label="游戏结束"]'),null);
+ assert.equal(document.activeElement,button(finalePanel,'查看终局'));
+ await act(async()=>{button(finalePanel,'刷新').click();await settle(5)});
+ assert.ok([...finalePanel.container.querySelectorAll('[data-game-content]')].every(node=>!node.hasAttribute('inert')));
+ assert.equal(finalePanel.container.querySelector('[aria-label="游戏结束"]'),null,'refresh must not reopen a dismissed finale');
+ await act(async()=>{button(finalePanel,'查看终局').click();await settle()});
+ assert.ok(finalePanel.container.querySelector('[aria-label="游戏结束"]'));
+ await act(async()=>{button(finalePanel,'回到圆桌').click();finalePanel.render({...base,gameSessionId:'new-game',runId:'run-finale',phase:'voting',display:{showPublicReveal:false}});await settle(5)});
+ const hiddenReveal=finalePanel.container.querySelector('[aria-label="游戏结束"]');
+ assert.ok(hiddenReveal);assert.doesNotMatch(hiddenReveal.textContent,/最后一轮找到了卧底|平民阵营获胜/);
+ await act(async()=>finalePanel.unmount());
+
 }finally{globalThis.fetch=originalFetch}
 console.log('Component lifecycle tests passed: dock speech/vote/abstain, privacy, compact layout, focus, transition, and recovery.');

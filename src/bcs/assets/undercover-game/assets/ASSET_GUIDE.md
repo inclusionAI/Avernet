@@ -1,9 +1,10 @@
 # Undercover room asset guide
 
-- **Source grid:** 16×16 pixels; atlas slots are 32×32 and render at integer multiples.
-- **Palette:** ink `#201c30`, deep plum `#39324b`, muted red `#a94f5c`, wood `#8b5260`, amber `#f2b36c`, paper `#f9edcf`, Human teal `#5fb7a6`, neutral gray `#8b8ca3`.
-- **Outline:** one source pixel, dark-plum/ink, with no semitransparent edge pixels.
-- **Lighting:** upper-left highlight, lower-right shadow.
-- **Characters:** selected 16×16 Kenney silhouettes in 32×32 atlas slots; Human and host identity is supplied by dedicated surrounding frames rather than secret-dependent recoloring.
-- **Furniture projection:** top-down/dollhouse hybrid. The table is a shallow oval normalized from the Urban furniture palette; chairs use the Urban furniture sprite in exact front/rear/left/right rotations.
-- **Rendering:** `image-rendering: pixelated`; no antialiasing, rotation, arbitrary image URLs, or fractional sprite coordinates.
+- **Source grid:** Kenney characters are 16×16 pixels in 32×32 atlas slots; room source shapes use a 32px grid.
+- **Palette:** slate walls `#343e4c`, walnut floor `#564437`, green felt `#304c49`, brass `#d2a66c`, paper `#e0caa1`, viewer teal `#5fb7a6`.
+- **Room:** paneled walls, paired night windows and sconces, original parquet, a stepped geometric rug, and a broad felt table. Furniture is grouped at the edges so the six stable seats remain readable.
+- **Lighting:** static warm sconce glows and a subtle room vignette. These layers ignore pointer events and never obscure labels.
+- **Characters:** retained CC0 Kenney people render at integer source-pixel scales. A fixed frame marks the current viewer; no appearance depends on secret roles.
+- **Furniture:** original stepped table geometry; the retained chair uses exact quarter-turn rotations. Table surface cards are decorative and contain no game secrets.
+- **Rendering:** sprite crops explicitly fill their viewport, preventing adjacent atlas cells from appearing when the table is stretched into a wide oval. `image-rendering: pixelated` preserves hard edges. All art is embedded locally.
+- **Compact mode:** narrow panels keep the room vignette and player roster; while an action is pending the vignette shrinks. The full table and decorations stay in medium/wide layouts.
