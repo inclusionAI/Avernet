@@ -450,34 +450,17 @@ ANGLE_MENU = "什么时候会想到它 / 多久遇到一次 / 用完是什么感
 
 
 def bluntness_block(rnd: int, first: bool) -> str:
-    """本轮的钝度要求，逐字写进每个发言节点的 instruction。
-
-    这一段刻意写成**闭合式**：给一张固定的角度表让它挑一个，而不是让它自己去枚举
-    「这句话还能罩住哪些东西」。开放式自检（"念给局外人，他能列出至少 N 样吗"）要
-    求模型在开口之前先在心里造一批候选物再逐个比对——2026-08-31 那一局里，每个发
-    言节点从拿到 200 响应到吐出第一个字平均静默 35 秒（最长 76 秒），产出只有 20
-    来个字，那段静默就是这一步。闭合式给的是同一份钝度保证：一个角度 + 不出现类目
-    名词 + 不下定义，这句话必然同时罩得住一片东西，而模型不需要先把那一片列出来。
-    """
+    """Keep the same round-specific limits without a separate self-review task."""
     n = bluntness_n(rnd)
-    lines = [f"【本轮钝度 = {n}】这句话得能同时套在至少 {n} 样别的东西上。"]
+    lines = [f"本轮钝度 {n}：描述至少适用于 {n} 样东西，不下定义、不用类目名词。"]
     if rnd == 1:
-        lines.append(f"照这个写：从「{ANGLE_MENU}」里挑**一个**角度，只说那一个。")
-        lines.append(
-            "可以带一个属性（形状 / 材质 / 大小 / 场合，四选一），但一句里只放一个，"
-            "而且「用途」和「对象」不能进同一句——那等于给这个词下定义。"
-        )
+        lines.append(f"从「{ANGLE_MENU}」选一个角度。")
+        lines.append("可带一个属性（形状/材质/大小/场合四选一）；用途和对象不能进同一句。")
     elif rnd == 2:
-        lines.append(f"照这个写：从「{ANGLE_MENU}」里挑一个角度，可以再加一个使用场合。")
-        lines.append("整句仍然不等于这个词的定义。")
+        lines.append(f"从「{ANGLE_MENU}」选一个角度，可加一个使用场合。")
     else:
-        lines.append("这一轮可以说用途了，但整句仍然不能等价于这个词的定义。")
-    lines.append("不出现这个词所属类目的名词（不写「这种工具」「这类饮料」）。")
-    if first:
-        lines.append("你是本轮第一个发言的人，本轮的钝度由你定——宁可更钝。")
-    else:
-        lines.append("前面的人到了什么钝度，对齐就行：不要更锐利，也不要去补他们没说到的角度。")
-    lines.append("按上面这条直接写出来，不要先在心里列一批候选再挑。")
+        lines.append("本轮可以说用途，仍不能等价于词的定义。")
+    lines.append("你是首发，宁可更钝。" if first else "对齐前序发言的钝度，不更锐利、不补他们没说到的角度。")
     return "\n".join(lines)
 
 
@@ -783,19 +766,15 @@ def render_speak_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
 
     collect_instruction = (
         "【裁判节点 · 本轮发言汇总】\n"
-        "[Upstream Outputs] 里是本轮全部玩家的发言。\n"
-        "1. 先把每个座位的原话整理成 JSON，调 undercover.py speeches-set 交给事实层。\n"
-        "2. 用它返回的可展示文本写主持稿：串场用你自己的话，发言逐字引用，不要改写、不要概括。\n"
-        "   **每位玩家都要用返回里的 label 原样称呼（名字后面带号数），"
-        "例如「阿和（1号）开头：「…」」。**人类在副屏里投的是号码，"
-        "只报名字他就得自己去对照。\n"
-        "3. 结尾告诉人类：给他几秒看完，接下来他不用做任何事——**不要再让他说一声**。\n"
-        "**这个节点里只做上面这三件事。不要开投、不要调 open-vote、不要提交任何运行。**"
-        "你此刻就在这个发言运行的最后一个节点里：运行要等你这次激活结束才算完成，"
-        "协作槽位也才释放。在这里开投一定会被拒（IN_COLLECT_NODE），而重试、sleep、轮询都只会让"
-        "这次激活一直不结束——运行永远完不成，槽位永远不释放，整局就死在这里。"
-        "开投等这段稿子发出去、你被自己这条消息叫醒之后再做。\n"
-        "只输出给玩家看的主持稿，不要输出任何词语、身份、内部状态、节点名或运行 ID。"
+        "这是 NODE_TASK/collect；本次激活类型不会随脚本返回的 phase 改变。\n"
+        "1. 将 [Upstream Outputs] 中每个座位的原话整理成 JSON，执行 "
+        "undercover.py speeches-set --session '<当前会话ID>' --json '<JSON>'。\n"
+        "2. 用返回的 label 称呼每个人，逐字引用遮蔽后的 text，标明 violation；"
+        "串场用自己的口吻，不评价谁可疑。\n"
+        "3. 告诉人类接下来自动开投、不用回复，输出这一段主持稿后结束激活。\n"
+        "本节点禁止 open-vote、提交运行、派任务和 bcs_route。开投只在汇总稿回灌后执行；"
+        "IN_COLLECT_NODE 不重试、不 sleep、不轮询。\n"
+        "不输出词语、身份、内部状态、节点名或运行 ID。"
     )
     nodes.append(
         "      collect:\n"
@@ -903,18 +882,14 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
             # 这里只留一条**闭合的**挑人规则——开放式的「读完所有人所有轮次再自
             # 己想」是投票节点吐 4 个字要花 20-70 秒的原因。
             instruction = (
-                f"你是 {s['seat']} 号，你的词是【{s['word']}】。第 {rnd} 轮投票。"
-                f"全场：{seat_list}。\n"
-                f"[Input] 是所有人历轮发言的原话，这是唯一依据。"
-                "[Upstream Outputs] 只有主持人开场，不含信息。\n"
-                f"可以投：{others}。不能投自己。\n\n"
-                "按这两条挑一个人，命中哪条投哪个：\n"
-                "① 哪句话和你的词最对不上；② 谁前后两轮自相矛盾。\n"
-                "话少、风格不同、这轮说得钝，都不算——钝是规则要求的。\n\n"
-                "只输出票号：「我投N号」，N 是阿拉伯数字，整条不超过 "
-                f"{VOTE_MAX_CHARS} 字。不写理由、不解释、不加前缀。\n"
-                "两条都命中不了就只输出「我弃权」。\n"
-                f"输出里不得出现「{s['word']}」或它的任何一部分。"
+                f"第 {rnd} 轮投票。只输出「我投N号」（阿拉伯数字）或「我弃权」，"
+                f"不超过 {VOTE_MAX_CHARS} 字，不写理由、解释或前缀。\n"
+                f"你是 {s['seat']} 号，词是【{s['word']}】。全场：{seat_list}。\n"
+                f"可以投：{others}；不能投自己。\n"
+                "唯一依据是 [Input] 的全部历轮公开发言；[Upstream Outputs] 仅为开投提示。\n"
+                "选与自己的词明显不符、或前后两轮自相矛盾的席位；均无依据则弃权。"
+                "话少、风格不同和本轮钝度不算嫌疑。\n"
+                f"输出不得出现「{s['word']}」或它的任何部分。"
             )
             # 入口节点归了裁判，玩家的投票节点不再和任何东西抢通道，走默认超时。
             nodes.append(
@@ -932,24 +907,22 @@ def render_vote_yaml(state: dict[str, Any]) -> tuple[str, list[str]]:
 
     tally_instruction = (
         "【裁判节点 · 计票】\n"
-        "[Upstream Outputs] 里是本轮全部玩家的投票，每条只有票号，没有理由。\n"
-        "1. 把每个座位的原话整理成 JSON，调 undercover.py votes-set 交给事实层计票。\n"
-        "2. 用它返回的结果写开票主持稿：逐条报谁投了谁、报票数、宣布出局者、"
-        "说明身份暂不公布、报剩下几个人。判定一律以事实层返回为准，不要自己数票。\n"
-        "   **每位玩家都要用返回里的 label / target_label 原样称呼（名字后面带号数），"
-        "例如「阿和（1号）投了阿浪（3号）」。**只报名字的话，人类下一轮就不知道"
-        "副屏里那些号码是谁。\n"
-        "   **玩家没有给理由，你也不许替他们编、不许猜他们为什么这么投。**"
-        "这一段的戏在票型上——谁压谁、谁是孤票、谁被围了。\n"
-        "   返回里 tie 为真就是平票：本轮没有人出局，直接进下一轮，没有重投这回事。\n"
-        "3. 如果事实层说本局结束，就在这里公布完整真相（先调 reveal）。\n"
-        "**这个节点里只做这三件事。不要派任何任务、不要调 bcs_assign_task、"
-        "不要去查 bcs 的用法，也不要开下一轮、不要提交任何运行。**"
-        "你此刻就在这个投票运行的最后一个节点里：运行要等你这次激活结束才算完成，"
-        "协作槽位也才释放，在这里提交下一个运行只会把整局锁死。"
-        "下一轮的唤醒源等这段稿子发出去之后再安排——"
-        "这条消息会把你自己叫醒一次，那次才是安排它的地方。\n"
-        "只输出给玩家看的主持稿，不要输出任何未出局玩家的词语或身份、内部状态、节点名或运行 ID。"
+        "这是 NODE_TASK/tally，不是 ECHO；本次激活类型不会随 phase 改变。\n"
+        "1. 将 [Upstream Outputs] 中每个座位的票面原样整理成 JSON，执行 "
+        "undercover.py votes-set --session '<当前会话ID>' --json '<JSON>'；"
+        "human 的结构化票面也作为原始文本传入，不自行换算。\n"
+        "2. 按返回的 label/target_label 逐条报票向、票数和出局者；"
+        "不自行计票，不编造投票理由。tie 为真时本轮无人出局、不重投。\n"
+        "3. verdict=continue：身份不公布，报存活名单，输出开票稿后结束激活。"
+        "下一轮或遗言任务由开票稿回灌唤醒后安排。\n"
+        "4. verdict=finished：本次刚判胜，尚未公布真相。先执行 "
+        "undercover.py reveal --session '<当前会话ID>'，按返回公布词对、全员身份和词、"
+        "胜负与关键转折；然后执行 bcs-cli session complete '<当前会话ID>'。"
+        "这是终局唯一允许公开全员词语和身份的分支；命令失败须如实报告。\n"
+        "本节点的上下文是 state_machine，不能使用 bcs_task_complete；"
+        "禁止 bcs_route（包括路由给自己）、查工具用法、派任务、open-round 或提交运行。"
+        "完成会话仍在本次终局节点内，不等待 ECHO 来收尾。\n"
+        "只输出主持稿，不输出内部状态、节点名、命令或运行 ID。"
     )
     nodes.append(
         "      tally:\n"
@@ -1701,12 +1674,22 @@ def cmd_votes_set(args: argparse.Namespace) -> None:
             "winner": winner,
             "win_reason": reason,
             "ping": ping,
-            "next_action": NEXT_ACTION[state["phase"]],
+            "next_action": (
+                "本次刚判胜，真相尚未公布。保持在当前计票节点：先 reveal --session '<当前会话ID>'，"
+                "公布终局稿，再执行 bcs-cli session complete '<当前会话ID>'。"
+                "不要等待 ECHO，不调用 bcs_task_complete 或 bcs_route。"
+                if verdict == "finished"
+                else (
+                    "念开票稿后结束当前节点。回灌后 render-ping 派遗言，回执后开下一轮。"
+                    if ping and ping["kind"] == "eulogy"
+                    else "念开票稿后结束当前节点。回灌后直接 open-round，不派预备任务。"
+                )
+            ),
             "note": "只使用 text 字段念稿——它已经规范化成票号，玩家的原话不会给你。"
             "每位玩家用 label / target_label 原样称呼（名字带号数）。"
             "不要替玩家编造或猜测投票理由。出局者身份不要公布，除非 verdict 是 finished。"
             "tie 为真就是本轮无人出局、直接进下一轮，没有重投这回事。"
-            "ping 为空、或它的 kind 是 standby 时，**这一轮不派任何任务**："
+            "仅 verdict=continue 且 ping 为空、或 verdict=continue 且 kind 是 standby 时，**这一轮不派任何任务**："
             "开票稿会把你自己叫醒一次，那一拍直接 open-round。",
         }
     )

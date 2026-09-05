@@ -1,0 +1,1083 @@
+[
+  {
+    "state": {
+      "session_id": "group-game:session-1",
+      "group_id": "group-game",
+      "human_actor_id": "human-1",
+      "referee_uuid": "referee-1",
+      "phase": "AWAIT_START",
+      "config": {
+        "max_rounds": 6
+      },
+      "words": {
+        "civilian": "隐词甲",
+        "undercover": "隐词乙"
+      },
+      "round": 1,
+      "rounds": [
+        {
+          "round": 1,
+          "order": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "speeches": {},
+          "votes": {},
+          "counts": {},
+          "renders": {}
+        }
+      ],
+      "seats": [
+        {
+          "seat": 1,
+          "kind": "bot",
+          "display": "玩家1",
+          "bot_uuid": "bot-1",
+          "bot_name": "玩家1",
+          "binding": "seat1",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 2,
+          "kind": "human",
+          "display": "你",
+          "bot_uuid": null,
+          "bot_name": "玩家2",
+          "binding": null,
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 3,
+          "kind": "bot",
+          "display": "玩家3",
+          "bot_uuid": "bot-3",
+          "bot_name": "玩家3",
+          "binding": "seat3",
+          "word": "隐词乙",
+          "role": "undercover",
+          "alive": true
+        },
+        {
+          "seat": 4,
+          "kind": "bot",
+          "display": "玩家4",
+          "bot_uuid": "bot-4",
+          "bot_name": "玩家4",
+          "binding": "seat4",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 5,
+          "kind": "bot",
+          "display": "玩家5",
+          "bot_uuid": "bot-5",
+          "bot_name": "玩家5",
+          "binding": "seat5",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 6,
+          "kind": "bot",
+          "display": "玩家6",
+          "bot_uuid": "bot-6",
+          "bot_name": "玩家6",
+          "binding": "seat6",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        }
+      ]
+    },
+    "speak": {
+      "yaml": "name: \"谁是卧底 第1轮 发言\"\nmetadata:\n  description: \"存活玩家按座位顺序各说一句话描述自己的词语\"\nparticipants:\n  seat1:\n    display_name: \"1号 玩家1\"\n    required: true\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      speak_open:\n        kind: bot_task\n        display_name: \"回合开场\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_1, speak_2, speak_3, speak_4, speak_5, speak_6]\n      speak_1:\n        kind: bot_task\n        display_name: \"1号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat1\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_2, speak_3, speak_4, speak_5, speak_6, collect]\n      speak_2:\n        kind: human_input\n        display_name: \"👤 你的发言（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 1 轮 · 你是 2 号 · 轮到你发言了。\n          上面能看到本轮在你之前的人说了什么。\n\n          写一句话（不超过 25 个字）描述你的词，别把这个词说出来，也别拆开来说。\n          说钝一点：这句话得能同时套在至少 4 样别的东西上。\n          别提身份、别点评别人，只说你的词。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"speech\",\"round\":1,\"seatNumber\":2,\"word\":\"隐词甲\",\"maxChars\":25,\"forbidOwnWord\":true,\"bluntness\":4}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [speak_3, speak_4, speak_5, speak_6, collect]\n      speak_3:\n        kind: bot_task\n        display_name: \"3号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_4, speak_5, speak_6, collect]\n      speak_4:\n        kind: bot_task\n        display_name: \"4号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_5, speak_6, collect]\n      speak_5:\n        kind: bot_task\n        display_name: \"5号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_6, collect]\n      speak_6:\n        kind: bot_task\n        display_name: \"6号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [collect]\n      collect:\n        kind: bot_task\n        display_name: \"本轮发言汇总\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat1=bot-1",
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "speaking",
+        "round": 1,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "speak_1": "bot-1",
+          "speak_2": "human-1",
+          "speak_3": "bot-3",
+          "speak_4": "bot-4",
+          "speak_5": "bot-5",
+          "speak_6": "bot-6",
+          "speak_open": "referee-1",
+          "collect": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": true,
+          "bluntness": 4
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": {
+          "actorId": "human-1",
+          "type": "speech",
+          "nodeId": "speak_2"
+        },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        }
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 1 轮发言"
+      },
+      "baseline_chars": 6933
+    },
+    "vote": {
+      "yaml": "name: \"谁是卧底 第1轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat1:\n    display_name: \"1号 玩家1\"\n    required: true\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_1, vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_1:\n        kind: bot_task\n        display_name: \"1号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat1\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 1 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：1号、3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":1,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat1=bot-1",
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "voting",
+        "round": 1,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "vote_1": "bot-1",
+          "vote_2": "human-1",
+          "vote_3": "bot-3",
+          "vote_4": "bot-4",
+          "vote_5": "bot-5",
+          "vote_6": "bot-6",
+          "vote_open": "referee-1",
+          "tally": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": false,
+          "bluntness": 4
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": {
+          "actorId": "human-1",
+          "type": "vote",
+          "nodeId": "vote_2"
+        },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
+        "voteCandidates": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "eligible": true
+          }
+        ]
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 1 轮投票"
+      },
+      "baseline_chars": 5866
+    }
+  },
+  {
+    "state": {
+      "session_id": "group-game:session-1",
+      "group_id": "group-game",
+      "human_actor_id": "human-1",
+      "referee_uuid": "referee-1",
+      "phase": "AWAIT_START",
+      "config": {
+        "max_rounds": 6
+      },
+      "words": {
+        "civilian": "隐词甲",
+        "undercover": "隐词乙"
+      },
+      "round": 2,
+      "rounds": [
+        {
+          "round": 2,
+          "order": [
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "speeches": {},
+          "votes": {},
+          "counts": {},
+          "renders": {}
+        }
+      ],
+      "seats": [
+        {
+          "seat": 1,
+          "kind": "bot",
+          "display": "玩家1",
+          "bot_uuid": "bot-1",
+          "bot_name": "玩家1",
+          "binding": "seat1",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": false
+        },
+        {
+          "seat": 2,
+          "kind": "human",
+          "display": "你",
+          "bot_uuid": null,
+          "bot_name": "玩家2",
+          "binding": null,
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 3,
+          "kind": "bot",
+          "display": "玩家3",
+          "bot_uuid": "bot-3",
+          "bot_name": "玩家3",
+          "binding": "seat3",
+          "word": "隐词乙",
+          "role": "undercover",
+          "alive": true
+        },
+        {
+          "seat": 4,
+          "kind": "bot",
+          "display": "玩家4",
+          "bot_uuid": "bot-4",
+          "bot_name": "玩家4",
+          "binding": "seat4",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 5,
+          "kind": "bot",
+          "display": "玩家5",
+          "bot_uuid": "bot-5",
+          "bot_name": "玩家5",
+          "binding": "seat5",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 6,
+          "kind": "bot",
+          "display": "玩家6",
+          "bot_uuid": "bot-6",
+          "bot_name": "玩家6",
+          "binding": "seat6",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        }
+      ]
+    },
+    "speak": {
+      "yaml": "name: \"谁是卧底 第2轮 发言\"\nmetadata:\n  description: \"存活玩家按座位顺序各说一句话描述自己的词语\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      speak_open:\n        kind: bot_task\n        display_name: \"回合开场\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_2, speak_3, speak_4, speak_5, speak_6]\n      speak_2:\n        kind: human_input\n        display_name: \"👤 你的发言（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 2 轮 · 你是 2 号 · 轮到你发言了。\n          上面能看到本轮在你之前的人说了什么。\n\n          写一句话（不超过 25 个字）描述你的词，别把这个词说出来，也别拆开来说。\n          说钝一点：这句话得能同时套在至少 3 样别的东西上。\n          别提身份、别点评别人，只说你的词。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"speech\",\"round\":2,\"seatNumber\":2,\"word\":\"隐词甲\",\"maxChars\":25,\"forbidOwnWord\":true,\"bluntness\":3}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [speak_3, speak_4, speak_5, speak_6, collect]\n      speak_3:\n        kind: bot_task\n        display_name: \"3号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_4, speak_5, speak_6, collect]\n      speak_4:\n        kind: bot_task\n        display_name: \"4号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_5, speak_6, collect]\n      speak_5:\n        kind: bot_task\n        display_name: \"5号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_6, collect]\n      speak_6:\n        kind: bot_task\n        display_name: \"6号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [collect]\n      collect:\n        kind: bot_task\n        display_name: \"本轮发言汇总\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "speaking",
+        "round": 2,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "speak_2": "human-1",
+          "speak_3": "bot-3",
+          "speak_4": "bot-4",
+          "speak_5": "bot-5",
+          "speak_6": "bot-6",
+          "speak_open": "referee-1",
+          "collect": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": true,
+          "bluntness": 3
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": {
+          "actorId": "human-1",
+          "type": "speech",
+          "nodeId": "speak_2"
+        },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        }
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 2 轮发言"
+      },
+      "baseline_chars": 5723
+    },
+    "vote": {
+      "yaml": "name: \"谁是卧底 第2轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_2, vote_3, vote_4, vote_5, vote_6]\n      vote_2:\n        kind: human_input\n        display_name: \"👤 你的投票（2号 · 人类玩家）\"\n        node_timeout_ms: 900000\n        instruction: |\n          【你的词语】隐词甲\n\n          第 2 轮投票 · 你是 2 号。\n          大家说过的话，主持人刚在群里念过一遍。\n\n          可以投的人：3号、4号、5号、6号，不能投自己。\n          只写「我投N号」，N 是阿拉伯数字，不用写理由。\n          不想投就写「我弃权」。\n\n          [UNDERCOVER_UI_CONTEXT_V1]\n          {\"action\":\"vote\",\"round\":2,\"seatNumber\":2,\"word\":\"隐词甲\",\"allowAbstain\":true}\n          [/UNDERCOVER_UI_CONTEXT_V1]\n        transitions:\n          complete:\n            targets: [tally]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "voting",
+        "round": 2,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "vote_2": "human-1",
+          "vote_3": "bot-3",
+          "vote_4": "bot-4",
+          "vote_5": "bot-5",
+          "vote_6": "bot-6",
+          "vote_open": "referee-1",
+          "tally": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": false,
+          "bluntness": 3
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": {
+          "actorId": "human-1",
+          "type": "vote",
+          "nodeId": "vote_2"
+        },
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        },
+        "voteCandidates": [
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "eligible": true
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "eligible": true
+          }
+        ]
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 2 轮投票"
+      },
+      "baseline_chars": 5122
+    }
+  },
+  {
+    "state": {
+      "session_id": "group-game:session-1",
+      "group_id": "group-game",
+      "human_actor_id": "human-1",
+      "referee_uuid": "referee-1",
+      "phase": "AWAIT_START",
+      "config": {
+        "max_rounds": 6
+      },
+      "words": {
+        "civilian": "隐词甲",
+        "undercover": "隐词乙"
+      },
+      "round": 3,
+      "rounds": [
+        {
+          "round": 3,
+          "order": [
+            3,
+            4,
+            5,
+            6
+          ],
+          "speeches": {},
+          "votes": {},
+          "counts": {},
+          "renders": {}
+        }
+      ],
+      "seats": [
+        {
+          "seat": 1,
+          "kind": "bot",
+          "display": "玩家1",
+          "bot_uuid": "bot-1",
+          "bot_name": "玩家1",
+          "binding": "seat1",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": false
+        },
+        {
+          "seat": 2,
+          "kind": "human",
+          "display": "你",
+          "bot_uuid": null,
+          "bot_name": "玩家2",
+          "binding": null,
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": false
+        },
+        {
+          "seat": 3,
+          "kind": "bot",
+          "display": "玩家3",
+          "bot_uuid": "bot-3",
+          "bot_name": "玩家3",
+          "binding": "seat3",
+          "word": "隐词乙",
+          "role": "undercover",
+          "alive": true
+        },
+        {
+          "seat": 4,
+          "kind": "bot",
+          "display": "玩家4",
+          "bot_uuid": "bot-4",
+          "bot_name": "玩家4",
+          "binding": "seat4",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 5,
+          "kind": "bot",
+          "display": "玩家5",
+          "bot_uuid": "bot-5",
+          "bot_name": "玩家5",
+          "binding": "seat5",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        },
+        {
+          "seat": 6,
+          "kind": "bot",
+          "display": "玩家6",
+          "bot_uuid": "bot-6",
+          "bot_name": "玩家6",
+          "binding": "seat6",
+          "word": "隐词甲",
+          "role": "civilian",
+          "alive": true
+        }
+      ]
+    },
+    "speak": {
+      "yaml": "name: \"谁是卧底 第3轮 发言\"\nmetadata:\n  description: \"存活玩家按座位顺序各说一句话描述自己的词语\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      speak_open:\n        kind: bot_task\n        display_name: \"回合开场\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_3, speak_4, speak_5, speak_6]\n      speak_3:\n        kind: bot_task\n        display_name: \"3号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_4, speak_5, speak_6, collect]\n      speak_4:\n        kind: bot_task\n        display_name: \"4号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_5, speak_6, collect]\n      speak_5:\n        kind: bot_task\n        display_name: \"5号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [speak_6, collect]\n      speak_6:\n        kind: bot_task\n        display_name: \"6号发言\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [collect]\n      collect:\n        kind: bot_task\n        display_name: \"本轮发言汇总\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "speaking",
+        "round": 3,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "speak_3": "bot-3",
+          "speak_4": "bot-4",
+          "speak_5": "bot-5",
+          "speak_6": "bot-6",
+          "speak_open": "referee-1",
+          "collect": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": true,
+          "bluntness": 2
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": null,
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        }
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 3 轮发言"
+      },
+      "baseline_chars": 4788
+    },
+    "vote": {
+      "yaml": "name: \"谁是卧底 第3轮 投票\"\nmetadata:\n  description: \"存活玩家根据全部发言并行投票，主持人计票\"\nparticipants:\n  seat3:\n    display_name: \"3号 玩家3\"\n    required: true\n  seat4:\n    display_name: \"4号 玩家4\"\n    required: true\n  seat5:\n    display_name: \"5号 玩家5\"\n    required: true\n  seat6:\n    display_name: \"6号 玩家6\"\n    required: true\n  referee:\n    display_name: \"主持人\"\n    required: true\nruntime:\n  kind: state_machine\n  state_machine:\n    version: 1\n    graph_mode: acyclic\n    defaults:\n      node_timeout_ms: 420000\n      max_attempts: 1\n    nodes:\n      vote_open:\n        kind: bot_task\n        display_name: \"开投\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 900000\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [vote_3, vote_4, vote_5, vote_6]\n      vote_3:\n        kind: bot_task\n        display_name: \"3号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat3\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_4:\n        kind: bot_task\n        display_name: \"4号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat4\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_5:\n        kind: bot_task\n        display_name: \"5号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat5\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      vote_6:\n        kind: bot_task\n        display_name: \"6号投票\"\n        assignee:\n          type: bot_binding\n          binding: seat6\n        instruction: |\n          <BOT_INSTRUCTION>\n        transitions:\n          complete:\n            targets: [tally]\n      tally:\n        kind: bot_task\n        display_name: \"开票\"\n        assignee:\n          type: bot_binding\n          binding: referee\n        node_timeout_ms: 600000\n        final_output: true\n        instruction: |\n          <BOT_INSTRUCTION>\n",
+      "bindings": [
+        "seat3=bot-3",
+        "seat4=bot-4",
+        "seat5=bot-5",
+        "seat6=bot-6",
+        "referee=referee-1"
+      ],
+      "panel": {
+        "runId": "{{bcs.run_id}}",
+        "apiBaseUrl": "/bcnproxy",
+        "groupId": "group-game",
+        "sessionId": "group-game:session-1",
+        "gameSessionId": "group-game:session-1",
+        "phase": "voting",
+        "round": 3,
+        "attempt": 1,
+        "host": {
+          "actorId": "referee-1",
+          "displayName": "主持人"
+        },
+        "seatOrder": [
+          "bot-1",
+          "human-1",
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "turnOrder": [
+          "bot-3",
+          "bot-4",
+          "bot-5",
+          "bot-6"
+        ],
+        "players": [
+          {
+            "actorId": "bot-1",
+            "displayName": "玩家1",
+            "seatNumber": 1,
+            "isHuman": false,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "human-1",
+            "displayName": "你",
+            "seatNumber": 2,
+            "isHuman": true,
+            "alive": false,
+            "eliminated": true
+          },
+          {
+            "actorId": "bot-3",
+            "displayName": "玩家3",
+            "seatNumber": 3,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-4",
+            "displayName": "玩家4",
+            "seatNumber": 4,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-5",
+            "displayName": "玩家5",
+            "seatNumber": 5,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          },
+          {
+            "actorId": "bot-6",
+            "displayName": "玩家6",
+            "seatNumber": 6,
+            "isHuman": false,
+            "alive": true,
+            "eliminated": false
+          }
+        ],
+        "nodeActorMap": {
+          "vote_3": "bot-3",
+          "vote_4": "bot-4",
+          "vote_5": "bot-5",
+          "vote_6": "bot-6",
+          "vote_open": "referee-1",
+          "tally": "referee-1"
+        },
+        "publicHistory": [],
+        "rules": {
+          "speechMaxChars": 25,
+          "voteMaxChars": 10,
+          "forbidOwnWord": false,
+          "bluntness": 2
+        },
+        "currentViewerActorId": "human-1",
+        "currentAction": null,
+        "display": {
+          "showVoteResults": false,
+          "showHostOutput": true,
+          "showTimer": true
+        }
+      },
+      "tab": {
+        "id": "undercover-game-group-game-session-1",
+        "title": "谁是卧底 · 第 3 轮投票"
+      },
+      "baseline_chars": 4541
+    }
+  }
+]

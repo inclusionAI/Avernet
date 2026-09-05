@@ -206,7 +206,7 @@ Bot 在一次激活里写的**每一段**文字都会被转发成群里的一条
 面板/事实层回归不需要起服务：
 
 ```bash
-python3 -m unittest scripts/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests/test_undercover_panel.py
+python3 -m unittest discover -s scripts/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests -v
 cd src/bcs/assets/undercover-game && npm run verify
 ```
 
@@ -244,3 +244,32 @@ cd src/bcs/assets/undercover-game && npm run verify
 - 人类中途退出 Present 状态会让下一轮的协作直接失败。
 - **遗言是公开的任务回执，主持人来不及遮蔽。** 玩家 profile 里对此有硬规则，但这是唯一拦不住的泄词面。
 - 每次任务派发和回复，BCS 会往时间线插一条 `[任务状态] …` 系统消息，profile 层关不掉，而且它会打断主持人当时正在跑的激活。本设计里只有"有 Bot 出局"那一轮会派一次遗言，所以每局大约 2×(出局轮数) 条，平票轮零条。这是 profile 能压到的下限——彻底消除要平台侧改成"driver 有在飞的激活时排队等它结束"。
+
+## 保持流程的延迟优化（2026-09-05）
+
+本次只优化 Bot 执行提示与脚本返回的下一步说明。发言串行、投票并行、两个运行的
+入口/末节点、遗言与回灌、阶段状态、重试、HumanInput 和副屏投影都保持原样。
+
+- 主持人的常规动作入口是 referee skill，详细 references 按需读，不在开局通读全部手册。
+- `votes-set` 刚判胜时明确要求 reveal；再次唤醒看到 FINISHED 才禁止重复公布。
+  继续游戏时按遗言/直接下一轮分支给出指引，不再把终局的空 ping 误导为下一轮。
+- tally 使用 `bcs-cli session complete` 完成原会话。该节点的 state_machine 上下文
+  不提供 bcs_task_complete；不路由给自己寻找工具，也不把收尾移到 ECHO。
+- 玩家保留人格、钝度和投票依据，缩短公共入口，去掉隐式建模/论证要求。
+  skill 的 `allowed-tools: []` 仅表达任务不需要工具，不代表运行时工具 schema 已被移除。
+
+指令归属：当前节点负责动态词、席位、轮次和限制；skill 负责当前动作；AGENTS/TOOLS
+负责角色和调用边界；SOUL/OUTPUT 负责人格和表达；references 负责详细规则与排障。
+
+`tests/fixtures/flow_baseline.json` 是修改前用虚构词生成的快照，包含完整六人首轮、
+Bot 出局轮和 human 出局轮。测试仅屏蔽 Bot instruction 的正文，其他 YAML、
+HumanInput 私有块、绑定、副屏参数和 tab metadata 逐字/逐字段比较。
+另有真实事实层命令回归覆盖判胜、轮数上限、平票、Bot 遗言和 human 出局分支。
+
+本地通过不等于已验证模型加速。后续对照需保持同一模型、配置、词、前序发言和人格，
+分别记录节点耗时、请求到 HTTP 200、首个可见输出、input/cache/output/reasoning token；
+缺失 reasoning 字段记为缺失，不记作零。多次比较中位数与 p95，并检查泄词、字数、
+票面和人格。不要拿轮数不同或 human 等待不同的两局总时长直接比较。
+
+源码修改没有覆盖正在运行的 Bot workspace。下次通过正常 profile 启动/装配流程加载；
+已在运行中的会话不作为修改后的样本。provider 参数和工具暴露配置不在本次修改范围。
