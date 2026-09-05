@@ -103,6 +103,7 @@ async fn full_oauth_session_flow() {
         src: "google".to_string(),
         iat: now,
         exp: now + 1800,
+        name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
     // Callback persists the JWT fingerprint so the hot path can bind to it.
@@ -172,6 +173,7 @@ async fn expired_jwt_returns_none() {
         src: "google".to_string(),
         iat: 50,
         exp: 100,
+        name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
 
@@ -211,6 +213,7 @@ async fn verify_oauth_session_hot_path_does_not_refresh() {
         src: "google".to_string(),
         iat: now - 1500,
         exp: now + 300,
+        name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
     // Bind the session (as the callback would) so the hash check passes.
@@ -253,6 +256,7 @@ async fn verify_oauth_session_rejects_unbound_jwt() {
         src: "google".to_string(),
         iat: now,
         exp: now + 1800,
+        name: None,
     };
     let jwt = jwt_svc.sign(&claims).unwrap();
     // Note: no update_token — this JWT was never bound as the current session.

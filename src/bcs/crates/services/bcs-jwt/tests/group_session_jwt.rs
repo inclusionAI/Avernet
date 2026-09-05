@@ -150,6 +150,7 @@ fn rejects_wrong_key_and_login_jwt_token_confusion() {
         src: "oauth".into(),
         iat: NOW,
         exp: NOW + TTL_SECONDS,
+        name: None,
     }) {
         Ok(value) => value,
         Err(_) => panic!("login JWT fixture must sign"),

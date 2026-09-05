@@ -21,6 +21,13 @@ pub struct Claims {
     pub iat: u64,
     /// Expiration (unix seconds).
     pub exp: u64,
+    /// Display-name snapshot of the session user, for external JWT-only
+    /// verifiers (e.g. a gateway that authenticates the `bcs_session` cookie
+    /// without reading `bcs_user_identities`). BCS's own verify still reads the
+    /// live name from the identity row. Omitted from the payload when `None`,
+    /// so legacy tokens stay byte-identical and decode with `name = None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Claims {

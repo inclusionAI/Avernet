@@ -260,7 +260,7 @@ pub use core::{
     ContextBotSummary, HiddenMentionInfo, ContextBotSummary as BotContextSummary, ContextConflict, ContextConflictPosition,
     ContextFusionRequest, ContextFusionResponse, ContextParticipantPerspective, DefaultDelivery,
     DeliveryType, DmActorSpec, DynamicStatusResponse, EnsureHumanResult, EnsureOwnerEdgesResult,
-    FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
+    EdgePermissionFriendSyncService, FriendCoreService, FriendRequest, FriendRequestCoreService, FriendRequestDirection,
     FriendRequestStatus, Friendship, FusionCoreService, Group, GroupChatProposal, GroupCoreService, GroupKind,
     GroupMessage, GroupMessageType, GroupMutableFieldsPatch, GroupStatus, GroupStrategy, MessageRole,
     Participant, ParticipantKind, ParticipantMode, ParticipantRole, ProposalCoreService,

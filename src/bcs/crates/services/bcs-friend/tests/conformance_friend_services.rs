@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bcs_friend::{
@@ -7,8 +7,9 @@ use bcs_friend::{
 };
 use bcs_service_api::{
     ActorKind, ActorStatus, AgentCredentials, BotCapabilities, BotDynamicStatus,
-    BotRegistryCoreService, FriendCoreService, FriendRequestCoreService, FriendRequestDirection,
-    FriendRepoPort, FriendRequestRepoPort, FriendRequestStatus, FriendService, ListFriendsCommand,
+    BotRegistryCoreService, EdgePermissionFriendSyncService, FriendCoreService,
+    FriendRequestCoreService, FriendRequestDirection, FriendRepoPort, FriendRequestRepoPort,
+    FriendRequestStatus, FriendService, ListFriendsCommand,
     RegisteredBot, ServiceError, ServiceResult,
 };
 use bcs_test_support::{
@@ -56,6 +57,105 @@ async fn memory_friend_request_store_passes_core_contract() {
     )
     .await;
     bcs_test_support::contract::repo::friend_request_repo_contract_tests(repo.as_ref()).await;
+}
+
+
+#[derive(Default)]
+struct RecordingEdgePermissionFriendSync {
+    calls: Mutex<Vec<String>>,
+}
+
+impl RecordingEdgePermissionFriendSync {
+    fn calls(&self) -> Vec<String> {
+        self.calls.lock().expect("calls lock").clone()
+    }
+}
+
+#[async_trait]
+impl EdgePermissionFriendSyncService for RecordingEdgePermissionFriendSync {
+    async fn sync_add_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        self.calls
+            .lock()
+            .expect("calls lock")
+            .push(format!("add:{a}:{b}"));
+        Ok(())
+    }
+
+    async fn sync_remove_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
+        self.calls
+            .lock()
+            .expect("calls lock")
+            .push(format!("remove:{a}:{b}"));
+        Ok(())
+    }
+}
+
+
+struct FailingEdgePermissionFriendSync;
+
+#[async_trait]
+impl EdgePermissionFriendSyncService for FailingEdgePermissionFriendSync {
+    async fn sync_add_friendship(&self, _a: &str, _b: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("sync add failed".to_string()))
+    }
+
+    async fn sync_remove_friendship(&self, _a: &str, _b: &str) -> ServiceResult<()> {
+        Err(ServiceError::InternalError("sync remove failed".to_string()))
+    }
+}
+
+#[tokio::test]
+async fn friend_core_add_succeeds_when_edge_permission_sync_fails() {
+    let repo = Arc::new(MemoryFriendRepo::new());
+    let friend = FriendCore::with_repo(repo.clone())
+        .with_edge_permission_sync(Arc::new(FailingEdgePermissionFriendSync));
+
+    friend
+        .add_friendship("alice", "bob")
+        .await
+        .expect("legacy add should not fail on edge-permission sync error");
+
+    assert!(repo.are_friends("alice", "bob").await.expect("legacy friendship"));
+}
+
+#[tokio::test]
+async fn friend_core_does_not_sync_edge_permission_when_remove_is_noop() {
+    let sync = Arc::new(RecordingEdgePermissionFriendSync::default());
+    let friend = FriendCore::with_repo(Arc::new(MemoryFriendRepo::new()))
+        .with_edge_permission_sync(sync.clone());
+
+    let removed = friend
+        .remove_friendship("alice", "missing")
+        .await
+        .expect("remove");
+
+    assert!(!removed);
+    assert!(sync.calls().is_empty());
+}
+
+#[tokio::test]
+async fn friend_core_syncs_edge_permission_on_add_and_remove() {
+    let sync = Arc::new(RecordingEdgePermissionFriendSync::default());
+    let friend = FriendCore::with_repo(Arc::new(MemoryFriendRepo::new()))
+        .with_edge_permission_sync(sync.clone());
+
+    friend.add_friendship("alice", "bob").await.expect("add");
+    friend.remove_friendship("alice", "bob").await.expect("remove");
+    friend.add_friendship("alice", "carol").await.expect("add again");
+    friend
+        .remove_all_friendships("alice")
+        .await
+        .expect("remove all");
+
+    assert_eq!(
+        sync.calls(),
+        vec![
+            "add:alice:bob".to_string(),
+            "remove:alice:bob".to_string(),
+            "add:alice:carol".to_string(),
+            "remove:alice:carol".to_string(),
+        ]
+    );
 }
 
 struct FailingFriendRepo;

@@ -2,7 +2,8 @@
 
 The gateway's browser/session path uses the same signed JWT that BCS issues at
 login time. This strategy reads the ``bcs_session`` cookie, verifies its HS256
-signature locally, and maps the ``sub`` claim onto a ``UserPrincipal``.
+signature locally, and maps the ``sub`` claim onto the user id and the
+``name`` claim onto the login name of a ``UserPrincipal``.
 
 Absent cookie → ``None`` (not applicable).
 Present but invalid cookie → ``AuthError`` (hard failure, no fallback).
@@ -85,12 +86,17 @@ class OauthSessionStrategy:
             logger.warning("bcs_session cookie missing sub claim")
             raise AuthError("invalid bcs session cookie") from exc
 
+        username = str(claims.get("name") or subject_id)
+
         logger.debug(
-            "bcs_session resolved: sub=%s src=%s", subject_id, claims.get("src")
+            "bcs_session resolved: sub=%s username=%s src=%s",
+            subject_id,
+            username,
+            claims.get("src"),
         )
         return UserPrincipal(
             subject=AuthenticatedUser(
                 id=subject_id,
-                username=subject_id,
+                username=username,
             )
         )

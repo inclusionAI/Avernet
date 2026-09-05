@@ -6,6 +6,7 @@ fn make_claims(exp: u64) -> Claims {
         src: "google".into(),
         iat: 1000,
         exp,
+        name: None,
     }
 }
 
@@ -21,6 +22,7 @@ fn sign_and_verify_roundtrip() {
         src: "google".into(),
         iat: now,
         exp: now + 3600,
+        name: None,
     };
     let token = svc.sign(&claims).expect("sign");
     let verified = svc.verify(&token).expect("verify");
@@ -43,6 +45,7 @@ fn verify_rejects_wrong_secret() {
         src: "test".into(),
         iat: now,
         exp: now + 3600,
+        name: None,
     };
     let token = svc_a.sign(&claims).expect("sign");
     let result = svc_b.verify(&token);
@@ -78,20 +81,34 @@ fn verify_rejects_malformed_token() {
 
 #[test]
 fn claims_serialization_minimal() {
+    // `name: None` is omitted (skip_serializing_if), so the base 4 claims stay.
     let claims = Claims {
         sub: "s".into(),
         src: "g".into(),
         iat: 1,
         exp: 2,
+        name: None,
     };
     let json = serde_json::to_value(&claims).expect("serde");
-    // Exactly 4 fields
     let obj = json.as_object().expect("object");
     assert_eq!(obj.len(), 4);
     assert_eq!(obj["sub"], "s");
     assert_eq!(obj["src"], "g");
     assert_eq!(obj["iat"], 1);
     assert_eq!(obj["exp"], 2);
+
+    // `name: Some` adds a 5th key.
+    let claims = Claims {
+        sub: "s".into(),
+        src: "g".into(),
+        iat: 1,
+        exp: 2,
+        name: Some("大苹果".into()),
+    };
+    let json = serde_json::to_value(&claims).expect("serde");
+    let obj = json.as_object().expect("object");
+    assert_eq!(obj.len(), 5);
+    assert_eq!(obj["name"], "大苹果");
 }
 
 #[test]
@@ -102,6 +119,7 @@ fn should_refresh_at_50_percent_threshold() {
         src: "test".into(),
         iat: 0,
         exp: 1800,
+        name: None,
     };
 
     // now=800 → elapsed 800 < 900 → no refresh
@@ -123,4 +141,52 @@ fn verify_no_exp_allows_expired_token() {
     let result = svc.verify_no_exp(&token);
     assert!(result.is_ok());
     assert_eq!(result.expect("ok").sub, "bot-42");
+}
+
+#[test]
+fn name_claim_roundtrips() {
+    let svc = JwtService::new("secret");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("epoch")
+        .as_secs();
+    let claims = Claims {
+        sub: "human_1".into(),
+        src: "alipay".into(),
+        iat: now,
+        exp: now + 3600,
+        name: Some("大苹果".into()),
+    };
+    let token = svc.sign(&claims).expect("sign");
+    let verified = svc.verify(&token).expect("verify");
+    assert_eq!(verified.name.as_deref(), Some("大苹果"));
+}
+
+#[test]
+fn name_none_roundtrips_to_none() {
+    let svc = JwtService::new("secret");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("epoch")
+        .as_secs();
+    let claims = Claims {
+        sub: "bot".into(),
+        src: "test".into(),
+        iat: now,
+        exp: now + 3600,
+        name: None,
+    };
+    let token = svc.sign(&claims).expect("sign");
+    let verified = svc.verify(&token).expect("verify");
+    assert_eq!(verified.name, None);
+}
+
+#[test]
+fn legacy_payload_without_name_decodes_name_none() {
+    // A pre-name-claim payload must still deserialize thanks to `#[serde(default)]`.
+    let json = r#"{"sub":"x","src":"google","iat":1000,"exp":2000}"#;
+    let claims: Claims = serde_json::from_str(json).expect("decode legacy");
+    assert_eq!(claims.sub, "x");
+    assert_eq!(claims.src, "google");
+    assert_eq!(claims.name, None);
 }
