@@ -68,5 +68,5 @@ async def get_transfer_status(
         logger.error(f"Error querying transfer status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": "INTERNAL_ERROR", "message": str(e)},
+            detail={"error": "INTERNAL_ERROR", "message": "Internal Server Error"},
         )
