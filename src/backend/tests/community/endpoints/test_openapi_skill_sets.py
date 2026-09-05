@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import time
+from types import SimpleNamespace
 
 import jwt
 
@@ -91,6 +92,20 @@ class _Runtime:
 
     async def project(self, *, bot_id: str, owner_id: str, **_kwargs) -> None:
         self.calls.append((bot_id, owner_id))
+
+    def resolve_plan(self, *, bot_id: str, owner_id: str, **_kwargs):
+        return SimpleNamespace(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=SimpleNamespace(skill_mappings=()),
+        )
+
+    async def apply_plan(self, *, plan, **kwargs) -> None:
+        await self.project(
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            **kwargs,
+        )
 
 
 def _principal() -> str:

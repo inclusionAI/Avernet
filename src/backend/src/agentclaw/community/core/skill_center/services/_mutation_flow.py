@@ -238,10 +238,12 @@ class MutationProjectionFlow:
             )
         try:
             snapshot_started_at = time.perf_counter()
-            current_mappings = await self._runtime.snapshot_skill_mappings(
+            plan = self._runtime.resolve_plan(
                 bot_id=bot_id,
                 owner_id=owner_id,
+                scope=scope,
             )
+            current_mappings = plan.projection.skill_mappings
         except Exception:
             return RuntimeProjectionResult.pending(
                 code="RUNTIME_SNAPSHOT_UNAVAILABLE",
@@ -257,13 +259,13 @@ class MutationProjectionFlow:
             scope=scope,
         )
         try:
-            projected = await self._runtime.project(
-                bot_id=bot_id,
-                owner_id=owner_id,
-                retired_mappings=retired_logical_skill_mappings(
-                    list(previous_mappings),
-                    list(current_mappings),
-                ),
+            retired_mappings = retired_logical_skill_mappings(
+                list(previous_mappings),
+                list(current_mappings),
+            )
+            projected = await self._runtime.apply_plan(
+                plan=plan,
+                retired_mappings=retired_mappings,
                 scope=scope,
             )
             # Existing in-process fakes and pre-change Runtime adapters return

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
+import stat
+import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -39,6 +42,9 @@ from engine.community.plugins.skills_pool.layout_sync import (
     mirror_local_tree,
     write_baseline_manifest,
 )
+
+logger = logging.getLogger(__name__)
+_SLOW_SOURCE_LIMIT = 3
 
 
 class PoolActivationStatus(StrEnum):
@@ -739,6 +745,99 @@ def _managed_source_failure(
     return None
 
 
+@dataclass(slots=True)
+class _BestEffortSourceInspection:
+    """Request-local, bounded source checks for ordinary runtime projection."""
+
+    layout: _Layout
+    source_layout: MappingSourceLayout
+    results: dict[Path, str | None] = field(default_factory=dict)
+    resolved_roots: dict[Path, Path | None] = field(default_factory=dict)
+    durations_ms: dict[Path, float] = field(default_factory=dict)
+    checks: int = 0
+    cache_hits: int = 0
+
+    def failure(self, source: Path) -> str | None:
+        normalized = Path(os.path.abspath(source))
+        if normalized in self.results:
+            self.cache_hits += 1
+            return self.results[normalized]
+        started_at = time.perf_counter()
+        result = self._inspect(normalized)
+        self.checks += 1
+        self.results[normalized] = result
+        self.durations_ms[normalized] = (time.perf_counter() - started_at) * 1000
+        return result
+
+    def _inspect(self, source: Path) -> str | None:
+        roots, outside_reason = self._roots()
+        containing_root: Path | None = None
+        for root in roots:
+            normalized_root = Path(os.path.abspath(root))
+            if source.is_relative_to(normalized_root):
+                containing_root = normalized_root
+                break
+        if containing_root is None:
+            return outside_reason
+        try:
+            source_stat = source.stat()
+        except FileNotFoundError:
+            return "source_missing"
+        except OSError:
+            return "source_unreadable"
+        if not stat.S_ISDIR(source_stat.st_mode):
+            return "source_not_directory"
+        resolved_root = self._resolved_root(containing_root)
+        if resolved_root is None:
+            return "source_unreadable"
+        try:
+            if not source.resolve(strict=True).is_relative_to(resolved_root):
+                return "source_escapes_pool"
+        except OSError:
+            return "source_unreadable"
+        if not os.access(source, os.R_OK | os.X_OK):
+            return "source_unreadable"
+        return None
+
+    def _resolved_root(self, root: Path) -> Path | None:
+        if root not in self.resolved_roots:
+            try:
+                self.resolved_roots[root] = root.resolve(strict=True)
+            except OSError:
+                self.resolved_roots[root] = None
+        return self.resolved_roots[root]
+
+    def _roots(self) -> tuple[tuple[Path, ...], str]:
+        if self.source_layout is MappingSourceLayout.LEGACY:
+            roots = [
+                self.layout.legacy_local,
+                self.layout.legacy_repo,
+                self.layout.pool_center,
+            ]
+            if self.layout.engine_type == "claude_code":
+                roots.append(self.layout.repo_bridge)
+            return tuple(roots), "source_outside_legacy"
+        return (
+            self.layout.pool_local,
+            self.layout.pool_repo,
+            self.layout.pool_center,
+        ), "source_outside_pool"
+
+    def evidence(self) -> dict[str, object]:
+        slowest = sorted(
+            self.durations_ms.items(), key=lambda item: item[1], reverse=True
+        )[:_SLOW_SOURCE_LIMIT]
+        return {
+            "source_checks": self.checks,
+            "source_check_cache_hits": self.cache_hits,
+            "unique_sources": len(self.results),
+            "slow_sources": [
+                {"name": source.name, "duration_ms": round(duration_ms, 3)}
+                for source, duration_ms in slowest
+            ],
+        }
+
+
 def _source_failure(
     layout: _Layout,
     source: Path,
@@ -1028,6 +1127,7 @@ def _best_effort_desired(
     layout: _Layout,
     mappings: Sequence[SkillMapping],
     source_layout: MappingSourceLayout,
+    inspection: _BestEffortSourceInspection,
 ) -> tuple[dict[Path, Path], list[MappingItemResult]]:
     """Classify requested mappings without treating source availability as unsafe.
 
@@ -1068,11 +1168,7 @@ def _best_effort_desired(
                 )
             )
             continue
-        source_reason = _source_failure(
-            layout,
-            source,
-            source_layout=source_layout,
-        )
+        source_reason = inspection.failure(source)
         if source_reason not in {None, "source_missing", "source_unreadable"}:
             outcomes.append(
                 MappingItemResult(
@@ -1157,13 +1253,27 @@ def _best_effort_retire(
                 )
             )
             continue
-        if not target.exists() and not target.is_symlink():
+        try:
+            target.lstat()
+        except FileNotFoundError:
             absent.append(str(target))
             outcomes.append(
                 MappingItemResult(
                     target=str(target),
                     source=str(source),
                     status=MappingProjectionStatus.CONVERGED,
+                    action="RETIRE",
+                )
+            )
+            continue
+        except OSError:
+            outcomes.append(
+                MappingItemResult(
+                    target=str(target),
+                    source=str(source),
+                    status=MappingProjectionStatus.PENDING,
+                    code="MAPPING_PUBLISH_IO_ERROR",
+                    retryable=True,
                     action="RETIRE",
                 )
             )
@@ -1211,7 +1321,7 @@ def _best_effort_retire(
                 )
                 continue
             removed.append(str(target))
-        elif target.exists() or target.is_symlink():
+        else:
             outcomes.append(
                 MappingItemResult(
                     target=str(target),
@@ -1244,11 +1354,20 @@ def _best_effort_mapping_results(
 ) -> tuple[tuple[MappingItemResult, ...], dict[str, object]]:
     """Apply or inspect one full desired mapping set without touching unknown data."""
 
+    started_at = time.perf_counter()
+    inspection = _BestEffortSourceInspection(
+        layout=layout,
+        source_layout=source_layout,
+    )
+    classify_started_at = time.perf_counter()
     desired, outcomes = _best_effort_desired(
         layout=layout,
         mappings=mappings,
         source_layout=source_layout,
+        inspection=inspection,
     )
+    classify_ms = (time.perf_counter() - classify_started_at) * 1000
+    retire_started_at = time.perf_counter()
     retired, removed, absent = _best_effort_retire(
         layout=layout,
         retired_mappings=retired_mappings,
@@ -1257,14 +1376,18 @@ def _best_effort_mapping_results(
         additional_retirement_roots=additional_retirement_roots,
         apply=apply,
     )
+    retire_ms = (time.perf_counter() - retire_started_at) * 1000
     outcomes.extend(retired)
 
+    inventory_started_at = time.perf_counter()
     discovered, external, occupied = _active_entry_inventory(layout)
+    inventory_ms = (time.perf_counter() - inventory_started_at) * 1000
     external_targets = set(external)
     occupied_targets = set(occupied)
     created: list[str] = []
     updated: list[str] = []
     kept: list[str] = []
+    reconcile_started_at = time.perf_counter()
     for target, source in desired.items():
         if target in external_targets:
             outcomes.append(
@@ -1286,11 +1409,7 @@ def _best_effort_mapping_results(
                 )
             )
             continue
-        source_reason = _source_failure(
-            layout,
-            source,
-            source_layout=source_layout,
-        )
+        source_reason = inspection.failure(source)
         pending = source_reason in {"source_missing", "source_unreadable"}
         if not apply:
             if not target.is_symlink() or _lexical_target(target) != source:
@@ -1352,19 +1471,21 @@ def _best_effort_mapping_results(
                 retryable=pending,
             )
         )
+    reconcile_ms = (time.perf_counter() - reconcile_started_at) * 1000
 
     # A previously published managed link is preserved by the full-snapshot
     # contract.  Report its missing source as pending so unrelated product
     # mutations do not hide existing runtime drift.
+    retired_targets = {Path(item.target) for item in retired_mappings}
     for target, pool_source in discovered.items():
-        if target in desired or target in {Path(item.target) for item in retired_mappings}:
+        if target in desired or target in retired_targets:
             continue
         source = _source_for_layout(
             layout,
             pool_source,
             source_layout=source_layout,
         )
-        reason = _source_failure(layout, source, source_layout=source_layout)
+        reason = inspection.failure(source)
         if reason in {"source_missing", "source_unreadable"}:
             outcomes.append(
                 MappingItemResult(
@@ -1376,7 +1497,7 @@ def _best_effort_mapping_results(
                 )
             )
 
-    return tuple(outcomes), {
+    evidence = {
         "total": len(desired),
         "created": created,
         "updated": updated,
@@ -1384,7 +1505,36 @@ def _best_effort_mapping_results(
         "removed": removed,
         "retired_absent": absent,
         "external_ignored": [str(path) for path in external],
+        **inspection.evidence(),
+        "source_check_ms": round(sum(inspection.durations_ms.values()), 3),
+        "classify_ms": round(classify_ms, 3),
+        "retire_ms": round(retire_ms, 3),
+        "inventory_ms": round(inventory_ms, 3),
+        "reconcile_ms": round(reconcile_ms, 3),
+        "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
     }
+    logger.info(
+        "[SkillsPoolMapping] best_effort apply=%s duration_ms=%s desired=%s "
+        "retired=%s inventory=%s source_checks=%s source_cache_hits=%s "
+        "source_check_ms=%s classify_ms=%s retire_ms=%s inventory_ms=%s "
+        "reconcile_ms=%s "
+        "slow_sources=%s status=%s",
+        apply,
+        evidence["duration_ms"],
+        len(desired),
+        len(retired_mappings),
+        len(discovered) + len(external) + len(occupied),
+        evidence["source_checks"],
+        evidence["source_check_cache_hits"],
+        evidence["source_check_ms"],
+        evidence["classify_ms"],
+        evidence["retire_ms"],
+        evidence["inventory_ms"],
+        evidence["reconcile_ms"],
+        evidence["slow_sources"],
+        _mapping_status(outcomes).value,
+    )
+    return tuple(outcomes), evidence
 
 
 def _retirement_plan(

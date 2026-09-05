@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from injector import inject, singleton
 
@@ -10,6 +12,7 @@ from agentclaw.community.api.bot_runtime_projector import (
 )
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     BotRuntimeProjectorProtocol as CoreBotRuntimeProjectorProtocol,
+    ProjectionScope,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
@@ -32,6 +35,17 @@ class _RecordingReconciler:
         if self.error is not None:
             raise self.error
 
+    def resolve_plan(self, **kwargs):
+        self.calls.append({"operation": "resolve_plan", **kwargs})
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(projection=SimpleNamespace(skill_mappings=()))
+
+    async def apply_plan(self, **kwargs) -> None:
+        self.calls.append({"operation": "apply_plan", **kwargs})
+        if self.error is not None:
+            raise self.error
+
     async def project_mcp_and_cli(self, **kwargs) -> None:
         self.calls.append({"operation": "non_skill", **kwargs})
         if self.error is not None:
@@ -48,6 +62,15 @@ class _Consumer:
 
     async def snapshot_skill_mappings(self) -> None:
         await self._runtime.snapshot_skill_mappings(bot_id="bot-1", owner_id="owner-1")
+
+    async def resolve_and_apply(self) -> None:
+        scope = ProjectionScope(skills=True)
+        plan = self._runtime.resolve_plan(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            scope=scope,
+        )
+        await self._runtime.apply_plan(plan=plan, scope=scope)
 
     async def refresh_non_skill(self) -> None:
         await self._runtime.project_mcp_and_cli(
@@ -98,6 +121,18 @@ async def test_snapshot_service_api_reads_without_reconciliation(world) -> None:
     assert runtime.calls == [
         {"operation": "snapshot", "bot_id": "bot-1", "owner_id": "owner-1"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_resolved_plan_service_api_applies_the_same_plan(world) -> None:
+    runtime = _RecordingReconciler()
+    consumer = _consumer(world, runtime)
+
+    await consumer.resolve_and_apply()
+
+    assert runtime.calls[0]["operation"] == "resolve_plan"
+    assert runtime.calls[1]["operation"] == "apply_plan"
+    assert runtime.calls[1]["plan"].projection.skill_mappings == ()
 
 
 @pytest.mark.asyncio

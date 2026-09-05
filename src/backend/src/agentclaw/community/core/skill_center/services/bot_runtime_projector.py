@@ -130,11 +130,45 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
         scope: ProjectionScope,
     ) -> RuntimeProjectionResult:
-        plan = self._resolve_plan(
+        plan = self.resolve_plan(
             bot_id=bot_id,
             owner_id=owner_id,
             retired_mappings=retired_mappings,
             scope=scope,
+        )
+        return await self.apply_plan(
+            plan=plan,
+            retired_mappings=retired_mappings,
+            scope=scope,
+        )
+
+    def resolve_plan(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        scope: ProjectionScope,
+    ) -> ResolvedSkillPlan:
+        """Build the sole Reader-backed plan consumed by one projection."""
+        return self._resolve_plan(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            retired_mappings=retired_mappings,
+            scope=scope,
+        )
+
+    async def apply_plan(
+        self,
+        *,
+        plan: ResolvedSkillPlan,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        scope: ProjectionScope,
+    ) -> RuntimeProjectionResult:
+        """Apply one already-resolved plan without reading desired state again."""
+        self._registry.for_engine(plan.engine).validate_plan(
+            skill_assets=plan.projection.skill_assets,
+            retired_mappings=retired_mappings,
         )
         if scope.mcp and not isinstance(plan, ResolvedCapabilityPlan):
             # Contract guard before any engine write: an MCP scope must never

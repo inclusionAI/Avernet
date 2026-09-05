@@ -283,6 +283,23 @@ class _Runtime:
         self.snapshot_calls.append({"bot_id": bot_id, "owner_id": owner_id})
         return self._snapshots[len(self.snapshot_calls) - 1]
 
+    def resolve_plan(self, *, bot_id: str, owner_id: str, **_kwargs):
+        assert bot_id == "bot-1"
+        self.snapshot_calls.append({"bot_id": bot_id, "owner_id": owner_id})
+        mappings = self._snapshots[len(self.snapshot_calls) - 1]
+        return SimpleNamespace(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=SimpleNamespace(skill_mappings=mappings),
+        )
+
+    async def apply_plan(self, *, plan, **kwargs) -> None:
+        await self.project(
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            **kwargs,
+        )
+
     async def project(
         self,
         *,
@@ -337,6 +354,20 @@ class _SuccessfulRuntime:
 
     async def project(self, **_kwargs) -> None:
         return None
+
+    def resolve_plan(self, *, bot_id: str, owner_id: str, **_kwargs):
+        return SimpleNamespace(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=SimpleNamespace(skill_mappings=()),
+        )
+
+    async def apply_plan(self, *, plan, **kwargs) -> None:
+        await self.project(
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            **kwargs,
+        )
 
 
 
