@@ -1075,6 +1075,32 @@ main() {
     export BCN_PLUGIN_VERSION
     export SINGLEBOX_COMMAND="${command:-}"
 
+    # Guard: 在容器内，拒绝会影响 BCS / 整个 stack 的破坏性命令。
+    # stop/restart/clean 作用于任何含 BCS 的组（bcs / bcs_bots / bcs_frontend / all）会与容器入口（PID 1）的生命周期管理冲突：
+    # 会停掉 BCS 但无法可靠重启，导致 BCS 不可达、用户无法登录。
+    # 只影响 bot 子集的命令（restart bots / stop bots / clean bots）不碰 BCS，放行——
+    # 它们是合法的 bot 管理操作（如 avernet_omp_team_sdd.sh 启动 team-sdd bot）。
+    # 用 /.dockerenv 识别容器；OCB_LIFECYCLE_OWNER=entrypoint 放行入口自身调用。
+    # 宿主开发机无 /.dockerenv，不受影响。
+    if [ -f /.dockerenv ] && [ "${OCB_LIFECYCLE_OWNER:-}" != "entrypoint" ]; then
+        case "${command:-}" in
+            stop|restart|clean)
+                for _guard_svc in "${services[@]}"; do
+                    case "$_guard_svc" in
+                        bcs|bcs_bots|bcs_frontend|all)
+                            log_error "Refusing 'singlebox.sh ${command} ${_guard_svc}' inside a container."
+                            log_error "The BCS process is owned by the container entrypoint (PID 1);"
+                            log_error "stop/restart/clean of BCS, or any BCS-containing group (bcs/bcs_bots/bcs_frontend/all), from inside the container"
+                            log_error "cannot reliably bring it back. To manage bots only, target 'bots'."
+                            log_error "To restart the whole stack, run on the host:  docker restart <container>"
+                            exit 1
+                            ;;
+                    esac
+                done
+                ;;
+        esac
+    fi
+
     case "$command" in
         setup|start|restart|"")
             if singlebox_model_config_required_for_services "${services[@]}"; then
