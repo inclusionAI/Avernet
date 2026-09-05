@@ -187,6 +187,37 @@ impl<'a> MakeWriter<'a> for RotatingFileWriter {
     }
 }
 
+impl Write for RotatingFileWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.make_writer().write(bytes)
+    }
+    fn flush(&mut self) -> std::io::Result<()> { self.make_writer().flush() }
+}
+
+/// Keep these guards alive until the runtime has stopped, then flush queued logs.
+#[must_use]
+pub struct LoggingGuard {
+    _workers: Vec<tracing_appender::non_blocking::WorkerGuard>,
+}
+
+static DROP_COUNTERS: std::sync::OnceLock<Vec<(String, tracing_appender::non_blocking::ErrorCounter)>> = std::sync::OnceLock::new();
+
+pub fn record_writer_metrics() {
+    if let Some(counters) = DROP_COUNTERS.get() {
+        for (name, counter) in counters {
+            metrics::counter!("bcs_log_dropped_lines_total", "output" => name.clone())
+                .absolute(counter.dropped_lines() as u64);
+        }
+    }
+}
+
+fn buffered_writer(writer: impl Write + Send + 'static) -> (tracing_appender::non_blocking::NonBlocking, tracing_appender::non_blocking::WorkerGuard) {
+    tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .buffered_lines_limit(4096)
+        .lossy(true)
+        .finish(writer)
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 
 fn timer_for_output<F: Clone>(
@@ -204,7 +235,9 @@ fn timer_for_output<F: Clone>(
 /// Initialize the tracing subscriber based on `LoggingConfig`.
 ///
 /// Console, file, and BCN OpenTelemetry output use independent layer filters.
-pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
+pub fn init(config: &LoggingConfig, tracer: SdkTracer) -> LoggingGuard {
+    let mut workers = Vec::new();
+    let mut drop_counters = Vec::new();
     let timer = LocalTime::new(format_description!(
         "[year]-[month]-[day] [hour]:[minute]:[second]"
     ));
@@ -226,7 +259,9 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
                 return None;
             }
 
-            let writer = RotatingFileWriter::new(&dir, &output.file);
+            let (writer, guard) = buffered_writer(RotatingFileWriter::new(&dir, &output.file));
+            drop_counters.push((output.name.clone(), writer.error_counter()));
+            workers.push(guard);
 
             let filter = build_output_targets_filter(output);
             let output_timer = timer_for_output(&output.name, &timer, &millisecond_timer);
@@ -275,6 +310,8 @@ pub fn init(config: &LoggingConfig, tracer: SdkTracer) {
         .with(file_layers)
         .with(otel_layer)
         .init();
+    let _ = DROP_COUNTERS.set(drop_counters);
+    LoggingGuard { _workers: workers }
 }
 
 // ─── Cleanup ────────────────────────────────────────────────────────────────
@@ -344,6 +381,46 @@ mod tests {
     use super::*;
     use std::ffi::OsStr;
     use tracing_subscriber::layer::SubscriberExt;
+
+    #[test]
+    fn worker_guard_flushes_all_queued_file_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut writer, guard) = buffered_writer(RotatingFileWriter::new(dir.path(), "buffered.log"));
+        for _ in 0..100 { writeln!(writer, "queued-log-line").unwrap(); }
+        drop(guard);
+        let output = fs::read_to_string(dir.path().join("buffered.log")).unwrap();
+        assert_eq!(output.lines().count(), 100);
+        assert_eq!(writer.error_counter().dropped_lines(), 0);
+    }
+
+    #[test]
+    fn stalled_sink_drops_and_counts_lines_without_blocking_callers() {
+        struct BlockedWriter {
+            entered: std::sync::mpsc::Sender<()>,
+            release: std::sync::mpsc::Receiver<()>,
+            first: bool,
+        }
+        impl Write for BlockedWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.first {
+                    self.first = false;
+                    self.entered.send(()).unwrap();
+                    self.release.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+        }
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let (mut writer, guard) = buffered_writer(BlockedWriter { entered: entered_tx, release: release_rx, first: true });
+        writeln!(writer, "first").unwrap();
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        for _ in 0..5000 { writeln!(writer, "queued").unwrap(); }
+        assert!(writer.error_counter().dropped_lines() > 0);
+        release_tx.send(()).unwrap();
+        drop(guard);
+    }
 
     #[test]
     fn console_ansi_only_when_stdout_is_terminal_and_no_color_absent_or_empty() {

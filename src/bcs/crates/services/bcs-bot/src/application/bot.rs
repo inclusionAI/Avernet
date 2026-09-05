@@ -355,17 +355,22 @@ impl BotQueryService for Bot {
         &self,
         command: BotQueryByIdsCommand,
     ) -> Result<BotQueryByIdsResult, BotUseCaseError> {
-        let bots = self
+        let started = std::time::Instant::now();
+        let input_count = command.bot_ids.len();
+        let unique_count = command.bot_ids.iter().collect::<std::collections::HashSet<_>>().len();
+        let bots = bcs_telemetry::observe_value("bots.query.batch_load", self
             .registry
-            .get_by_ids(&command.bot_ids)
-            .await
+            .get_by_ids(&command.bot_ids)).await
             .into_iter()
             .filter(|bot| bot.capabilities.name.is_some())
             .collect::<Vec<_>>();
+        let load_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let enrich_started = std::time::Instant::now();
         let mut entries = Vec::with_capacity(bots.len());
         for bot in bots {
-            entries.push(self.bot_to_query_entry(bot).await);
+            entries.push(bcs_telemetry::observe_value("bots.query.status_enrich", self.bot_to_query_entry(bot)).await);
         }
+        tracing::info!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), input_count, unique_count, returned_count = entries.len(), load_ms, enrich_ms = enrich_started.elapsed().as_secs_f64() * 1000.0, duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bots.query.summary");
         Ok(BotQueryByIdsResult { bots: entries })
     }
 
