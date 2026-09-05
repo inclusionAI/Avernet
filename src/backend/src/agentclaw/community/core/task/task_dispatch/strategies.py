@@ -30,23 +30,9 @@ logger = logging.getLogger("task.dispatcher")
 _SINGLE_CANDIDATE_MISS_PROBABILITY = 0.4
 _RULE_TEST_MAX_GROUP_MEMBERS = 3
 
-# Temporary pre-authorized Bot pool for validating the multi-Bot dispatch path.
-# The rule mode intentionally samples from this fixed pool instead of using the
-# discovered candidates as assignees, because discovered Bots may not have the
-# task-claim switch enabled in the target environment.
-_RULE_TEST_BOT_POOL: tuple[str, ...] = (
-    # 仅取已在 BCN 开启 task_claim_mode 的 owner 内 pool bot,使 claim-join 不误 drop、
-    # 随机抽样命中数 == 派发数稳定覆盖协作群链路(全 claim_on,8 条)。
-    # 已剔除 claim_mode_off:`20260824_nwlj25w6:35983`、`20260825_aeqp3xky:440718` 需 owner 开 claim 才可回填。
-    "20260825_bohtfhe6:35983",
-    "default:35983",
-    "default:146836",
-    "20260825_p8e63hms:35983",
-    "20260823_1c4am0ei:146836",
-    "20260826_q3tbj2da:146836",
-    "20260826_fmszf5aq:146836",
-    "20260826_20rphqo0:146836",
-)
+# Rule 模式候选池不再写死:由 ``SearchBasedDispatchStrategy._load_rule_test_pool``
+# 在派发时动态查询 ``task_claim_mode=true & visibility=public`` 的 bot_id(``product:owner``),
+# 以适配不同环境 bot_id 不一致(见 ``_rule_based_search_result`` 的 ``bot_pool`` 形参)。
 
 
 class SearchOutcome(StrEnum):
@@ -255,14 +241,16 @@ class SearchBasedDispatchStrategy:
                 _search_result_summary(sr),
             )
         else:
-            sr = _rule_based_search_result(candidates)
+            bot_pool = await self._load_rule_test_pool()
+            sr = _rule_based_search_result(candidates, bot_pool)
             logger.info(
-                "[task][search] task=%s node=%s 使用候选数量规则 outcome=%s bot_id=%s bot_ids=%s",
+                "[task][search] task=%s node=%s 使用候选数量规则 outcome=%s bot_id=%s bot_ids=%s pool_size=%s",
                 node.task_id,
                 node.node_id,
                 sr.outcome,
                 sr.bot_id,
                 sr.group_formation.bot_ids if sr.group_formation else None,
+                len(bot_pool),
             )
         before_join = _search_result_summary(sr)
         # JOIN 灰度开关:开启时对决出的 assignee 做 task_claim_mode-on 名单交集(下游 post-filter)
@@ -298,6 +286,28 @@ class SearchBasedDispatchStrategy:
         )
         return sr
 
+    async def _load_rule_test_pool(self) -> list[str]:
+        """Rule 模式候选池:动态取 ``task_claim_mode=true & visibility=public`` 的 bot_id(``product:owner``)。
+
+        不同环境 claim 名单不同,不再写死。bcn 缺失 / 查询失败 / 名单空 → 返回空列表,
+        由 :func:`_rule_based_search_result` 兜底 ``MISS(no_claim_pool)``。复用与
+        ``_apply_claim_join`` 完全相同的查询参数(进程内 TTL 缓存命中,无额外出网开销)。
+        """
+        if self._bcn is None:
+            return []
+        try:
+            entries = await asyncio.to_thread(
+                self._bcn.list_bots_by_task_modes,
+                claim=True,
+                dream=None,
+                match="all",
+                visibility="public",
+            )
+        except Exception as exc:  # noqa: BLE001 roster is a best-effort rule-pool input
+            logger.warning("[task][search][rule-pool] roster 取失败→空池: %s", exc)
+            return []
+        return [e.get("bot_id") for e in (entries or []) if e.get("bot_id")]
+
     async def _apply_claim_join(
         self, sr: "SearchResult", candidates: list[dict]
     ) -> "SearchResult":
@@ -322,7 +332,11 @@ class SearchBasedDispatchStrategy:
             return sr
         try:
             entries = await asyncio.to_thread(
-                self._bcn.list_bots_by_task_modes, claim=True, dream=None, match="any"
+                self._bcn.list_bots_by_task_modes,
+                claim=True,
+                dream=None,
+                match="all",
+                visibility="public",
             )
         except Exception as exc:
             logger.warning(
@@ -420,7 +434,7 @@ def _dropped_unauthorized(candidates: list[dict], dropped_ids: list[str | None])
 
     与 dashboard 现有 ``unauthorized_bots`` 契约对齐:``{bot_id(无冒号 product), owner_user_id, reason}``。
     owner 优先取 ``_find_candidate`` 回查候选的 ``owner_id``(BCSFuse/search item 自带 owner_id);
-    无候选回查时(规则派发 ``_RULE_TEST_BOT_POOL`` 的 ``product:owner`` bot 不在 prefetch 候选内),
+    无候选回查时(规则派发动态 claim 池的 ``product:owner`` bot 不在 prefetch 候选内),
     退而从 bot_id 的 ``:owner`` 后缀解析,避免 ``owner_user_id`` 落空串。
     reason=``claim_mode_off``(claim_on 未开启)。"""
     out: list[dict] = []
@@ -542,13 +556,19 @@ async def _prefetch_candidates(
     return result
 
 
-def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
+def _rule_based_search_result(
+    candidates: list[dict], bot_pool: list[str]
+) -> SearchResult:
     """Build a deterministic-shape result with random test Bot identities.
 
     The discovered candidate count controls the dispatch shape, while the
-    final assignees come from the temporary pre-authorized test pool. One or
+    final assignees come from ``bot_pool`` — a dynamic roster of
+    ``task_claim_mode=true & visibility=public`` bots in ``product:owner`` form
+    (fetched by :meth:`SearchBasedDispatchStrategy._load_rule_test_pool`), so the
+    pool adapts to each environment instead of a hardcoded internal list. One or
     two candidates produce one single-Bot assignee. More than two candidates
-    produce a manager-worker group with the same number of sampled Bots.
+    produce a manager-worker group with the same number of sampled Bots. An empty
+    pool (no claim-enabled public bot) degrades to ``MISS(no_claim_pool)``.
     """
     candidate_count = sum(1 for candidate in candidates if candidate.get("bot_id"))
     if candidate_count == 0:
@@ -568,12 +588,22 @@ def _rule_based_search_result(candidates: list[dict]) -> SearchResult:
             miss_reason="rule_single_candidate_random_miss",
         )
 
+    if not bot_pool:
+        logger.info(
+            "[task][search] rule mode claim pool 为空→MISS(no_claim_pool) "
+            "candidate_count=%s",
+            candidate_count,
+        )
+        return SearchResult(
+            outcome=SearchOutcome.MISS, miss_reason="no_claim_pool"
+        )
+
     dispatch_count = 1 if candidate_count <= 2 else candidate_count
     # PRE 定制：固定候选池建协作群最多保留 3 个成员，避免搜推结果直接拉超大群。
     dispatch_count = min(
-        dispatch_count, _RULE_TEST_MAX_GROUP_MEMBERS, len(_RULE_TEST_BOT_POOL)
+        dispatch_count, _RULE_TEST_MAX_GROUP_MEMBERS, len(bot_pool)
     )
-    selected = random.sample(_RULE_TEST_BOT_POOL, dispatch_count)
+    selected = random.sample(bot_pool, dispatch_count)
     if dispatch_count == 1:
         bot_id = selected[0]
         _, _, owner_id = bot_id.partition(":")
