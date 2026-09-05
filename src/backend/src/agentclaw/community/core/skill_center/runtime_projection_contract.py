@@ -152,7 +152,6 @@ class RuntimeProjectionResult:
             data["reason"] = self.reason
         return data
 
-
 @runtime_checkable
 class CapabilityRuntimeBoundary(Protocol):
     """The runtime writes a capability projection is allowed to make.
@@ -419,6 +418,7 @@ class ProjectionScope:
             released_mcp=self.claimed_mcp,
         )
 
+
 @runtime_checkable
 class BotRuntimeProjectorProtocol(Protocol):
     """Apply database desired state through the selected runtime authority."""
@@ -447,6 +447,27 @@ class BotRuntimeProjectorProtocol(Protocol):
         never the one a mutation wants. Callers with genuinely nothing to
         declare say so with ``ProjectionScope.everything()``.
         """
+        ...
+
+    def resolve_plan(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        scope: ProjectionScope,
+    ) -> ResolvedSkillPlan:
+        """Resolve one immutable post-mutation plan without applying it."""
+        ...
+
+    async def apply_plan(
+        self,
+        *,
+        plan: ResolvedSkillPlan,
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        scope: ProjectionScope,
+    ) -> RuntimeProjectionResult:
+        """Apply the exact plan returned by ``resolve_plan``."""
         ...
 
     async def project_mcp_and_cli(

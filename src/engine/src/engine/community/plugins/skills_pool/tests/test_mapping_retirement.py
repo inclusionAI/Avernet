@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -80,6 +82,129 @@ def test_best_effort_mapping_keeps_unmanaged_entry_and_publishes_safe_entries(
     assert verified.to_data()["items"] == [
         item.to_data() for item in verified.items
     ]
+
+
+@pytest.mark.parametrize(
+    ("engine", "source_layout", "source_root"),
+    [
+        ("openclaw", MappingSourceLayout.POOL, "pool_local"),
+        ("claude_code", MappingSourceLayout.LEGACY, "legacy_repo"),
+        ("hermes", MappingSourceLayout.POOL, "pool_center"),
+    ],
+)
+def test_best_effort_uses_one_bounded_source_check_per_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    engine: str,
+    source_layout: MappingSourceLayout,
+    source_root: str,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout = _Layout.for_engine(engine, home)
+    layout.active_root.mkdir(parents=True)
+    source = getattr(layout, source_root) / "nested" / "sample"
+    source.mkdir(parents=True)
+    for index in range(500):
+        (source / f"asset-{index}.txt").write_text("payload")
+    (source / "unreadable-child").write_text("still not inspected")
+    target = layout.active_root / "sample"
+
+    monkeypatch.setattr(
+        os,
+        "walk",
+        Mock(side_effect=AssertionError("BEST_EFFORT must not recurse")),
+    )
+    published = publish_pool_mappings(
+        mappings=[SkillMapping(str(source), str(target))],
+        home=home,
+        engine=engine,
+        source_layout=source_layout,
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+    verified = verify_skill_mappings(
+        mappings=[SkillMapping(str(source), str(target))],
+        home=home,
+        engine=engine,
+        source_layout=source_layout,
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert published.status == "CONVERGED"
+    assert verified.status == "CONVERGED"
+    assert published.evidence["source_checks"] == 1
+    assert published.evidence["source_check_cache_hits"] == 1
+    assert verified.evidence["source_checks"] == 1
+    assert verified.evidence["source_check_cache_hits"] == 1
+
+
+def test_best_effort_retirement_does_not_follow_dangling_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout = _Layout.for_engine("openclaw", home)
+    layout.active_root.mkdir(parents=True)
+    retired_source = layout.pool_repo / "removed" / "skill"
+    target = layout.active_root / "skill"
+    target.symlink_to(retired_source, target_is_directory=True)
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        Mock(side_effect=AssertionError("retirement must use lstat")),
+    )
+    published = publish_pool_mappings(
+        mappings=[],
+        retired_mappings=[SkillMapping(str(retired_source), str(target))],
+        home=home,
+        engine="openclaw",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert published.status == "CONVERGED"
+    assert not target.is_symlink()
+
+
+def test_best_effort_preserves_bounded_source_safety_and_availability(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home/admin"
+    layout = _Layout.for_engine("openclaw", home)
+    layout.active_root.mkdir(parents=True)
+    unreadable = layout.pool_local / "unreadable"
+    unreadable.mkdir(parents=True)
+    ordinary_file = layout.pool_local / "ordinary-file"
+    ordinary_file.write_text("not a directory")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escaping = layout.pool_repo / "escaping"
+    escaping.parent.mkdir(parents=True)
+    escaping.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(os, "access", lambda path, _mode: Path(path) != unreadable)
+    result = publish_pool_mappings(
+        mappings=[
+            SkillMapping(str(unreadable), str(layout.active_root / "unreadable")),
+            SkillMapping(str(ordinary_file), str(layout.active_root / "ordinary-file")),
+            SkillMapping(str(escaping), str(layout.active_root / "escaping")),
+        ],
+        home=home,
+        engine="openclaw",
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+
+    assert result.item_for(target=layout.active_root / "unreadable").status == "PENDING"
+    assert (
+        result.item_for(target=layout.active_root / "unreadable").code
+        == "MANAGED_SOURCE_MISSING"
+    )
+    assert (
+        result.item_for(target=layout.active_root / "ordinary-file").code
+        == "SOURCE_NOT_DIRECTORY"
+    )
+    assert (
+        result.item_for(target=layout.active_root / "escaping").code
+        == "SOURCE_ESCAPES_POOL"
+    )
 
 
 def test_best_effort_reports_invalid_requested_mappings_without_touching_safe_ones(

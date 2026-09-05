@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from dataclasses import replace
@@ -144,6 +146,20 @@ class _SuccessfulRuntime:
 
     async def project(self, **_kwargs) -> None:
         return None
+
+    def resolve_plan(self, *, bot_id: str, owner_id: str, **_kwargs):
+        return SimpleNamespace(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            projection=SimpleNamespace(skill_mappings=()),
+        )
+
+    async def apply_plan(self, *, plan, **kwargs) -> None:
+        await self.project(
+            bot_id=plan.bot_id,
+            owner_id=plan.owner_id,
+            **kwargs,
+        )
 
 
 class _ScopeRecordingRuntime(_SuccessfulRuntime):
@@ -646,6 +662,9 @@ class _NeverProjects(_SuccessfulRuntime):
 
     async def project(self, **_kwargs) -> None:
         raise AssertionError("record-only activation must not project")
+
+    def resolve_plan(self, **_kwargs):
+        raise AssertionError("record-only activation must not resolve a plan")
 
 
 class _PendingBotsForRecordOnly(_Bots):
