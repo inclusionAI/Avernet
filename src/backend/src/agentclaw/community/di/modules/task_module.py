@@ -316,6 +316,11 @@ class TaskModule(Module):
             notify_messages_provider = injector.get(NotifyMessagesProvider)
         except Exception:  # noqa: BLE101 未绑定时降级 noop(不阻断)
             notify_messages_provider = NullNotifyMessagesProvider()
+        from agentclaw.community.di.config import MerchantTaskBotBindingsConfig
+        try:
+            bot_bindings = injector.get(MerchantTaskBotBindingsConfig)
+        except Exception:  # noqa: BLE101 未绑定时降级 None(占位符字面保留)
+            bot_bindings = None
         return TaskService(
             graph,
             harness=harness,
@@ -336,6 +341,7 @@ class TaskModule(Module):
             notify_messages_provider=notify_messages_provider,
             task_search_skill_enabled=task_dispatch.task_search_skill_enabled,
             task_settings=task_settings,
+            bot_bindings=bot_bindings,
         )
 
     @singleton

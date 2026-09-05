@@ -323,3 +323,13 @@ user_config:
     secret_secret: "${secret_secret:-}"
     task_callback_url: "${BACKEND_URL:-}"
     task_callback_url_pre: "${BACKEND_URL:-}"
+
+  # merchant_task_bot_bindings → static-plan template bot binding (role_key ->
+  #   bot uuid). Public profile: a SINGLE env-injected JSON string
+  #   (``${MERCHANT_TASK_BOT_BINDINGS:-}``) so the role<->uuid mapping of our own
+  #   demo bots is NOT carved into this open-source config; the provider decodes
+  #   it. Internal profiles may instead write a structured YAML sub-tree of the
+  #   same keys. Empty -> no resolution -> placeholders stay literal at load
+  #   (content routing/materialize stays green on a bare/CI build); only a real
+  #   dispatch then degrades (BCS rejects a literal ${...}).
+  merchant_task_bot_bindings: "${MERCHANT_TASK_BOT_BINDINGS:-}"

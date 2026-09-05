@@ -151,6 +151,22 @@ class BcsClientConfig:
 
 
 @dataclass(frozen=True)
+class MerchantTaskBotBindingsConfig:
+    """Role-key -> bot uuid map for static-plan template bot binding resolution.
+
+    Read from the ``merchant_task_bot_bindings`` block. In the public community
+    profile the block is a single env-injected JSON string
+    (``${MERCHANT_TASK_BOT_BINDINGS:-}``); the provider decodes it there. In
+    internal profiles the block may instead be a structured YAML sub-tree.
+    Empty/absent -> empty map: a bare boot never runs placeholder expansion (it
+    only fires from ``from_file``/``from_yaml`` with a NON-EMPTY bindings map and
+    matching ``${...}`` in a plan), so content routing/materialize stays green on a
+    bare/CI build (placeholders stay literal) and only a real dispatch degrades.
+    """
+    bot_id_by_role: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class BcsBindingConfig:
     """BCS channel-binding orchestration endpoint (yaml ``bcs_binding`` block).
 

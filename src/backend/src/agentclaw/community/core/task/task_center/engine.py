@@ -202,6 +202,7 @@ class ExecutionEngine:
         api_base_url: str = "",
         bot_token_provider=None,
         notify_messages_provider=None,
+        bot_bindings=None,
     ) -> None:
         """graph: TaskGraphService;bot: OpenApiBotPort;bcs: BcsClientPort;discover: BotDiscoverServiceProtocol。
         端口由 DI 从配置注入(local/prod/double 只换端口实现,引擎代码不变)。prod 必传;测试子类覆写
@@ -223,6 +224,7 @@ class ExecutionEngine:
         self._api_base_url = api_base_url
         self._bot_token_provider = bot_token_provider
         self._notify_provider = notify_messages_provider
+        self._bot_bindings = bot_bindings
         self._bg_tasks: set[object] = set()
         self._bbs_loop: asyncio.AbstractEventLoop | None = None
         self._bbs_loop_thread: threading.Thread | None = None
@@ -630,7 +632,10 @@ class ExecutionEngine:
                 return None
             yaml_text = plans_path.read_text(encoding="utf-8")
         try:
-            definition = StaticPlanDefinition.from_yaml(str(yaml_text) if yaml_text else "")
+            definition = StaticPlanDefinition.from_yaml(
+                str(yaml_text) if yaml_text else "",
+                bindings=self._bot_bindings.bot_id_by_role if self._bot_bindings else None,
+            )
             runtime = StaticPlanRuntime(definition, dict(cfg.get("template_input") or {}))
         except Exception:
             logger.exception(

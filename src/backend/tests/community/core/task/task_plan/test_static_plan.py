@@ -57,3 +57,67 @@ def test_static_plan_rejects_cycles():
                 depends_on: [a]
             """
         )
+
+
+# ── bot binding placeholder resolution (merchant template role keys) ─────────
+
+
+def test_merchant_template_uses_role_placeholders_not_literal_uuids():
+    """The public OSS template carries role-key placeholders, not internal uuids."""
+    plan = StaticPlanDefinition.from_file("merchant-operations-goal-to-plan", TEMPLATE_DIR)
+    assert plan.entry_bot_id == "${store_owner_bot_id}"
+    bound = [b for node in plan.nodes for b in node.all_bot_ids if b]
+    assert bound, "expected bound bot ids"
+    assert all(b.startswith("${") and b.endswith("}") for b in bound), bound
+    assert "${store_owner_bot_id}" in bound
+
+
+def test_static_plan_from_yaml_expands_bindings():
+    text = (
+        "template_id: t\n"
+        "nodes:\n"
+        "  - id: n\n"
+        "    type: bot\n"
+        "    bot_id: ${store_owner_bot_id}\n"
+    )
+    plan = StaticPlanDefinition.from_yaml(text, bindings={"store_owner_bot_id": "uuid-1"})
+    assert plan.nodes[0].bot_id == "uuid-1"
+
+
+def test_static_plan_from_yaml_default_when_binding_missing():
+    text = (
+        "template_id: t\n"
+        "nodes:\n"
+        "  - id: n\n"
+        "    type: bot\n"
+        "    bot_id: ${store_owner_bot_id:-fallback-uuid}\n"
+    )
+    # non-empty map but the referenced key absent -> default branch applies
+    plan = StaticPlanDefinition.from_yaml(text, bindings={"other_role": "x"})
+    assert plan.nodes[0].bot_id == "fallback-uuid"
+
+
+def test_static_plan_from_yaml_missing_binding_raises():
+    text = (
+        "template_id: t\n"
+        "nodes:\n"
+        "  - id: n\n"
+        "    type: bot\n"
+        "    bot_id: ${store_owner_bot_id}\n"
+    )
+    with pytest.raises(KeyError):
+        StaticPlanDefinition.from_yaml(text, bindings={"other": "x"})
+
+
+def test_static_plan_from_yaml_without_bindings_leaves_placeholder_literal():
+    """No bindings -> placeholders stay literal (bare boot / unconfigured degrade)."""
+    text = (
+        "template_id: t\n"
+        "nodes:\n"
+        "  - id: n\n"
+        "    type: bot\n"
+        "    bot_id: ${store_owner_bot_id}\n"
+    )
+    plan = StaticPlanDefinition.from_yaml(text)
+    assert plan.nodes[0].bot_id == "${store_owner_bot_id}"
+    plan.validate_bindings()  # literal non-empty placeholder passes binding validation

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import re
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,42 @@ from agentclaw.community.core.task.domain.errors import TaskStateError
 
 
 logger = logging.getLogger("task.static_plan")
+
+
+_PLACEHOLDER_RE = re.compile(r"\${(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?}")
+
+
+def _expand_placeholders(data: Any, bindings: Mapping[str, str]) -> Any:
+    """Resolve ``${role_key}`` / ``${role_key:-default}`` from an injected
+    bindings map (role_key -> bot uuid).
+
+    Only reached when a NON-EMPTY ``bindings`` map is passed (env-injected
+    deployment); ``None`` (test seam) and an empty map (env unset) are both
+    falsy and skip expansion, leaving ``${...}`` literal so content
+    routing/materialize stays green on a bare/CI build and only a real
+    dispatch hits BCS with a literal (where it rejects it). With a non-empty map,
+    a referenced role_key that has neither a binding nor a default is a config
+    error (raised at load) so a half-wired real deployment fails loudly.
+    """
+
+    def _repl(match: re.Match[str]) -> str:
+        name = match.group("name")
+        if name in bindings:
+            return str(bindings[name])
+        default = match.group(2)
+        if default is not None:
+            return default
+        raise KeyError(
+            f"task static-plan placeholder ${{{name}}} has no binding and no default"
+        )
+
+    if isinstance(data, dict):
+        return {k: _expand_placeholders(v, bindings) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_expand_placeholders(v, bindings) for v in data]
+    if isinstance(data, str):
+        return _PLACEHOLDER_RE.sub(_repl, data)
+    return data
 
 
 @dataclass(frozen=True)
@@ -48,8 +86,10 @@ class StaticPlanDefinition:
     entry_name: str | None = None
 
     @classmethod
-    def from_yaml(cls, text: str) -> "StaticPlanDefinition":
+    def from_yaml(cls, text: str, *, bindings: Mapping[str, str] | None = None) -> "StaticPlanDefinition":
         raw = yaml.safe_load(text) or {}
+        if bindings:
+            raw = _expand_placeholders(raw, bindings)
         if not isinstance(raw, dict) or not raw.get("template_id"):
             raise ValueError("static plan requires template_id")
         nodes: list[StaticPlanNodeDefinition] = []
@@ -100,11 +140,11 @@ class StaticPlanDefinition:
         return cls(str(raw["template_id"]), raw.get("entry_bot_id"), dict(raw.get("input_schema") or {}), tuple(nodes), entry_name=raw.get("entry_name"))
 
     @classmethod
-    def from_file(cls, template_id: str, directory: Path) -> "StaticPlanDefinition":
+    def from_file(cls, template_id: str, directory: Path, *, bindings: Mapping[str, str] | None = None) -> "StaticPlanDefinition":
         path = directory / f"{template_id}.yaml"
         if not path.is_file():
             raise ValueError(f"static plan not found: {template_id}")
-        plan = cls.from_yaml(path.read_text(encoding="utf-8"))
+        plan = cls.from_yaml(path.read_text(encoding="utf-8"), bindings=bindings)
         if plan.template_id != template_id:
             raise ValueError(f"static plan template_id mismatch: {plan.template_id}")
         return plan
