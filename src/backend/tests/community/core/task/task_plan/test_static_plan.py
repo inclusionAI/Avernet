@@ -121,3 +121,11 @@ def test_static_plan_from_yaml_without_bindings_leaves_placeholder_literal():
     plan = StaticPlanDefinition.from_yaml(text)
     assert plan.nodes[0].bot_id == "${store_owner_bot_id}"
     plan.validate_bindings()  # literal non-empty placeholder passes binding validation
+
+
+def test_expand_placeholders_preserves_scalar_values():
+    """Scalar YAML values pass through unchanged during recursive expansion."""
+    from agentclaw.community.core.task.task_plan.static_plan import _expand_placeholders
+
+    marker = object()
+    assert _expand_placeholders(marker, {"role": "bot-1"}) is marker

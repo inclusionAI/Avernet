@@ -157,3 +157,25 @@ def test_resolve_harness_enabled_falls_back_to_env_on_read_error(monkeypatch):
     monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "true")
     assert _resolve_harness_enabled(fake) is True  # env 开 → 开
     monkeypatch.delenv("OCB_TASK_HARNESS_ENABLED", raising=False)
+
+
+def test_task_service_degrades_when_merchant_bindings_are_not_registered(monkeypatch):
+    """A lightweight injector may omit optional merchant bindings."""
+    from agentclaw.community.di.config import TaskDispatchConfig
+    from agentclaw.community.di.modules import task_module as module
+
+    class _Graph:
+        def bind_repository(self, _repo):
+            raise RuntimeError("repository not configured")
+
+    class _Injector:
+        def get(self, _binding):
+            raise RuntimeError("optional binding not configured")
+
+    monkeypatch.setattr(module.TaskModule, "_resolve_ports", staticmethod(lambda: (None, None)))
+    monkeypatch.setattr(module.TaskModule, "_resolve_discover", staticmethod(lambda **_: object()))
+    monkeypatch.setenv("OCB_TASK_HARNESS_ENABLED", "0")
+    svc = module.TaskModule().task_service(
+        _Graph(), object(), TaskDispatchConfig(), _Injector()
+    )
+    assert isinstance(svc, module.TaskService)
