@@ -805,11 +805,18 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
   }
   const environments: Record<"pre" | "prod", ResolvedBaasEnvironmentConfig> = {
     pre: {
-      apiKey: yaml.baas?.environments?.pre?.apiKey ?? "",
+      apiKey: firstNonBlank(
+        getEnv("CLAWEVOLVE_BAAS_PRE_API_KEY"),
+        yaml.baas?.environments?.pre?.apiKey,
+      ),
       baseUrl: firstNonBlank(yaml.baas?.environments?.pre?.baseUrl).replace(/\/$/, ""),
     },
     prod: {
-      apiKey: firstNonBlank(yaml.baas?.environments?.prod?.apiKey, legacyApiKey),
+      apiKey: firstNonBlank(
+        getEnv("CLAWEVOLVE_BAAS_PROD_API_KEY"),
+        yaml.baas?.environments?.prod?.apiKey,
+        legacyApiKey,
+      ),
       baseUrl: firstNonBlank(yaml.baas?.environments?.prod?.baseUrl, legacyBaseUrl)
         .replace(/\/$/, ""),
     },
