@@ -103,13 +103,8 @@ from engine.community.plugin_api.cron.models import (
 # ── shared helpers ───────────────────────────────────────────────────────────
 
 
-class _FakeAuth:
-    def __init__(self, token: str | None = None) -> None:
-        self.token = token
-
-
-def _auth(token: str | None = None) -> AuthContext:
-    return _FakeAuth(token=token)  # type: ignore[return-value]
+def _auth(token: str | None = None, user_id: str | None = "u1") -> AuthContext:
+    return AuthContext(token=token, user_id=user_id)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -637,10 +632,10 @@ class TestSessionHelpers:
         assert s.last_message is not None
         assert s.last_message.metadata["source"] == "session-summary"
 
-    def test_relay_session_to_session_unparseable_key(self):
+    def test_relay_session_to_session_unparseable_key_has_unknown_owner(self):
         s = _relay_session_to_session({"key": "session:short"})
         assert s.agent_id is None
-        assert s.user_id == "default"  # falls through to default user_id
+        assert s.user_id is None
 
     def test_relay_message_to_message_content_list_variants(self):
         # list of dicts with text key directly
@@ -730,10 +725,12 @@ class _SessionPort:
 
     async def sessions_list(
         self, token=None, offset=0, limit=50, agent_id=None, session_key=None,
+        source=None, actor_user_id=None,
     ) -> list[dict]:
         self.calls.append({
             "m": "list", "token": token, "offset": offset, "limit": limit,
             "agent_id": agent_id, "session_key": session_key,
+            "source": source, "actor_user_id": actor_user_id,
         })
         return self._sessions
 
@@ -759,6 +756,37 @@ class _SessionPort:
 
 
 class TestSessionAdapterCoverage:
+    async def test_list_conversion_failure_log_redacts_raw_session(self, caplog, monkeypatch):
+        import engine.community.core.adapters.claude_code.session as session_module
+
+        def fail_conversion(_raw):
+            raise ValueError("conversion failed")
+
+        monkeypatch.setattr(session_module, "_relay_session_to_session", fail_conversion)
+        port = _SessionPort()
+        port._sessions = [{"key": "session:secret-session:user:secret-user"}]
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        with caplog.at_level("WARNING", logger="claude-code-session-adapter"):
+            assert await adapter.list(SessionListRequest(limit=10)) == []
+
+        records = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.failure" in record.getMessage()
+        ]
+        assert len(records) == 1
+        message = records[0]
+        assert "operation=sessions.list" in message
+        assert "status=500" in message
+        assert "reason=conversion_error" in message
+        assert "duration_ms=" in message
+        assert "raw_type=dict" in message
+        assert "key_format=session_user" in message
+        assert "secret-session" not in message
+        assert "secret-user" not in message
+        assert "conversion failed" not in message
+
     async def test_list_conversion_failure_skipped(self):
         port = _SessionPort()
         # One valid + one broken (missing key triggers _relay_session_to_session
@@ -781,16 +809,16 @@ class TestSessionAdapterCoverage:
         assert len(out) == 1
         assert out[0].id == "agent:b1:session:s1:user:u1"
 
-    async def test_create_no_agent_builds_short_key(self):
+    async def test_create_no_agent_builds_user_scoped_key(self):
         port = _SessionPort()
         adapter = ClaudeCodeSessionAdapter(port)
-        # No agent_id/user_id → short-form `session:<uuid>` key
         sess = await adapter.create(
-            _make_create_request(title="T", user_id=None, agent_id=None),
+            _make_create_request(title="T", agent_id=None),
             auth=_auth("t"),
         )
         assert sess.id.startswith("session:")
-        assert port.calls[0]["key"].startswith("session:")
+        assert sess.id.endswith(":user:u1")
+        assert port.calls[0]["key"].endswith(":user:u1")
 
     async def test_create_with_uuid_passthrough(self):
         from engine.community.core.session.models import SessionCreateRequest
@@ -801,6 +829,7 @@ class TestSessionAdapterCoverage:
                 title="T", user_id="u1", agent_id="b1", model="m1",
                 uuid="fixed-uuid",
             ),
+            auth=_auth(),
         )
         assert "fixed-uuid" in sess.id
 

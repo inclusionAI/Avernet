@@ -23,13 +23,17 @@ Notable translation differences vs OpenClaw's session adapter
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from engine.community.core.engine.context import AuthContext
+from engine.community.core.engine.exceptions import SessionActorError
 from engine.community.core.session.models import (
     Message,
     Session,
@@ -52,39 +56,56 @@ log = logging.getLogger("claude-code-session-adapter")
 # ── raw-dict → core-DTO builders (relocated from engines/claude_code/session.py) ──
 
 
+_CLAUDE_CODE_SESSION_KEY_PATTERNS = (
+    re.compile(r"^agent:(?P<agent>[^:]+):session:(?P<session>[^:]+):user:(?P<user>[^:]+)$"),
+    re.compile(r"^user:(?P<user>[^:]+):session:(?P<session>[^:]+):agent:(?P<agent>[^:]+)$"),
+    re.compile(r"^session:(?P<session>[^:]+):user:(?P<user>[^:]+)$"),
+)
+
+
 def _parse_session_key(key: str) -> tuple[str | None, str | None]:
-    """Extract (user_id, agent_id) from a canonical claude_code session key.
-
-    Recognises two long forms:
-      * new  ``agent:<a>:session:<s>:user:<u>``
-      * legacy ``user:<u>:session:<s>:agent:<a>``
-
-    Returns ``(None, None)`` for the legacy short form ``session:<uuid>`` and
-    any other unparseable shape.
-    """
-    if key.startswith("agent:") and ":session:" in key and ":user:" in key:
-        try:
-            _, rest = key.split("agent:", 1)
-            agent_part, rest2 = rest.split(":session:", 1)
-            _, user_part = rest2.split(":user:", 1)
-        except ValueError:
-            return None, None
-        if not user_part or not agent_part:
-            return None, None
-        return user_part, agent_part
-
-    if key.startswith("user:") and ":session:" in key and ":agent:" in key:
-        try:
-            _, rest = key.split("user:", 1)
-            user_part, rest2 = rest.split(":session:", 1)
-            _, agent_part = rest2.split(":agent:", 1)
-        except ValueError:
-            return None, None
-        if not user_part or not agent_part:
-            return None, None
-        return user_part, agent_part
-
+    """Extract ``(user_id, agent_id)`` from supported Claude Code key forms."""
+    for pattern in _CLAUDE_CODE_SESSION_KEY_PATTERNS:
+        match = pattern.fullmatch(key)
+        if match is not None:
+            return match.group("user"), match.groupdict().get("agent")
     return None, None
+
+
+def _require_session_actor(
+    auth: AuthContext | None, requested_user_id: str | None, *, required: bool,
+) -> str | None:
+    actor_user_id = auth.user_id if auth is not None else None
+    if required or requested_user_id is not None:
+        if not isinstance(actor_user_id, str) or not actor_user_id.strip():
+            raise SessionActorError(reason="missing_actor", status_code=401)
+        if requested_user_id is not None and requested_user_id != actor_user_id:
+            raise SessionActorError(reason="identity_mismatch", status_code=403)
+    return actor_user_id
+
+
+def _session_key_format(key: object) -> str:
+    if not isinstance(key, str):
+        return "non_string"
+    user_id, agent_id = _parse_session_key(key)
+    if user_id is not None and agent_id is not None:
+        return "agent_user" if key.startswith("agent:") else "legacy_user_agent"
+    if user_id is not None:
+        return "session_user"
+    if re.fullmatch(r"session:[^:]+", key):
+        return "legacy_short"
+    return "other"
+
+
+def _session_log_fields(raw: object) -> tuple[str, str, str]:
+    raw_type = type(raw).__name__
+    if not isinstance(raw, dict):
+        return raw_type, "none", "non_dict"
+    key = raw.get("key")
+    if not isinstance(key, str):
+        return raw_type, "none", _session_key_format(key)
+    key_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+    return raw_type, key_hash, _session_key_format(key)
 
 
 def _parse_relay_timestamp(raw: Any) -> datetime | None:
@@ -112,7 +133,7 @@ def _parse_message_count(raw: Any) -> int:
         return 0
 
 
-def _relay_session_to_session(data: dict[str, Any], user_id: str = "default") -> Session:
+def _relay_session_to_session(data: dict[str, Any]) -> Session:
     """Build a `Session` from a raw relay ``sessions.list`` entry dict.
 
     Relocated from ``ClaudeCodeSessionService._relay_session_to_session``.
@@ -144,7 +165,7 @@ def _relay_session_to_session(data: dict[str, Any], user_id: str = "default") ->
         id=key,
         key=key,
         agent_id=parsed_agent,
-        user_id=parsed_user or user_id,
+        user_id=parsed_user,
         title=data.get("label") or key,
         status="active",
         created_at=created_at,
@@ -272,11 +293,17 @@ class ClaudeCodeSessionAdapter(SessionService):
         auth: AuthContext | None = None,
     ) -> list[Session]:
         """List sessions matching the request filter."""
+        started_at = time.monotonic()
         token = auth.token if auth is not None else None
+        actor_user_id = _require_session_actor(
+            auth, request.user_id, required=request.source is not None,
+        )
+
         has_session_key = bool(request.session_key and request.session_key.strip())
         log.info(
-            "[list] user_id=%s agent_id=%s has_session_key=%s",
-            request.user_id,
+            "[list] source=%s actor_present=%s agent_id=%s has_session_key=%s",
+            request.source,
+            bool(actor_user_id),
             request.agent_id,
             has_session_key,
         )
@@ -287,6 +314,8 @@ class ClaudeCodeSessionAdapter(SessionService):
             limit=request.limit,
             agent_id=request.agent_id,
             session_key=request.session_key,
+            source=request.source,
+            actor_user_id=actor_user_id,
         )
 
         sessions: list[Session] = []
@@ -296,14 +325,22 @@ class ClaudeCodeSessionAdapter(SessionService):
                 # Filter out bcs_grp_ sessions (aicoding BCS group sessions).
                 if "bcs_grp_" in key:
                     continue
-                session = _relay_session_to_session(
-                    raw, user_id=request.user_id or "default"
-                )
+                session = _relay_session_to_session(raw)
                 if request.agent_id and session.agent_id != request.agent_id:
                     continue
                 sessions.append(session)
             except Exception as e:
-                log.warning("[list] conversion failed: %s raw=%s", e, raw)
+                raw_type, key_hash, key_format = _session_log_fields(raw)
+                log.warning(
+                    "event=claude_code.sessions.list.failure operation=sessions.list "
+                    "status=500 reason=conversion_error raw_type=%s key_hash=%s "
+                    "key_format=%s error_type=%s duration_ms=%.3f",
+                    raw_type,
+                    key_hash,
+                    key_format,
+                    type(e).__name__,
+                    (time.monotonic() - started_at) * 1000,
+                )
 
         return sessions
 
@@ -314,14 +351,20 @@ class ClaudeCodeSessionAdapter(SessionService):
     ) -> Session:
         """Pre-allocate a sessionKey via ``sessions.patch`` and return it."""
         token = auth.token if auth is not None else None
-        log.info("[create] title=%s model=%s user_id=%s", request.title, request.model, request.user_id)
+        user_id = _require_session_actor(auth, request.user_id, required=True)
+        if user_id is None:
+            raise SessionActorError(reason="missing_actor", status_code=401)
+        log.info(
+            "claude_code.sessions.create.request operation=sessions.create "
+            "actor_present=true agent_present=%s",
+            request.agent_id is not None,
+        )
 
-        user_id = request.user_id or "default"
         session_uuid = request.uuid or str(uuid.uuid4())
-        if request.agent_id and request.user_id:
+        if request.agent_id:
             session_key = f"agent:{request.agent_id}:session:{session_uuid}:user:{user_id}"
         else:
-            session_key = f"session:{session_uuid}"
+            session_key = f"session:{session_uuid}:user:{user_id}"
 
         label = request.title or None
 
@@ -338,7 +381,7 @@ class ClaudeCodeSessionAdapter(SessionService):
             id=session_key,
             key=session_key,
             agent_id=request.agent_id,
-            user_id=request.user_id,
+            user_id=user_id,
             title=request.title or session_key,
             status="active",
             created_at=now,

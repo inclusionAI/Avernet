@@ -15,6 +15,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from engine.community.api.session.router import router
+from engine.community.core.engine.context import (
+    AUTHENTICATED_PRINCIPAL_SCOPE_KEY,
+    AuthContext,
+    AuthenticatedPrincipal,
+)
+from engine.community.core.engine.exceptions import SessionActorError
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -89,11 +95,28 @@ def allow_root(tmp_path, monkeypatch) -> str:
     return str(tmp_path)
 
 
-@pytest.fixture()
-def client(mock_session_api, mock_favorite_repository) -> TestClient:
+def _make_client(*, principal: AuthenticatedPrincipal | None) -> TestClient:
     app = FastAPI()
+    if principal is not None:
+        @app.middleware("http")
+        async def add_authenticated_principal(request, call_next):
+            request.scope[AUTHENTICATED_PRINCIPAL_SCOPE_KEY] = principal
+            return await call_next(request)
+
     app.include_router(router)
     return TestClient(app)
+
+
+@pytest.fixture()
+def client(mock_session_api, mock_favorite_repository) -> TestClient:
+    return _make_client(
+        principal=AuthenticatedPrincipal(user_id="u1", token="scope-token")
+    )
+
+
+@pytest.fixture()
+def unauthenticated_client(mock_session_api, mock_favorite_repository) -> TestClient:
+    return _make_client(principal=None)
 
 
 # ── GET /api/sessions ─────────────────────────────────────────────────────────
@@ -106,6 +129,32 @@ class TestListSessions:
         assert body["success"] is True
         assert len(body["data"]) == 1
         assert body["data"][0]["id"] == "sess-1"
+
+    def test_legacy_no_source_no_user_log_marks_actor_absent(
+        self, unauthenticated_client, caplog
+    ):
+        with caplog.at_level("INFO", logger="web-sessions"):
+            resp = unauthenticated_client.get("/api/sessions")
+
+        assert resp.status_code == 200
+        success = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.list.success" in record.getMessage()
+        ]
+        assert len(success) == 1
+        assert "actor_present=false" in success[0]
+        assert "duration_ms=" in success[0]
+
+    def test_legacy_no_source_no_user_preserves_unauthenticated_service_call(
+        self, unauthenticated_client, mock_session_api
+    ):
+        resp = unauthenticated_client.get("/api/sessions")
+
+        assert resp.status_code == 200
+        request = mock_session_api.list.call_args.args[0]
+        assert request.user_id is None
+        assert "auth" not in mock_session_api.list.call_args.kwargs
 
     def test_query_params_forwarded(self, client, mock_session_api):
         resp = client.get(
@@ -120,6 +169,9 @@ class TestListSessions:
         assert call_args.source == "all_but_others"
         assert call_args.limit == 5
         assert call_args.offset == 10
+        assert mock_session_api.list.call_args.kwargs["auth"] == AuthContext(
+            token="scope-token", user_id="u1"
+        )
 
     def test_session_key_query_param_forwarded(self, client, mock_session_api):
         resp = client.get("/api/sessions?session_key=session%3Atarget")
@@ -127,11 +179,175 @@ class TestListSessions:
         call_args = mock_session_api.list.call_args[0][0]
         assert call_args.session_key == "session:target"
 
-    def test_unknown_source_is_forwarded_without_http_validation(self, client, mock_session_api):
-        resp = client.get("/api/sessions?source=unsupported")
+    @pytest.mark.parametrize("source", ["mine", "others", "unsupported"])
+    def test_invalid_source_returns_422_before_dispatch(
+        self, client, mock_session_api, source
+    ):
+        resp = client.get("/api/sessions", params={"source": source})
+
+        assert resp.status_code == 422
+        mock_session_api.list.assert_not_called()
+
+    def test_missing_actor_log_names_list_operation(
+        self, unauthenticated_client, caplog
+    ):
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = unauthenticated_client.get(
+                "/api/sessions", params={"user_id": "u1"}
+            )
+
+        assert resp.status_code == 401
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.list.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=list" in denied[0]
+        assert "reason=missing_actor" in denied[0]
+        assert "status=401" in denied[0]
+        assert "duration_ms=" in denied[0]
+
+    def test_missing_trusted_actor_returns_401_before_service(
+        self, unauthenticated_client, mock_session_api
+    ):
+        resp = unauthenticated_client.get(
+            "/api/sessions", params={"user_id": "u1"}
+        )
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Session authentication required"
+        mock_session_api.list.assert_not_called()
+
+    def test_mismatched_requested_user_returns_403_before_service(
+        self, client, mock_session_api
+    ):
+        resp = client.get("/api/sessions", params={"user_id": "u2"})
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Forbidden"
+        mock_session_api.list.assert_not_called()
+
+    def test_create_uses_authenticated_actor_and_auth_context(
+        self, client, mock_session_api
+    ):
+        resp = client.post("/api/sessions", json={"user_id": "u1"})
 
         assert resp.status_code == 200
-        assert mock_session_api.list.call_args[0][0].source == "unsupported"
+        request = mock_session_api.create.call_args.args[0]
+        assert request.user_id == "u1"
+        assert mock_session_api.create.call_args.kwargs["auth"] == AuthContext(
+            token="scope-token", user_id="u1"
+        )
+
+    def test_create_mismatch_log_names_create_operation(
+        self, client, caplog
+    ):
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = client.post("/api/sessions", json={"user_id": "u2"})
+
+        assert resp.status_code == 403
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.create.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=create" in denied[0]
+        assert "reason=identity_mismatch" in denied[0]
+        assert "status=403" in denied[0]
+        assert "duration_ms=" in denied[0]
+
+    def test_create_mismatch_returns_403_before_service(
+        self, client, mock_session_api
+    ):
+        resp = client.post("/api/sessions", json={"user_id": "u2"})
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Forbidden"
+        mock_session_api.create.assert_not_called()
+
+    def test_create_without_actor_returns_401_before_service(
+        self, unauthenticated_client, mock_session_api, caplog
+    ):
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = unauthenticated_client.post("/api/sessions", json={})
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Session authentication required"
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.create.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=create" in denied[0]
+        assert "reason=missing_actor" in denied[0]
+        assert "status=401" in denied[0]
+        assert "duration_ms=" in denied[0]
+        mock_session_api.create.assert_not_called()
+
+    def test_list_failure_log_contains_duration(self, client, mock_session_api, caplog):
+        mock_session_api.list.side_effect = RuntimeError("db error")
+
+        with caplog.at_level("ERROR", logger="web-sessions"):
+            resp = client.get("/api/sessions", params={"user_id": "u1"})
+
+        assert resp.status_code == 500
+        failure = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.list.failure" in record.getMessage()
+        ]
+        assert len(failure) == 1
+        assert "duration_ms=" in failure[0]
+
+    def test_downstream_session_actor_error_returns_safe_denied_response(
+        self, client, mock_session_api, caplog
+    ):
+        mock_session_api.list.side_effect = SessionActorError(
+            reason="identity_mismatch", status_code=403,
+            message="permission denied: private actor detail",
+        )
+
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = client.get("/api/sessions", params={"user_id": "u1"})
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Forbidden"
+        assert "private actor detail" not in resp.text
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.list.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "reason=identity_mismatch" in denied[0]
+        assert "status=403" in denied[0]
+        assert "duration_ms=" in denied[0]
+
+    def test_downstream_permission_error_returns_safe_list_denied_response(
+        self, client, mock_session_api, caplog
+    ):
+        mock_session_api.list.side_effect = PermissionError(
+            "permission denied: raw detail"
+        )
+
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = client.get("/api/sessions", params={"user_id": "u1"})
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Session authentication required"
+        assert "raw detail" not in resp.text
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.list.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "reason=actor_unavailable" in denied[0]
+        assert "status=401" in denied[0]
+        assert "duration_ms=" in denied[0]
 
     def test_service_error_returns_500(self, client, mock_session_api):
         mock_session_api.list.side_effect = RuntimeError("db error")
@@ -164,21 +380,88 @@ class TestCreateSession:
     def test_full_create_passes_fields(self, client, mock_session_api):
         resp = client.post("/api/sessions", json={
             "title": "My Chat",
-            "user_id": "alice",
+            "user_id": "u1",
             "agent_id": "bot-1",
             "model": "claude-3",
         })
         assert resp.status_code == 200
         req = mock_session_api.create.call_args[0][0]
         assert req.title == "My Chat"
-        assert req.user_id == "alice"
+        assert req.user_id == "u1"
         assert req.agent_id == "bot-1"
         assert req.model == "claude-3"
 
-    def test_default_user_id_when_omitted(self, client, mock_session_api):
+    def test_authenticated_user_id_when_omitted(self, client, mock_session_api):
         client.post("/api/sessions", json={})
         req = mock_session_api.create.call_args[0][0]
-        assert req.user_id == "default"
+        assert req.user_id == "u1"
+        assert mock_session_api.create.call_args.kwargs["auth"] == AuthContext(
+            token="scope-token", user_id="u1"
+        )
+
+    def test_create_failure_log_contains_duration(self, client, mock_session_api, caplog):
+        mock_session_api.create.side_effect = RuntimeError("create failed")
+
+        with caplog.at_level("ERROR", logger="web-sessions"):
+            resp = client.post("/api/sessions", json={})
+
+        assert resp.status_code == 500
+        failure = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.create.failure" in record.getMessage()
+        ]
+        assert len(failure) == 1
+        assert "duration_ms=" in failure[0]
+
+    def test_downstream_create_actor_error_returns_safe_denied_response(
+        self, client, mock_session_api, caplog
+    ):
+        mock_session_api.create.side_effect = SessionActorError(
+            reason="missing_actor", status_code=401,
+            message="permission denied: private create detail",
+        )
+
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = client.post("/api/sessions", json={})
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Session authentication required"
+        assert "private create detail" not in resp.text
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.create.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "reason=missing_actor" in denied[0]
+        assert "status=401" in denied[0]
+        assert "duration_ms=" in denied[0]
+
+    def test_downstream_create_permission_error_has_safe_denied_event(
+        self, client, mock_session_api, caplog
+    ):
+        mock_session_api.create.side_effect = PermissionError(
+            "permission denied: raw create detail"
+        )
+
+        with caplog.at_level("WARNING", logger="web-sessions"):
+            resp = client.post("/api/sessions", json={})
+
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "Session authentication required"
+        assert "raw create detail" not in resp.text
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=engine.sessions.create.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=create" in denied[0]
+        assert "reason=actor_unavailable" in denied[0]
+        assert "status=401" in denied[0]
+        assert "duration_ms=" in denied[0]
+        mock_session_api.create.assert_called_once()
 
     def test_service_error_returns_500(self, client, mock_session_api):
         mock_session_api.create.side_effect = RuntimeError("create failed")

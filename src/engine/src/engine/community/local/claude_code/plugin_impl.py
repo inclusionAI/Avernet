@@ -14,13 +14,22 @@ dict so round-trip assertions work.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Any, Literal
 
 from engine.community.kernel.frames import EventFrame
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
 
 log = logging.getLogger("local-claude-code-plugin")
+
+_USER_SUFFIX = re.compile(r"(?:^|:)user:([^:]+)$")
+
+
+def _session_matches_source(session: dict[str, Any], actor_user_id: str) -> bool:
+    key = session.get("key")
+    match = _USER_SUFFIX.search(key) if isinstance(key, str) else None
+    return match is None or match.group(1).casefold() == actor_user_id.casefold()
 
 
 def _session_matches_agent_id(session: dict, agent_id: str) -> bool:
@@ -159,7 +168,15 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: Literal["all_but_others"] | None = None,
+        actor_user_id: str | None = None,
     ) -> list[dict]:
+        if source not in (None, "all_but_others"):
+            log.warning(
+                "claude_code.sessions.list.denied operation=sessions.list "
+                "reason=invalid_source status=422"
+            )
+            return []
         items = list(self._sessions.values())
         if agent_id is not None:
             before_count = len(items)
@@ -181,6 +198,13 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
                 before_count,
                 len(items),
             )
+        if source == "all_but_others":
+            if not isinstance(actor_user_id, str) or not actor_user_id.strip():
+                return []
+            items = [
+                item for item in items
+                if _session_matches_source(item, actor_user_id)
+            ]
         return items[offset: offset + limit]
 
     async def session_create(

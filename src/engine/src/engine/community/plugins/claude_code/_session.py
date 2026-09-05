@@ -2,9 +2,22 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+import time
+from typing import Any, Literal
 
 log = logging.getLogger("claude-code-community-port")
+
+_USER_SUFFIX = re.compile(r"(?:^|:)user:([^:]+)$")
+_SOURCE_ALL_BUT_OTHERS = "all_but_others"
+
+
+def _session_matches_source(
+    session: dict[str, Any], actor_user_id: str,
+) -> bool:
+    key = session.get("key")
+    match = _USER_SUFFIX.search(key) if isinstance(key, str) else None
+    return match is None or match.group(1).casefold() == actor_user_id.casefold()
 
 
 def _session_matches_agent_id(session: dict, agent_id: str) -> bool:
@@ -43,16 +56,56 @@ class _SessionPortMixin:
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: Literal["all_but_others"] | None = None,
+        actor_user_id: str | None = None,
     ) -> list[dict]:
-        client = await self._relay()
+        started_at = time.monotonic()
+        if source not in (None, _SOURCE_ALL_BUT_OTHERS):
+            log.warning(
+                "event=claude_code.sessions.list.denied operation=sessions.list "
+                "reason=invalid_source status=422 result=empty duration_ms=%.3f",
+                (time.monotonic() - started_at) * 1000,
+            )
+            return []
+        log.info(
+            "event=claude_code.sessions.list.request operation=sessions.list "
+            "source=%s actor_present=%s agent_filter_present=%s "
+            "session_key_filter_present=%s offset=%s limit=%s duration_ms=%.3f",
+            source,
+            bool(actor_user_id),
+            agent_id is not None,
+            bool(session_key and session_key.strip()),
+            offset,
+            limit,
+            (time.monotonic() - started_at) * 1000,
+        )
+        if source == _SOURCE_ALL_BUT_OTHERS and (
+            not isinstance(actor_user_id, str) or not actor_user_id.strip()
+        ):
+            log.warning(
+                "event=claude_code.sessions.list.denied operation=sessions.list "
+                "reason=actor_unavailable status=401 result=empty duration_ms=%.3f",
+                (time.monotonic() - started_at) * 1000,
+            )
+            return []
         try:
+            client = await self._relay()
             resp = await client.send_request("sessions.list", {})
         except Exception as e:  # noqa: BLE001
-            log.error("[sessions_list] RPC failed: %s", e)
+            log.error(
+                "event=claude_code.sessions.list.failure operation=sessions.list "
+                "reason=rpc_error status=503 error_type=%s duration_ms=%.3f",
+                type(e).__name__,
+                (time.monotonic() - started_at) * 1000,
+            )
             return []
         if not resp.ok:
-            log.error("[sessions_list] failed: %s",
-                      resp.error.message if resp.error else "unknown")
+            log.error(
+                "event=claude_code.sessions.list.failure operation=sessions.list "
+                "reason=rpc_error status=502 error_type=relay_error "
+                "duration_ms=%.3f",
+                (time.monotonic() - started_at) * 1000,
+            )
             return []
         payload = resp.payload or []
         if isinstance(payload, dict):
@@ -68,6 +121,7 @@ class _SessionPortMixin:
         else:
             return []
         sessions = [s for s in sessions if isinstance(s, dict)]
+        raw_count = len(sessions)
         # agent_id filter (relay doesn't filter server-side for this field).
         if agent_id is not None:
             before_count = len(sessions)
@@ -89,7 +143,30 @@ class _SessionPortMixin:
                 before_count,
                 len(sessions),
             )
-        return sessions[offset: offset + limit]
+        if source == _SOURCE_ALL_BUT_OTHERS:
+            before_count = len(sessions)
+            sessions = [
+                item for item in sessions
+                if _session_matches_source(item, actor_user_id)
+            ]
+            log.info(
+                "[sessions_list] source_filter source=%s before=%s matched=%s",
+                source,
+                before_count,
+                len(sessions),
+            )
+        page = sessions[offset: offset + limit]
+        log.info(
+            "event=claude_code.sessions.list.success operation=sessions.list status=200 "
+            "raw_count=%s matched_count=%s returned_count=%s source=%s "
+            "duration_ms=%.3f",
+            raw_count,
+            len(sessions),
+            len(page),
+            source,
+            (time.monotonic() - started_at) * 1000,
+        )
+        return page
 
     async def session_create(
         self,

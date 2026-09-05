@@ -86,6 +86,31 @@ async def test_local_claude_code_session_key_lookup_is_exact_and_pre_paginated()
     assert await plugin.sessions_list(session_key="  ", offset=0, limit=1) == [first]
 
 
+async def test_local_claude_code_all_but_others_filters_before_pagination():
+    plugin = LocalClaudeCodePluginImpl()
+    current_one = await plugin.session_create("session:one:user:u1")
+    other = await plugin.session_create("session:other:user:u2")
+    current_two = await plugin.session_create("session:two:user:u1")
+    legacy = await plugin.session_create("session:legacy")
+
+    assert await plugin.sessions_list(
+        source="all_but_others", actor_user_id="u1", offset=1, limit=2
+    ) == [current_two, legacy]
+    assert other not in await plugin.sessions_list(
+        source="all_but_others", actor_user_id="u1"
+    )
+    assert current_one in await plugin.sessions_list(
+        source="all_but_others", actor_user_id="u1"
+    )
+
+
+async def test_local_claude_code_invalid_source_fails_closed():
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.session_create("session:one:user:u1")
+
+    assert await plugin.sessions_list(source="others") == []
+
+
 async def test_local_claude_code_agent_lookup_uses_canonical_key_without_agent_id():
     plugin = LocalClaudeCodePluginImpl()
     await plugin.session_create("agent:g2:session:other:user:u1")

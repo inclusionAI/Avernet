@@ -1068,6 +1068,125 @@ class TestSessionMixin:
         out = await impl.sessions_list(offset=2, limit=3)
         assert [s["key"] for s in out] == ["2", "3", "4"]
 
+    async def test_list_source_filters_other_users_before_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "session:other:user:u2"},
+            {"key": "session:mine-1:user:u1"},
+            {"key": "session:mine-2:user:u1"},
+            {"key": "session:mine-3:user:u1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            source="all_but_others", actor_user_id="u1", offset=0, limit=2,
+        )
+
+        assert [s["key"] for s in out] == [
+            "session:mine-1:user:u1",
+            "session:mine-2:user:u1",
+        ]
+
+    async def test_list_source_keeps_legacy_keys_without_trailing_user(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "session:legacy"},
+            {"key": "session:other:user:u2"},
+            {"key": "malformed"},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            source="all_but_others", actor_user_id="u1",
+        )
+
+        assert [s["key"] for s in out] == ["session:legacy", "malformed"]
+
+    async def test_list_source_without_actor_fails_closed_before_rpc(self, caplog):
+        c = _FakeRelayClient()
+        impl, _ = _impl(c)
+
+        with caplog.at_level("WARNING", logger="claude-code-community-port"):
+            assert await impl.sessions_list(source="all_but_others") == []
+
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=sessions.list" in denied[0]
+        assert "reason=actor_unavailable" in denied[0]
+        assert "status=401" in denied[0]
+        assert "result=empty" in denied[0]
+        assert "duration_ms=" in denied[0]
+        assert c.calls == []
+
+    async def test_list_logs_safe_request_and_success_events(self, caplog):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "session:private-key:user:u1"},
+        ]}))
+        impl, _ = _impl(c)
+
+        with caplog.at_level("INFO", logger="claude-code-community-port"):
+            await impl.sessions_list(
+                source="all_but_others", actor_user_id="u1",
+            )
+
+        request = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.request" in record.getMessage()
+        ]
+        success = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.success" in record.getMessage()
+        ]
+        assert len(request) == 1
+        assert len(success) == 1
+        assert "duration_ms=" in request[0]
+        assert "duration_ms=" in success[0]
+        assert "private-key" not in caplog.text
+
+    async def test_list_rpc_failure_logs_event_and_duration(self, caplog):
+        c = _FakeRelayClient()
+        c.set_raise(ConnectionError("relay down"))
+        impl, _ = _impl(c)
+
+        with caplog.at_level("ERROR", logger="claude-code-community-port"):
+            assert await impl.sessions_list() == []
+
+        failure = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.failure" in record.getMessage()
+        ]
+        assert len(failure) == 1
+        assert "duration_ms=" in failure[0]
+        assert "relay down" not in failure[0]
+
+    async def test_list_invalid_source_fails_closed_before_rpc(self, caplog):
+        c = _FakeRelayClient()
+        impl, _ = _impl(c)
+
+        with caplog.at_level("WARNING", logger="claude-code-community-port"):
+            assert await impl.sessions_list(source="others") == []
+
+        denied = [
+            record.getMessage()
+            for record in caplog.records
+            if "event=claude_code.sessions.list.denied" in record.getMessage()
+        ]
+        assert len(denied) == 1
+        assert "operation=sessions.list" in denied[0]
+        assert "reason=invalid_source" in denied[0]
+        assert "status=422" in denied[0]
+        assert "result=empty" in denied[0]
+        assert "duration_ms=" in denied[0]
+        assert c.calls == []
+
     async def test_create_success_full_params(self):
         c = _FakeRelayClient()
         c.set_response("sessions.patch", _ok({"key": "k"}))

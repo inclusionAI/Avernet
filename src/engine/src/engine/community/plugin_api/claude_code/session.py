@@ -25,7 +25,7 @@ In-band error convention for ``session_reset`` / ``session_clear``:
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 class ClaudeCodeSessionPort(Protocol):
@@ -38,6 +38,8 @@ class ClaudeCodeSessionPort(Protocol):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: Literal["all_but_others"] | None = None,
+        actor_user_id: str | None = None,
     ) -> list[dict]:
         """Call ``sessions.list`` and return raw session dicts.
 
@@ -50,9 +52,12 @@ class ClaudeCodeSessionPort(Protocol):
             limit: Page size (default 50).
             agent_id: Optional agent filter.
             session_key: Optional exact session-key filter; blank values are ignored.
+            source: Optional caller-relative visibility filter.
+            actor_user_id: Trusted authenticated actor used by ``source``.
 
         Returns:
             List of raw session dicts after local filtering and pagination.
+            A missing actor with ``source`` returns an empty list.
         """
         ...
 

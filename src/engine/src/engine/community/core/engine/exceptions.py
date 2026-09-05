@@ -25,6 +25,19 @@ class EngineNotFoundError(EngineError):
         self.engine_name = engine_name
 
 
+class SessionActorError(PermissionError):
+    """Safe, typed rejection for a missing or mismatched session actor."""
+
+    def __init__(
+        self, reason: str, status_code: int, message: str | None = None,
+    ) -> None:
+        if status_code not in (401, 403):
+            raise ValueError("session actor status must be 401 or 403")
+        self.reason = reason
+        self.status_code = status_code
+        super().__init__(message or reason)
+
+
 class CapabilityNotSupportedError(EngineError):
     """Raised when code attempts to use a capability the current engine does not support.
 
@@ -43,4 +56,5 @@ __all__ = [
     "CapabilityNotSupportedError",
     "EngineError",
     "EngineNotFoundError",
+    "SessionActorError",
 ]
