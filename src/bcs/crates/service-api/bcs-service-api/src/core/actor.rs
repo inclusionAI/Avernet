@@ -104,3 +104,16 @@ pub trait RelationCoreService: Send + Sync {
         env: &str,
     ) -> ServiceResult<Vec<String>>;
 }
+
+/// Synchronizes legacy friendship mutations into the edge-permission friend
+/// edge model while both friendship links coexist.
+#[async_trait]
+pub trait EdgePermissionFriendSyncService: Send + Sync {
+    /// Mirror an established legacy friendship into approved edge-permission
+    /// friend edges. Implementations must be idempotent.
+    async fn sync_add_friendship(&self, a: &str, b: &str) -> ServiceResult<()>;
+
+    /// Mirror removal of one legacy friendship into edge-permission friend-edge
+    /// revocation. Implementations must preserve unrelated non-friend grants.
+    async fn sync_remove_friendship(&self, a: &str, b: &str) -> ServiceResult<()>;
+}

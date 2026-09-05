@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_friend_store::MemoryFriendRepo;
 use bcs_service_api::{
-    FriendCoreService, FriendRepoPort, RelationCoreService, ServiceError, ServiceResult, Friendship,
+    EdgePermissionFriendSyncService, FriendCoreService, FriendRepoPort, RelationCoreService,
+    ServiceError, ServiceResult, Friendship,
 };
 use tracing::{error, info, warn};
 
@@ -15,6 +16,7 @@ use tracing::{error, info, warn};
 pub struct FriendCore {
     repo: Arc<dyn FriendRepoPort>,
     relation: Option<Arc<dyn RelationCoreService>>,
+    edge_permission_sync: Option<Arc<dyn EdgePermissionFriendSyncService>>,
 }
 
 impl FriendCore {
@@ -26,6 +28,7 @@ impl FriendCore {
         Self {
             repo,
             relation: None,
+            edge_permission_sync: None,
         }
     }
 
@@ -36,6 +39,16 @@ impl FriendCore {
     /// Inject the relation graph service for dual-write (F.1 + F.2).
     pub fn with_relation(mut self, relation: Arc<dyn RelationCoreService>) -> Self {
         self.relation = Some(relation);
+        self
+    }
+
+    /// Inject edge-permission friend-edge synchronization for the migration
+    /// window where legacy friendships and edge grants coexist.
+    pub fn with_edge_permission_sync(
+        mut self,
+        sync: Arc<dyn EdgePermissionFriendSyncService>,
+    ) -> Self {
+        self.edge_permission_sync = Some(sync);
         self
     }
 }
@@ -112,11 +125,28 @@ impl FriendCoreService for FriendCore {
             }
         }
 
+        if let Some(ref sync) = self.edge_permission_sync {
+            if let Err(err) = sync.sync_add_friendship(bot_a, bot_b).await {
+                warn!(
+                    left_bot = %bot_a,
+                    right_bot = %bot_b,
+                    step = "edge_permission_sync_add_friendship",
+                    error = %err,
+                    "friendship edge-permission sync failed; friendship repo already inserted"
+                );
+            }
+        }
+
         info!(left_bot = %bot_a, right_bot = %bot_b, "Friendship established");
         Ok(())
     }
 
     async fn remove_all_friendships(&self, bot_id: &str) -> ServiceResult<usize> {
+        let edge_permission_friends = if self.edge_permission_sync.is_some() {
+            self.repo.list_friends(bot_id).await?
+        } else {
+            Vec::new()
+        };
         let removed = self.repo.remove_all_friendships(bot_id).await?;
 
         if let Some(ref relation) = self.relation {
@@ -128,6 +158,19 @@ impl FriendCoreService for FriendCore {
                     error = %err,
                     "F.2: relation.remove_all_friend_edges failed; will be reconciled on next remove"
                 );
+            }
+        }
+
+        if let Some(ref sync) = self.edge_permission_sync {
+            for friend_id in edge_permission_friends {
+                if let Err(err) = sync.sync_remove_friendship(bot_id, &friend_id).await {
+                    warn!(
+                        left_bot = %bot_id,
+                        right_bot = %friend_id,
+                        error = %err,
+                        "edge_permission_sync.remove_friendship failed during remove_all; friendship repo already removed"
+                    );
+                }
             }
         }
 
@@ -161,6 +204,19 @@ impl FriendCoreService for FriendCore {
                     error = %err,
                     "F.2: relation.remove_friend_edges failed; friendship repo already removed, relation graph is inconsistent"
                 );
+            }
+        }
+
+        if removed {
+            if let Some(ref sync) = self.edge_permission_sync {
+                if let Err(err) = sync.sync_remove_friendship(bot_a, bot_b).await {
+                    warn!(
+                        left_bot = %bot_a,
+                        right_bot = %bot_b,
+                        error = %err,
+                        "edge_permission_sync.remove_friendship failed; friendship repo already removed"
+                    );
+                }
             }
         }
 

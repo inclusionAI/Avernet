@@ -4126,16 +4126,18 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             bot_registry.clone(),
         );
 
-        // Create SQLite-backed friend services.
-        let (legacy_friend_core, friend_request_svc): (
-            Arc<dyn bcs_service_api::FriendCoreService>,
-            Arc<dyn bcs_service_api::FriendRequestCoreService>,
+        // Create DB-backed legacy friend repositories. The FriendCore service is
+        // built after edge-permission wiring so legacy friendship mutations can
+        // dual-write both coexistence paths.
+        let (friend_repo, friend_request_repo): (
+            Arc<dyn bcs_service_api::FriendRepoPort>,
+            Arc<dyn bcs_service_api::FriendRequestRepoPort>,
         ) = {
             info!(
                 db_plugin = %db_kind,
-                "Initializing DB-backed friend storage with relation dual-write"
+                "Initializing DB-backed friend storage with relation and edge-permission dual-write"
             );
-            let friend_repo = match db_kind {
+            let friend_repo: Arc<dyn bcs_service_api::FriendRepoPort> = match db_kind {
                 DbPluginKind::LocalSqlite => Arc::new(DbFriendStore::sqlite(db_plugin.clone())),
                 DbPluginKind::Mysql => Arc::new(DbFriendStore::mysql(db_plugin.clone())),
                 DbPluginKind::External(provider) => {
@@ -4145,9 +4147,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                     )
                 }
             };
-            let friend_store: Arc<dyn bcs_service_api::FriendCoreService> =
-                Arc::new(FriendCore::with_repo(friend_repo).with_relation(relation_svc.clone()));
-            let friend_request_repo = match db_kind {
+            let friend_request_repo: Arc<dyn bcs_service_api::FriendRequestRepoPort> = match db_kind {
                 DbPluginKind::LocalSqlite => {
                     Arc::new(DbFriendRequestStore::sqlite(db_plugin.clone()))
                 }
@@ -4159,14 +4159,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                     )
                 }
             };
-            let friend_request_store: Arc<dyn bcs_service_api::FriendRequestCoreService> =
-                Arc::new(FriendRequestCore::with_repo(
-                    friend_request_repo,
-                    friend_store.clone(),
-                    bot_registry.clone(),
-                ));
 
-            (friend_store, friend_request_store)
+            (friend_repo, friend_request_repo)
         };
 
         // Edge-permission stores + services (T16): real DB-backed impls back
@@ -4242,11 +4236,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             (edge_grant_repo, profile_repo, request_repo, bot_config_repo)
         };
         let edge_permission_env = crate::env::resolve_env();
-        // friend_svc = legacy FriendCore (reads bcs_friendships/old tables).
-        // Gates (group/proposal/a2a) use this until edge_grants data is migrated.
-        // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
-        let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> =
-            legacy_friend_core.clone();
         let friend_connect_notification: Arc<dyn bcs_service_api::FriendConnectNotificationPort> =
             match config.friend_work_order_base_url.as_deref() {
                 Some(base_url) => Arc::new(
@@ -4255,15 +4244,33 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
                 ),
                 None => Arc::new(bcs_service_api::NoopFriendConnectNotificationPort),
             };
+        let connect_service_impl = Arc::new(bcs_edge_permission::DbConnectService::new(
+            edge_grant_store.clone(),
+            profile_store.clone(),
+            request_store.clone(),
+            bot_config_store.clone(),
+            user_directory.clone(),
+            friend_connect_notification,
+            edge_permission_env,
+        ));
         let connect_service: Arc<dyn bcs_service_api::application::ConnectService> =
-            Arc::new(bcs_edge_permission::DbConnectService::new(
-                edge_grant_store.clone(),
-                profile_store.clone(),
-                request_store.clone(),
-                bot_config_store.clone(),
-                user_directory.clone(),
-                friend_connect_notification,
-                edge_permission_env,
+            connect_service_impl.clone();
+        let edge_permission_friend_sync: Arc<dyn bcs_service_api::EdgePermissionFriendSyncService> =
+            connect_service_impl.clone();
+        // friend_svc = legacy FriendCore (reads bcs_friendships/old tables) plus
+        // coexistence dual-write into edge_grants while the old and new friend
+        // APIs run in parallel.
+        // See docs/superpowers/plans/2026-08-19-v2-friends-parallel-interface.md.
+        let friend_svc: Arc<dyn bcs_service_api::FriendCoreService> = Arc::new(
+            FriendCore::with_repo(friend_repo)
+                .with_relation(relation_svc.clone())
+                .with_edge_permission_sync(edge_permission_friend_sync),
+        );
+        let friend_request_svc: Arc<dyn bcs_service_api::FriendRequestCoreService> =
+            Arc::new(FriendRequestCore::with_repo(
+                friend_request_repo,
+                friend_svc.clone(),
+                bot_registry.clone(),
             ));
         let admission_service: Arc<dyn bcs_service_api::application::AdmissionService> =
             Arc::new(bcs_edge_permission::DbAdmissionService::new(

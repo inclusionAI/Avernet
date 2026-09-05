@@ -97,6 +97,7 @@ async fn seed_bound_oauth_cookie(
         src: "google".to_string(),
         iat: now,
         exp: now + 1800,
+        name: None,
     };
     let jwt = jwt_svc.sign(&claims).expect("sign jwt");
     user_port
