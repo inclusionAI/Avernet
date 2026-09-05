@@ -5,6 +5,10 @@ import { EvolveTaskSourceRepository } from "./repositories/evolve-task-source-re
 import { BenchDomainRepository } from "./repositories/bench-domain-repository.js";
 import { BenchTemplateRepository } from "./repositories/bench-template-repository.js";
 import { BenchRunRepository } from "./repositories/bench-run-repository.js";
+import { BenchTemplateVersionRepository } from "./repositories/bench-template-version-repository.js";
+import { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
+import { BenchArtifactRepository } from "./repositories/bench-artifact-repository.js";
+import { BenchTagRepository } from "./repositories/bench-tag-repository.js";
 import { BotWorkflowPermissionRepository } from "./repositories/bot-workflow-permission-repository.js";
 import { FlowRunRepository } from "./repositories/flow-run-repository.js";
 import { NodeExecutionRepository } from "./repositories/node-execution-repository.js";
@@ -14,6 +18,7 @@ import { ExecutionStepLogRepository } from "./repositories/execution-step-log-re
 import { createEvolveRouter, type EvolveRouterDeps } from "./routes/evolve.js";
 import { createInternalEvolveRouter } from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
+import { createBenchRouter } from "./routes/bench.js";
 import { TaskSourceService } from "./services/evolve/task-source-service.js";
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
 import { InsightPlanStepService } from "./services/evolve/insight-plan-step-service.js";
@@ -41,10 +46,16 @@ export type ClawevolveModule = {
   publicRouter: Router;
   internalRouter: Router;
   taskGuardRouter: Router;
+  benchRouter: Router;
   internalApi: ClawEvolveInternalApi;
   repositories: {
     evolve: EvolveRepository;
     taskSource: EvolveTaskSourceRepository;
+    benchDomain: BenchDomainRepository;
+    benchTemplate: BenchTemplateRepository;
+    benchTemplateVersion: BenchTemplateVersionRepository;
+    benchRun: BenchRunRepository;
+    benchTaskResult: BenchTaskResultRepository;
   };
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -69,6 +80,10 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const benchDomain = new BenchDomainRepository(db);
   const benchTemplate = new BenchTemplateRepository(db);
   const benchRun = new BenchRunRepository(db);
+  const benchTemplateVersion = new BenchTemplateVersionRepository(db);
+  const benchTaskResult = new BenchTaskResultRepository(db);
+  const benchArtifact = new BenchArtifactRepository(db);
+  const benchTag = new BenchTagRepository(db);
   const botWorkflowPermission = new BotWorkflowPermissionRepository(db);
   const taskSourceService = clawInsight?.readFrozenEvidence
     ? new TaskSourceService(taskSource, clawInsight.readFrozenEvidence)
@@ -116,6 +131,16 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     executionStepLogRepo: new ExecutionStepLogRepository(db),
   });
   const taskGuardRouter = createInternalTaskGuardRouter(evolve);
+  const benchRouter = createBenchRouter(
+    benchDomain,
+    benchTemplate,
+    benchTemplateVersion,
+    benchRun,
+    benchTaskResult,
+    db,
+    benchArtifact,
+    benchTag,
+  );
 
   let runAnalysisTimeoutTimer: NodeJS.Timeout | null = null;
   let suggestionApplyTimeoutTimer: NodeJS.Timeout | null = null;
@@ -124,13 +149,22 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     publicRouter,
     internalRouter,
     taskGuardRouter,
+    benchRouter,
     internalApi: {
       async createInsightTask(input) {
         if (!insightTaskService) throw new Error("ClawInsight integration is unavailable");
         return insightTaskService.create(input);
       },
     },
-    repositories: { evolve, taskSource },
+    repositories: {
+      evolve,
+      taskSource,
+      benchDomain,
+      benchTemplate,
+      benchTemplateVersion,
+      benchRun,
+      benchTaskResult,
+    },
     async start() {
       if (runAnalysisTimeoutTimer || suggestionApplyTimeoutTimer) return;
       runAnalysisTimeoutTimer = startRunAnalysisTimeoutSweeper(evolve);

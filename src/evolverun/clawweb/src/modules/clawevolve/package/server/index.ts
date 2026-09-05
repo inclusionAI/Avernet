@@ -3,4 +3,9 @@ export type { ClawevolveModule, ClawevolveModuleOptions } from "./create-module.
 export type { ClawInsightInternalApi, ClawEvolveInternalApi } from "./internal/module-api.js";
 export type { IDatabase, ExecResult, Row } from "./db.js";
 export { SqliteDatabase, runMigrations } from "./db.js";
+export { BenchDomainRepository } from "./repositories/bench-domain-repository.js";
+export { BenchTemplateRepository } from "./repositories/bench-template-repository.js";
+export { BenchTemplateVersionRepository } from "./repositories/bench-template-version-repository.js";
+export { BenchRunRepository } from "./repositories/bench-run-repository.js";
+export { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
 export type { ObjectStore, StoredObject } from "./services/object-storage/oss-object-store.js";
