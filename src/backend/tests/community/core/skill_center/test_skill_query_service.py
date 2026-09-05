@@ -79,15 +79,20 @@ class _Bots:
 
 
 class _SkillSets:
-    """Stands in for the repository seam that owns resolution *and* repair."""
+    """Stands in for the repository seam that owns resolution and membership."""
 
     def __init__(self, bridge: InstallationFlushPlan) -> None:
         self._bridge = bridge
         self.calls: list[dict] = []
+        self.member_calls: list[dict] = []
 
     def flush_installations(self, **kwargs) -> InstallationFlushPlan:
         self.calls.append(kwargs)
         return self._bridge
+
+    def list_member_skill_ids(self, **kwargs) -> frozenset[int]:
+        self.member_calls.append(kwargs)
+        return self._bridge.member_skill_ids
 
 
 class _Skills:
@@ -142,11 +147,11 @@ def _list(service, *, actor_id: str = "owner", source: str | None = None):
     )
 
 
-# ── Listing: flush-first, engine scoping, refusal-before-write ──────
+# ── Listing: membership-first, engine scoping, refusal-before-write ─
 
 
-def test_the_repair_runs_before_the_page_is_cut():
-    """`active` is a filter, so the repair cannot happen after the query."""
+def test_effective_sync_then_membership_read_runs_before_the_page_is_cut():
+    """Listing synchronizes effective state but reads reachability separately."""
     service, skills, sets, _bots = _listing_service(
         bridge=InstallationFlushPlan(
             member_skill_ids=frozenset({1, 2}),
@@ -158,18 +163,19 @@ def test_the_repair_runs_before_the_page_is_cut():
     _list(service)
 
     assert len(sets.calls) == 1
+    assert len(sets.member_calls) == 1
     assert skills.calls[0]["skill_set_member_ids"] == frozenset({1, 2})
     assert skills.calls[0]["bot_id"] == "bot"
     assert skills.calls[0]["user_id"] == "owner"
     assert skills.calls[0]["source"] is None
 
 
-def test_local_source_filter_is_forwarded_after_the_standard_flush():
+def test_local_source_filter_is_forwarded_after_the_membership_read():
     service, skills, sets, _bots = _listing_service(bridge=_EMPTY)
 
     _list(service, source="LOCAL")
 
-    assert len(sets.calls) == 1
+    assert len(sets.member_calls) == 1
     assert skills.calls[0]["source"] == "LOCAL"
 
 
@@ -182,9 +188,8 @@ def test_the_skillset_scope_uses_the_bots_engine_and_layout_precedence():
 
     _list(service)
 
-    assert sets.calls[0]["env"] == "dev"
-    assert sets.calls[0]["engine_type"] == "claude_code"
-    assert sets.calls[0]["default_engine_types"] == ("aicoding", "claude_code")
+    assert sets.member_calls[0]["engine_type"] == "claude_code"
+    assert sets.member_calls[0]["default_engine_types"] == ("aicoding", "claude_code")
     # One Bot read for the whole listing: the engine comes off it.
     assert bots.reads == 1
 
@@ -202,8 +207,8 @@ def test_a_bot_with_no_recorded_engine_does_not_scope_to_a_literal_none():
 
     _list(service)
 
-    assert sets.calls[0]["engine_type"] is None
-    assert sets.calls[0]["default_engine_types"] == ()
+    assert sets.member_calls[0]["engine_type"] is None
+    assert sets.member_calls[0]["default_engine_types"] == ()
 
 
 def test_an_invisible_bot_is_refused_before_anything_is_written():

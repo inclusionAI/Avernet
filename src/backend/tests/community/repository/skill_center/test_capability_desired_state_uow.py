@@ -211,6 +211,126 @@ def test_global_default_reads_apply_owner_bot_exclusions_without_hiding_membersh
         bot_id="default", owner_id="owner-b", set_id=str(default.id), engine_type="openclaw"
     )] == ["included", "excluded"]
 
+
+def test_default_only_sync_materializes_defaults_without_repairing_ordinary_history():
+    """The post-backfill path has one writer: Default membership/exclusion."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        default = SkillSet(
+            name="platform-default", bolt_id="", user_id="", engine_type="openclaw",
+            is_default=True, env="dev",
+        )
+        ordinary = SkillSet(
+            name="ordinary", bolt_id="bot", user_id="owner", engine_type="openclaw",
+            is_active=True, env="dev",
+        )
+        default_skill = Skill(name="default", git_path="git://default", env="dev")
+        excluded_skill = Skill(name="excluded", git_path="git://excluded", env="dev")
+        shared_skill = Skill(name="shared", git_path="git://shared", env="dev")
+        direct_skill = Skill(name="direct", git_path="local://direct", env="dev")
+        former_default_skill = Skill(
+            name="former-default", git_path="git://former-default", env="dev"
+        )
+        session.add_all([
+            default, ordinary, default_skill, excluded_skill, shared_skill,
+            direct_skill, former_default_skill,
+        ])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=default.id, skill_id=default_skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=default.id, skill_id=excluded_skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=default.id, skill_id=shared_skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=ordinary.id, skill_id=shared_skill.id, env="dev"),
+            SkillSetMCPServer(skill_set_id=default.id, server_code="mcp.default", name="default", env="dev"),
+            SkillSetMCPServer(skill_set_id=default.id, server_code="mcp.excluded", name="excluded", env="dev"),
+            SkillSetMCPServer(skill_set_id=default.id, server_code="mcp.shared", name="shared", env="dev"),
+            SkillSetMCPServer(skill_set_id=ordinary.id, server_code="mcp.shared", name="shared", env="dev"),
+            DefaultSkillsetSkillExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                skill_id=excluded_skill.id,
+            ),
+            DefaultSkillsetSkillExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                skill_id=shared_skill.id,
+            ),
+            DefaultSkillsetMcpExclusion(
+                user_id="owner", bot_id="bot", skill_set_id=default.id,
+                server_code="mcp.excluded",
+            ),
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=excluded_skill.id, env="dev"),
+            # Historical malformed overlap: Default exclusion must not remove
+            # the active ordinary Set's claim.
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=shared_skill.id, env="dev"),
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=direct_skill.id, env="dev"),
+            # Default membership removal is an explicit operations cleanup;
+            # the reader cannot infer that this is not a Direct installation.
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=former_default_skill.id, env="dev"),
+            BotMCPInstallation(bot_id="bot", owner_id="owner", server_code="mcp.excluded", env="dev"),
+        ])
+
+    repository = CapabilityDesiredStateRepository(db)
+    plan = repository.sync_default_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    )
+
+    assert plan.skills_to_install == frozenset({default_skill.id})
+    assert plan.skills_to_uninstall == frozenset({excluded_skill.id})
+    assert plan.mcps_to_install == frozenset({"mcp.default", "mcp.shared"})
+    assert plan.mcps_to_uninstall == frozenset({"mcp.excluded"})
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(BotSkillInstallation).all()} == {
+            default_skill.id, shared_skill.id, direct_skill.id, former_default_skill.id,
+        }
+        assert {row.server_code for row in session.query(BotMCPInstallation).all()} == {
+            "mcp.default", "mcp.shared",
+        }
+
+    assert repository.sync_default_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    ) == plan
+
+
+def test_new_bot_initialization_inserts_missing_rows_without_deleting_existing_rows():
+    """Creation/retry initializes DB state without Reader or Runtime projection."""
+    db = _Database()
+    with db.transactional_orm_session() as session:
+        active = SkillSet(
+            name="active", bolt_id="bot", user_id="owner", engine_type="openclaw",
+            is_active=True, env="dev",
+        )
+        inactive = SkillSet(
+            name="inactive", bolt_id="bot", user_id="owner", engine_type="openclaw",
+            is_active=False, env="dev",
+        )
+        active_skill = Skill(name="active", git_path="git://active", env="dev")
+        stale_skill = Skill(name="stale", git_path="git://stale", env="dev")
+        direct_skill = Skill(name="direct", git_path="local://direct", env="dev")
+        session.add_all([active, inactive, active_skill, stale_skill, direct_skill])
+        session.flush()
+        session.add_all([
+            SkillSetSkill(skill_set_id=active.id, skill_id=active_skill.id, env="dev"),
+            SkillSetSkill(skill_set_id=inactive.id, skill_id=stale_skill.id, env="dev"),
+            SkillSetMCPServer(skill_set_id=active.id, server_code="mcp.active", name="active", env="dev"),
+            SkillSetMCPServer(skill_set_id=inactive.id, server_code="mcp.stale", name="stale", env="dev"),
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=stale_skill.id, env="dev"),
+            BotSkillInstallation(bot_id="bot", owner_id="owner", skill_id=direct_skill.id, env="dev"),
+            BotMCPInstallation(bot_id="bot", owner_id="owner", server_code="mcp.stale", env="dev"),
+            BotMCPInstallation(bot_id="bot", owner_id="owner", server_code="mcp.direct", env="dev"),
+        ])
+
+    CapabilityDesiredStateRepository(db).initialize_installations(
+        bot_id="bot", owner_id="owner", env="dev", engine_type="openclaw"
+    )
+
+    with db.orm_session() as session:
+        assert {row.skill_id for row in session.query(BotSkillInstallation).all()} == {
+            active_skill.id, stale_skill.id, direct_skill.id,
+        }
+        assert {row.server_code for row in session.query(BotMCPInstallation).all()} == {
+            "mcp.active", "mcp.stale", "mcp.direct",
+        }
+
+
 def test_flush_does_not_resurrect_a_deactivated_sets_member():
     """A later flush cannot re-add a member after its Set is deactivated."""
     db = _Database()

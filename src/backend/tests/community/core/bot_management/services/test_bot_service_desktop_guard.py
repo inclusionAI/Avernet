@@ -219,6 +219,40 @@ class TestCreateBotDesktopGuard:
         assert result is not None
         assert result["bot_type"] == "desktop"
 
+    def test_desktop_bot_create_initializes_installations_before_returning(self):
+        svc = _make_service()
+        svc._repository.get_by_id_and_owner.return_value = None
+        svc._repository.exists_by_bot_name.return_value = False
+        svc._repository.insert.return_value = _make_bot(
+            bot_id="desktop_new", bot_type="desktop", status="PENDING"
+        )
+
+        with patch(
+            "agentclaw.community.core.bot_management.services.bot_service.generate_bot_id",
+            return_value="desktop_new",
+        ):
+            svc.create_bot(
+                user_id="user001", nick_name="TestUser", bot_type="desktop"
+            )
+
+        svc._skill_set_factory.initialize_installations.assert_called_once_with(
+            bot_id="desktop_new", owner_id="user001", bot=None
+        )
+
+    def test_existing_create_retry_initializes_installations_before_returning(self):
+        svc = _make_service()
+        existing = _make_bot(bot_id="retry", bot_type="desktop", status="PENDING")
+        existing["env"] = "dev"
+        svc._repository.get_by_id_and_owner.return_value = existing
+
+        assert svc.create_bot(
+            user_id="user001", nick_name="TestUser", bot_id="retry"
+        ) == existing
+
+        svc._skill_set_factory.initialize_installations.assert_called_once_with(
+            bot_id="retry", owner_id="user001", bot=existing
+        )
+
     def test_personal_bot_create_calls_apply_device(self):
         """create_bot with default bot_type should call apply_device."""
         svc = _make_service()

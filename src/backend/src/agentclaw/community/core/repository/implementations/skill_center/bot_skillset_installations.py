@@ -6,6 +6,8 @@ range over every Set a Bot has and answer what its Installation table should say
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from sqlalchemy import and_, func, or_
 
 from agentclaw.community.core.models.mcp import SkillSetMCPServer
@@ -145,10 +147,83 @@ class BotSkillSetInstallations:
         Skills and MCPs, one algorithm. Returns the plan it applied, so the
         caller need not resolve twice.
         """
-        # Resolve unlocked first: a Bot that already agrees — the common case —
-        # answers here without a row lock or a write transaction.
+        return self._reconcile_installations(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            env=env,
+            engine_type=engine_type,
+            default_engine_types=default_engine_types,
+            plan_resolver=self._resolve_flush_plan,
+            allow_uninstall=True,
+        )
+
+    def sync_default_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> InstallationFlushPlan:
+        """Materialize the current Default Set without repairing ordinary Sets.
+
+        The mode is safe only after the operator has backfilled ordinary
+        SkillSet history.  A Default membership removal is deliberately not
+        inferred from an Installation row: that row may be Direct, and Default
+        removal is an explicit operational cleanup.  Per-Bot exclusions are
+        the one supported Default removal signal.  An active ordinary claim
+        still wins over that signal for malformed historical overlap.
+        """
+        return self._reconcile_installations(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            env=env,
+            engine_type=engine_type,
+            default_engine_types=default_engine_types,
+            plan_resolver=self._resolve_default_sync_plan,
+            allow_uninstall=True,
+        )
+
+    def initialize_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> InstallationFlushPlan:
+        """Insert missing active Set facts without deleting existing capabilities.
+
+        This is the new-Bot and retry boundary.  A partially persisted Bot can
+        be retried safely, while a full backfill remains the explicit repair
+        operation allowed to remove stale Set-derived rows.
+        """
+        return self._reconcile_installations(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            env=env,
+            engine_type=engine_type,
+            default_engine_types=default_engine_types,
+            plan_resolver=self._resolve_flush_plan,
+            allow_uninstall=False,
+        )
+
+    def _reconcile_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None,
+        default_engine_types: tuple[str, ...] | None,
+        plan_resolver: Callable[..., InstallationFlushPlan],
+        allow_uninstall: bool,
+    ) -> InstallationFlushPlan:
+        """Apply one resolver's plan with the shared lock and write protocol."""
         with self._db.orm_session() as session:
-            plan = self._resolve_flush_plan(
+            plan = plan_resolver(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -163,16 +238,17 @@ class BotSkillSetInstallations:
             )
         if (
             not (plan.skills_to_install - installed)
-            and not (plan.skills_to_uninstall & installed)
+            and (not allow_uninstall or not (plan.skills_to_uninstall & installed))
             and not (plan.mcps_to_install - installed_mcps)
-            and not (plan.mcps_to_uninstall & installed_mcps)
+            and (
+                not allow_uninstall
+                or not (plan.mcps_to_uninstall & installed_mcps)
+            )
         ):
             return plan
 
-        # There is something to write, so resolve again holding the Set rows —
-        # the same locks every SkillSet mutation takes.
         with self._db.transactional_orm_session() as session:
-            plan = self._resolve_flush_plan(
+            plan = plan_resolver(
                 session,
                 bot_id=bot_id,
                 owner_id=owner_id,
@@ -188,10 +264,11 @@ class BotSkillSetInstallations:
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     skill_id=skill_id,
                 )
-            skill_installations.uninstall(
-                session, bot_id=bot_id, owner_id=owner_id, env=env,
-                skill_ids=plan.skills_to_uninstall & installed,
-            )
+            if allow_uninstall:
+                skill_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id, env=env,
+                    skill_ids=plan.skills_to_uninstall & installed,
+                )
             installed_mcps = mcp_installations.installed_codes(
                 session, bot_id=bot_id, owner_id=owner_id, env=env, locked=True
             )
@@ -200,11 +277,102 @@ class BotSkillSetInstallations:
                     session, bot_id=bot_id, owner_id=owner_id, env=env,
                     server_code=server_code,
                 )
-            mcp_installations.uninstall(
-                session, bot_id=bot_id, owner_id=owner_id, env=env,
-                server_codes=plan.mcps_to_uninstall & installed_mcps,
-            )
+            if allow_uninstall:
+                mcp_installations.uninstall(
+                    session, bot_id=bot_id, owner_id=owner_id, env=env,
+                    server_codes=plan.mcps_to_uninstall & installed_mcps,
+                )
             return plan
+
+    def list_member_skill_ids(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> frozenset[int]:
+        """Read Set reachability for list/manifest consumers without a flush."""
+        with self._db.orm_session() as session:
+            members: set[int] = set()
+            for row in self._bot_sets(
+                session,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                engine_type=engine_type,
+                default_engine_types=default_engine_types,
+            ):
+                ids = set_member_skill_ids(self._scope, session, skill_set_id=int(row.id))
+                if row.is_default:
+                    ids -= set(
+                        default_exclusions.excluded_skill_ids(
+                            session,
+                            bot_id=bot_id,
+                            owner_id=owner_id,
+                            set_id=int(row.id),
+                        )
+                    )
+                members |= ids
+            return frozenset(members)
+
+    def _resolve_default_sync_plan(
+        self,
+        session,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None,
+        default_engine_types: tuple[str, ...] | None,
+        locked: bool = False,
+    ) -> InstallationFlushPlan:
+        """Resolve only Default materialization plus targeted active claims."""
+        bot_sets = self._bot_sets(
+            session,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            engine_type=engine_type,
+            default_engine_types=default_engine_types,
+            locked=locked,
+        )
+        default_skills: set[int] = set()
+        excluded_skills: set[int] = set()
+        default_mcps: set[str] = set()
+        excluded_mcps: set[str] = set()
+        ordinary_active_skills: set[int] = set()
+        ordinary_active_mcps: set[str] = set()
+        for row in bot_sets:
+            skill_ids = set_member_skill_ids(
+                self._scope, session, skill_set_id=int(row.id)
+            )
+            mcp_codes = set_member_mcp_codes(
+                self._scope, session, skill_set_id=int(row.id)
+            )
+            if not row.is_default:
+                if row.is_active:
+                    ordinary_active_skills |= skill_ids
+                    ordinary_active_mcps |= mcp_codes
+                continue
+            excluded_skill_ids = set(
+                default_exclusions.excluded_skill_ids(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+            )
+            excluded_mcp_codes = set(
+                default_exclusions.excluded_mcp_codes(
+                    session, bot_id=bot_id, owner_id=owner_id, set_id=int(row.id)
+                )
+            )
+            default_skills |= skill_ids - excluded_skill_ids
+            excluded_skills |= skill_ids & excluded_skill_ids
+            default_mcps |= mcp_codes - excluded_mcp_codes
+            excluded_mcps |= mcp_codes & excluded_mcp_codes
+        return InstallationFlushPlan(
+            member_skill_ids=frozenset(default_skills),
+            skills_to_install=frozenset(default_skills),
+            skills_to_uninstall=frozenset(excluded_skills - ordinary_active_skills),
+            mcps_to_install=frozenset(default_mcps),
+            mcps_to_uninstall=frozenset(excluded_mcps - ordinary_active_mcps),
+        )
 
     def _resolve_flush_plan(
         self,

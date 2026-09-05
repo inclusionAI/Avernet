@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from agentclaw.community.api.bot_capability_state_reader import (
     BotCapabilityStateReaderProtocol,
@@ -38,10 +39,29 @@ class _Bots:
 class _Repository:
     def __init__(self) -> None:
         self.flush_calls: list[dict] = []
+        self.default_sync_calls: list[dict] = []
+        self.initialization_calls: list[dict] = []
         self.mcp_reads: list[dict] = []
+        self.member_reads: list[dict] = []
 
     def flush_installations(self, **kwargs) -> InstallationFlushPlan:
         self.flush_calls.append(kwargs)
+        return InstallationFlushPlan(
+            member_skill_ids=frozenset({1}),
+            skills_to_install=frozenset({1}),
+            skills_to_uninstall=frozenset(),
+        )
+
+    def sync_default_installations(self, **kwargs) -> InstallationFlushPlan:
+        self.default_sync_calls.append(kwargs)
+        return InstallationFlushPlan(
+            member_skill_ids=frozenset(),
+            skills_to_install=frozenset(),
+            skills_to_uninstall=frozenset(),
+        )
+
+    def initialize_installations(self, **kwargs) -> InstallationFlushPlan:
+        self.initialization_calls.append(kwargs)
         return InstallationFlushPlan(
             member_skill_ids=frozenset({1}),
             skills_to_install=frozenset({1}),
@@ -54,6 +74,10 @@ class _Repository:
         self.mcp_reads.append(kwargs)
         return {"mcp.weather"}
 
+    def list_member_skill_ids(self, **kwargs) -> frozenset[int]:
+        self.member_reads.append(kwargs)
+        return frozenset({1})
+
 
 class _PoolSkills:
     def __init__(self) -> None:
@@ -65,7 +89,9 @@ class _PoolSkills:
         return self
 
     def list_bot_installed_assets(self, **kwargs) -> list[RegisteredSkillAsset]:
-        assert self._repository.flush_calls, (
+        assert (
+            self._repository.flush_calls or self._repository.default_sync_calls
+        ), (
             "read reached Installation before the flush"
         )
         self.reads.append(kwargs)
@@ -173,11 +199,49 @@ def test_a_missing_bot_raises_before_any_flush():
     assert repository.flush_calls == []
 
 
-def test_member_skill_ids_flushes_and_answers_the_set_membership_half():
+def test_member_skill_ids_reads_the_set_membership_without_materializing():
     reader, repository, _pool, bots, _versions = _reader()
 
     ids = reader.member_skill_ids(bot=_BOT)
 
     assert bots.lookups == []
-    assert repository.flush_calls == [_EXPECTED_FLUSH]
+    assert repository.flush_calls == []
+    assert repository.member_reads == [{
+        "bot_id": "bot-1",
+        "owner_id": "owner",
+        "engine_type": "openclaw",
+        "default_engine_types": ("openclaw",),
+    }]
     assert ids == frozenset({1})
+
+
+def test_reader_uses_default_only_sync_after_the_explicit_migration_switch(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    reader, repository, pool_skills, _bots, _versions = _reader()
+    monkeypatch.setattr(
+        "agentclaw.community.core.skill_center.services.bot_capability_state_reader.get_skill_center_flags",
+        lambda: SimpleNamespace(installation_default_sync_only=True),
+    )
+
+    reader.active_skill_assets(bot_id="bot-1", owner_id="owner")
+
+    assert repository.flush_calls == []
+    assert repository.default_sync_calls == [_EXPECTED_FLUSH]
+    assert pool_skills.reads
+
+
+def test_new_bot_initialization_always_uses_the_complete_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    reader, repository, _pool, _bots, _versions = _reader()
+    monkeypatch.setattr(
+        "agentclaw.community.core.skill_center.services.bot_capability_state_reader.get_skill_center_flags",
+        lambda: SimpleNamespace(installation_default_sync_only=True),
+    )
+
+    reader.initialize_installations(bot_id="bot-1", owner_id="owner")
+
+    assert repository.initialization_calls == [_EXPECTED_FLUSH]
+    assert repository.flush_calls == []
+    assert repository.default_sync_calls == []
