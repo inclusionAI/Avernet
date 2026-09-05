@@ -36,6 +36,7 @@ import { adminAuthMiddleware } from "./middleware/admin-auth.js";
 import { requestLogger } from "./middleware/request-logger.js";
 import { errorLogger } from "./middleware/error-logger.js";
 import { initSchema } from "./schema.js";
+import { getCorsAllowedOrigins } from "./env.js";
 
 function resolvePort(): number {
   const envPort = process.env.PORT;
@@ -88,12 +89,14 @@ async function main(extensions?: EvolvetraceExtensions): Promise<void> {
   const sandboxQueryService = new SandboxQueryService();
 
   const app = express();
+  const allowedCorsOrigins = getCorsAllowedOrigins();
 
   app.use(cors({
     origin: (origin, callback) => {
       if (!origin) return callback(null, "*");
       if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return callback(null, origin);
       if (/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) return callback(null, origin);
+      if (allowedCorsOrigins.has(origin)) return callback(null, origin);
       callback(new Error("CORS not allowed"));
     },
     credentials: true,
