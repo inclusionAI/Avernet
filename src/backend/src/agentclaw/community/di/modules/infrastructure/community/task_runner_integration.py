@@ -59,7 +59,7 @@ from agentclaw.community.di.config import (
     MerchantTaskBotBindingsConfig,
     OpenApiBotConfig,
 )
-from agentclaw.community.di.modules.config_module import _block
+from agentclaw.community.di.modules.config_module import _block, _user_config
 from agentclaw.community.log import get_logger
 
 from injector import Module, inject, provider, singleton
@@ -213,22 +213,22 @@ class TaskRunnerIntegrationModule(Module):
         plans resolve unchanged and unconfigured community singlebox/CI degrades.
         A malformed JSON string is logged and treated as empty (degrade, not boot halt).
         """
-        block = _block("merchant_task_bot_bindings")
+        raw = _user_config().get("merchant_task_bot_bindings")
         mapping: dict[str, object] = {}
-        if isinstance(block, str):
-            raw = block.strip()
-            if raw:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
                 try:
-                    decoded = json.loads(raw)
+                    decoded = json.loads(text)
                 except (ValueError, TypeError):
                     logger.warning(
                         "[task][bot-bindings] merchant_task_bot_bindings JSON decode failed; "
-                        "static-plan placeholders stay literal (len=%d)", len(raw),
+                        "static-plan placeholders stay literal (len=%d)", len(text),
                     )
                     decoded = {}
                 mapping = decoded if isinstance(decoded, dict) else {}
-        elif isinstance(block, dict):
-            mapping = block
+        elif isinstance(raw, dict):
+            mapping = raw
         return MerchantTaskBotBindingsConfig(
             bot_id_by_role={k: str(v) for k, v in mapping.items() if isinstance(k, str)},
         )
