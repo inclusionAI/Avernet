@@ -42,7 +42,9 @@ from agentclaw.community.core.bot_config_manifest.bot_config_manifest_apply_serv
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
-    BotCreationManifestSeam,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.plugin_api.passport import PassportPlugin
@@ -295,7 +297,7 @@ class BotCreateWithManifestHandler:
     def __init__(
         self,
         *,
-        manifest_seam_provider: Callable[[], BotCreationManifestSeam],
+        manifest_seam_provider: Callable[[], ManifestCreationSeam],
         apply_service_provider: Callable[[], BotConfigManifestApplyServiceProtocol],
         bot_repository_provider: Callable[[], BotRepository],
         passport_plugin_provider: Callable[[], PassportPlugin],
@@ -304,7 +306,10 @@ class BotCreateWithManifestHandler:
         # ``core/bot_management`` or the graph it pulls in, and this package is
         # what that graph reaches into. Naming their types here would close the
         # cycle at import time, which is why they arrive as callables the DI
-        # module resolves. ``complete_authorization`` is
+        # module resolves. ``ManifestCreationSeam`` above is from that same
+        # package and imported outright, which is not an exception: it is a
+        # Protocol module that imports nothing but ``typing`` and one value
+        # type, so it pulls none of the graph behind it. ``complete_authorization`` is
         # ``create_flow.complete_bot_authorization``, ``bot_service_provider``
         # yields ``BotService``, and ``auth_relationship_provider`` yields the
         # relationship writer the owner-repair step consults.

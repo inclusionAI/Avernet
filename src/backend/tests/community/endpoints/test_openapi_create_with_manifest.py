@@ -405,6 +405,9 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
 from agentclaw.community.core.bot_config_manifest.creation import (
     BotCreationManifestSeam,
 )
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
+)
 from agentclaw.community.core.repository.protocols.bot import (
     BotConfigManifestRepositoryProtocol,
 )
@@ -720,7 +723,11 @@ def test_an_abandoned_creation_expires_rather_than_reading_as_declined(
         self._authorization_window_seconds = 1
         return BotCreationManifestSeam.start_job(self, **kwargs)
 
-    bind_overrides(world, BotCreationManifestSeam, {"start_job": _one_second_window})
+    # Keyed by the Protocol, because that is what the container binds — the
+    # concrete class is not a binding at all, and asking for it would build a
+    # second, unwired seam. ``bind_overrides`` subclasses whatever the binding
+    # actually serves, so the stand-in still carries the real implementation.
+    bind_overrides(world, ManifestCreationSeam, {"start_job": _one_second_window})
 
     bot_id = _submit(client).json()["data"]["bot_id"]
     time.sleep(1.2)

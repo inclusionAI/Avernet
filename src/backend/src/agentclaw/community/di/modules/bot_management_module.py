@@ -114,6 +114,7 @@ from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
 )
+from agentclaw.community.core.bot_management.manifest_seam import ManifestCreationSeam
 from agentclaw.community.core.skill_center.capability_state_contract import (
     BotCapabilityStateReaderProtocol,
 )
@@ -792,13 +793,13 @@ class BotManagementModule(Module):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         task_queue_provider: Callable[[], TaskQueueService],
         create_with_manifest_config: cfg.BotCreateWithManifestConfig,
-    ) -> BotCreationManifestSeam:
+    ) -> ManifestCreationSeam:
         """The operations bot creation asks of the manifest layer.
 
-        The job's two operations are bound here rather than imported by the seam:
-        ``create_job`` imports ``creation`` for the phase triggers, so the
-        dependency has to run one way. The queue stays behind the same lazy
-        provider the apply service uses.
+        Bound under the **Protocol** every consumer holds; the one place naming
+        the implementation, since it is the one that builds it. The job's two
+        operations are wired here rather than imported by the seam (``create_job``
+        imports ``creation`` for the triggers), behind the same lazy queue provider.
         """
         return BotCreationManifestSeam(
             manifest_service=manifest_service,
@@ -843,7 +844,7 @@ class BotManagementModule(Module):
             )
 
         return BotCreateWithManifestHandler(
-            manifest_seam_provider=lambda: injector.get(BotCreationManifestSeam),
+            manifest_seam_provider=lambda: injector.get(ManifestCreationSeam),
             apply_service_provider=lambda: injector.get(
                 BotConfigManifestApplyService
             ),

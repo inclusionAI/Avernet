@@ -171,12 +171,12 @@ class BotCreationManifestSeam(ManifestCreationSeam):
     """Everything bot creation asks of the manifest layer, in one place.
 
     The base class is ``core/bot_management``'s :class:`ManifestCreationSeam`,
-    the Protocol naming the four operations submission calls — **declared** here
-    rather than merely satisfied by shape. Structural conformance was checked
-    nowhere: a signature drifting from the contract surfaced, if at all, as a
-    type error at the one call site that passes this class where the Protocol is
-    asked for, and neither a reader nor an IDE could get from the contract to its
-    single real implementation. Inheriting costs nothing at runtime — every
+    the Protocol naming these six operations — **declared** here rather than
+    merely satisfied by shape. Structural conformance was checked nowhere: a
+    signature drifting from the contract surfaced, if at all, as a type error at
+    whichever call site happened to pass this class where the Protocol was
+    asked for, and neither a reader nor an IDE could get from the contract to
+    its single real implementation. Inheriting costs nothing at runtime — every
     method the Protocol names is overridden below — and makes both hold; the
     signatures themselves are pinned by ``test_creation_seam``, since no type
     checker runs on this tree.
@@ -188,10 +188,15 @@ class BotCreationManifestSeam(ManifestCreationSeam):
     The dependency direction is unchanged: this package already imports
     ``core/bot_management`` (the engine registry, the token vault), and it is the
     *reverse* that would close a cycle, which is why the contract lives over
-    there. What this class adds beyond it — ``apply_pre_container``,
-    ``find_job``, and ``discard``'s ``owner_id`` — stays off the Protocol on
-    purpose: those belong to the creation job and the poll, which hold this class
-    directly and need no stand-in for it.
+    there.
+
+    **This class is named in two places and no more**: here, and the DI provider
+    that constructs it. Everything that *uses* the seam — submission, the two
+    routes, the creation job — holds the Protocol, which is also what the
+    container binds. That is why the Protocol names ``apply_pre_container`` and
+    ``find_job`` too: they have exactly one caller each, but those callers are
+    injected like every other, and a binding that handed out the class would
+    make them depend on how the seam is built.
 
     Deliberately small and free of creation policy: creation decides *when* to
     call these, this decides what each one means. Everything underneath is W1's

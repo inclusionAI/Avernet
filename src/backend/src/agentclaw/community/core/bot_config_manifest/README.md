@@ -584,7 +584,7 @@ provides:
   - ApplyTaskLifecycle
   - APPLY_TASK_TYPE
   - build_apply_task_payload
-  - BotCreationManifestSeam
+  - BotCreationManifestSeam (the ManifestCreationSeam implementation; only DI names it)
   - CREATE_PRE_CONTAINER_TRIGGER
   - CREATE_ON_CONTAINER_TRIGGER
   - preflight_creation_manifest
@@ -701,7 +701,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.object_storage  # the bot-data object store the managed-files store writes a teclaw bot's manifest-delivered files into (W8), and the cli_tools store keeps a bot's tool bytes in (W9)
   - agentclaw.community.core.bot_startup_script
   - agentclaw.community.core.bot_management.engines.registry  # the pure runtime-engine routing policy the resources materialiser addresses workspaces through, the router's own rule (W6)
-  - agentclaw.community.core.bot_management.manifest_seam  # the Protocol creation states its four operations as; the creation seam declares it rather than matching it by shape, so the contract is checked in one place
+  - agentclaw.community.core.bot_management.manifest_seam  # the Protocol the creation seam is declared as, bound as, and injected as everywhere; declaring it rather than matching it by shape is what checks the contract in one place
   - agentclaw.community.core.bot_management.token_vault
   - agentclaw.community.core.bot_management.utils  # resolve_agent_code — the creation job asks whether completion's *second* write (the owner relationship) actually landed, since the bot record alone cannot tell it
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults

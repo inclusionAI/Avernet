@@ -1,22 +1,27 @@
-"""What bot creation needs from the manifest layer, stated without importing it.
+"""The manifest layer's creation seam, stated without importing it.
 
 Its own module rather than a declaration inside ``create_flow``: that file is
-already at the size the architecture cap allows, and a contract is a different
-kind of thing from the flow that calls it. It is also what the implementation
-imports to declare itself — see the class docstring — so keeping it free of
-everything but ``typing`` is what lets that import stay one-directional.
+already at the size the architecture cap allows, a contract is a different kind
+of thing from the flow that calls it, and ``create_flow`` is only one of the
+three callers. It is also what the implementation imports to declare itself and
+what the DI container binds, so it stays free of everything but ``typing`` and
+one value type — that is what lets the import stay one-directional and the
+module stay cheap to import.
 
-The reason it is a ``Protocol`` at all is the import cycle — again, see the
-class docstring.
+The reason it is a ``Protocol`` at all is the import cycle — see the class
+docstring.
 """
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
+
+from agentclaw.community.core.task_queue.types import TaskRecord
 
 
+@runtime_checkable
 class ManifestCreationSeam(Protocol):
-    """What creation needs from the manifest package, named without importing it.
+    """Everything bot creation asks of the manifest package, named without it.
 
     A ``Protocol`` rather than the concrete ``BotCreationManifestSeam``:
     ``core/bot_management`` must not import ``core/bot_config_manifest`` — that
@@ -25,21 +30,40 @@ class ManifestCreationSeam(Protocol):
     double satisfies it by shape, with no base class and no import, which is the
     second reason.
 
+    **This is the type the container binds and every consumer holds.** The
+    concrete class is constructed in one place, the DI provider that wires its
+    collaborators; everywhere else — ``submit_bot_creation_with_manifest``, the
+    two ``with-manifest`` routes, the creation job's handler — names this. A
+    consumer that held the class instead would be depending on how the seam is
+    built rather than on what it promises, and would drag the whole manifest
+    package into modules that need six method signatures.
+
+    ``@runtime_checkable`` follows from that binding and nothing else:
+    python-injector ``isinstance``-checks an instance against the key it is
+    bound to, so rebinding this key to a stand-in — which the endpoint suite
+    does — raises on a plain ``Protocol``. It buys no guarantee worth having on
+    its own, since the check is attribute presence and never a signature; that
+    is what the implementation's declaration and ``test_creation_seam`` are for.
+
     **The one real implementation says so out loud.**
     ``BotCreationManifestSeam`` inherits this explicitly. That import runs
     manifest → management, the direction that is allowed and that the manifest
     package already takes; only the reverse closes the cycle. It buys what
     conformance-by-shape alone never did: the contract is checked against *this*
-    file rather than against whichever call site happens to pass the seam here,
-    and a reader or an IDE can walk between the contract and its implementation
+    file rather than against whichever call site happens to pass the seam, and a
+    reader or an IDE can walk between the contract and its implementation
     instead of guessing which class fits. The checking is a type checker's in an
     editor and ``test_creation_seam``'s in CI — the suite pins both the
-    inheritance and the four signatures, because no type checker runs on this
-    tree.
+    inheritance and the signatures, because no type checker runs on this tree.
 
-    Only the four operations submission calls are here. The pre-container apply
-    and the job's own steps belong to the creation job, which holds the seam
-    directly and needs no stand-in for it.
+    **Why all six and not only submission's four.** ``preflight``, ``persist``,
+    ``start_job`` and ``discard`` are what submission calls; ``apply_pre_container``
+    is the creation job's and ``find_job`` the poll's. They are one contract
+    because they are served by one object with one lifetime, handed out under
+    one binding: naming only submission's would leave the job and the route
+    holding the concrete class, which is the coupling this exists to remove.
+    ``create_flow`` calling four of six is the ordinary shape of a caller that
+    does not need everything, not a reason to split the seam in two.
     """
 
     def preflight(
@@ -61,6 +85,20 @@ class ManifestCreationSeam(Protocol):
         """Store the document and return the ``entity_id`` it was keyed by."""
         ...
 
+    def apply_pre_container(
+        self,
+        *,
+        entity_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        engine_type: str | None,
+        bot_type: str | None,
+        bot: dict[str, Any] | None = None,
+    ) -> str | None:
+        """Run the pre-container phase. Never raises; ``None`` if it never started."""
+        ...
+
     def start_job(
         self,
         *,
@@ -75,7 +113,13 @@ class ManifestCreationSeam(Protocol):
         """Hand the creation to its durable job."""
         ...
 
-    def discard(self, *, entity_id: str, bot_id: str) -> bool:
+    def find_job(self, *, entity_id: str, bot_id: str) -> TaskRecord | None:
+        """This creation's task row, or ``None`` if none was submitted."""
+        ...
+
+    def discard(
+        self, *, entity_id: str, bot_id: str, owner_id: str | None = None
+    ) -> bool:
         """Undo what submission wrote. Never raises; reports whether it landed."""
         ...
 

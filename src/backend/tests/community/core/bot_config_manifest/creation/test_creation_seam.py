@@ -199,6 +199,16 @@ def test_persist_keys_by_the_spec_entity_id_and_nothing_else():
 
 # ── the contract itself (``ManifestCreationSeam``) ─────────────────────────
 
+#: The operations the Protocol declares, read off the Protocol rather than
+#: retyped: a contract that grows is covered by the signature test below
+#: without anyone remembering to extend a list here. Dunders are dropped
+#: because ``Protocol`` puts one of its own (``__init__``) on every subclass.
+_CONTRACT_OPERATIONS = sorted(
+    name
+    for name, member in vars(ManifestCreationSeam).items()
+    if inspect.isfunction(member) and not name.startswith("_")
+)
+
 
 def test_the_seam_declares_the_creation_protocol_rather_than_matching_it():
     """The contract is a base class, not a resemblance.
@@ -213,9 +223,26 @@ def test_the_seam_declares_the_creation_protocol_rather_than_matching_it():
     assert ManifestCreationSeam in BotCreationManifestSeam.__mro__
 
 
-@pytest.mark.parametrize(
-    "operation", ["preflight", "persist", "start_job", "discard"]
-)
+def test_the_contract_names_the_whole_seam():
+    """Every operation a consumer reaches through the container is on it.
+
+    The container binds ``ManifestCreationSeam``, so an operation missing from
+    it is an operation nobody can call: submission's four, the creation job's
+    ``apply_pre_container`` and the poll's ``find_job``. Pinned as an exact set
+    rather than left to the parametrization below, which would silently shrink
+    along with the contract and go on passing.
+    """
+    assert _CONTRACT_OPERATIONS == [
+        "apply_pre_container",
+        "discard",
+        "find_job",
+        "persist",
+        "preflight",
+        "start_job",
+    ]
+
+
+@pytest.mark.parametrize("operation", _CONTRACT_OPERATIONS)
 def test_every_declared_operation_keeps_the_contract_signature(operation):
     """Signature drift is caught here, because no type checker runs in CI.
 
@@ -223,9 +250,9 @@ def test_every_declared_operation_keeps_the_contract_signature(operation):
     what verifies them on this tree. Each contract parameter must survive by
     name — silently renaming one would leave every caller passing an argument
     the implementation no longer takes. Extra parameters are allowed only with a
-    default (``discard``'s ``owner_id``, which the creation job passes and
-    submission does not), since a required one the Protocol does not name could
-    never be supplied through it.
+    default, since a required one the Protocol does not name could never be
+    supplied by a caller holding the Protocol — which, now that the container
+    binds it, is every caller.
 
     The first assertion is the hazard the base class brings with it: a Protocol
     method's body is ``...``, so an operation dropped from the seam would be
