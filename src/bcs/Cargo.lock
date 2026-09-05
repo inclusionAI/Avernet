@@ -345,6 +345,7 @@ dependencies = [
  "bcs-storage-baas",
  "bcs-storage-local",
  "bcs-system-message",
+ "bcs-telemetry",
  "bcs-test-support",
  "bcs-user-directory-api",
  "bcs-user-identity",
@@ -588,6 +589,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-telemetry",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -700,6 +702,7 @@ dependencies = [
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-telemetry",
  "bcs-test-support",
  "bcs-user-directory-api",
  "serde_json",
@@ -721,6 +724,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-service-api",
+ "bcs-telemetry",
  "bcs-test-support",
  "serde",
  "serde_json",
@@ -769,6 +773,7 @@ dependencies = [
  "async-trait",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-telemetry",
  "futures",
  "reqwest",
  "serde_json",
@@ -1066,6 +1071,7 @@ dependencies = [
  "bcs-event-store",
  "bcs-group",
  "bcs-service-api",
+ "bcs-telemetry",
  "bcs-test-support",
  "chrono",
  "futures",
@@ -1124,6 +1130,7 @@ name = "bcs-fuse-client"
 version = "0.1.0"
 dependencies = [
  "bcs-config-api",
+ "bcs-telemetry",
  "reqwest",
  "serde",
  "serde_json",
@@ -1407,6 +1414,7 @@ dependencies = [
  "bcs-domain",
  "bcs-protocol",
  "bcs-service-api",
+ "bcs-telemetry",
  "bcs-test-support",
  "chrono",
  "futures",
@@ -1517,6 +1525,7 @@ dependencies = [
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-telemetry",
  "futures",
  "opentelemetry",
  "opentelemetry-http",
@@ -1562,6 +1571,7 @@ name = "bcs-route-security"
 version = "0.1.0"
 dependencies = [
  "bcs-config-api",
+ "bcs-telemetry",
  "ipnet",
  "thiserror 2.0.20",
  "tokio",
@@ -1790,6 +1800,7 @@ dependencies = [
  "async-trait",
  "bcs-domain",
  "bcs-storage-api",
+ "bcs-telemetry",
  "chrono",
  "percent-encoding",
  "reqwest",
@@ -1840,7 +1851,15 @@ dependencies = [
 name = "bcs-telemetry"
 version = "0.1.0"
 dependencies = [
+ "metrics",
+ "opentelemetry",
+ "serde",
  "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-opentelemetry",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1893,6 +1912,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-route-security",
  "bcs-service-api",
+ "bcs-telemetry",
  "bcs-test-support",
  "futures",
  "httpdate",

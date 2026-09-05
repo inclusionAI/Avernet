@@ -8,6 +8,7 @@ rust-version = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+bcs-telemetry = { workspace = true }
 async-trait = { workspace = true }
 bcs-cache-api = { workspace = true }
 bcs-config = { workspace = true }

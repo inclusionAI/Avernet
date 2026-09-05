@@ -285,6 +285,7 @@ impl FriendWorkOrderEventRequest {
 #[async_trait]
 impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
     async fn notify(&self, command: FriendConnectNotificationCommand) -> ServiceResult<()> {
+        bcs_telemetry::observe_result("callback.friend_work_order", async {
         if command.recipient_user_ids.is_empty() {
             debug!(
                 kind = %notification_kind_label(command.kind),
@@ -340,6 +341,7 @@ impl FriendConnectNotificationPort for HttpFriendConnectNotificationPort {
             &payload,
             &command,
         ))
+            }).await
     }
 }
 
