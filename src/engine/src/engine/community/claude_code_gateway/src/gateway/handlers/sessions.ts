@@ -313,8 +313,43 @@ export const handleSessionNew: SessionsHandler = async (ctx, frame, deps) => {
 };
 
 export const handleSessionsList: SessionsHandler = async (ctx, frame, deps) => {
-  const sessions = deps.store.list().map(mapSessionSummary);
-  ctx.response(frame.id, true, { sessions });
+  const params = (frame.params ?? {}) as Record<string, unknown>;
+  const source = params.source;
+  const allSessions = deps.store.list();
+  let sessions = allSessions;
+
+  if (source !== undefined) {
+    if (source !== 'all_but_others') {
+      log.warn('sessions.list: invalid request', { reason: 'unsupported-source' });
+      ctx.response(frame.id, false, undefined, {
+        message: 'unsupported source',
+        code: 'INVALID_REQUEST',
+      });
+      return;
+    }
+
+    const userId = typeof params.userId === 'string' ? params.userId.trim() : '';
+    if (!userId) {
+      log.warn('sessions.list: invalid request', { reason: 'missing-user-id' });
+      ctx.response(frame.id, false, undefined, {
+        message: 'userId required for source all_but_others',
+        code: 'INVALID_REQUEST',
+      });
+      return;
+    }
+
+    sessions = allSessions.filter(binding => {
+      const match = binding.gatewaySessionKey.match(/:user:([^:]+)$/);
+      return !match || match[1] === userId;
+    });
+  }
+
+  log.debug('sessions.list: complete', {
+    source: source ?? 'all',
+    total: allSessions.length,
+    returned: sessions.length,
+  });
+  ctx.response(frame.id, true, { sessions: sessions.map(mapSessionSummary) });
 };
 
 export const handleSessionsPatch: SessionsHandler = async (ctx, frame, deps) => {

@@ -43,10 +43,13 @@ class _SessionPortMixin:
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         client = await self._relay()
+        params = {"source": source, "userId": user_id} if source is not None else {}
         try:
-            resp = await client.send_request("sessions.list", {})
+            resp = await client.send_request("sessions.list", params)
         except Exception as e:  # noqa: BLE001
             log.error("[sessions_list] RPC failed: %s", e)
             return []

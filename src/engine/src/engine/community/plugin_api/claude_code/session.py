@@ -38,6 +38,8 @@ class ClaudeCodeSessionPort(Protocol):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
         """Call ``sessions.list`` and return raw session dicts.
 
@@ -50,6 +52,8 @@ class ClaudeCodeSessionPort(Protocol):
             limit: Page size (default 50).
             agent_id: Optional agent filter.
             session_key: Optional exact session-key filter; blank values are ignored.
+            source: Optional gateway source filter.
+            user_id: User id forwarded with a source filter.
 
         Returns:
             List of raw session dicts after local filtering and pagination.
