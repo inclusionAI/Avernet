@@ -20,7 +20,7 @@
 /src/baas/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
 /src/proxy/ @cassiuscai @pfmiles @phoenixliu @xxxxpenny @EVASHINJI
 /src/gateway/ @cassiuscai @xxxxpenny @totalfrank @liveandevil @vzvince
-/src/evolverun/ @archer910517-ctrl @wienyang @fudp @shanzong @ZhaosenLin
+/src/evolverun/ @archer910517-ctrl @wienyang @fudp @3h-william @ZhaosenLin
 
 # Task goal-driven execution framework — dedicated owners.
 # These rules override the /src/backend/ fallback above for the
