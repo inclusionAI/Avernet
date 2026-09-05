@@ -1291,31 +1291,6 @@ impl EdgePermissionFriendSyncService for DbConnectService {
 
 // ---- AdmissionService (T14) ----------------------------------------------
 
-#[async_trait]
-impl EdgePermissionFriendSyncService for DbConnectService {
-    async fn sync_add_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
-        let Some((caller, target, caller_kind, target_kind)) = normalize_friend_sync_pair(a, b)? else {
-            warn!(left = %a, right = %b, env = %self.env, "skip human-human friendship edge-permission sync");
-            return Ok(());
-        };
-        if self.edge_grants.has_friend_edge(caller, target, &self.env).await {
-            return Ok(());
-        }
-        self.build_connect_edges(caller, target, caller_kind, target_kind)
-            .await
-            .map(|_| ())
-    }
-
-    async fn sync_remove_friendship(&self, a: &str, b: &str) -> ServiceResult<()> {
-        let Some((caller, target, _, _)) = normalize_friend_sync_pair(a, b)? else {
-            return Ok(());
-        };
-        <Self as ConnectService>::revoke_friend(self, caller, target)
-            .await
-            .map(|_| ())
-    }
-}
-
 /// DB-backed [`AdmissionService`] implementation (spec §4.3 + §4.5 + §6.2).
 ///
 /// Unlike [`DbConnectService`] (which owns its env because `ConnectService`
