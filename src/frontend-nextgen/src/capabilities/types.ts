@@ -204,7 +204,24 @@ export interface AdminSections {
   workOrders: boolean;
 }
 
+/** 用户身份展示策略。部署形态差异必须由 capability 收口，页面不得读取环境变量。 */
+export interface UserProfilePresentation {
+  /** true=名称与 userId 优先读取认证 User 接口解析出的 HumanIdentity。 */
+  preferAuthenticatedUserProfile: boolean;
+  /** 是否展示组织部门路径与同步入口。 */
+  showDepartment: boolean;
+}
+
+/** Open Core 体验环境提示；null 表示当前部署形态不展示。 */
+export interface OpenSourceExperienceNoticeSpec {
+  version: string;
+  message: string;
+  acknowledgeLabel: string;
+}
+
 export interface AppCapabilities {
+  /** Open Core 返回版本化提示配置；Internal 返回 null，且不得访问知悉状态。 */
+  getOpenSourceExperienceNotice: () => CapabilityResult<OpenSourceExperienceNoticeSpec | null>;
   getHelpLinks: () => CapabilityResult<HelpLink[]>;
   openExternal: (href: string) => CapabilityResult<null>;
   getRuntimeRouteRedirect: (context: RuntimeRouteContext) => CapabilityResult<string | null>;
@@ -217,6 +234,10 @@ export interface AppCapabilities {
    * 同步签名：capability 不发请求，返回当前已解析缓存；异步解析由 useHumanIdentity 编排。
    */
   getHumanIdentity: () => CapabilityResult<HumanIdentity | null>;
+  /**
+   * 用户身份展示策略。Open Core 优先认证 User 名称且隐藏部门；Internal 保留组织用户名称与部门。
+   */
+  getUserProfilePresentation: () => CapabilityResult<UserProfilePresentation>;
   /**
    * 版本发布说明能力。Open Core 默认 null（不支持，菜单不渲染该项）；
    * internal overlay 经 src/internal/help 提供 yuyan 配置实现。
@@ -313,6 +334,11 @@ export interface AppCapabilities {
    * 同步签名，面板与渠道绑定加载均消费本能力，不感知部署环境。
    */
   getGroupAdvancedConfigEnabled: () => CapabilityResult<boolean>;
+  /**
+   * 公开范围编辑器是否提供“限制组织范围”。Open Core 默认关闭；internal overlay 保持开启。
+   * 同步签名，两个 audience 共用，组件不得按部署环境自行判断。
+   */
+  getRestrictedPublicationScopeEnabled: () => CapabilityResult<boolean>;
   /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`

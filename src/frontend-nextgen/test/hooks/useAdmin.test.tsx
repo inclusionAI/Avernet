@@ -53,9 +53,7 @@ describe('useAdmin 未登录静默守卫', () => {
     const { toast } = jest.requireActual('sonner') as typeof import('sonner');
     const toastError = jest.spyOn(toast, 'error').mockImplementation(() => 'err' as any);
     useLoginStrategyStore.getState().setLoginStrategy('oauth-provider');
-    useExternalAuthStore
-      .getState()
-      .setAuthenticated({ userId: 'u1', displayName: 'U', provider: 'p' });
+    useExternalAuthStore.getState().setAuthenticated({ userId: 'u1', displayName: 'U', provider: 'p' });
     as.listSpaces.mockResolvedValue({ error: MISSING_IDENTITY_ERROR });
 
     renderHook(() => useAdmin());

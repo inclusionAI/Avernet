@@ -143,12 +143,7 @@ describe('WorkspaceIdentitySelector', () => {
 
   it('侧栏身份区突出头像、名称和身份类型，并明确影响工作下全部页面', async () => {
     render(
-      <WorkspaceIdentitySelector
-        identities={identities}
-        activeId="bot-online"
-        onChange={() => {}}
-        layout="sidebar"
-      />,
+      <WorkspaceIdentitySelector identities={identities} activeId="bot-online" onChange={() => {}} layout="sidebar" />,
     );
 
     expect(screen.getByText('工作身份')).toBeInTheDocument();

@@ -172,7 +172,6 @@ function renderArea(mobileListOpen: boolean) {
       view="group"
       onViewChange={jest.fn()}
       availableViews={['chat', 'group']}
-      onAddFriend={jest.fn()}
       mobileListOpen={mobileListOpen}
       onCloseMobileList={onCloseMobileList}
     />,

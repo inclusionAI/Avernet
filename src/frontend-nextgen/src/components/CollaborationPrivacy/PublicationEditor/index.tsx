@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { publicConfigsEqual } from '@/domain/collaborationPrivacy/policies';
@@ -56,20 +57,33 @@ export function PublicationEditor({
   onClose,
   onSubmit,
 }: PublicationEditorProps) {
-  const [scope, setScope] = useState(initialConfig.scope);
-  const [selected, setSelected] = useState<OrganizationPath[]>(initialConfig.organizationPaths);
-  const [selectedEntries, setSelectedEntries] = useState<OrganizationSearchEntry[]>(
-    () => initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path })),
+  const restrictedScopeEnabled = getCapabilities().getRestrictedPublicationScopeEnabled().value;
+  const [scope, setScope] = useState<PublicScope>(() =>
+    !restrictedScopeEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope,
+  );
+  const [selected, setSelected] = useState<OrganizationPath[]>(() =>
+    restrictedScopeEnabled ? initialConfig.organizationPaths : [],
+  );
+  const [selectedEntries, setSelectedEntries] = useState<OrganizationSearchEntry[]>(() =>
+    restrictedScopeEnabled
+      ? initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path }))
+      : [],
   );
   useEffect(() => {
     if (open) {
-      setScope(initialConfig.scope);
-      setSelected(initialConfig.organizationPaths);
+      setScope(!restrictedScopeEnabled && initialConfig.scope === 'restricted' ? 'none' : initialConfig.scope);
+      setSelected(restrictedScopeEnabled ? initialConfig.organizationPaths : []);
       setSelectedEntries(
-        initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path })),
+        restrictedScopeEnabled
+          ? initialConfig.organizationEntries ?? initialConfig.organizationPaths.map((path) => ({ deptNo: '', path }))
+          : [],
       );
     }
-  }, [open, initialConfig]);
+  }, [open, initialConfig, restrictedScopeEnabled]);
+
+  const availableScopeOptions = restrictedScopeEnabled
+    ? scopeOptions
+    : scopeOptions.filter((option) => option.value !== 'restricted');
 
   const wrappedSearch = async (keyword: string, signal?: AbortSignal): Promise<OrganizationSearchEntry[]> => {
     const entries = await onSearch(keyword, signal);
@@ -124,13 +138,13 @@ export function PublicationEditor({
         <div className="space-y-5">
           <ChoiceGroup
             value={scope}
-            options={scopeOptions.map((option) => ({
+            options={availableScopeOptions.map((option) => ({
               ...option,
               description: scopeDescriptions[audience][option.value],
             }))}
             ariaLabel="公开范围"
             onChange={setScope}
-            className="sm:grid-cols-3"
+            className={restrictedScopeEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
           />
           {scope === 'restricted' && (
             <section aria-labelledby="publication-organizations">

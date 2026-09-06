@@ -18,12 +18,7 @@ const SCOPE_OPTIONS: Array<{ value: SessionScope; label: string }> = [
   { value: 'favorite', label: '已收藏会话' },
 ];
 
-export function SessionScopeFilter({
-  value,
-  onChange,
-  allCount,
-  favoriteCount,
-}: SessionScopeFilterProps) {
+export function SessionScopeFilter({ value, onChange, allCount, favoriteCount }: SessionScopeFilterProps) {
   const [open, setOpen] = useState(false);
   const activeLabel = value === 'favorite' ? '已收藏会话' : '全部会话';
 

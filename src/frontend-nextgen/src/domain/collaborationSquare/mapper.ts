@@ -159,7 +159,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
   if (!id) return null;
   const friendRequestBotId = resolveFriendRequestBotId(value);
   const shortProfile = value.recommendation?.short_profile?.trim() || undefined;
-  const isOwnedByViewer = Boolean(viewerUserId?.trim() && value.entity_id?.trim() === viewerUserId.trim());
+  const isOwnedByLoggedInUser = Boolean(viewerUserId?.trim() && value.entity_id?.trim() === viewerUserId.trim());
   return {
     id,
     name: value.name?.trim() || '未命名 Bot',
@@ -167,7 +167,7 @@ export function mapPublicBotCatalogDto(value: PublicBotCatalogTransport, viewerU
     description: value.description?.trim() ?? '',
     capabilities: [],
     relationshipStatus: value.is_friend === true ? 'friend' : 'none',
-    ...(isOwnedByViewer ? { isOwnedByViewer: true } : {}),
+    ...(isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(friendRequestBotId && friendRequestBotId !== id ? { friendRequestBotId } : {}),
     ...(shortProfile ? { shortProfile } : {}),
   };
@@ -294,7 +294,7 @@ export function mapPublicBotCatalogSummaryToProfile(bot: PublicBot): PublicBotPr
     ownerName: bot.ownerName,
     description: bot.description,
     ...(bot.friendRequestBotId ? { friendRequestBotId: bot.friendRequestBotId } : {}),
-    ...(bot.isOwnedByViewer ? { isOwnedByViewer: true } : {}),
+    ...(bot.isOwnedByLoggedInUser ? { isOwnedByLoggedInUser: true } : {}),
     ...(bot.shortProfile ? { shortProfile: bot.shortProfile } : {}),
     capabilities: [],
   };

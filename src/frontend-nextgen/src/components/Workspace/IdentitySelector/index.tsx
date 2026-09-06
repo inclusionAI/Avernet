@@ -52,9 +52,7 @@ export function WorkspaceIdentitySelector({
                   <Info className="h-3 w-3" aria-hidden />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>
-                当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
-              </TooltipContent>
+              <TooltipContent>当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围</TooltipContent>
             </Tooltip>
           </div>
         </TooltipProvider>
@@ -76,9 +74,7 @@ export function WorkspaceIdentitySelector({
                   <Info className="h-3.5 w-3.5" aria-hidden />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>
-                当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
-              </TooltipContent>
+              <TooltipContent>当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围</TooltipContent>
             </Tooltip>
           </div>
         </TooltipProvider>
@@ -99,7 +95,11 @@ export function WorkspaceIdentitySelector({
                   sidebarLayout && open && 'border-primary',
                 )}
               >
-                <IdentityAvatar identity={activeIdentity} size={sidebarLayout ? 'xs' : 'sm'} userAvatarUrl={userAvatarUrl} />
+                <IdentityAvatar
+                  identity={activeIdentity}
+                  size={sidebarLayout ? 'xs' : 'sm'}
+                  userAvatarUrl={userAvatarUrl}
+                />
                 <IdentityDetails identity={activeIdentity} compact={sidebarLayout} summaryOnly={sidebarLayout} />
                 <ChevronDown
                   className={cn(

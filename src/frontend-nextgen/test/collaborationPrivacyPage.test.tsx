@@ -18,6 +18,7 @@ import { ScopeViewer } from '../src/components/CollaborationPrivacy/ScopeViewer'
 import { ConfirmDialog } from '../src/components/ui/ConfirmDialog';
 import { Switch } from '../src/components/ui/Switch';
 import type { CollaborationBot } from '../src/domain/collaborationPrivacy/types';
+import { directSettingLabel } from '../src/hooks/collaborationPrivacyHelpers';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
 
@@ -38,6 +39,11 @@ const bot: CollaborationBot = {
   pendingPublications: {},
   friendApproval: { mode: 'all', exemptOrganizationPaths: [] },
 };
+
+test('Dream Mode 开关使用正确提示文案', () => {
+  expect(directSettingLabel('dreamModelEnabled', true)).toBe('已开启 Dream Mode');
+  expect(directSettingLabel('dreamModelEnabled', false)).toBe('已关闭 Dream Mode');
+});
 
 function renderWithPortals(element: React.ReactElement) {
   const container = document.createElement('div');
@@ -191,6 +197,30 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('最近同步');
   });
 
+  test('Open Core 身份卡使用认证 User 名称并隐藏部门信息', () => {
+    const html = renderToStaticMarkup(
+      <IdentityCard
+        identity={{
+          displayName: '组织接口名称',
+          employeeNumber: 'internal-447147',
+          departmentPath: ['内部集团-产品部'],
+          lastSyncedAt: '2026-08-18T08:00:00.000Z',
+        }}
+        authenticatedIdentity={{ userId: 'external-user-1', displayName: '开源用户', online: true }}
+        showDepartment={false}
+        syncing={false}
+        onSync={jest.fn()}
+      />,
+    );
+
+    expect(html).toContain('开源用户');
+    expect(html).toContain('工号 external-user-1');
+    expect(html).not.toContain('组织接口名称');
+    expect(html).not.toContain('internal-447147');
+    expect(html).not.toContain('内部集团-产品部');
+    expect(html).not.toContain('同步用户部门信息');
+  });
+
   test('待审批公开范围只透出审批进度入口', () => {
     const html = renderToStaticMarkup(
       <RelationCard
@@ -330,7 +360,7 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(userHtml).toContain('其他用户无法发现当前 Bot');
     expect(userHtml).toContain('其他用户可发现并申请添加当前 Bot 为好友');
-    expect(userHtml).toContain('仅所选组织范围可申请添加当前 Bot 为好友');
+    expect(userHtml).not.toContain('仅所选组织范围可申请添加当前 Bot 为好友');
     expect(userHtml).not.toContain('该受众');
     expect(userHtml).not.toContain('所有主体');
 
@@ -346,10 +376,10 @@ describe('collaboration privacy accessible UI', () => {
     );
     expect(botHtml).toContain('其他 Bot 无法发现当前 Bot');
     expect(botHtml).toContain('其他 Bot 可发现并申请添加当前 Bot 为好友');
-    expect(botHtml).toContain('仅所选组织范围可申请添加当前 Bot 为好友');
+    expect(botHtml).not.toContain('仅所选组织范围可申请添加当前 Bot 为好友');
   });
 
-  test('公开范围编辑器阻止无变化提交并提供级联多选入口', () => {
+  test('Open Core 读取存量限制范围时 fail closed 且不展示组织选择', () => {
     const html = renderWithPortals(
       <PublicationEditor
         open
@@ -360,12 +390,13 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(html).toContain('选择组织范围');
-    expect(html).toContain('已选组织范围（1）');
-    expect(html).toContain('示例集团 / 事业部 / 部门 / 团队');
-    expect(html).toContain('配置未发生变化，无需提交审批');
+    expect(html).toContain('不公开');
+    expect(html).not.toContain('限制组织范围');
+    expect(html).not.toContain('选择组织范围');
+    expect(html).not.toContain('已选组织范围（1）');
+    expect(html).not.toContain('示例集团 / 事业部 / 部门 / 团队');
+    expect(html).not.toContain('配置未发生变化，无需提交审批');
     expect(html).not.toContain('Mock');
-    expect(html).toContain('disabled=""');
   });
 
   test('公开范围和好友审批编辑器使用单选组语义', () => {

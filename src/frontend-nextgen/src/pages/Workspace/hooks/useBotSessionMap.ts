@@ -1,12 +1,12 @@
+import { appendUnique } from '@/services/workspace/botSessionHelpers';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE, botSessionService } from '@/services/workspace/botSessionService';
-import { appendUnique } from '@/services/workspace/botSessionHelpers';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDirectSessionFallback } from './useDirectSessionFallback';
 
-import { hasMoreForPage, errorBotPageMeta, successBotPageMeta } from './useBotSessionMap.utils';
 import type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
+import { errorBotPageMeta, hasMoreForPage, successBotPageMeta } from './useBotSessionMap.utils';
 export type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
 
 /** 以 botId 键控缓存各 bot 会话；首屏及追加均使用 10 条，身份切换清缓存。 */
@@ -196,7 +196,11 @@ export function useBotSessionMap(
           }
           setMeta((current) => ({
             ...current,
-            [key]: successBotPageMeta(res.data.total, hasMoreForPage(res.data.items.length, res.data.total, meta.nextPage), meta.nextPage + 1),
+            [key]: successBotPageMeta(
+              res.data.total,
+              hasMoreForPage(res.data.items.length, res.data.total, meta.nextPage),
+              meta.nextPage + 1,
+            ),
           }));
           if (mode === 'favorite') favoriteLoadedRef.current.add(key);
         } else {

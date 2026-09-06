@@ -11,11 +11,13 @@ import type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  OpenSourceExperienceNoticeSpec,
   PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  UserProfilePresentation,
   UserSearchCapability,
 } from './types';
 
@@ -24,6 +26,15 @@ function unsupported<T>(value: T, reason: string): CapabilityResult<T> {
 }
 
 export const defaultCapabilities: AppCapabilities = {
+  // Open Core 固定展示体验环境提示；Internal overlay 覆盖为 null。
+  getOpenSourceExperienceNotice: (): CapabilityResult<OpenSourceExperienceNoticeSpec | null> => ({
+    status: 'available',
+    value: {
+      version: 'open-source-experience-v1',
+      message: '本环境仅供开源版本进行功能体验，不提供正式生产服务。请不要上传敏感数据。',
+      acknowledgeLabel: '我已知悉',
+    },
+  }),
   // Open Core 默认不暴露内部帮助链接，避免内部 URL 泄漏。
   getHelpLinks: () => ({ status: 'available', value: [] }),
   openExternal: () => unsupported(null, '当前运行环境暂不支持打开外部链接'),
@@ -73,6 +84,11 @@ export const defaultCapabilities: AppCapabilities = {
     };
     return { status: 'available', value: identity };
   },
+  // Open Core 使用 /auth/user 的 name/user_id 展示用户身份，不展示内部组织部门信息。
+  getUserProfilePresentation: (): CapabilityResult<UserProfilePresentation> => ({
+    status: 'available',
+    value: { preferAuthenticatedUserProfile: true, showDepartment: false },
+  }),
   // Open Core 无雨燕配置数据源 → 版本发布说明不支持（菜单不渲染该项）。
   getReleaseNotesCapability: (): CapabilityResult<ReleaseNotesCapability | null> => ({
     status: 'available',
@@ -156,6 +172,11 @@ export const defaultCapabilities: AppCapabilities = {
   }),
   // Open Core（外部部署）暂不提供群高级配置与内部渠道绑定能力，避免展示不可用配置并发起无效请求。
   getGroupAdvancedConfigEnabled: (): CapabilityResult<boolean> => ({
+    status: 'available',
+    value: false,
+  }),
+  // Open Core（外部部署）不提供组织目录限制公开能力；两个公开 audience 仅保留“不公开/全部公开”。
+  getRestrictedPublicationScopeEnabled: (): CapabilityResult<boolean> => ({
     status: 'available',
     value: false,
   }),

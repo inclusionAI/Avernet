@@ -5,7 +5,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
 import { Pagination } from '@/components/ui/Pagination';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
 import type { ScheduledRoutineRecord } from '@/services/scheduledTasks';
 import { cn } from '@/utils/cn';
 import { Eye, Play, Search } from 'lucide-react';
@@ -13,11 +12,7 @@ import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { makeRoutineKey } from '../hooks/routineTaskUtils';
 import { formatDateTime, getBotDisplayName } from '../userTaskUtils';
-
-export interface RoutineBotOption {
-  value: string;
-  label: string;
-}
+import { RoutineBotSelector, type RoutineBotOption } from './RoutineBotSelector';
 
 export interface RoutineTaskTabProps {
   routines: ScheduledRoutineRecord[];
@@ -28,6 +23,7 @@ export interface RoutineTaskTabProps {
   error: string | null;
   botOptions: RoutineBotOption[];
   selectedBotId: string;
+  showBotSelector?: boolean;
   onChangeBotId: (botId: string) => void;
   onRetry: () => void;
   onSelectRoutine: (routine: ScheduledRoutineRecord) => void;
@@ -68,6 +64,7 @@ export function RoutineTaskTab({
   error,
   botOptions,
   selectedBotId,
+  showBotSelector = true,
   onChangeBotId,
   onRetry,
   onSelectRoutine,
@@ -101,7 +98,12 @@ export function RoutineTaskTab({
   return (
     <section className="space-y-4">
       <div className="space-y-3">
-        <div className="grid gap-3 border-y border-border py-3 md:grid-cols-3">
+        <div
+          className={cn(
+            'grid gap-3 border-y border-border py-3',
+            showBotSelector ? 'md:grid-cols-3' : 'md:grid-cols-1',
+          )}
+        >
           <div className="relative min-w-0">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -114,26 +116,9 @@ export function RoutineTaskTab({
               className="pl-9 text-xs"
             />
           </div>
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">Bot</span>
-            <Select
-              value={selectedBotId}
-              onValueChange={(value) => {
-                onChangeBotId(value);
-              }}
-            >
-              <SelectTrigger className="w-full text-xs">
-                <SelectValue placeholder="请选择 Bot" />
-              </SelectTrigger>
-              <SelectContent>
-                {botOptions.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
-                    {item.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {showBotSelector ? (
+            <RoutineBotSelector options={botOptions} value={selectedBotId} onChange={onChangeBotId} />
+          ) : null}
         </div>
         {error && routineList.length > 0 ? (
           <div className="rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">{error}</div>

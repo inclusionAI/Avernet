@@ -12,6 +12,7 @@ import type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  OpenSourceExperienceNoticeSpec,
   PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
@@ -19,6 +20,7 @@ import type {
   SearchedUser,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  UserProfilePresentation,
   UserSearchCapability,
 } from './types';
 
@@ -57,6 +59,7 @@ export type {
   HumanIdentity,
   LoginStrategy,
   MetricsDashboardSpec,
+  OpenSourceExperienceNoticeSpec,
   PersonalSpaceInitOptions,
   ProductBrand,
   ReleaseNotesCapability,
@@ -64,5 +67,6 @@ export type {
   SearchedUser,
   ShellVisibility,
   TaskClaimGrantStrategy,
+  UserProfilePresentation,
   UserSearchCapability,
 };

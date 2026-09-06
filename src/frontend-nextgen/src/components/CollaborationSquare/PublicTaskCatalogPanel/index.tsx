@@ -1,6 +1,6 @@
+import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
 import TaskCard from '@/components/CollaborationSquare/TaskCard';
 import { TaskDetailModal } from '@/components/CollaborationSquare/TaskDetailModal';
-import SquareSearchBar from '@/components/CollaborationSquare/SquareSearchBar';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
@@ -76,12 +76,7 @@ export function PublicTaskCatalogPanel({ vm }: { vm: TaskCatalogViewModel }) {
   return (
     <>
       <div className="flex min-h-8 flex-col gap-3 md:flex-row md:flex-nowrap md:items-center md:justify-between">
-        <SquareSearchBar
-          resource="task"
-          query={taskQuery}
-          onQueryChange={vm.setTaskQuery}
-          className="flex-1"
-        />
+        <SquareSearchBar resource="task" query={taskQuery} onQueryChange={vm.setTaskQuery} className="flex-1" />
         <Segmented
           aria-label="任务状态筛选"
           value={taskStatusFilter}

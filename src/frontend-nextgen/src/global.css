@@ -86,7 +86,7 @@
   /* 聊天面板 bot 回复气泡底色(rgb 246,249,255)。 */
   --color-chat-bubble-bot: hsl(var(--brand) / 0.04);
   --shell-header-height: 56px;
-  --shell-sidebar-width: 240px;
+  --shell-sidebar-width: 224px;
 
   /* 浮层层级统一由组件 Token 管理，避免业务页面散落 z-index 魔法数。
      注意：Select/Popover 等锚定浮层会 Portal 到 body，若层级低于 Drawer/Dialog，
@@ -203,6 +203,13 @@ body,
   height: 100%;
 }
 
+/* 锁定根字号 16px：Tailwind rem 工具类（字号/间距）据此换算，本规范尺寸均为定值
+   （正文 12px 等）；浏览器“字号”设置非默认时（如 20px）会把整套 rem 体系放大，
+   出现 text-sm 14px 渲染成 17.5px 的偏差。 */
+html {
+  font-size: 16px;
+}
+
 body {
   margin: 0;
   overflow: hidden;
@@ -211,13 +218,6 @@ body {
   font-family: var(--font-sans);
   font-size: 12px;
   -webkit-font-smoothing: antialiased;
-}
-
-button,
-input,
-textarea,
-select {
-  font: inherit;
 }
 
 button {
@@ -301,6 +301,28 @@ button {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* ==========================================================================
+   基础交互 — 可点击元素指针样式兜底
+   浏览器原生只给 a[href] 手型（button 仍是箭头），Tailwind v4 preflight 也不
+   声明 cursor，故在 base 层统一兜底。必须置于 @layer base 内：其优先级低于
+   utilities，disabled:cursor-not-allowed / cursor-help / cursor-col-resize 等
+   工具类才能正常覆盖；也低于第三方 unlayered 样式（styled-components、qiankun
+   子应用），不会改写 @tc-chat SDK 自带的 cursor 声明。
+   刻意不含 [tabindex]：滚动容器与 Radix 内部节点会误伤。
+   ========================================================================== */
+@layer base {
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  a[href],
+  summary,
+  label[for],
+  select,
+  input[type='checkbox'],
+  input[type='radio'] {
+    cursor: pointer;
+  }
 }
 
 /* ==========================================================================

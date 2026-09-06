@@ -17,10 +17,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import { toast } from 'sonner';
 import { buildSingleChatBridgeRequest } from './singleChatBridgeRequest';
 import { useHumanIdentity } from './useHumanIdentity';
+import { TEST_SUPPORT_TARGET } from './useWorkspace.constants';
+import type { UseWorkspaceOptions } from './useWorkspace.options';
 import { useWorkspaceIdentityBootstrap } from './useWorkspaceIdentityBootstrap';
 import { buildBotChatTarget, mapIdentityViewToIdentity } from './workspaceIdentityMapper';
-import type { UseWorkspaceOptions } from './useWorkspace.options';
-import { TEST_SUPPORT_TARGET } from './useWorkspace.constants';
 export type { UseWorkspaceOptions } from './useWorkspace.options';
 export function useWorkspace(options: UseWorkspaceOptions = {}) {
   const {
@@ -72,11 +72,7 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     isLoading: isFriendBotsLoading,
     error: friendBotsError,
     reload: reloadFriendBots,
-  } = useFriendBots(
-    activeIdentityId,
-    isUserIdentity,
-    view !== 'group',
-  );
+  } = useFriendBots(activeIdentityId, isUserIdentity, view !== 'group');
   const allChatBots = useMemo(
     () => [...chatBots, ...friendBots.filter((b) => !chatBots.some((m) => m.botId === b.botId))],
     [chatBots, friendBots],

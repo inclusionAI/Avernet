@@ -1,6 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import type { BotChannel, BotChannelInput } from '@/domain/botAdvancedConfig';
@@ -26,20 +25,20 @@ export function ChannelConfigPanel({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BotChannel>();
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
+    <div className="flex min-h-full flex-col bg-card">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
         <div>
-          <h2 className="m-0 text-base font-semibold">渠道</h2>
-          <p className="mt-1 text-xs text-muted-foreground">绑定钉钉机器人，并管理草稿渠道的启停。</p>
+          <h2 className="m-0 text-sm font-semibold">渠道</h2>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">绑定钉钉机器人，并管理草稿渠道的启停。</p>
         </div>
-        <Button disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
+        <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => setOpen(true)}>
           绑定渠道
         </Button>
       </div>
-      {channels.length ? (
-        channels.map((channel) => (
-          <Card key={channel.id}>
-            <CardContent className="flex items-center gap-4">
+      <div className="space-y-3 px-5 py-4">
+        {channels.length ? (
+          channels.map((channel) => (
+            <div key={channel.id} className="flex items-center gap-4 rounded-lg border border-border p-3">
               <div className="min-w-0 flex-1">
                 <p className="m-0 font-medium">钉钉 · {channel.description || channel.clientId}</p>
                 <p className="m-0 mt-1 text-xs text-muted-foreground">
@@ -79,12 +78,12 @@ export function ChannelConfigPanel({
               >
                 <Button variant="ghost" size="icon" aria-label="删除渠道" leftIcon={<Trash2 className="size-4" />} />
               </ConfirmDialog>
-            </CardContent>
-          </Card>
-        ))
-      ) : (
-        <Empty title="暂无绑定渠道" description="当前仅支持钉钉渠道。" />
-      )}
+            </div>
+          ))
+        ) : (
+          <Empty title="暂无绑定渠道" description="当前仅支持钉钉渠道。" />
+        )}
+      </div>
       <ChannelFormModal
         open={open}
         channel={editing}

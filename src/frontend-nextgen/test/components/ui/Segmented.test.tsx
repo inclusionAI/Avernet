@@ -23,6 +23,25 @@ describe('Segmented accessibility', () => {
     expect(screen.getByRole('button', { name: '智能搜索' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  test('复用 Button 基类，可点击项带手型、禁用项退回 not-allowed', () => {
+    render(
+      <Segmented
+        aria-label="状态筛选"
+        value="all"
+        options={[
+          { value: 'all', label: '全部' },
+          { value: 'off', label: '不可用', disabledReason: '暂不可用' },
+        ]}
+        onChange={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '全部' })).toHaveClass('cursor-pointer');
+    const disabled = screen.getByRole('button', { name: '不可用' });
+    expect(disabled).toBeDisabled();
+    expect(disabled).toHaveClass('disabled:cursor-not-allowed');
+  });
+
   test('supports arrow-key selection and skips disabled options', async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();

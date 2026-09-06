@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import {
+  Input,
   Modal,
   ModalContent,
   ModalTitle,
@@ -55,6 +56,38 @@ describe('Wave 1A UI 组件', () => {
     expect(screen.getByRole('option', { name: '启用' })).toBeVisible();
     await user.click(screen.getByRole('option', { name: '启用' }));
     expect(screen.getByRole('combobox', { name: '状态' })).toHaveTextContent('启用');
+  });
+
+  test('SelectTrigger 带手型，SelectItem 维持 cursor-default', async () => {
+    const user = userEvent.setup();
+    render(
+      <Select>
+        <SelectTrigger aria-label="优先级">
+          <SelectValue placeholder="请选择" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="high">高</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: '优先级' });
+    expect(trigger).toHaveClass('cursor-pointer');
+    expect(trigger).toHaveClass('disabled:cursor-not-allowed');
+
+    await user.click(trigger);
+    expect(screen.getByRole('option', { name: '高' })).toHaveClass('cursor-default');
+  });
+
+  test('Input / Textarea 不加手型，保留浏览器文本 I-beam', () => {
+    render(<Input aria-label="名称" />);
+    render(<Textarea aria-label="备注" />);
+
+    const input = screen.getByLabelText('名称');
+    const textarea = screen.getByLabelText('备注');
+    expect(input.className).not.toContain('cursor-pointer');
+    expect(textarea.className).not.toContain('cursor-pointer');
+    expect(input).toHaveClass('disabled:cursor-not-allowed');
   });
 
   test('Tooltip 在 focus 时显示提示', async () => {

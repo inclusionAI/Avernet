@@ -56,13 +56,14 @@ describe('useTaskExecuteFromCard 执行前任务认领门禁', () => {
   it('Bot 未开启任务认领 → 提示去任务协作页授权、阻断执行且不调 executeTaskService', async () => {
     mockedIsClaimEnabled.mockResolvedValue(false);
     const submitPanelMessage = jest.fn();
+    const onOpenCollaborationPermissions = jest.fn();
 
     renderHook(() =>
       useTaskExecuteFromCard({
         panelRef: { current: null } as never,
         context,
         submitPanelMessage,
-        onOpenCollaborationPermissions: jest.fn(),
+        onOpenCollaborationPermissions,
       }),
     );
 
@@ -74,6 +75,10 @@ describe('useTaskExecuteFromCard 执行前任务认领门禁', () => {
       '当前 Bot 未开启任务认领，请先去任务协作页对当前 Bot 授权开启后再执行',
       expect.objectContaining({ action: expect.objectContaining({ label: '去开启' }) }),
     );
+    const action = mockedToastWarning.mock.calls[0]?.[1]?.action;
+    expect(action?.onClick).toEqual(expect.any(Function));
+    action?.onClick();
+    expect(onOpenCollaborationPermissions).toHaveBeenCalledTimes(1);
     expect(mockedExecute).not.toHaveBeenCalled();
     expect(submitPanelMessage).not.toHaveBeenCalled();
   });

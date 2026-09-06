@@ -139,6 +139,20 @@ export const taskEscortService = {
     return saveWorkflow(body);
   },
 
+  async saveWorkflowSpec(
+    workflowId: string,
+    spec: WorkflowSpec,
+    botOwnerId?: string,
+    botId?: string,
+  ): Promise<WorkflowSpec> {
+    return saveWorkflow({
+      workflowId,
+      spec,
+      ...(botOwnerId ? { botOwnerId } : {}),
+      ...(botId ? { botId } : {}),
+    });
+  },
+
   async createWorkflowFromYaml(
     input: CreateWorkflowFromYamlInput,
     workflows: WorkflowListItem[],

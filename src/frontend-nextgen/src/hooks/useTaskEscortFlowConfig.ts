@@ -16,12 +16,15 @@ export interface UseTaskEscortFlowConfigReturn {
   isLoadingList: boolean;
   isLoadingSpec: boolean;
   isCreatingWorkflow: boolean;
+  isSaving: boolean;
   error: string | null;
   selectWorkflow: (workflowId: string) => void;
   refreshList: () => Promise<void>;
   createWorkflowFromYaml: (
     input: Pick<CreateWorkflowFromYamlInput, 'yaml' | 'command' | 'remark'>,
   ) => Promise<{ ok: true } | { ok: false; field: WorkflowImportErrorField; message: string }>;
+  updateSpec: (spec: TaskEscortWorkflowSpec) => void;
+  saveSpec: () => Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 export function useTaskEscortFlowConfig({
@@ -35,6 +38,7 @@ export function useTaskEscortFlowConfig({
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isLoadingSpec, setIsLoadingSpec] = useState(false);
   const [isCreatingWorkflow, setIsCreatingWorkflow] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
@@ -103,6 +107,33 @@ export function useTaskEscortFlowConfig({
     [botId, botOwnerId, loadList, workflows],
   );
 
+  const updateSpec = useCallback((nextSpec: TaskEscortWorkflowSpec) => {
+    setSpec(nextSpec);
+  }, []);
+
+  const saveSpec = useCallback(async () => {
+    if (!spec || !selectedWorkflowId) {
+      return { ok: false, message: '没有可保存的工作流' } as const;
+    }
+    setIsSaving(true);
+    setError(null);
+    try {
+      await taskEscortService.saveWorkflowSpec(
+        selectedWorkflowId,
+        spec as unknown as Parameters<typeof taskEscortService.saveWorkflow>[0]['spec'],
+        botOwnerId,
+        botId,
+      );
+      return { ok: true } as const;
+    } catch (cause: unknown) {
+      const message = cause instanceof Error ? cause.message : '保存工作流失败';
+      setError(message);
+      return { ok: false, message } as const;
+    } finally {
+      setIsSaving(false);
+    }
+  }, [botId, botOwnerId, selectedWorkflowId, spec]);
+
   useEffect(() => {
     if (enabled) {
       loadList();
@@ -116,9 +147,12 @@ export function useTaskEscortFlowConfig({
     isLoadingList,
     isLoadingSpec,
     isCreatingWorkflow,
+    isSaving,
     error,
     selectWorkflow,
     refreshList,
     createWorkflowFromYaml,
+    updateSpec,
+    saveSpec,
   };
 }

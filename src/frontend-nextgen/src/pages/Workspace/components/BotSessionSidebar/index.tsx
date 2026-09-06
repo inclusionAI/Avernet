@@ -6,9 +6,9 @@ import type { Identity } from '@/services/workspace/workspaceModel';
 import { Info, Search } from 'lucide-react';
 import { useState } from 'react';
 import type { BotSessionPageMeta } from '../../hooks/useBotSessionMap';
-import { WorkspaceActionButton } from '../WorkspaceActionButton';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
+import { WorkspaceSidebarCollapsedRail } from '../WorkspaceSidebarCollapsedRail';
 import { BotListSection } from './BotListSection';
 
 export interface BotSessionSidebarProps {
@@ -46,8 +46,7 @@ export interface BotSessionSidebarProps {
   onLoadMoreSessions?: (botId: string, mode: 'all' | 'favorite') => Promise<void>;
   onReloadBot?: (botId: string) => Promise<void>;
   onOpenBotWorkshop?: () => void;
-  onCreateGroup: () => void;
-  onAddFriend: () => void;
+  onOpenPublicBots: () => void;
 }
 
 /** 二级会话列表内容本体（不含 <aside> 外壳）。由内流 BotSessionSidebar 与 <lg 抽屉复用，保证两处一致。 */
@@ -87,8 +86,7 @@ export function BotSessionList(props: BotSessionSidebarProps) {
     onLoadMoreSessions,
     onReloadBot,
     onOpenBotWorkshop,
-    onCreateGroup,
-    onAddFriend,
+    onOpenPublicBots,
   } = props;
   const [search, setSearch] = useState('');
   const keyword = search.trim().toLowerCase();
@@ -132,7 +130,6 @@ export function BotSessionList(props: BotSessionSidebarProps) {
                 options={availableViews ?? []}
                 onChange={onViewChange}
               />
-              <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
             </div>
           )}
           <div className="my-2 px-[18px]">
@@ -155,7 +152,16 @@ export function BotSessionList(props: BotSessionSidebarProps) {
             ))}
           </div>
         ) : !isUserIdentity && filteredMine.length === 0 && filteredFriends.length === 0 ? (
-          <Empty compact title="暂无可协作的 Bot" description="可在「添加好友」中搜索并添加 Bot。" />
+          <Empty
+            compact
+            title="暂无可协作的 Bot"
+            description="可前往「公开 Bot」发现并添加 Bot。"
+            action={
+              <Button variant="secondary" size="sm" onClick={onOpenPublicBots}>
+                前往公开 Bot
+              </Button>
+            }
+          />
         ) : (
           <div>
             {(isUserIdentity || filteredMine.length > 0) && (
@@ -225,7 +231,18 @@ export function BotSessionList(props: BotSessionSidebarProps) {
 /** 内流会话列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 BotSessionList。 */
 export function BotSessionSidebar(props: BotSessionSidebarProps) {
   return (
-    <ResizableWorkspaceSidebar ariaLabel="Bot 会话侧栏">
+    <ResizableWorkspaceSidebar
+      ariaLabel="Bot 会话侧栏"
+      collapsedContent={
+        props.view && props.onViewChange ? (
+          <WorkspaceSidebarCollapsedRail
+            value={props.view}
+            options={props.availableViews ?? ['chat', 'group']}
+            onChange={props.onViewChange}
+          />
+        ) : undefined
+      }
+    >
       <BotSessionList {...props} />
     </ResizableWorkspaceSidebar>
   );

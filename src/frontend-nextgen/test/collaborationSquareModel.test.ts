@@ -12,6 +12,7 @@ import {
 import {
   TASK_STATUS_CONFIG,
   getPublicTaskStatusPresentation,
+  resolvePublicBotPrimaryAction,
   type PlazaTaskStatus,
   type SquareResource,
 } from '../src/domain/collaborationSquare/types';
@@ -155,12 +156,50 @@ describe('collaboration square model', () => {
       expect.objectContaining({
         id: 'owned-bot',
         relationshipStatus: 'none',
-        isOwnedByViewer: true,
+        isOwnedByLoggedInUser: true,
       }),
     );
     const otherBot = mapPublicBotCatalogDto({ bot_id: 'other-bot', entity_id: '151221', is_friend: false }, '151220');
     expect(otherBot).toEqual(expect.objectContaining({ relationshipStatus: 'none' }));
-    expect(otherBot).not.toHaveProperty('isOwnedByViewer');
+    expect(otherBot).not.toHaveProperty('isOwnedByLoggedInUser');
+  });
+
+  test('公开 Bot 主操作按当前 actor、关系和 self-target 决定', () => {
+    const human = { type: 'human' as const, id: '327325' };
+    const botActor = { type: 'bot' as const, id: 'bot-viewer' };
+
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: human,
+        targetActorId: 'bot-target',
+        relationshipStatus: 'friend',
+        isOwnedByLoggedInUser: false,
+      }),
+    ).toBe('open_human_bot_conversation');
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: botActor,
+        targetActorId: 'bot-target',
+        relationshipStatus: 'friend',
+        isOwnedByLoggedInUser: false,
+      }),
+    ).toBe('friendship_established');
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: botActor,
+        targetActorId: 'bot-target',
+        relationshipStatus: 'none',
+        isOwnedByLoggedInUser: true,
+      }),
+    ).toBe('request_friendship');
+    expect(
+      resolvePublicBotPrimaryAction({
+        activeActor: botActor,
+        targetActorId: 'bot-viewer',
+        relationshipStatus: 'none',
+        isOwnedByLoggedInUser: true,
+      }),
+    ).toBe('self_target');
   });
 
   test('公开群目录 Mapper 丢弃非公开、非 normal 和无 ID 的条目', () => {

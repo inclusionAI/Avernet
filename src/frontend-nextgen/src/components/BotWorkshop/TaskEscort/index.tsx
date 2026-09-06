@@ -1,5 +1,4 @@
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { useTaskEscort } from '@/hooks/useTaskEscort';
 import type { BotDomain } from '@/services/botWorkshop';
@@ -59,23 +58,23 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
 
   if (!bot) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>任务护航</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="flex min-h-full flex-col bg-card">
+        <div className="border-b border-border px-5 py-4">
+          <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+        </div>
+        <div className="px-5 py-4">
           <Empty compact title="请选择一个 Bot" description="任务护航配置需要绑定具体 Bot。" />
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>任务护航</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="flex min-h-full flex-col bg-card">
+      <div className="border-b border-border px-5 py-4">
+        <h2 className="m-0 text-sm font-semibold">任务护航</h2>
+      </div>
+      <div className="space-y-4 px-5 py-4">
         <div className="flex flex-wrap items-center gap-1 rounded-lg bg-[var(--color-panel-muted)] p-1">
           {TAB_OPTIONS.map((option) => (
             <Button
@@ -125,8 +124,8 @@ const TaskEscort: React.FC<TaskEscortProps> = ({ bot }) => {
         )}
 
         {tab === 'guide' && <TaskEscortGuidePanel />}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 };
 

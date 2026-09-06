@@ -47,8 +47,7 @@ export function useExpandedGroupSessionRequests({
               return next;
             });
             replaceGroupPage(gid, res.data);
-          }
-          else {
+          } else {
             replaceGroupPage(gid, []);
             setErrorByGroupId((current) => ({ ...current, [gid]: res.error.friendlyMessage }));
             // 未登录（oauth-provider + 非 authenticated）静默：会话失效后展开群 sessions 的

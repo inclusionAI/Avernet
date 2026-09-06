@@ -1,8 +1,9 @@
-import { Button, Input } from '@/components/ui';
+import { Button, Input, Popover, PopoverContent, PopoverTrigger } from '@/components/ui';
 import type { GroupKind } from '@/domain/collaboration/types';
 import { cn } from '@/utils/cn';
 import { Check, Filter, Search } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useState } from 'react';
+import { WorkspaceActionButton } from '../WorkspaceActionButton';
 
 export type KindFilter = 'all' | GroupKind;
 export type Membership = 'direct' | 'session_only';
@@ -31,6 +32,7 @@ interface GroupSidebarFiltersProps {
   onKindFilterChange: (value: KindFilter) => void;
   membership: Membership;
   onMembershipChange: (value: Membership) => void;
+  onCreateGroup: () => void;
 }
 
 export function GroupSidebarFilters({
@@ -40,27 +42,10 @@ export function GroupSidebarFilters({
   onKindFilterChange,
   membership,
   onMembershipChange,
+  onCreateGroup,
 }: GroupSidebarFiltersProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const filterPanelId = `group-filters-${useId().replace(/:/g, '')}`;
-  const filterRegionRef = useRef<HTMLDivElement>(null);
   const hasActiveFilters = membership !== 'direct' || kindFilter !== 'all';
-
-  useEffect(() => {
-    if (!filtersOpen) return undefined;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!filterRegionRef.current?.contains(event.target as Node)) setFiltersOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setFiltersOpen(false);
-    };
-    document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [filtersOpen]);
 
   const handleMembershipChange = (nextMembership: Membership) => {
     onMembershipChange(nextMembership);
@@ -72,7 +57,7 @@ export function GroupSidebarFilters({
   };
 
   return (
-    <div ref={filterRegionRef} className="my-2">
+    <div className="my-2">
       <div className="flex items-center gap-2 px-[18px]">
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -85,78 +70,78 @@ export function GroupSidebarFilters({
             aria-label="搜索协作群"
           />
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-expanded={filtersOpen}
-          aria-pressed={hasActiveFilters}
-          aria-controls={filterPanelId}
-          aria-label="筛选"
-          onClick={() => setFiltersOpen((open) => !open)}
-          className={cn(
-            'h-9 shrink-0 gap-1 rounded-md border border-input bg-background px-2 text-xs text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground',
-            filtersOpen &&
-              'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
-            hasActiveFilters &&
-              'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
-          )}
-        >
-          <Filter className="h-3.5 w-3.5" aria-hidden />
-          筛选
-          {hasActiveFilters && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />}
-        </Button>
+        <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-pressed={hasActiveFilters}
+              aria-label="筛选"
+              className={cn(
+                'h-9 shrink-0 gap-1 rounded-md border border-input bg-background px-2 text-xs text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground',
+                filtersOpen &&
+                  'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
+                hasActiveFilters &&
+                  'border-primary/30 bg-primary/5 text-primary hover:border-primary/40 hover:bg-primary/10 hover:text-primary',
+              )}
+            >
+              <Filter className="h-3.5 w-3.5" aria-hidden />
+              筛选
+              {hasActiveFilters && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            sideOffset={8}
+            className="w-[360px] max-w-[calc(100vw-1rem)] space-y-3 rounded-lg border-border/70 p-3"
+          >
+            <div className="min-w-0" role="radiogroup" aria-label="协作群类型">
+              <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">协作群类型</p>
+              <div className="flex min-w-0 flex-wrap gap-1">
+                {KIND_OPTIONS.map((kind) => (
+                  <Button
+                    key={kind}
+                    variant="ghost"
+                    size="sm"
+                    role="radio"
+                    aria-checked={kindFilter === kind}
+                    onClick={() => handleKindFilterChange(kind)}
+                    className={kindChipClass(kindFilter === kind)}
+                  >
+                    {kindFilter === kind && <Check className="h-3 w-3" aria-hidden />}
+                    {KIND_LABELS[kind]}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <div className="min-w-0 border-t border-border/60 pt-3" role="radiogroup" aria-label="协作群参与方式">
+              <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">参与方式</p>
+              <div className="flex min-w-0 flex-wrap gap-1">
+                {(
+                  [
+                    ['direct', '固定群成员'],
+                    ['session_only', '仅参与临时会话'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    variant="ghost"
+                    size="sm"
+                    role="radio"
+                    aria-checked={membership === value}
+                    onClick={() => handleMembershipChange(value)}
+                    className={kindChipClass(membership === value)}
+                  >
+                    {membership === value && <Check className="h-3 w-3" aria-hidden />}
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+        <WorkspaceActionButton onCreateGroup={onCreateGroup} />
       </div>
-
-      {filtersOpen && (
-        <div
-          id={filterPanelId}
-          className="mx-[18px] mt-2 space-y-3 rounded-lg border border-border/70 bg-muted/50 px-3 py-3 shadow-sm"
-        >
-          <div className="min-w-0" role="radiogroup" aria-label="协作群类型">
-            <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">协作群类型</p>
-            <div className="app-scrollbar flex min-w-0 flex-nowrap gap-x-1 overflow-x-auto pb-1 touch-pan-x">
-              {KIND_OPTIONS.map((kind) => (
-                <Button
-                  key={kind}
-                  variant="ghost"
-                  size="sm"
-                  role="radio"
-                  aria-checked={kindFilter === kind}
-                  onClick={() => handleKindFilterChange(kind)}
-                  className={kindChipClass(kindFilter === kind)}
-                >
-                  {kindFilter === kind && <Check className="h-3 w-3" aria-hidden />}
-                  {KIND_LABELS[kind]}
-                </Button>
-              ))}
-            </div>
-          </div>
-          <div className="min-w-0 border-t border-border/60 pt-3" role="radiogroup" aria-label="协作群参与方式">
-            <p className="mb-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">参与方式</p>
-            <div className="app-scrollbar flex min-w-0 flex-nowrap gap-x-1 overflow-x-auto pb-1 touch-pan-x">
-              {(
-                [
-                  ['direct', '固定群成员'],
-                  ['session_only', '仅参与临时会话'],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value}
-                  variant="ghost"
-                  size="sm"
-                  role="radio"
-                  aria-checked={membership === value}
-                  onClick={() => handleMembershipChange(value)}
-                  className={kindChipClass(membership === value)}
-                >
-                  {membership === value && <Check className="h-3 w-3" aria-hidden />}
-                  {label}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

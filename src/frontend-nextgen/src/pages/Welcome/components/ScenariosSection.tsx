@@ -5,8 +5,8 @@ import scenarioFreeChat from '@/assets/Images/scenarios/free_chat.png';
 import scenarioHumanInvolved1 from '@/assets/Images/scenarios/human_involved_1.png';
 import scenarioHumanInvolved2 from '@/assets/Images/scenarios/human_involved_2.png';
 import { getCapabilities } from '@/capabilities';
-import { LayoutGrid, MessagesSquare, Search, UserRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { LayoutGrid, MessagesSquare, Search, UserRound } from 'lucide-react';
 
 /**
  * 场景素材(src/assets/Images/scenarios,经 webpack asset import 随构建产物发行;
@@ -133,9 +133,7 @@ export function ScenariosSection() {
               <span className="mx-auto flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <Icon className="size-5" aria-hidden />
               </span>
-              <h3 className="mt-4 text-xl font-semibold leading-tight text-foreground sm:text-2xl">
-                {scenario.title}
-              </h3>
+              <h3 className="mt-4 text-xl font-semibold leading-tight text-foreground sm:text-2xl">{scenario.title}</h3>
               <p className="mt-3 text-sm text-muted-foreground">{scenario.description}</p>
               <div className="mt-6 grid grid-cols-1 gap-4">
                 {scenario.images.map((image) => (

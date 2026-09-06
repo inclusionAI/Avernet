@@ -2,10 +2,10 @@
 // - 着色只走语义 token：键=primary / 字符串=success / 数字=warning / null·bool=destructive，标点回落 text-muted-foreground 基调；
 // - 长文（> JSON_COLLAPSED_LINES 行）默认折叠：底部渐隐遮罩 + 头部「展开」；展开后限高滚动，可「收起」。
 // 外部用 key=itemId 挂载，切换工单时自动重置折叠态。
-import { Check, ChevronDown, ChevronUp, Copy } from 'lucide-react';
-import { Fragment, useMemo, useState } from 'react';
 import { IconButton } from '@/components/ui';
 import { cn } from '@/utils/cn';
+import { Check, ChevronDown, ChevronUp, Copy } from 'lucide-react';
+import { Fragment, useMemo, useState } from 'react';
 
 /** 折叠阈值（行数）：超过则默认折叠并提供展开/收起 */
 const JSON_COLLAPSED_LINES = 12;

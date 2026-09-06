@@ -4,8 +4,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { shouldMuteNonAuthedToast } from '@/utils/loginToastGate';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { useSelectedGroupDetail } from './useSelectedGroupDetail';
 import type { UseGroupWorkspaceResult } from './useGroupWorkspace.types';
+import { useSelectedGroupDetail } from './useSelectedGroupDetail';
 
 const SEARCH_DEBOUNCE_MS = 300;
 

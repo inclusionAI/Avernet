@@ -51,6 +51,25 @@ describe('Button', () => {
     expect(btn.querySelector('[aria-hidden]')).toBeInTheDocument();
   });
 
+  it('可点击态给手型，禁用态退回 not-allowed', () => {
+    const btn = getButton(render(<Button>保存</Button>));
+    expect(btn.className).toContain('cursor-pointer');
+    expect(btn.className).toContain('disabled:cursor-not-allowed');
+
+    const disabled = getButton(render(<Button disabled>保存</Button>));
+    expect(disabled).toBeDisabled();
+    expect(disabled.className).toContain('disabled:cursor-not-allowed');
+  });
+
+  it('asChild 渲染非 button 元素时仍带手型（base 层元素选择器覆盖不到）', () => {
+    const { container } = render(
+      <Button asChild>
+        <div>整行热区</div>
+      </Button>,
+    );
+    expect(container.querySelector('div')!.className).toContain('cursor-pointer');
+  });
+
   it('asChild 经 Slot 把类名透传给子元素', () => {
     const { container } = render(
       <Button asChild>

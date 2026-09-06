@@ -49,15 +49,13 @@ export function AppHeader({
           onClick={onOpenMobileNav}
         />
       </div>
-      <nav aria-label="产品区域" className="ml-2 flex items-center rounded-md bg-[var(--color-panel-strong)] p-0.5">
+      <nav aria-label="产品区域" className="ml-2 flex items-center rounded-md bg-[var(--color-panel-strong)] p-[3px]">
         <Button
           size="sm"
           variant="ghost"
           className={cn(
-            'h-8 rounded px-3 text-xs',
-            area === 'work'
-              ? 'bg-background text-primary shadow-sm hover:bg-background'
-              : 'text-muted-foreground hover:text-foreground',
+            'h-[30px] rounded px-3 text-sm hover:text-primary hover:font-medium',
+            area === 'work' ? 'bg-background text-primary shadow-sm hover:bg-background' : 'text-muted-foreground',
           )}
           onClick={() => onAreaChange('work')}
         >
@@ -67,10 +65,8 @@ export function AppHeader({
           size="sm"
           variant="ghost"
           className={cn(
-            'h-8 rounded px-3 text-xs',
-            area === 'manage'
-              ? 'bg-background text-primary shadow-sm hover:bg-background'
-              : 'text-muted-foreground hover:text-foreground',
+            'h-[30px] rounded px-3 text-sm hover:text-primary hover:font-medium',
+            area === 'manage' ? 'bg-background text-primary shadow-sm hover:bg-background' : 'text-muted-foreground',
           )}
           onClick={() => onAreaChange('manage')}
         >

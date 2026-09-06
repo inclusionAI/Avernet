@@ -117,7 +117,7 @@ export const BotItem = React.memo(function BotItem({
             <TooltipProvider delayDuration={300}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <span className="block truncate text-sm font-semibold text-foreground">{bot.displayName}</span>
+                  <span className="block truncate text-sm font-normal text-foreground">{bot.displayName}</span>
                 </TooltipTrigger>
                 <TooltipContent>{bot.chatable ? bot.displayName : '该 Bot 暂不支持单聊'}</TooltipContent>
               </Tooltip>
@@ -148,13 +148,13 @@ export const BotItem = React.memo(function BotItem({
               )}
             </div>
           </div>
-          {bot.chatable && !bot.isAgentCodingBot && (
-            expanded ? (
+          {bot.chatable &&
+            !bot.isAgentCodingBot &&
+            (expanded ? (
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
             ) : (
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            )
-          )}
+            ))}
         </Button>
         {bot.chatable && !bot.isAgentCodingBot && (
           <>
@@ -188,7 +188,10 @@ export const BotItem = React.memo(function BotItem({
             ) : sessionTab === 'all' && sessions === undefined ? (
               <div>
                 {[1, 2, 3].map((i) => (
-                  <Skeleton.Block key={i} className="h-[60px] w-full rounded-none border-b border-border last:border-b-0" />
+                  <Skeleton.Block
+                    key={i}
+                    className="h-[60px] w-full rounded-none border-b border-border last:border-b-0"
+                  />
                 ))}
               </div>
             ) : sessionTab === 'favorite' && favoriteSessions === undefined ? (

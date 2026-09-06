@@ -16,8 +16,7 @@ interface ChatSessionSidebarSlotProps {
   /** <lg 会话列表抽屉开关。≥lg 内流侧栏始终渲染，抽屉仅 <lg 由移动端顶部的「打开会话列表」触发。 */
   mobileListOpen: boolean;
   onMobileListClose: () => void;
-  onOpenCreateGroup: () => void;
-  onOpenAddFriend: () => void;
+  onOpenPublicBots: () => void;
   onOpenBotWorkshop?: () => void;
 }
 
@@ -32,8 +31,7 @@ export function ChatSessionSidebarSlot({
   availableViews,
   mobileListOpen,
   onMobileListClose,
-  onOpenCreateGroup,
-  onOpenAddFriend,
+  onOpenPublicBots,
   onOpenBotWorkshop,
 }: ChatSessionSidebarSlotProps) {
   const botSessions = workspace.botSessions;
@@ -86,8 +84,7 @@ export function ChatSessionSidebarSlot({
     onLoadFavorites: (botId) => botSessions.loadFavoriteSessions(botId),
     onLoadMoreSessions: botSessions.loadMoreSessions,
     onOpenBotWorkshop,
-    onCreateGroup: onOpenCreateGroup,
-    onAddFriend: onOpenAddFriend,
+    onOpenPublicBots,
   };
 
   return (

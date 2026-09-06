@@ -35,7 +35,7 @@ export function NotificationBell() {
         <span className="relative inline-flex">
           <IconButton
             label="通知中心"
-            icon={<Bell className={cn('h-5 w-5', unreadCount > 0 && 'bell-wiggle')} aria-hidden />}
+            icon={<Bell className={cn('h-4 w-4', unreadCount > 0 && 'bell-wiggle')} aria-hidden />}
           />
           {unreadCount > 0 && (
             <span

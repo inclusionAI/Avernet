@@ -87,7 +87,9 @@ export function BotListSection({
           ) : (
             <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           )}
-          <span className="min-w-0 flex-1 truncate text-left">{title} ({count})</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {title} ({count})
+          </span>
         </Button>
         {headerHint && <div className="shrink-0 pr-3">{headerHint}</div>}
       </div>
@@ -98,10 +100,7 @@ export function BotListSection({
           ) : isLoading ? (
             <div className="overflow-hidden border-y border-border bg-background">
               {[1, 2].map((i) => (
-                <Skeleton.Block
-                  key={i}
-                  className="h-16 w-full rounded-none border-b border-border last:border-b-0"
-                />
+                <Skeleton.Block key={i} className="h-16 w-full rounded-none border-b border-border last:border-b-0" />
               ))}
             </div>
           ) : bots.length === 0 ? (
