@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
+
+from agentclaw.community.core.skill_center.activation_port import ActivationPort
 
 
 @runtime_checkable
-class DirectActivationServiceProtocol(Protocol):
+class DirectActivationServiceProtocol(ActivationPort, Protocol):
     """Activate/deactivate ONE capability (skill or MCP) for a Bot, directly.
 
     Legal only when no Set or platform Default policy governs the capability.
@@ -17,28 +20,41 @@ class DirectActivationServiceProtocol(Protocol):
     ``project=False`` (W8) records the desired state and skips both the
     readiness check and the runtime projection — for a delivery that projects
     by itself, which is teclaw's artifact. The default is the pre-W8 contract.
+
+    **Widens ``ActivationPort``.** That base is the same six methods without
+    ``project``; this adds it, and narrows the return types. Declaring the base
+    is what makes ``DirectActivationService`` an ``ActivationPort`` in the
+    source rather than only in the DI graph, so the apply engine's
+    ``MaterialiserPorts.activation_service`` field is satisfied by a stated
+    contract on both paths — this service on ARCA, ``RecordOnlyActivation`` on
+    platform-managed teclaw.
     """
 
+    @abstractmethod
     async def activate_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def deactivate_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> set[str]:
@@ -46,6 +62,7 @@ class DirectActivationServiceProtocol(Protocol):
         above, answered by the capability state reader (which flushes first)."""
         ...
 
+    @abstractmethod
     def platform_default_mcp_codes(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> frozenset[str]:

@@ -37,9 +37,7 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
-from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
-    DirectActivationServiceProtocol,
-)
+from agentclaw.community.core.skill_center.activation_port import ActivationPort
 
 
 class McpMaterialiser(Materialiser):
@@ -49,7 +47,7 @@ class McpMaterialiser(Materialiser):
 
     def __init__(
         self,
-        activation_service: DirectActivationServiceProtocol,
+        activation_service: ActivationPort,
         mcp_auth_service: Any,
     ) -> None:
         self._activation = activation_service

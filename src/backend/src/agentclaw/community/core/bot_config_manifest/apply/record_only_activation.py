@@ -6,18 +6,31 @@ the artifact — the composer reads the same rows — and the strategy closes th
 apply with one whole-artifact redeliver, so a per-mutation projection would
 be one extra delivery per skill and per MCP server, each of them redundant
 and each of them a container round-trip an apply that needs no container
-must not make. This wrapper keeps the service's surface and passes
-``project=False`` on every write; the reads it forwards unchanged.
+must not make. This wrapper passes ``project=False`` on every write; the reads
+it forwards unchanged.
+
+**It is an ``ActivationPort``, not a ``DirectActivationServiceProtocol``.**
+Deliberately: pinning ``project=False`` means the parameter cannot be offered,
+so the surface is the narrow port's, one parameter short of the service it
+wraps. Declaring that base is what states the difference — and because the
+port's members are abstract, a method dropped here fails at construction
+rather than mid-apply, at the one call site that needed it, on the
+platform-managed path alone.
 """
 from __future__ import annotations
 
 from typing import Any
 
+from agentclaw.community.core.skill_center.activation_port import ActivationPort
+from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
+    DirectActivationServiceProtocol,
+)
 
-class RecordOnlyActivation:
-    """``DirectActivationService`` with projection off, same surface."""
 
-    def __init__(self, inner: Any) -> None:
+class RecordOnlyActivation(ActivationPort):
+    """``DirectActivationService`` with projection off — the narrow surface."""
+
+    def __init__(self, inner: DirectActivationServiceProtocol) -> None:
         self._inner = inner
 
     # ── reads, unchanged ─────────────────────────────────────────────────

@@ -673,7 +673,7 @@ consumes:
   - "BotConfigManifestRepositoryProtocol (core.repository) — persistence for the one table"
   - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
-  - "DirectActivationServiceProtocol (core.skill_center) — the `mcp` materialiser's per-bot activation writes"
+  - "ActivationPort (core.skill_center.activation_port) — the narrow activation contract the `mcp` and `skills` materialisers write through. Two classes declare it: `DirectActivationService`, whose own Protocol widens it with `project` (ARCA), and `RecordOnlyActivation`, which pins `project=False` and so cannot offer the parameter (platform-managed teclaw)"
   - "LocalSkillUploadServiceProtocol (core.skill_center) — the upload road the `skills` materialiser installs packages through: the same entry point the raw-zip router path takes (W5)"
   - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5; the core contract module — not the api/ façade that re-exports it, which core deliberately does not depend on)"
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
@@ -709,7 +709,8 @@ internal_dependencies:
   - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
   - agentclaw.community.core.services.identity
   - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
-  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the `mcp` materialiser's per-bot activation writes
+  - agentclaw.community.core.skill_center.activation_port  # ActivationPort — the narrow activation contract the `mcp` and `skills` materialisers write through, and the base `RecordOnlyActivation` declares
+  - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the wide Service API that widens ActivationPort with `project`; the type `RecordOnlyActivation` wraps
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)
   - agentclaw.community.core.task_queue  # applying runs as a queue task, not a daemon thread (W13) — the queue module imports the DI container at module scope, so TaskQueueService is a TYPE_CHECKING-only annotation behind a lazy provider

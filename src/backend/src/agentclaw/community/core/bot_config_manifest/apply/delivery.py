@@ -33,7 +33,7 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
-from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+from agentclaw.community.core.skill_center.activation_port import (
     ActivationPort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext

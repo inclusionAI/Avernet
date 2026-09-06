@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, runtime_che
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 
 if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
-    from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+    from agentclaw.community.core.skill_center.activation_port import (
         ActivationPort,
     )
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
