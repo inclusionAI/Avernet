@@ -38,6 +38,15 @@ if [ -z "$ocb_root" ]; then
   exit 2
 fi
 
+node -e '
+  const [major, minor] = process.versions.node.split(".").map(Number);
+  const supported = (major === 20 && minor >= 19) || (major === 22 && minor >= 12) || major > 22;
+  if (!supported) {
+    console.error(`Node.js ${process.versions.node} is unsupported; use 20.19.0 or >=22.12.0`);
+    process.exit(1);
+  }
+'
+
 if [ -n "$machine_env" ]; then
   machine_env="$(printf '%s' "$machine_env" | tr '[:upper:]' '[:lower:]')"
   case "$machine_env" in
@@ -112,7 +121,16 @@ if [ "$DATABASE_MODE" = "sqlite" ] && [ -z "${SQLITE_PATH:-}" ]; then
   export SQLITE_PATH="$local_state_dir/engine.db"
 fi
 
-npm install
+# The OCB workspace links public packages to their real Avernet paths. Install
+# both roots from lockfiles so platform-specific optional dependencies resolve
+# correctly on macOS/Linux and ARM/x64 without relying on existing node_modules.
+(
+  cd "$clawweb_root"
+  npm ci --include=optional --no-audit --no-fund
+)
+
+cd "$ocb_clawweb"
+npm ci --include=optional --no-audit --no-fund
 npm run build
 
 export CLAWWEB_DEPLOY_PROFILE="internal"
