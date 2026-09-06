@@ -34,6 +34,8 @@ from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
 from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAdapter
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
+from engine.community.core.cli_tools.directories import cli_dir_resolver
+from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
 from engine.community.openclaw.client.gateway_client import (
@@ -93,6 +95,12 @@ class OpenClawEngine(BaseEngine):
             Capability.SKILLS_SYNC_BINDPATHS,
             Capability.SKILLS_CLEAN_SYMLINKS,
             Capability.SKILLS_CENTER_ENSURE,
+            # CLI tools (W9) — model-callable binaries placed by a manifest.
+            Capability.CLI_INSTALL,
+            Capability.CLI_DELETE,
+            Capability.CLI_LIST,
+            Capability.CLI_REPLACE,
+            Capability.CLI_DOWNLOAD,
             # Approval
             Capability.APPROVAL_GET,
             Capability.APPROVAL_SET,
@@ -167,6 +175,11 @@ class OpenClawEngine(BaseEngine):
         self._node = OpenClawNodeAdapter(self._port)
         self._mcp = OpenClawMcpAdapter(self._port)
         self._skills = OpenClawSkillsAdapter(self._port)
+        # CLI tools need no port: placing a command is local filesystem work.
+        # Where they land is a deployment fact — override with BOT_CLI_DIR_OPENCLAW
+        # or BOT_CLI_DIR, or add an entry to ENGINE_CLI_DIRS; see
+        # core/cli_tools/directories.py.
+        self._cli_tools = LocalCliToolsService(cli_dir_resolver("openclaw"))
         self._file = OpenClawFileAdapter(self._port)
         self._default_config = OpenClawDefaultConfigAdapter(self._port)
         self._web_shell = OpenClawWebShellAdapter(self._port)

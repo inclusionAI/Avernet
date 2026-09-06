@@ -18,6 +18,7 @@ Captured invariants (reviewer S2):
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -97,6 +98,12 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.DEFAULT_CONFIG_GET,
     # Web shell
     Capability.WEB_SHELL_OPEN,
+    # CLI tools (W9) — model-callable binaries placed by a config manifest.
+    Capability.CLI_INSTALL,
+    Capability.CLI_DELETE,
+    Capability.CLI_LIST,
+    Capability.CLI_REPLACE,
+    Capability.CLI_DOWNLOAD,
 })
 GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
 
@@ -225,3 +232,28 @@ class TestInjectionSeams:
         engine = OpenClawEngine(client=_fake_client(), pool=pool)
         await engine.shutdown()
         pool.shutdown.assert_not_awaited()
+
+
+class TestCliToolsBinding:
+    """W9. The service is bound, and it is *this* engine's directory."""
+
+    def test_cli_tools_service_is_assigned(self):
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools is not None
+
+    def test_the_tool_directory_follows_this_bots_workspace(self, monkeypatch):
+        """Per bot by default, and overridable per engine without code.
+
+        Where an engine's tools belong is a deployment fact, so the binding
+        resolves through ``cli_dir_for`` rather than a constant.
+        """
+        monkeypatch.delenv("BOT_CLI_DIR", raising=False)
+        monkeypatch.delenv("BOT_CLI_DIR_OPENCLAW", raising=False)
+        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools._dir() == Path("/data/bot_a/openclaw/cli")
+
+        monkeypatch.setenv("BOT_CLI_DIR_OPENCLAW", "/opt/tools")
+        assert engine.cli_tools._dir() == Path("/opt/tools")

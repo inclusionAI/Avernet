@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 
+from engine.community.core.cli_tools.directories import cli_dir_resolver
+from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
 from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
@@ -73,6 +75,12 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         Capability.SKILLS_SYNC_BINDPATHS,
         Capability.SKILLS_CLEAN_SYMLINKS,
         Capability.SKILLS_CENTER_ENSURE,
+        # CLI tools (W9) — model-callable binaries placed by a manifest.
+        Capability.CLI_INSTALL,
+        Capability.CLI_DELETE,
+        Capability.CLI_LIST,
+        Capability.CLI_REPLACE,
+        Capability.CLI_DOWNLOAD,
         # ── Cron ──
         Capability.CRON_LIST,
         Capability.CRON_CREATE,
@@ -137,6 +145,11 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
+        # Where Claude Code's tools land is still open — the community image
+        # is not what production deploys. Tune with BOT_CLI_DIR_CLAUDE_CODE, or
+        # add an ENGINE_CLI_DIRS entry; see core/cli_tools/directories.py. Until
+        # then it takes the workspace-sibling default, which stays per-bot.
+        self._cli_tools = LocalCliToolsService(cli_dir_resolver("claude_code"))
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)
