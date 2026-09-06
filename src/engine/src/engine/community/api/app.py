@@ -79,6 +79,7 @@ from engine.community.di import Injected  # noqa: E402
 from engine.community.plugin_api.auth_gate.protocol import AuthGateService  # noqa: E402
 from engine.community.api.approvals import router as approvals  # noqa: E402
 from engine.community.api.bot import router as bot_router  # noqa: E402
+from engine.community.api.cli import router as cli_router  # noqa: E402
 from engine.community.api.default_config import router as default_config_router  # noqa: E402
 from engine.community.api.engine import router as engine_router  # noqa: E402
 from engine.community.api.file import router as file_router  # noqa: E402
@@ -272,6 +273,7 @@ app.include_router(approvals)
 app.include_router(mcp)
 app.include_router(node)
 app.include_router(skills_router)
+app.include_router(cli_router)
 app.include_router(work_item_router)
 app.include_router(file_router)
 app.include_router(bash_router)

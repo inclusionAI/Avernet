@@ -106,25 +106,25 @@
   - [x] `validate_capabilities()` passes for both at startup.
 - **Depends on:** Tasks 2, 4
 
-## Task 6: Add the `/api/cli` router
+## Task 6 `[x]`: Add the `/api/cli` router
 - **Goal:** Expose the five endpoints exactly as the platform caller expects.
 - **Files:** `src/engine/community/api/cli/__init__.py`, `api/cli/router.py`,
   `api/cli/schemas.py`, `api/app.py`
 - **Done when:**
-  - [ ] Routes exist at `POST /api/cli/install`, `POST /api/cli/delete`,
+  - [x] Routes exist at `POST /api/cli/install`, `POST /api/cli/delete`,
         `POST /api/cli/replace`, `GET /api/cli/list`,
         `GET /api/cli/download`, matching `arca_port.py`'s paths and bodies
         byte for byte.
-  - [ ] Every handler calls `check_capability` first, so an engine without the
+  - [x] Every handler calls `check_capability` first, so an engine without the
         capability answers 501 rather than appearing to succeed.
-  - [ ] `replace` returns `200` with a per-name `results` array even when some
+  - [x] `replace` returns `200` with a per-name `results` array even when some
         names failed; a partial failure is never a non-2xx.
-  - [ ] `download` for an absent tool returns `200` with
+  - [x] `download` for an absent tool returns `200` with
         `success: false, error: "not_found"` — **never 404**, which is reserved
         for "this engine build has no CLI endpoints".
-  - [ ] `list` returns `{"tools": []}` for a bot with no tools, not an error.
-  - [ ] Responses use the shared `ApiResponse` envelope.
-  - [ ] The router is imported and registered in `app.py` beside the others.
+  - [x] `list` returns `{"tools": []}` for a bot with no tools, not an error.
+  - [x] Responses use the shared `ApiResponse` envelope.
+  - [x] The router is imported and registered in `app.py` beside the others.
 - **Depends on:** Task 4
 
 ## Task 7: Router tests
