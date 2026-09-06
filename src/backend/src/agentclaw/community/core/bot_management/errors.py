@@ -35,3 +35,13 @@ class BotCombinationUnsupportedError(BotCreateError):
 
 class ApplicationCodingUnavailableError(BotCreateError):
     """Application Coding requires a Workspace Hosting capability."""
+
+
+class ServiceIntakeConversionError(BotCreateError):
+    """The Bot was created as personal, but its follow-up service upgrade failed.
+
+    The two-part "create as service" contract (personal create, then the
+    combination-gate-mandated upgrade) completed only its first half. The
+    caller should be told which bot exists — the message carries the id — so
+    it can retry the lifecycle upgrade instead of re-creating the bot.
+    """
