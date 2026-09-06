@@ -25,6 +25,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.100.10",
     "better-sqlite3": "^11.9.1",
     "express": "^5.2.1",
     "mysql2": "^3.12.0",
