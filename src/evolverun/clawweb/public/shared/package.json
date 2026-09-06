@@ -1,0 +1,48 @@
+{
+  "name": "@avernet/clawweb-shared",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    "./server/*": {
+      "types": "./dist/server/*.d.ts",
+      "import": "./dist/server/*.js"
+    },
+    "./web/*": {
+      "types": "./dist/web/*.d.ts",
+      "import": "./dist/web/*.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/services/mist && cp -R server/services/mist/proto dist/server/services/mist/",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
+    "@tanstack/react-query": "^5.100.10",
+    "better-sqlite3": "^11.9.1",
+    "express": "^5.2.1",
+    "mysql2": "^3.12.0",
+    "yaml": "^2.9.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "react": "^19.2.6",
+    "typescript": "~6.0.2",
+    "vitest": "^3.2.4"
+  }
+}
