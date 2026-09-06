@@ -34,6 +34,49 @@
 -- apply lock — so one tenant's apply could block or unblock another's — and
 -- read each other's apply reports.
 
+-- DIALECT: OCEANBASE, MYSQL MODE. What this file writes follows the deployed
+-- tables there rather than portable MySQL -- compare ``SHOW CREATE TABLE
+-- ac_bots``, and the sibling DDL in core/caller_identity/sql/.
+--
+--   * EVERY INDEX IS DECLARED ``GLOBAL``. On a partitioned table an index
+--     without it is partition-local, and a partition-local UNIQUE enforces
+--     uniqueness only *within* a partition. For ``uk_manifest_apply_lock``
+--     that is the whole mechanism -- the UNIQUE constraint *is* the lock,
+--     so a partition-local one lets two applies hold it at once. These tables are not
+--     partitioned today, so it is a no-op now and cheap insurance later: what
+--     it prevents surfaces as duplicate rows, silently, never as an error.
+--     SQLAlchemy cannot render the modifier, so this file is the only place it
+--     can live.
+--   * ``TIMESTAMP`` FOR THE DB-CLOCK COLUMNS, ``DATETIME`` FOR THE REST, and
+--     which one a column gets is decided by who fills it, not by taste.
+--     gmt_create and gmt_modified are written by the database itself
+--     (``DEFAULT CURRENT_TIMESTAMP``, and ``func.now()`` from the ORM), so
+--     TIMESTAMP's session-time-zone conversion is a no-op round trip and they
+--     match ac_bots and every table added since --
+--     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql is
+--     the repair that convention exists to avoid repeating.
+--
+--     A column the APPLICATION fills stays DATETIME. TIMESTAMP reads the naive
+--     value being bound as session-local wall time and converts it to UTC for
+--     storage, so a Python-supplied instant is stored shifted by the session
+--     offset -- eight hours under the Asia/Shanghai session assumed here. This
+--     was got wrong in the first draft of this change and caught in review; started_at and
+--     finished_at are the columns in question here, per their comment below.
+--
+--     The ORM keeps ``DateTime`` for both kinds -- ac_skill_version's
+--     published_at is the precedent for ``DateTime`` over a TIMESTAMP column.
+--   * NO ``ENGINE`` CLAUSE, and no BLOCK_SIZE / REPLICA_NUM / COMPRESSION /
+--     TABLET_SIZE / PCTFREE / ROW_FORMAT. OceanBase applies its own defaults
+--     and echoes them back from SHOW CREATE TABLE; writing them here would be
+--     copying its own output back at it.
+--   * ``AUTO_INCREMENT_MODE = 'ORDER'``, pinned rather than inherited from the
+--     tenant default, because this table's read order rests on it:
+--     ``config_manifest_apply.py`` answers GET .../last-apply with
+--     ``ORDER BY id DESC``. Under NOORDER each observer caches its own
+--     auto-increment range, so ids stop being monotonic in insertion order and
+--     "max id" stops meaning "newest" -- last-apply would serve a stale report
+--     while the newer one sat behind a smaller id.
+
 CREATE TABLE `ac_bot_config_manifest_apply` (
   `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT 'Primary key',
   -- The report's public identity: returned by the 202 from POST .../apply and
@@ -68,20 +111,30 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   -- ("app:7:on-behalf-of:<...>"), so the composed value can legitimately be
   -- long without anything being malformed.
   `actor`          varchar(1024) NOT NULL COMMENT 'Audit: who started it',
+  -- DATETIME, not TIMESTAMP, for both of these: they are filled by the
+  -- application from datetime.now() (process-local, naive), never by the
+  -- database. TIMESTAMP binds a naive value as session-local, so these would
+  -- be stored correctly only where the process time zone happens to equal the
+  -- database session's -- and a container on UTC against an Asia/Shanghai
+  -- session is exactly where that stops being true. gmt_* below are a
+  -- different case: the database fills those itself.
   `started_at`     datetime      NOT NULL COMMENT 'When the apply began',
   -- NULL exactly while status is RUNNING. The two move together.
   `finished_at`    datetime      NULL     COMMENT 'When it ended; NULL while RUNNING',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
-  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
-  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
+  `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
+  `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
   PRIMARY KEY (`id`),
   -- Two indexes, one per read. There are exactly two reads on this table.
   --
   -- GET .../last-apply — the newest row for this bot.
-  KEY `idx_manifest_apply_latest` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `id`),
+  KEY `idx_manifest_apply_latest`
+    (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `id`) GLOBAL,
   -- GET .../applies/{apply_id} — the poll by id, scoped to the bot.
-  KEY `idx_manifest_apply_by_id` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `apply_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot config manifest apply record';
+  KEY `idx_manifest_apply_by_id`
+    (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `apply_id`) GLOBAL
+) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Bot config manifest apply record';
 
 -- NO dry_run COLUMN, deliberately. A dry run mints no apply_id and writes no
 -- row at all, so there is nothing here to mark. A flag would invite a future
@@ -98,8 +151,8 @@ CREATE TABLE `ac_bot_config_manifest_apply_lock` (
   -- reaped as stale could delete the lock a *later* apply legitimately took.
   `lock_token`     varchar(256)  NOT NULL COMMENT 'Fencing token, compared on release',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
-  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
-  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
+  `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
+  `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
   PRIMARY KEY (`id`),
   -- THE UNIQUE CONSTRAINT IS THE LOCK. One row per bot; concurrent INSERTs are
   -- arbitrated by the database, exactly one wins, and the losers see the
@@ -107,5 +160,7 @@ CREATE TABLE `ac_bot_config_manifest_apply_lock` (
   --
   -- gmt_create is what get_if_stale measures against, on the DB clock, so a
   -- process killed mid-apply cannot hold this forever.
-  UNIQUE KEY `uk_manifest_apply_lock` (`avernet_tenant`, `env`, `entity_id`, `bot_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot config manifest apply serialization lock';
+  UNIQUE KEY `uk_manifest_apply_lock`
+    (`avernet_tenant`, `env`, `entity_id`, `bot_id`) GLOBAL
+) DEFAULT CHARSET = utf8mb4
+  COMMENT = 'Bot config manifest apply serialization lock';

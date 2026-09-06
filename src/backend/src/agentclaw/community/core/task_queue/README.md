@@ -260,11 +260,20 @@ inconsistent row, not a repair — see its docstring.
 
 ## Provisioning
 
-**`repository/models.py` is the source of truth for the schema.** No DDL is
-checked in: the deployed tables are provisioned out of band, so a copy in the
-repo would be a second definition to keep in step rather than an authority. Read
-the ORM model — column types, nullability, collations, and the index are all
-declared there with the reasoning inline.
+**`repository/models.py` is the source of truth for the schema.** Read the ORM
+model — column types, nullability, collations, and the indexes are all declared
+there with the reasoning inline.
+
+`sql/2026_09_06_task_queue.sql` is a **provisioning reference derived from that
+model, not a second authority.** It exists because two things cannot be read off
+the ORM: `GLOBAL` on the unique indexes, which SQLAlchemy has no way to render
+and which a partitioned table needs or dedup degrades to once-per-partition, and
+`AUTO_INCREMENT_MODE = 'ORDER'`, which `_find_by_key`'s `ORDER BY id DESC`
+depends on. It declares the same two unique indexes the model does, legacy one
+included, so a freshly provisioned database behaves the way the test suite
+asserts. Where the two disagree the ORM wins and the file is what gets fixed; on
+a deployment that already has the table, `SHOW CREATE TABLE ac_task_queue`
+outranks both.
 
 **The schema change must be applied before deploying the release that contains
 it** — for `app` as much as for the key columns, and not merely before the first
