@@ -15,12 +15,20 @@
 -- is not -- reconcile against it before running anything here. Two known ways
 -- an existing table differs:
 --
---   * THE LEGACY DEDUP INDEX. ``uk_env_task_type_active_idempotency_key``
---     (no ``app``) is still present on the deployed table, and dropping it is
---     the last step of the app-scoping migration -- README "Provisioning" owns
---     that sequence. It is omitted below because a NEW table should never gain
---     it: it enforces a scope wider than the code's, so it can reject a keyed
---     enqueue whose key is free in the caller's own (env, app, task_type).
+--   * THE LEGACY DEDUP INDEX IS DECLARED HERE, not omitted. An earlier draft
+--     of this file left it out on the reasoning that a NEW table should never
+--     gain an index scoped wider than the code's -- true in isolation, and
+--     wrong as a schema decision, because ``repository/models.py`` still
+--     declares it and
+--     tests/community/repository/platform/test_task_queue_repository.py
+--     asserts the behaviour it produces
+--     (test_same_key_under_different_app_is_rejected_while_the_legacy_index_lives).
+--     Omitting it here would mean a freshly provisioned OceanBase database
+--     accepts an enqueue that every local SQLite test run rejects -- the two
+--     schemas disagreeing while both claim to be this component's. The ORM's
+--     own comment sets the order: dropping it is the last step of the
+--     app-scoping migration, "drop it there and here in the same change"
+--     (README "Provisioning"). This file is the "here".
 --   * TIMESTAMP COLUMNS. The manifest DDL in core/bot_config_manifest/sql/ uses
 --     TIMESTAMP to match ac_bots. This file deliberately keeps DATETIME,
 --     mirroring the ORM's ``DateTime`` and the table as it was provisioned.
@@ -96,6 +104,21 @@ CREATE TABLE `ac_task_queue` (
   -- create-with-manifest request running twice -- two Passport applications,
   -- two containers -- which is exactly what the key exists to prevent.
   UNIQUE KEY `uk_env_app_task_type_active_idempotency_key`
-    (`env`, `app`, `task_type`, `active_idempotency_key`) GLOBAL
+    (`env`, `app`, `task_type`, `active_idempotency_key`) GLOBAL,
+  -- The pre-``app`` dedup index. Redundant once every app writes its own
+  -- ``app``, and scheduled for removal -- but present because the ORM still
+  -- declares it, so leaving it out would make a fresh database behave
+  -- differently from every test run. It is unique on (env, task_type, key)
+  -- regardless of app, so while it exists two deployments cannot use the same
+  -- key for the same task_type in one env: the second app's INSERT is rejected
+  -- even though the key is free in its own scope. ``enqueue`` never joins that
+  -- row -- it belongs to another app and this deployment could not claim it --
+  -- so the enqueue fails loudly once its retries are spent, which is the
+  -- documented intermediate state rather than a defect in this file.
+  --
+  -- Drop it from this file, from models.py and from the deployed tables in one
+  -- change; dropping it here alone re-opens the divergence described above.
+  UNIQUE KEY `uk_env_task_type_active_idempotency_key`
+    (`env`, `task_type`, `active_idempotency_key`) GLOBAL
 ) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
   COMMENT = '通用后台任务队列';

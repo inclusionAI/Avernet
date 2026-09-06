@@ -47,13 +47,24 @@
 --     it prevents surfaces as duplicate rows, silently, never as an error.
 --     SQLAlchemy cannot render the modifier, so this file is the only place it
 --     can live.
---   * ``TIMESTAMP``, NOT ``DATETIME``, for gmt_* and the business timestamps,
---     matching ac_bots and every table added since. Mixing the two is what
---     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql
---     had to repair: TIMESTAMP converts by session time zone and DATETIME does
---     not, so a session outside Asia/Shanghai reads the two as disagreeing by
---     the offset. The ORM keeps ``DateTime`` either way -- ac_skill_version's
---     published_at is the precedent for that pairing.
+--   * ``TIMESTAMP`` FOR THE DB-CLOCK COLUMNS, ``DATETIME`` FOR THE REST, and
+--     which one a column gets is decided by who fills it, not by taste.
+--     gmt_create and gmt_modified are written by the database itself
+--     (``DEFAULT CURRENT_TIMESTAMP``, and ``func.now()`` from the ORM), so
+--     TIMESTAMP's session-time-zone conversion is a no-op round trip and they
+--     match ac_bots and every table added since --
+--     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql is
+--     the repair that convention exists to avoid repeating.
+--
+--     A column the APPLICATION fills stays DATETIME. TIMESTAMP reads the naive
+--     value being bound as session-local wall time and converts it to UTC for
+--     storage, so a Python-supplied instant is stored shifted by the session
+--     offset -- eight hours under the Asia/Shanghai session assumed here. This
+--     was got wrong in the first draft of this change and caught in review; started_at and
+--     finished_at are the columns in question here, per their comment below.
+--
+--     The ORM keeps ``DateTime`` for both kinds -- ac_skill_version's
+--     published_at is the precedent for ``DateTime`` over a TIMESTAMP column.
 --   * NO ``ENGINE`` CLAUSE, and no BLOCK_SIZE / REPLICA_NUM / COMPRESSION /
 --     TABLET_SIZE / PCTFREE / ROW_FORMAT. OceanBase applies its own defaults
 --     and echoes them back from SHOW CREATE TABLE; writing them here would be
@@ -100,9 +111,16 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   -- ("app:7:on-behalf-of:<...>"), so the composed value can legitimately be
   -- long without anything being malformed.
   `actor`          varchar(1024) NOT NULL COMMENT 'Audit: who started it',
-  `started_at`     timestamp      NOT NULL COMMENT 'When the apply began',
+  -- DATETIME, not TIMESTAMP, for both of these: they are filled by the
+  -- application from datetime.now() (process-local, naive), never by the
+  -- database. TIMESTAMP binds a naive value as session-local, so these would
+  -- be stored correctly only where the process time zone happens to equal the
+  -- database session's -- and a container on UTC against an Asia/Shanghai
+  -- session is exactly where that stops being true. gmt_* below are a
+  -- different case: the database fills those itself.
+  `started_at`     datetime      NOT NULL COMMENT 'When the apply began',
   -- NULL exactly while status is RUNNING. The two move together.
-  `finished_at`    timestamp      NULL     COMMENT 'When it ended; NULL while RUNNING',
+  `finished_at`    datetime      NULL     COMMENT 'When it ended; NULL while RUNNING',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
   `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
   `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
