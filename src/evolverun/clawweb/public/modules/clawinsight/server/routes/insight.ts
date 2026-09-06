@@ -27,7 +27,8 @@ import type { RuleEvolutionService } from "../services/insight/rule-evolution-se
 import { readAutoRepairRule } from "../services/insight/auto-repair-policy.js";
 import { createAdminConsentToken } from "../services/insight/admin-consent.js";
 import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
-import { InsightTaskCreationError, type CreateInsightTaskInput, type InsightTaskCreationResult } from "../services/evolve/insight-task-service.js";
+import { InsightTaskCreationError } from "../services/evolve/insight-task-service.js";
+import type { CreateInsightTaskInput, InsightTaskCreationResult } from "@avernet/clawevolve/server/internal/module-api";
 import type { RepairTaskService } from "../services/repair/repair-runtime.js";
 import { RepairError } from "../services/repair/errors.js";
 

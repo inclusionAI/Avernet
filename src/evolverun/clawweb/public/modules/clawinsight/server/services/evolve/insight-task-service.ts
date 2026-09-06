@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
-import type { EvolveStepRow, EvolveRepository, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
+import type { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
+import type {
+  CreateInsightTaskInput,
+  InsightTaskCreationResult,
+} from "@avernet/clawevolve/server/internal/module-api";
+export type {
+  CreateInsightTaskInput,
+  InsightTaskCreationResult,
+} from "@avernet/clawevolve/server/internal/module-api";
 import {
   ImprovementEvolveLinkConflictError,
   type InsightImprovementRepository,
@@ -18,45 +26,7 @@ import { verifyAdminConsentToken } from "../insight/admin-consent.js";
 import {
   TaskSourceError,
   type TaskSourceService,
-  type TaskSourceView,
 } from "./task-source-service.js";
-
-export type CreateInsightTaskInput = {
-  taskType: unknown;
-  taskName: unknown;
-  remark: unknown;
-  userId: unknown;
-  botId: unknown;
-  botEnv?: unknown;
-  improvementId: unknown;
-  crossBotConfirmed: unknown;
-  maxRounds: unknown;
-  nodeCommandYamls: unknown;
-  forceMessage: unknown;
-  runtimeMaintenance?: unknown;
-  openclawExecutionMode?: unknown;
-  idempotencyKey: string;
-  actorUserId: string | null;
-  persistAutoRepairGrant?: unknown;
-  authorizationGrantId?: unknown;
-  createdByOverride?: string;
-  adminOverrideOnce?: {
-    operatorUserId: string;
-    reason: string;
-    repairDirection?: string | null;
-  };
-  autoExecuteAfterConsent?: unknown;
-  adminConsentToken?: unknown;
-  callbackUrl: (taskId: string, stepId: string) => string;
-};
-
-export type InsightTaskCreationResult = {
-  task: EvolveTaskRow;
-  steps: EvolveStepRow[];
-  source: TaskSourceView | null;
-  idempotent: boolean;
-  created: boolean;
-};
 
 export class InsightTaskCreationError extends Error {
   constructor(

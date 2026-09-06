@@ -3,7 +3,7 @@ import { getClawWebPublicBaseUrl } from "@avernet/clawweb-shared/server/env";
 import type { EvolveRepository, EvolveTaskRow } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import { dispatchEvolveCommand } from "@avernet/clawevolve";
 import { renderCommand, type NodeCommandYamls } from "@avernet/clawevolve/server/services/evolve/command";
-import { startInitialEvolveStep } from "./task-start.js";
+import { startInitialEvolveStep } from "@avernet/clawevolve/server/services/evolve/task-start";
 
 type Dispatch = typeof dispatchEvolveCommand;
 
