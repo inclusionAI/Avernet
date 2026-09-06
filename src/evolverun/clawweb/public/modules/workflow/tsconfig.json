@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": false,
+    "types": ["vite/client"],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "global.d.ts",
+    "server/**/*.ts",
+    "web/**/*.ts",
+    "web/**/*.tsx"
+  ],
+  "exclude": [
+    "**/__tests__/**",
+    "node_modules",
+    "dist"
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "insight-governance-rules/v1",
+  "environment": "pre",
+  "version": 1,
+  "updatedAt": "2026-08-14T00:00:00+08:00",
+  "rules": [
+    {
+      "ruleId": "tool.yuque.use-skylark-mcp",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["TOOL_FAILURE", "CONFIG_MISSING"], "signals": ["语雀", "yuque"] },
+      "actionType": "DIRECT_EVOLUTION",
+      "allowedTargets": ["skill", "tools.md"],
+      "risk": "low",
+      "adminPolicy": { "mode": "REVIEW", "trustedAfterApprovals": 3 },
+      "verification": { "minNewSessions": 3, "noRecurrenceDays": 3 }
+    },
+    {
+      "ruleId": "tool.odps.use-dpagent-mcp",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["TOOL_FAILURE", "PARAMETER_ERROR"], "signals": ["ODPS", "odps"] },
+      "actionType": "DIRECT_EVOLUTION",
+      "allowedTargets": ["skill", "tools.md"],
+      "risk": "low",
+      "adminPolicy": { "mode": "REVIEW", "trustedAfterApprovals": 3 }
+    },
+    {
+      "ruleId": "tool.web-search.use-asap",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["PERMISSION_NETWORK", "TOOL_FAILURE"], "signals": ["web_search", "web_fetch", "外网"] },
+      "actionType": "ASSIGN_OWNER",
+      "allowedTargets": [],
+      "risk": "medium",
+      "adminPolicy": { "mode": "REVIEW" }
+    },
+    {
+      "ruleId": "tool.utoo-proxy.unsupported",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["TOOL_FAILURE"], "signals": ["UTOO_PROXY"] },
+      "actionType": "DIRECT_EVOLUTION",
+      "allowedTargets": ["tools.md"],
+      "risk": "low",
+      "adminPolicy": { "mode": "REVIEW", "trustedAfterApprovals": 2 }
+    },
+    {
+      "ruleId": "workflow.timeout.extend-wait",
+      "version": 1,
+      "enabled": true,
+      "scope": { "environment": "pre", "botId": "*" },
+      "matcher": { "failureClass": ["TIMEOUT", "WORKFLOW_FAILURE"], "signals": ["日报", "timeout", "SIGTERM"] },
+      "actionType": "DIRECT_EVOLUTION",
+      "allowedTargets": ["skill", "tools.md"],
+      "risk": "low",
+      "adminPolicy": { "mode": "REVIEW", "trustedAfterApprovals": 3 }
+    }
+  ]
+}
