@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 
-from engine.community.core.cli_tools.directories import claude_code_cli_dir
+from engine.community.core.cli_tools.directories import bot_cli_dir
 from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
@@ -145,9 +145,11 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
-        # Claude Code keeps its own tool tree — its workspace is
-        # <home>/.claude_code/workspace, not OpenClaw's.
-        self._cli_tools = LocalCliToolsService(claude_code_cli_dir)
+        # Same resolver as OpenClaw, and deliberately so: start_claude_code.sh
+        # points this engine's agent at /home/admin/.openclaw/workspace, and
+        # BaaS injects a per-bot workspace for every engine. Tools sit beside
+        # the workspace the agent actually runs in.
+        self._cli_tools = LocalCliToolsService(bot_cli_dir)
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)

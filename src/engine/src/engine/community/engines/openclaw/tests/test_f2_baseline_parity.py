@@ -18,6 +18,7 @@ Captured invariants (reviewer S2):
 """
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -241,17 +242,18 @@ class TestCliToolsBinding:
 
         assert engine.cli_tools is not None
 
-    def test_openclaw_and_claude_code_never_share_a_tool_directory(self):
-        """A future engine must not silently inherit OpenClaw's tree.
+    def test_the_tool_directory_follows_this_bots_workspace(self, monkeypatch):
+        """Per bot, not per engine — that is what keeps bots isolated.
 
-        The two workspaces genuinely differ — OpenClaw's is env-injected,
-        Claude Code's is ``<home>/.claude_code/workspace`` — so one shared
-        resolver would put both engines' tools in one directory, where a
-        whole-set replacement on either would delete the other's.
+        BaaS injects the workspace per bot and per engine, so both community
+        engines share one resolver: on the ARCA image
+        ``start_claude_code.sh`` points its agent at the same
+        ``/home/admin/.openclaw/workspace`` an OpenClaw bot uses.
         """
-        from engine.community.core.cli_tools.directories import (
-            claude_code_cli_dir,
-            openclaw_cli_dir,
-        )
+        from engine.community.core.cli_tools.directories import bot_cli_dir
 
-        assert openclaw_cli_dir() != claude_code_cli_dir()
+        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools._dir() == Path("/data/bot_a/openclaw/cli")
+        assert bot_cli_dir() == Path("/data/bot_a/openclaw/cli")

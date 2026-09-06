@@ -34,7 +34,7 @@ from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
 from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAdapter
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
-from engine.community.core.cli_tools.directories import openclaw_cli_dir
+from engine.community.core.cli_tools.directories import bot_cli_dir
 from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
@@ -175,9 +175,10 @@ class OpenClawEngine(BaseEngine):
         self._node = OpenClawNodeAdapter(self._port)
         self._mcp = OpenClawMcpAdapter(self._port)
         self._skills = OpenClawSkillsAdapter(self._port)
-        # CLI tools need no port: placing a command is local filesystem
-        # work, so the only per-engine variable is the directory.
-        self._cli_tools = LocalCliToolsService(openclaw_cli_dir)
+        # CLI tools need no port: placing a command is local filesystem work.
+        # The directory follows the bot's workspace, which BaaS injects per bot
+        # — the same resolver every ARCA-family engine uses.
+        self._cli_tools = LocalCliToolsService(bot_cli_dir)
         self._file = OpenClawFileAdapter(self._port)
         self._default_config = OpenClawDefaultConfigAdapter(self._port)
         self._web_shell = OpenClawWebShellAdapter(self._port)

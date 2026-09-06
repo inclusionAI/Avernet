@@ -1,7 +1,6 @@
 from engine.community.core.cli_tools.directories import (
-    claude_code_cli_dir,
+    bot_cli_dir,
     cli_dir_beside,
-    openclaw_cli_dir,
 )
 from engine.community.core.cli_tools.models import (
     CliToolBytes,
@@ -24,8 +23,7 @@ __all__ = [
     "CliToolsService",
     "InvalidCliToolNameError",
     "LocalCliToolsService",
-    "claude_code_cli_dir",
+    "bot_cli_dir",
     "cli_dir_beside",
-    "openclaw_cli_dir",
     "validate_tool_name",
 ]
