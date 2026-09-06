@@ -127,21 +127,23 @@
   - [x] The router is imported and registered in `app.py` beside the others.
 - **Depends on:** Task 4
 
-## Task 7: Router tests
+## Task 7 `[x]`: Router tests
 - **Goal:** Pin the wire contract the platform parses strictly.
 - **Files:** `src/engine/community/api/tests/test_cli_router.py`
 - **Done when:**
-  - [ ] Install places an executable and leaves other tools alone.
-  - [ ] Delete of an absent tool reports success.
-  - [ ] Replace removes tools not named in the request; an empty list clears all.
-  - [ ] Replace answers for every requested name, including failures, and a
+  - [x] Install places an executable and leaves other tools alone.
+  - [x] Delete of an absent tool reports success.
+  - [x] Replace removes tools not named in the request; an empty list clears all.
+  - [x] Replace answers for every requested name, including failures, and a
         partial failure is HTTP 200.
-  - [ ] A response omitting a requested name would be rejected by the
-        platform's parser — asserted by exercising `_failures_in`'s contract
-        shape, so the two sides cannot drift.
-  - [ ] Download of an absent tool is `200 + not_found`, not 404.
-  - [ ] An engine that declares no CLI capability refuses with 501.
-  - [ ] A request at the documented size cap is accepted.
+  - [x] A response omitting a requested name would be rejected by the
+        platform's parser. The engine package cannot import the backend, so
+        the test replicates `_failures_in`'s rule and names it, rather than
+        calling it behind an `importorskip` that would skip forever in
+        engine CI.
+  - [x] Download of an absent tool is `200 + not_found`, not 404.
+  - [x] An engine that declares no CLI capability refuses with 501.
+  - [x] A request at the documented size cap is accepted.
 - **Depends on:** Task 6
 
 ## Task 8: Verification and contract reconciliation
