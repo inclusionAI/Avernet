@@ -193,16 +193,16 @@ class Materialiser(Protocol):
 
 def build_materialisers(
     *,
-    script_service: "BotStartupScriptServiceProtocol",
-    activation_service: "ActivationPort",
-    mcp_auth_service: "MCPAuthServiceProtocol",
-    identity_service: "IdentityFilePort",
-    upload_service: "SkillPackageUploadPort",
-    capability_reader: "BotCapabilityStateReaderProtocol",
-    package_validator: "SkillPackageValidator",
-    entry_fetcher: "EntryFetcher",
-    resource_service: "ResourceFilePort",
-    cli_tool_service: "CliToolService",
+    script_service: BotStartupScriptServiceProtocol,
+    activation_service: ActivationPort,
+    mcp_auth_service: MCPAuthServiceProtocol,
+    identity_service: IdentityFilePort,
+    upload_service: SkillPackageUploadPort,
+    capability_reader: BotCapabilityStateReaderProtocol,
+    package_validator: SkillPackageValidator,
+    entry_fetcher: EntryFetcher,
+    resource_service: ResourceFilePort,
+    cli_tool_service: CliToolService,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 
