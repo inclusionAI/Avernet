@@ -2,7 +2,7 @@
 use std::future::Future;
 use std::time::{Duration, Instant};
 use opentelemetry::trace::TraceContextExt;
-use tracing::{Instrument, Span};
+use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Default, serde::Serialize)]
@@ -20,6 +20,7 @@ struct RequestContext {
 tokio::task_local! {
     static REQUEST_CONTEXT: RequestContext;
     static CURRENT_OPERATION: uuid::Uuid;
+    static INHERITED_TRACE_ID: String;
 }
 
 pub fn current_operation_id() -> String {
@@ -35,7 +36,7 @@ pub fn current_trace_id() -> String {
     let context_span = context.span();
     if context_span.span_context().is_valid() {
         context_span.span_context().trace_id().to_string()
-    } else { String::new() }
+    } else { INHERITED_TRACE_ID.try_with(Clone::clone).unwrap_or_default() }
 }
 
 fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static str, duration_ms: f64) {
@@ -62,18 +63,20 @@ pub async fn with_request_context<T>(request_id: String, future: impl Future<Out
     result
 }
 
+/// Carry log correlation into detached work without retaining or entering spans.
 pub fn in_current_context<T>(future: impl Future<Output = T>) -> impl Future<Output = T> {
     use tracing::instrument::WithSubscriber;
     let future = Box::pin(future);
     let context = REQUEST_CONTEXT.try_with(Clone::clone).ok();
     let operation_id = CURRENT_OPERATION.try_with(|id| *id).ok();
+    let trace_id = current_trace_id();
     let future = async move {
         match operation_id {
             Some(id) => CURRENT_OPERATION.scope(id, future).await,
             None => future.await,
         }
     };
-    let future = future.instrument(Span::current()).with_current_subscriber();
+    let future = INHERITED_TRACE_ID.scope(trace_id, future).with_current_subscriber();
     async move {
         match context {
             Some(context) => REQUEST_CONTEXT.scope(context, future).await,

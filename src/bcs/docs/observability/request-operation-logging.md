@@ -20,11 +20,15 @@ retry policy, authorization decisions or business return values.
    finish after the response are not included in the already emitted snapshot.
 4. Use `operation_id` and `parent_operation_id` to reconstruct nested stages from
    log events. These observations do not create tracing spans or record metrics.
-   `trace_id` reads an existing trace context when available and is otherwise empty;
+   `trace_id` reads an existing trace context, or a captured trace ID in detached
+   work, and is otherwise empty;
    request and operation IDs provide correlation even without tracing enabled.
    Existing gateway span selection and downstream TraceContext propagation are
-   unchanged. `in_current_context` carries request/operation/existing trace context into selected
-   detached work; detached run duration remains distinct from request latency.
+   unchanged. `in_current_context` carries request/operation IDs, the trace ID
+   string and the logging subscriber into selected detached work. It does not
+   retain or enter the request span, so background work cannot extend that span's
+   lifetime or change its attributes through this helper. Detached run duration
+   remains distinct from request latency.
 
 A parent stage contains its children. Parallel child durations overlap. Do not
 sum all entries as request time, subtract them indiscriminately, or interpret

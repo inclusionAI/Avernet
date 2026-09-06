@@ -3,7 +3,7 @@
 ## Provides
 
 - Transport-neutral operation timing, termination, request aggregation and correlation in logs.
-- Parent/child observation IDs and propagation into explicitly wrapped spawned tasks.
+- Parent/child observation IDs and log correlation propagation into explicitly wrapped spawned tasks.
 - Existing OpenTelemetry semantic attribute encoders.
 
 ## Consumes
@@ -27,7 +27,9 @@ This utility observes caller-owned operations and preserves their result, cancel
 and awaits the caller-owned future. Operation names and outcomes must be bounded constants. It
 never inspects or logs operation arguments, values or raw errors. The observations
 do not create spans or record metrics; existing trace IDs are read only for log
-correlation. Subscribers, export and sampling remain owned by bootstrap. Services and
+correlation. Detached work carries the trace ID string, not a span handle, so the
+helper does not extend request span lifetimes or enter their context. Subscribers,
+export and sampling remain owned by bootstrap. Services and
 adapters may use this utility without importing each other's implementations.
 
 ## Tests
