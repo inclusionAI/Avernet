@@ -72,8 +72,8 @@ COPY src/bcs/configs/bcs-config-example.toml /app/configs/bcs-config.toml
 # Persistence: bots_base_dir and the session-file data_dir must live on a
 # writable volume. The shipped example config uses /var/lib/bcs; mount a
 # PVC/emptyDir here and point the config's data paths at it.
-RUN mkdir -p /app/tmp /var/lib/bcs /home/admin/logs \
-    && chown -R admin:admin /app /var/lib/bcs /home/admin
+RUN mkdir -p /app/tmp /var/lib/bcs /var/log/bcs /home/admin/logs \
+    && chown -R admin:admin /app /var/lib/bcs /var/log/bcs /home/admin
 
 # The service runs as admin (non-root). Root stays available for debugging —
 # it is merely password-locked, and container exec needs no password:
