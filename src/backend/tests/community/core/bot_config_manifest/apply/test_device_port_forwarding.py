@@ -200,10 +200,16 @@ def test_device_delegate_adds_no_surface_of_its_own(port, impl) -> None:
     The point of each wrapper is to narrow — 15 methods to 3 for identity, 7 to
     3 for resources. A public method beyond the port's would be surface the
     materialiser was meant not to reach.
+
+    Walks the MRO rather than the class's own ``__dict__``: the activation
+    delegates define none of their six methods themselves — they inherit every
+    one from ``_DelegatingActivation`` and add only ``_PROJECT`` — so a
+    ``vars()`` check would find nothing to compare and pass whatever the shared
+    base exposed.
     """
     extra = {
-        m for m in vars(impl)
-        if not m.startswith("_") and callable(vars(impl)[m])
+        m for m in dir(impl)
+        if not m.startswith("_") and callable(getattr(impl, m))
     } - set(_port_methods(port))
     assert not extra, (
         f"{impl.__name__} exposes {sorted(extra)} beyond {port.__name__}."
