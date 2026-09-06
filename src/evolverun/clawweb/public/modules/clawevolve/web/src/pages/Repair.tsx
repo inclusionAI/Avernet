@@ -6,6 +6,7 @@ import {
   type RepairAgentMode,
   type RepairBot,
   type RepairCfuseEngine,
+  type RepairCreateTaskInput,
   type RepairHistoricalPlan,
   type RepairPlan,
   type RepairStepFailure,
@@ -21,6 +22,7 @@ import EvolveModelFields, {
 } from '../components/EvolveModelFields'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
 import { insightApi } from '../api/insight'
+import { useEvolveAdminScope } from '../features/evolve/admin-scope'
 
 const inputClass = 'w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/10'
 const primaryButton = 'inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
@@ -509,6 +511,12 @@ function CreateRepair({
 }) {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const {
+    enabled: adminMode,
+    ownerUserId: adminOwnerUserId,
+    setOwnerUserId: setAdminOwnerUserId,
+    ownerUserIds: adminOwnerUserIds,
+  } = useEvolveAdminScope()
   const rawInsightImprovementId = searchParams.get('improvementId')?.trim() ?? ''
   const parsedInsightImprovementId = Number(rawInsightImprovementId)
   const insightImprovementId = /^\d+$/.test(rawInsightImprovementId)
@@ -523,6 +531,7 @@ function CreateRepair({
   )
   const [bots, setBots] = useState<RepairBot[]>([])
   const [botsLoading, setBotsLoading] = useState(true)
+  const [loadedOwnerId, setLoadedOwnerId] = useState('')
   const [botId, setBotId] = useState('')
   const [botSelectionKey, setBotSelectionKey] = useState('')
   const [symptom, setSymptom] = useState('')
@@ -546,18 +555,62 @@ function CreateRepair({
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    if (adminMode) {
+      setBots([])
+      setBotsLoading(false)
+      setLoadedOwnerId('')
+      setBotId('')
+      setBotSelectionKey('')
+      return undefined
+    }
     let active = true
     api.repair.bots()
-      .then(({ bots: items }) => {
+      .then(({ userId, bots: items }) => {
         if (!active) return
         setBots(items)
+        setLoadedOwnerId(userId)
         setBotId('')
         setBotSelectionKey('')
       })
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'Bot 列表加载失败') })
       .finally(() => { if (active) setBotsLoading(false) })
     return () => { active = false }
-  }, [])
+  }, [adminMode])
+
+  const loadAdminBots = async () => {
+    const ownerId = adminOwnerUserId.trim()
+    setError('')
+    if (!ownerId) {
+      setError('请输入目标 Bot 的 Owner 工号')
+      return
+    }
+    setBotsLoading(true)
+    try {
+      const result = await api.repair.bots(ownerId)
+      setBots(result.bots)
+      // The endpoint authenticates the requested owner scope; its userId field
+      // remains the current actor for backwards compatibility.
+      setLoadedOwnerId(ownerId)
+      setBotId('')
+      setBotSelectionKey('')
+    } catch (cause) {
+      setBots([])
+      setLoadedOwnerId('')
+      setBotId('')
+      setBotSelectionKey('')
+      setError(cause instanceof Error ? cause.message : '目标用户的 Bot 列表加载失败')
+    } finally {
+      setBotsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!adminMode || !loadedOwnerId || adminOwnerUserId.trim() === loadedOwnerId) return
+    setBots([])
+    setLoadedOwnerId('')
+    setBotId('')
+    setBotSelectionKey('')
+  }, [adminMode, adminOwnerUserId, loadedOwnerId])
 
   useEffect(() => {
     if (insightImprovementId == null) return undefined
@@ -583,6 +636,7 @@ function CreateRepair({
 
   const create = async () => {
     setError('')
+    if (adminMode && !loadedOwnerId) return setError('请先按 Owner 工号查询 Bot')
     if (!botId) return setError('请选择要修复的 Bot')
     if (!targetEnvironment) return setError('所选 Bot 的运行环境缺失或暂不支持')
     if (!symptom.trim()) return setError('请描述需要修复的问题')
@@ -597,7 +651,18 @@ function CreateRepair({
 
     setBusy(true)
     try {
-      const task = await api.repair.create({
+      const selectedAgent: RepairAgentInput = agentMode === 'openclaw'
+        ? {
+            agentMode: 'openclaw',
+            llmUseDefault,
+            ...(!llmUseDefault ? {
+              llmModel,
+              ...(modelApiKey.trim() ? { llmApiKey: modelApiKey.trim() } : {}),
+            } : {}),
+          }
+        : { agentMode: 'cfuse', cfuseEngine, cfuseModel }
+      const input: RepairCreateTaskInput = {
+        ...(adminMode ? { targetUserId: loadedOwnerId } : {}),
         targetEnvironment,
         botId,
         ...(insightImprovementId != null ? {
@@ -608,21 +673,13 @@ function CreateRepair({
         } : {}),
         symptom: symptom.trim(),
         diagnosticMode: deepDiagnostics ? 'deep' : 'observe',
-        agentMode,
-        ...(agentMode === 'openclaw'
-          ? {
-              llmUseDefault,
-              ...(!llmUseDefault ? {
-                llmModel,
-                ...(modelApiKey.trim() ? { llmApiKey: modelApiKey.trim() } : {}),
-              } : {}),
-            }
-          : { cfuseEngine, cfuseModel }),
+        ...selectedAgent,
         ...(traceId.trim() ? { traceId: traceId.trim() } : {}),
         ...(relatedTaskId.trim() ? { relatedTaskId: relatedTaskId.trim() } : {}),
         ...(errorText.trim() ? { errorText: errorText.trim() } : {}),
         ...(from != null && to != null ? { timeRange: { from, to } } : {}),
-      })
+      }
+      const task = await api.repair.create(input)
       setModelApiKey('')
       navigate(`/evolve/repair-runs/${encodeURIComponent(task.taskId)}`)
     } catch (cause) {
@@ -648,6 +705,37 @@ function CreateRepair({
           <section>
             <h2 className="text-sm font-semibold text-gray-900">修复对象</h2>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              {adminMode && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 sm:col-span-2">
+                <label className="text-xs font-medium text-amber-900">目标 Bot Owner 工号</label>
+                <div className="mt-1.5 flex gap-2">
+                  <input
+                    aria-label="目标 Bot Owner 工号"
+                    list="repair-admin-owner-options"
+                    maxLength={128}
+                    className={inputClass}
+                    value={adminOwnerUserId}
+                    onChange={(event) => {
+                      setAdminOwnerUserId(event.target.value.trim())
+                      setBots([])
+                      setLoadedOwnerId('')
+                      setBotId('')
+                      setBotSelectionKey('')
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void loadAdminBots()
+                      }
+                    }}
+                    placeholder="输入工号后查询该用户的 Bot"
+                  />
+                  <button type="button" disabled={botsLoading} className={secondaryButton} onClick={() => void loadAdminBots()}>{botsLoading ? '查询中…' : '查询 Bot'}</button>
+                </div>
+                <datalist id="repair-admin-owner-options">
+                  {adminOwnerUserIds.map((ownerId) => <option key={ownerId} value={ownerId} />)}
+                </datalist>
+                <p className="mt-2 text-[11px] leading-5 text-amber-700">查询后只展示该 Owner 名下当前支持 Repair 的个人 Bot；任务会冻结所选 Owner、Bot 和运行环境。</p>
+              </div>}
               <div><span className="text-xs font-medium text-gray-600">Bot <span className="text-red-500">*</span></span><div className="mt-1.5"><EvolveBotPicker bots={bots} value={botSelectionKey} disabled={botsLoading} emptyText={botsLoading ? '正在加载…' : '当前没有可用 Bot'} onChange={(key, bot) => { setBotSelectionKey(key); setBotId(bot.botId) }} /></div></div>
               <label className="text-xs font-medium text-gray-600">运行环境<input aria-label="运行环境" className={`${inputClass} mt-1.5 bg-gray-50`} value={targetEnvironment ?? '环境未知或暂不支持'} readOnly /></label>
             </div>
@@ -839,9 +927,9 @@ function CurrentStepFailureAlert({
   if (!step || step.status !== 'failed' || (!step.error && !step.failure)) return null
   const versionChanged = step.failure?.reason === 'system_context_changed'
   const retryMessage = showRetry && !canRetry
-    ? '该错误可以通过启动新的方案步骤重试，但只有任务 Owner 可以操作。'
+    ? '该方案步骤可以重新运行，但只有具备任务操作权限的用户可以操作。'
     : canRetry
-    ? '当前失败不会在同一次 Agent 调用内自动重试。排除原因后，可以启动新的方案步骤重试。'
+    ? '可以重新运行方案阶段。系统会创建一个不继承本次失败上下文的新方案步骤。'
     : step.failure?.retryable === true
       ? '该错误可以重试，但当前任务状态不支持直接启动新的方案步骤。'
     : step.failure?.retryable === false
@@ -861,7 +949,7 @@ function CurrentStepFailureAlert({
           <p className="font-medium">接下来怎么做</p>
           <p className="mt-1">{retryMessage}</p>
           <p>{actionMessage}</p>
-          {showRetry && <button type="button" disabled={!canRetry || retrying} title={!canRetry ? '仅任务 Owner 可操作' : undefined} className="mt-3 inline-flex items-center justify-center rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50" onClick={onRetry}>{retrying ? '正在启动新步骤…' : '重新运行方案步骤'}</button>}
+          {showRetry && <button type="button" disabled={!canRetry || retrying} title={!canRetry ? '当前用户无任务操作权限' : undefined} className="mt-3 inline-flex items-center justify-center rounded-lg bg-red-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50" onClick={onRetry}>{retrying ? '正在重新运行…' : '重新运行方案步骤'}</button>}
         </div>
       </div>
     </div>
@@ -1308,7 +1396,11 @@ function RepairDetail({
   const resume = async () => {
     if (!task || !taskCanOperate) return
     setDecisionError('')
-    const agentInput = newExecutionAgentInput(true)
+    const reusesFailedPlanExecution = task.status === 'failed'
+      && task.currentStep?.phase === 'repair_plan'
+      && task.currentStep.status === 'failed'
+      && executionCanContinue(task)
+    const agentInput = newExecutionAgentInput(!reusesFailedPlanExecution)
     if (!agentInput) return
     setBusyAction('resume')
     try { setTask(await api.repair.resume(task.taskId, agentInput)); setModelApiKey('') }
@@ -1373,7 +1465,7 @@ function RepairDetail({
     && task.openclawUsesCustomApiKey
     && !(task.status === 'waiting_approval' && task.plan?.recommendation?.disposition === 'no_change')
     && (task.status === 'waiting_context'
-      || retryFailedPlanAvailable
+      || (retryFailedPlanAvailable && !canReuseCurrentExecution)
       || pendingDecisionResumeAvailable
       || (['waiting_approval', 'waiting_acceptance'].includes(task.status) && !canReuseCurrentExecution))
   const agentModel = task.agentMode === 'cfuse'
