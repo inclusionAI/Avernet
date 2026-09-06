@@ -325,7 +325,7 @@ marked as TODO.
 
 Before changing Skills management, publication, mounting, or runtime
 activation, read
-`src/backend/src/agentclaw/community/adapters/http/skill_center/CLAUDE.md`.
+`src/backend/src/agentclaw/community/core/skill_center/AGENTS.md`.
 
 - `skills-repo` and `skills-local` are complete content stores. An active
   Skills directory must expose only the Skills explicitly activated for the
