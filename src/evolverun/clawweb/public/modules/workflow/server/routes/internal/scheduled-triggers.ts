@@ -79,7 +79,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       }
 
       const normParams = normalizeParamsJson(params_json);
-      if (!normParams.ok) {
+      if ("error" in normParams) {
         res.status(400).json({ success: false, error: "Bad Request", message: normParams.error });
         return;
       }
@@ -192,7 +192,7 @@ export function createInternalScheduledTriggersRouter(repos: RouterDeps): Router
       let normParamsValue: string | null | undefined;
       if (params_json !== undefined) {
         const normParams = normalizeParamsJson(params_json);
-        if (!normParams.ok) {
+        if ("error" in normParams) {
           res.status(400).json({ success: false, error: "Bad Request", message: normParams.error });
           return;
         }
