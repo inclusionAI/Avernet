@@ -27,29 +27,29 @@
         contract and state that the directory is the engine's, not the platform's.
 - **Depends on:** —
 
-## Task 2: Implement `LocalCliToolsService`
+## Task 2 `[x]`: Implement `LocalCliToolsService`
 - **Goal:** The engine-agnostic filesystem implementation, parameterised by a
   directory callable.
 - **Files:** `src/engine/community/core/cli_tools/service.py`
 - **Done when:**
-  - [ ] `LocalCliToolsService` **explicitly subclasses `CliToolsService`** —
+  - [x] `LocalCliToolsService` **explicitly subclasses `CliToolsService`** —
         structural satisfaction alone is verified by nothing in this repo.
-  - [ ] `install` writes to a temp file in the target directory, sets mode
+  - [x] `install` writes to a temp file in the target directory, sets mode
         `0o755`, then `os.replace`s onto the target — never leaving a partial
         file runnable.
-  - [ ] `install` leaves every other tool in the directory untouched.
-  - [ ] `delete` removes the named tool and reports success when it was absent.
-  - [ ] `replace_all` installs or replaces every named tool first, collects a
+  - [x] `install` leaves every other tool in the directory untouched.
+  - [x] `delete` removes the named tool and reports success when it was absent.
+  - [x] `replace_all` installs or replaces every named tool first, collects a
         per-name verdict, and only then prunes names absent from the request.
-  - [ ] `replace_all` with an empty sequence removes every tool.
-  - [ ] `replace_all` returns a `CliToolResult` for **every** requested name,
+  - [x] `replace_all` with an empty sequence removes every tool.
+  - [x] `replace_all` returns a `CliToolResult` for **every** requested name,
         including failures, and does not raise on a partial failure.
-  - [ ] `list_tools` stats the directory on every call and computes `md5` from
+  - [x] `list_tools` stats the directory on every call and computes `md5` from
         the bytes on disk — no cache, no replay of the last write.
-  - [ ] `read_tool` returns `None` for an absent name rather than raising.
-  - [ ] A name that is empty, contains a path separator, or is `.`/`..` is
+  - [x] `read_tool` returns `None` for an absent name rather than raising.
+  - [x] A name that is empty, contains a path separator, or is `.`/`..` is
         refused before any path is built.
-  - [ ] No sha256 verification anywhere — the platform is the single
+  - [x] No sha256 verification anywhere — the platform is the single
         enforcement point, and a comment says so.
 - **Depends on:** Task 1
 
