@@ -82,11 +82,13 @@ async fn read_provider_ack_body(
     response: reqwest::Response,
     timeout: Duration,
 ) -> Result<ProviderAckResponse, ProviderAckBodyError> {
+    bcs_observability::observe_result("provider.read_provider_ack_body", async {
     match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
         Ok(Ok(ack)) => Ok(ack),
         Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
         Err(_) => Err(ProviderAckBodyError::Timeout),
     }
+    }).await
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1089,6 +1091,7 @@ async fn post_provider<T: DeserializeOwned>(
     body: &ProviderWebhookRequest,
     provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<T> {
+    bcs_observability::observe_result("provider.post_provider", async {
     let response = send_provider_request(
         client,
         url_guard,
@@ -1113,6 +1116,7 @@ async fn post_provider<T: DeserializeOwned>(
         );
         ServiceError::InternalError(format!("decode provider response: {error}"))
     })
+    }).await
 }
 
 /// Send the webhook request and return the raw response (status checked, body
@@ -1168,6 +1172,7 @@ async fn send_provider_request_with_policy(
     provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
 ) -> ServiceResult<reqwest::Response> {
+    bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
         bcs_to_provider_token,
@@ -1359,6 +1364,7 @@ async fn send_provider_request_with_policy(
     }
 
     Ok(response)
+    }).await
 }
 
 fn blocked_outbound_ip(error: &OutboundUrlError) -> Option<IpAddr> {

@@ -1572,6 +1572,7 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
     .await;
 
     result.unwrap();
+    assert_eq!(spans.len(), 1, "log correlation must not add a span");
     let span = spans
         .iter()
         .find(|span| span.name == "bcn.bot.response")
@@ -1653,6 +1654,7 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     .await;
 
     result.unwrap();
+    assert_eq!(spans.len(), 1, "log correlation must not add a span");
     let span = spans
         .iter()
         .find(|span| span.name == "bcn.bot.response")

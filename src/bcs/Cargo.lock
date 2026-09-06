@@ -321,6 +321,7 @@ dependencies = [
  "bcs-message",
  "bcs-message-flow",
  "bcs-message-store",
+ "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
  "bcs-proposal",
@@ -588,6 +589,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "bcs-observability",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -695,6 +697,7 @@ dependencies = [
  "bcs-db-api",
  "bcs-db-local",
  "bcs-domain",
+ "bcs-observability",
  "bcs-organization",
  "bcs-organization-store",
  "bcs-protocol",
@@ -720,6 +723,7 @@ dependencies = [
  "bcs-config",
  "bcs-db-api",
  "bcs-db-local",
+ "bcs-observability",
  "bcs-service-api",
  "bcs-test-support",
  "serde",
@@ -767,6 +771,7 @@ name = "bcs-callback"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bcs-observability",
  "bcs-route-security",
  "bcs-service-api",
  "futures",
@@ -1065,6 +1070,7 @@ dependencies = [
  "bcs-config-api",
  "bcs-event-store",
  "bcs-group",
+ "bcs-observability",
  "bcs-service-api",
  "bcs-test-support",
  "chrono",
@@ -1124,6 +1130,7 @@ name = "bcs-fuse-client"
 version = "0.1.0"
 dependencies = [
  "bcs-config-api",
+ "bcs-observability",
  "reqwest",
  "serde",
  "serde_json",
@@ -1218,6 +1225,7 @@ dependencies = [
  "bcs-group",
  "bcs-group-store",
  "bcs-jwt",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
@@ -1405,6 +1413,7 @@ dependencies = [
  "bcs-cache-local",
  "bcs-chat-run-store",
  "bcs-domain",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-service-api",
  "bcs-test-support",
@@ -1435,6 +1444,18 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bcs-observability"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 
@@ -1514,6 +1535,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bcs-domain",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",
@@ -1562,6 +1584,7 @@ name = "bcs-route-security"
 version = "0.1.0"
 dependencies = [
  "bcs-config-api",
+ "bcs-observability",
  "ipnet",
  "thiserror 2.0.20",
  "tokio",
@@ -1789,6 +1812,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bcs-domain",
+ "bcs-observability",
  "bcs-storage-api",
  "chrono",
  "percent-encoding",
@@ -1891,6 +1915,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bcs-config-api",
+ "bcs-observability",
  "bcs-route-security",
  "bcs-service-api",
  "bcs-test-support",
@@ -1911,6 +1936,7 @@ dependencies = [
  "bcs-callback",
  "bcs-domain",
  "bcs-interaction",
+ "bcs-observability",
  "bcs-protocol",
  "bcs-route-security",
  "bcs-service-api",

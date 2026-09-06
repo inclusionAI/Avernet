@@ -4998,6 +4998,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                 Arc::clone(&self.state),
                 http_metrics_middleware,
             ))
+            .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request))
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)

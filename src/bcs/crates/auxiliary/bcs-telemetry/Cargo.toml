@@ -1,6 +1,6 @@
 [package]
 name        = "bcs-telemetry"
-description = "OpenTelemetry semantic attribute helpers for BCS adapters"
+description = "OpenTelemetry semantic attribute helpers"
 edition     = { workspace = true }
 license     = { workspace = true }
 repository  = { workspace = true }

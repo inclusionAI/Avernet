@@ -17,6 +17,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `bcs-service-api` delivery port and `bcs-route-security`
 - HTTP, URL, time parsing, and async utility crates
 

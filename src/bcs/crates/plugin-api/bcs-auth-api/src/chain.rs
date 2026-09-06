@@ -37,13 +37,22 @@ impl AuthPluginChain {
 
     /// Run the chain. First plugin to return `Some` wins. All `None` => anonymous.
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<AuthResult, AuthError> {
-        for plugin in &self.plugins {
+        let chain_started = std::time::Instant::now();
+        for (plugin_index, plugin) in self.plugins.iter().enumerate() {
             let name = plugin.name();
             if !plugin.can_authenticate(headers) {
+                bcs_observability::count("auth.plugin", "skipped");
                 tracing::debug!(plugin = name, "auth: plugin skipped (header shape mismatch)");
                 continue;
             }
-            match plugin.authenticate(headers).await {
+            let started = std::time::Instant::now();
+            let result = bcs_observability::observe_result("auth.plugin", plugin.authenticate(headers)).await;
+            tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), plugin = name, plugin_index,
+                duration_ms = started.elapsed().as_secs_f64() * 1000.0,
+                chain_elapsed_ms = chain_started.elapsed().as_secs_f64() * 1000.0,
+                outcome = match &result { Ok(Some(_)) => "success", Ok(None) => "no_match", Err(_) => "error" },
+                "auth.plugin.finished");
+            match result {
                 Ok(Some(principal)) => {
                     tracing::info!(
                         plugin = name,
@@ -60,12 +69,12 @@ impl AuthPluginChain {
                     tracing::debug!(plugin = name, "auth: plugin no match, trying next");
                 }
                 Err(e) => {
-                    tracing::warn!(plugin = name, error = %e, "auth: plugin failed");
+                    tracing::warn!(plugin = name, outcome = "error", "auth: plugin failed");
                     return Err(e);
                 }
             }
         }
-        tracing::info!("auth: anonymous (no plugin matched)");
+        tracing::info!(duration_ms = chain_started.elapsed().as_secs_f64() * 1000.0, "auth: anonymous (no plugin matched)");
         Ok(AuthResult { principal: None })
     }
 

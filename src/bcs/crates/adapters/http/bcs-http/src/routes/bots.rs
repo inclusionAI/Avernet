@@ -345,21 +345,23 @@ pub async fn query_bots(
     Json(body): Json<QueryBotsRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
     let _caller_actor_id =
-        require_caller_actor_id_from_headers(&state, &headers, &uri).await?;
-    let result = state
+        bcs_observability::observe_result("bots.query.auth", require_caller_actor_id_from_headers(&state, &headers, &uri)).await?;
+    let result = bcs_observability::observe_result("bots.query.load_and_enrich", state
         .services
         .bot_query
         .query_bots_by_ids(BotQueryByIdsCommand {
             bot_ids: body.bot_uuids,
-        })
-        .await
+        })).await
         .map_err(bot_use_case_error_to_http)?;
+    let response_started = std::time::Instant::now();
+    let returned_count = result.bots.len();
     let entries = result
         .bots
         .into_iter()
         .map(bot_query_entry_to_query_json)
         .collect();
 
+    tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), returned_count, duration_ms = response_started.elapsed().as_secs_f64() * 1000.0, "bots.query.response_built");
     Ok(Json(Value::Array(entries)))
 }
 
