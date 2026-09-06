@@ -67,6 +67,8 @@ type EvidenceManifest = {
     count: number;
     producers: string[];
     terminalSeen: boolean;
+    sequenceContiguous: boolean;
+    droppedBeforeTerminal: number;
     status: "complete" | "partial" | "missing";
   }>;
 };
@@ -160,8 +162,17 @@ export class WorkflowEvolutionRepository {
   private async captureManifest(flowIds: string[], capturedAtMs: number): Promise<EvidenceManifest> {
     const flows: EvidenceManifest["flows"] = [];
     for (const flowId of flowIds) {
-      const aggregate = (await this.db.query<{ max_id: number | null; total: number; terminal_count: number }>(
+      const aggregate = (await this.db.query<{
+        max_id: number | null;
+        total: number;
+        terminal_count: number;
+        min_seq: number | null;
+        max_seq: number | null;
+        distinct_seq: number;
+      }>(
         `SELECT MAX(id) AS max_id, COUNT(*) AS total,
+                MIN(event_seq) AS min_seq, MAX(event_seq) AS max_seq,
+                COUNT(DISTINCT event_seq) AS distinct_seq,
                 SUM(CASE WHEN event_type = 'run.terminal' THEN 1 ELSE 0 END) AS terminal_count
          FROM workflow_run_evidence_events WHERE flow_id = ?`,
         [flowId],
@@ -172,13 +183,34 @@ export class WorkflowEvolutionRepository {
       );
       const count = Number(aggregate?.total ?? 0);
       const terminalSeen = Number(aggregate?.terminal_count ?? 0) > 0;
+      const sequenceContiguous = count > 0
+        && Number(aggregate?.min_seq ?? 0) === 1
+        && Number(aggregate?.max_seq ?? 0) === count
+        && Number(aggregate?.distinct_seq ?? 0) === count;
+      const terminalRows = terminalSeen
+        ? await this.db.query<{ payload_json: string }>(
+          "SELECT payload_json FROM workflow_run_evidence_events WHERE flow_id = ? AND event_type = 'run.terminal'",
+          [flowId],
+        )
+        : [];
+      const droppedBeforeTerminal = terminalRows.reduce((max, row) => {
+        try {
+          const payload = JSON.parse(row.payload_json) as { droppedBeforeTerminal?: unknown };
+          return Math.max(max, Math.max(0, Number(payload.droppedBeforeTerminal ?? 0) || 0));
+        } catch {
+          return max;
+        }
+      }, 0);
+      const complete = terminalSeen && sequenceContiguous && droppedBeforeTerminal === 0;
       flows.push({
         flowId,
         maxId: Number(aggregate?.max_id ?? 0),
         count,
         producers: producers.map((item) => item.producer),
         terminalSeen,
-        status: count === 0 ? "missing" : terminalSeen ? "complete" : "partial",
+        sequenceContiguous,
+        droppedBeforeTerminal,
+        status: count === 0 ? "missing" : complete ? "complete" : "partial",
       });
     }
     return { schemaVersion: "workflow-evidence-manifest/v1", capturedAtMs, flows };
@@ -227,10 +259,17 @@ export class WorkflowEvolutionRepository {
   }
 
   async findAnalysisRunForFlow(analysisId: string, flowId: string): Promise<WorkflowEvolutionAnalysisRow | null> {
-    return (await this.db.query<WorkflowEvolutionAnalysisRow>(
-      "SELECT * FROM workflow_evolution_analysis_runs WHERE analysis_id = ? AND flow_id = ? LIMIT 1",
-      [analysisId, flowId],
-    ))[0] ?? null;
+    const analysis = await this.findAnalysisRun(analysisId);
+    if (!analysis) return null;
+    if (analysis.flow_id === flowId) return analysis;
+    try {
+      const scope = JSON.parse(analysis.scope_json) as { flowIds?: unknown };
+      return Array.isArray(scope.flowIds) && scope.flowIds.map(String).includes(flowId)
+        ? analysis
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   async listEvidenceByEventIds(eventIds: string[]): Promise<WorkflowRunEvidenceRow[]> {

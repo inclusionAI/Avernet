@@ -7,7 +7,7 @@ import { NodeExecutionRepository } from "../../repositories/node-execution-repos
 import type { FlowControlAppConfig } from "@avernet/clawweb-shared/server/db";
 import { apiLog, apiLogBody } from "../internal-logger.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import type { RunTerminalObserver } from "../../services/evolve/run-analysis-starter.js";
+import type { RunTerminalObserver } from "@avernet/clawevolve/server/services/evolve/run-analysis-starter";
 
 function scheduleTerminalObserver(
   observer: RunTerminalObserver | undefined,
