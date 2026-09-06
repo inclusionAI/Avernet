@@ -132,6 +132,45 @@ describe('CronStore', () => {
     assert.deepEqual(store.getRuns('j', 10), []);
   });
 
+  it('flush waits for concurrent jobs and runs writes', async () => {
+    const runsPath = path.join(path.dirname(storePath), `cron-runs-gated-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`);
+    const persistent = new CronStore(storePath, { writeDebounceMs: 0, runsPath, maxRunsPerJob: 3 });
+    const writable = persistent as unknown as {
+      writeAtomic: (filePath: string, contents: string) => Promise<void>;
+    };
+    const originalWriteAtomic = writable.writeAtomic.bind(persistent);
+    let releaseJobsWrite!: () => void;
+    const jobsWriteGate = new Promise<void>(resolve => { releaseJobsWrite = resolve; });
+    writable.writeAtomic = async (filePath, contents) => {
+      if (filePath === storePath) await jobsWriteGate;
+      await originalWriteAtomic(filePath, contents);
+    };
+
+    try {
+      persistent.put(makeJob({ id: 'persist' }));
+      persistent.appendRun({ jobId: 'persist', runId: 'r1', runAtMs: 0, ts: 1, status: 'ok', durationMs: 1 });
+
+      let flushSettled = false;
+      const flushPromise = persistent.flush().then(() => { flushSettled = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(flushSettled, false, 'flush returned before the blocked jobs write completed');
+
+      releaseJobsWrite();
+      await flushPromise;
+
+      const reopened = new CronStore(storePath, { writeDebounceMs: 0, runsPath, maxRunsPerJob: 3 });
+      assert.equal(reopened.get('persist')?.id, 'persist');
+      assert.equal(reopened.getRuns('persist', 10).length, 1);
+      await reopened.flush();
+    } finally {
+      releaseJobsWrite();
+      await persistent.flush();
+      if (fs.existsSync(runsPath)) {
+        try { fs.unlinkSync(runsPath); } catch { /* ignore */ }
+      }
+    }
+  });
+
   it('flush persists and a new store reloads state', async () => {
     const runsPath = path.join(path.dirname(storePath), `cron-runs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}.json`);
     const persistent = new CronStore(storePath, { writeDebounceMs: 0, runsPath, maxRunsPerJob: 3 });

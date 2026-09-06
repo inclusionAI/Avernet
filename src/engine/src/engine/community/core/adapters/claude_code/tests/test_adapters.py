@@ -84,10 +84,12 @@ class _FakeSessionPort:
 
     async def sessions_list(
         self, token=None, offset=0, limit=50, agent_id=None, session_key=None,
+        source=None, user_id=None,
     ) -> list[dict]:
         self.calls.append({
             "method": "sessions_list", "token": token, "offset": offset,
             "limit": limit, "agent_id": agent_id, "session_key": session_key,
+            "source": source, "user_id": user_id,
         })
         return self._sessions
 
@@ -159,6 +161,9 @@ class TestSessionAdapter:
         assert user == "u2"
         assert agent == "bot2"
 
+    def test_parse_session_key_user_form(self):
+        assert _parse_session_key("session:uuid-only:user:u3") == ("u3", None)
+
     def test_parse_session_key_short_form_returns_none(self):
         assert _parse_session_key("session:uuid-only") == (None, None)
 
@@ -204,7 +209,9 @@ class TestSessionAdapter:
         adapter = ClaudeCodeSessionAdapter(port)
 
         sessions = await adapter.list(
-            SessionListRequest(user_id="u1", agent_id="b1", limit=10),
+            SessionListRequest(
+                user_id="u1", agent_id="b1", source="all_but_others", limit=10,
+            ),
             auth=_auth("tok-1"),
         )
 
@@ -212,6 +219,8 @@ class TestSessionAdapter:
         assert sessions[0].id == "agent:b1:session:s1:user:u1"
         assert port.calls[0]["token"] == "tok-1"
         assert port.calls[0]["agent_id"] == "b1"
+        assert port.calls[0]["source"] == "all_but_others"
+        assert port.calls[0]["user_id"] == "u1"
         assert port.calls[0]["limit"] == 10
 
     async def test_list_forwards_session_key_to_port(self):
@@ -254,16 +263,26 @@ class TestSessionAdapter:
         session = await adapter.create(
             SessionCreateRequest(
                 title="T", user_id="u1", agent_id="b1", model="m1",
+                uuid="session-uuid",
             ),
             auth=_auth("tok-2"),
         )
-        # The key form is agent:b1:session:<uuid>:user:u1
-        assert session.id.startswith("agent:b1:session:")
-        assert session.id.endswith(":user:u1")
+        assert session.id == "agent:b1:session:session-uuid:user:u1"
         assert session.model == "m1"
         assert port.calls[0]["method"] == "session_create"
         assert port.calls[0]["token"] == "tok-2"
         assert port.calls[0]["model"] == "m1"
+
+    async def test_create_without_agent_builds_user_scoped_key(self):
+        port = _FakeSessionPort()
+        adapter = ClaudeCodeSessionAdapter(port)
+
+        session = await adapter.create(
+            SessionCreateRequest(uuid="session-uuid", user_id="u2"),
+        )
+
+        assert session.key == "session:session-uuid:user:u2"
+        assert port.calls[0]["key"] == "session:session-uuid:user:u2"
 
     async def test_delete_delegates(self):
         port = _FakeSessionPort()

@@ -55,8 +55,9 @@ log = logging.getLogger("claude-code-session-adapter")
 def _parse_session_key(key: str) -> tuple[str | None, str | None]:
     """Extract (user_id, agent_id) from a canonical claude_code session key.
 
-    Recognises two long forms:
+    Recognises three user-scoped forms:
       * new  ``agent:<a>:session:<s>:user:<u>``
+      * no-agent ``session:<s>:user:<u>``
       * legacy ``user:<u>:session:<s>:agent:<a>``
 
     Returns ``(None, None)`` for the legacy short form ``session:<uuid>`` and
@@ -72,6 +73,17 @@ def _parse_session_key(key: str) -> tuple[str | None, str | None]:
         if not user_part or not agent_part:
             return None, None
         return user_part, agent_part
+
+    if key.startswith("session:") and ":user:" in key:
+        try:
+            session_part, user_part = key.removeprefix("session:").split(
+                ":user:", 1
+            )
+        except ValueError:
+            return None, None
+        if not session_part or not user_part:
+            return None, None
+        return user_part, None
 
     if key.startswith("user:") and ":session:" in key and ":agent:" in key:
         try:
@@ -281,12 +293,17 @@ class ClaudeCodeSessionAdapter(SessionService):
             has_session_key,
         )
 
+        source_params = (
+            {"source": request.source, "user_id": request.user_id}
+            if request.source is not None else {}
+        )
         raw_sessions = await self._port.sessions_list(
             token=token,
             offset=request.offset,
             limit=request.limit,
             agent_id=request.agent_id,
             session_key=request.session_key,
+            **source_params,
         )
 
         sessions: list[Session] = []
@@ -318,10 +335,10 @@ class ClaudeCodeSessionAdapter(SessionService):
 
         user_id = request.user_id or "default"
         session_uuid = request.uuid or str(uuid.uuid4())
-        if request.agent_id and request.user_id:
+        if request.agent_id:
             session_key = f"agent:{request.agent_id}:session:{session_uuid}:user:{user_id}"
         else:
-            session_key = f"session:{session_uuid}"
+            session_key = f"session:{session_uuid}:user:{user_id}"
 
         label = request.title or None
 
