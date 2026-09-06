@@ -340,7 +340,7 @@ max_file_size = 5368709120
 
 [session_files.backend]
 # local:
-data_dir = "/var/bcs/session-files"
+data_dir = "/var/lib/bcs/session-files"
 # baas (when storage_backend = "baas"):
 # endpoint = "https://storage.example.com"
 # tenant = "teamclaw"
