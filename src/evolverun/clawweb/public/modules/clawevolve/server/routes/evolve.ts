@@ -16,10 +16,11 @@ import {
 } from "../services/evolution/contracts.js";
 import { presentEvidence } from "../services/evolution/evidence-presentation.js";
 import { requireWorkflowAccess } from "../services/workflow-access.js";
-import {
-  ImprovementEvolveLinkConflictError,
-  type InsightImprovementRepository,
-} from "../repositories/insight-improvement-repository.js";
+import type {
+  InsightImprovementPort,
+  InsightTaskCreatorPort,
+  InsightTaskSourcePort,
+} from "../internal/module-api.js";
 import {
   cancelEvolveExecution,
   dispatchEvolveCommand,
@@ -53,12 +54,17 @@ import {
   taskLogArchiveLocation,
 } from "../services/evolve/artifact-url.js";
 import { getArtifactBucket, UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
-import {
-  InsightTaskCreationError,
-  InsightTaskService,
-} from "../services/evolve/insight-task-service.js";
-import { InsightPlanStepService } from "../services/evolve/insight-plan-step-service.js";
-import { TaskSourceError, type TaskSourceService } from "../services/evolve/task-source-service.js";
+
+type InsightBoundaryError = Error & {
+  code: string;
+  category?: "validation" | "auth" | "forbidden" | "not_found" | "conflict" | "source";
+  stage?: string;
+  retryable?: boolean;
+};
+
+function isInsightBoundaryError(error: unknown): error is InsightBoundaryError {
+  return error instanceof Error && typeof (error as { code?: unknown }).code === "string";
+}
 
 function textOrNull(value: unknown): string | null {
   if (value === undefined || value === null) return null;
@@ -66,8 +72,6 @@ function textOrNull(value: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 import { createEvolveKnowledgeRouter } from "./evolve-knowledge.js";
-import type { InsightAutoRepairRepository } from "../repositories/insight-auto-repair-repository.js";
-import type { GovernanceRuleProvider } from "../services/insight/governance-rule-provider.js";
 import {
   dispatchPendingBusinessStep,
   startInitialEvolveStep,
@@ -86,12 +90,13 @@ export type EvolveRouterDeps = {
   dispatch?: Dispatch;
   dispatchTaskLogArchive?: DispatchTaskLogArchive;
   cancelExecution?: CancelExecution;
-  improvementRepo?: InsightImprovementRepository | null;
-  taskSourceService?: TaskSourceService | null;
-  insightPlanStepService?: InsightPlanStepService | null;
-  insightTaskService?: InsightTaskService | null;
-  autoRepairRepo?: InsightAutoRepairRepository | null;
-  ruleProvider?: GovernanceRuleProvider | null;
+  improvementRepo?: InsightImprovementPort | null;
+  taskSourceService?: InsightTaskSourcePort | null;
+  insightTaskService?: InsightTaskCreatorPort | null;
+  /** @deprecated ClawInsight owns auto-repair composition. */
+  autoRepairRepo?: unknown;
+  /** @deprecated ClawInsight owns governance composition. */
+  ruleProvider?: unknown;
   benchDomainRepo?: BenchDomainRepository | null;
   benchTemplateRepo?: BenchTemplateRepository | null;
   benchRunRepo?: BenchRunRepository | null;
@@ -598,7 +603,7 @@ function taskLogArchiveView(row: import("../repositories/evolve-repository.js").
 async function withTaskSource(
   view: Record<string, unknown>,
   task: { task_id: string; config_json: string },
-  taskSourceService: TaskSourceService | null,
+  taskSourceService: InsightTaskSourcePort | null,
 ) {
   if (!taskSourceService || !isInsightImprovementTask(task)) return view;
   const source = await taskSourceService.findView(task.task_id);
@@ -611,7 +616,7 @@ function isInsightImprovementTask(task: { config_json: string }): boolean {
 
 async function markInsightTaskApplied(
   repo: EvolveRepository,
-  improvementRepo: InsightImprovementRepository | null,
+  improvementRepo: InsightImprovementPort | null,
   taskId: string,
 ): Promise<void> {
   if (!improvementRepo) return;
@@ -825,7 +830,7 @@ async function advanceOptimizeTask(
   dispatch: Dispatch,
   step: EvolveStepRow,
   output: unknown,
-  improvementRepo: InsightImprovementRepository | null,
+  improvementRepo: InsightImprovementPort | null,
 ) {
   const task = await repo.findTask(step.task_id);
   if (!task) throw new Error("step 关联任务不存在");
@@ -1071,21 +1076,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const cancelExecution = deps.cancelExecution ?? cancelEvolveExecution;
   const improvementRepo = deps.improvementRepo ?? null;
   const taskSourceService = deps.taskSourceService ?? null;
-  const insightPlanStepService = deps.insightPlanStepService
-    ?? (repo
-      ? new InsightPlanStepService(repo, dispatch)
-      : null);
-  const insightTaskService = deps.insightTaskService
-    ?? (repo && improvementRepo && taskSourceService && insightPlanStepService
-      ? new InsightTaskService(
-          repo,
-          improvementRepo,
-          taskSourceService,
-          insightPlanStepService,
-          deps.autoRepairRepo ?? null,
-          deps.ruleProvider ?? null,
-        )
-      : null);
+  const insightTaskService = deps.insightTaskService ?? null;
   const benchDomainRepo = deps.benchDomainRepo ?? null;
   const benchTemplateRepo = deps.benchTemplateRepo ?? null;
   const benchRunRepo = deps.benchRunRepo ?? null;
@@ -1278,7 +1269,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           ...(result.idempotent ? { idempotent: true } : {}),
         });
       } catch (error) {
-        if (error instanceof InsightTaskCreationError) {
+        if (isInsightBoundaryError(error) && error.category) {
           const status = error.category === "validation" ? 400
             : error.category === "auth" ? 401
               : error.category === "forbidden" ? 403
@@ -1545,7 +1536,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
         });
       } catch (error) {
         await repo.deleteTask(taskId);
-        if (error instanceof ImprovementEvolveLinkConflictError) {
+        if (isInsightBoundaryError(error) && error.code === "IMPROVEMENT_STATE_CONFLICT") {
           const existingLink = await improvementRepo.findEvolveLinkByRequest(
             improvementId,
             improvementRequestId,
@@ -2773,13 +2764,11 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           report: { url: `/api/evolve/internal/tasks/${task.task_id}/steps/${step.step_id}/report` },
         });
       } catch (error) {
-        const failure = error instanceof TaskSourceError
+        const failure: InsightBoundaryError = isInsightBoundaryError(error)
           ? error
-          : new TaskSourceError(
-            "PLAN_SOURCE_INPUT_UNAVAILABLE",
-            error instanceof Error ? error.message : String(error),
-            "interface",
-            true,
+          : Object.assign(
+            new Error(error instanceof Error ? error.message : String(error)),
+            { code: "PLAN_SOURCE_INPUT_UNAVAILABLE", stage: "interface", retryable: true },
           );
         res.status(failure.retryable ? 503 : 422).json({
           code: failure.code,

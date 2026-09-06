@@ -6,7 +6,7 @@ import { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { BenchDomainRepository } from "../../repositories/bench-domain-repository.js";
 import { BenchTemplateRepository } from "../../repositories/bench-template-repository.js";
 import { BenchRunRepository } from "../../repositories/bench-run-repository.js";
-import { InsightImprovementRepository } from "../../repositories/insight-improvement-repository.js";
+import { InsightImprovementRepository } from "../../../../clawinsight/server/repositories/insight-improvement-repository.js";
 import { createEvolveRouter } from "../evolve.js";
 
 let db: SqliteDatabase;

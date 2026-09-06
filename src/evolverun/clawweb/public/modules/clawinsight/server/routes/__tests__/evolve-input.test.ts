@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import Database from "better-sqlite3";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
-import { EvolveRepository } from "../../repositories/evolve-repository.js";
+import { EvolveRepository } from "@avernet/clawevolve/server/repositories/evolve-repository";
 import { EvolveTaskSourceRepository } from "../../repositories/evolve-task-source-repository.js";
-import { BenchTemplateRepository } from "../../repositories/bench-template-repository.js";
+import { BenchTemplateRepository } from "@avernet/clawevolve/server/repositories/bench-template-repository";
 import { InsightImprovementRepository } from "../../repositories/insight-improvement-repository.js";
 import { InsightAutoRepairRepository } from "../../repositories/insight-auto-repair-repository.js";
 import type { SessionEvidence } from "../../services/insight/contracts.js";
@@ -12,7 +12,7 @@ import { GovernanceRuleProvider } from "../../services/insight/governance-rule-p
 import { TaskSourceService } from "../../services/evolve/task-source-service.js";
 import { InsightPlanStepService } from "../../services/evolve/insight-plan-step-service.js";
 import { InsightTaskService } from "../../services/evolve/insight-task-service.js";
-import { createEvolveRouter } from "../evolve.js";
+import { createEvolveRouter } from "@avernet/clawevolve/server/routes/evolve";
 import { join } from "node:path";
 
 let db: SqliteDatabase;

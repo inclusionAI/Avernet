@@ -45,7 +45,7 @@
   ],
   "scripts": {
     "check": "bash scripts/check-public-boundary.sh && tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures/insight/v1 && cp server/fixtures/insight/v1/governance-rules.json dist/server/fixtures/insight/v1/governance-rules.json && vite build && vite build --config vite.singlebox.config.ts && cp web/index.d.ts dist/web/index.d.ts",
+    "build": "tsc -p tsconfig.json && vite build && vite build --config vite.singlebox.config.ts && cp web/index.d.ts dist/web/index.d.ts",
     "singlebox": "node dist/server/singlebox.js",
     "test": "vitest run --config vitest.config.ts",
     "prepack": "npm run check && npm test && npm run build"

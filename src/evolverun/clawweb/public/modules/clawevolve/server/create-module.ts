@@ -1,7 +1,6 @@
 import type { Router } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "./repositories/evolve-repository.js";
-import { EvolveTaskSourceRepository } from "./repositories/evolve-task-source-repository.js";
 import { BenchDomainRepository } from "./repositories/bench-domain-repository.js";
 import { BenchTemplateRepository } from "./repositories/bench-template-repository.js";
 import { BenchRunRepository } from "./repositories/bench-run-repository.js";
@@ -17,10 +16,7 @@ import {
 } from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
 import { createBenchRouter } from "./routes/bench.js";
-import { TaskSourceService } from "./services/evolve/task-source-service.js";
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
-import { InsightPlanStepService } from "./services/evolve/insight-plan-step-service.js";
-import { InsightTaskService } from "./services/evolve/insight-task-service.js";
 import { configureArtifactBucket, type ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
@@ -36,6 +32,8 @@ export type ClawevolveModuleOptions = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   artifactBucket?: string;
   clawInsight?: ClawInsightInternalApi;
+  insightTaskService?: EvolveRouterDeps["insightTaskService"];
+  taskSourceService?: EvolveRouterDeps["taskSourceService"];
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
   workflowRuntime?: InternalEvolveWorkflowRuntime;
@@ -49,7 +47,6 @@ export type ClawevolveModule = {
   internalApi: ClawEvolveInternalApi;
   repositories: {
     evolve: EvolveRepository;
-    taskSource: EvolveTaskSourceRepository;
     benchDomain: BenchDomainRepository;
     benchTemplate: BenchTemplateRepository;
     benchTemplateVersion: BenchTemplateVersionRepository;
@@ -72,10 +69,8 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   configureArtifactBucket(options.artifactBucket);
 
   const evolve = new EvolveRepository(db);
-  const taskSource = new EvolveTaskSourceRepository(db);
   const clawInsight = options.clawInsight ?? null;
   const improvement = clawInsight?.improvementRepository ?? null;
-  const autoRepair = clawInsight?.autoRepairRepository ?? null;
   const benchDomain = new BenchDomainRepository(db);
   const benchTemplate = new BenchTemplateRepository(db);
   const benchRun = new BenchRunRepository(db);
@@ -84,22 +79,9 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const benchArtifact = new BenchArtifactRepository(db);
   const benchTag = new BenchTagRepository(db);
   const botWorkflowPermission = new BotWorkflowPermissionRepository(db);
-  const taskSourceService = clawInsight?.readFrozenEvidence
-    ? new TaskSourceService(taskSource, clawInsight.readFrozenEvidence)
-    : null;
+  const taskSourceService = options.taskSourceService ?? null;
   const dispatch = options.dispatch ?? dispatchEvolveCommand;
-  const insightPlanStepService = new InsightPlanStepService(evolve, dispatch);
-  const governance = clawInsight?.governanceRuleProvider ?? null;
-  const insightTaskService = clawInsight && taskSourceService
-    ? new InsightTaskService(
-        evolve,
-        clawInsight.improvementRepository,
-        taskSourceService,
-        insightPlanStepService,
-        autoRepair,
-        governance,
-      )
-    : null;
+  const insightTaskService = options.insightTaskService ?? null;
 
   const publicRouter = createEvolveRouter(evolve, {
     db,
@@ -108,10 +90,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     cancelExecution: options.cancelExecution,
     improvementRepo: improvement,
     taskSourceService,
-    insightPlanStepService,
     insightTaskService,
-    autoRepairRepo: autoRepair,
-    ruleProvider: governance,
     benchDomainRepo: benchDomain,
     benchTemplateRepo: benchTemplate,
     benchRunRepo: benchRun,
@@ -153,7 +132,6 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     },
     repositories: {
       evolve,
-      taskSource,
       benchDomain,
       benchTemplate,
       benchTemplateVersion,
