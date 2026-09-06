@@ -53,21 +53,21 @@
         enforcement point, and a comment says so.
 - **Depends on:** Task 1
 
-## Task 3: Service-level tests
+## Task 3 `[x]`: Service-level tests
 - **Goal:** Pin the behaviours that are invisible at the HTTP layer.
 - **Files:** `src/engine/community/core/cli_tools/tests/__init__.py`,
   `core/cli_tools/tests/test_service.py`
 - **Done when:**
-  - [ ] `list` reflects a file written behind the service's back (drift, not replay).
-  - [ ] `list` reports a changed `md5` when a binary is swapped in place under
+  - [x] `list` reflects a file written behind the service's back (drift, not replay).
+  - [x] `list` reports a changed `md5` when a binary is swapped in place under
         the same name.
-  - [ ] `replace_all` installs before pruning — asserted by observing the
+  - [x] `replace_all` installs before pruning — asserted by observing the
         directory mid-call, so no "tool is gone" window exists.
-  - [ ] A failed install inside `replace_all` does not delete the tool it was
+  - [x] A failed install inside `replace_all` does not delete the tool it was
         replacing.
-  - [ ] An install interrupted before `os.replace` leaves no runnable file.
-  - [ ] A name with a separator or `..` is refused and writes nothing.
-  - [ ] An install at the documented single-file cap (200 MiB) succeeds.
+  - [x] An install interrupted before `os.replace` leaves no runnable file.
+  - [x] A name with a separator or `..` is refused and writes nothing.
+  - [x] An install at the documented single-file cap (200 MiB) succeeds.
 - **Depends on:** Task 2
 
 ## Task 4: Wire `cli_tools` into the engine abstraction
