@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import Entry
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    RecordOnlyActivation,
+    PlatformActivation,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_PRE_CONTAINER_TRIGGER,
@@ -36,7 +36,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     StoreIdentityPort,
     StoreResourcePort,
-    StoreSkillPackagePort,
+    PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
     BotConfigManifestApplyLockModel,
@@ -192,10 +192,10 @@ def _build(db):
     def platform_ports() -> MaterialiserPorts:
         return MaterialiserPorts(
             script_service=scripts,
-            activation_service=RecordOnlyActivation(activation),
+            activation_service=PlatformActivation(activation),
             mcp_auth_service=FakeMcpAuth(),
             identity_service=StoreIdentityPort(store),
-            upload_service=StoreSkillPackagePort(store, validator=validator, skill_repository=skills),
+            upload_service=PlatformSkillPackageUpload(store, validator=validator, skill_repository=skills),
             capability_reader=reader_of_active,
             package_validator=validator,
             entry_fetcher=fetcher(),

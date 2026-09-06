@@ -21,7 +21,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyStatus,
 )
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    RecordOnlyActivation,
+    PlatformActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 
@@ -199,7 +199,7 @@ class _Recording:
 
 def test_record_only_activation_passes_project_false_on_every_write() -> None:
     inner = _Recording()
-    wrapped = RecordOnlyActivation(inner)
+    wrapped = PlatformActivation(inner)
     ids = dict(bot_id="b", owner_id="o", actor_id="a")
 
     assert wrapped.list_installed_mcps(**ids) == {"a"}

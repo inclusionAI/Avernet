@@ -50,11 +50,30 @@ Here, both sides can import it and neither owns it.
 
 - `activation_port.py` — `ActivationPort`: per-bot skill and MCP activation
   writes, without the projection choice.
+- `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
+  local skill package, without the directory-upload route's method.
 
 Remaining ports still live beside their consumers and move here as they are
-revisited: `bot_config_manifest/apply/` (`identity_port`, `resource_port`,
-`upload_port`) and `bot_config_manifest/cli_tools/` (`arca_port`,
-`delivery_port`).
+revisited: `bot_config_manifest/apply/` (`identity_port`, `resource_port`) and
+`bot_config_manifest/cli_tools/` (`arca_port`, `delivery_port`).
+
+## Implementations are named for where the write lands
+
+Each port has exactly two, and they split on the one axis every delivery family
+splits on — whether the write reaches the bot's **device** or stays in
+**platform** state that the composed artifact delivers:
+
+| Port | device (ARCA) | platform (platform-managed teclaw) |
+|---|---|---|
+| `ActivationPort` | `DeviceActivation` | `PlatformActivation` |
+| `SkillPackageUploadPort` | `DeviceSkillPackageUpload` | `PlatformSkillPackageUpload` |
+
+The pairs are not the same shape underneath, and that is expected. The
+activation two are wrappers over one `DirectActivationService`, differing only
+in the `project` they forward. The upload two share no body at all: one writes
+package files onto a container, the other objects into the managed-files store.
+Same axis, different depth — name for the axis, because that is what a reader
+needs to predict which one a family gets.
 
 ## Context Boundary
 
@@ -62,8 +81,9 @@ revisited: `bot_config_manifest/apply/` (`identity_port`, `resource_port`,
 purpose: Outbound ports — the narrow contracts core states for what it calls out to, owned by the caller and published where both caller and implementer can reach them.
 provides:
   - ActivationPort
+  - SkillPackageUploadPort
 consumes: []
 consumed_by:
-  - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through ActivationPort, and both delegates in apply/activation_delegates.py declare it"
+  - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"
 internal_dependencies: []
 ```

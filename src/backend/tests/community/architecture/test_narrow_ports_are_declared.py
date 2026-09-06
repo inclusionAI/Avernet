@@ -32,19 +32,33 @@ import inspect
 import pytest
 
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    ProjectingActivation,
-    RecordOnlyActivation,
+    DeviceActivation,
+    PlatformActivation,
+)
+from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+    DeviceSkillPackageUpload,
+)
+from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
+    PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.ports.activation_port import ActivationPort
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    SkillPackageUploadPort,
+)
 
-#: (port, implementer) for every class bound to an outbound port field.
+#: (port, implementer) for every class bound to an outbound port field. Each
+#: port has exactly two, split on where the write lands — the axis every
+#: delivery family splits on: ARCA reaches the bot's container, platform-managed
+#: teclaw writes platform state that the composed artifact delivers.
 _PORT_IMPLEMENTERS = [
-    (ActivationPort, ProjectingActivation),
-    (ActivationPort, RecordOnlyActivation),
+    (ActivationPort, DeviceActivation),
+    (ActivationPort, PlatformActivation),
+    (SkillPackageUploadPort, DeviceSkillPackageUpload),
+    (SkillPackageUploadPort, PlatformSkillPackageUpload),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
-_PORTS = [ActivationPort]
+_PORTS = [ActivationPort, SkillPackageUploadPort]
 
 
 @pytest.mark.parametrize(
@@ -105,10 +119,31 @@ def test_activation_port_never_exposes_project(method_name) -> None:
     is settled by which delegate the strategy binds, not per call site. If the
     port grew the parameter, a materialiser could override the family's choice.
     """
-    for holder in (ActivationPort, ProjectingActivation, RecordOnlyActivation):
+    for holder in (ActivationPort, DeviceActivation, PlatformActivation):
         params = inspect.signature(getattr(holder, method_name)).parameters
         assert "project" not in params, (
             f"{holder.__name__}.{method_name} exposes `project`. The port and its "
             f"delegates deliberately do not: the delivery strategy chooses by "
-            f"binding ProjectingActivation or RecordOnlyActivation."
+            f"binding DeviceActivation or PlatformActivation."
+        )
+
+
+def test_upload_port_never_exposes_the_directory_route() -> None:
+    """The narrowing is the point: ``upload_local_skill_files`` stays out.
+
+    It converts one browser-selected directory's files into a package — the
+    directory-upload route's vocabulary. During an apply the package arrives as
+    fetched bytes, so the method has no meaning; a materialiser handed the whole
+    Service API could still reach for it. The port is what makes that
+    impossible, and neither implementation may quietly re-add it.
+    """
+    for holder in (
+        SkillPackageUploadPort,
+        DeviceSkillPackageUpload,
+        PlatformSkillPackageUpload,
+    ):
+        assert not hasattr(holder, "upload_local_skill_files"), (
+            f"{holder.__name__} exposes upload_local_skill_files. That method "
+            f"belongs to LocalSkillUploadServiceProtocol — the Service API — and "
+            f"the port exists to keep it away from the `skills` materialiser."
         )

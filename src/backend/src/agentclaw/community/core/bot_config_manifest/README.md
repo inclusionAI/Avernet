@@ -674,7 +674,7 @@ consumes:
   - "BotConfigManifestApplyRepositoryProtocol / BotConfigManifestApplyLockRepositoryProtocol (core.repository) — the apply record and its serialization lock"
   - "BotStartupScriptServiceProtocol (core.bot_startup_script) — the `script` materialiser's only write"
   - "ActivationPort (core.ports) — the outbound port the `mcp` and `skills` materialisers write through: the activation service's six methods without `project`, because choosing whether a write projects is the delivery strategy's call, not a materialiser's. Both implementations live in apply/activation_delegates.py"
-  - "LocalSkillUploadServiceProtocol (core.skill_center) — the upload road the `skills` materialiser installs packages through: the same entry point the raw-zip router path takes (W5)"
+  - "SkillPackageUploadPort (core.ports) — the outbound port the `skills` materialiser installs packages through: the Service API's two apply-relevant methods, without the directory-upload route's `upload_local_skill_files`. DeviceSkillPackageUpload wraps LocalSkillUploadServiceProtocol (the same entry point the raw-zip router path takes, W5); PlatformSkillPackageUpload writes the store instead"
   - "BotCapabilityStateReaderProtocol (core.skill_center.capability_state_contract) — the flush-then-read active-set the `skills` materialiser enumerates its area from and narrows removals by (W5; the core contract module — not the api/ façade that re-exports it, which core deliberately does not depend on)"
   - "SkillPackageValidator (core.skill_center.skill_package) — the manual-upload package gate the `skills` materialiser validates fetched bytes with, so an installed skill is an uploaded one (W5)"
   - "ManifestContentServiceProtocol.latest_receipt — the per-source receipt lookup the entry fetch pipeline asks (W5)"
@@ -710,6 +710,7 @@ internal_dependencies:
   - agentclaw.community.core.services.identity
   - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
   - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
+  - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the activation Service API both delegates wrap and forward `project` to
   - agentclaw.community.core.skill_center.local_skill_upload_service_protocol  # the upload road a manifest skill travels (W5)
   - agentclaw.community.core.skill_center.skill_package  # the manual-upload package gate, reused per fetched skill (W5)

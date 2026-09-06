@@ -39,9 +39,12 @@ from agentclaw.community.core.bot_config_manifest.apply.carry_forward import (
     carry_forward,
 )
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    ProjectingActivation,
+    DeviceActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
+    DeviceSkillPackageUpload,
+)
 from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     DeliveryStrategy,
     DeliveryStrategyFactory,
@@ -797,10 +800,10 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         """The device-backed write targets: ARCA's, and teclaw's with the switch off."""
         return MaterialiserPorts(
             script_service=self._script_service_provider(),
-            activation_service=ProjectingActivation(self._activation_service_provider()),
+            activation_service=DeviceActivation(self._activation_service_provider()),
             mcp_auth_service=self._mcp_auth_service_provider(),
             identity_service=self._identity_service_provider(),
-            upload_service=self._upload_service_provider(),
+            upload_service=DeviceSkillPackageUpload(self._upload_service_provider()),
             capability_reader=self._capability_reader_provider(),
             package_validator=self._package_validator_provider(),
             entry_fetcher=self._entry_fetcher_provider(),

@@ -16,7 +16,8 @@ not of the capability being written:
 So neither value belongs to the ``mcp`` and ``skills`` materialisers, and
 ``ActivationPort`` — what those materialisers hold — does not expose the
 parameter. These two classes are where the choice is made instead: peers, both
-declaring the port, both wrapping the same service, differing in one constant.
+declaring the port, both wrapping the same service, differing in one constant
+— named for where the write lands, the axis every delivery family splits on.
 
 **The service is never bound to the port raw.** It would satisfy the port by
 shape, and ARCA would then project because ``project`` *defaults* to ``True``
@@ -100,16 +101,16 @@ class _DelegatingActivation(ActivationPort):
         )
 
 
-class ProjectingActivation(_DelegatingActivation):
-    """ARCA: write, then project to the live container. The pre-W8 contract."""
+class DeviceActivation(_DelegatingActivation):
+    """ARCA: write the rows, then project onto the live container (pre-W8)."""
 
     _PROJECT = True
 
 
-class RecordOnlyActivation(_DelegatingActivation):
-    """Platform-managed teclaw: record the desired state, redeliver closes it."""
+class PlatformActivation(_DelegatingActivation):
+    """Platform-managed teclaw: write the rows only; the artifact delivers."""
 
     _PROJECT = False
 
 
-__all__ = ["ProjectingActivation", "RecordOnlyActivation"]
+__all__ = ["DeviceActivation", "PlatformActivation"]

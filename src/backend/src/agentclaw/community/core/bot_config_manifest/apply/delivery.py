@@ -44,7 +44,7 @@ from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
 from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
     ManifestResourcePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
+from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory

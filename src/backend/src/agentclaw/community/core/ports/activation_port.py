@@ -15,7 +15,7 @@ skill and per MCP server. The materialisers must not be able to make that
 choice, so the port they hold cannot offer it.
 
 **Both implementers are wrappers, and they differ in exactly that value.**
-``ProjectingActivation`` delegates with ``project=True``, ``RecordOnlyActivation``
+``DeviceActivation`` delegates with ``project=True``, ``PlatformActivation``
 with ``project=False``; both hold the same ``DirectActivationServiceProtocol``.
 The service is never bound here raw — if it were, one family's behaviour would
 rest on the parameter's *default* while the other stated its choice, and the

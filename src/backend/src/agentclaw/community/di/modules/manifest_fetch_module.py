@@ -79,13 +79,13 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     TeclawPlatformBindings,
 )
 from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
-    RecordOnlyActivation,
+    PlatformActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     StoreIdentityPort,
     StoreResourcePort,
-    StoreSkillPackagePort,
+    PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
@@ -585,10 +585,10 @@ class ManifestFetchModule(Module):
             validator = package_validator_provider()
             return MaterialiserPorts(
                 script_service=script_service_provider(),
-                activation_service=RecordOnlyActivation(activation_service_provider()),
+                activation_service=PlatformActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
                 identity_service=StoreIdentityPort(store),
-                upload_service=StoreSkillPackagePort(
+                upload_service=PlatformSkillPackageUpload(
                     store,
                     validator=validator,
                     skill_repository=injector.get(SkillRepository),
