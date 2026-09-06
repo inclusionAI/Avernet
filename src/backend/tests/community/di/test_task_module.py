@@ -16,7 +16,7 @@ from agentclaw.community.di.modules.task_module import TaskModule
 
 from agentclaw.community.di.modules.task_module import _resolve_harness_enabled
 from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-    SingleboxKeywordBotDiscover,
+    CatalogKeywordBotDiscover,
 )
 
 
@@ -36,7 +36,7 @@ class _StubDiscoverModule(Module):
     def bot_public(self) -> BotPublicServiceProtocol:
         """TaskService provider 还 inject BotPublicServiceProtocol(_resolve_discover 单 box 时不用);stub 占位。"""
         class _BP:
-            def search_public_bots_by_keyword(self, **kw):
+            def search_catalog_public_bots_by_keyword(self, **kw):
                 return {"total": 0, "items": []}
         return _BP()  # type: ignore[return-value]
 
@@ -91,13 +91,13 @@ def test_resolve_api_base_url_uses_bcs_task_callback_origin(monkeypatch):
 
 def test_task_module_uses_keyword_discovery_in_every_profile(monkeypatch):
     class _BotPublic:
-        def search_public_bots_by_keyword(self, **_kwargs):
+        def search_catalog_public_bots_by_keyword(self, **_kwargs):
             return {"total": 0, "items": []}
 
     for profile in ("singlebox", "corp", "community"):
         monkeypatch.setenv("DEPLOY_PROFILE", profile)
         discover = TaskModule._resolve_discover(bot_public=_BotPublic())
-        assert isinstance(discover, SingleboxKeywordBotDiscover)
+        assert isinstance(discover, CatalogKeywordBotDiscover)
 
 
 
