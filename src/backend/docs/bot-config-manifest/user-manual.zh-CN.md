@@ -9,8 +9,9 @@
 > **本文按已拍板的口径写**，并与 `manifest-schema.zh-CN.md` 保持一致——两份
 > 用户可见的契约说的是同一件事。`design.zh-CN.md` 早于其中几条决策、未随之
 > 修订，差异清单见**附录 D**。尚未开放的写法见**附录 C**（与 schema §7
-> 同一张表）——写了会在 `PUT` 时被拒绝，而不是被静默忽略。**全部端点的参考见
-> 附录 B**，其中也包括「用清单创建 bot」这条路径的两个端点。
+> 同一张表）——写了会在 `PUT` 时被拒绝，而不是被静默忽略。**要查某个端点该填什么、
+> 回什么、枚举有哪些取值，直接看附录 B**——它逐端点列出请求字段与响应字段，也包括
+> 「用清单创建 bot」这条路径的两个端点。
 
 ## 目录
 
@@ -26,7 +27,7 @@
 10. [限额](#10-限额)
 11. [安全须知](#11-安全须知)
 12. [FAQ](#12-faq)
-13. [附录](#附录-a完整清单示例)（A 完整示例 · **B API 参考（全部端点）** · C 尚未开放 · D 与设计文档的差异 · E 字段速查）
+13. [附录](#附录-a完整清单示例)（A 完整示例 · **B API 参考——逐端点的请求/响应字段与枚举取值** · C 尚未开放 · D 与设计文档的差异 · E 字段速查）
 
 ---
 
@@ -135,7 +136,7 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 **第 5 步：以后要改**，不必重建 bot——改清单 `PUT` 上去即可，走路径 B 的第 3
 步起，**立即生效、不需要重启**。
 
-> 这两个端点的完整出入参、以及本特性全部端点的速查，见**附录 B**。
+> 这两个端点逐字段的出入参见**附录 B.3**；本特性全部端点的参考见**附录 B**。
 
 ### 2.3 路径 B：已经有 bot
 
@@ -194,45 +195,54 @@ apply 要写设备，将来（W5）还要走网络取源，让调用方举着一
 dry_run** 是推荐动作，尤其是第一次声明 `skills` 或 `resources` 的时候（原因见 §8）。
 这几个都需要 bot 已存在——**路径 A 的人在创建请求里就完成了同样的校验**（第 2 步）。
 
+> 这四个端点逐字段的出入参（含 `409` / `422` 分别在什么时候出现）见**附录 B.2**。
+
 ### 2.5 本特性一共有哪些端点
 
-一张全景图，够你判断「这件事该调谁」。逐个端点的出入参、状态码与权限位见
-**附录 B**。
+一张全景图，够你判断「这件事该调谁」。**每个端点要填哪些字段、回哪些字段、枚举
+有哪些取值，见附录 B**——右边的箭头就是它在附录 B 的小节号。
 
 ```text
-清单本体（每个 bot 一份文档）
+清单本体（每个 bot 一份文档）                                      → B.1
   GET    /openapi/v1/bots/{bot_id}/config-manifest                 读回原文
   PUT    /openapi/v1/bots/{bot_id}/config-manifest                 整体替换 + 自动 apply
   DELETE /openapi/v1/bots/{bot_id}/config-manifest                 清除声明（不删实体）
   GET    /openapi/v1/bots/{bot_id}/config-manifest/capabilities    这个 bot 支持哪些构造
 
-apply（把声明变成现实）
+apply（把声明变成现实）                                            → B.2
   POST   /openapi/v1/bots/{bot_id}/config-manifest/apply           202 + apply_id
   POST   .../config-manifest/apply?dry_run=true                    200，同步返回计划
   GET    /openapi/v1/bots/{bot_id}/config-manifest/applies/{id}    轮询这一次
   GET    /openapi/v1/bots/{bot_id}/config-manifest/last-apply      最近一次（权威答案）
 
-用清单创建 bot（还没有 bot 时；路径 A）
+用清单创建 bot（还没有 bot 时；路径 A）                            → B.3
   POST   /openapi/v1/bots/with-manifest                            202 + bot_id + 授权链接
   GET    /openapi/v1/bots/{bot_id}/with-manifest/status            轮询创建状态
 
-源凭证（租户级，跨 bot 复用）
+源凭证（租户级，跨 bot 复用）                                      → B.4
   GET    /openapi/v1/bots/source-credentials                       列表（掩码）
   GET    /openapi/v1/bots/source-credentials/{name}                单个（掩码）
   PUT    /openapi/v1/bots/source-credentials/{name}                注册 / 轮换
   DELETE /openapi/v1/bots/source-credentials/{name}                删除
 
-同一份状态的「另一扇门」（不感知清单，或与清单同组件）
-  POST/GET/DELETE /openapi/v1/bots/{bot_id}/cli-tools[/{name}]     CLI 工具，与 cli_tools 同实现
+CLI 工具（与清单类目 cli_tools 同一个组件）                        → B.5
+  POST   /openapi/v1/bots/{bot_id}/cli-tools                       装一个（同名答 409）
+  GET    /openapi/v1/bots/{bot_id}/cli-tools                       平台记录的全部
+  DELETE /openapi/v1/bots/{bot_id}/cli-tools/{name}                移除一个
+
+同一份状态的「另一扇门」（不感知清单）                             → B.6
   GET/PUT/DELETE  /openapi/v1/bots/{bot_id}/startup-script         启动脚本，与 script 同一行
   GET/PUT         /openapi/v1/bots/{bot_id}/engine/config          引擎配置（清单类目未开放）
-  …以及 identity / skills / resources / mcp 各自的管理 API（附录 B.5）
+  …以及 identity / skills / resources / mcp 各自的管理 API
 ```
 
-**这不是三组无关的接口。**清单本体是「你想要什么」，apply 是「平台去做」，
+**这不是几组无关的接口。**清单本体是「你想要什么」，apply 是「平台去做」，
 创建 API 是「在还没有 bot 的时刻把前两件事塞进创建流程」，凭证是「取源时用谁的
 身份」，另一扇门则是同一份状态的手工入口——被清单声明的类目上，那扇门的改动会在
 下一个 apply 点被覆盖回去（§3.2）。
+
+**每个响应都包在同一个信封里**（`{ code, message, data, request_id }`），下文与附录 B
+说的字段都是 `data` 里的字段；信封本身见 B.0。
 
 ---
 
@@ -633,6 +643,9 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 | `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
 | `categories[].aborted` / `partially_written` | 这个类目有没有收敛；**只有 `partially_written: true` 意味着「写了一半」**，需要再 apply 一次收敛。`aborted` 单独为真表示什么都没写、没有东西要回滚 |
 | `trigger` | 这次 apply 是谁发起的：`explicit`（`POST …/apply`）、`put`（`PUT` 之后自动跟的那一次）、`create:pre_container` / `create:on_container`（用清单创建 bot 的两个阶段）。**没有 `restart` / `republish`**——第一期它们不是 apply 点（§7） |
+
+> **完整字段表**（含 `sources[]` / `categories[]` / `entries[]` 每个字段的类型与含义、
+> 以及 `result` / `action` / `trigger` 的全部取值）见**附录 B.2.5** 与 **B.7**。
 
 **`result` 的四个值**：`RUNNING` 是「还没做完」——apply 是启动式的，所以轮询时先
 看到它；然后才是 `SUCCEEDED` / `PARTIAL` / `FAILED`。
@@ -1298,116 +1311,680 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 ## 附录 B：API 参考
 
-本特性开放的全部端点。所有响应都包在统一信封里
-（`{ code, message, data, request_id }`，`code` = 3 位 HTTP 状态 + 3 位业务子码，
-`request_id` 与 `X-Trace-Id` 响应头一致），下文说的字段都是 `data` 里的字段。
-「权限」一列：`MEMBER` / `ADMIN` / `OWNER` 是 bot 的协作者等级，「编辑锁」表示该
-操作还要求持有 bot 的编辑锁。
+本特性开放的全部端点，逐个列出**请求要填什么**、**响应回什么**、以及每个枚举
+字段的取值。共用的对象（信封、`Bot`、apply 报告）只在 B.0 与 B.2.5 定义一次，
+后面引用。
+
+- [B.0 公共约定](#b0-公共约定)
+- [B.1 清单本体](#b1-清单本体)
+- [B.2 apply](#b2-apply)
+- [B.3 用清单创建 bot](#b3-用清单创建-bot)
+- [B.4 源凭证](#b4-源凭证)
+- [B.5 CLI 工具](#b5-cli-工具)
+- [B.6 同一份状态的「另一扇门」](#b6-同一份状态的另一扇门)
+- [B.7 枚举速查](#b7-枚举速查)
+
+### B.0 公共约定
+
+**每个响应都包在同一个信封里**，成功失败都是这个形状：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `code` | int | 6 位：前 3 位是 HTTP 状态码，后 3 位是业务子码。`200000` = OK |
+| `message` | string | 人读的状态说明，**恒为英文**（如 `"OK"`） |
+| `data` | object \| array \| null | 载荷。**出错时为 `null`**，空结果时也可能是 `null` |
+| `request_id` | string | 链路 id，与响应头 `X-Trace-Id` 一致。报障时带上它 |
+
+下文每个端点的「响应」一节说的都是 `data` 里的字段。
+
+**路径参数 `bot_id`**：所有 `/bots/{bot_id}/…` 端点共用，就是 `Bot.bot_id`
+（形如 `20260813_a7k2m9p1`），原样传，不做任何加工。
+
+**权限位**：`MEMBER` / `ADMIN` / `OWNER` 是调用方在这个 bot 上的协作者等级，**OWNER
+恒通过**。等级不够一律 `403`，`data` 为 `null`。「编辑锁」表示该操作**还**要求持有这个
+bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 `423`，不是 `403`。
+
+**`DELETE` 类端点的 `data`**：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `deleted` | bool | **恒为 `true`**。删除失败回的是错误信封，永远不会是 `deleted: false` |
+
+**`Bot` 对象**（`GET …/with-manifest/status` 在终态返回它）：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `bot_id` | string | bot 唯一标识 |
+| `bot_name` | string | 展示名，租户内唯一 |
+| `bot_desc` | string | 描述，可能为空串 |
+| `engine` | string | 引擎，创建时固定不可改 |
+| `cluster_name` | enum | `ACRA` / `ANDC`，见 B.7 |
+| `bot_type` | string | `personal` / `service` / `desktop`（读侧包含 `desktop`，它不由本 API 创建） |
+| `status` | string | 生命周期状态，**开放集合**，见 B.7 |
+| `owner_entity_id` | string | 属主用户，回显请求里的 `user_id` |
+| `template_type` | string \| null | 模板类型（如 `applicationCoding`）；无模板时 `null` |
+| `template_config` | object \| null | 模板快照，**逐字段原样存的创建入参**，可能含创建者填进去的敏感值（如 `token`）——按敏感数据对待 |
+| `space` | object \| null | 所属业务空间：`{ space_id, name, kind }`；只有列表类端点会填 |
+
+**错误**：每个端点的错误在各自小节列出。跨端点共有的一条是 `403`——`user_id`
+指向了这个调用方无权代表的用户。
+
+---
 
 ### B.1 清单本体
 
-| 方法与路径 | 用途 | 权限 |
+#### B.1.1 `GET /openapi/v1/bots/{bot_id}/config-manifest`
+
+读整份清单。**权限：MEMBER。**
+
+**请求**：只有路径参数 `bot_id`，没有 body、没有查询参数。
+
+**响应 `data`**：
+
+| 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `GET /openapi/v1/bots/{bot_id}/config-manifest` | 读整份清单，**逐字节原样**返回（含 `script` 的引号与空白）。没有 manifest 的 bot 读出的是**空文档，不是错误** | MEMBER |
-| `PUT /openapi/v1/bots/{bot_id}/config-manifest` | 整体替换；all-or-nothing 校验；**接受后自动启动一次 apply**（§4.6） | ADMIN |
-| `DELETE /openapi/v1/bots/{bot_id}/config-manifest` | 清除声明；幂等；**不删除任何已装上的实体** | ADMIN |
-| `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities` | 该 bot 的逐构造支持表；**与 `PUT` 的判定同一个函数**，所以不会出现「这里说支持、`PUT` 却拒绝」 | MEMBER |
+| `bot_id` | string | 这份清单属于哪个 bot |
+| `document` | string | 清单原文，**逐字节原样**（`script` 的引号与空白都保留）。**没存过清单时是空串，不是 404** |
+| `size_bytes` | int | 存下来的文档字节数；没存过是 `0` |
+| `schema_version` | int \| null | 文档声明的版本；**只有在没存过清单时才是 `null`** |
+| `updated_by` | string | 最后一次写入者。应用代用户写入时是 `app:<应用 id>:on-behalf-of:<用户 id>`；没存过是空串 |
+| `updated_at` | datetime \| null | 最后一次写入时间；**只有在没存过清单时才是 `null`** |
+| `warnings` | string[] | **读的时候恒为空数组**，只有 `PUT` 会填（见 B.1.2） |
+| `apply` | object \| null | **读的时候恒为 `null`**，只有 `PUT` 会填（见 B.1.2） |
 
-`PUT` 的请求体是 `{ "document": "<清单 YAML 全文>" }`。`GET` 与 `PUT` 的响应体字段
-相同：`bot_id`、`document`（原文；没存过是空串）、`size_bytes`、`schema_version`、
-`updated_by`、`updated_at`，外加下面两个——它们**只有 `PUT` 才填**（读的时候
-`warnings` 恒为空、`apply` 恒为 `null`）：
+#### B.1.2 `PUT /openapi/v1/bots/{bot_id}/config-manifest`
 
-- `apply`：`PUT` 顺手启动的那次 apply。`RUNNING` 带可轮询的 `apply_id`；或
-  `NOT_STARTED` 并给出原因（`apply_in_progress` = 这个 bot 上还有 apply 没结束，等它
-  完了再 `POST …/apply`）。**无论哪种，文档都已经存下了，响应都是 `200`。**
-- `warnings`：这一次写入值得知道的、但不致命的事——校验器自己的提醒（比如 `sources`
-  里声明了却没人引用的源），加上这个面补的两条：声明了 `script`（现在写下、下次启动
-  才执行）、bot 还不是 `ACTIVE`（需要容器的类目会被记成失败，等 ACTIVE 之后再
-  apply 一次）。
+整体替换清单，接受之后**顺手启动一次 apply**。**权限：ADMIN。**
 
-`PUT` 的失败：`413` 文档超限（§10）；`422` 校验不通过，`data.violations` **一次列出
-全部原因**，每条带着违规条目的位置。
+**请求 body**（不认识的键会被拒绝，不是被忽略）：
 
-`GET …/capabilities` 的 `data` 形如
-`{ engine_type, bot_type, schema_versions: [1], constructs: [ {kind, name, supported, reason}, … ] }`。
-`kind` 有三种：`category`（六个类目）、`section`（`script`）、`source`（`url` /
-`git` / `named` / `content`）。**给写客户端的人**：这张表是唯一的事实来源，写之前
-先读它。
+| 字段 | 必填 | 类型 | 含义 |
+| --- | --- | --- | --- |
+| `document` | ✅ | string | 清单文档全文（YAML）。**原样存、原样读回**。校验规则见 §5–§6 与附录 E |
+
+**响应 `data`**：与 B.1.1 同样的字段，但 `warnings` 与 `apply` 这次会填：
+
+`apply` 对象——`PUT` 启动的那次 apply 的**启动结果**（不是报告）：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `apply_id` | string | 拿去轮询的 id（`GET …/config-manifest/applies/{apply_id}`）。**没启动起来时是空串** |
+| `result` | enum | `RUNNING`（已启动）或 `NOT_STARTED`（没启动） |
+| `reason` | string \| null | 只在 `NOT_STARTED` 时有值：`apply_in_progress`（这个 bot 上还有 apply 没结束，等它完了再 `POST …/apply`）或 `not_started`（其他原因没能启动） |
+
+`warnings`（`string[]`，人读的提示，不致命）今天有三类来源：
+
+1. 校验器自己的提醒——例如 `sources` 里声明了却没有任何条目引用的源；
+2. 文档声明了 `script`：**现在就写下去，下次启动才执行**；
+3. bot 当前不是 `ACTIVE`：需要容器的类目会被记成失败，等 ACTIVE 之后再 apply 一次。
+   （teclaw 的平台管理路径不需要容器，所以没有第 3 条。）
+
+> **无论 `apply` 是 `RUNNING` 还是 `NOT_STARTED`，文档都已经存下了，响应都是 `200`。**
+
+**错误**：
+
+| 状态 | 什么时候 | `data` |
+| --- | --- | --- |
+| `403` | 权限不足 | `null` |
+| `413` | 文档超出大小上限（§10） | `null` |
+| `422` | 文档不合法或有不受支持的构造 | `{ "violations": [ … ] }`，**一次列全**（见下） |
+
+`violations[]` 每一条的形状——三个字段都是公开契约：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `location` | string | 指进**你提交的那份文档**的路径，如 `manifest.identity[1].type`、`sources.content.mode`。照着它就能把光标放到那一行 |
+| `code` | string | 稳定的机器可读原因，`snake_case`（如 `multiple_sources`、`missing_digest`、`unsupported_source`）。**要分支就读它**——`message` 是会被改写的散文 |
+| `message` | string | 人读的解释，会点出规则、必要时点出值 |
+
+> 一次校验会把**所有能跑的规则都跑完**再一起回答，所以修文档是一遍过，而不是
+> 「修一条、再提交、再学下一条」。但如果文档顶层就解析不了，后面的规则没有东西
+> 可检查，那次的答案就只有一条解析错误——**列表是「我们能判定的全部」，不保证
+> 第二次提交能通过的文档在第一次就被完整描述过**。
+
+#### B.1.3 `DELETE /openapi/v1/bots/{bot_id}/config-manifest`
+
+清除声明。幂等。**权限：ADMIN。**
+
+**请求**：只有 `bot_id`。**响应 `data`**：`{ "deleted": true }`。
+
+> **不删除任何已装上的实体**——清掉的是声明，不是它装出来的东西。要清空某个类目，
+> 用 `skills: []` 这种空集合声明（§3.3）。
+
+#### B.1.4 `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities`
+
+这个 bot 接受哪些构造。**权限：MEMBER。**
+
+**请求**：只有 `bot_id`。
+
+**响应 `data`**：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `bot_id` | string | 这张表描述的 bot |
+| `engine_type` | string | 结论是按哪个引擎算的 |
+| `bot_type` | string | 结论是按哪个 bot 类型算的 |
+| `schema_versions` | int[] | 本部署接受的 `schema_version` 取值，今天是 `[1]` |
+| `constructs` | object[] | 每个构造一行，**支持与不支持的都在**，见下 |
+
+`constructs[]` 每一行：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `kind` | enum | `category`（`manifest` 下的六个类目）/ `section`（顶层非类目段，今天只有 `script`）/ `source`（条目怎么指定来源） |
+| `name` | string | 该 `kind` 内的名字。取值见 B.7 |
+| `supported` | bool | 能不能写 |
+| `reason` | string | 不支持时说明原因；**支持时是空串** |
+
+> 这张表与 `PUT` 的拒绝**是同一个函数算的**，所以不会出现「这里说支持、`PUT` 却
+> 拒绝」。唯一它答不了的是「类目 × 源形态」的组合（`resources` 不能用 `from`/git，
+> 附录 C）——那由条目校验逐条拒绝，`reason` 里会点名类目。
+>
+> 不认识的引擎**什么都不支持**，每一行的 `reason` 都会这么说。
+
+---
 
 ### B.2 apply
 
-| 方法与路径 | 用途 | 权限 |
+#### B.2.1 `POST /openapi/v1/bots/{bot_id}/config-manifest/apply`
+
+把存下来的清单应用一次。**权限：OWNER；有协作者的 bot 上还要持有编辑锁（否则 `423`）。
+状态码 `202`。**
+
+**请求**：路径参数 `bot_id`；查询参数 `dry_run`（见 B.2.2，默认 `false`）；**没有 body**
+——要应用的文档就是已经存下来的那份，这个端点不收清单。
+
+**响应 `data`**（`202`，这是一个**句柄，不是报告**）：
+
+| 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `POST /openapi/v1/bots/{bot_id}/config-manifest/apply` | 显式 apply。**`202`** + `{ apply_id, result: "RUNNING" }`，真正的下发在后台 | OWNER + 编辑锁 |
-| `POST …/config-manifest/apply?dry_run=true` | 只算计划、不动手。**`200`**，同步返回一份报告形状的计划；不写 apply 记录、不发 `apply_id`、不进历史 | OWNER + 编辑锁 |
-| `GET /openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}` | 轮询这一次。`apply_id` 属于别的 bot 时**读不到**——它是轮询句柄，不是访问凭据 | MEMBER |
-| `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply` | 最近一次报告——**「生效了吗」的权威答案**。从没 apply 过的 bot 读出**空报告，不是错误** | MEMBER |
+| `apply_id` | string | 拿去轮询：`GET …/config-manifest/applies/{apply_id}` |
+| `result` | enum | **恒为 `RUNNING`**——活还没干，这里不可能有结果 |
 
-**`POST …/apply` 在发 id 之前就能回答的都立刻回答**：这个 bot 已经有 apply 在跑 →
-`409`；存下来的文档对这个 bot 已经不合法（比如引擎换了）→ `422`。**你永远不会拿到
-一个「其实没跑起来」的 id。**
+**错误**：
 
-> `dry_run` 不改 bot 的任何配置，但它**可能真的去取源**（一个说不出「你的源可不可达、
-> digest 对不对得上」的预览是弱预览），取回的字节按平台自己的副本留存；读 MCP 集合
-> 也会顺带做一次安装行与 SkillSet 成员的对账。这两件事任何一次读都会做。
+| 状态 | 什么时候 |
+| --- | --- |
+| `403` | 权限不足（这个操作要 OWNER） |
+| `409` | 这个 bot 上已经有一次 apply 在跑 |
+| `422` | 存下来的文档对**现在的**这个 bot 已经不合法（比如引擎换了） |
+| `423` | **有协作者的 bot 上，调用方没有持有它的编辑锁** |
 
-报告的字段解释见 §4.7。
+> 这两个都是**在发 id 之前**回答的。**你永远不会拿到一个「其实没跑起来」的 id。**
+>
+> 没存过清单的 bot：apply 什么都不做、报告里什么都没有——**这不是错误**。
 
-> **注意权限位的不对称**：`PUT`（ADMIN）会自动启动一次 apply，而显式
-> `POST …/apply` 要 OWNER + 编辑锁。apply 会重写整份配置，它自己的口径是 owner 级
-> ——六个类目里有三个的独立端点本来就是 owner-only 的，清单不能成为绕过它们的路。
+#### B.2.2 `POST …/config-manifest/apply?dry_run=true`
 
-### B.3 用清单创建 bot（路径 A）
+只算计划、不动手。**权限同 B.2.1（OWNER，有协作者时还要编辑锁）。状态码 `200`
+——同步，不需要轮询。**
 
-| 方法与路径 | 用途 | 权限 |
+**请求**：
+
+| 查询参数 | 必填 | 类型 | 含义 |
+| --- | --- | --- | --- |
+| `dry_run` | ❌ | bool，默认 `false` | `true` = 返回计划而不执行。**不写 apply 记录**，所以不发 `apply_id`、不进 `last-apply`、不出现在历史里 |
+
+**响应 `data`**：一份 **apply 报告对象**（B.2.5），只是它描述的是「会发生什么」。
+
+> **不改 bot 的任何配置**，但有两件事照做，都是有意的：声明的源**可能真的被取一次**
+> （一个说不出「你的源可不可达、digest 对不对得上」的预览是弱预览），取回的字节按
+> 平台自己的副本留存——那条审计记的是「取得」，不是「下发」；读 bot 的 MCP 集合会
+> 顺带把平台安装行与 SkillSet 成员对一次账，任何一次读这份状态都会这么做。
+
+#### B.2.3 `GET /openapi/v1/bots/{bot_id}/config-manifest/applies/{apply_id}`
+
+轮询某一次 apply。**权限：MEMBER。**
+
+**请求**：
+
+| 路径参数 | 类型 | 含义 |
 | --- | --- | --- |
-| `POST /openapi/v1/bots/with-manifest` | 创建 bot + 提交清单，一次请求。**总是 `202`** + `{ bot_id, iframe_url, redirect_url }` | 与 `POST /openapi/v1/bots` 同（不是针对某个已有 bot 的操作）；**拒绝纯应用身份的调用方** |
-| `GET /openapi/v1/bots/{bot_id}/with-manifest/status` | 轮询这次创建。**纯读**：不查 AgentPass、不启动任何工作、不写任何东西 | 同上；只看得到调用方自己的创建 |
+| `bot_id` | string | 这次 apply 属于哪个 bot |
+| `apply_id` | string | `POST …/apply` 返回的那个 id |
 
-请求体 = 普通创建 API 的全部字段 + `config_manifest`（清单 YAML 全文字符串）。响应与
-状态机见 §4.5，状态词表见那一节的图。
+**响应 `data`**：apply 报告对象（B.2.5），跑着的和跑完的都读得到。
 
-- **清单在申请 Passport 授权之前就被校验**，不合法 → `422`，**连 `bot_id` 都不会分配**，
-  不会有 Passport 申请、不会有任何东西落库。
-- **比 `PUT` 多一条拒绝**：本 build 没有物化器的类目（今天只剩 `engine_config`）在这里
-  被拒，而不是先存下来。
-- **清单只提交一次**：轮询端点不收清单、也不收任何创建参数，所以「被校验的那份」必然
-  就是「被应用的那份」。
-- `GET …/status` 的 **`404` 表示这个 `bot_id` 上没有用清单创建过**——包括用普通接口
-  创建、事后 `PUT` 清单的 bot。
+> `apply_id` 属于**别的 bot** 时这里读不到——它是轮询句柄，不是访问凭据。
 
-### B.4 源凭证（租户级）
+#### B.2.4 `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply`
 
-| 方法与路径 | 用途 | 权限 |
+这个 bot 最近的一次 apply。**权限：MEMBER。**这是「**我的清单生效了吗**」的权威答案。
+
+**请求**：只有 `bot_id`。**响应 `data`**：apply 报告对象（B.2.5）。
+
+> 从没 apply 过的 bot 读出的是**空报告**（`apply_id` 为空串、`started_at` 为 `null`），
+> **不是错误**——和「没有清单的 bot 读出空文档」是同一条规则。
+
+#### B.2.5 apply 报告对象
+
+B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都是这个形状。
+
+| 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `GET /openapi/v1/bots/source-credentials` | 租户内全部凭证，按名字排序，**仅掩码元数据**（`name` / `has_secret` / `updated_at`） | 租户内任何应用可读 |
-| `GET /openapi/v1/bots/source-credentials/{name}` | 单个凭证的掩码详情（多出 `type` / `header_name` / `allowed_prefixes` / `owner_app_id`）。不存在 → `404` | 租户内任何应用可读 |
-| `PUT /openapi/v1/bots/source-credentials/{name}` | 注册或轮换。**不触发任何 apply**，下一次取源自然用新值 | 首次注册者成为属主应用；**轮换只有属主应用能做**（其他应用 `403`） |
-| `DELETE /openapi/v1/bots/source-credentials/{name}` | 删除，重复删除也成功。仍被引用时，下次 apply 该条目 `failed` 并写明凭证名——**绝不退化成不带凭证的匿名请求** | 同上，**属主应用专属** |
+| `apply_id` | string | 这次 apply 的 id。**bot 从没 apply 过时是空串** |
+| `bot_id` | string | 目标 bot |
+| `trigger` | enum | 谁发起的：`explicit` / `put` / `create:pre_container` / `create:on_container`，见 B.7 |
+| `result` | enum | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的** |
+| `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
+| `finished_at` | datetime \| null | 结束时间；**恰好在 `result` 是 `RUNNING` 时为 `null`** |
+| `sources` | object[] | 命名源的溯源，每个源一行，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
+| `categories` | object[] | 每个**被声明的**类目一行，见下。文档没提的类目不出现，因为它根本没被碰 |
+| `entries` | object[] | 每个**被声明的条目**一行，跨所有类目，见下 |
+| `notes` | string[] | 不属于任何条目的 apply 级说明。今天只有一处：teclaw 上「所有类目都写完了、最后整包 artifact 重投失败」记在这里，而不是让整次 apply 失败。ARCA 上恒为空 |
 
-字段含义、`allowed_prefixes` 的匹配规则与选 token 的口径见 §4.2。生产环境解析不到
-主密钥时，`PUT` 会直接 `503` 拒绝写入，**绝不明文落库**。
+`sources[]`：
 
-### B.5 同一份状态的「另一扇门」
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 源名（`sources.<name>` 里的那个名字） |
+| `ref` | string \| null | 声明的 ref：tag / branch / commit SHA |
+| `resolved_sha` | string \| null | 这一次**实际解析到**的 commit。`ref: main` 这种会动的引用，下周就是另一个值 |
+| `auth` | string \| null | 用到的凭证**名**。**永远只有名字，没有值** |
 
-清单管的每个类目，平台上都另有一组手工管理的端点。它们不是清单的一部分，但**被清单
-声明的类目上，这些端点的改动会在下一个 apply 点被覆盖回去**（§3.2）——列在这里，是
-为了让你知道「哪扇门通向同一间屋子」。
+`categories[]`：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `category` | string | 类目名，或 `script` |
+| `aborted` | bool | 这个类目没有收敛（至少一条声明的条目没能物化）。**单独看它并不保证「这块区域没被动过」**，要和下一个字段一起读 |
+| `partially_written` | bool | 失败发生在**写了一半的时候**，这块区域可能已经变了。`aborted` 为真而它为假 = 什么都没写、没有东西要回滚；它为真 = 再 apply 一次收敛 |
+| `removed` | string[] | 覆盖**删掉了什么**。它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
+
+`entries[]`：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `category` | string | 这条属于哪个类目 / 段 |
+| `name` | string | 条目怎么称呼自己：skill 的 `name`、identity 的 `type`、resource 的 `path`、mcp 的 `server_code`、cli_tool 的 `name` |
+| `action` | enum | `created` / `updated` / `unchanged` / `skipped` / `failed`，见 B.7 |
+| `error` | string \| null | `failed` 或 `skipped` 时说明原因 |
+| `note` | string \| null | 成功条目上「你本来得自己推断」的事实。今天只有一处：`script` 用它说明什么时候真正执行 |
+
+> **apply 记录的是「下发」，不是「执行」。**`script` 那一条记的是「已写入」，脚本在
+> 容器启动时才跑，退出码不进这份报告。**apply 失败也不改 bot 状态、不阻断 bot 就绪**
+> ——所以「bot 是健康的」不等于「它的清单全生效了」。
+
+---
+
+### B.3 用清单创建 bot
+
+#### B.3.1 `POST /openapi/v1/bots/with-manifest`
+
+创建 bot + 提交清单，一次请求。**总是 `202`。**
+
+**权限**：与 `POST /openapi/v1/bots` 相同（这不是针对某个已有 bot 的操作，没有协作者
+等级可查）。**纯应用身份的调用方被拒绝（`401`）**——bot 还不存在时没有授权关系可查，
+所以这条路必须由一个指名了终端用户的调用来走。
+
+**请求 body**（= 普通创建 API 的全部字段 + 一个 `config_manifest`；不认识的键会被拒绝）：
+
+| 字段 | 必填 | 类型 | 含义与取值 |
+| --- | --- | --- | --- |
+| `bot_name` | ✅ | string | 展示名。非空白、**不能含 `@`**、租户内不能重名（重名 `409`）；首尾空白会被去掉 |
+| `bot_desc` | ✅ | string | 这个 bot 是干什么的 |
+| `engine` | ✅ | string | 引擎，**创建后不可改**。合法集合由部署配置决定——去引擎组的 available-engines 端点读；不在表里的 `400`。**内部实现引擎不接受**（如 `aicoding`，它是 `claude_code` 背后的内部运行时） |
+| `cluster_name` | ✅ | enum | `ACRA` / `ANDC`。**与 `engine` 严格一一对应**：`teclaw` ⟺ `ANDC`，其余引擎 ⟺ `ACRA`。配错 `400` |
+| `bot_type` | ✅ | enum | `personal`（本人自用，单一 draft 运行时）或 `service`（为发布而建，随发布流程获得 verify / online 运行时）。**`desktop` 不能从这里创建** |
+| `space_id` | ❌ | string \| null | 要关联的业务空间；省略则用当前空间 |
+| `engine_properties` | ❌ | object \| null | 引擎专属属性。普通 bot 省略；模板 bot 传 `template_config` |
+| `engine_properties.template_type` | ❌ | string \| null | 模板类型。模板工厂快照必填（值从 available-tc-list 回显）；手写的 application-coding 配置省略或写 `applicationCoding` |
+| `engine_properties.template_config` | ✅（给了 `engine_properties` 时） | object | 模板配置：手写的 application-coding 属性，或从 bot-templates/available-tc-list **逐字段回显**的模板工厂快照。平台管理的身份与生命周期字段不接受 |
+| `config_manifest` | ✅ | string | **清单文档全文（YAML 字符串）**，与 `PUT …/config-manifest` 收的是同一份东西 |
+
+`config_manifest` 比 `PUT` 多一条拒绝：**本 build 没有物化器的类目**（今天只剩
+`engine_config`）在这里被拒，而不是先存下来——这条路上「先接受」的代价是一次授权、
+一个已创建的 bot，然后才失败。
+
+⚠️ **第一期：`script` 不得依赖同一份清单声明的任何东西。**首启时脚本被烤进启动命令，
+在其他类目下发**之前**就跑了。
+
+**响应 `data`**（`202`）：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `bot_id` | string | 已分配的 bot id。拿它去轮询 |
+| `iframe_url` | string | 可内嵌的授权链接，或空串 |
+| `redirect_url` | string | 整页跳转的授权链接，或空串 |
+
+> **平台只给其中一个，给哪个不可预测——取非空的那个。**
+>
+> **响应里没有 `state`**：刚提交按定义就是「等授权」，一个能装下终态的字段只会诱导
+> 调用方去判断一个不可能出现的值。
+
+**错误**：
+
+| 状态 | 什么时候 | `data` |
+| --- | --- | --- |
+| `400` | 引擎不在部署配置里 / 是内部引擎；或 `engine` 与 `cluster_name` 不匹配 | `null` |
+| `401` | 调用方是**纯应用身份**（没有指名任何终端用户）。bot 还不存在时没有授权关系可查，所以这条路必须由能解析出用户的调用来走 | `null` |
+| `403` | 调用方无权代表 `user_id` 指名的那个用户 | `null` |
+| `409` | `bot_name` 在租户内重名；或目标空间的 bot 配额满了 | 配额满时是 `{ space_id, space_name, space_type: "PERSONAL"\|"TEAM", ceiling, used }` |
+| `422` | 清单不合法 | `{ "violations": [ … ] }`，形状同 B.1.2 |
+
+> **`422` 时连 `bot_id` 都不会分配**，不会有 Passport 申请、不会有任何东西落库——
+> **不会让你点完授权才被告知清单写错了**。
+>
+> **校验顺序**（决定你先看到哪个错）：① 创建策略归一（老引擎别名会在这一步被改写成
+> 真正要跑的引擎）→ ② 名称检查，然后是平台 preflight（配额、保留引擎）→ ③ **对着
+> 归一之后的引擎**校验清单 → ④ 清单落库 → ⑤ 申请 Passport。所以拿到 `422` 就意味着
+> 名字和配额那关**已经过了**；反过来，`409` 的时候清单还没被看过一眼。
+
+#### B.3.2 `GET /openapi/v1/bots/{bot_id}/with-manifest/status`
+
+这次创建走到哪了。**权限同 B.3.1；只看得到调用方自己的创建。**
+
+**请求**：**只有路径参数 `bot_id`，没有别的**——不收清单，也不收任何创建参数。
+这是刻意的：**被校验的那份清单必然就是被应用的那份**，没有第二份副本能被人换掉。
+
+> **纯读**：它读的是落库的行（创建任务行、bot 记录、apply 记录），不查 AgentPass、
+> 不启动任何工作、不写任何东西。**轮得快一点不会让创建变快，停止轮询也不会让创建停下。**
+
+**响应 `data`**：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `state` | enum | 创建走到哪了。八个取值见下 |
+| `bot_id` | string | 这次创建对应的 bot |
+| `iframe_url` | string | **只在 `AWAITING_AUTHORIZATION` 时非空**，之后是空串 |
+| `redirect_url` | string | 同上 |
+| `bot` | object \| null | 创建出来的 `Bot`（B.0）。**只在 `READY` 与 `APPLY_FAILED` 时出现** |
+| `apply` | object \| null | apply 报告（B.2.5）。**只在 `READY` 与 `APPLY_FAILED` 时出现**，且**只会是这次创建自己的那份**——创建之后又跑过的显式 apply 不会顶替它（那个去 `last-apply` 看） |
+| `message` | string | 状态名说不清楚时的原因；其余状态是空串 |
+
+`state` 的八个取值：
+
+| 值 | 终态 | 有 bot 吗 | 含义 |
+| --- | --- | --- | --- |
+| `AWAITING_AUTHORIZATION` | ❌ | 还没有 | 等用户点开授权链接。**什么都还没创建** |
+| `AUTHORIZATION_REJECTED` | ✅ | **没有** | 用户拒绝了。落库的清单随创建一起删掉，不留残骸。`message` 说明原因 |
+| `AUTHORIZATION_EXPIRED` | ✅ | **没有** | 窗口内没人响应（默认 10 分钟）。与「拒绝」分开，因为**没有人做过任何决定** |
+| `CREATING` | ❌ | 记录已有 | 已授权，bot 记录已写入，容器正在开通 |
+| `CREATE_FAILED` | ✅ | **没有可用的 bot** | 建不出来，或容器始终没起来。**与清单无关** |
+| `APPLYING` | ❌ | 有，且在跑 | bot 起来了，清单的容器后阶段正在下发 |
+| `READY` | ✅ | 有，且在跑 | bot 起来了，**整份清单都落地了** |
+| `APPLY_FAILED` | ✅ | **有，且在跑** | bot 起来了，**部分配置没落地**。响应同时带着 `bot` 和 `apply`，所以这跟 `CREATE_FAILED` 一眼就分得开。改完清单 `POST …/apply` 即可，**不需要重建** |
+
+> **三种失败不用读文案就能分辨**：清单不合法 = 提交时 `422`（连 `bot_id` 都没有）；
+> `CREATE_FAILED` = 没有可用的 bot；`APPLY_FAILED` = **bot 正在运行**，只是配置缺了一块。
+>
+> **`PARTIAL` 的 apply 汇报为 `APPLY_FAILED`，不是 `READY`**：按类目覆盖语义，一个
+> 半途失败的类目可能已经**删掉**了旧条目却没写进新的——这是要处理的状态，不是带
+> 脚注的成功。
+>
+> 终态的报告**覆盖两个阶段**：容器前阶段的 `script` 会被带进来，不会看起来像是消失了。
+>
+> **teclaw 的顺序不同**（§7.1：先写记录、对着记录 apply、再开容器），所以它的状态流是
+> `CREATING → APPLYING → CREATING → READY`。
+
+**错误**：
+
+| 状态 | 什么时候 |
+| --- | --- |
+| `401` | 调用方是纯应用身份（同 B.3.1） |
+| `403` | 无权代表这个用户 |
+| `404` | **这个 `bot_id` 上没有用清单创建过**——包括用普通接口创建、事后 `PUT` 清单的 bot。它的配置状态去 `last-apply` 看 |
+
+---
+
+### B.4 源凭证
+
+租户级命名对象，一次注册、所有 bot 的所有清单都能按名字引用。语义、
+`allowed_prefixes` 的匹配规则与选 token 的口径见 §4.2。
+
+**权限**：读——租户内任何应用都可以；写与删——**只有属主应用**（第一次 `PUT` 占下
+这个名字的那个应用），其他应用 `403`。
+
+#### B.4.1 `GET /openapi/v1/bots/source-credentials`
+
+租户内全部凭证，按名字排序。**请求**：无参数。
+
+**响应 `data`**：数组，每项：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 凭证名。清单里 `auth: <name>` 就是引用它 |
+| `has_secret` | bool | 这个名字下有没有存着 secret |
+| `updated_at` | datetime | 最后一次写入时间（服务端时钟） |
+
+#### B.4.2 `GET /openapi/v1/bots/source-credentials/{name}`
+
+单个凭证的掩码详情。
+
+**请求**：
+
+| 路径参数 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 凭证名。**调用方自选的标识符，与域名之间没有任何推导关系** |
+
+**响应 `data`**：B.4.1 的三个字段，再加：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `type` | enum | 认证机制：`header` / `oss_aksk` / `basic`，见 B.7 |
+| `header_name` | string \| null | secret 会被放进哪个请求头；机制不用请求头时 `null` |
+| `allowed_prefixes` | string[] | 这个凭证**允许被出示给**哪些绝对 HTTPS 前缀 |
+| `owner_app_id` | int | 属主应用的注册 id。轮换与删除只有它能做；租户内所有应用都能读这份元数据 |
+
+**任何路径下都不返回 secret 的值。**日志、错误信息、apply 报告里只出现凭证**名**。
+
+**错误**：`404` —— 本租户下没有这个名字的凭证。
+
+#### B.4.3 `PUT /openapi/v1/bots/source-credentials/{name}`
+
+注册或轮换。**轮换 = 对同一个名字重新 `PUT`。**
+
+**请求**：路径参数 `name`（同 B.4.2）；body：
+
+| 字段 | 必填 | 类型 | 含义与取值 |
+| --- | --- | --- | --- |
+| `type` | ❌ | enum，默认 `header` | 出示 secret 的**认证机制**（不是存储类型）。`header` 是唯一已实现的；`oss_aksk` 与 `basic` 是保留值，**写了会被 `422` 拒绝** |
+| `header_name` | 见右 | string \| null | secret 放进哪个请求头。**`type` 是 `header` 时必填**（如 git 宿主的 `PRIVATE-TOKEN`，或 bearer 风格的 `Authorization`） |
+| `secret` | ✅ | string | secret 值本身，**是完整的头值**。加密落库，**永远读不回来**，不进日志、不进 apply 报告 |
+| `allowed_prefixes` | ✅ | string[] | 授权出示范围：绝对 HTTPS 前缀，**至少一项，空数组即拒绝**。按**路径段边界**匹配——`https://host/team/content` 授权的是那棵树，**不包括** `…/team/content-secret` |
+
+**响应 `data`**：与 B.4.2 相同的掩码详情（回显你刚写的元数据，不含 secret）。
+
+**错误**：
+
+| 状态 | 什么时候 |
+| --- | --- |
+| `403` | 这个名字已被别的应用占着——轮换是属主应用一个人的事 |
+| `422` | `type` 是保留机制；`type` 是 `header` 却没给 `header_name`；前缀不是绝对 HTTPS 或数组为空 |
+| `503` | 生产环境解析不到平台主密钥。**写入被拒绝，绝不明文落库** |
+
+> **注册/轮换不触发任何 apply**，下一个 apply 点自然用新值。
+
+#### B.4.4 `DELETE /openapi/v1/bots/source-credentials/{name}`
+
+删除。重复删除也成功。
+
+**请求**：路径参数 `name`。**响应 `data`**：`{ "deleted": true }`。**错误**：`403`（非属主应用）。
+
+> 删掉一个**仍被引用**的凭证：引用它的条目在下次 apply 记 `failed` 并写明凭证名，
+> 进而按 §3.4 让整个类目不写。**绝不会退化成不带凭证的匿名请求。**
+
+---
+
+### B.5 CLI 工具
+
+`…/cli-tools` 与清单的 `cli_tools` 类目**走同一个组件**，所以同一份声明得到同样的
+拒绝理由。区别只有一处：**清单 apply 是全量覆盖**（不再声明的工具会被移除，包括你
+用这组 API 装的），单次 `POST` 不是。语义见 §5.6。
+
+#### B.5.1 `POST /openapi/v1/bots/{bot_id}/cli-tools`
+
+装一个命令行工具。**权限：ADMIN。**
+
+**请求 body**：
+
+| 字段 | 必填 | 类型 | 含义与取值 |
+| --- | --- | --- | --- |
+| `name` | ✅ | string，≤128 | agent 要敲的**命令名**。**裸标识符，不含位置信息**——落在哪由引擎决定 |
+| `source` | ✅ | string | 从哪里取。平台侧可达的 https |
+| `digest` | ✅ | string | `sha256:<64 位十六进制>`，**强制**。平台在代你分发可执行物，供应链必须钉死。它校验的是**取回来的那个对象**——二进制本身，或整个压缩包 |
+| `unpack` | ❌ | enum \| null | 源是压缩包时写 `zip` 或 `tar.gz`；省略则取回来的对象本身就是可执行文件 |
+| `subpath` | 见右 | string \| null | 包内哪个文件是这个命令。**给了 `unpack` 就必填，没给 `unpack` 就非法**——一个条目 = 一个命令 = 一个文件 |
+| `version` | ❌ | string \| null | **纯元数据，不参与收敛**：同样的字节换个 version 字符串，还是同一个工具，不会重新下发 |
+| `auth` | ❌ | string \| null | 取源时用的**凭证名**（B.4）。**永远不是 secret 值** |
+
+平台的动作顺序：取源 → 按 `digest` 验 → （有 `unpack` 时）解包取出 `subpath` 那一个
+文件 → 确认它是 **x86-64 ELF 可执行文件** → 留一份自己的副本 → 让引擎装上。
+**任何一步失败都不留记录**，所以 `200` 就意味着 bot 真的有这个命令了。
+
+**响应 `data`**（一个 `CliTool`）：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `name` | string | 命令名 |
+| `version` | string \| null | 你声明的那个。元数据 |
+| `digest` | string | 取回对象被钉住的 digest |
+| `subpath` | string \| null | 哪个包内成员成了这个命令 |
+| `md5` | string | **交付出去的那个文件**的 md5，由平台在解包与选取**之后**算——所以是可执行文件的，不是压缩包的。引擎拿它做变更判断 |
+| `size_bytes` | int | 交付出去的那个文件的大小 |
+| `installed_by` | string | `manifest`（清单 apply 装的）或装它的**用户 id**。**清单 apply 是全量覆盖，会移除它没声明的、从这里装的工具**——这个字段就是报告能这么说的依据 |
+| `gmt_modified` | datetime | 这条记录最后一次变化的时间 |
+
+**错误**：
+
+| 状态 | 什么时候 |
+| --- | --- |
+| `403` | 权限不足 |
+| `409` | 这个 bot 已经有同名工具。**单次安装不会替换你没提到的东西**——要换先删，或者用清单声明整套（清单 apply 是全量覆盖） |
+| `422` | 声明、取回的字节或引擎拒绝了这次安装：没钉 digest、源对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎不收 |
+
+#### B.5.2 `GET /openapi/v1/bots/{bot_id}/cli-tools`
+
+**权限：MEMBER。请求**：只有 `bot_id`。
+
+**响应 `data`**：
+
+| 字段 | 类型 | 含义 |
+| --- | --- | --- |
+| `tools` | object[] | 每项是一个 `CliTool`（B.5.1），**按名字排序**。没有工具时是空数组 |
+
+> 这是**平台自己的记录**，不是读容器。它也正是清单 apply 计算「要删掉哪些」的依据，
+> 所以同时是「全量覆盖会替换掉什么」的答案。
+
+#### B.5.3 `DELETE /openapi/v1/bots/{bot_id}/cli-tools/{name}`
+
+**权限：ADMIN。**
+
+**请求**：
+
+| 路径参数 | 类型 | 含义 |
+| --- | --- | --- |
+| `bot_id` | string | 目标 bot |
+| `name` | string | 要移除的命令，**按它被装上时的名字写** |
+
+**响应 `data`**：`{ "deleted": true }`。从 bot 上移除、删掉平台记录、删掉那份字节副本。
+
+**错误**：`404` —— 这个 bot 没有叫这个名字的工具。**这一个不是幂等的**（和清除清单
+不同）：「工具已经没了」和「你写错了名字」值得分开告诉你。
+
+---
+
+### B.6 同一份状态的「另一扇门」
+
+清单管的每个类目，平台上都另有一组手工管理的端点。它们不是本特性的一部分，但
+**被清单声明的类目上，这些端点的改动会在下一个 apply 点被覆盖回去**（§3.2）——
+列在这里，是为了让你知道「哪扇门通向同一间屋子」。
 
 | 类目 / 段 | 另一扇门 | 关系 |
 | --- | --- | --- |
-| `cli_tools` | `POST` / `GET` `/openapi/v1/bots/{bot_id}/cli-tools`、`DELETE …/cli-tools/{name}` | **同一个组件**，同一份声明得到同样的拒绝理由。区别只有一处：清单 apply 是全量覆盖，单次 `POST` 不是（同名答 `409`，要换先删）。读 MEMBER、写 ADMIN，与清单同级（§5.6） |
-| `script` | `GET` / `PUT` / `DELETE` `/openapi/v1/bots/{bot_id}/startup-script` | #935 老端点，**不感知清单**；清单声明的 `script` 在 apply 时物化进同一行，所以在声明了 `script` 的 bot 上，从这里改会被下一次 apply 改回去（§5.5）。OWNER |
-| `identity` | `GET` `/openapi/v1/bots/{bot_id}/identity`、`GET` / `PUT` `…/identity/{file_type}` | 同一批 identity 文件 |
+| `cli_tools` | **B.5**（`…/cli-tools`） | 同一个组件，出入参见上 |
+| `script` | `GET` / `PUT` / `DELETE` `/openapi/v1/bots/{bot_id}/startup-script`（权限 OWNER） | #935 老端点，**不感知清单**；清单声明的 `script` 在 apply 时物化进同一行，所以在声明了 `script` 的 bot 上，从这里改会被下一次 apply 改回去（§5.5） |
+| `identity` | `GET` `…/identity`、`GET` / `PUT` `…/identity/{file_type}` | 同一批 identity 文件 |
 | `skills` | `/openapi/v1/bots/{bot_id}/skills` 一组（上传、启用/停用、删除、参数） | 同一个 active skill set |
 | `resources` | `/openapi/v1/bots/{bot_id}/resources` 一组 | 同一棵 workspace 文件树。**CLI 工具不在其中**——它不按路径寻址（§5.6） |
 | `mcp` | `/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}` 等 | 同一份已启用 server 集合；**界面上手工开的 server 会被声明了 `mcp` 的清单移除**（§8） |
-| `engine_config` | `GET` / `PUT` `/openapi/v1/bots/{bot_id}/engine/config` | 这扇门**开着**（自由 JSON，直接写设备），但**清单类目 `engine_config` 没开**——今天要配引擎配置，只能走这里，且它不受清单管辖、不会被 apply 覆盖 |
+| `engine_config` | `GET` / `PUT` `/openapi/v1/bots/{bot_id}/engine/config` | 这扇门**开着**（自由 JSON，直接写设备），但**清单类目 `engine_config` 没开**——今天要配引擎配置只能走这里，且它不受清单管辖、不会被 apply 覆盖 |
 
-> 这张表列的是「同一份状态的另一个入口」，不是完整的 bot 开放平台 API 目录。各组端点
+> 这张表列的是「同一份状态的另一个入口」，不是完整的 bot 开放平台 API 目录。这些端点
 > 自己的出入参以各自的 OpenAPI 文档为准。
 
+---
+
+### B.7 枚举速查
+
+一页看完本特性所有枚举字段的取值。
+
+**`cluster_name`**（请求与响应）：
+
+| 值 | 含义 |
+| --- | --- |
+| `ACRA` | `teclaw` 以外的全部引擎 |
+| `ANDC` | 引擎 `teclaw` |
+
+**`bot_type`**：请求侧只接受 `personal`（本人自用，单一 draft 运行时）与
+`service`（为发布而建，随发布流程获得 verify / online 运行时）；响应侧还可能读到
+`desktop`（跑在用户自己机器上，生命周期不归本 API 管，也不在本特性范围内）。
+
+**`Bot.status`**——**开放集合**，新的生命周期还会加值，所以**除 `ACTIVE` 之外一律
+当作「还不能干活」**：
+
+| 值 | 含义 |
+| --- | --- |
+| `PENDING` | 已创建，设备还在开通 |
+| `ACTIVE` | 在跑，可达 |
+| `FAILED` | 设备开通失败（重启，或删掉重建） |
+| `OFFLINE` / `RELEASING` / `RELEASED` | desktop bot 的生命周期状态 |
+| `RECYCLED` / `REACTIVATING` | 休眠 bot 的回收状态 |
+
+**创建状态 `state`**（B.3.2）：`AWAITING_AUTHORIZATION` · `AUTHORIZATION_REJECTED` ·
+`AUTHORIZATION_EXPIRED` · `CREATING` · `CREATE_FAILED` · `APPLYING` · `READY` ·
+`APPLY_FAILED`——逐个含义见 B.3.2 的表。
+
+**apply 的 `result`**：
+
+| 值 | 含义 |
+| --- | --- |
+| `RUNNING` | 还没做完。apply 是启动式的，所以轮询时先看到它；此时 `finished_at` 为 `null` |
+| `SUCCEEDED` | 全部落地 |
+| `PARTIAL` | 一部分落地。**按类目覆盖语义，这是要处理的状态，不是带脚注的成功** |
+| `FAILED` | 都没落地 |
+
+**`PUT` 响应里 `apply.result`**：只有 `RUNNING` 与 `NOT_STARTED` 两个值；
+`NOT_STARTED` 时 `reason` 是 `apply_in_progress` 或 `not_started`。
+
+**条目的 `action`**：
+
+| 值 | 含义 |
+| --- | --- |
+| `created` | 这个类目区域里原来没有，装上了 |
+| `updated` | 原来有，内容变了 |
+| `unchanged` | 已经是声明的样子，**零动作。这是正常的**——收敛就是「已经对了就不动」 |
+| `skipped` | **因为所在类目被中止（§3.4）而没写**，不是「可选所以跳过」。同一类目里，把类目搞挂的那条记 `failed`，其余无辜的记 `skipped` |
+| `failed` | 这一条自己没成，`error` 说明原因 |
+
+**apply 的 `trigger`**：
+
+| 值 | 什么发起的 |
+| --- | --- |
+| `explicit` | `POST …/config-manifest/apply` |
+| `put` | `PUT …/config-manifest` 之后自动跟的那一次 |
+| `create:pre_container` | 用清单创建 bot 的**容器前**阶段 |
+| `create:on_container` | 用清单创建 bot 的**容器后**阶段 |
+
+**没有 `restart` / `republish`**——第一期它们不是 apply 点（§7）。
+
+**能力表的 `kind` 与 `name`**：
+
+| `kind` | 可能的 `name` |
+| --- | --- |
+| `category` | `mcp` · `resources` · `skills` · `engine_config` · `identity` · `cli_tools` |
+| `section` | `script` |
+| `source` | `url`（内联 HTTPS URL）· `git`（git 引用）· `named`（`from` 引用命名源）· `content`（内联文本） |
+
+**凭证的 `type`**：
+
+| 值 | 含义 |
+| --- | --- |
+| `header` | 取源时把 secret 放进 `header_name` 指定的请求头。**唯一已实现的机制** |
+| `oss_aksk` | 保留给将来的 OSS AK/SK 机制，**今天写了就被拒**——这样存下来的 type 从第一天起就是真的 |
+| `basic` | 保留给将来的 HTTP Basic 机制，同上 |
+
+**CLI 工具的 `unpack`**：`zip` / `tar.gz`（或省略，表示源本身就是可执行文件）。
 ---
 
 ## 附录 C：尚未开放的写法
@@ -1420,7 +1997,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 | 构造 | 为什么 | 什么时候开放 |
 | --- | --- | --- |
-| 类目 `engine_config` | 按跨引擎确认的结论移出第一期，至今没有物化器 | 它的物化器回来时。**在此之前**要写引擎配置，走 `GET`/`PUT /openapi/v1/bots/{bot_id}/engine/config`（附录 B.5），那条路不受清单管辖 |
+| 类目 `engine_config` | 按跨引擎确认的结论移出第一期，至今没有物化器 | 它的物化器回来时。**在此之前**要写引擎配置，走 `GET`/`PUT /openapi/v1/bots/{bot_id}/engine/config`（附录 B.6），那条路不受清单管辖 |
 | `resources` 条目用 **`from`（命名源）或 git 源** | resources 物化器目前只走 URL 那条路（W6）；接受了会在 apply 时以一条看不懂的错误失败，所以在 `PUT` 就精确拒掉 | resources 接上 git 那条路之后。**在此之前**：resources 条目写内联 `source` URL 或 `content` |
 
 **已经开放的**（早期版本的本文档曾把它们列在这张表里，现在不是了）：
