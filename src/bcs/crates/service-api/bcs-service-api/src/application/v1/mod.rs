@@ -18,6 +18,7 @@ pub mod group_session_connection;
 pub mod identity;
 pub mod internal_bot_attributes;
 pub mod invitation;
+pub mod invite_code;
 pub mod message;
 pub mod principal;
 pub mod register;
@@ -44,6 +45,7 @@ pub use identity::{
 };
 pub use internal_bot_attributes::*;
 pub use invitation::*;
+pub use invite_code::*;
 pub use message::*;
 pub use principal::{AuthenticatedUser, BotPrincipal, HumanPrincipal, Principal};
 pub use register::*;

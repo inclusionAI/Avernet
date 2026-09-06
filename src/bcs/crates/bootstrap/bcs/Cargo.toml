@@ -143,6 +143,8 @@ bcs-app-invitation = { workspace = true }
 bcs-app-register = { workspace = true }
 bcs-app-collaboration-template = { workspace = true }
 bcs-app-collaboration-definition = { workspace = true }
+bcs-invite-code-store = { workspace = true }
+bcs-app-invite-code = { workspace = true }
 bcs-provider-http = { workspace = true }
 bcs-bot-store = { workspace = true }
 bcs-friend-store = { workspace = true }

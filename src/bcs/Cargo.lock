@@ -268,6 +268,7 @@ dependencies = [
  "bcs-app-collaboration-template",
  "bcs-app-group",
  "bcs-app-invitation",
+ "bcs-app-invite-code",
  "bcs-app-register",
  "bcs-app-session",
  "bcs-auth-alipay",
@@ -312,6 +313,7 @@ dependencies = [
  "bcs-human-notify-api",
  "bcs-human-notify-dummy",
  "bcs-interaction",
+ "bcs-invite-code-store",
  "bcs-judge",
  "bcs-jwt",
  "bcs-leader-election",
@@ -518,6 +520,20 @@ dependencies = [
  "bcs-test-support",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "bcs-app-invite-code"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-service-api",
+ "hex",
+ "hmac",
+ "rand 0.8.7",
+ "sha2",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1293,6 +1309,25 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "bcs-invite-code-store"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bcs-config",
+ "bcs-db-api",
+ "bcs-db-local",
+ "bcs-service-api",
+ "hex",
+ "hmac",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-test",
+ "tracing",
 ]
 
 [[package]]

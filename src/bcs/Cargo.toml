@@ -22,6 +22,7 @@ members = [
     "crates/services/bcs-group",
     "crates/application/v1/bcs-app-group",
     "crates/application/v1/bcs-app-bot",
+    "crates/application/v1/bcs-app-invite-code",
     "crates/services/bcs-group-store",
     "crates/services/bcs-interaction",
     "crates/services/bcs-message",
@@ -61,6 +62,7 @@ members = [
     "crates/application/v1/bcs-app-collaboration-definition",
     "crates/services/bcs-session-file",
     "crates/services/bcs-session-file-store",
+    "crates/services/bcs-invite-code-store",
     "crates/services/bcs-routing",
     "crates/services/bcs-system-message",
     # plugin-api
@@ -298,9 +300,11 @@ bcs-session-store          = { path = "crates/services/bcs-session-store" }
 bcs-app-session             = { path = "crates/application/v1/bcs-app-session" }
 bcs-app-invitation = { path = "crates/application/v1/bcs-app-invitation" }
 bcs-app-register = { path = "crates/application/v1/bcs-app-register" }
+bcs-app-invite-code = { path = "crates/application/v1/bcs-app-invite-code" }
 bcs-app-collaboration-template = { path = "crates/application/v1/bcs-app-collaboration-template" }
 bcs-app-collaboration-definition = { path = "crates/application/v1/bcs-app-collaboration-definition" }
 bcs-session-file-store     = { path = "crates/services/bcs-session-file-store" }
+bcs-invite-code-store      = { path = "crates/services/bcs-invite-code-store" }
 bcs-session-file           = { path = "crates/services/bcs-session-file" }
 bcs-system-message         = { path = "crates/services/bcs-system-message" }
 bcs-cache-api              = { path = "crates/plugin-api/bcs-cache-api" }

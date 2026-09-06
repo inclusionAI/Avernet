@@ -1,0 +1,401 @@
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
+use bcs_service_api::application::v1::{
+    ApplicationError, AuthenticatedCaller, BindInviteCode, BindInviteCodeResult,
+    GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult, InviteCodeBindingView,
+    InviteCodeService,
+};
+use bcs_service_api::port::repo::{
+    InviteCodeBindOutcome, InviteCodeRecord, InviteCodeRepoPort, InviteCodeStatus,
+};
+use hmac::{Hmac, Mac};
+use rand::rngs::OsRng;
+use rand::RngCore;
+use sha2::Sha256;
+use tracing::warn;
+
+type HmacSha256 = Hmac<Sha256>;
+
+const INVITE_CODE_LEN: usize = 6;
+const INVITE_CODE_CHARSET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+pub struct InviteCodeServiceImpl {
+    repo: Arc<dyn InviteCodeRepoPort>,
+    secret: Vec<u8>,
+}
+
+impl InviteCodeServiceImpl {
+    pub fn new(repo: Arc<dyn InviteCodeRepoPort>, secret: Vec<u8>) -> Self {
+        Self { repo, secret }
+    }
+
+    fn normalize_code(code: &str) -> Result<String, ApplicationError> {
+        let code = code.trim().to_uppercase();
+        if code.len() != INVITE_CODE_LEN {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "invite code must be exactly 6 characters",
+            ));
+        }
+        if !code
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_uppercase())
+        {
+            return Err(ApplicationError::invalid(
+                "invalid_request",
+                "invite code must contain only digits and uppercase letters",
+            ));
+        }
+        Ok(code)
+    }
+
+    fn code_hash(&self, code: &str) -> String {
+        let mut mac = HmacSha256::new_from_slice(&self.secret)
+            .expect("invite-code HMAC secret is not empty");
+        mac.update(code.as_bytes());
+        hex::encode(mac.finalize().into_bytes())
+    }
+
+    fn code_hint(code: &str) -> String {
+        code.chars().rev().take(4).collect::<String>().chars().rev().collect()
+    }
+
+    fn generate_code() -> String {
+        let mut rng = OsRng;
+        let mut code = String::with_capacity(INVITE_CODE_LEN);
+        for _ in 0..INVITE_CODE_LEN {
+            let idx = (rng.next_u32() as usize) % INVITE_CODE_CHARSET.len();
+            code.push(INVITE_CODE_CHARSET[idx] as char);
+        }
+        code
+    }
+
+    fn now_secs() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    fn record_for_code(&self, code: &str, created_by: Option<String>) -> InviteCodeRecord {
+        let now = Self::now_secs();
+        InviteCodeRecord {
+            id: 0,
+            code_hash: self.code_hash(code),
+            code_hint: Self::code_hint(code),
+            status: InviteCodeStatus::Active,
+            bound_user_id: None,
+            bound_at: None,
+            created_by,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    fn human_user_id(caller: &AuthenticatedCaller) -> Result<&str, ApplicationError> {
+        caller.user.as_ref().map(|user| user.id.as_str()).ok_or_else(|| {
+            ApplicationError::invite_code_not_applicable(
+                "invite codes are only available to human callers",
+            )
+        })
+    }
+}
+
+#[async_trait]
+impl InviteCodeService for InviteCodeServiceImpl {
+    async fn init_invite_codes(
+        &self,
+        command: InitInviteCodes,
+    ) -> Result<InitInviteCodesResult, ApplicationError> {
+        let mut codes = Vec::with_capacity(command.count as usize);
+        while codes.len() < command.count as usize {
+            let code = Self::generate_code();
+            let record = self.record_for_code(&code, None);
+            match self.repo.insert_code(record).await {
+                Ok(true) => codes.push(code),
+                Ok(false) => continue,
+                Err(error) => {
+                    warn!(error = %error, "invite code initialization failed");
+                    return Err(ApplicationError::internal(format!(
+                        "failed to initialize invite codes: {error}"
+                    )));
+                }
+            }
+        }
+        Ok(InitInviteCodesResult { codes })
+    }
+
+    async fn bind_invite_code(
+        &self,
+        command: BindInviteCode,
+    ) -> Result<BindInviteCodeResult, ApplicationError> {
+        let user_id = Self::human_user_id(&command.caller)?;
+        let code = Self::normalize_code(&command.code)?;
+        let bound_at = Self::now_secs();
+
+        if let Some(existing) = self
+            .repo
+            .find_by_user_id(user_id)
+            .await
+            .map_err(|error| ApplicationError::internal(format!(
+                "failed to load invite-code binding: {error}"
+            )))?
+        {
+            if existing.code_hash == self.code_hash(&code) {
+                return Ok(BindInviteCodeResult {
+                    bound: true,
+                    bound_at: existing.bound_at.unwrap_or(bound_at),
+                });
+            }
+            return Err(ApplicationError::invite_code_already_bound(
+                "this human caller has already bound a different invite code",
+            ));
+        }
+
+        let outcome = self
+            .repo
+            .bind_code(&self.code_hash(&code), user_id, bound_at)
+            .await
+            .map_err(|error| ApplicationError::internal(format!(
+                "failed to bind invite-code: {error}"
+            )))?;
+
+        match outcome {
+            InviteCodeBindOutcome::Bound(record)
+            | InviteCodeBindOutcome::AlreadyBoundToSameCode(record) => Ok(BindInviteCodeResult {
+                bound: true,
+                bound_at: record.bound_at.unwrap_or(bound_at),
+            }),
+            InviteCodeBindOutcome::AlreadyBoundToDifferentCode(_) => Err(
+                ApplicationError::invite_code_already_bound(
+                    "this human caller has already bound a different invite code",
+                ),
+            ),
+            InviteCodeBindOutcome::Unavailable => Err(ApplicationError::invite_code_unavailable(
+                "invite code is unavailable",
+            )),
+        }
+    }
+
+    async fn get_my_invite_code_binding(
+        &self,
+        command: GetMyInviteCodeBinding,
+    ) -> Result<InviteCodeBindingView, ApplicationError> {
+        let user_id = Self::human_user_id(&command.caller)?;
+        let record = self
+            .repo
+            .find_by_user_id(user_id)
+            .await
+            .map_err(|error| ApplicationError::internal(format!(
+                "failed to load invite-code binding: {error}"
+            )))?;
+        Ok(match record {
+            Some(record) => InviteCodeBindingView {
+                bound: true,
+                bound_at: record.bound_at,
+            },
+            None => InviteCodeBindingView {
+                bound: false,
+                bound_at: None,
+            },
+        })
+    }
+
+    async fn ensure_invite_code_access(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<(), ApplicationError> {
+        let Some(user) = caller.user.as_ref() else {
+            return Ok(());
+        };
+        if self
+            .repo
+            .find_by_user_id(&user.id)
+            .await
+            .map_err(|error| ApplicationError::internal(format!(
+                "failed to verify invite-code access: {error}"
+            )))?
+            .is_some()
+        {
+            Ok(())
+        } else {
+            Err(ApplicationError::invite_code_required(
+                "human callers must bind an invite code before using platform features",
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    struct FakeInviteCodeRepo {
+        records: tokio::sync::RwLock<HashMap<String, InviteCodeRecord>>,
+    }
+
+    impl FakeInviteCodeRepo {
+        fn new() -> Self {
+            Self {
+                records: tokio::sync::RwLock::new(HashMap::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl InviteCodeRepoPort for FakeInviteCodeRepo {
+        async fn insert_code(&self, record: InviteCodeRecord) -> bcs_service_api::ServiceResult<bool> {
+            let mut records = self.records.write().await;
+            if records.contains_key(&record.code_hash) {
+                return Ok(false);
+            }
+            records.insert(record.code_hash.clone(), record);
+            Ok(true)
+        }
+
+        async fn bind_code(
+            &self,
+            code_hash: &str,
+            user_id: &str,
+            bound_at: u64,
+        ) -> bcs_service_api::ServiceResult<InviteCodeBindOutcome> {
+            let mut records = self.records.write().await;
+            let Some(record) = records.get_mut(code_hash) else {
+                return Ok(InviteCodeBindOutcome::Unavailable);
+            };
+            if record.status == InviteCodeStatus::Disabled {
+                return Ok(InviteCodeBindOutcome::Unavailable);
+            }
+            if record.bound_user_id.as_deref() == Some(user_id) {
+                return Ok(InviteCodeBindOutcome::AlreadyBoundToSameCode(record.clone()));
+            }
+            if let Some(bound_user_id) = record.bound_user_id.as_ref() {
+                let mut cloned = record.clone();
+                cloned.bound_user_id = Some(bound_user_id.clone());
+                return Ok(InviteCodeBindOutcome::AlreadyBoundToDifferentCode(cloned));
+            }
+            record.bound_user_id = Some(user_id.to_string());
+            record.bound_at = Some(bound_at);
+            record.status = InviteCodeStatus::Bound;
+            record.updated_at = bound_at;
+            Ok(InviteCodeBindOutcome::Bound(record.clone()))
+        }
+
+        async fn find_by_user_id(
+            &self,
+            user_id: &str,
+        ) -> bcs_service_api::ServiceResult<Option<InviteCodeRecord>> {
+            Ok(self
+                .records
+                .read()
+                .await
+                .values()
+                .find(|record| record.bound_user_id.as_deref() == Some(user_id))
+                .cloned())
+        }
+
+        async fn find_by_code_hash(
+            &self,
+            code_hash: &str,
+        ) -> bcs_service_api::ServiceResult<Option<InviteCodeRecord>> {
+            Ok(self.records.read().await.get(code_hash).cloned())
+        }
+    }
+
+    fn human_caller(id: &str) -> AuthenticatedCaller {
+        AuthenticatedCaller {
+            tenant: None,
+            user: Some(bcs_service_api::AuthenticatedUserIdentity {
+                id: id.to_string(),
+                username: id.to_string(),
+                display_name: None,
+                full_name: None,
+            }),
+            bot: None,
+            app: None,
+            access_key: None,
+        }
+    }
+
+    fn service() -> (InviteCodeServiceImpl, Arc<FakeInviteCodeRepo>) {
+        let repo = Arc::new(FakeInviteCodeRepo::new());
+        (
+            InviteCodeServiceImpl::new(repo.clone() as Arc<dyn InviteCodeRepoPort>, b"secret".to_vec()),
+            repo,
+        )
+    }
+
+    #[tokio::test]
+    async fn init_codes_generates_requested_count() {
+        let (svc, repo) = service();
+        let result = svc
+            .init_invite_codes(InitInviteCodes { count: 3 })
+            .await
+            .expect("init codes");
+        assert_eq!(result.codes.len(), 3);
+        assert!(result.codes.iter().all(|code| code.len() == 6));
+        assert_eq!(repo.records.read().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn bind_and_query_round_trip() {
+        let (svc, repo) = service();
+        let code = "A1B2C3".to_string();
+        let hash = svc.code_hash(&code);
+        repo.insert_code(svc.record_for_code(&code, None))
+            .await
+            .expect("insert code");
+        let result = svc
+            .bind_invite_code(BindInviteCode {
+                caller: human_caller("user-1"),
+                code: code.clone(),
+            })
+            .await
+            .expect("bind code");
+        assert!(result.bound);
+        assert!(result.bound_at > 0);
+        assert_eq!(
+            repo.records.read().await.get(&hash).cloned().and_then(|record| record.bound_user_id),
+            Some("user-1".to_string())
+        );
+        let view = svc
+            .get_my_invite_code_binding(GetMyInviteCodeBinding {
+                caller: human_caller("user-1"),
+            })
+            .await
+            .expect("query binding");
+        assert!(view.bound);
+        assert!(view.bound_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn ensure_access_allows_bots_and_bound_humans() {
+        let (svc, repo) = service();
+        let code = "A1B2C3".to_string();
+        let hash = svc.code_hash(&code);
+        repo.insert_code(svc.record_for_code(&code, None))
+            .await
+            .expect("insert code");
+        svc.bind_invite_code(BindInviteCode {
+            caller: human_caller("user-1"),
+            code,
+        })
+        .await
+        .expect("bind code");
+        assert!(svc.ensure_invite_code_access(&human_caller("user-1")).await.is_ok());
+        assert!(svc.ensure_invite_code_access(&AuthenticatedCaller {
+            tenant: None,
+            user: None,
+            bot: None,
+            app: None,
+            access_key: None,
+        }).await.is_ok());
+        assert_eq!(
+            repo.records.read().await.get(&hash).cloned().and_then(|record| record.bound_user_id),
+            Some("user-1".to_string())
+        );
+    }
+}

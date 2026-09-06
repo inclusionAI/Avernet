@@ -78,6 +78,20 @@ const SQLITE_DDL_STATEMENTS: &[&str] = &[
     "CREATE UNIQUE INDEX IF NOT EXISTS uk_friend_requests_req ON bcs_friend_requests(request_id)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_from ON bcs_friend_requests(from_bot, status)",
     "CREATE INDEX IF NOT EXISTS idx_friend_requests_to ON bcs_friend_requests(to_bot, status)",
+    // ── invite_codes ─────────────────────────────────────
+    "CREATE TABLE IF NOT EXISTS bcs_invite_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code_hash TEXT NOT NULL UNIQUE,
+        code_hint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        bound_user_id TEXT NULL UNIQUE,
+        bound_at INTEGER NULL,
+        created_by TEXT NULL,
+        env TEXT NOT NULL,
+        gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )",
+    "CREATE INDEX IF NOT EXISTS idx_invite_codes_env_status ON bcs_invite_codes(env, status)",
     // ── actor_relations ───────────────────────────────────
     "CREATE TABLE IF NOT EXISTS bcs_actor_relations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1000,6 +1014,10 @@ const SQLITE_VERSIONED_MIGRATIONS: &[SqliteMigration] = &[
         version: 19,
         name: "one_shot_opening_message_override",
     },
+    SqliteMigration {
+        version: 20,
+        name: "invite_code_id",
+    },
 ];
 
 pub fn sqlite_target_version() -> i64 {
@@ -1374,8 +1392,51 @@ async fn apply_sqlite_migration_body(
         17 => add_sqlite_session_callback_lease_schema(db).await,
         18 => add_sqlite_state_machine_rerun_lineage_schema(db).await,
         19 => add_sqlite_one_shot_opening_message_override_schema(db).await,
+        20 => add_sqlite_invite_code_id_schema(db).await,
         _ => Ok(()),
     }
+}
+
+async fn add_sqlite_invite_code_id_schema(db: &dyn DbPlugin) -> DbResult<()> {
+    if !table_exists(db, "bcs_invite_codes").await? {
+        return Ok(());
+    }
+    let columns = sqlite_table_columns(db, "bcs_invite_codes").await?;
+    if columns.iter().any(|column| column == "id") {
+        return Ok(());
+    }
+    db.transaction(vec![
+        DbTransactionStep::Execute(DbStatement::new(
+            "DROP TABLE IF EXISTS bcs_invite_codes__id_migration",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "CREATE TABLE bcs_invite_codes__id_migration (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code_hash TEXT NOT NULL UNIQUE,
+                code_hint TEXT NOT NULL,
+                status TEXT NOT NULL,
+                bound_user_id TEXT NULL UNIQUE,
+                bound_at INTEGER NULL,
+                created_by TEXT NULL,
+                env TEXT NOT NULL,
+                gmt_create TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                gmt_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )),
+        DbTransactionStep::Execute(DbStatement::new(
+            "INSERT INTO bcs_invite_codes__id_migration (
+                code_hash, code_hint, status, bound_user_id, bound_at, created_by, env, gmt_create, gmt_modified
+            )
+            SELECT code_hash, code_hint, status, bound_user_id, bound_at, created_by, env, gmt_create, gmt_modified
+            FROM bcs_invite_codes",
+        )),
+        DbTransactionStep::Execute(DbStatement::new("DROP TABLE bcs_invite_codes")),
+        DbTransactionStep::Execute(DbStatement::new(
+            "ALTER TABLE bcs_invite_codes__id_migration RENAME TO bcs_invite_codes",
+        )),
+    ])
+    .await?;
+    Ok(())
 }
 
 async fn add_sqlite_one_shot_opening_message_override_schema(
