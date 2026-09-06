@@ -29,11 +29,11 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolServiceFactory,
 )
 from agentclaw.community.api.bot_cli_tool_service import BotCliToolServiceProtocol
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.content.service import (
     ManifestContentService,
@@ -78,14 +78,14 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     MaterialiserPorts,
     TeclawPlatformBindings,
 )
-from agentclaw.community.core.bot_config_manifest.apply.record_only_activation import (
-    RecordOnlyActivation,
+from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
+    PlatformActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    StoreIdentityPort,
-    StoreResourcePort,
-    StoreSkillPackagePort,
+    PlatformIdentity,
+    PlatformResource,
+    PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.direct_activation_service_protocol import (
@@ -261,7 +261,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_identity_service_factory(
         self, injector: Injector
-    ) -> Callable[[], ManifestIdentityPort]:
+    ) -> Callable[[], IdentityFilePort]:
         """The identity service the ``identity`` materialiser writes through.
 
         Lazy with a function-level import for the reason
@@ -269,20 +269,20 @@ class ManifestFetchModule(Module):
         reaches the device dispatcher graph at import time, and this
         module's import must not trigger that chain.
         """
-        from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-            ManifestIdentityPort,
+        from agentclaw.community.core.ports.identity_file_port import (
+            IdentityFilePort,
         )
         from agentclaw.community.core.services.identity import IdentityService
 
-        def _identity() -> ManifestIdentityPort:
+        def _identity() -> IdentityFilePort:
             service = injector.get(IdentityService)
-            if not isinstance(service, ManifestIdentityPort):
+            if not isinstance(service, IdentityFilePort):
                 # Structural check at wiring time: the port has no
                 # implementation relationship to the service, so nothing
                 # else would notice a renamed method until mid-apply. The
                 # drift guard belongs where the two first meet.
                 raise TypeError(
-                    "IdentityService no longer satisfies ManifestIdentityPort"
+                    "IdentityService no longer satisfies IdentityFilePort"
                 )
             return service
 
@@ -344,7 +344,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_resource_service_factory(
         self, injector: Injector
-    ) -> Callable[[], ManifestResourcePort]:
+    ) -> Callable[[], ResourceFilePort]:
         """The write chain the ``resources`` materialiser delivers through.
 
         Lazy with a function-level import for the reason the identity
@@ -359,11 +359,11 @@ class ManifestFetchModule(Module):
             ResourceFileService,
         )
 
-        def _resources() -> ManifestResourcePort:
+        def _resources() -> ResourceFilePort:
             service = injector.get(ResourceFileService)
-            if not isinstance(service, ManifestResourcePort):
+            if not isinstance(service, ResourceFilePort):
                 raise TypeError(
-                    "ResourceFileService no longer satisfies ManifestResourcePort"
+                    "ResourceFileService no longer satisfies ResourceFilePort"
                 )
             return service
 
@@ -585,10 +585,10 @@ class ManifestFetchModule(Module):
             validator = package_validator_provider()
             return MaterialiserPorts(
                 script_service=script_service_provider(),
-                activation_service=RecordOnlyActivation(activation_service_provider()),
+                activation_service=PlatformActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
-                identity_service=StoreIdentityPort(store),
-                upload_service=StoreSkillPackagePort(
+                identity_service=PlatformIdentity(store),
+                upload_service=PlatformSkillPackageUpload(
                     store,
                     validator=validator,
                     skill_repository=injector.get(SkillRepository),
@@ -596,7 +596,7 @@ class ManifestFetchModule(Module):
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,
                 entry_fetcher=entry_fetcher_provider(),
-                resource_service=StoreResourcePort(store),
+                resource_service=PlatformResource(store),
                 # W9 is always platform-managed and never consults the switch,
                 # as ``mcp`` does not: the artifact is the delivery on this
                 # family whatever the switch says.

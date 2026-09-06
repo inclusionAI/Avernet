@@ -24,7 +24,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     ManagedSkillOwnerConflict,
-    StoreSkillPackagePort,
+    PlatformSkillPackageUpload,
 )
 
 from tests.community.core.bot_config_manifest.apply._fakes import (
@@ -114,7 +114,7 @@ def _rig(packages: dict[str, bytes]):
     )
     skills = FakeSkillRepository()
     activation = FakeActivationService()
-    port = StoreSkillPackagePort(
+    port = PlatformSkillPackageUpload(
         store,
         validator=real_validator(),
         skill_repository=skills,
@@ -219,7 +219,7 @@ def test_a_changed_package_is_replaced_in_place() -> None:
 
 def test_a_stale_member_of_a_replaced_package_is_dropped_from_the_store() -> None:
     _, store, oss, skills, _, _ = _rig({})
-    port = StoreSkillPackagePort(
+    port = PlatformSkillPackageUpload(
         store, validator=real_validator(), skill_repository=skills
     )
     with_extra = build_skill_zip("quality-check", extra=[("old/gone.txt", b"x")])
@@ -251,7 +251,7 @@ def test_removal_deactivates_record_only() -> None:
 
 def test_installed_digest_answers_from_the_store() -> None:
     _, store, oss, skills, _, _ = _rig({})
-    port = StoreSkillPackagePort(
+    port = PlatformSkillPackageUpload(
         store, validator=real_validator(), skill_repository=skills
     )
 
@@ -283,7 +283,7 @@ def test_a_same_name_row_owned_by_someone_else_is_never_replaced() -> None:
     _, store, oss, skills, _, _ = _rig({})
     # A collaborator's row, and a legacy row with no owner at all.
     skills.create({"name": "quality-check", "git_path": "local://skills-local/quality-check", "user_id": "u_other", "bolt_id": "b_1"})
-    port = StoreSkillPackagePort(
+    port = PlatformSkillPackageUpload(
         store, validator=real_validator(), skill_repository=skills
     )
     with pytest.raises(ManagedSkillOwnerConflict):

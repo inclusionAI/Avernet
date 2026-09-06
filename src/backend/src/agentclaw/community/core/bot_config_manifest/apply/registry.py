@@ -16,17 +16,17 @@ from typing import TYPE_CHECKING, Any, Optional, Protocol, Sequence, runtime_che
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 
 if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see below
-    from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+    from agentclaw.community.core.ports.activation_port import (
         ActivationPort,
     )
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
-    from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-        ManifestIdentityPort,
+    from agentclaw.community.core.ports.identity_file_port import (
+        IdentityFilePort,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-        ManifestResourcePort,
+    from agentclaw.community.core.ports.resource_file_port import (
+        ResourceFilePort,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
+    from agentclaw.community.core.ports.skill_package_upload_port import (
         SkillPackageUploadPort,
     )
     from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
@@ -193,16 +193,16 @@ class Materialiser(Protocol):
 
 def build_materialisers(
     *,
-    script_service: "BotStartupScriptServiceProtocol",
-    activation_service: "ActivationPort",
-    mcp_auth_service: "MCPAuthServiceProtocol",
-    identity_service: "ManifestIdentityPort",
-    upload_service: "SkillPackageUploadPort",
-    capability_reader: "BotCapabilityStateReaderProtocol",
-    package_validator: "SkillPackageValidator",
-    entry_fetcher: "EntryFetcher",
-    resource_service: "ManifestResourcePort",
-    cli_tool_service: "CliToolService",
+    script_service: BotStartupScriptServiceProtocol,
+    activation_service: ActivationPort,
+    mcp_auth_service: MCPAuthServiceProtocol,
+    identity_service: IdentityFilePort,
+    upload_service: SkillPackageUploadPort,
+    capability_reader: BotCapabilityStateReaderProtocol,
+    package_validator: SkillPackageValidator,
+    entry_fetcher: EntryFetcher,
+    resource_service: ResourceFilePort,
+    cli_tool_service: CliToolService,
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.
 

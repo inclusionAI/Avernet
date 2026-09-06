@@ -1222,8 +1222,8 @@ def test_the_port_mirrors_the_apply_side_call_surface():
     """
     import inspect
 
-    from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-        ManifestResourcePort,
+    from agentclaw.community.core.ports.resource_file_port import (
+        ResourceFilePort,
     )
     from agentclaw.community.core.services.resource_file_service import (
         ResourceFileService,
@@ -1237,7 +1237,7 @@ def test_the_port_mirrors_the_apply_side_call_surface():
         }
 
     for method in ("upload_file", "delete", "exists"):
-        port_params = _kwparams(getattr(ManifestResourcePort, method))
+        port_params = _kwparams(getattr(ResourceFilePort, method))
         real_params = _kwparams(getattr(ResourceFileService, method))
         # Every port parameter exists on the real service...
         assert set(port_params) <= set(real_params), (method, port_params)
@@ -1248,7 +1248,7 @@ def test_the_port_mirrors_the_apply_side_call_surface():
         assert "preserve_structure" not in port_params, method
         # The one divergence the apply side must not reintroduce: ``exists``
         # is addressed like ``delete`` and ``upload_file``, entity and all.
-        assert "entity_type" in _kwparams(ManifestResourcePort.exists)
+        assert "entity_type" in _kwparams(ResourceFilePort.exists)
 
 
 def test_an_unhashable_unpack_kind_is_refused_not_raised():

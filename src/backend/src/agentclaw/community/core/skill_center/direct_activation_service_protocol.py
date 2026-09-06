@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -17,28 +18,41 @@ class DirectActivationServiceProtocol(Protocol):
     ``project=False`` (W8) records the desired state and skips both the
     readiness check and the runtime projection — for a delivery that projects
     by itself, which is teclaw's artifact. The default is the pre-W8 contract.
+
+    **This is not the manifest apply engine's ``ActivationPort``.** That port is
+    these six methods *without* ``project``, because choosing whether to project
+    belongs to the delivery strategy rather than to a materialiser. It is not a
+    supertype of this Protocol and this service is not bound to it: the two
+    wrappers in ``bot_config_manifest/apply/activation_delegates.py`` hold a
+    ``DirectActivationServiceProtocol`` and delegate to it with the ``project``
+    value their family requires.
     """
 
+    @abstractmethod
     async def activate_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def deactivate_skill(
         self, *, skill_id: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def activate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     async def deactivate_mcp(
         self, *, server_code: str, bot_id: str, owner_id: str, actor_id: str,
         project: bool = True,
     ) -> dict[str, Any]: ...
 
+    @abstractmethod
     def list_installed_mcps(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> set[str]:
@@ -46,6 +60,7 @@ class DirectActivationServiceProtocol(Protocol):
         above, answered by the capability state reader (which flushes first)."""
         ...
 
+    @abstractmethod
     def platform_default_mcp_codes(
         self, *, bot_id: str, owner_id: str, actor_id: str
     ) -> frozenset[str]:

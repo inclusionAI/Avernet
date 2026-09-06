@@ -33,18 +33,18 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
-from agentclaw.community.core.bot_config_manifest.apply.activation_port import (
+from agentclaw.community.core.ports.activation_port import (
     ActivationPort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.upload_port import (
+from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
@@ -106,12 +106,12 @@ class MaterialiserPorts:
     script_service: BotStartupScriptServiceProtocol
     activation_service: ActivationPort
     mcp_auth_service: MCPAuthServiceProtocol
-    identity_service: ManifestIdentityPort
+    identity_service: IdentityFilePort
     upload_service: SkillPackageUploadPort
     capability_reader: BotCapabilityStateReaderProtocol
     package_validator: SkillPackageValidator
     entry_fetcher: EntryFetcher
-    resource_service: ManifestResourcePort
+    resource_service: ResourceFilePort
     #: W9. One field for a whole category, because the service already holds
     #: the family's delivery port — so the ``cli_tools`` materialiser takes one
     #: dependency and the family difference stays here, where W6 put it.
