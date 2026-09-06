@@ -19,6 +19,13 @@ type-checks by shape, and the method silently returns ``None`` — the failure
 mode ``test_protocol_base_ordering.py`` was written after shipping. Only
 ``@abstractmethod`` members turn a missing method into a construction error.
 
+**What this file does not check is behaviour.** Every assertion here is
+structural: a delegate that forwards the wrong argument, drops a keyword, or
+picks the other family's ``project`` satisfies all of it. That is covered by
+``core/bot_config_manifest/apply/test_device_port_forwarding.py``, which drives
+each port's methods through a recording double, and by the store-backed
+implementations' own suites under ``managed_files/``.
+
 The last test pins the narrowing itself. ``ActivationPort`` omits ``project``
 because whether a write projects to a running container is the delivery
 strategy's choice, not a materialiser's; a port that grew the parameter would

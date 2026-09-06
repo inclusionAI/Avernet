@@ -604,7 +604,6 @@ provides:
   - FetchedEntry
   - EntryFetchError
   - scope_of
-  - IdentityFilePort
   - IdentityMaterialiser
   - SkillsMaterialiser
   - BotConfigManifestService
