@@ -38,6 +38,7 @@ use tracing_subscriber::prelude::*;
 #[derive(Default)]
 struct RecordingMessageFlow {
     bot_events: Mutex<Vec<BotEventCommand>>,
+    bot_event_trace_ids: Mutex<Vec<String>>,
     task_dispatches: Mutex<Vec<TaskDispatchCommand>>,
     task_messages: Mutex<Vec<TaskMessageCommand>>,
     task_completes: Mutex<Vec<TaskCompleteCommand>>,
@@ -512,6 +513,7 @@ impl MessageFlowService for RecordingMessageFlow {
     }
 
     async fn handle_bot_event(&self, cmd: BotEventCommand) -> ServiceResult<BotEventOutcome> {
+        self.bot_event_trace_ids.lock().await.push(bcs_observability::current_trace_id());
         self.bot_events.lock().await.push(cmd);
         Ok(BotEventOutcome {
             bot_deliveries: vec![],
@@ -1514,6 +1516,7 @@ async fn direct_chat_event_scope_comes_from_run_context_for_all_session_key_shap
 #[tokio::test]
 async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_accepts() {
     let state = new_state();
+    let message_flow = state.message_flow.clone();
     let (tx, _rx) = mpsc::channel(8);
     let (client_tx, _client_rx) = mpsc::channel(8);
     let mut registered_bot_id = Some("bot-compat:staff".to_string());
@@ -1572,6 +1575,9 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
     .await;
 
     result.unwrap();
+    assert_eq!(bcs_observability::current_trace_id(), "", "WS log scope must end with dispatch");
+    assert_eq!(*message_flow.bot_event_trace_ids.lock().await, vec!["0af7651916cd43dd8448eb211c80319c".to_string()]);
+    assert_eq!(spans.len(), 1, "log correlation must not add a span");
     let span = spans
         .iter()
         .find(|span| span.name == "bcn.bot.response")
@@ -1595,6 +1601,7 @@ async fn traced_chat_event_creates_bot_response_child_span_after_message_flow_ac
 #[tokio::test]
 async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     let state = new_state();
+    let message_flow = state.message_flow.clone();
     let (tx, _rx) = mpsc::channel(8);
     let (client_tx, _client_rx) = mpsc::channel(8);
     let mut registered_bot_id = Some("bot-compat:staff".to_string());
@@ -1653,6 +1660,9 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
     .await;
 
     result.unwrap();
+    assert_eq!(bcs_observability::current_trace_id(), "", "WS log scope must end with dispatch");
+    assert_eq!(*message_flow.bot_event_trace_ids.lock().await, vec!["0af7651916cd43dd8448eb211c80319c".to_string()]);
+    assert_eq!(spans.len(), 1, "log correlation must not add a span");
     let span = spans
         .iter()
         .find(|span| span.name == "bcn.bot.response")
@@ -1666,6 +1676,7 @@ async fn traced_plugin_run_alias_creates_bot_response_child_span() {
 #[tokio::test]
 async fn chat_event_without_trace_mapping_does_not_create_response_span() {
     let state = new_state();
+    let message_flow = state.message_flow.clone();
     let (tx, _rx) = mpsc::channel(8);
     let mut registered_bot_id = Some("bot-compat:staff".to_string());
     let event = BcsFrame::Event(EventFrame::new(
@@ -1696,6 +1707,8 @@ async fn chat_event_without_trace_mapping_does_not_create_response_span() {
     .await;
 
     result.unwrap();
+    assert_eq!(bcs_observability::current_trace_id(), "", "WS log scope must end with dispatch");
+    assert_eq!(*message_flow.bot_event_trace_ids.lock().await, vec!["".to_string()]);
     assert!(spans.is_empty());
 }
 

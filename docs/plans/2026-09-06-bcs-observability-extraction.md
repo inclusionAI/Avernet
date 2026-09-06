@@ -4,7 +4,7 @@
 
 **Goal:** Separate log-only operation observations from OpenTelemetry helpers in both public BCS and its internal overlay.
 
-**Architecture:** `bcs-observability` owns timing, structured log events and task-local correlation data. HTTP tracing integration extracts an existing trace ID and explicitly passes the string into that package; no OpenTelemetry dependency, span creation or metrics recording belongs in the base. Existing GenAI encoders remain in `bcs-telemetry`; bootstrap retains subscriber/exporter ownership. No new plugin runtime is needed for this extraction.
+**Architecture:** `bcs-observability` owns timing, structured log events and task-local correlation data. HTTP and WebSocket tracing integration extracts an existing trace ID and explicitly passes the string into that package; no OpenTelemetry dependency, span creation or metrics recording belongs in the base. Existing GenAI encoders remain in `bcs-telemetry`; bootstrap retains subscriber/exporter ownership. No new plugin runtime is needed for this extraction.
 
 **Tech Stack:** Rust, Tokio task locals, tracing log events, Cargo, existing OpenTelemetry HTTP integration.
 
@@ -22,7 +22,7 @@
 - Add `with_trace_id(String, future)` as a data-only async scope. `current_trace_id` reads only this scope. Keep operation log event names, fields, thresholds and outcomes unchanged.
 - Restore `bcs-telemetry` to its original GenAI encoding responsibility and dependencies.
 - Migrate operation API consumers and Cargo dependencies throughout public BCS; retain telemetry dependencies only for GenAI encoder consumers.
-- Update `gateway_trace::observe_request` to extract the existing trace ID in the HTTP adapter and scope the complete request observation future. Preserve existing span creation and TraceContext propagation.
+- Update `gateway_trace::observe_request` and the WebSocket Bot response dispatcher to extract the existing trace ID in their adapters and scope the observed work. Preserve existing span creation and TraceContext propagation; cover WebSocket run aliases and missing trace mappings.
 - Update context declarations and `src/bcs/docs/observability/request-operation-logging.md` with ownership and migration semantics.
 
 ### Task 3: Migrate internal BCS

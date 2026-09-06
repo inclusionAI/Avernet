@@ -20,7 +20,7 @@ retry policy, authorization decisions or business return values.
    finish after the response are not included in the already emitted snapshot.
 4. Use `operation_id` and `parent_operation_id` to reconstruct nested stages from
    log events. These observations do not create tracing spans or record metrics.
-   `trace_id` reads only a string explicitly supplied by the HTTP tracing adapter
+   `trace_id` reads only a string explicitly supplied by the HTTP or WebSocket tracing adapter
    through `with_trace_id`; detached work copies this string. It is otherwise empty;
    request and operation IDs provide correlation even without tracing enabled.
    Existing gateway span selection and downstream TraceContext propagation are
@@ -98,8 +98,11 @@ No collector, dashboard, alert or online experiment is installed by this change.
   the caller. Scopes restore outer values after completion or cancellation and
   remain isolated when futures are polled concurrently.
 - `bcs-http::gateway_trace::observe_request` extracts an existing trace ID in the
-  HTTP adapter and injects it around the request context. The base never reads a
-  current span. Logs outside an explicitly supplied scope have an empty trace ID.
+  HTTP adapter and injects it around the request context. The WebSocket dispatcher
+  likewise scopes the existing `bcn.bot.response` trace ID around its callback
+  handling, including run aliases. Both adapters release SDK context handles
+  before awaiting the work. The base never reads a current span. Logs outside an
+  explicitly supplied scope have an empty trace ID.
 - `bcs-telemetry` retains the original pure GenAI message attribute encoders.
   Existing A2A span creation, provider TraceContext propagation and bootstrap
   exporter configuration retain their owners and behavior.

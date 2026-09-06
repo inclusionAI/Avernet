@@ -45,7 +45,7 @@ tracing event/subscriber extension mechanism and adds no plugin runtime or spans
 ## Change impact
 
 Public and internal operation callers depend on this package. GenAI encoders stay
-in bcs-telemetry. HTTP tracing integration explicitly injects existing trace IDs;
+in bcs-telemetry. HTTP and WebSocket tracing adapters explicitly inject existing trace IDs;
 callers outside an injected scope get an empty trace ID and may still correlate
 by request/operation ID. Log schemas, levels, thresholds and result semantics are
 unchanged. The public revision and internal path dependencies must move together.
@@ -56,5 +56,7 @@ unchanged. The public revision and internal path dependencies must move together
   cancellation, stalled calls, nested/spawned IDs and trace scope isolation.
 - `cargo test -p bcs-http --test request_observations` covers the real HTTP bridge
   and proves detached logs do not delay either existing A2A span's export.
+- `cargo test -p bcs-ws --test frame_compat` covers WebSocket callback trace
+  correlation, run aliases, missing trace mappings and scope cleanup.
 - `bash scripts/ci/check-observability-deps.sh` checks the normal/build dependency
   tree with all features for trace/metric implementations.

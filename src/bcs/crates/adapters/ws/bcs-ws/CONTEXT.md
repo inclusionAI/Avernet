@@ -43,6 +43,10 @@
 
 ## Runtime ownership
 
+The existing Bot response tracing boundary explicitly supplies its trace ID as
+log-correlation data to bcs-observability. Callback handling restores the outer
+scope on completion or cancellation; log correlation owns no span handles.
+
 The adapter owns WebSocket streams, `mpsc::Sender`, connection registries,
 frontend envelope stamping, and disconnect cleanup. It does not own routing or
 message lifecycle business decisions.
