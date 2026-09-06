@@ -46,6 +46,10 @@ from agentclaw.community.core.task.task_runner.client.bcs_http_adapter import (
 from agentclaw.community.core.task.task_runner.client.bcs_token_provider import (
     BcsTokenProvider,
 )
+from agentclaw.community.core.task.task_runner.client.bcs_bot_token_provider import (
+    BcsBotTokenProvider,
+    CachingBcsBotTokenProvider,
+)
 from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter import (
     OpenApiBotAdapter,
 )
@@ -61,8 +65,11 @@ from agentclaw.community.di.config import (
 )
 from agentclaw.community.di.modules.config_module import _block, _user_config
 from agentclaw.community.log import get_logger
+from agentclaw.community.plugin_api.database import DatabasePlugin
+from agentclaw.community.utils.env_utils import get_current_env
 
 from injector import Module, inject, provider, singleton
+from sqlalchemy import text
 
 logger = get_logger()
 
@@ -109,6 +116,49 @@ class BcsTokenProviderImpl:
     provider_id: str = ""  # env-resolved bcn provider_id (reuses bcn identity)
     provider_admin_token: str = ""  # env-resolved bcn Bearer mgmt token
     task_callback_url: str = ""  # env-resolved task-result callback host
+
+
+class BcsBotTokenServiceProvider:
+    """community 自包含:经 ``DatabasePlugin.orm_session()`` 直读 ``bcs_bots.session_token``。
+
+    建群(``POST /groups``)driver-bot 的 session_token 作 ``Authorization: Bearer`` caller 归属
+    (``task_executor`` 经 ``caller_bot_token`` 头透传),BCS 把 caller 解析成带归属 driver/originator
+    bot,解 "valid Human cookie required" 401:`human_<owner>` observer 入群时 BCS 校验请求方身份,
+    无 caller Bearer → 401 需 Human cookie;有 driver-bot Bearer → 通过(对齐 ocb ``CorpBcsBotTokenProvider``)。
+
+    ``CachingBcsBotTokenProvider`` 命中 300s / 未命中短缓存(60s),避免建群反复查库。
+    Resolver 失败(本地无 ``bcs_bots`` 表 / 查无行 / 查询抛错)→ 返 None → ``task_executor`` 不发 Bearer,
+    降级 HMAC 匿名 no-sub 建群分支,不阻断。不把 token 明文写日志。
+
+    ``env``: ``bcs_bots`` 复合唯一键 ``(bot_uuid, env)``,与 BCS ``bcs_client`` 同一 env;
+    取 ``get_current_env()``(prod|gray→prod / pre→pre)。env 在 ctor 期固化(部署级常量)。
+
+    迁移自 ocb corp ``corp_task_integration.py``(community 无 corp 前缀,跨列 import-disjoint)。
+    未装本 module 的 profile(singlebox/test)由 ``task_module`` 降级 ``NullBcsBotTokenProvider``。
+    """
+
+    _SQL = "SELECT session_token FROM bcs_bots WHERE bot_uuid = :uuid AND env = :env LIMIT 1"
+
+    def __init__(self, db: DatabasePlugin, *, env: str, ttl_s: float = 300.0) -> None:
+        self._db = db
+        self._env = env
+        self._inner = CachingBcsBotTokenProvider(resolver=self._resolve, ttl_s=ttl_s)
+
+    def get_token(self, bcs_bot_uuid: str) -> str | None:
+        return self._inner.get_token(bcs_bot_uuid)
+
+    def _resolve(self, bcs_bot_uuid: str) -> str | None:
+        try:
+            with self._db.orm_session() as session:
+                return session.execute(
+                    text(self._SQL), {"uuid": bcs_bot_uuid, "env": self._env},
+                ).scalar()
+        except Exception:  # noqa: BLE101 本地无 bcs_bots 表 / 查询失败 → 降级 None
+            logger.error(
+                "[task][community-task] bcs_bot_token lookup failed bot_uuid=%s — degrade to None",
+                (bcs_bot_uuid[:8] + "...") if bcs_bot_uuid else "<empty>",
+            )
+            return None
 
 
 def _env_select(prod: str, pre: str) -> str:
@@ -327,3 +377,35 @@ class TaskRunnerIntegrationModule(Module):
             provider_admin_token=provider_admin_token,
             task_callback_url=_env_select(cfg.task_callback_url, cfg.task_callback_url_pre),
         )
+
+    @singleton
+    @provider
+    @inject
+    def bcs_bot_token_provider(
+        self,
+        db: DatabasePlugin,
+    ) -> BcsBotTokenProvider:
+        """Bind ``BcsBotTokenProvider`` to community DB-backed resolver。
+
+        Reads ``bcs_bots.session_token`` 为 driver-bot 经 ``task_executor.caller_bot_token``
+        (Authorization: Bearer)透传给 BCS ``POST /groups``;解 "valid Human cookie required"
+        401:**driver-bot Bearer 让 BCS caller 校署通过、放行 ``human_<owner>`` observer 入群**,
+        与 task_executor P1 inject_observers 行为对齐(adapt 自 ocb corp,community 无 corp 前缀)。
+
+        Query 用 ``get_current_env()`` (prod|gray→prod / pre→pre)scope,与 ``_env_base_url`` /
+        ``_resolve_bcn_provider_identity`` 同源 env,选到与 ``bcs_client`` 同环境 onboard 的
+        ``(bot_uuid, env)`` 行。
+
+        Resolver 失败(库无 ``bcs_bots`` 表 / 查无行 / 查询抛错)→ 返 None → task_executor 不发
+        Bearer,降级 HMAC 匿名 no-sub 建群分支,不阻断。本 module 未装的 profile(singlebox/test)
+        由 ``task_module`` 降级 ``NullBcsBotTokenProvider`` 兜底,行为同未迁移。
+
+        部署前置:driver/worker bot 经 ``BcnService`` onboard 写入 ``bcs_bots.session_token``
+        到本环境对应 env 行;OSS 阿里云部署需确认这些 bot 已 onboard 写库非空,否则 caller
+        Bearer 仍拿不到、401 未解,需另起 onboard 写 token 链路(跨模块/部署 onboarding,不在本迁移内)。
+
+        ``env`` 在装配期固化(部署级常量),与 ``bcs_client_port`` 同环境。
+        """
+        env = get_current_env()
+        logger.info("[task][community-task] bcs_bot_token_provider 端口装配 env=%s", env)
+        return BcsBotTokenServiceProvider(db, env=env)
