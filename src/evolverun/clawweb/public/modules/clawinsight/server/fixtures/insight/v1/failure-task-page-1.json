@@ -1,0 +1,119 @@
+{
+  "contractVersion": "insight-serving/v1",
+  "dataAsOf": "2026-08-17T17:55:00+08:00",
+  "sourceBatchId": "20260817_admin_gate_v2",
+  "items": [
+    {
+      "sourceDt": "20260726",
+      "ownerUserId": "dev_local",
+      "botId": "20260603_fp6to0gv",
+      "botName": "支付宝反洗钱风险运营合规小助理",
+      "sessionId": "7e82d8f2-a7f9-40ab-b0ac-7a6142ce3ca0",
+      "taskIndex": 0,
+      "taskDescription": "测试新上传的HUAMEI skill功能，确认环境就绪并验证配置",
+      "isComplete": 0,
+      "failureClass": "TOOL_FAILURE",
+      "judgeReasonSummary": "助手完成skill代码层面验证和CLI测试，但核心的图片生成功能因画眉token未配置且sandbox无浏览器而无法执行，任务最终未交付",
+      "humanInterventionLevel": "none",
+      "humanInterventionReasoning": "无真实人工参与。用户仅要求测试skill并授权助手自由选择测试方案，助手独立执行检查和执行",
+      "humanTurnCount": 1,
+      "systemUserMessageCount": 0,
+      "messageRange": [
+        0,
+        37
+      ],
+      "sessionStartTime": "2026-07-26T12:47:35+08:00",
+      "sessionEndTime": "2026-07-26T14:51:10+08:00",
+      "sessionDurationSeconds": 7415,
+      "isCron": false,
+      "payloadRef": "oss://antsys-agentclaw-prod/evolution/pre/evidence/dev_local/20260603_fp6to0gv/20260726/7e82d8f2-a7f9-40ab-b0ac-7a6142ce3ca0.json",
+      "payloadEtag": "64495193b78d870cd42016e765c5db9a9fbd2eb3f8f7b3cff7e0cf2d38ec4b1d",
+      "payloadVersionId": null,
+      "payloadSchemaVersion": "session-evidence/v1",
+      "judgeVersion": {
+        "task_split": "Kimi-K2.5",
+        "task_1_is_complete": "MiniMax-M2.5",
+        "is_complete": "MiniMax-M2.5",
+        "task_0_skill_assessment": "MiniMax-M2.5",
+        "skill_assessment": "MiniMax-M2.5",
+        "task_2_skill_assessment": "MiniMax-M2.5",
+        "task_0_is_complete": "MiniMax-M2.5",
+        "task_2_is_complete": "Kimi-K2.5"
+      },
+      "judgedAt": "2026-07-27T05:42:01+0800",
+      "batchId": "20260726_local_01",
+      "dataAsOf": "2026-07-26T14:51:10+08:00"
+    },
+    {
+      "sourceDt": "20260817",
+      "ownerUserId": "dev_local",
+      "botId": "20260603_fp6to0gv",
+      "botName": "Admin Gate 测试 Bot",
+      "sessionId": "admin-gate-auto-20260817",
+      "taskIndex": 0,
+      "taskDescription": "抓取公开状态页并生成服务异常摘要",
+      "isComplete": 0,
+      "failureClass": "TOOL_FAILURE",
+      "judgeReasonSummary": "Agent 在 Linux 测试环境中连续选择仅支持 macOS 的 UTOO_PROXY，未使用可用的 Web Search/HTTP 工具，导致公开页面无法抓取。该问题可通过更新 tools.md 的工具选择约束自动修复。",
+      "humanInterventionLevel": "none",
+      "humanInterventionReasoning": "用户提出目标后由 Agent 独立执行；失败后未发生人工代操作。",
+      "humanTurnCount": 1,
+      "systemUserMessageCount": 0,
+      "messageRange": [
+        0,
+        6
+      ],
+      "sessionStartTime": "2026-08-17T17:40:00+08:00",
+      "sessionEndTime": "2026-08-17T17:42:10+08:00",
+      "sessionDurationSeconds": 130,
+      "isCron": false,
+      "payloadRef": "oss://antsys-agentclaw-prod/evolution/pre/evidence/dev_local/20260603_fp6to0gv/20260817/admin-gate-auto-20260817.json",
+      "payloadEtag": "c2647123aa26ebed915ceaf80af5ace63edbea9b3da232a7f509c3b54e95ea5d",
+      "payloadVersionId": null,
+      "payloadSchemaVersion": "session-evidence/v1",
+      "judgeVersion": {
+        "task_split": "admin-gate-demo-v2",
+        "is_complete": "admin-gate-demo-v2"
+      },
+      "judgedAt": "2026-08-17T17:42:10+08:00",
+      "batchId": "20260817_admin_gate_v2",
+      "dataAsOf": "2026-08-17T17:55:00+08:00"
+    },
+    {
+      "sourceDt": "20260817",
+      "ownerUserId": "dev_local",
+      "botId": "20260603_fp6to0gv",
+      "botName": "Admin Gate 测试 Bot",
+      "sessionId": "admin-gate-manual-20260817",
+      "taskIndex": 0,
+      "taskDescription": "检索最近一周公开政策并汇总关键变化",
+      "isComplete": 0,
+      "failureClass": "PERMISSION_NETWORK",
+      "judgeReasonSummary": "Web Search 所需的网络权限和服务凭据尚未在测试 Bot 中配置。Agent 无法安全扩大权限或代替用户注入凭据，需要 Bot Owner 手动完成配置后再验证。",
+      "humanInterventionLevel": "none",
+      "humanInterventionReasoning": "用户提出目标后由 Agent 独立执行；失败后未发生人工代操作。",
+      "humanTurnCount": 1,
+      "systemUserMessageCount": 0,
+      "messageRange": [
+        0,
+        6
+      ],
+      "sessionStartTime": "2026-08-17T17:45:00+08:00",
+      "sessionEndTime": "2026-08-17T17:47:20+08:00",
+      "sessionDurationSeconds": 140,
+      "isCron": false,
+      "payloadRef": "oss://antsys-agentclaw-prod/evolution/pre/evidence/dev_local/20260603_fp6to0gv/20260817/admin-gate-manual-20260817.json",
+      "payloadEtag": "33e16a1acd0bb1565ac1f56a45ea4cc9496d7cc50ddb87715fe52413845470ef",
+      "payloadVersionId": null,
+      "payloadSchemaVersion": "session-evidence/v1",
+      "judgeVersion": {
+        "task_split": "admin-gate-demo-v2",
+        "is_complete": "admin-gate-demo-v2"
+      },
+      "judgedAt": "2026-08-17T17:47:20+08:00",
+      "batchId": "20260817_admin_gate_v2",
+      "dataAsOf": "2026-08-17T17:55:00+08:00"
+    }
+  ],
+  "nextCursor": null
+}
