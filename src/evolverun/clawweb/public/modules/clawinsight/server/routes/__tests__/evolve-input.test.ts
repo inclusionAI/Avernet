@@ -106,12 +106,21 @@ beforeEach(async () => {
     sessionId: "session-1",
     platformResponse: { echoedCommand: input.command },
   }));
+  const insightTaskService = new InsightTaskService(
+    repo,
+    improvementRepo,
+    taskSourceService,
+    new InsightPlanStepService(repo, dispatch),
+    autoRepairRepo,
+    ruleProvider,
+  );
   const app = express();
   app.use(express.json());
   app.use("/api/evolve", createEvolveRouter(repo, {
     dispatch,
     improvementRepo,
     taskSourceService,
+    insightTaskService,
     autoRepairRepo,
     ruleProvider,
     benchTemplateRepo,
