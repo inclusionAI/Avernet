@@ -81,7 +81,7 @@ def validate_tool_name(name: str) -> str:
     path-traversal guard on a write.
 
     **Applies to caller input only.** Names read back off the disk are not
-    routed through here — see :meth:`LocalCliToolsService._delete_path`.
+    routed through here — see :meth:`LocalCliToolsService._prune_path`.
     """
     if not name or name != name.strip():
         raise InvalidCliToolNameError(f"cli tool name is empty or padded: {name!r}")
