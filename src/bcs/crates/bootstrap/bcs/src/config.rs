@@ -3125,10 +3125,6 @@ base_url = "https://directory.example.com"
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../../configs/bcs-config-local.toml"
             )),
-            ("prod", concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../../configs/bcs-config-prod.toml"
-            )),
         ];
         for (label, path) in targets {
             let source = std::fs::read_to_string(path)
