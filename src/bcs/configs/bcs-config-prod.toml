@@ -285,34 +285,3 @@ provider = "env"
 # (prefix "BCS_SECRET_" + name uppercased, '-' -> '_'). Use the logical name,
 # not the env-var name, or the lookup double-prefixes and fails.
 signing_key_secret = "bcn-group-session-ws-jwt"
-
-[eventing]
-enabled = true
-dispatcher_enabled = true
-fanout_poll_interval_ms = 200
-delivery_poll_interval_ms = 200
-worker_concurrency = 16
-per_host_concurrency = 4
-lease_ms = 30000
-drain_timeout_ms = 10000
-event_retention_days = 30
-
-[eventing.retry]
-base_delay_ms = 5000
-max_delay_ms = 3600000
-max_attempts = 12
-max_elapsed_ms = 86400000
-
-[eventing.webhook]
-connect_timeout_ms = 3000
-request_timeout_ms = 10000
-max_request_timeout_ms = 30000
-max_event_body_bytes = 262144
-max_response_body_bytes = 4096
-# 临时放行 OSS 内网 webhook 回投 endpoint（[eventing.webhook] strict 默认下，私有 host 默认被
-# SSRF 拒；此处显式放行 backend task callback 回投目标，cidrs 收窄到 RFC1918/IPv6 ULA 堵公网 SSRF（过渡），后续按 baas.inner.avernet.com 解析网段进一步收窄到单段
-# 应收窄回实际内网网段）。
-[[eventing.webhook.private_endpoint_allowlist]]
-host = "*.avernet.com"
-cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
-ports = [80, 443, 8443]
