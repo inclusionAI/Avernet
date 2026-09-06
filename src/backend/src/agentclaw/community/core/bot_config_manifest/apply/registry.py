@@ -23,8 +23,8 @@ if TYPE_CHECKING:  # pragma: no cover — the registry stays import-light; see b
     from agentclaw.community.core.ports.identity_file_port import (
         IdentityFilePort,
     )
-    from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-        ManifestResourcePort,
+    from agentclaw.community.core.ports.resource_file_port import (
+        ResourceFilePort,
     )
     from agentclaw.community.core.ports.skill_package_upload_port import (
         SkillPackageUploadPort,
@@ -201,7 +201,7 @@ def build_materialisers(
     capability_reader: "BotCapabilityStateReaderProtocol",
     package_validator: "SkillPackageValidator",
     entry_fetcher: "EntryFetcher",
-    resource_service: "ManifestResourcePort",
+    resource_service: "ResourceFilePort",
     cli_tool_service: "CliToolService",
 ) -> dict[ApplyConstruct, Materialiser]:
     """The registry, built from injected services.

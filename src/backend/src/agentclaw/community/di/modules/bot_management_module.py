@@ -108,8 +108,8 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliTo
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
@@ -738,7 +738,7 @@ class BotManagementModule(Module):
         entry_fetcher_provider: Callable[[], EntryFetcher],
         # W6's resources materialiser and W7's git transport, from the same
         # module and lazy for the same reason.
-        resource_service_provider: Callable[[], ManifestResourcePort],
+        resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,  # W9, keyed by family
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],

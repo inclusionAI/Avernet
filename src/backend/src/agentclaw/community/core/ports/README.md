@@ -54,10 +54,15 @@ Here, both sides can import it and neither owns it.
   local skill package, without the directory-upload route's method.
 - `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
   bot's identity files — three of `IdentityService`'s fifteen public methods.
+- `resource_file_port.py` — `ResourceFilePort`: uploading, deleting and probing
+  a bot's workspace files — three of `ResourceFileService`'s seven.
 
-Remaining ports still live beside their consumers and move here as they are
-revisited: `bot_config_manifest/apply/resource_port.py` and
-`bot_config_manifest/cli_tools/` (`arca_port`, `delivery_port`).
+The `cli_tools` ports (`arca_port`, `delivery_port`) stay where they are. That
+category already splits by family one level down — `CliToolDeliveryPort` with
+`ArcaCliToolPort` and `TeclawCliToolPort` — so the structure is present; only
+the vocabulary differs, naming the engine family where these name the write's
+destination. For that category the two coincide: ARCA installs into a live
+container, teclaw does nothing.
 
 ## Implementations are named for where the write lands
 
@@ -70,6 +75,7 @@ splits on — whether the write reaches the bot's **device** or stays in
 | `ActivationPort` | `DeviceActivation` | `PlatformActivation` |
 | `SkillPackageUploadPort` | `DeviceSkillPackageUpload` | `PlatformSkillPackageUpload` |
 | `IdentityFilePort` | `DeviceIdentity` | `PlatformIdentity` |
+| `ResourceFilePort` | `DeviceResource` | `PlatformResource` |
 
 The pairs are not the same shape underneath, and that is expected. The
 activation two are wrappers over one `DirectActivationService`, differing only
@@ -84,6 +90,7 @@ rather than binding the service raw:
 | Port | service surface | port surface |
 |---|---|---|
 | `IdentityFilePort` | `IdentityService`, 15 public methods | 3 |
+| `ResourceFilePort` | `ResourceFileService`, 7 public methods | 3 |
 | `SkillPackageUploadPort` | `LocalSkillUploadServiceProtocol`, 3 | 2 |
 | `ActivationPort` | `DirectActivationServiceProtocol`, 6 + `project` | 6, no `project` |
 
@@ -95,6 +102,7 @@ provides:
   - ActivationPort
   - SkillPackageUploadPort
   - IdentityFilePort
+  - ResourceFilePort
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"

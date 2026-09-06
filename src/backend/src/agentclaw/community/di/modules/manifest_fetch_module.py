@@ -32,8 +32,8 @@ from agentclaw.community.api.bot_cli_tool_service import BotCliToolServiceProtoc
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.content.service import (
     ManifestContentService,
@@ -84,7 +84,7 @@ from agentclaw.community.core.bot_config_manifest.apply.activation_delegates imp
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     PlatformIdentity,
-    StoreResourcePort,
+    PlatformResource,
     PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
@@ -344,7 +344,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_resource_service_factory(
         self, injector: Injector
-    ) -> Callable[[], ManifestResourcePort]:
+    ) -> Callable[[], ResourceFilePort]:
         """The write chain the ``resources`` materialiser delivers through.
 
         Lazy with a function-level import for the reason the identity
@@ -359,11 +359,11 @@ class ManifestFetchModule(Module):
             ResourceFileService,
         )
 
-        def _resources() -> ManifestResourcePort:
+        def _resources() -> ResourceFilePort:
             service = injector.get(ResourceFileService)
-            if not isinstance(service, ManifestResourcePort):
+            if not isinstance(service, ResourceFilePort):
                 raise TypeError(
-                    "ResourceFileService no longer satisfies ManifestResourcePort"
+                    "ResourceFileService no longer satisfies ResourceFilePort"
                 )
             return service
 
@@ -596,7 +596,7 @@ class ManifestFetchModule(Module):
                 capability_reader=capability_reader_provider(),
                 package_validator=validator,
                 entry_fetcher=entry_fetcher_provider(),
-                resource_service=StoreResourcePort(store),
+                resource_service=PlatformResource(store),
                 # W9 is always platform-managed and never consults the switch,
                 # as ``mcp`` does not: the artifact is the delivery on this
                 # family whatever the switch says.

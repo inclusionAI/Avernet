@@ -35,7 +35,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     PlatformIdentity,
-    StoreResourcePort,
+    PlatformResource,
     PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
@@ -199,7 +199,7 @@ def _build(db):
             capability_reader=reader_of_active,
             package_validator=validator,
             entry_fetcher=fetcher(),
-            resource_service=StoreResourcePort(store),
+            resource_service=PlatformResource(store),
             cli_tool_service=object(),
         )
 

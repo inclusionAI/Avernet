@@ -707,8 +707,10 @@ internal_dependencies:
   - agentclaw.community.core.mcp.mcp_auth_service_protocol  # the permission check DirectActivationService also consults
   - agentclaw.community.core.repository
   - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
-  - agentclaw.community.core.services.identity
+  - agentclaw.community.core.services.identity  # the device-backed IdentityFilePort forwards to it (TYPE_CHECKING only — the module reaches the device dispatcher graph at import)
+  - agentclaw.community.core.services.resource_file_service  # the device-backed ResourceFilePort forwards to it (TYPE_CHECKING only, same reason)
   - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
+  - agentclaw.community.core.ports.resource_file_port  # ResourceFilePort — the outbound port both resource implementations declare
   - agentclaw.community.core.ports.identity_file_port  # IdentityFilePort — the outbound port both identity implementations declare
   - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
   - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare

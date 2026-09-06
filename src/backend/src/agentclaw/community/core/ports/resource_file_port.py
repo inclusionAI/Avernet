@@ -1,17 +1,27 @@
-"""The resources write path's narrow naming, for the apply wiring's providers.
+"""A bot's workspace resource files, named by what the caller needs of them.
 
-The same move ``identity_port.py`` records, for the same reason: the apply
-wiring's lazy providers are keyed by type, and the one type that would name
-``ResourceFileService`` is a module that reaches the device dispatcher graph
-at import time — importing it from the apply service (or eagerly from the DI
-module) would turn a lazy provider into an import cycle. So this module
-imports nothing, names the three methods the ``resources`` materialiser
-calls, and serves as the provider key.
+An outbound port (see this package's README): the ``resources`` materialiser
+uploads, deletes and probes a bot's workspace files, and this names exactly
+those three operations.
 
-The bound object is the real ``ResourceFileService`` singleton — structural
-typing, no adapter, no second implementation. A signature drift on the real
-service surfaces as a ``TypeError`` in the materialiser's tests (whose fake
-mirrors these shapes) before it surfaces mid-apply.
+**It is a narrowing.** ``ResourceFileService`` has seven public methods —
+``list_dir``, ``read_file``, ``iter_directory_files``, ``create_directory``
+alongside these three. The materialiser needs three; handed the service it
+could reach the rest.
+
+**Two implementations, split on where the write lands** — the same axis the
+delivery families split on everywhere else:
+
+* ``DeviceResource`` (ARCA) forwards to ``ResourceFileService``, which writes
+  the file into the bot's live container.
+* ``PlatformResource`` (platform-managed teclaw) writes objects under the
+  store's ``workspace`` namespace and never touches a container; the composed
+  artifact is the delivery.
+
+Members are ``@abstractmethod`` on purpose. The backend runs no static type
+checker, so a structurally-satisfied Protocol is verified by nothing at all;
+abstract members make a dropped or renamed method fail at construction instead
+of resolving to an inherited ``...`` stub that silently returns ``None``.
 """
 from __future__ import annotations
 
@@ -20,7 +30,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class ManifestResourcePort(Protocol):
+class ResourceFilePort(Protocol):
     """The three methods the ``resources`` materialiser reaches, as a type key.
 
     The declared keyword-only parameters are *apply's own call surface* —
@@ -71,4 +81,4 @@ class ManifestResourcePort(Protocol):
     ) -> bool: ...
 
 
-__all__ = ["ManifestResourcePort"]
+__all__ = ["ResourceFilePort"]

@@ -38,15 +38,20 @@ from agentclaw.community.core.bot_config_manifest.apply.activation_delegates imp
 from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
     DeviceIdentity,
 )
+from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+    DeviceResource,
+)
 from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     PlatformIdentity,
+    PlatformResource,
     PlatformSkillPackageUpload,
 )
 from agentclaw.community.core.ports.activation_port import ActivationPort
 from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -62,10 +67,12 @@ _PORT_IMPLEMENTERS = [
     (SkillPackageUploadPort, PlatformSkillPackageUpload),
     (IdentityFilePort, DeviceIdentity),
     (IdentityFilePort, PlatformIdentity),
+    (ResourceFilePort, DeviceResource),
+    (ResourceFilePort, PlatformResource),
 ]
 
 #: Every outbound port. Members must be abstract for the declarations to gate.
-_PORTS = [ActivationPort, SkillPackageUploadPort, IdentityFilePort]
+_PORTS = [ActivationPort, SkillPackageUploadPort, IdentityFilePort, ResourceFilePort]
 
 
 @pytest.mark.parametrize(

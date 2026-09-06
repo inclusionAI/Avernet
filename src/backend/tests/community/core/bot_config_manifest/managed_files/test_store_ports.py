@@ -22,7 +22,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
     PlatformIdentity,
-    StoreResourcePort,
+    PlatformResource,
 )
 
 from tests.community.core.bot_config_manifest.apply._fakes import (
@@ -114,7 +114,7 @@ def test_identity_declared_empty_removes_everything_but_reserved_names() -> None
 
 def test_resources_write_rows_under_the_workspace_namespace() -> None:
     store, oss = _store()
-    port = StoreResourcePort(store)
+    port = PlatformResource(store)
     materialiser = ResourcesMaterialiser(port, _fetcher())
     plan, written = _run(_apply(materialiser, _ctx(), [
         {"path": "kb/faq.md", "content": "q&a"},
@@ -132,7 +132,7 @@ def test_resources_write_rows_under_the_workspace_namespace() -> None:
 
 def test_resource_tree_delete_is_a_prefix_delete_over_the_store() -> None:
     store, oss = _store()
-    port = StoreResourcePort(store)
+    port = PlatformResource(store)
     args = dict(entity_type="staff", entity_id="u_owner", bot_id="b_1", engine_type="teclaw")
     _run(port.upload_file(**args, target_dir="kb", filename="a.md", data=b"a"))
     _run(port.upload_file(**args, target_dir="kb/deep", filename="b.md", data=b"b"))

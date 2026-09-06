@@ -45,6 +45,9 @@ from agentclaw.community.core.bot_config_manifest.apply.context import ApplyCont
 from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
     DeviceIdentity,
 )
+from agentclaw.community.core.bot_config_manifest.apply.resource_files import (
+    DeviceResource,
+)
 from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
@@ -66,8 +69,8 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
 from agentclaw.community.core.ports.identity_file_port import (
     IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
@@ -210,7 +213,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
-        resource_service_provider: Callable[[], ManifestResourcePort],
+        resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: Callable[[str], "CliToolService"],
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], "TaskQueueService"],
@@ -810,7 +813,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             capability_reader=self._capability_reader_provider(),
             package_validator=self._package_validator_provider(),
             entry_fetcher=self._entry_fetcher_provider(),
-            resource_service=self._resource_service_provider(),
+            resource_service=DeviceResource(self._resource_service_provider()),
             cli_tool_service=self._cli_tool_service_factory("arca"),
         )
 

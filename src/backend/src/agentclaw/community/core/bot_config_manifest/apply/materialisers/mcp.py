@@ -37,6 +37,9 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
+from agentclaw.community.core.mcp.mcp_auth_service_protocol import (
+    MCPAuthServiceProtocol,
+)
 from agentclaw.community.core.ports.activation_port import ActivationPort
 
 
@@ -48,7 +51,7 @@ class McpMaterialiser(Materialiser):
     def __init__(
         self,
         activation_service: ActivationPort,
-        mcp_auth_service: Any,
+        mcp_auth_service: MCPAuthServiceProtocol,
     ) -> None:
         self._activation = activation_service
         # The *same* permission service ``DirectActivationService`` consults, so
