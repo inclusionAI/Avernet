@@ -45,40 +45,43 @@ engine teams.
 
 ## Acceptance Criteria
 
-- [ ] Installing a tool by name makes that command present and executable in
+- [x] Installing a tool by name makes that command present and executable in
       the bot's container, and leaves every other command untouched.
-- [ ] The engine decides the directory, sets the executable bit, and makes the
+- [x] The engine decides the directory, sets the executable bit, and makes the
       tool reachable by the agent — all within the single install call. The
       platform sends no shell command and no permission change.
-- [ ] Deleting a command removes it; deleting a command that was never there
+- [x] Deleting a command removes it; deleting a command that was never there
       reports success.
-- [ ] Replacing the set treats the request as the desired end state: commands
+- [x] Replacing the set treats the request as the desired end state: commands
       not named in it are removed. An empty set is a valid request meaning
       "this bot has no commands", and clears them all.
-- [ ] A replace response carries a per-command verdict for **every** command
+- [x] A replace response carries a per-command verdict for **every** command
       the request named. A command the request named but the response omits
       makes the whole call unreadable to the platform, by design — silence is
       never read as success.
-- [ ] A replace call may report some commands succeeded and others failed in
+- [x] A replace call may report some commands succeeded and others failed in
       the same response, and that is an ordinary 200, not an error status.
-- [ ] Listing reports what is actually on disk at that moment — never a replay
+- [x] Listing reports what is actually on disk at that moment — never a replay
       of the last install or the last artifact received. It surfaces partial
       delivery, manual edits made inside the container, restores from an old
       snapshot, and tools the engine itself dropped.
-- [ ] A bot with no commands lists an empty set, not an error.
-- [ ] A refusal is unambiguous: either a non-success status, or a success
+- [x] A bot with no commands lists an empty set, not an error.
+- [x] A refusal is unambiguous: either a non-success status, or a success
       status whose envelope reports failure. A tool the engine could not
       install is never reported as installed.
-- [ ] The engine does not re-verify the content hash the platform already
+- [x] The engine does not re-verify the content hash the platform already
       enforced.
-- [ ] A tool binary at the platform's single-file ceiling can be carried by
+- [x] A tool binary at the platform's single-file ceiling can be carried by
       both the install request and the download response without exceeding any
       body limit.
-- [ ] An engine build that does not support CLI tools refuses in a way the
+- [x] An engine build that does not support CLI tools refuses in a way the
       platform reads as a refusal, rather than appearing to succeed.
-- [ ] Applying a manifest that declares `cli_tools` to an ARCA bot results in a
-      succeeded `cli_tools` category in the apply report, and the tools present
-      in the container.
+- [ ] **Deferred — needs a live ARCA bot.** Applying a manifest that declares
+      `cli_tools` results in a succeeded `cli_tools` category in the apply
+      report, with the tools present in the container. Every layer it depends
+      on is covered (service, router, wire contract against the platform's
+      parser), but the end-to-end assertion needs a deployed bot and belongs on
+      the platform side. Recorded as a follow-up.
 
 ## In Scope
 
@@ -101,27 +104,31 @@ engine teams.
 - **The in-container operations CLI** (`install-skill` and friends), held for
   v2 under its own contract.
 
-## Open Questions
+## Resolved
 
-- **The two written contracts disagree on surface area.** Engine requirements
-  §4 A2 specifies four endpoints. The engine handoff specification issued to
-  the engine teams specifies five — it adds fetching a single tool's bytes back
-  — and additionally requires a content hash on every entry the list returns,
-  which §4 A2 does not mention. The handoff document states the repository
-  wins on conflict and asks for discrepancies to be reported; this is that
-  report. *Proceeding with the superset*, since the extra read is additive, has
-  no platform caller yet, and the hash is what makes drift detection able to
-  catch a same-named binary that was swapped. Needs a ruling on which document
-  gets corrected.
-- **How an unsupported engine build should refuse.** The contract pins one
-  specific status to mean "this engine build has no CLI endpoints". The
-  engine's existing capability guard refuses with a different status. Both
-  reach the platform as a refusal and neither can be mistaken for success, so
-  this is not a correctness risk — but the contract text and the code will
-  disagree unless one is amended. *Proceeding with the engine's existing
-  guard*, on the grounds that consistency within the engine matters more than
-  the letter of a status code, and that its status is the more accurate signal.
-- **Whether every ARCA engine must support this in this iteration**, or whether
-  one leads and the rest declare it unsupported until they choose a directory.
-  *Proceeding with all of them*, since the only per-engine difference is the
-  directory constant.
+- **Contract surface.** Shipped as the superset: five endpoints, and `md5` on
+  every `list` entry. `§4 A2` has been updated to match, resolving the
+  discrepancy it asked to have reported.
+- **Refusal status.** `501`, via the engine's existing capability guard. `§4 A2`
+  now records this alongside the reserved meaning of `404`.
+- **Engine coverage.** `openclaw` and `claude_code` — the only `Engine`
+  subclasses in this repository. `aicoding` and `hermes` carry ports, not
+  engines; if the corp build ships them they each need a binding, which this
+  change does not cover.
+- **Where the tools land.** Not settled in code, and deliberately so: the
+  community `docker/` tree is not what production deploys, so the directory is
+  a deployment knob (`BOT_CLI_DIR_<ENGINE>`, `BOT_CLI_DIR`, `ENGINE_CLI_DIRS`)
+  with a per-bot workspace-sibling default. Claude Code's production location
+  is still to be confirmed with the deployment owners.
+
+## Follow-ups
+
+- **End-to-end assertion on a live ARCA bot**: an apply declaring `cli_tools`
+  reports the category succeeded and the tools are present. Platform-side.
+- **Confirm Claude Code's production tool directory** with the deployment
+  owners, then pin it via `BOT_CLI_DIR_CLAUDE_CODE` or an `ENGINE_CLI_DIRS`
+  entry.
+- **`aicoding` and `hermes`** need the same binding if the corp build ships
+  them as engines.
+- **PATH injection**, which makes the workspace-sibling placement load-bearing
+  rather than merely tidy.

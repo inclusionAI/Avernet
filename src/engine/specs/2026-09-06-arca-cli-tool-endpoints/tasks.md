@@ -146,20 +146,20 @@
   - [x] A request at the documented size cap is accepted.
 - **Depends on:** Task 6
 
-## Task 8: Verification and contract reconciliation
+## Task 8 `[x]`: Verification and contract reconciliation
 - **Goal:** Confirm the spec's acceptance criteria hold, and close the
   documentation discrepancy the spec recorded.
 - **Files:** `src/backend/docs/bot-config-manifest/engine-requirements.zh-CN.md`,
   `src/engine/specs/2026-09-06-arca-cli-tool-endpoints/spec.md`
 - **Done when:**
-  - [ ] The engine test suite passes, and lint/format are clean.
-  - [ ] Every acceptance criterion in `spec.md` is checked off or explicitly
+  - [x] The engine test suite passes, and lint/format are clean.
+  - [x] Every acceptance criterion in `spec.md` is checked off or explicitly
         deferred with a reason.
-  - [ ] §4 A2 is updated to match what shipped: the fifth endpoint
+  - [x] §4 A2 is updated to match what shipped: the fifth endpoint
         (`download`), the `md5` field on `list`, and the 501-vs-404 refusal
         note — resolving the discrepancy between the repo doc and the engine
         handoff specification, as that document asks.
-  - [ ] The end-to-end assertion that an ARCA apply reports `cli_tools`
+  - [x] The end-to-end assertion that an ARCA apply reports `cli_tools`
         succeeded is either added on the platform side or recorded as a named
         follow-up.
 - **Depends on:** Tasks 3, 5, 7
