@@ -63,7 +63,7 @@
 
 | 文档 | 内容 | 读者 |
 | --- | --- | --- |
-| `user-manual.zh-CN.md` | **用户手册**：怎么写清单、怎么发上去、怎么确认生效、出问题怎么查；含上手路径、逐类目写法、排错表 | 业务方 & 平台团队 |
+| `user-manual.zh-CN.md` | **用户手册**：怎么写清单、怎么发上去、怎么确认生效、出问题怎么查；含上手路径、逐类目写法、排错表，以及**全部端点的 API 参考**（附录 B：清单本体 / apply / 用清单创建 bot / 源凭证 / 同一份状态的另一扇门） | 业务方 & 平台团队 |
 | `design.zh-CN.md` | 完整设计：动机、备选方案取舍、apply 语义、失败/安全/观测、版本化 | 平台 & 引擎团队 |
 | `manifest-schema.zh-CN.md` | Manifest v1 草案：六类配置的字段、校验、到各引擎的映射 | 平台 & 引擎团队 |
 | `examples.zh-CN.md` | 六类配置的完整案例：业务场景、manifest 写法、apply 动作、交付形态 | 平台 & 引擎团队 & 业务方 |
@@ -80,7 +80,7 @@
 | TC Open API | `/openapi/v1/...` 公开 API 面（`adapters/http/openapi_v1/`） |
 | manifest | 配置清单的声明式部分（六个类别），本设计的核心新增物 |
 | script | #935 的 per-bot startup script，本设计中作为配置清单的命令式部分 |
-| apply 点 | 平台评估并应用 manifest 的生命周期边界（创建 / republish / 重建式 restart / 显式 apply） |
+| apply 点 | 平台评估并应用 manifest 的生命周期边界（创建 / republish / 重建式 restart / 显式 apply）。**第一期实际实现的是：创建、`PUT` 之后自动跟的一次、显式 `POST …/apply`**；republish 与重建式 restart 推迟，见 `user-manual.zh-CN.md` §7 |
 | 物化（materialize） | 平台把 `source` URL 的内容 fetch 下来、写入平台存储（对 teclaw 即 OSS store）的动作 |
 | ARCA 系 | 走 `_build_create_bot_payload` 组装启动命令的单容器引擎家族：openclaw / claude_code / aicoding / hermes / moltis |
 | teclaw | 外部容器引擎：无启动命令通道，唯一配置通道是整包 `BotConfigArtifact` |
