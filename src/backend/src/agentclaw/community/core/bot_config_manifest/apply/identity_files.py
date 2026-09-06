@@ -39,7 +39,7 @@ if TYPE_CHECKING:  # pragma: no cover — see the module docstring
 class DeviceIdentity(IdentityFilePort):
     """The ARCA identity road: files onto the bot's live container."""
 
-    def __init__(self, inner: "IdentityService") -> None:
+    def __init__(self, inner: IdentityService) -> None:
         self._inner = inner
 
     async def list_bot_files(
