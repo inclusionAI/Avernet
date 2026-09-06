@@ -159,8 +159,8 @@ class TaskModule(Module):
         - 其它(corp/prod)→ 不内联 BaaS/BCS 密钥;``_resolve_ports`` 返 ``(None,None)`` 后由
           ``injector.get(OpenApiBotPort)``/``injector.get(BcsClientPort)`` 取 corp overlay 经 DI 绑定的
           真实端口实现(community 未绑 → None,纯内核/HTTP-contract 路径退化为 stub)。
-        - discover: every profile reuses ``SingleboxKeywordBotDiscover`` over the local
-          public-Bot catalogue (name/owner-name LIKE). Task dispatch intentionally does
+        - discover: every profile reuses ``CatalogKeywordBotDiscover`` over the public
+          Bot catalogue (BCS catalog keyword search). Task dispatch intentionally does
           not invoke BCSFuse recommendation, whose availability must not decide routing.
         """
         try:
@@ -525,14 +525,16 @@ class TaskModule(Module):
     def _resolve_discover(
         *, bot_public: BotPublicServiceProtocol
     ) -> BotDiscoverServiceProtocol:
-        """Reuse the existing public-Bot LIKE candidate adapter for every profile.
+        """Reuse the catalog keyword candidate adapter for every profile.
 
         ``SearchBasedDispatchStrategy`` performs jieba tokenization and calls this
-        port once per token. BCSFuse remains available to the separate public
-        Bot-discovery API, but is not a task dispatch dependency.
+        port once per token. The adapter delegates to BCS catalog keyword search
+        (``search_catalog_public_bots_by_keyword``); BCSFuse recommendation remains
+        available to the separate public Bot-discovery API and is not a task
+        dispatch dependency.
         """
         from agentclaw.community.core.task.task_runner.client.singlebox_engine_adapter import (
-            SingleboxKeywordBotDiscover,
+            CatalogKeywordBotDiscover,
         )
 
-        return SingleboxKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
+        return CatalogKeywordBotDiscover(bot_public)  # type: ignore[arg-type]
