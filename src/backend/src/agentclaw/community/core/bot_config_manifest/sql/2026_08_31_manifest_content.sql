@@ -68,6 +68,33 @@
 -- ``.tmp-*`` staging files from crashed writes are not audit facts and are
 -- age-swept at store time (see content/service.py); they are the only thing
 -- a sweeper may ever touch.
+-- DIALECT: OCEANBASE, MYSQL MODE. What this file writes follows the deployed
+-- tables there rather than portable MySQL -- compare ``SHOW CREATE TABLE
+-- ac_bots``, and the sibling DDL in core/caller_identity/sql/.
+--
+--   * EVERY INDEX IS DECLARED ``GLOBAL``. On a partitioned table an index
+--     without it is partition-local, and a partition-local UNIQUE enforces
+--     uniqueness only *within* a partition. These tables are not
+--     partitioned today, so it is a no-op now and cheap insurance later: what
+--     it prevents surfaces as duplicate rows, silently, never as an error.
+--     SQLAlchemy cannot render the modifier, so this file is the only place it
+--     can live.
+--   * ``TIMESTAMP``, NOT ``DATETIME``, for gmt_* and the business timestamps,
+--     matching ac_bots and every table added since. Mixing the two is what
+--     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql
+--     had to repair: TIMESTAMP converts by session time zone and DATETIME does
+--     not, so a session outside Asia/Shanghai reads the two as disagreeing by
+--     the offset. The ORM keeps ``DateTime`` either way -- ac_skill_version's
+--     published_at is the precedent for that pairing.
+--   * NO ``ENGINE`` CLAUSE, and no BLOCK_SIZE / REPLICA_NUM / COMPRESSION /
+--     TABLET_SIZE / PCTFREE / ROW_FORMAT. OceanBase applies its own defaults
+--     and echoes them back from SHOW CREATE TABLE; writing them here would be
+--     copying its own output back at it.
+--   * ``AUTO_INCREMENT_MODE = 'ORDER'``, pinned rather than inherited, because
+--     id is the tie-break keep_last resolves on: reads order by
+--     ``gmt_create DESC, id DESC``, so within one second the newest receipt is
+--     the largest id -- true only while ids are allocated in order.
+
 CREATE TABLE `ac_manifest_content` (
   `id`            bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `avernet_tenant` varchar(64)  NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
@@ -89,7 +116,7 @@ CREATE TABLE `ac_manifest_content` (
   -- reconciliation anchor, not this).
   `content_type`  varchar(256)  DEFAULT NULL COMMENT '响应 Content-Type（advisory；超宽存 NULL）',
   `size_bytes`    bigint(20) unsigned NOT NULL COMMENT '字节数（与 digest 同为对账锚）',
-  `fetched_at`    datetime      NOT NULL COMMENT '拉取时间（FetchedObject.fetched_at）',
+  `fetched_at`    timestamp      NOT NULL COMMENT '拉取时间（FetchedObject.fetched_at）',
   -- The join back to the apply record (ac_bot_config_manifest_apply), and
   -- the per-entry identity a fetch served: apply_id is what that table's
   -- own comment ("also what a per-entry table would join on") points at
@@ -106,13 +133,15 @@ CREATE TABLE `ac_manifest_content` (
   `category`      varchar(32)   DEFAULT NULL COMMENT '条目类目（skills/identity/…；条目维度之一）',
   `entry_identity` varchar(256) DEFAULT NULL COMMENT '条目标识（对账锚外的维度：skill name / identity type / …）',
   `modifier`      varchar(1024) NOT NULL DEFAULT '' COMMENT '审计：触发拉取的身份',
-  `gmt_create`    datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `gmt_modified`  datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `gmt_create`    timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
   -- The audit query shape: one bot's receipts, newest first. Leading column
   -- tenant keeps it aligned with the guard's filter.
-  KEY `idx_tenant_env_entity_bot` (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `gmt_create`),
+  KEY `idx_tenant_env_entity_bot`
+    (`avernet_tenant`, `env`, `entity_id`, `bot_id`, `gmt_create`) GLOBAL,
   -- "What did apply X fetch" — the join the apply record's own comment
   -- anticipated this table providing.
-  KEY `idx_apply` (`apply_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='manifest 拉取内容平台副本的溯源日志（行 append-only，字节在内容寻址 blob 目录）';
+  KEY `idx_apply` (`apply_id`) GLOBAL
+) AUTO_INCREMENT_MODE = 'ORDER' DEFAULT CHARSET = utf8mb4
+  COMMENT = 'manifest 拉取内容平台副本的溯源日志（行 append-only，字节在内容寻址 blob 目录）';
