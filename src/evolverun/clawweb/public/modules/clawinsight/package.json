@@ -29,14 +29,12 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures dist/server/services/object-storage && cp -R server/fixtures/. dist/server/fixtures/ && cp -R server/services/object-storage/proto dist/server/services/object-storage/",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/fixtures && cp -R server/fixtures/. dist/server/fixtures/",
     "test": "vitest run"
   },
   "dependencies": {
     "@avernet/clawevolve": "0.2.0",
     "@avernet/clawweb-shared": "0.1.0",
-    "@grpc/grpc-js": "^1.14.4",
-    "@grpc/proto-loader": "^0.8.1",
     "ali-oss": "^6.23.0",
     "better-sqlite3": "^11.9.1",
     "echarts-for-react": "^3.0.6",

@@ -30,11 +30,18 @@ describe("Clawevolve environment", () => {
     expect(getCurrentEnv()).toBe("dev");
   });
 
-  it("requires an explicit public URL outside dev", () => {
+  it("uses the standard public URL outside dev", () => {
     clearRuntimeEnv();
     vi.stubEnv("SERVER_ENV", "pre");
-    expect(() => getClawWebPublicBaseUrl()).toThrow(
-      "CLAWWEB_PUBLIC_BASE_URL is required outside dev",
+    expect(getClawWebPublicBaseUrl()).toBe("https://clawweb-pre.alipay.com");
+  });
+
+  it("shares a custom Host origin with all ClawWeb modules", () => {
+    clearRuntimeEnv();
+    configureClawWebPublicBaseUrl(
+      "https://custom-clawweb.example.com",
+      ["https://custom-clawweb.example.com"],
     );
+    expect(getClawWebPublicBaseUrl()).toBe("https://custom-clawweb.example.com");
   });
 });

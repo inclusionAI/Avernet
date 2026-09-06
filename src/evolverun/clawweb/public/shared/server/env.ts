@@ -11,6 +11,11 @@
  */
 
 const ENV_PRIORITY = ["SERVER_ENV", "REAL_SERVER_ENV", "ALIPAY_APP_ENV"] as const;
+const DEFAULT_TRUSTED_REMOTE_ORIGINS = new Set([
+  "https://clawweb-pre.alipay.com",
+  "https://clawweb.alipay.com",
+]);
+let configuredPublicBaseUrl: string | undefined;
 
 function getRawEnv(): string {
   for (const key of ENV_PRIORITY) {
@@ -43,7 +48,10 @@ export function isDev(): boolean {
 }
 
 /** Public origin embedded in task commands that call back into this ClawWeb. */
-export function normalizeClawWebPublicBaseUrl(value: string): string {
+export function normalizeClawWebPublicBaseUrl(
+  value: string,
+  trustedRemoteOrigins: ReadonlySet<string> = DEFAULT_TRUSTED_REMOTE_ORIGINS,
+): string {
   const raw = value.trim();
   if (!raw || /\s/.test(raw)) throw new Error("ClawWeb public URL must be a non-empty origin without whitespace");
   let parsed: URL;
@@ -63,15 +71,30 @@ export function normalizeClawWebPublicBaseUrl(value: string): string {
     // Dev mode allows HTTP origins for internal network callbacks (e.g. bot inside corp VPN).
   } else if (
     parsed.protocol !== "https:"
-    || (parsed.hostname !== "clawweb-pre.alipay.com" && parsed.hostname !== "clawweb.alipay.com")
     || parsed.port
+    || !trustedRemoteOrigins.has(parsed.origin)
   ) {
     throw new Error("ClawWeb public URL is not a trusted HTTPS origin");
   }
   return parsed.origin;
 }
 
+/** Configure one exact callback origin explicitly trusted by the embedding Host. */
+export function configureClawWebPublicBaseUrl(
+  value: string | undefined,
+  trustedRemoteOrigins: readonly string[] = [],
+): void {
+  if (!value) {
+    configuredPublicBaseUrl = undefined;
+    return;
+  }
+  // COSEC: Remote callback origins must pass URL parsing and an exact origin allowlist.
+  const allowed = new Set([...DEFAULT_TRUSTED_REMOTE_ORIGINS, ...trustedRemoteOrigins]);
+  configuredPublicBaseUrl = normalizeClawWebPublicBaseUrl(value, allowed);
+}
+
 export function getClawWebPublicBaseUrl(): string {
+  if (configuredPublicBaseUrl) return configuredPublicBaseUrl;
   const override = process.env.CLAWWEB_PUBLIC_BASE_URL?.trim()
     || process.env.CLAWWEB_URL?.trim();
   if (override) return normalizeClawWebPublicBaseUrl(override);

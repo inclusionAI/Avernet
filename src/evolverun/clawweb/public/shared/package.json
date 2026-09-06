@@ -21,10 +21,12 @@
   ],
   "scripts": {
     "check": "tsc -p tsconfig.json --noEmit",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/server/services/mist && cp -R server/services/mist/proto dist/server/services/mist/",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "@tanstack/react-query": "^5.100.10",
     "better-sqlite3": "^11.9.1",
     "express": "^5.2.1",
