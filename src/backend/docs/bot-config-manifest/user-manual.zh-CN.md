@@ -129,9 +129,13 @@ POST /openapi/v1/bots/with-manifest        ← 202 + bot_id + 授权链接
 GET /openapi/v1/bots/{bot_id}/with-manifest/status
 ```
 
-`READY` 与 `APPLY_FAILED` **都**带 apply 报告和 `bot`，逐条告诉你哪些条目下发了、
-哪些没有——`APPLY_FAILED` 意味着 **bot 在跑**，只是配置缺了一块。拿不到 bot 的失败叫
-`CREATE_FAILED`，是另一件事。
+`READY` 与 `APPLY_FAILED` **都一定带 `bot`**——`APPLY_FAILED` 意味着 **bot 在跑**，
+只是配置缺了一块；拿不到 bot 的失败叫 `CREATE_FAILED`，是另一件事。
+
+`apply` 报告通常也在，会逐条告诉你哪些条目下发了、哪些没有；但**这两个状态下它都可能是
+`null`，写客户端时务必判空**（容器后那一段没能启动，或创建之后又跑过一次显式 apply 把
+记录顶掉了）。为 `null` 时改读 `GET …/config-manifest/last-apply`。两种情形与处理方式见
+**附录 B.3.2**。
 
 **第 5 步：以后要改**，不必重建 bot——改清单 `PUT` 上去即可，走路径 B 的第 3
 步起，**立即生效、不需要重启**。
@@ -567,6 +571,7 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 → 200 { "state": "READY", "bot_id": "…",
         "iframe_url": "", "redirect_url": "",
         "bot": { … }, "apply": { …apply 报告… }, "message": "" }
+        ↑ bot 在终态一定有；apply 可能是 null，见附录 B.3.2
 ```
 
 几个细节值得单独记：
