@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bcs_config_api::ManifestConfig;
 use bcs_service_api::application::v1::{
-    AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, RegisterService,
+    AuthService as ApplicationAuthService, BotService, CollaborationDefinitionService, CollaborationTemplateService, EventSubscriptionService, FriendConnectionService, FriendshipService, GroupService, InvitationService, InviteCodeService, RegisterService,
     SessionFileApplicationService, SessionMessageService, SessionService,
 };
 use bcs_service_api::application::channel::ChannelService;
@@ -10,7 +10,7 @@ use bcs_service_api::application::CollaborationRuntimeService;
 
 use crate::v1::openapi::SessionFileUrlProjector;
 
-use super::PrincipalVerifier;
+use super::{InviteCodeGateState, PrincipalVerifier};
 
 pub trait PrincipalVerificationState: Clone + Send + Sync + 'static {
     fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier>;
@@ -26,6 +26,8 @@ pub struct ApiState {
     pub session_service: Arc<dyn SessionService>,
     pub message_service: Arc<dyn SessionMessageService>,
     pub invitation_service: Arc<dyn InvitationService>,
+    pub invite_code_service: Option<Arc<dyn InviteCodeService>>,
+    pub invite_code_gate_enabled: bool,
     pub register_service: Arc<dyn RegisterService>,
     pub friendship_service: Arc<dyn FriendshipService>,
     pub friend_connection_service: Option<Arc<dyn FriendConnectionService>>,
@@ -59,6 +61,8 @@ impl ApiState {
             session_service,
             message_service,
             invitation_service,
+            invite_code_service: None,
+            invite_code_gate_enabled: false,
             register_service,
             friendship_service,
             friend_connection_service: None,
@@ -90,6 +94,17 @@ impl ApiState {
     /// rollout mounts this adapter in the bootstrap composition root.
     pub fn with_bot_service(mut self, bot_service: Arc<dyn BotService>) -> Self {
         self.bot_service = Some(bot_service);
+        self
+    }
+
+    pub fn with_invite_code_service(mut self, service: Arc<dyn InviteCodeService>) -> Self {
+        self.invite_code_service = Some(service);
+        self
+    }
+
+    /// Enable or disable invite-code gating for protected routes.
+    pub fn with_invite_code_gate_enabled(mut self, enabled: bool) -> Self {
+        self.invite_code_gate_enabled = enabled;
         self
     }
 
@@ -169,6 +184,12 @@ impl ApiState {
         self.manifest_env = env;
         self.manifest = manifest;
         self
+    }
+}
+
+impl InviteCodeGateState for ApiState {
+    fn invite_code_service(&self) -> Option<&Arc<dyn InviteCodeService>> {
+        self.invite_code_service.as_ref()
     }
 }
 
