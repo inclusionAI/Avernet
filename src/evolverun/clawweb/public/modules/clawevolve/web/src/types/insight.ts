@@ -1,5 +1,3 @@
-export type CompletionState = 0 | 1 | 2 | 3
-
 export type ImprovementEvidenceSnapshot = {
   sessionId: string
   taskIndex: number
