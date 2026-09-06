@@ -310,3 +310,47 @@ class TestCapabilityGate:
                 assert not cli_dir.exists() or list(cli_dir.iterdir()) == []
         finally:
             EngineManager.reset_instance()
+
+
+class TestRefusalShapes:
+    """An engine-side failure must reach the platform as a refusal, never as
+    a success, and never as a 404 (which means "no CLI endpoints")."""
+
+    def test_an_install_the_engine_cannot_place_is_success_false(
+        self, client, monkeypatch, cli_dir
+    ):
+        from engine.community.core.cli_tools.service import LocalCliToolsService
+
+        async def boom(self, name, data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(LocalCliToolsService, "install", boom)
+        response = client.post(
+            "/api/cli/install", json={"name": "mycli", "content_b64": _b64(ELF)}
+        )
+
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+        assert "disk full" in response.json()["message"]
+
+    def test_a_delete_the_engine_cannot_perform_is_success_false(
+        self, client, monkeypatch
+    ):
+        from engine.community.core.cli_tools.service import LocalCliToolsService
+
+        async def boom(self, name):
+            raise OSError("read-only filesystem")
+
+        monkeypatch.setattr(LocalCliToolsService, "delete", boom)
+        response = client.post("/api/cli/delete", json={"name": "mycli"})
+
+        assert response.status_code == 200
+        assert response.json()["success"] is False
+
+    def test_a_traversing_name_is_refused_on_delete_and_download(self, client):
+        assert client.post(
+            "/api/cli/delete", json={"name": "../escape"}
+        ).status_code == 400
+        assert client.get(
+            "/api/cli/download", params={"name": "../escape"}
+        ).status_code == 400

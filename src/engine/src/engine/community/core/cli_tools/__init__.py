@@ -1,6 +1,9 @@
 from engine.community.core.cli_tools.directories import (
-    bot_cli_dir,
+    ENGINE_CLI_DIRS,
     cli_dir_beside,
+    cli_dir_for,
+    cli_dir_resolver,
+    default_cli_dir,
 )
 from engine.community.core.cli_tools.models import (
     CliToolBytes,
@@ -23,7 +26,10 @@ __all__ = [
     "CliToolsService",
     "InvalidCliToolNameError",
     "LocalCliToolsService",
-    "bot_cli_dir",
+    "ENGINE_CLI_DIRS",
     "cli_dir_beside",
+    "cli_dir_for",
+    "cli_dir_resolver",
+    "default_cli_dir",
     "validate_tool_name",
 ]

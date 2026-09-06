@@ -104,16 +104,17 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   「平台工具目录在哪个注入点进 agent 进程的 PATH」——即把落点当成平台侧的答案、
   逐引擎去谈。**W9 把它反过来了**：落点是**引擎的**，平台不参与。
 
-  引擎需要提供四个按**命令名**寻址的端点（后端通过各 bot 的 engine adapter
-  调用，与 runtime-layout probe、cron relay 走的是同一条通道）。前三个是
-  「改一个」，第四个是「整体替换」：
+  引擎需要提供五个按**命令名**寻址的端点（后端通过各 bot 的 engine adapter
+  调用，与 runtime-layout probe、cron relay 走的是同一条通道）。前两个是
+  「改一个」，第三个是「整体替换」，后两个是只读的：
 
   | 端点 | 请求体 | 语义 |
   | --- | --- | --- |
   | `POST /api/cli/install` | `{name, size_bytes, content_b64}` | 「让这个 bot 有 `name` 这个命令」，其余命令不动。**目录、可执行位、以及让 agent 能用到它，全在这一次调用里由引擎完成。**平台不发 `chmod`、不跑 shell |
   | `POST /api/cli/delete` | `{name}` | 移除该命令；本来就没有也算成功 |
-  | `GET /api/cli/list` | — | 引擎认为这个 bot 有哪些命令。**仅供漂移观测**，平台的表才是「已安装」的定义 |
   | `POST /api/cli/replace` | `{tools: [{name, size_bytes, content_b64}, …]}` | 「这个 bot 的命令集**就是**这些」。**请求体里没出现的命令要被删掉**——删除是隐含的。空数组是合法且有意义的请求：等于「这个 bot 没有任何命令」 |
+  | `GET /api/cli/list` | — | 引擎认为这个 bot 有哪些命令。**仅供漂移观测**，平台的表才是「已安装」的定义。每条返回 `{name, md5, size_bytes}`；**`md5` 必填**——只报 `name` 只能发现「少了 / 多了」，发现不了**同名但二进制被换掉**，而那恰恰是最值得发现的一种。一个命令都没有时返回 `{"tools": []}`，不是 404 |
+  | `GET /api/cli/download?name=…` | — | 取回单个命令的字节（base64）。**核对与排查用的旁路，不是交付链路的一环**——平台自己留了一份字节，交付路径上不从容器回读。命令不存在时返回 `200` + `success:false` + `error:"not_found"`，**不用 404**（见下） |
 
   **`replace` 的响应必须逐命令给结论**，这是它比前三个端点难做的地方，也是
   必须写在契约里而不是留到实现时才发现的一点：
@@ -137,9 +138,16 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
 
   约定：非 2xx 抛错、200 但 envelope 里 `success: false` 同样算拒绝——引擎装
   不上的工具，平台**绝不**记成已安装。404 的含义是「这个引擎构建没有 CLI
-  端点」，不是「工具不存在」（平台从不按路径问工具）。字节以 base64 走
-  JSON body：`DeviceAdapterTransport` 是 core 能绑定也能测试的唯一引擎通道，
-  逐文件写用的 multipart 通道其 ARCA 分支是 corp-only。
+  端点」，不是「工具不存在」（平台从不按路径问工具）——所以 `download` 遇到
+  未知命令时**不能**用 404，否则一个写错的命令名会被读成「整个引擎坏了」。
+  字节以 base64 走 JSON body：`DeviceAdapterTransport` 是 core 能绑定也能测试
+  的唯一引擎通道，逐文件写用的 multipart 通道其 ARCA 分支是 corp-only。
+
+  **本仓库的实现按能力位拒绝时返回 `501` 而不是 `404`**（`api/caps.py` 的
+  `check_capability`，与其余所有 router 一致）。两者在平台侧都落成
+  `CliToolPlacementError`，都不可能被误读成成功；沿用 `501` 是为了让引擎内部
+  一致，而 `501`（未实现）本身也比 `404`（找不到）更贴近「这个构建不做
+  CLI」。契约在此以实现为准。
 
   **v1 已知代价：`replace` 会带上集合里每一个工具的字节，哪怕这次只改了一个。**
   四个工具改一个 = 四份二进制都重传。之所以可接受：**完全没变化的 apply 根本

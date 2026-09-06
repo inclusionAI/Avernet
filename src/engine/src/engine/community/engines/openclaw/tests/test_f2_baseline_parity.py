@@ -243,17 +243,17 @@ class TestCliToolsBinding:
         assert engine.cli_tools is not None
 
     def test_the_tool_directory_follows_this_bots_workspace(self, monkeypatch):
-        """Per bot, not per engine — that is what keeps bots isolated.
+        """Per bot by default, and overridable per engine without code.
 
-        BaaS injects the workspace per bot and per engine, so both community
-        engines share one resolver: on the ARCA image
-        ``start_claude_code.sh`` points its agent at the same
-        ``/home/admin/.openclaw/workspace`` an OpenClaw bot uses.
+        Where an engine's tools belong is a deployment fact, so the binding
+        resolves through ``cli_dir_for`` rather than a constant.
         """
-        from engine.community.core.cli_tools.directories import bot_cli_dir
-
+        monkeypatch.delenv("BOT_CLI_DIR", raising=False)
+        monkeypatch.delenv("BOT_CLI_DIR_OPENCLAW", raising=False)
         monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
         engine = OpenClawEngine(client=_fake_client())
 
         assert engine.cli_tools._dir() == Path("/data/bot_a/openclaw/cli")
-        assert bot_cli_dir() == Path("/data/bot_a/openclaw/cli")
+
+        monkeypatch.setenv("BOT_CLI_DIR_OPENCLAW", "/opt/tools")
+        assert engine.cli_tools._dir() == Path("/opt/tools")
