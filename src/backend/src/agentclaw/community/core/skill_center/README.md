@@ -271,7 +271,7 @@ observes the loss at the next item boundary, stops subsequent items, and reports
 the stable coordinator error. A later periodic/manual pass converges the
 materialized-only set again.
 
-### One writer, one flush, one reader, one rule book
+### One writer, migration-gated synchronization, one reader, one rule book
 
 Installation (`ac_bot_skill_installation` / `ac_bot_mcp_installation`) is the
 single source of truth for a Bot's active capabilities, and four seams keep it
@@ -283,11 +283,18 @@ that way:
   `CapabilityDesiredStateRepository` unit of work composes them. An
   architecture test (`test_installation_table_write_ownership.py`) fails any
   other module that writes the models.
-- **One flush.** `flush_installations` is the only reconciliation from Set
-  configuration into Installation, and every read-side consumer runs it first
-  (details below).
+- **Staged synchronization.** Before an environment's Installation backfill is
+  accepted, `flush_installations` is the complete reconciliation from Set
+  configuration into Installation. The default-off
+  `SC_INSTALLATION_DEFAULT_SYNC_ONLY` switch is enabled only after that
+  acceptance; it retains Default membership + per-Bot exclusion materialization
+  but does not repair ordinary Set history. The internal backfill endpoint
+  always invokes the complete resolver, independent of this switch.
 - **One reader.** `BotCapabilityStateReader` answers every "what is active on
-  this Bot" question — it flushes, then reads Installation alone.
+  this Bot" question — it synchronizes the configured migration scope, then
+  reads Installation alone. It has an explicit DB-only new-Bot initializer, so
+  a create retry, `provision=False`, and desktop creation do not depend on a
+  later effective read or Runtime projection.
   `SkillQueryService` (listing/detail/content/parameters) and
   `DirectActivationService.list_installed_mcps` answer through it.
 - **One rule book.** `policies/capability_ownership.py` owns the ownership
@@ -323,7 +330,15 @@ reads such as `GET /openapi/v1/bots/{bot_id}/skills` (see
 difference, in one transaction, after the caller's Bot access has been checked,
 and never touches runtime.
 
-`InstallationBackfillService` runs that same flush deliberately for one named
+After the documented backfill acceptance, the explicit operator switch may
+select `sync_default_installations`: it materializes only the currently
+applicable Default and exclusions, still reads effective identity solely from
+Installation, preserves active ordinary claims on malformed historical overlap,
+and never infers a deletion from removed Default membership. Removing a global
+Default member remains an operations cleanup that must protect Direct
+Installation rows.
+
+`InstallationBackfillService` runs the complete flush deliberately for one named
 Bot, behind the Bearer-token
 `POST /api/internal/skill-center/installations/backfill/bot` endpoint. The lazy
 flush converges a Bot only when something reads it, which is enough for per-Bot

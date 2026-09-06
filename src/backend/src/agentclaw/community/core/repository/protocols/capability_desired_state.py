@@ -48,6 +48,46 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         """
         ...
     @abstractmethod
+    def sync_default_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> InstallationFlushPlan:
+        """Materialize only the applicable Default Set and its exclusions.
+
+        This is the post-backfill reader migration path.  It intentionally
+        does not repair ordinary SkillSet history or infer provenance for a
+        removed Default membership.
+        """
+        ...
+    @abstractmethod
+    def initialize_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        env: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> InstallationFlushPlan:
+        """Insert missing active Set facts without deleting existing rows."""
+        ...
+    @abstractmethod
+    def list_member_skill_ids(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        engine_type: str | None = None,
+        default_engine_types: tuple[str, ...] | None = None,
+    ) -> frozenset[int]:
+        """Read the Bot's Set reachability without materializing Installation."""
+        ...
+    @abstractmethod
     def resolve_legacy_set_scope(
         self, *, set_id: str
     ) -> LegacySkillSetScope | None:

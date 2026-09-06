@@ -699,6 +699,14 @@ class DesktopBotService(DesktopBotServiceProtocol):
                 "ext": ext,
             })
 
+            # The desktop flow has its own Bot insert and must establish the
+            # same DB-only Installation facts before it starts publish polling.
+            # This intentionally neither waits for the container nor projects
+            # Runtime state.
+            self._skill_set_factory.initialize_installations(
+                bot_id=bot_id, owner_id=user_id
+            )
+
             logger.info(
                 "[DesktopBotService._execute_creation] bot_id=%s binding_id=%s bot_uuid=%s",
                 bot_id, binding_id, bot_uuid,
@@ -760,6 +768,30 @@ class DesktopBotService(DesktopBotServiceProtocol):
         bot_id = bot.get("bot_id", "")
         if not bot_id:
             raise DesktopBotServiceError("bot_id is required for create_after_authorization")
+
+        existing = self._bot_repo.get_by_id_and_owner(bot_id=bot_id, owner_id=user_id)
+        if isinstance(existing, dict):
+            # A previous attempt can have committed the local Bot/Binding and
+            # then failed at Installation initialization. Repair that DB-only
+            # step before returning the same create result; never issue a
+            # second BaaS create or overwrite the persisted Bot.
+            self._skill_set_factory.initialize_installations(
+                bot_id=bot_id, owner_id=user_id, bot=existing
+            )
+            ext = existing.get("ext") or {}
+            if isinstance(ext, str):
+                try:
+                    ext = json.loads(ext)
+                except json.JSONDecodeError:
+                    ext = {}
+            passport = ext.get("passport") if isinstance(ext, dict) else {}
+            agent_code = passport.get("agent_code", "") if isinstance(passport, dict) else ""
+            return {
+                "bot_uuid": existing.get("device_id", ""),
+                "binding_id": existing.get("binding_id"),
+                "bot_id": bot_id,
+                "agent_code": agent_code,
+            }
 
         passport_info = self._passport.query_agent_passport(
             bot_id=bot_id,

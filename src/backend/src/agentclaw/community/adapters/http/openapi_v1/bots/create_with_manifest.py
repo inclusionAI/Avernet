@@ -19,7 +19,7 @@ what polls AgentPass), starts no work, and writes nothing, so polling faster
 never changes an outcome and a caller that stops polling loses nothing.
 
 **Nothing here decides what a manifest means.** Validation, storage and apply are
-W1's and W4's, reached through ``BotCreationManifestSeam``; creation itself is
+W1's and W4's, reached through ``ManifestCreationSeam``; creation itself is
 ``create_flow``'s, and ``bot_service.create_bot`` is untouched. This module
 composes them and shapes the answer.
 """
@@ -66,7 +66,6 @@ from agentclaw.community.core.bot_config_manifest.create_job import (
 from agentclaw.community.core.bot_config_manifest.creation import (
     CREATE_ON_CONTAINER_TRIGGER,
     CREATE_PRE_CONTAINER_TRIGGER,
-    BotCreationManifestSeam,
 )
 from agentclaw.community.core.bot_inventory.protocols import (
     BusinessSpaceContextProtocol,
@@ -77,6 +76,9 @@ from agentclaw.community.core.bot_management.create_flow import (
     BotCreateSpec,
     BotCreateTemplateValidationMode,
     submit_bot_creation_with_manifest,
+)
+from agentclaw.community.core.bot_management.manifest_seam import (
+    ManifestCreationSeam,
 )
 from agentclaw.community.core.bot_management.services.bot_service import (
     BotNotFoundError,
@@ -150,7 +152,7 @@ async def create_bot_with_manifest(
     space_context: BusinessSpaceContextProtocol = Injected(
         BusinessSpaceContextProtocol
     ),
-    manifest_seam: BotCreationManifestSeam = Injected(BotCreationManifestSeam),
+    manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
 ) -> Envelope[BotCreateWithManifestAccepted]:
     """Create a bot and its configuration in one request. Always `202`.
 
@@ -252,7 +254,7 @@ async def get_bot_create_with_manifest_status(
     apply_service: BotConfigManifestApplyServiceProtocol = Injected(
         BotConfigManifestApplyServiceProtocol
     ),
-    manifest_seam: BotCreationManifestSeam = Injected(BotCreationManifestSeam),
+    manifest_seam: ManifestCreationSeam = Injected(ManifestCreationSeam),
 ) -> Envelope[BotCreateWithManifestStatus]:
     """Where a creation stands. Takes a `bot_id` and nothing else.
 

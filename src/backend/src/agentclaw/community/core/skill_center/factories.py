@@ -633,6 +633,25 @@ class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
         self._ext_info_provider = ext_info_provider
         self._reader = reader
 
+    def initialize_installations(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Initialize one persisted Bot's DB-only Installation facts.
+
+        This keeps Bot lifecycle services on the existing Skill Center factory
+        seam. A missing reader is a construction error, never a successful
+        no-op that leaves a created Bot without its capability projection.
+        """
+        if self._reader is None:
+            raise RuntimeError("SkillSetServiceFactory requires a capability reader")
+        self._reader.initialize_installations(
+            bot_id=bot_id, owner_id=owner_id, bot=bot
+        )
+
     def create(
         self,
         skills_dir: Optional[Path] = None,

@@ -165,8 +165,12 @@ class SkillQueryService(SkillQueryServiceProtocol):
         bot = self._require_view_access(
             bot_id=bot_id, owner_id=owner_id, actor_id=actor_id
         )
-        # The reader flushes before answering, so the page need not resolve
-        # Set membership again.
+        # Synchronize effective Installation state first, then read the
+        # independent Set-reachability relation used to include bridged and
+        # inactive members on the page.
+        self._reader.synchronize_installations(
+            bot_id=bot_id, owner_id=owner_id, bot=bot
+        )
         member_ids = self._reader.member_skill_ids(bot=bot)
         return self._skill_repo.list_bot_skills(
             bot_id=bot_id,

@@ -422,6 +422,16 @@ class BotService(BotServiceProtocol):
         self._runtime_reconciler = runtime_reconciler
         self._runtime_reconciler_provider = runtime_reconciler_provider
         self._bot_quota_service = bot_quota_service
+    def _initialize_capability_installations(
+        self, *, bot_id: str, owner_id: str, bot: "Dict[str, Any] | None" = None
+    ) -> None:
+        """Persist a new Bot's DB-only capability projection before returning.
+
+        No Runtime projection or device readiness check is involved here.
+        """
+        self._skill_set_factory.initialize_installations(
+            bot_id=bot_id, owner_id=owner_id, bot=bot
+        )
 
     def _service_bot_image_policy_enabled(self) -> bool:
         """Whether draft create/restart should opt into image policy."""
@@ -1342,7 +1352,12 @@ class BotService(BotServiceProtocol):
         if bot_id is not None:
             existing_bot = self._repository.get_by_id_and_owner(bot_id, user_id)
             if existing_bot:
-                # Bot 已存在，直接返回（幂等）
+                # A prior create can have persisted the Bot and failed before
+                # capability initialization.  Retrying must converge that
+                # recoverable state instead of reporting a false success.
+                self._initialize_capability_installations(
+                    bot_id=bot_id, owner_id=user_id, bot=existing_bot
+                )
                 logger.info(f"[bot_service.create_bot] Bot {bot_id} already exists for user {user_id}, returning existing bot")
                 return existing_bot
             # 不存在，继续创建流程，使用传入的 bot_id
@@ -1524,6 +1539,13 @@ class BotService(BotServiceProtocol):
                         ) from e
                     # Keep the historical best-effort behavior for non-coding
                     # template creation.
+
+            # This is deliberately DB-only and precedes both early returns.
+            # New Bots must not depend on a later effective read or Runtime
+            # projector to materialize their initial Default/SkillSet state.
+            self._initialize_capability_installations(
+                bot_id=bot_id, owner_id=user_id
+            )
 
             # 桌面 bot 的设备分配走 BaaS 流程（DesktopBotService._execute_creation），
             # 不应走 DeviceService.apply_device()（会生成 staff_xxx 格式 device_id）。
