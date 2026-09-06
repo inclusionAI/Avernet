@@ -735,14 +735,21 @@ report。
 | --- | --- | --- |
 | 类别 `engine_config`（§3.4） | 按跨引擎确认的结论移出第一期，至今没有物化器 | 其物化器回来时 |
 | `resources` 条目用 `from`（§2.3）或 **git 源**（§2.2） | resources 物化器只走 URL 那条路；这是「类别 × 源形态」的组合，因此由条目校验逐条拒绝，理由里点名类别 | resources 接上 git 那条路时 |
+| `cli_tools` 条目用 `from`（§2.3）或 **git 源**（§2.2） | cli_tools 物化器同样不解析命名源：`CliToolDecl.from_entry` 把 `from` 的**源名原样放进 `source_url`**，`CliToolsMaterialiser.resolve` 不经过取源会话。⚠️ **与上一行不同，这个组合 `PUT` 不拒——它在 apply 时才失败**，是本表唯一「提交得过、跑不通」的构造 | cli_tools 接上取源会话时 |
 
-**已经解禁的**（早期版本的本表曾列出它们）：类别 `cli_tools`（§3.7）；`from`
-指向命名源与 git 源——两者对 `skills` 与 `identity` 条目**已可用**，只是尚未
-覆盖 `resources`。
+**已经解禁的**（早期版本的本表曾列出它们）：类别 `cli_tools`（§3.7）本身；`from`
+指向命名源与 git 源——两者对 **`skills` 与 `identity`** 条目已可用，尚未覆盖
+`resources` 与 `cli_tools`（见上表）。
 
-命名源与 git 源是本文推荐的主力写法；`resources` 在它接通之前用**条目内联的
-HTTPS `source` URL** 或 `content`，之后迁到命名源只是把 `source` 换成
-`from` + `subpath`。
+**源形态是「类别 × 形态」的矩阵，不是全局开关**，完整那张表见
+`user-manual.zh-CN.md` §2.1。两条最容易踩的：内联 `content` **只有 `identity` 与
+`resources` 能用**（`skills` 条目答 `content_not_a_skill_package`；`cli_tools` 强制
+`digest` 而 `content` 上写 `digest` 非法，两条规则互斥）；`cli_tools` 的来源**只能是
+内联 `source` URL**。
+
+命名源与 git 源是本文推荐的主力写法；`resources` 与 `cli_tools` 在它接通之前用
+**条目内联的 HTTPS `source` URL**（`resources` 也可以用 `content`），之后迁到命名源
+只是把 `source` 换成 `from` + `subpath`。
 
 **写客户端的人：能力表是唯一的事实来源**——先
 `GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities`，它与 `PUT`

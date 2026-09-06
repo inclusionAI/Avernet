@@ -85,11 +85,19 @@
 以及 **`resources` 条目用命名源 `from` 或 git 源**（resources 物化器目前只走 URL
 那条路）——写了会在提交时被拒绝，清单见**附录 C**。
 
-⚠️ **取源形态不是全局开关，要按类目看**：条目内联的 HTTPS `source` URL 与内联 `content`
-到处都能用；**命名源 `from` 与 git 源只有 `skills` 与 `identity` 两个类目真正能用**。
-`resources` 写了会在 `PUT` 就被拒；**`cli_tools` 更麻烦——它写了能通过 `PUT`，却会在
-apply 时失败**（物化器把 `from` 的源名当成 URL 直接去取），所以 `cli_tools` 请一律写
-内联 `source` URL。整张表见**附录 C**。
+⚠️ **取源形态不是全局开关，逐类目都不一样。**照这张表写：
+
+| 类目 | 内联 `source` URL | 内联 `content` | `from`（命名源） | git 源 |
+| --- | --- | --- | --- | --- |
+| `identity` | ✅ | ✅ | ✅ | ✅ |
+| `skills` | ✅ | ❌ 拒（skill 是一个包，不是一段文本） | ✅ | ✅ |
+| `resources` | ✅ | ✅ | ❌ `PUT` 拒 | ❌ `PUT` 拒 |
+| `cli_tools` | ✅ | ❌ 拒（本类目强制 `digest`，而 `content` 上写 `digest` 非法——两条规则互斥） | ⚠️ **`PUT` 过、apply 失败** | ⚠️ 同左 |
+| `mcp` | —— 它不取源，只写 `server_code` | | | |
+
+**只有 `identity` 四种形态全通。**其中 `cli_tools` 那两个 ⚠️ 是唯一「提交时不报错、
+运行时才炸」的组合（物化器把 `from` 的源名当成 URL 直接去取），所以 **`cli_tools` 请
+一律写内联 `source` URL**。整张表的理由见**附录 C**。
 
 **已经有 bot 的人**可以直接问平台，答案与上表同源（同一个函数，所以不会出现
 「这里说支持、`PUT` 却拒绝」）：
@@ -459,7 +467,7 @@ script:                    # 命令式部分，能力门控（teclaw 拒绝）
 | --- | --- |
 | `from` + `subpath` | **推荐**。引用一个命名源，取其中某个子路径 |
 | `source` | 内联来源：一个 HTTPS URL 字符串，或一个结构化 git 引用。单条目、跨仓库、一次性来源时用 |
-| `content` | 内联 UTF-8 文本。**不推荐**——内容游离于版本控制之外，只用于一次性小片段 |
+| `content` | 内联 UTF-8 文本。**只有 `identity` 与 `resources` 能用**（§2.1 那张表）。**不推荐**——内容游离于版本控制之外，只用于一次性小片段 |
 | 注册项引用 | 仅特定类目：MCP 的 `server_code` |
 
 内联 `content` 条目没有 fetch 环节，所以 `auth` / `digest` / `on_fetch_failure`
@@ -876,7 +884,7 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 
 ```yaml
 cli_tools:
-  - name: shopctl                 # 命令名；同一 bot 内唯一，不含路径分隔符
+  - name: shopctl                 # 命令名；同一 bot 内唯一。字母/数字开头，只含字母数字与 . _ -，≤128
     source: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
     digest: "sha256:9f2c…"        # 本类目强制
     version: "2.3.0"              # 元数据；**不参与收敛**
@@ -1924,7 +1932,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 必填 | 类型 | 含义与取值 |
 | --- | --- | --- | --- |
-| `name` | ✅ | string，≤128 | agent 要敲的**命令名**。**裸标识符，不含位置信息**——落在哪由引擎决定 |
+| `name` | ✅ | string | agent 要敲的**命令名**，不含位置信息——落在哪由引擎决定。**语法是被强制的**：必须以字母或数字开头，之后只允许**字母、数字、`.`、`_`、`-`**，长度 ≤ 128。所以 `.hidden`、`-leading`、`a b`、`a/b` 一律 `422`（在取源之前就判掉） |
 | `source` | ✅ | string | 从哪里取。平台侧可达的 https |
 | `digest` | ✅ | string | `sha256:<64 位十六进制>`，**强制**。平台在代你分发可执行物，供应链必须钉死。它校验的是**取回来的那个对象**——二进制本身，或整个压缩包 |
 | `unpack` | ❌ | enum \| null | 源是压缩包时写 `zip` 或 `tar.gz`；省略则取回来的对象本身就是可执行文件 |
@@ -2175,6 +2183,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 ### 条目通用字段（resources / skills / identity / cli_tools）
 
 **来源四选一、互斥**：`from` + `subpath` ／ `source` ／ `content` ／ 注册项引用。
+**但四选一里哪几个对你这个类目真的可用，按 §2.1 的表看**——只有 `identity` 四种全通。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -2192,7 +2201,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `resources` | `path` | workspace 相对；`/` 结尾 = 目录条目；禁绝对路径/`../`；禁嵌套；**来源只能是内联 `source` URL 或 `content`** | **仅被声明的 `path` 子树** |
 | `mcp` | `server_code` | 平台注册表引用；**条目只有这一个字段** | 已启用的 server 集合 |
 | `engine_config` | `config` 对象 | **未开放**（附录 C） | 被声明的顶层键 |
-| `cli_tools` | `name` | 命令名，同 bot 内唯一，不含路径分隔符；`digest` 强制 | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |
+| `cli_tools` | `name` | 命令名，同 bot 内唯一；**字母或数字开头，只含字母数字与 `.` `_` `-`，≤128**；`digest` 强制；**来源只能是内联 `source` URL** | 清单下发的工具集合（含用 `…/cli-tools` API 装的） |
 | `script` | `body` | 仅 ARCA 系 | —— |
 
 目录条目专用（`resources`，归档形态）：`unpack`（`zip` / `tar.gz`）、
