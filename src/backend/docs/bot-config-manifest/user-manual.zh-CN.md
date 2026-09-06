@@ -650,6 +650,10 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 **`result` 的四个值**：`RUNNING` 是「还没做完」——apply 是启动式的，所以轮询时先
 看到它；然后才是 `SUCCEEDED` / `PARTIAL` / `FAILED`。
 
+**还有第五种情况：空串。**从没 apply 过的 bot（以及问一个不存在的 `apply_id`）读出的是
+一份**空报告**，它的 `result` 与 `trigger` 都是 `""`。按 `result` 写分支时先判空，
+细节见附录 B.2.5。
+
 **`skipped` 的含义**：「因为所在类目被中止（§3.4）而没写」。它不再来自任何你能
 声明的策略。同一个类目里，**把类目搞挂的那一条记 `failed`，其余无辜的记
 `skipped`**——这样你一眼能看出该去改哪一行。
@@ -1341,8 +1345,22 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 （形如 `20260813_a7k2m9p1`），原样传，不做任何加工。
 
 **权限位**：`MEMBER` / `ADMIN` / `OWNER` 是调用方在这个 bot 上的协作者等级，**OWNER
-恒通过**。等级不够一律 `403`，`data` 为 `null`。「编辑锁」表示该操作**还**要求持有这个
-bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 `423`，不是 `403`。
+恒通过**。「编辑锁」表示该操作**还**要求持有这个 bot 的编辑锁——**只在有协作者的 bot 上
+生效**，没拿到锁答 `423`。
+
+⚠️ **等级不够答的是 `404 Not found`，不是 `403`**，而且与「这个 bot 不存在」**逐字节
+相同**（同样的状态码、同样的 message、同样的信封）。这是故意的：如果调用方能把「我权限
+不够」和「没有这个 bot」区分开，那就等于拿到了一个枚举租户内全部 bot id 的探针。所以
+**不要把 `404` 当成「bot 没了」**——在这些端点上它同时意味着「你不够格」。
+
+这条路径下的 `403` 是**另一回事**，只有一个含义：`user_id` 指向了这个调用方无权代表的
+用户。三种拒绝各归各的：
+
+| 状态 | 含义 |
+| --- | --- |
+| `403` | `user_id` 指向了调用方无权代表的用户 |
+| `404` | 这个 bot 不存在**，或者**调用方的协作者等级不够——两者不可区分 |
+| `423` | 等级够了，但没持有编辑锁（只发生在有协作者的 bot 上） |
 
 **`DELETE` 类端点的 `data`**：
 
@@ -1366,8 +1384,8 @@ bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 
 | `template_config` | object \| null | 模板快照，**逐字段原样存的创建入参**，可能含创建者填进去的敏感值（如 `token`）——按敏感数据对待 |
 | `space` | object \| null | 所属业务空间：`{ space_id, name, kind }`；只有列表类端点会填 |
 
-**错误**：每个端点的错误在各自小节列出。跨端点共有的一条是 `403`——`user_id`
-指向了这个调用方无权代表的用户。
+**错误**：每个端点的错误在各自小节列出。跨端点共有的两条就是上面那张表里的 `403`
+与 `404`；下文各端点只列它们**额外**的失败。
 
 ---
 
@@ -1425,7 +1443,7 @@ bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 
 
 | 状态 | 什么时候 | `data` |
 | --- | --- | --- |
-| `403` | 权限不足 | `null` |
+| `404` | bot 不存在，**或**协作者等级不到 ADMIN（不可区分，见 B.0） | `null` |
 | `413` | 文档超出大小上限（§10） | `null` |
 | `422` | 文档不合法或有不受支持的构造 | `{ "violations": [ … ] }`，**一次列全**（见下） |
 
@@ -1505,7 +1523,7 @@ bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 
 
 | 状态 | 什么时候 |
 | --- | --- |
-| `403` | 权限不足（这个操作要 OWNER） |
+| `404` | bot 不存在，**或**调用方不是 OWNER（不可区分，见 B.0） |
 | `409` | 这个 bot 上已经有一次 apply 在跑 |
 | `422` | 存下来的文档对**现在的**这个 bot 已经不合法（比如引擎换了） |
 | `423` | **有协作者的 bot 上，调用方没有持有它的编辑锁** |
@@ -1545,7 +1563,9 @@ bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 
 
 **响应 `data`**：apply 报告对象（B.2.5），跑着的和跑完的都读得到。
 
-> `apply_id` 属于**别的 bot** 时这里读不到——它是轮询句柄，不是访问凭据。
+> `apply_id` 属于**别的 bot**、或者根本不存在时，这里返回的是**空报告**（`result` 与
+> `trigger` 为空串，见 B.2.5 开头那条），**不是 `404`**——它是轮询句柄，不是访问凭据，
+> 所以问一个不属于你的 id 得到的是「没有这条记录」而不是「有，但不给你」。
 
 #### B.2.4 `GET /openapi/v1/bots/{bot_id}/config-manifest/last-apply`
 
@@ -1553,19 +1573,27 @@ bot 的编辑锁——**只在有协作者的 bot 上生效**，没拿到锁答 
 
 **请求**：只有 `bot_id`。**响应 `data`**：apply 报告对象（B.2.5）。
 
-> 从没 apply 过的 bot 读出的是**空报告**（`apply_id` 为空串、`started_at` 为 `null`），
-> **不是错误**——和「没有清单的 bot 读出空文档」是同一条规则。
+> 从没 apply 过的 bot 读出的是**空报告**（`apply_id` / `result` / `trigger` 都是空串、
+> `started_at` 为 `null`、三个数组为空），**不是错误**——和「没有清单的 bot 读出空文档」
+> 是同一条规则。判空看 `result == ""`，别去判 `apply_id`。
 
 #### B.2.5 apply 报告对象
 
 B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都是这个形状。
 
+> ⚠️ **先看这条，它影响你怎么写分支。**「空报告」是一个正常响应，不是错误——`last-apply`
+> 读一个从没 apply 过的 bot，或 `applies/{apply_id}` 读一个不存在、或属于别的 bot 的
+> `apply_id`，都会得到它。**空报告里 `result` 与 `trigger` 是空串 `""`，不是下表列的任何
+> 一个枚举值**，`apply_id` 也是空串、`started_at` 为 `null`、三个数组都是空的。所以按
+> `result` 穷举分支时**必须先处理空串**（判空 = 「这个 bot 还没有 apply 记录」），再去分
+> `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`。
+
 | 字段 | 类型 | 含义 |
 | --- | --- | --- |
-| `apply_id` | string | 这次 apply 的 id。**bot 从没 apply 过时是空串** |
+| `apply_id` | string | 这次 apply 的 id。**空报告时是空串** |
 | `bot_id` | string | 目标 bot |
-| `trigger` | enum | 谁发起的：`explicit` / `put` / `create:pre_container` / `create:on_container`，见 B.7 |
-| `result` | enum | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的** |
+| `trigger` | enum \| `""` | 谁发起的：`explicit` / `put` / `create:pre_container` / `create:on_container`，见 B.7。**空报告时是空串** |
+| `result` | enum \| `""` | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的**。**空报告时是空串** |
 | `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
 | `finished_at` | datetime \| null | 结束时间；**恰好在 `result` 是 `RUNNING` 时为 `null`** |
 | `sources` | object[] | 命名源的溯源，每个源一行，见下。**「这批 bot 线上跑的到底是哪一版内容」看这里** |
@@ -1849,7 +1877,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 状态 | 什么时候 |
 | --- | --- |
-| `403` | 权限不足 |
+| `404` | bot 不存在，**或**协作者等级不到 ADMIN（不可区分，见 B.0） |
 | `409` | 这个 bot 已经有同名工具。**单次安装不会替换你没提到的东西**——要换先删，或者用清单声明整套（清单 apply 是全量覆盖） |
 | `422` | 声明、取回的字节或引擎拒绝了这次安装：没钉 digest、源对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎不收 |
 
@@ -1882,6 +1910,10 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 **错误**：`404` —— 这个 bot 没有叫这个名字的工具。**这一个不是幂等的**（和清除清单
 不同）：「工具已经没了」和「你写错了名字」值得分开告诉你。
 
+> 注意这里的 `404` 有三个来源，且**互相不可区分**：没有这个工具、没有这个 bot、你的协作者
+> 等级不到 ADMIN（B.0）。所以删除返回 `404` 时，先确认自己在这个 bot 上有 ADMIN，再去怀疑
+> 工具名。
+
 ---
 
 ### B.6 同一份状态的「另一扇门」
@@ -1897,7 +1929,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `identity` | `GET` `…/identity`、`GET` / `PUT` `…/identity/{file_type}` | 同一批 identity 文件 |
 | `skills` | `/openapi/v1/bots/{bot_id}/skills` 一组（上传、启用/停用、删除、参数） | 同一个 active skill set |
 | `resources` | `/openapi/v1/bots/{bot_id}/resources` 一组 | 同一棵 workspace 文件树。**CLI 工具不在其中**——它不按路径寻址（§5.6） |
-| `mcp` | `/openapi/v1/bots/{bot_id}/skill-sets/{set_id}/mcps/{server_code}` 等 | 同一份已启用 server 集合；**界面上手工开的 server 会被声明了 `mcp` 的清单移除**（§8） |
+| `mcp` | `GET /openapi/v1/bots/{bot_id}/mcps`、`POST …/mcps/{server_code}/activate`、`POST …/mcps/{server_code}/deactivate` | **同一个服务**（`DirectActivationService`），和 `cli_tools` 一样：清单的 `mcp` 物化器就是调它来收敛的，收敛的对象是这个 bot 的**已启用 server 集合**。所以**界面上手工开的 server 会被声明了 `mcp` 的清单移除**（§8）。⚠️ 别和 `…/skill-sets/{set_id}/mcps/{server_code}` 搞混：那是**另一个控制面**，改的是某个 SkillSet 内部的 MCP 成员关系，所有权与冲突语义都不同 |
 | `engine_config` | `GET` / `PUT` `/openapi/v1/bots/{bot_id}/engine/config` | 这扇门**开着**（自由 JSON，直接写设备），但**清单类目 `engine_config` 没开**——今天要配引擎配置只能走这里，且它不受清单管辖、不会被 apply 覆盖 |
 
 > 这张表列的是「同一份状态的另一个入口」，不是完整的 bot 开放平台 API 目录。这些端点
@@ -1939,6 +1971,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 值 | 含义 |
 | --- | --- |
+| `""`（空串） | **空报告**：这个 bot 从没 apply 过，或你问的 `apply_id` 不存在／不属于它。`trigger` 同时也是空串。**穷举分支时先判这一个**（B.2.5） |
 | `RUNNING` | 还没做完。apply 是启动式的，所以轮询时先看到它；此时 `finished_at` 为 `null` |
 | `SUCCEEDED` | 全部落地 |
 | `PARTIAL` | 一部分落地。**按类目覆盖语义，这是要处理的状态，不是带脚注的成功** |
@@ -1961,6 +1994,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 值 | 什么发起的 |
 | --- | --- |
+| `""`（空串） | 空报告，没有哪次 apply 可说（见上） |
 | `explicit` | `POST …/config-manifest/apply` |
 | `put` | `PUT …/config-manifest` 之后自动跟的那一次 |
 | `create:pre_container` | 用清单创建 bot 的**容器前**阶段 |
