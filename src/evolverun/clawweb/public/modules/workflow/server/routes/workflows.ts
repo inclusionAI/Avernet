@@ -73,7 +73,7 @@ function mapCallbackRow(row: HttpCallbackConfigRow) {
   };
 }
 
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { WorkflowNotificationConfigRepository } from "../repositories/workflow-notification-config-repository.js";
 import type { WorkflowDeployHistoryRepository } from "../repositories/workflow-deploy-history-repository.js";
 import type { HttpCallbackConfigRepository, HttpCallbackConfigRow } from "../repositories/http-callback-config-repository.js";
@@ -84,7 +84,7 @@ import {
   hasWorkflowAccess,
   requireWorkflowAccess,
   resolveWorkflowActorId,
-} from "../services/workflow-access.js";
+} from "@avernet/clawweb-shared/server/services/workflow-access";
 
 const workflowsCache = new ApiCache<unknown[]>({
   ttlMs: 2 * 60 * 1000,

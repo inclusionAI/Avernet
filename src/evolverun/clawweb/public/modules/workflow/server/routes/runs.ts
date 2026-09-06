@@ -9,7 +9,7 @@ import { FlowEventRepository } from "../repositories/event-repository.js";
 import { MetricsRepository } from "../repositories/metrics-repository.js";
 import { AlertRepository } from "../repositories/alert-repository.js";
 import { FlowControlRepository } from "../repositories/flow-control-repository.js";
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { sendIntervention } from "@avernet/clawevolve/server/services/baas-intervention";
 import { buildInterventionMessage, type InterventionAction } from "../services/intervention-message-builder.js";
 import type { WorkflowSpecRepository } from "../repositories/workflow-spec-repository.js";

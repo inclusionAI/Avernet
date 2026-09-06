@@ -6,7 +6,7 @@ import type { EvolveBotRuntime, EvolvePackRow, EvolveStepRow, EvolveRepository, 
 import type { BenchDomainRepository } from "../repositories/bench-domain-repository.js";
 import type { BenchTemplateRepository } from "../repositories/bench-template-repository.js";
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js";
 import {
   digestCanonicalJson,
@@ -15,7 +15,7 @@ import {
   WORKFLOW_EVOLUTION_ANALYSIS_VERSION,
 } from "../services/evolution/contracts.js";
 import { presentEvidence } from "../services/evolution/evidence-presentation.js";
-import { requireWorkflowAccess } from "../services/workflow-access.js";
+import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access";
 import type {
   InsightImprovementPort,
   InsightTaskCreatorPort,

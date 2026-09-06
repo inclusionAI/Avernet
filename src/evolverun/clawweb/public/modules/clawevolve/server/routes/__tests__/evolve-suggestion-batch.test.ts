@@ -3,7 +3,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { EvolveRepository } from "../../repositories/evolve-repository.js";
-import { BotWorkflowPermissionRepository } from "../../repositories/bot-workflow-permission-repository.js";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createEvolveRouter } from "../evolve.js";
 import { createInternalTaskGuardRouter } from "../internal/task-guard.js";
 import { digestCanonicalJson } from "../../services/evolution/contracts.js";

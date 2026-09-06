@@ -3,10 +3,10 @@
  */
 import { Router, type Request, type Response } from "express";
 import type { FacadeBindingRepository } from "../repositories/facade-binding-repository.js";
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import { ApiCache } from "../cache.js";
-import { requireWorkflowAccess } from "../services/workflow-access.js";
+import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access";
 
 const facadesCache = new ApiCache<unknown[]>({
   ttlMs: 5 * 60 * 1000,

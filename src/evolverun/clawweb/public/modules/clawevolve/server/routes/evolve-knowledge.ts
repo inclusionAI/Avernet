@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db"
 import type { EvolveRepository } from "../repositories/evolve-repository.js"
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js"
-import { requireWorkflowAccess } from "../services/workflow-access.js"
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository"
+import { requireWorkflowAccess } from "@avernet/clawweb-shared/server/services/workflow-access"
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js"
 
 function lessonSuccessRate(hitCount: number, rescuedCount: number): number {

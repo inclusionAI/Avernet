@@ -8,7 +8,7 @@ import { BenchTemplateVersionRepository } from "./repositories/bench-template-ve
 import { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
 import { BenchArtifactRepository } from "./repositories/bench-artifact-repository.js";
 import { BenchTagRepository } from "./repositories/bench-tag-repository.js";
-import { BotWorkflowPermissionRepository } from "./repositories/bot-workflow-permission-repository.js";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createEvolveRouter, type EvolveRouterDeps } from "./routes/evolve.js";
 import {
   createInternalEvolveRouter,

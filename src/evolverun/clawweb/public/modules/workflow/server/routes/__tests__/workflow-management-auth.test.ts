@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import { once } from "node:events";
-import type { BotWorkflowPermissionRepository } from "../../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { WorkflowDeployHistoryRepository } from "../../repositories/workflow-deploy-history-repository.js";
 import type { WorkflowSpecRepository } from "../../repositories/workflow-spec-repository.js";
 import { createWorkflowsRouter } from "../workflows.js";

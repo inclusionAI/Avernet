@@ -1,8 +1,8 @@
 import { Router, type Request, type Response } from "express";
-import type { BotWorkflowPermissionRepository } from "../repositories/bot-workflow-permission-repository.js";
+import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import type { AutoAnalysisSettings } from "../services/task-guard/auto-analysis-settings.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
-import { requireWorkflowAccess, resolveWorkflowActorId } from "../services/workflow-access.js";
+import { requireWorkflowAccess, resolveWorkflowActorId } from "@avernet/clawweb-shared/server/services/workflow-access";
 
 export function createTaskGuardSettingsRouter(input: {
   settings: AutoAnalysisSettings;

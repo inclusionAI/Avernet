@@ -3,7 +3,7 @@ import express from "express";
 import Database from "better-sqlite3";
 import { SqliteDatabase, runMigrations } from "@avernet/clawweb-shared/server/db";
 import { AppConfigRepository } from "../../repositories/app-config-repository.js";
-import { BotWorkflowPermissionRepository } from "../../repositories/bot-workflow-permission-repository.js";
+import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createTaskGuardSettingsRouter } from "../task-guard-settings.js";
 import { createAutoAnalysisSettings } from "../../services/task-guard/auto-analysis-settings.js";
 
