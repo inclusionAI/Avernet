@@ -71,6 +71,8 @@ export ZDAS_PORT="${ZDAS_PORT:-11306}"
 export ZDAS_DATABASE="${ZDAS_DATABASE:-clawweb_ds}"
 export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1}"
 export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
+export PORT="${PORT:-5173}"
+export CLAWWEB_PUBLIC_BASE_URL="${CLAWWEB_PUBLIC_BASE_URL:-http://localhost:${PORT}}"
 
 zdas_proxy_ready() {
   if command -v nc >/dev/null 2>&1; then
