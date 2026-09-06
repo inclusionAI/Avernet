@@ -10,6 +10,7 @@ from engine.community.core.cli_tools.models import (
     CliToolInfo,
     CliToolPayload,
     CliToolResult,
+    ReplaceOutcome,
 )
 from engine.community.core.cli_tools.protocol import CliToolsService
 from engine.community.core.cli_tools.service import (
@@ -26,6 +27,7 @@ __all__ = [
     "CliToolsService",
     "InvalidCliToolNameError",
     "LocalCliToolsService",
+    "ReplaceOutcome",
     "ENGINE_CLI_DIRS",
     "cli_dir_beside",
     "cli_dir_for",

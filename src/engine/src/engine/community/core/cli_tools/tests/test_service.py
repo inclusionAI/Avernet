@@ -6,6 +6,7 @@ truth or replay.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 from pathlib import Path
@@ -183,25 +184,25 @@ class TestReplaceAll:
         await service.install("a", ELF)
         await service.install("b", ELF)
 
-        results = await service.replace_all([])
+        outcome = await service.replace_all([])
 
-        assert results == []
+        assert outcome.results == []
         assert list(cli_dir.iterdir()) == []
 
     async def test_answers_for_every_requested_name(self, service):
-        results = await service.replace_all(
+        outcome = await service.replace_all(
             [CliToolPayload("a", ELF), CliToolPayload("b", ELF)]
         )
 
-        assert {r.name for r in results} == {"a", "b"}
-        assert all(r.success for r in results)
+        assert {r.name for r in outcome.results} == {"a", "b"}
+        assert all(r.success for r in outcome.results)
 
     async def test_a_partial_failure_is_reported_not_raised(self, service, cli_dir):
-        results = await service.replace_all(
+        outcome = await service.replace_all(
             [CliToolPayload("good", ELF), CliToolPayload("../bad", ELF)]
         )
 
-        verdicts = {r.name: r for r in results}
+        verdicts = {r.name: r for r in outcome.results}
         assert verdicts["good"].success is True
         assert verdicts["../bad"].success is False
         assert verdicts["../bad"].message  # carries the engine's own reason
@@ -220,9 +221,9 @@ class TestReplaceAll:
             return real_replace(src, dst, *args, **kwargs)
 
         monkeypatch.setattr(os, "replace", fail_for_mycli)
-        results = await service.replace_all([CliToolPayload("mycli", ELF + b"new")])
+        outcome = await service.replace_all([CliToolPayload("mycli", ELF + b"new")])
 
-        assert results[0].success is False
+        assert outcome.results[0].success is False
         # Degrades to "unchanged", never to "removed".
         assert (cli_dir / "mycli").read_bytes() == ELF + b"old"
 
@@ -426,3 +427,59 @@ class TestErrorPaths:
         await service.install("mycli", ELF)
 
         assert (cli_dir / "mycli").read_bytes() == ELF
+
+
+class TestReviewRegressions:
+    """One test per bug an automated review round caught."""
+
+    async def test_delete_propagates_a_failure_instead_of_reporting_success(
+        self, service, cli_dir, monkeypatch
+    ):
+        """A tool that could not be removed is still callable on the bot.
+
+        Reporting success would let the apply report claim the manifest's
+        removal took effect while the executable is still there.
+        """
+        await service.install("mycli", ELF)
+
+        def refuse(self, *args, **kwargs):
+            raise PermissionError("read-only filesystem")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+        with pytest.raises(PermissionError):
+            await service.delete("mycli")
+
+    async def test_delete_still_treats_absent_as_success(self, service):
+        """Only FileNotFoundError is success — the distinction the fix rests on."""
+        await service.delete("never-existed")
+
+    async def test_also_keep_spares_a_name_the_caller_could_not_prepare(
+        self, service, cli_dir
+    ):
+        """An entry whose payload never reached the service must not be pruned.
+
+        Otherwise "your update failed" silently becomes "your tool is gone".
+        """
+        await service.install("undecodable", ELF + b"existing")
+        await service.install("dropped", ELF)
+
+        outcome = await service.replace_all(
+            [CliToolPayload("kept", ELF)], also_keep=["undecodable"]
+        )
+
+        assert [r.name for r in outcome.results] == ["kept"]
+        assert (cli_dir / "undecodable").read_bytes() == ELF + b"existing"
+        assert not (cli_dir / "dropped").exists()
+
+    async def test_a_fifo_does_not_block_the_worker_thread(self, service, cli_dir):
+        """The tool directory is inside the bot's container.
+
+        An agent that made a FIFO there could park a ``to_thread`` worker on
+        every download — enough of them stalls every CLI operation.
+        """
+        cli_dir.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(cli_dir / "trap")
+
+        # Would hang forever without O_NONBLOCK + the regular-file check.
+        assert await asyncio.wait_for(service.read_tool("trap"), timeout=5) is None
+        assert [i.name for i in await service.list_tools()] == []

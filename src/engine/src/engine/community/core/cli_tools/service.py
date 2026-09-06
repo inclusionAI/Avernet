@@ -21,6 +21,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import stat
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -30,6 +31,7 @@ from engine.community.core.cli_tools.models import (
     CliToolInfo,
     CliToolPayload,
     CliToolResult,
+    ReplaceOutcome,
 )
 from engine.community.core.cli_tools.protocol import CliToolsService
 
@@ -186,31 +188,44 @@ class LocalCliToolsService(CliToolsService):
             await asyncio.to_thread(self._delete_sync, name)
 
     def _delete_sync(self, name: str) -> None:
-        """Remove a **caller-named** command. Absent is success (§4 A2)."""
-        self._delete_path(self._path_of(name))
+        """Remove a **caller-named** command. Absent is success (§4 A2).
 
-    def _delete_path(self, path: Path) -> None:
-        """Remove one file by path, with no name validation.
+        Anything *else* that stops the removal — a read-only filesystem, lost
+        permissions, an immutable file — is raised, never swallowed. Reporting
+        success while the executable is still callable would let the apply
+        report claim a tool was removed when the bot can still run it.
+        """
+        path = self._path_of(name)
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            log.info("[cli_tools] delete name=%s: already absent", name)
+            return
+        log.info("[cli_tools] deleted name=%s", name)
 
-        Pruning feeds names that came from ``scandir``, not from a caller, and
-        those are not subject to :func:`validate_tool_name`: a file the agent
-        created inside the container may carry a name the validator refuses
-        (trailing space, a backslash). Re-validating it would raise out of a
-        prune, abandoning the rest of the loop and turning a whole replacement
-        into an unreadable failure — while the offending file, being
-        undeletable by that path, would make every future replacement for that
-        bot fail the same way.
+    def _prune_path(self, path: Path) -> str | None:
+        """Remove one *disk-sourced* file. Returns a reason on failure.
+
+        Names here came from ``scandir``, not from a caller, so they are not
+        put through :func:`validate_tool_name`: a file the agent created inside
+        the container may carry a name the validator refuses (trailing space, a
+        backslash). Re-validating would raise out of the prune loop, abandoning
+        the rest of it — and the offending file, undeletable by that path,
+        would make every future replacement for that bot fail the same way.
+
+        A failure is returned rather than raised so one stubborn entry cannot
+        abort the loop, and rather than logged-and-forgotten so the caller can
+        report that the tool is still there.
         """
         try:
             path.unlink()
         except FileNotFoundError:
-            return
+            return None
         except OSError as error:
-            # Replaced by a directory between the scan and here, or immutable.
-            # One stubborn entry must not abort the rest of the prune.
             log.warning("[cli_tools] could not remove %s: %s", path, error)
-            return
+            return f"{path.name}: {error}"
         log.info("[cli_tools] deleted %s", path.name)
+        return None
 
     @staticmethod
     def _unlink_quietly(path: Path) -> None:
@@ -239,14 +254,19 @@ class LocalCliToolsService(CliToolsService):
             os.close(fd)
 
     async def replace_all(
-        self, tools: Sequence[CliToolPayload]
-    ) -> list[CliToolResult]:
+        self,
+        tools: Sequence[CliToolPayload],
+        *,
+        also_keep: Sequence[str] = (),
+    ) -> ReplaceOutcome:
         async with self._write_lock:
-            return await asyncio.to_thread(self._replace_all_sync, tools)
+            return await asyncio.to_thread(
+                self._replace_all_sync, tools, tuple(also_keep)
+            )
 
     def _replace_all_sync(
-        self, tools: Sequence[CliToolPayload]
-    ) -> list[CliToolResult]:
+        self, tools: Sequence[CliToolPayload], also_keep: Sequence[str] = ()
+    ) -> ReplaceOutcome:
         """Install everything named, *then* prune everything not named.
 
         The ordering is the point of this endpoint existing. Pruning first
@@ -256,7 +276,10 @@ class LocalCliToolsService(CliToolsService):
 
         A name that failed to install is **not** pruned either: its old binary
         is left in place, so a failed replacement degrades to "unchanged"
-        rather than "removed".
+        rather than "removed". ``also_keep`` extends that to names the *caller*
+        could not prepare — an entry whose payload would not decode never
+        reaches this method, and without it the prune would read that name as
+        dropped from the set and delete a perfectly good installed tool.
         """
         results: list[CliToolResult] = []
         for tool in tools:
@@ -273,12 +296,15 @@ class LocalCliToolsService(CliToolsService):
                 continue
             results.append(CliToolResult(name=tool.name, success=True))
 
-        keep = {result.name for result in results}
+        keep = {result.name for result in results} | set(also_keep)
         directory = self._dir()
+        prune_failures: list[str] = []
         for present in self._names_on_disk():
             if present not in keep:
-                self._delete_path(directory / present)
-        return results
+                failure = self._prune_path(directory / present)
+                if failure is not None:
+                    prune_failures.append(failure)
+        return ReplaceOutcome(results=results, prune_failures=prune_failures)
 
     # ── reads ────────────────────────────────────────────────────────────
 
@@ -323,13 +349,23 @@ class LocalCliToolsService(CliToolsService):
         tool", which is exactly what it is.
         """
         try:
-            fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+            # O_NONBLOCK so a FIFO cannot park this thread. Opening a named
+            # pipe for reading blocks until a writer appears, and the tool
+            # directory is inside the bot's container — so an agent that
+            # created a FIFO there could hold a worker from the shared
+            # ``to_thread`` executor on every download, and enough of them
+            # would stall every CLI operation. It is a no-op for regular
+            # files, which are the only thing this goes on to read.
+            fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError:
             # ELOOP (a symlink), ENOENT, EISDIR, EACCES — none of them is a
             # command the bot can run.
             return None
         try:
             with os.fdopen(fd, "rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    # A FIFO, socket or device. Not a command either.
+                    return None
                 return handle.read()
         except OSError:
             return None

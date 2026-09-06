@@ -10,6 +10,7 @@ failure at 200.
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -354,3 +355,71 @@ class TestRefusalShapes:
         assert client.get(
             "/api/cli/download", params={"name": "../escape"}
         ).status_code == 400
+
+
+class TestReviewRegressions:
+    def test_an_undecodable_entry_does_not_delete_the_installed_tool(
+        self, client, cli_dir
+    ):
+        """The bug the router uniquely owns.
+
+        An entry whose base64 will not decode never reaches the service, so
+        without ``also_keep`` the prune reads its name as dropped from the
+        desired set and deletes a perfectly good binary — turning "your update
+        failed" into "your tool is gone", while the response says only that
+        this one item failed.
+        """
+        client.post(
+            "/api/cli/install",
+            json={"name": "mycli", "content_b64": _b64(ELF + b"installed")},
+        )
+
+        response = client.post(
+            "/api/cli/replace",
+            json={
+                "tools": [
+                    {"name": "mycli", "content_b64": "not!base64!!"},
+                    {"name": "other", "content_b64": _b64(ELF)},
+                ]
+            },
+        )
+
+        verdicts = {r["name"]: r for r in response.json()["data"]["results"]}
+        assert verdicts["mycli"]["success"] is False
+        # Degrades to unchanged, never to removed.
+        assert (cli_dir / "mycli").read_bytes() == ELF + b"installed"
+        assert (cli_dir / "other").exists()
+
+    def test_a_prune_failure_is_reported_rather_than_implied_clean(
+        self, client, cli_dir, monkeypatch
+    ):
+        """A tool the manifest dropped but the engine could not remove is
+        still callable, so the response must not read as a clean sweep."""
+        client.post("/api/cli/install", json={"name": "kept", "content_b64": _b64(ELF)})
+        client.post("/api/cli/install", json={"name": "stuck", "content_b64": _b64(ELF)})
+
+        real_unlink = Path.unlink
+
+        def refuse_stuck(self, *args, **kwargs):
+            if self.name == "stuck":
+                raise PermissionError("immutable")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refuse_stuck)
+        body = client.post(
+            "/api/cli/replace",
+            json={"tools": [{"name": "kept", "content_b64": _b64(ELF)}]},
+        ).json()
+
+        assert "stuck" in (body["message"] or "")
+        assert (cli_dir / "stuck").exists()
+
+    def test_download_of_a_fifo_does_not_hang(self, client, cli_dir):
+        """An agent-created FIFO must not park a worker thread."""
+        cli_dir.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(cli_dir / "trap")
+
+        body = client.get("/api/cli/download", params={"name": "trap"}).json()
+
+        assert body["success"] is False
+        assert body["error"] == "not_found"

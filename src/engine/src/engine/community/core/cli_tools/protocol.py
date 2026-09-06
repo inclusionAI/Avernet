@@ -32,7 +32,7 @@ from engine.community.core.cli_tools.models import (
     CliToolBytes,
     CliToolInfo,
     CliToolPayload,
-    CliToolResult,
+    ReplaceOutcome,
 )
 
 
@@ -78,16 +78,27 @@ class CliToolsService(Protocol):
 
     @abstractmethod
     async def replace_all(
-        self, tools: Sequence[CliToolPayload]
-    ) -> list[CliToolResult]:
+        self,
+        tools: Sequence[CliToolPayload],
+        *,
+        also_keep: Sequence[str] = (),
+    ) -> ReplaceOutcome:
         """Make this set **the** command set. Deletion is implied.
 
         The argument is the desired end state, not a diff: a command present on
         the bot and absent from ``tools`` is removed. An empty sequence is a
         real and meaningful request — "this bot has no commands" — not a no-op.
 
-        Returns one verdict per requested name, successes and failures alike.
-        Partial failure is an ordinary outcome, not an error.
+        ``also_keep`` names entries the caller requested but could not prepare
+        — a payload that would not decode, say. They are not installed, but
+        they are not pruned either, so a replacement that failed for one entry
+        leaves that tool unchanged rather than deleting it.
+
+        Returns one verdict per requested name, successes and failures alike;
+        partial failure is an ordinary outcome, not an error. Failures while
+        *pruning* ride alongside, because those names have no verdict slot and
+        silently dropping them would let a replacement claim success while a
+        tool the manifest removed is still callable.
         """
         ...
 

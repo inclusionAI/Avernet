@@ -65,9 +65,25 @@ class CliToolResult:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class ReplaceOutcome:
+    """What a whole-set replacement did.
+
+    ``results`` is the per-requested-name verdict the platform parses. Pruning
+    touches names the request did *not* carry, so a prune that fails has no
+    slot there — and swallowing it would let a replacement report clean success
+    while a tool the manifest dropped stays callable on the bot. Those failures
+    ride here instead, and the router surfaces them in the envelope's message.
+    """
+
+    results: list[CliToolResult]
+    prune_failures: list[str]
+
+
 __all__ = [
     "CliToolBytes",
     "CliToolInfo",
     "CliToolPayload",
     "CliToolResult",
+    "ReplaceOutcome",
 ]

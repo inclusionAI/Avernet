@@ -124,15 +124,31 @@ async def replace_cli_tools(request: ReplaceRequest) -> ApiResponse:
             continue
         payloads.append(CliToolPayload(name=item.name, data=data))
 
-    results = await _service().replace_all(payloads)
+    # An undecodable entry never reaches the service, so without this the
+    # prune would read its name as dropped from the desired set and delete a
+    # perfectly good installed tool — turning "your update failed" into "your
+    # tool is gone". A failed entry degrades to unchanged, exactly as one that
+    # failed to install does.
+    outcome = await _service().replace_all(
+        payloads, also_keep=[str(entry["name"]) for entry in undecodable]
+    )
     body = [
         {"name": r.name, "success": r.success}
         if r.success
         else {"name": r.name, "success": False, "message": r.message}
-        for r in results
+        for r in outcome.results
     ]
+    # Pruning touches names the request did not carry, so a prune failure has
+    # no verdict slot. Reporting it here keeps the response from implying the
+    # bot is clean when a tool the manifest dropped is still callable.
+    message = None
+    if outcome.prune_failures:
+        message = (
+            "some tools could not be removed and are still installed: "
+            + "; ".join(outcome.prune_failures)
+        )
     return ApiResponse(success=True, data={"results": body + undecodable},
-                       warning=warning)
+                       message=message, warning=warning)
 
 
 @router.get("/list", response_model=ApiResponse)
