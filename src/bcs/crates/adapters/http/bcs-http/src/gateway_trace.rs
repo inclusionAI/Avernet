@@ -126,7 +126,13 @@ pub async fn observe_request(
         .map(str::to_owned).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let header = axum::http::HeaderValue::from_str(&request_id).expect("validated request ID");
     request.headers_mut().insert("x-request-id", header.clone());
-    let trace_id = bcs_telemetry::current_trace_id();
+    // Extract correlation data at the tracing boundary; never retain the span in log context.
+    let trace_id = {
+        let context = Span::current().context();
+        let span = context.span();
+        if span.span_context().is_valid() { span.span_context().trace_id().to_string() }
+        else { String::new() }
+    };
     let route = request.extensions().get::<axum::extract::MatchedPath>()
         .map(|route| route.as_str()).unwrap_or("unmatched").to_owned();
     let mut observation = RequestObservation {
@@ -136,8 +142,8 @@ pub async fn observe_request(
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         trace_id = %observation.trace_id, route = %observation.route,
         method = %request.method(), "http.request.started");
-    let mut response = bcs_telemetry::with_request_context(request_id,
-        next.run(request)).await;
+    let mut response = bcs_observability::with_trace_id(observation.trace_id.clone(),
+        bcs_observability::with_request_context(request_id, next.run(request))).await;
     let elapsed = observation.started.elapsed();
     response.headers_mut().insert("x-request-id", header);
     observation.completed = true;

@@ -38,8 +38,8 @@ use bcs_service_api::{
 };
 
 fn log_bot_cache_source(source: &'static str) {
-    bcs_telemetry::count("bot.memory", source);
-    debug!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), source, "bot.load.source");
+    bcs_observability::count("bot.memory", source);
+    debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), source, "bot.load.source");
 }
 
 pub mod memory;
@@ -666,7 +666,7 @@ impl PersistentBotRepo {
             .hash_set(&key, "status", status.status.as_bytes().to_vec())
             .await
         {
-            warn!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
             return;
         }
 
@@ -698,9 +698,9 @@ impl PersistentBotRepo {
         failed_commands += u64::from(result.is_err());
 
         if failed_commands > 0 {
-            warn!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
         } else {
-            debug!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
         }
     }
 
@@ -708,17 +708,17 @@ impl PersistentBotRepo {
     async fn load_status_from_cache(&self, bot_uuid: &str) -> BotDynamicStatus {
         let key = self.configured_status_cache_key(bot_uuid);
 
-        let raw = match bcs_telemetry::observe_result("bot_status.cache_read", self.cache.hash_get_all(&key)).await {
+        let raw = match bcs_observability::observe_result("bot_status.cache_read", self.cache.hash_get_all(&key)).await {
             Ok(raw) => raw,
             Err(_) => {
-                bcs_telemetry::count("bot_status.fallback", "cache_error");
-                warn!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
+                bcs_observability::count("bot_status.fallback", "cache_error");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
                 return BotDynamicStatus::default();
             }
         };
-        match bcs_telemetry::observe_result("bot_status.decode", async { Self::cache_hash_to_strings(raw) }).await {
+        match bcs_observability::observe_result("bot_status.decode", async { Self::cache_hash_to_strings(raw) }).await {
             Ok(map) => {
-                bcs_telemetry::count("bot_status.cache", if map.is_empty() { "empty" } else { "hit" });
+                bcs_observability::count("bot_status.cache", if map.is_empty() { "empty" } else { "hit" });
                 BotDynamicStatus {
                     status: map.get("status").cloned().unwrap_or_default(),
                     dynamic_summary: map.get("dynamic_summary").cloned(),
@@ -727,8 +727,8 @@ impl PersistentBotRepo {
                 }
             }
             Err(_) => {
-                bcs_telemetry::count("bot_status.fallback", "decode_error");
-                warn!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
+                bcs_observability::count("bot_status.fallback", "decode_error");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
                 BotDynamicStatus::default()
             }
         }
@@ -1548,17 +1548,17 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
-        match bcs_telemetry::observe_result("bot.load", self.try_get(bot_id)).await {
+        match bcs_observability::observe_result("bot.load", self.try_get(bot_id)).await {
             Ok(value) => value,
             Err(_) => {
-                warn!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), outcome = "load_error", fallback = "omitted", "bot.load.fallback");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "load_error", fallback = "omitted", "bot.load.fallback");
                 None
             }
         }
     }
 
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
-        let bots = bcs_telemetry::observe_value("bot.memory_lock.wait", self.bots.read()).await;
+        let bots = bcs_observability::observe_value("bot.memory_lock.wait", self.bots.read()).await;
 
         if let Some(bot) = bots.get(bot_id) {
             if !bot.is_expired() {
@@ -1575,7 +1575,7 @@ impl BotRepoPort for PersistentBotRepo {
         // returning defaults; otherwise O.5/P.3/F.3 will misclassify any actor
         // whose row is no longer cached in process memory.
         let Some((mut capabilities, env, _hidden, created_by, actor_kind, status)) =
-            bcs_telemetry::observe_result("bot.db_load", self.try_load_from_db(bot_id, false)).await?
+            bcs_observability::observe_result("bot.db_load", self.try_load_from_db(bot_id, false)).await?
         else {
             return Ok(None);
         };

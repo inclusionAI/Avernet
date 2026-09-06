@@ -76,10 +76,10 @@ impl RunChannelManager {
 
     pub async fn send_event(&self, run_id: &str, event: String) -> bool {
         let resolved_run_id = self.resolve_run_id(run_id).await;
-        let channels = bcs_telemetry::observe_value("ws.run_channels.read_lock", self.channels.read()).await;
+        let channels = bcs_observability::observe_value("ws.run_channels.read_lock", self.channels.read()).await;
 
         if let Some(channel) = channels.get(&resolved_run_id) {
-            match bcs_telemetry::observe_result("ws.run_channels.enqueue", channel.tx.send(event)).await {
+            match bcs_observability::observe_result("ws.run_channels.enqueue", channel.tx.send(event)).await {
                 Ok(()) => {
                     debug!(
                         run_id = %run_id,

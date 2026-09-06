@@ -60,7 +60,7 @@ async fn send_baas_message(
     extra: Option<&serde_json::Value>,
     url_guard: &OutboundUrlGuard,
 ) -> Result<(), String> {
-    bcs_telemetry::observe_result("callback.baas.send", async {
+    bcs_observability::observe_result("callback.baas.send", async {
     let url = messages_url(base_url);
     let body = build_message_body(bot_id, content, metadata, extra);
     let guarded_url = url_guard

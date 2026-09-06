@@ -21,6 +21,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `service-api/*`
 - WebSocket framework crates such as `axum`, `tokio`, and `futures`
 

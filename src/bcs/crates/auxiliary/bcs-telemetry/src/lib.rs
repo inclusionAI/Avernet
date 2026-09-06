@@ -1,12 +1,7 @@
-//! Transport-neutral observations and OpenTelemetry semantic attribute encoders.
+//! Pure OpenTelemetry semantic attribute encoders shared by delivery adapters.
 //!
-//! This crate owns no exporter, transport client, or BCS business behavior.
-//! Operation observations emit logs through the subscriber installed by bootstrap;
-//! they do not create spans or record metrics. Existing trace IDs may be read for correlation;
-//! arguments, return values and raw errors are never recorded.
-
-mod operation;
-pub use operation::{Operation, observe_result, observe_value, with_request_context, in_current_context, count, current_operation_id, current_request_id, current_trace_id};
+//! This crate owns no tracing pipeline or BCS business behavior. It only converts
+//! adapter-provided text into bounded, schema-compliant GenAI message JSON.
 
 use serde_json::{Value, json};
 

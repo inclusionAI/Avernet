@@ -280,7 +280,7 @@ impl A2aChatRunService for A2aChat {
         cmd: AsyncA2aChatCommand,
     ) -> ServiceResult<AsyncA2aChatAccepted> {
         let (response_tx, response_rx) = mpsc::channel::<String>(64);
-        bcs_telemetry::observe_value("chat.channel.register", self.chat_run_events
+        bcs_observability::observe_value("chat.channel.register", self.chat_run_events
             .register(
                 cmd.run_id.clone(),
                 cmd.session_key.clone(),
@@ -288,10 +288,10 @@ impl A2aChatRunService for A2aChat {
                 Some("http-chat-async".to_string()),
                 cmd.run_channel_from.clone(),
             )).await;
-        bcs_telemetry::observe_value("chat.context.register", self.register_bot_run_context(&cmd.run_id, &cmd.target_bot_id, &cmd.session_key, cmd.timeout_ms)).await;
+        bcs_observability::observe_value("chat.context.register", self.register_bot_run_context(&cmd.run_id, &cmd.target_bot_id, &cmd.session_key, cmd.timeout_ms)).await;
 
         let expires_at_ms = now_ms().saturating_add(cmd.timeout_ms);
-        let chat_result = bcs_telemetry::observe_result("chat.prepare_and_deliver", self
+        let chat_result = bcs_observability::observe_result("chat.prepare_and_deliver", self
             .chat(A2aChatCommand {
                 caller: cmd.caller,
                 target_bot_id: cmd.target_bot_id.clone(),
@@ -324,7 +324,7 @@ impl A2aChatRunService for A2aChat {
             let service = self.clone();
             let run_id = cmd.run_id.clone();
             let timeout_ms = cmd.timeout_ms;
-            tokio::spawn(bcs_telemetry::in_current_context(async move {
+            tokio::spawn(bcs_observability::in_current_context(async move {
                 service.drain_async_run(run_id, response_rx, timeout_ms).await;
             }));
         }
@@ -365,7 +365,7 @@ impl A2aChatService for A2aChat {
     async fn chat(&self, cmd: A2aChatCommand) -> ServiceResult<A2aChatOutcome> {
         let client_kind = direct_chat_client_kind(cmd.client.as_deref());
         let from_bot_id = bot_caller_id(&cmd.caller)?;
-        bcs_telemetry::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
+        bcs_observability::observe_result("chat.authorize.owner", self.ensure_source_owner(&from_bot_id, cmd.authenticated_staff_id.as_deref())).await?;
         let target_bot = if let Some(code) = cmd.organization_code.as_deref() {
             let organization = self.organization.as_ref().ok_or_else(|| {
                 ServiceError::InvalidOperation {
@@ -373,11 +373,11 @@ impl A2aChatService for A2aChat {
                     request_id: None,
                 }
             })?;
-            bcs_telemetry::observe_result("chat.authorize.organization", organization
+            bcs_observability::observe_result("chat.authorize.organization", organization
                 .authorize_pair(code, &from_bot_id, &cmd.target_bot_id)).await?;
-            bcs_telemetry::observe_result("chat.authorize.organization_target", self.ensure_organization_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
+            bcs_observability::observe_result("chat.authorize.organization_target", self.ensure_organization_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
         } else {
-            bcs_telemetry::observe_result("chat.authorize.target", self.ensure_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
+            bcs_observability::observe_result("chat.authorize.target", self.ensure_target_reachable(&from_bot_id, &cmd.target_bot_id)).await?
         };
         if target_bot.status == ActorStatus::Hidden {
             let name = target_bot
@@ -387,11 +387,11 @@ impl A2aChatService for A2aChat {
                 .unwrap_or(&cmd.target_bot_id);
             return Err(ServiceError::BotHidden(name.to_string()));
         }
-        let delivery_target = bcs_telemetry::observe_result("chat.delivery.resolve", self
+        let delivery_target = bcs_observability::observe_result("chat.delivery.resolve", self
             .registry
             .resolve_delivery_target(&cmd.target_bot_id)).await?;
         let target_is_http_provider = delivery_target.is_http_provider();
-        if !bcs_telemetry::observe_value("chat.delivery.available", self.bot_delivery.is_available(&delivery_target)).await {
+        if !bcs_observability::observe_value("chat.delivery.available", self.bot_delivery.is_available(&delivery_target)).await {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Failed,
                 MetricsResult::Error,
@@ -423,7 +423,7 @@ impl A2aChatService for A2aChat {
             ChatRunCompletionPolicy::WaitForFinal
         };
 
-        let from_bot_name = bcs_telemetry::observe_value("chat.sender.load", self.sender_display_name(&from_bot_id)).await;
+        let from_bot_name = bcs_observability::observe_value("chat.sender.load", self.sender_display_name(&from_bot_id)).await;
         let frame = build_chat_send_frame(
             &run_id,
             &session_key,
@@ -460,7 +460,7 @@ impl A2aChatService for A2aChat {
             completion_policy,
         );
         record.original_request = original_request;
-        if let Err(err) = bcs_telemetry::observe_result("chat.run.create", self.run_store.create(record)).await {
+        if let Err(err) = bcs_observability::observe_result("chat.run.create", self.run_store.create(record)).await {
             let reason = err.direct_chat_reason();
             let event = if reason == DirectChatRunReason::StoreCapacity {
                 DirectChatRunEvent::CapacityRejected
@@ -491,8 +491,8 @@ impl A2aChatService for A2aChat {
             use bcs_domain::{GroupMessage, GroupMessageType, MessageRole};
 
             let credentials_pair = match (
-                bcs_telemetry::observe_value("chat.credentials.sender", self.registry.get_agent_credentials(&from_bot_id)).await,
-                bcs_telemetry::observe_value("chat.credentials.target", self.registry.get_agent_credentials(&cmd.target_bot_id)).await,
+                bcs_observability::observe_value("chat.credentials.sender", self.registry.get_agent_credentials(&from_bot_id)).await,
+                bcs_observability::observe_value("chat.credentials.target", self.registry.get_agent_credentials(&cmd.target_bot_id)).await,
             ) {
                 (Some(c), Some(r))
                     if c.agent_code.as_deref().is_some_and(|s| !s.is_empty())
@@ -538,7 +538,7 @@ impl A2aChatService for A2aChat {
                     surface: DeliveryBlockSurface::DirectChat,
                     reason: DeliveryBlockReason::PolicyBlocked,
                 };
-                if let InterceptorDecision::Block(reason) = bcs_telemetry::observe_value("chat.security.check", self
+                if let InterceptorDecision::Block(reason) = bcs_observability::observe_value("chat.security.check", self
                     .interceptors
                     .on_outbound_with_context(&mut outbound, block_context)).await
                 {
@@ -570,7 +570,7 @@ impl A2aChatService for A2aChat {
             }
         }
 
-        let delivery = match bcs_telemetry::observe_result("chat.delivery.send", self
+        let delivery = match bcs_observability::observe_result("chat.delivery.send", self
             .bot_delivery
             .deliver(BotDeliveryCommand {
                 target: delivery_target,
@@ -623,7 +623,7 @@ impl A2aChatService for A2aChat {
         }
 
         if submit_on_provider_ack {
-            if bcs_telemetry::observe_value("chat.run.mark_submitted", self.run_store.mark_submitted(&run_id)).await {
+            if bcs_observability::observe_value("chat.run.mark_submitted", self.run_store.mark_submitted(&run_id)).await {
                 self.emit_run_lifecycle(
                     DirectChatRunEvent::Submitted,
                     MetricsResult::Success,
@@ -632,7 +632,7 @@ impl A2aChatService for A2aChat {
                 )
                 .await;
             }
-        } else if bcs_telemetry::observe_value("chat.run.mark_running", self.run_store.mark_running(&run_id)).await {
+        } else if bcs_observability::observe_value("chat.run.mark_running", self.run_store.mark_running(&run_id)).await {
             self.emit_run_lifecycle(
                 DirectChatRunEvent::Running,
                 MetricsResult::Success,

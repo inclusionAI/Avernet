@@ -82,7 +82,7 @@ async fn read_provider_ack_body(
     response: reqwest::Response,
     timeout: Duration,
 ) -> Result<ProviderAckResponse, ProviderAckBodyError> {
-    bcs_telemetry::observe_result("provider.read_provider_ack_body", async {
+    bcs_observability::observe_result("provider.read_provider_ack_body", async {
     match tokio::time::timeout(timeout, response.json::<ProviderAckResponse>()).await {
         Ok(Ok(ack)) => Ok(ack),
         Ok(Err(error)) => Err(ProviderAckBodyError::Decode(error)),
@@ -1091,7 +1091,7 @@ async fn post_provider<T: DeserializeOwned>(
     body: &ProviderWebhookRequest,
     provider_bypass_headers: &[(String, String)],
 ) -> ServiceResult<T> {
-    bcs_telemetry::observe_result("provider.post_provider", async {
+    bcs_observability::observe_result("provider.post_provider", async {
     let response = send_provider_request(
         client,
         url_guard,
@@ -1172,7 +1172,7 @@ async fn send_provider_request_with_policy(
     provider_bypass_headers: &[(String, String)],
     client_policy: ProviderClientPolicy,
 ) -> ServiceResult<reqwest::Response> {
-    bcs_telemetry::observe_result("provider.send_provider_request_with_policy", async {
+    bcs_observability::observe_result("provider.send_provider_request_with_policy", async {
     let BotDeliveryTarget::HttpProvider {
         webhook_url,
         bcs_to_provider_token,

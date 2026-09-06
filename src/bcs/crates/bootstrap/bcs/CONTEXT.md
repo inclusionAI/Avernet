@@ -31,6 +31,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `service-api/*`
 - `adapters/*`
 - `services/*`

@@ -141,7 +141,7 @@ impl OutboundUrlGuard {
         &self,
         url: &Url,
     ) -> Result<(Option<String>, Vec<SocketAddr>), OutboundUrlError> {
-        bcs_telemetry::observe_result("http.dns_and_policy", async {
+        bcs_observability::observe_result("http.dns_and_policy", async {
         let Some(Host::Domain(domain)) = url.host() else {
             return Ok((None, Vec::new()));
         };

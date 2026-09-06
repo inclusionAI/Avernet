@@ -1,6 +1,6 @@
 [package]
 name        = "bcs-telemetry"
-description = "Transport-neutral operation observations and OpenTelemetry attribute helpers"
+description = "OpenTelemetry semantic attribute helpers"
 edition     = { workspace = true }
 license     = { workspace = true }
 repository  = { workspace = true }
@@ -12,14 +12,3 @@ workspace = true
 
 [dependencies]
 serde_json = { workspace = true }
-serde = { workspace = true }
-tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-opentelemetry = { workspace = true }
-tokio = { workspace = true }
-uuid = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }

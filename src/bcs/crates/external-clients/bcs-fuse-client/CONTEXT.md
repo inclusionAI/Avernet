@@ -13,6 +13,8 @@
 
 ## Allowed dependencies
 
+- `auxiliary/bcs-observability` for log-only operation observations and correlation.
+
 - `bcs-config-api`
 - HTTP, serialization, logging, and error helper crates
 

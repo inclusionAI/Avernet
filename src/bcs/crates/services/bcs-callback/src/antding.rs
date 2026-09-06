@@ -57,7 +57,7 @@ async fn send_antding_callback(
     content: &str,
     instance_meta: Option<&serde_json::Value>,
 ) -> Result<(), String> {
-    bcs_telemetry::observe_result("callback.antding.send", async {
+    bcs_observability::observe_result("callback.antding.send", async {
     let meta_target = instance_meta.and_then(|m| m.get("callback_target"));
     let user_id = meta_target
         .and_then(|ct| ct.get("user_id"))

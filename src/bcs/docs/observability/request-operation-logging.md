@@ -20,8 +20,8 @@ retry policy, authorization decisions or business return values.
    finish after the response are not included in the already emitted snapshot.
 4. Use `operation_id` and `parent_operation_id` to reconstruct nested stages from
    log events. These observations do not create tracing spans or record metrics.
-   `trace_id` reads an existing trace context, or a captured trace ID in detached
-   work, and is otherwise empty;
+   `trace_id` reads only a string explicitly supplied by the HTTP tracing adapter
+   through `with_trace_id`; detached work copies this string. It is otherwise empty;
    request and operation IDs provide correlation even without tracing enabled.
    Existing gateway span selection and downstream TraceContext propagation are
    unchanged. `in_current_context` carries request/operation IDs, the trace ID
@@ -87,3 +87,27 @@ Keep `bcs_http_access` and `bcs_observation` enabled at INFO in file output targ
 filters (an existing `*` output already includes them). DEBUG operation detail
 can be enabled temporarily for diagnosis; keep existing sampling/exporter settings.
 No collector, dashboard, alert or online experiment is installed by this change.
+
+## Package ownership and migration
+
+- `bcs-observability` owns `Operation`, `observe_result`, `observe_value`, request
+  aggregation and correlation scopes. It prints structured events directly with
+  the Rust tracing log API; file output and subscriber configuration remain in bootstrap.
+- The base has no OpenTelemetry or metrics dependency, including with all features.
+  `with_trace_id(id, future)` takes opaque data; extraction/validation belongs to
+  the caller. Scopes restore outer values after completion or cancellation and
+  remain isolated when futures are polled concurrently.
+- `bcs-http::gateway_trace::observe_request` extracts an existing trace ID in the
+  HTTP adapter and injects it around the request context. The base never reads a
+  current span. Logs outside an explicitly supplied scope have an empty trace ID.
+- `bcs-telemetry` retains the original pure GenAI message attribute encoders.
+  Existing A2A span creation, provider TraceContext propagation and bootstrap
+  exporter configuration retain their owners and behavior.
+- Migrate operation calls/dependencies from `bcs_telemetry` / `bcs-telemetry` to
+  `bcs_observability` / `bcs-observability`. Encoder callers keep their old dependency.
+  Public and internal workspace consumers must use matching revisions. No wire,
+  config or log schema changes accompany this source-level API move.
+- A future OpenTelemetry adapter would depend on a declared base observation
+  contract and be assembled by bootstrap. This change adds no plugin runtime,
+  automatic spans, or metrics; the existing tracing event/subscriber mechanism
+  remains the logging extension point.

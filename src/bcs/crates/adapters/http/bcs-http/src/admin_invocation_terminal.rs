@@ -56,7 +56,7 @@ impl AdminInvocationTerminalObserver {
         let provider_id = run.provider_id;
         let run_id = run_id.to_string();
         let outbound_url_guard = self.outbound_url_guard.clone();
-        tokio::spawn(bcs_telemetry::in_current_context(async move {
+        tokio::spawn(bcs_observability::in_current_context(async move {
             let callback_url = callback_url_for_log(&callback.url);
             let guarded_url = match outbound_url_guard
                 .resolve_request_http_url(&callback.url)
@@ -94,7 +94,7 @@ impl AdminInvocationTerminalObserver {
                     return;
                 }
             };
-            let response = bcs_telemetry::observe_result("callback.admin_terminal.http", client
+            let response = bcs_observability::observe_result("callback.admin_terminal.http", client
                 .post(guarded_url.as_str())
                 .header("content-type", "application/json")
                 .header(BCN_PROVIDER_ID_HEADER, provider_id)

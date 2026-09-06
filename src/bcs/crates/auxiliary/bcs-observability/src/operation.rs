@@ -1,9 +1,6 @@
 //! Log-only operation observations. Never creates spans or records metrics/payloads.
 use std::future::Future;
 use std::time::{Duration, Instant};
-use opentelemetry::trace::TraceContextExt;
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[derive(Default, serde::Serialize)]
 struct Totals {
@@ -20,7 +17,7 @@ struct RequestContext {
 tokio::task_local! {
     static REQUEST_CONTEXT: RequestContext;
     static CURRENT_OPERATION: uuid::Uuid;
-    static INHERITED_TRACE_ID: String;
+    static TRACE_ID: String;
 }
 
 pub fn current_operation_id() -> String {
@@ -31,12 +28,18 @@ pub fn current_request_id() -> String {
     REQUEST_CONTEXT.try_with(|context| context.id.clone()).unwrap_or_default()
 }
 
+/// Returns only the correlation ID supplied by an adapter, or an empty string.
+/// No tracing SDK or active span is consulted.
 pub fn current_trace_id() -> String {
-    let context = Span::current().context();
-    let context_span = context.span();
-    if context_span.span_context().is_valid() {
-        context_span.span_context().trace_id().to_string()
-    } else { INHERITED_TRACE_ID.try_with(Clone::clone).unwrap_or_default() }
+    TRACE_ID.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// Scopes an adapter-supplied trace ID as log data, without creating or entering a span.
+/// The ID is opaque: validation/extraction belongs to the adapter. Empty means absent.
+/// Nested scopes restore the outer ID; completion or cancellation removes the scope.
+/// Spawned work inherits it only through an explicit `in_current_context` wrapper.
+pub async fn with_trace_id<T>(trace_id: String, future: impl Future<Output = T>) -> T {
+    TRACE_ID.scope(trace_id, future).await
 }
 
 fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static str, duration_ms: f64) {
@@ -76,7 +79,7 @@ pub fn in_current_context<T>(future: impl Future<Output = T>) -> impl Future<Out
             None => future.await,
         }
     };
-    let future = INHERITED_TRACE_ID.scope(trace_id, future).with_current_subscriber();
+    let future = TRACE_ID.scope(trace_id, future).with_current_subscriber();
     async move {
         match context {
             Some(context) => REQUEST_CONTEXT.scope(context, future).await,

@@ -345,8 +345,8 @@ pub async fn query_bots(
     Json(body): Json<QueryBotsRequest>,
 ) -> Result<Json<Value>, HttpAdapterError> {
     let _caller_actor_id =
-        bcs_telemetry::observe_result("bots.query.auth", require_caller_actor_id_from_headers(&state, &headers, &uri)).await?;
-    let result = bcs_telemetry::observe_result("bots.query.load_and_enrich", state
+        bcs_observability::observe_result("bots.query.auth", require_caller_actor_id_from_headers(&state, &headers, &uri)).await?;
+    let result = bcs_observability::observe_result("bots.query.load_and_enrich", state
         .services
         .bot_query
         .query_bots_by_ids(BotQueryByIdsCommand {
@@ -361,7 +361,7 @@ pub async fn query_bots(
         .map(bot_query_entry_to_query_json)
         .collect();
 
-    tracing::info!(target: "bcs_observation", request_id = %bcs_telemetry::current_request_id(), trace_id = %bcs_telemetry::current_trace_id(), returned_count, duration_ms = response_started.elapsed().as_secs_f64() * 1000.0, "bots.query.response_built");
+    tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), returned_count, duration_ms = response_started.elapsed().as_secs_f64() * 1000.0, "bots.query.response_built");
     Ok(Json(Value::Array(entries)))
 }
 

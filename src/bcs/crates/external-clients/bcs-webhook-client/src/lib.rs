@@ -98,7 +98,7 @@ impl WebhookClient {
         &self,
         request: EventDeliveryRequest,
     ) -> Result<EventDeliveryResponse, EventDeliveryError> {
-        bcs_telemetry::observe_result("webhook.deliver_once", async {
+        bcs_observability::observe_result("webhook.deliver_once", async {
         validate_request(&request)?;
         let endpoint = &request.endpoint_url;
         if let Err(category) =

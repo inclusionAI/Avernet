@@ -296,7 +296,7 @@ impl EventDispatcher {
                 .or_insert_with(|| Arc::new(Semaphore::new(self.per_host_concurrency)))
                 .clone()
         };
-        let _permit = match bcs_telemetry::observe_result("event.delivery.permit_wait", semaphore.acquire_owned()).await {
+        let _permit = match bcs_observability::observe_result("event.delivery.permit_wait", semaphore.acquire_owned()).await {
             Ok(permit) => permit,
             Err(error) => {
                 warn!(
