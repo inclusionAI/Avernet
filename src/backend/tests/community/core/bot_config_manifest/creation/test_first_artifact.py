@@ -34,7 +34,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     ManagedFilesStore,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    StoreIdentityPort,
+    PlatformIdentity,
     StoreResourcePort,
     PlatformSkillPackageUpload,
 )
@@ -194,7 +194,7 @@ def _build(db):
             script_service=scripts,
             activation_service=PlatformActivation(activation),
             mcp_auth_service=FakeMcpAuth(),
-            identity_service=StoreIdentityPort(store),
+            identity_service=PlatformIdentity(store),
             upload_service=PlatformSkillPackageUpload(store, validator=validator, skill_repository=skills),
             capability_reader=reader_of_active,
             package_validator=validator,

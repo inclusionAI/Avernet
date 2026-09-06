@@ -52,9 +52,11 @@ Here, both sides can import it and neither owns it.
   writes, without the projection choice.
 - `skill_package_upload_port.py` — `SkillPackageUploadPort`: installing one
   local skill package, without the directory-upload route's method.
+- `identity_file_port.py` — `IdentityFilePort`: listing, reading and writing a
+  bot's identity files — three of `IdentityService`'s fifteen public methods.
 
 Remaining ports still live beside their consumers and move here as they are
-revisited: `bot_config_manifest/apply/` (`identity_port`, `resource_port`) and
+revisited: `bot_config_manifest/apply/resource_port.py` and
 `bot_config_manifest/cli_tools/` (`arca_port`, `delivery_port`).
 
 ## Implementations are named for where the write lands
@@ -67,13 +69,23 @@ splits on — whether the write reaches the bot's **device** or stays in
 |---|---|---|
 | `ActivationPort` | `DeviceActivation` | `PlatformActivation` |
 | `SkillPackageUploadPort` | `DeviceSkillPackageUpload` | `PlatformSkillPackageUpload` |
+| `IdentityFilePort` | `DeviceIdentity` | `PlatformIdentity` |
 
 The pairs are not the same shape underneath, and that is expected. The
 activation two are wrappers over one `DirectActivationService`, differing only
-in the `project` they forward. The upload two share no body at all: one writes
-package files onto a container, the other objects into the managed-files store.
-Same axis, different depth — name for the axis, because that is what a reader
-needs to predict which one a family gets.
+in the `project` they forward. The upload and identity two share no body at
+all: one writes files onto a container, the other objects into the
+managed-files store. Same axis, different depth — name for the axis, because
+that is what a reader needs to predict which one a family gets.
+
+How much each device wrapper narrows, since that is what justifies it existing
+rather than binding the service raw:
+
+| Port | service surface | port surface |
+|---|---|---|
+| `IdentityFilePort` | `IdentityService`, 15 public methods | 3 |
+| `SkillPackageUploadPort` | `LocalSkillUploadServiceProtocol`, 3 | 2 |
+| `ActivationPort` | `DirectActivationServiceProtocol`, 6 + `project` | 6, no `project` |
 
 ## Context Boundary
 
@@ -82,6 +94,7 @@ purpose: Outbound ports — the narrow contracts core states for what it calls o
 provides:
   - ActivationPort
   - SkillPackageUploadPort
+  - IdentityFilePort
 consumes: []
 consumed_by:
   - "core/bot_config_manifest (apply) — the `mcp` and `skills` materialisers write through these ports; the four implementations are apply/activation_delegates.py, apply/skill_package_upload.py and managed_files/ports.py"

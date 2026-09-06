@@ -42,6 +42,9 @@ from agentclaw.community.core.bot_config_manifest.apply.activation_delegates imp
     DeviceActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.identity_files import (
+    DeviceIdentity,
+)
 from agentclaw.community.core.bot_config_manifest.apply.skill_package_upload import (
     DeviceSkillPackageUpload,
 )
@@ -60,8 +63,8 @@ from agentclaw.community.core.bot_config_manifest.apply.apply_task import (
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
     ManifestResourcePort,
@@ -202,7 +205,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         script_service_provider: Callable[[], BotStartupScriptServiceProtocol],
         activation_service_provider: Callable[[], DirectActivationServiceProtocol],
         mcp_auth_service_provider: Callable[[], MCPAuthServiceProtocol],
-        identity_service_provider: Callable[[], ManifestIdentityPort],
+        identity_service_provider: Callable[[], IdentityFilePort],
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
@@ -231,7 +234,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
         # W5's two fetch-consuming materialisers take their services the same
         # way — each sits deeper in the bot-configuration graph, and holding
         # one directly would close the same cycles. The identity service is
-        # named by its narrow apply-side key (``apply/identity_port.py``): the
+        # named by its narrow port (``core/ports/identity_file_port.py``): the
         # real service has no Protocol (one implementation, the waiver the
         # identity router records), and the port exists to key a lazy
         # provider without importing the device graph.
@@ -802,7 +805,7 @@ class BotConfigManifestApplyService(BotConfigManifestApplyServiceProtocol):
             script_service=self._script_service_provider(),
             activation_service=DeviceActivation(self._activation_service_provider()),
             mcp_auth_service=self._mcp_auth_service_provider(),
-            identity_service=self._identity_service_provider(),
+            identity_service=DeviceIdentity(self._identity_service_provider()),
             upload_service=DeviceSkillPackageUpload(self._upload_service_provider()),
             capability_reader=self._capability_reader_provider(),
             package_validator=self._package_validator_provider(),

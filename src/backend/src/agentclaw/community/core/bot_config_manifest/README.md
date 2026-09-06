@@ -604,7 +604,7 @@ provides:
   - FetchedEntry
   - EntryFetchError
   - scope_of
-  - ManifestIdentityPort
+  - IdentityFilePort
   - IdentityMaterialiser
   - SkillsMaterialiser
   - BotConfigManifestService
@@ -709,6 +709,7 @@ internal_dependencies:
   - agentclaw.community.core.resources.services.file_service  # the workspace file surface's admission constants, re-asked at resolve (W6)
   - agentclaw.community.core.services.identity
   - agentclaw.community.core.skill_center.capability_state_contract  # the flush-then-read active-set the `skills` materialiser enumerates (W5)
+  - agentclaw.community.core.ports.identity_file_port  # IdentityFilePort — the outbound port both identity implementations declare
   - agentclaw.community.core.ports.activation_port  # ActivationPort — the outbound port both apply-side activation delegates declare
   - agentclaw.community.core.ports.skill_package_upload_port  # SkillPackageUploadPort — the outbound port both upload implementations declare
   - agentclaw.community.core.skill_center.direct_activation_service_protocol  # the activation Service API both delegates wrap and forward `project` to

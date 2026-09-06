@@ -29,8 +29,8 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolServiceFactory,
 )
 from agentclaw.community.api.bot_cli_tool_service import BotCliToolServiceProtocol
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
     ManifestResourcePort,
@@ -83,7 +83,7 @@ from agentclaw.community.core.bot_config_manifest.apply.activation_delegates imp
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    StoreIdentityPort,
+    PlatformIdentity,
     StoreResourcePort,
     PlatformSkillPackageUpload,
 )
@@ -261,7 +261,7 @@ class ManifestFetchModule(Module):
     @inject
     def manifest_identity_service_factory(
         self, injector: Injector
-    ) -> Callable[[], ManifestIdentityPort]:
+    ) -> Callable[[], IdentityFilePort]:
         """The identity service the ``identity`` materialiser writes through.
 
         Lazy with a function-level import for the reason
@@ -269,20 +269,20 @@ class ManifestFetchModule(Module):
         reaches the device dispatcher graph at import time, and this
         module's import must not trigger that chain.
         """
-        from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-            ManifestIdentityPort,
+        from agentclaw.community.core.ports.identity_file_port import (
+            IdentityFilePort,
         )
         from agentclaw.community.core.services.identity import IdentityService
 
-        def _identity() -> ManifestIdentityPort:
+        def _identity() -> IdentityFilePort:
             service = injector.get(IdentityService)
-            if not isinstance(service, ManifestIdentityPort):
+            if not isinstance(service, IdentityFilePort):
                 # Structural check at wiring time: the port has no
                 # implementation relationship to the service, so nothing
                 # else would notice a renamed method until mid-apply. The
                 # drift guard belongs where the two first meet.
                 raise TypeError(
-                    "IdentityService no longer satisfies ManifestIdentityPort"
+                    "IdentityService no longer satisfies IdentityFilePort"
                 )
             return service
 
@@ -587,7 +587,7 @@ class ManifestFetchModule(Module):
                 script_service=script_service_provider(),
                 activation_service=PlatformActivation(activation_service_provider()),
                 mcp_auth_service=mcp_auth_service_provider(),
-                identity_service=StoreIdentityPort(store),
+                identity_service=PlatformIdentity(store),
                 upload_service=PlatformSkillPackageUpload(
                     store,
                     validator=validator,

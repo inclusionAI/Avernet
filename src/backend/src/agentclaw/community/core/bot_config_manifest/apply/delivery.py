@@ -38,8 +38,8 @@ from agentclaw.community.core.ports.activation_port import (
 )
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
     ManifestResourcePort,
@@ -106,7 +106,7 @@ class MaterialiserPorts:
     script_service: BotStartupScriptServiceProtocol
     activation_service: ActivationPort
     mcp_auth_service: MCPAuthServiceProtocol
-    identity_service: ManifestIdentityPort
+    identity_service: IdentityFilePort
     upload_service: SkillPackageUploadPort
     capability_reader: BotCapabilityStateReaderProtocol
     package_validator: SkillPackageValidator

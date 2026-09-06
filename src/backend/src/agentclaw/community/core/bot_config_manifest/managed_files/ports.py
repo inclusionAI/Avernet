@@ -1,7 +1,7 @@
 """Store-backed write targets for the teclaw strategy (W8).
 
 The identity and resources materialisers write through two narrow ports
-(``apply/identity_port.py``, ``apply/resource_port.py``) that the ARCA
+(``core/ports/identity_file_port.py``, ``apply/resource_port.py``) that the ARCA
 strategy binds to the real device-backed services. The teclaw strategy, with
 the platform-managed switch on, binds them to these: the same method
 signatures, but every read and write goes to the managed-files store — the
@@ -43,6 +43,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     ManagedFileScope,
     ManagedFilesStore,
 )
+from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
 from agentclaw.community.core.ports.skill_package_upload_port import (
     SkillPackageUploadPort,
 )
@@ -56,7 +57,7 @@ from agentclaw.community.core.skill_center.skill_package import (
 
 class _StorePort:
     """Every method below has the signature of the port protocol it fills
-    (``ManifestIdentityPort``, ``ManifestResourcePort``, the skills upload
+    (``IdentityFilePort``, ``ManifestResourcePort``, the skills upload
     road) — the device-backed services' own signatures, which the
     materialisers call by keyword. The parameters a store-backed port does
     not need (``owner_id``, ``engine_type``, ``stage``, ``operator_id``) are
@@ -71,8 +72,8 @@ class _StorePort:
         return ManagedFileScope(entity_type=entity_type, entity_id=entity_id, bot_id=bot_id)
 
 
-class StoreIdentityPort(_StorePort):
-    """``ManifestIdentityPort`` over the store: one object per identity file."""
+class PlatformIdentity(_StorePort, IdentityFilePort):
+    """``IdentityFilePort`` over the store: one object per identity file."""
 
     async def list_bot_files(
         self,
@@ -374,7 +375,7 @@ def _workspace_path(declared: str) -> str:
 
 __all__ = [
     "ManagedSkillOwnerConflict",
-    "StoreIdentityPort",
+    "PlatformIdentity",
     "StoreResourcePort",
     "PlatformSkillPackageUpload",
 ]

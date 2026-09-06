@@ -21,7 +21,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     ManagedFilesStore,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    StoreIdentityPort,
+    PlatformIdentity,
     StoreResourcePort,
 )
 
@@ -69,7 +69,7 @@ def _ctx():
 
 def test_identity_converges_from_the_store_only() -> None:
     store, oss = _store()
-    port = StoreIdentityPort(store)
+    port = PlatformIdentity(store)
     materialiser = IdentityMaterialiser(port, _fetcher())
 
     plan, written = _run(_apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "# rules"}]))
@@ -101,7 +101,7 @@ def test_identity_converges_from_the_store_only() -> None:
 
 def test_identity_declared_empty_removes_everything_but_reserved_names() -> None:
     store, _ = _store()
-    port = StoreIdentityPort(store)
+    port = PlatformIdentity(store)
     materialiser = IdentityMaterialiser(port, _fetcher())
     _run(_apply(materialiser, _ctx(), [{"type": "RULES.md", "content": "# rules"}]))
     plan, written = _run(_apply(materialiser, _ctx(), []))
