@@ -89,6 +89,9 @@ BOUNDARY_SIGNIFICANT_MODULES: frozenset[str] = frozenset({
     "agentclaw.community.core.grt_chat",
     "agentclaw.community.core.harness",
     "agentclaw.community.core.mcp",
+    # Outbound ports: contracts owned by the caller, published where both
+    # caller and implementer can reach them. See core/ports/README.md.
+    "agentclaw.community.core.ports",
     # Every repository contract and implementation, grouped by domain. A
     # top-level architectural package under §8, so it declares its own role.
     "agentclaw.community.core.repository",

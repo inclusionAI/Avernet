@@ -5,11 +5,9 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, Protocol, runtime_checkable
 
-from agentclaw.community.core.skill_center.activation_port import ActivationPort
-
 
 @runtime_checkable
-class DirectActivationServiceProtocol(ActivationPort, Protocol):
+class DirectActivationServiceProtocol(Protocol):
     """Activate/deactivate ONE capability (skill or MCP) for a Bot, directly.
 
     Legal only when no Set or platform Default policy governs the capability.
@@ -21,13 +19,13 @@ class DirectActivationServiceProtocol(ActivationPort, Protocol):
     readiness check and the runtime projection — for a delivery that projects
     by itself, which is teclaw's artifact. The default is the pre-W8 contract.
 
-    **Widens ``ActivationPort``.** That base is the same six methods without
-    ``project``; this adds it, and narrows the return types. Declaring the base
-    is what makes ``DirectActivationService`` an ``ActivationPort`` in the
-    source rather than only in the DI graph, so the apply engine's
-    ``MaterialiserPorts.activation_service`` field is satisfied by a stated
-    contract on both paths — this service on ARCA, ``RecordOnlyActivation`` on
-    platform-managed teclaw.
+    **This is not the manifest apply engine's ``ActivationPort``.** That port is
+    these six methods *without* ``project``, because choosing whether to project
+    belongs to the delivery strategy rather than to a materialiser. It is not a
+    supertype of this Protocol and this service is not bound to it: the two
+    wrappers in ``bot_config_manifest/apply/activation_delegates.py`` hold a
+    ``DirectActivationServiceProtocol`` and delegate to it with the ``project``
+    value their family requires.
     """
 
     @abstractmethod

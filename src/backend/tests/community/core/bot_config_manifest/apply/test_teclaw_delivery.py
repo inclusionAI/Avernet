@@ -20,7 +20,7 @@ from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     ApplyReport,
     ApplyStatus,
 )
-from agentclaw.community.core.bot_config_manifest.apply.record_only_activation import (
+from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
     RecordOnlyActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver

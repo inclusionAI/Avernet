@@ -78,7 +78,7 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import (
     MaterialiserPorts,
     TeclawPlatformBindings,
 )
-from agentclaw.community.core.bot_config_manifest.apply.record_only_activation import (
+from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
     RecordOnlyActivation,
 )
 from agentclaw.community.core.bot_config_manifest.apply.redeliver import TeclawRedeliver

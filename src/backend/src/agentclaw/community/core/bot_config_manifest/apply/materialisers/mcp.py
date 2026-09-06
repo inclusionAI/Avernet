@@ -37,7 +37,7 @@ from agentclaw.community.core.bot_config_manifest.apply.registry import (
     ResolveResult,
 )
 from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
-from agentclaw.community.core.skill_center.activation_port import ActivationPort
+from agentclaw.community.core.ports.activation_port import ActivationPort
 
 
 class McpMaterialiser(Materialiser):

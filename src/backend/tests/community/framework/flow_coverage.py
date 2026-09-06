@@ -42,8 +42,15 @@ def covered_modules(flows: list[FlowCase]) -> set[str]:
 # uncovered, and would need a "drain when…" reason that nothing could ever
 # satisfy: no flow can cover an index directly. If this module ever does grow
 # behaviour of its own, that is the moment it stops belonging here.
+#
+# ``ports`` is the third of this shape: outbound port contracts, owned by the
+# caller and published where both caller and implementer can reach them. Every
+# member is a ``Protocol`` of ``@abstractmethod`` stubs with no bodies, so there
+# is nothing for a flow to drive — what a port describes is executed by whichever
+# module implements it, under that module's own flow. Exempting it instead would
+# claim it is uncovered and demand a "drain when…" reason no flow could satisfy.
 _STRUCTURAL_NON_BUSINESS: frozenset[str] = frozenset(
-    {"repository", "bot_config_surface"}
+    {"repository", "bot_config_surface", "ports"}
 )
 
 

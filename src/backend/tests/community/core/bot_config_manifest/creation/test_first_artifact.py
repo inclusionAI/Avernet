@@ -23,7 +23,7 @@ from agentclaw.community.core.bot_config_manifest.apply.delivery import Material
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
 from agentclaw.community.core.bot_config_manifest.apply.order import ApplyPhase
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyStatus
-from agentclaw.community.core.bot_config_manifest.apply.record_only_activation import (
+from agentclaw.community.core.bot_config_manifest.apply.activation_delegates import (
     RecordOnlyActivation,
 )
 from agentclaw.community.core.bot_config_manifest.creation import (
