@@ -1,4 +1,10 @@
-"""The four operations bot creation asks of the manifest layer."""
+"""The operations bot creation asks of the manifest layer, and the contract.
+
+Most of this file is behavioural: what each operation does, and what it must not
+do. The section at the bottom pins the seam against ``ManifestCreationSeam`` — the
+Protocol it declares, the container binds, and every consumer holds — because no
+type checker runs on this tree to do it.
+"""
 from __future__ import annotations
 
 import inspect
