@@ -11,10 +11,18 @@
 - **Done when:**
   - [ ] `CliToolsService` Protocol declares `install`, `delete`, `list_tools`,
         `read_tool`, `replace_all`, and is `@runtime_checkable`.
+  - [ ] **Every Protocol member is decorated `@abstractmethod`**, so an
+        implementation that drops one fails at construction rather than
+        inheriting a `...` stub that silently returns `None`.
   - [ ] `CliToolInfo`, `CliToolPayload`, `CliToolResult` are frozen dataclasses.
+  - [ ] `cli_dir_beside(workspace)` states the shared rule once: a bot's `cli/`
+        is its workspace's sibling.
   - [ ] `openclaw_cli_dir()` resolves lazily from `workspace_root_strict()`,
-        returning `<workspace parent>/cli` when the env var is set and
+        returning the workspace's sibling when the env var is set and
         `~/.openclaw/cli` when it is not — never resolved at import time.
+  - [ ] `claude_code_cli_dir()` resolves `<home>/.claude_code/cli` from that
+        engine's own workspace root (`plugins/claude_code/layout_pool.py:45`),
+        which has no env override.
   - [ ] Module docstrings cite `engine-requirements.zh-CN.md` §4 A2 as the
         contract and state that the directory is the engine's, not the platform's.
 - **Depends on:** —
@@ -24,6 +32,8 @@
   directory callable.
 - **Files:** `src/engine/community/core/cli_tools/service.py`
 - **Done when:**
+  - [ ] `LocalCliToolsService` **explicitly subclasses `CliToolsService`** —
+        structural satisfaction alone is verified by nothing in this repo.
   - [ ] `install` writes to a temp file in the target directory, sets mode
         `0o755`, then `os.replace`s onto the target — never leaving a partial
         file runnable.
@@ -85,12 +95,13 @@
 - **Files:** `src/engine/community/engines/openclaw/engine.py`,
   `engines/claude_code/engine.py`
 - **Done when:**
-  - [ ] Both engines assign `_cli_tools = LocalCliToolsService(...)` with their
-        own directory callable.
+  - [ ] OpenClaw assigns `LocalCliToolsService(openclaw_cli_dir)`; Claude Code
+        assigns `LocalCliToolsService(claude_code_cli_dir)` — each its own
+        resolver, never a shared constant.
+  - [ ] A test asserts the two engines resolve to **different** directories, so
+        a future engine cannot silently inherit OpenClaw's tree.
   - [ ] Both declare all five `CLI_*` capabilities in `_CAPABILITIES.supported`.
   - [ ] `validate_capabilities()` passes for both at startup.
-  - [ ] Claude Code's directory choice is stated in a comment — it is that
-        engine's constant, not a copy of OpenClaw's.
 - **Depends on:** Tasks 2, 4
 
 ## Task 6: Add the `/api/cli` router

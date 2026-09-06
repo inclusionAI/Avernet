@@ -79,12 +79,31 @@ bodies from `DELETE` (`arca_port.py:_DELETE_METHOD`).
 # src/engine/community/core/cli_tools/protocol.py (new)
 @runtime_checkable
 class CliToolsService(Protocol):
+    @abstractmethod
     async def install(self, name: str, data: bytes) -> None: ...
-    async def delete(self, name: str) -> None: ...          # absent == success
-    async def list_tools(self) -> list[CliToolInfo]: ...     # reads disk, never a cache
+    @abstractmethod
+    async def delete(self, name: str) -> None: ...           # absent == success
+    @abstractmethod
+    async def list_tools(self) -> list[CliToolInfo]: ...      # reads disk, never a cache
+    @abstractmethod
     async def read_tool(self, name: str) -> CliToolBytes | None: ...
+    @abstractmethod
     async def replace_all(self, tools: Sequence[CliToolPayload]) -> list[CliToolResult]: ...
 ```
+
+**Every member is `@abstractmethod`, and implementations subclass the Protocol
+explicitly** — `class LocalCliToolsService(CliToolsService)`, never structural
+satisfaction alone. This repository runs no static type checker, so a
+structurally-satisfied Protocol is verified by nothing: not at import, not at
+construction, not in CI. The two rules together are what make the declaration
+load-bearing — a plain `...` stub is silently *inherited* in place of a method
+an implementation forgot, so the name still resolves and the call returns
+`None` instead of failing. With `@abstractmethod`, instantiating an
+implementation that dropped a method raises at construction.
+
+Same rule the backend states for its outbound ports
+(`src/backend/src/agentclaw/community/core/ports/README.md`, "Rules"), applied
+here for the same reason.
 
 ```python
 # src/engine/community/core/cli_tools/models.py (new)
@@ -160,16 +179,36 @@ engine startup, which is the class of bug that would otherwise surface as a
 
 ```python
 # src/engine/community/core/cli_tools/directories.py (new)
+def cli_dir_beside(workspace: Path) -> Path:
+    """The rule, stated once: a bot's `cli/` is its workspace's sibling."""
+    return workspace.parent / "cli"
+
 def openclaw_cli_dir() -> Path:
-    """`$OPENCLAW_WORKSPACE_DIR`'s sibling `cli/`, else `~/.openclaw/cli`."""
+    """`$OPENCLAW_WORKSPACE_DIR`'s sibling, else `~/.openclaw/cli`."""
     root = workspace_root_strict()
-    return (root.parent / "cli") if root else Path.home() / ".openclaw" / "cli"
+    return cli_dir_beside(root) if root else Path.home() / ".openclaw" / "cli"
+
+def claude_code_cli_dir(home: Path = Path("/home/admin")) -> Path:
+    """`<home>/.claude_code/cli` — that engine's workspace has no env override."""
+    return cli_dir_beside(home / ".claude_code" / "workspace")
 ```
 
-Resolved lazily, not at import: `workspace_root()` (`plugin_api/workspace_root.py:21`)
-reads an env var BaaS injects at spawn time. On the ARCA deployment this yields
-`/home/admin/.openclaw/cli` — the value the contract names — and on singlebox it
-stays per-bot, which a hardcoded constant would break.
+**Every engine needs its own resolver, because every engine has its own
+workspace.** OpenClaw's is `$OPENCLAW_WORKSPACE_DIR` or `~/.openclaw/workspace`
+(`plugin_api/workspace_root.py:21`); Claude Code's is
+`<home>/.claude_code/workspace` with no env override
+(`plugins/claude_code/layout_pool.py:45`). What is shared is the *rule* — the
+`cli/` directory sits beside the workspace — so that lives in
+`cli_dir_beside()` and each engine supplies only its own workspace. A single
+`openclaw_cli_dir()` would have put Claude Code's tools under OpenClaw's tree.
+
+Resolved lazily, never at import: OpenClaw's reads an env var BaaS injects at
+spawn time. On the ARCA deployment this yields `/home/admin/.openclaw/cli` —
+the value the contract names — and on singlebox it stays per-bot, which a
+hardcoded constant would break.
+
+A third ARCA engine added later supplies one more resolver here; it does not
+touch the service.
 
 ```diff
 # src/engine/community/manager.py:315 — after the skills property
