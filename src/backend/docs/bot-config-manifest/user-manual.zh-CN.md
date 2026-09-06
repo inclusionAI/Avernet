@@ -83,8 +83,13 @@
 
 还有两道与引擎无关的门，**对所有人都关着**：类目 `engine_config`（没有物化器），
 以及 **`resources` 条目用命名源 `from` 或 git 源**（resources 物化器目前只走 URL
-那条路）——写了会在提交时被拒绝，清单见**附录 C**。其余取源形态都已开放：条目内联
-的 HTTPS `source` URL、内联 `content`、命名源 `from` + `subpath`、git 源。
+那条路）——写了会在提交时被拒绝，清单见**附录 C**。
+
+⚠️ **取源形态不是全局开关，要按类目看**：条目内联的 HTTPS `source` URL 与内联 `content`
+到处都能用；**命名源 `from` 与 git 源只有 `skills` 与 `identity` 两个类目真正能用**。
+`resources` 写了会在 `PUT` 就被拒；**`cli_tools` 更麻烦——它写了能通过 `PUT`，却会在
+apply 时失败**（物化器把 `from` 的源名当成 URL 直接去取），所以 `cli_tools` 请一律写
+内联 `source` URL。整张表见**附录 C**。
 
 **已经有 bot 的人**可以直接问平台，答案与上表同源（同一个函数，所以不会出现
 「这里说支持、`PUT` 却拒绝」）：
@@ -872,10 +877,10 @@ payload。那一行会在这个 bot **下一次开设备**时被执行：创建�
 ```yaml
 cli_tools:
   - name: shopctl                 # 命令名；同一 bot 内唯一，不含路径分隔符
-    from: artifacts
-    subpath: shopctl/2.3.0/shopctl-linux-amd64
+    source: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
     digest: "sha256:9f2c…"        # 本类目强制
     version: "2.3.0"              # 元数据；**不参与收敛**
+    auth: oss-artifacts           # 私有制品库时写凭证名（§4.2）
 ```
 
 要点：
@@ -887,6 +892,10 @@ cli_tools:
 - **两种源形态**：直接指向一个二进制，或指向一个压缩包 + `subpath`。两种都必须
   带 `digest` —— 平台代你分发可执行物，供应链必须钉死。（`md5` 是平台物化之后
   自己算出来给引擎做变更判断的，不是你写的字段。）
+- ⚠️ **来源只能写内联 `source` URL，不要用 `from` 引用命名源、也不要用 git 源。**
+  这一条与 `resources` 那条不同、也更危险：`resources` 写了会在 `PUT` 当场被拒，而
+  `cli_tools` 写了**能通过 `PUT`**，然后在 apply 时失败——物化器不解析命名源，会把
+  `from` 的那个**源名当成 URL** 直接拿去取。见附录 C。
 - **`digest` + `subpath` 才是收敛依据，`version` 不是。**只改 `version` 不会
   触发重新下发——否则改一个字符串就会重推一个可能 200 MiB 的二进制。
 - **两个入口，一套实现**：清单里声明，或直接调管理 API——
@@ -1358,9 +1367,15 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 ### B.0.1 每个请求都要带的参数
 
-⚠️ **这一条最容易踩：`user_id` 是必填查询参数，落在本特性的每一个 bot 相关端点上。**
-漏了它不是「按默认身份处理」，而是 **`422`**（FastAPI 的参数校验失败）。下文各端点的
-「请求」一节只列它们**额外**的参数，`user_id` / `owner_id` 不再重复。
+⚠️ **这一条最容易踩：`user_id` 是必填查询参数。**漏了它不是「按默认身份处理」，而是
+**`422`**（FastAPI 的参数校验失败）。下文各端点的「请求」一节只列它们**额外**的参数，
+`user_id` / `owner_id` 不再重复。
+
+**它落在哪些端点上**：B.1 清单本体、B.2 apply、B.3 用清单创建 bot、B.5 CLI 工具——也就是
+所有针对某个 bot（或要创建一个 bot）的操作。**唯一的例外是 B.4 源凭证**：那一组是
+**租户级**的，路径虽然也在 `/openapi/v1/bots/` 下面，但它的路由只认调用方身份本身，
+**不接受也不需要 `user_id` / `owner_id`**——写不写都不影响，写的权属由**调用方应用**决定
+（B.4）。
 
 | 参数 | 位置 | 必填 | 含义 |
 | --- | --- | --- | --- |
@@ -1836,7 +1851,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 路径参数 | 类型 | 含义 |
 | --- | --- | --- |
-| `name` | string | 凭证名。**调用方自选的标识符，与域名之间没有任何推导关系** |
+| `name` | string | 凭证名。**调用方自选的标识符，与域名之间没有任何推导关系**。规则见 B.4.3 |
 
 **响应 `data`**：B.4.1 的三个字段，再加：
 
@@ -1855,12 +1870,20 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 注册或轮换。**轮换 = 对同一个名字重新 `PUT`。**
 
-**请求**：路径参数 `name`（同 B.4.2）；body：
+**请求**：路径参数 `name`，规则如下（违反 → `422`）：
+
+| 约束 | 说明 |
+| --- | --- |
+| 非空 | 空名字直接拒 |
+| **长度 ≤ 128** | 与存储列宽一致，在边界上拒绝而不是让 DB 报错 |
+| **不含任何空白字符** | 空格、制表符、换行一律不行——它是标识符，不是描述 |
+
+除此之外字符不限（它只是个名字，与域名、仓库名没有任何推导关系）。body：
 
 | 字段 | 必填 | 类型 | 含义与取值 |
 | --- | --- | --- | --- |
 | `type` | ❌ | enum，默认 `header` | 出示 secret 的**认证机制**（不是存储类型）。`header` 是唯一已实现的；`oss_aksk` 与 `basic` 是保留值，**写了会被 `422` 拒绝** |
-| `header_name` | 见右 | string \| null | secret 放进哪个请求头。**`type` 是 `header` 时必填**（如 git 宿主的 `PRIVATE-TOKEN`，或 bearer 风格的 `Authorization`） |
+| `header_name` | 见右 | string \| null | secret 放进哪个请求头。**`type` 是 `header` 时必填**（如 git 宿主的 `PRIVATE-TOKEN`，或 bearer 风格的 `Authorization`）。必须是合法的 HTTP header token（RFC 7230：字母数字与 `!#$%&'*+.^_\`\|~-`，**不含空格、冒号**），**长度 ≤ 256**；不合法 → `422` |
 | `secret` | ✅ | string | secret 值本身，**是完整的头值**。加密落库，**永远读不回来**，不进日志、不进 apply 报告 |
 | `allowed_prefixes` | ✅ | string[] | 授权出示范围：绝对 HTTPS 前缀，**至少一项，空数组即拒绝**。按**路径段边界**匹配——`https://host/team/content` 授权的是那棵树，**不包括** `…/team/content-secret` |
 
@@ -1871,7 +1894,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 状态 | 什么时候 |
 | --- | --- |
 | `403` | 这个名字已被别的应用占着——轮换是属主应用一个人的事 |
-| `422` | `type` 是保留机制；`type` 是 `header` 却没给 `header_name`；前缀不是绝对 HTTPS 或数组为空 |
+| `422` | **`name` 不合规**（空、超 128 字符、含空白）；`type` 是保留机制；`type` 是 `header` 却没给 `header_name`，或 `header_name` 不是合法 header token / 超 256 字符；`secret` 为空；前缀不是绝对 HTTPS 或数组为空 |
 | `503` | 生产环境解析不到平台主密钥。**写入被拒绝，绝不明文落库** |
 
 > **注册/轮换不触发任何 apply**，下一个 apply 点自然用新值。
@@ -2087,14 +2110,15 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- |
 | 类目 `engine_config` | 按跨引擎确认的结论移出第一期，至今没有物化器 | 它的物化器回来时。**在此之前**要写引擎配置，走 `GET`/`PUT /openapi/v1/bots/{bot_id}/engine/config`（附录 B.6），那条路不受清单管辖 |
 | `resources` 条目用 **`from`（命名源）或 git 源** | resources 物化器目前只走 URL 那条路（W6）；接受了会在 apply 时以一条看不懂的错误失败，所以在 `PUT` 就精确拒掉 | resources 接上 git 那条路之后。**在此之前**：resources 条目写内联 `source` URL 或 `content` |
+| `cli_tools` 条目用 **`from`（命名源）或 git 源** | cli_tools 物化器同样不解析命名源：`CliToolDecl.from_entry` 把 `from` 的**源名原样当成 URL**，`resolve` 也不经过取源会话。⚠️ **与上一行不同，这个组合 `PUT` 不会拒——它会在 apply 时失败**，所以它今天是一个「写得出、过得了、跑不通」的陷阱 | cli_tools 接上取源会话之后。**在此之前**：cli_tools 条目一律写内联 `source` URL |
 
 **已经开放的**（早期版本的本文档曾把它们列在这张表里，现在不是了）：
 
 | 构造 | 状态 |
 | --- | --- |
 | 类目 `cli_tools` | **已开放**（W9），与管理 API `…/cli-tools` 同一个组件（§5.6） |
-| `from` 指向命名源 | **已开放**（W7），对 `skills` 与 `identity` 条目有效 |
-| git 源（`sources.<name>.git` 或条目内联的 git 引用） | **已开放**（W7），同上 |
+| `from` 指向命名源 | **对 `skills` 与 `identity` 已开放**（W7）。`resources` 与 `cli_tools` **不可用**，见上表 |
+| git 源（`sources.<name>.git` 或条目内联的 git 引用） | 同上：**只对 `skills` 与 `identity`** |
 
 还有一条与引擎有关、不属于「没做完」的拒绝：**`script` 在 teclaw 与 desktop bot 上
 写入即拒**（§2.1）——它不是待开放，是那两类 bot 结构上没有执行通道。
@@ -2135,7 +2159,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 字段 | 必填 | 取值 | 备注 |
 | --- | --- | --- | --- |
 | `schema_version` | ✅ | `1` | 未知版本拒绝写入 |
-| `sources` | ❌ | 命名源字典（§4.1、§6） | 供 `skills` / `identity` 条目用 `from` 引用；**`resources` 条目不能用**（附录 C） |
+| `sources` | ❌ | 命名源字典（§4.1、§6） | **只有 `skills` / `identity` 条目能用 `from` 引用它**；`resources` 写了当场被拒，`cli_tools` 写了 apply 时才失败（附录 C） |
 | `manifest` | ❌ | 六个类目，见下 | 缺省的类目完全不碰 |
 | `script` | ❌ | `{ body: <shell> }` | teclaw / desktop **写入即拒**；≤ 24 KiB |
 
@@ -2143,7 +2167,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 说明 |
 | --- | --- |
-| `git` + `ref` | git 源；`ref` = tag / branch / commit SHA。**`resources` 条目不可用** |
+| `git` + `ref` | git 源；`ref` = tag / branch / commit SHA。**只对 `skills` / `identity` 有效**——`resources`、`cli_tools` 不可用（附录 C） |
 | `url` | URL 源；作为前缀，条目的 `subpath` 拼在其后 |
 | `auth` | 凭证名（§4.2）。用 `from` 时凭证声明在**源**上，条目里不写 |
 | `mode` | `strict` / `non_strict`（默认）；只对会动的 `ref` 有意义（§6.2） |
@@ -2194,3 +2218,6 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 - teclaw / desktop bot 写了 `script`；
 - 类目 `engine_config`；
 - `resources` 条目用了 `from`（命名源）或 git 源。
+
+**`cli_tools` 条目用 `from` 或 git 源是唯一的例外**：它**不会**在提交时被拒，而是在
+apply 时失败。别按「`PUT` 过了就没问题」推断这一条。
