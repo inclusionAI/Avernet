@@ -59,7 +59,7 @@ fi
 ln -sfn "$avernet_root" "$link_path"
 
 cd "$ocb_clawweb"
-bash scripts/ci/verify_clawweb_workspace.sh "$avernet_root"
+node scripts/ci/verify_clawweb_workspace.mjs "$avernet_root"
 
 # Keep the original ClawWeb local behavior: use meshboot/MOSN to connect to
 # the dev ZDAS database. Callers may explicitly select SQLite when needed.
