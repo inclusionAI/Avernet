@@ -70,23 +70,25 @@
   - [x] An install at the documented single-file cap (200 MiB) succeeds.
 - **Depends on:** Task 2
 
-## Task 4: Wire `cli_tools` into the engine abstraction
+## Task 4 `[x]`: Wire `cli_tools` into the engine abstraction
 - **Goal:** Make the service declarable, assignable and reachable the way every
   other domain is.
 - **Files:** `src/engine/community/core/engine/capability.py`,
   `core/engine/base.py`, `core/engine/protocol.py`, `manager.py`
 - **Done when:**
-  - [ ] `Capability` gains `CLI_INSTALL`, `CLI_DELETE`, `CLI_LIST`,
+  - [x] `Capability` gains `CLI_INSTALL`, `CLI_DELETE`, `CLI_LIST`,
         `CLI_REPLACE`, `CLI_DOWNLOAD`.
-  - [ ] `BaseEngine.__init__` initialises `_cli_tools` to `None` and exposes a
+  - [x] `BaseEngine.__init__` initialises `_cli_tools` to `None` and exposes a
         `cli_tools` property.
-  - [ ] `_PLUGIN_CAPABILITY_DOMAINS` gains a `_cli_tools` entry, so
+  - [x] `_PLUGIN_CAPABILITY_DOMAINS` gains a `_cli_tools` entry, so
         `validate_capabilities()` catches declared-but-unassigned and
         assigned-but-undeclared at engine startup.
-  - [ ] `Engine` Protocol declares `cli_tools: CliToolsService | None`.
-  - [ ] `EngineManager.cli_tools` raises `CapabilityNotSupportedError` when the
+  - [x] `Engine` Protocol declares `cli_tools: CliToolsService | None`.
+  - [x] `EngineManager.cli_tools` raises `CapabilityNotSupportedError` when the
         active engine has none.
-  - [ ] Existing engine foundation tests still pass unchanged.
+  - [x] Engine foundation tests pass. `test_engine_is_runtime_checkable`'s
+        `_Duck` gains `cli_tools = None`: that fixture enumerates every
+        Protocol member by design, so extending the Protocol extends it too.
 - **Depends on:** Task 1
 
 ## Task 5: Bind the service on both community engines
