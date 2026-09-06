@@ -285,3 +285,27 @@ provider = "env"
 # (prefix "BCS_SECRET_" + name uppercased, '-' -> '_'). Use the logical name,
 # not the env-var name, or the lookup double-prefixes and fails.
 signing_key_secret = "bcn-group-session-ws-jwt"
+
+[eventing]
+enabled = true
+dispatcher_enabled = true
+fanout_poll_interval_ms = 200
+delivery_poll_interval_ms = 200
+worker_concurrency = 16
+per_host_concurrency = 4
+lease_ms = 30000
+drain_timeout_ms = 10000
+event_retention_days = 30
+
+[eventing.retry]
+base_delay_ms = 5000
+max_delay_ms = 3600000
+max_attempts = 12
+max_elapsed_ms = 86400000
+
+[eventing.webhook]
+connect_timeout_ms = 3000
+request_timeout_ms = 10000
+max_request_timeout_ms = 30000
+max_event_body_bytes = 262144
+max_response_body_bytes = 4096
