@@ -84,7 +84,7 @@ export function useCollaborationSquareList({
       if (resource === 'bot' && !humanBotContext) {
         setHasMore(false);
         setLoading(humanIdentityStatus === 'loading');
-        setError(humanIdentityStatus === 'loading' ? null : '当前用户身份不可用，请刷新后重试');
+        setError(humanIdentityStatus === 'loading' ? null : '当前工作身份不可用，请刷新后重试');
         return;
       }
       setLoading(true);

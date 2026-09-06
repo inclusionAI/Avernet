@@ -127,8 +127,8 @@ export interface PublicBot {
   description: string;
   capabilities: string[];
   relationshipStatus: BotRelationshipStatus;
-  /** entity_id 与当前 human user_id 一致时，表示当前用户拥有该公开 Bot，可直接创建会话。 */
-  isOwnedByViewer?: boolean;
+  /** entity_id 与登录用户 ID 一致时，表示目标 Bot 归登录用户管理。 */
+  isOwnedByLoggedInUser?: boolean;
   /** 智能搜索 Discovery 响应的推荐理由简述（recommendation.short_profile），名称搜索无此字段。 */
   shortProfile?: string;
 }
@@ -138,9 +138,38 @@ export function getPublicBotTargetId(bot: Pick<PublicBot, 'id' | 'friendRequestB
   return bot.friendRequestBotId?.trim() || bot.id;
 }
 
-/** 当前查看者可直接创建公开 Bot 会话（已是好友或 Bot 归当前用户管理）。 */
-export function canStartPublicBotConversation(bot: Pick<PublicBot, 'relationshipStatus' | 'isOwnedByViewer'>): boolean {
-  return bot.isOwnedByViewer === true || bot.relationshipStatus === 'friend';
+export type PublicBotPrimaryAction =
+  | 'request_friendship'
+  | 'applying'
+  | 'open_human_bot_conversation'
+  | 'friendship_established'
+  | 'self_target';
+
+export interface PublicBotPrimaryActionInput {
+  activeActor: FriendRequestActor;
+  targetActorId: string;
+  relationshipStatus: BotRelationshipStatus;
+  isOwnedByLoggedInUser?: boolean;
+}
+
+/** 当前工作身份决定公开 Bot 主操作；Bot 身份不得进入登录用户私聊。 */
+export function resolvePublicBotPrimaryAction({
+  activeActor,
+  targetActorId,
+  relationshipStatus,
+  isOwnedByLoggedInUser,
+}: PublicBotPrimaryActionInput): PublicBotPrimaryAction {
+  if (activeActor.type === 'bot' && activeActor.id.trim() === targetActorId.trim()) return 'self_target';
+  if (relationshipStatus === 'applying') return 'applying';
+  if (relationshipStatus === 'friend') {
+    return activeActor.type === 'human' ? 'open_human_bot_conversation' : 'friendship_established';
+  }
+  if (activeActor.type === 'human' && isOwnedByLoggedInUser) return 'open_human_bot_conversation';
+  return 'request_friendship';
+}
+
+export function getPublicBotActionKey(actor: FriendRequestActor, targetActorId: string): string {
+  return `bot:${actor.type}:${actor.id}:${targetActorId}`;
 }
 
 export interface PublicBotProfile extends Omit<PublicBot, 'relationshipStatus' | 'capabilities'> {
@@ -214,6 +243,7 @@ export interface SquareDeepLink {
  * 由公共展示组件 {@link PublicBotCatalogPanel} 消费。
  */
 export interface BotCatalogViewModel {
+  activeActor: FriendRequestActor | null;
   bots: PublicBot[];
   busyKeys: string[];
   query: string;

@@ -24,9 +24,7 @@ export function useConnectionStatusSmoothing(
   graceMs = DEFAULT_GRACE_MS,
 ): ProviderConnectionStatus {
   // 冷启动首连：原始即 disconnected 时，初始展示「连接中」，避免首帧闪烁「离线」。
-  const [shown, setShown] = useState<ProviderConnectionStatus>(
-    raw === 'disconnected' ? 'connecting' : raw,
-  );
+  const [shown, setShown] = useState<ProviderConnectionStatus>(raw === 'disconnected' ? 'connecting' : raw);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {

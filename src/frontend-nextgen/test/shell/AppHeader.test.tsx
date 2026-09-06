@@ -29,11 +29,11 @@ describe('AppHeader product area switcher', () => {
     const work = screen.getByRole('button', { name: '工作' });
     const manage = screen.getByRole('button', { name: '管理' });
 
-    expect(productArea).toHaveClass('rounded-md', 'p-0.5');
+    expect(productArea).toHaveClass('rounded-md', 'p-[3px]');
     expect(productArea).not.toHaveClass('rounded-lg');
-    expect(work).toHaveClass('h-8', 'rounded', 'bg-background', 'text-primary');
+    expect(work).toHaveClass('h-[30px]', 'rounded', 'bg-background', 'text-primary');
     expect(work).not.toHaveClass('rounded-lg');
-    expect(manage).toHaveClass('h-8', 'rounded', 'text-muted-foreground');
+    expect(manage).toHaveClass('h-[30px]', 'rounded', 'text-muted-foreground');
     expect(manage).not.toHaveClass('bg-background');
   });
 

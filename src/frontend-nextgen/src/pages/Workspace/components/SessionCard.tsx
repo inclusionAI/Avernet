@@ -54,7 +54,10 @@ export function formatSessionTime(input: number | string | undefined, now = new 
     return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
   }
   if (date.getFullYear() === now.getFullYear()) return formatMonthDay(input);
-  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(
+    2,
+    '0',
+  )}`;
 }
 
 export function formatSessionTimeTooltip(input: number | string | undefined): string {

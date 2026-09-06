@@ -1,8 +1,8 @@
 import { IconButton } from '@/components/ui/IconButton';
-import { cn } from '@/utils/cn';
 import { Input } from '@/components/ui/Input';
 import { Segmented } from '@/components/ui/Segmented';
 import type { BotSearchMode } from '@/domain/collaborationSquare/types';
+import { cn } from '@/utils/cn';
 import { Search, X } from 'lucide-react';
 
 interface SquareSearchBarProps {
@@ -28,8 +28,8 @@ export default function SquareSearchBar({
         ? '描述你需要的职责或能力'
         : '搜索 Bot 名称'
       : resource === 'group'
-        ? '搜索协作群名称'
-        : '搜索任务';
+      ? '搜索协作群名称'
+      : '搜索任务';
   const handleModeChange = (nextMode: BotSearchMode) => {
     if (nextMode !== mode) onQueryChange('');
     onModeChange?.(nextMode);

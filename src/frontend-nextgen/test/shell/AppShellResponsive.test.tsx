@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
@@ -6,12 +7,17 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 
 const mockHistoryPush = jest.fn();
+const mockHistoryReplace = jest.fn();
+const mockLocation = { pathname: '/workspace' };
 // 受控视口：true=≥lg（桌面内流侧栏可视），false=<lg（一级导航走抽屉）。
 const mockViewport = { desktop: false };
 
 jest.mock('@umijs/max', () => ({
-  history: { push: (...args: unknown[]) => mockHistoryPush(...args) },
-  useLocation: () => ({ pathname: '/workspace' }),
+  history: {
+    push: (...args: unknown[]) => mockHistoryPush(...args),
+    replace: (...args: unknown[]) => mockHistoryReplace(...args),
+  },
+  useLocation: () => mockLocation,
 }));
 jest.mock('@/hooks/useMediaQuery', () => ({
   useMinWidth: () => mockViewport.desktop,
@@ -70,6 +76,13 @@ function renderShell() {
   );
 }
 
+beforeEach(() => {
+  mockLocation.pathname = '/workspace';
+  mockHistoryPush.mockClear();
+  mockHistoryReplace.mockClear();
+  useWorkspaceStore.getState().reset();
+});
+
 describe('AppShell responsive off-canvas nav (一级)', () => {
   it('below lg: hamburger opens the nav drawer', () => {
     mockViewport.desktop = false;
@@ -114,5 +127,55 @@ describe('AppShell responsive off-canvas nav (一级)', () => {
     renderShell();
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
     expect(screen.queryByTestId('drawer-content')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppShell 工作身份路由保护', () => {
+  it('Bot 工作身份可直访我的任务', () => {
+    mockLocation.pathname = '/work/my-task';
+    useWorkspaceStore.setState({
+      activeIdentityId: 'bot-1:447147',
+      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+    });
+
+    renderShell();
+
+    expect(mockHistoryReplace).not.toHaveBeenCalled();
+    expect(screen.getByTestId('page')).toBeInTheDocument();
+  });
+
+  it('Bot 工作身份直访公开协作群时替换到公开 Bot 且不挂载页面', () => {
+    mockLocation.pathname = '/collaboration-square/groups';
+    useWorkspaceStore.setState({
+      activeIdentityId: 'bot-1:447147',
+      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+    });
+
+    renderShell();
+
+    expect(mockHistoryReplace).toHaveBeenCalledWith('/collaboration-square/bots');
+    expect(screen.queryByTestId('page')).not.toBeInTheDocument();
+  });
+
+  it('用户工作身份可访问我的任务与公开协作群', () => {
+    useWorkspaceStore.setState({
+      activeIdentityId: 'human-1',
+      identities: [{ id: 'human-1', kind: 'user', displayName: '真实用户', online: true }],
+    });
+    mockLocation.pathname = '/work/my-task';
+
+    const view = renderShell();
+
+    expect(mockHistoryReplace).not.toHaveBeenCalled();
+    expect(screen.getByTestId('page')).toBeInTheDocument();
+
+    mockLocation.pathname = '/collaboration-square/groups';
+    view.rerender(
+      <AppShell>
+        <div data-testid="page" />
+      </AppShell>,
+    );
+    expect(mockHistoryReplace).not.toHaveBeenCalled();
+    expect(screen.getByTestId('page')).toBeInTheDocument();
   });
 });

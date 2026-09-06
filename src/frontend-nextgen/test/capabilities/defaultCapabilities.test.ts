@@ -19,6 +19,17 @@ describe('Open Core default capabilities', () => {
     expect(r.value).toEqual([]);
   });
 
+  test('getOpenSourceExperienceNotice 返回 Open Core v1 提示配置', () => {
+    expect(defaultCapabilities.getOpenSourceExperienceNotice()).toEqual({
+      status: 'available',
+      value: {
+        version: 'open-source-experience-v1',
+        message: '本环境仅供开源版本进行功能体验，不提供正式生产服务。请不要上传敏感数据。',
+        acknowledgeLabel: '我已知悉',
+      },
+    });
+  });
+
   test('getReleaseNotesCapability 默认 null（Open Core 无雨燕数据源）', () => {
     const r = defaultCapabilities.getReleaseNotesCapability();
     expect(r.status).toBe('available');
@@ -104,6 +115,17 @@ describe('Open Core default capabilities', () => {
     const r = defaultCapabilities.getGroupAdvancedConfigEnabled();
     expect(r.status).toBe('available');
     expect(r.value).toBe(false);
+  });
+
+  test('getUserProfilePresentation 默认使用认证用户名称并隐藏部门（Open Core）', () => {
+    expect(defaultCapabilities.getUserProfilePresentation()).toEqual({
+      status: 'available',
+      value: { preferAuthenticatedUserProfile: true, showDepartment: false },
+    });
+  });
+
+  test('getRestrictedPublicationScopeEnabled 默认 false（Open Core 隐藏限制组织范围）', () => {
+    expect(defaultCapabilities.getRestrictedPublicationScopeEnabled()).toEqual({ status: 'available', value: false });
   });
 
   test('getShellVisibility 默认 adminEntry/notificationBell=true、spaceSwitcher=false（Open Core 展示管理后台与通知中心，不展示空间切换器）', () => {

@@ -57,6 +57,33 @@ describe('useReleaseNotes', () => {
     expect(result.current.supported).toBe(true);
   });
 
+  it('新发布日期首次加载 → 自动打开 Modal、标记已读且同一日期不重复打开', async () => {
+    const data: ReleaseNotesData = { version: '1.1', date: '2026-09-05', releaseNoteHtml: '<p>new</p>' };
+    let seenDate: string | null = null;
+    const markSeen = jest.fn((date: string) => {
+      seenDate = date;
+    });
+    mockCap = {
+      load: jest.fn<() => Promise<ReleaseNotesData | null>>().mockResolvedValue(data),
+      markSeen,
+      getSeenDate: jest.fn(() => seenDate),
+    };
+
+    const first = renderHook(() => useReleaseNotes());
+    await waitFor(() => expect(first.result.current.status).toBe('ready'));
+    expect(first.result.current.modalOpen).toBe(true);
+    expect(first.result.current.hasNew).toBe(false);
+    expect(markSeen).toHaveBeenCalledTimes(1);
+    expect(markSeen).toHaveBeenCalledWith('2026-09-05');
+    first.unmount();
+
+    const second = renderHook(() => useReleaseNotes());
+    await waitFor(() => expect(second.result.current.status).toBe('ready'));
+    expect(second.result.current.modalOpen).toBe(false);
+    expect(second.result.current.hasNew).toBe(false);
+    expect(markSeen).toHaveBeenCalledTimes(1);
+  });
+
   it('load 返回 null → error', async () => {
     mockCap = {
       load: jest.fn<() => Promise<ReleaseNotesData | null>>().mockResolvedValue(null),
@@ -87,5 +114,25 @@ describe('useReleaseNotes', () => {
     });
     expect(markSeen).toHaveBeenCalledWith('2026-08-21');
     expect(result.current.modalOpen).toBe(false);
+  });
+
+  it('菜单手动打开 → 立即标记当前发布日期已读并清红点', async () => {
+    const data: ReleaseNotesData = { version: '1.0', date: '2026-08-21' };
+    const markSeen = jest.fn();
+    mockCap = {
+      load: jest.fn<() => Promise<ReleaseNotesData | null>>().mockResolvedValue(data),
+      markSeen,
+      getSeenDate: jest.fn<() => string | null>().mockReturnValue('2026-08-21'),
+    };
+    const { result } = renderHook(() => useReleaseNotes());
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    act(() => {
+      result.current.open();
+    });
+
+    expect(markSeen).toHaveBeenCalledWith('2026-08-21');
+    expect(result.current.modalOpen).toBe(true);
+    expect(result.current.hasNew).toBe(false);
   });
 });

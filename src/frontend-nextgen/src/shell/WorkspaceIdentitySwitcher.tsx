@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { WorkspaceIdentitySelector } from '@/components/Workspace/IdentitySelector';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { mapIdentityViewToIdentity } from '@/hooks/workspaceIdentityMapper';
@@ -9,7 +10,22 @@ function useWorkspaceIdentitySwitcherModel() {
   const identityViews = useWorkspaceStore((state) => state.identities);
   const activeIdentityId = useWorkspaceStore((state) => state.activeIdentityId);
   const { identity: humanIdentity } = useHumanIdentity();
-  const identities = useMemo(() => identityViews.map(mapIdentityViewToIdentity), [identityViews]);
+  const userProfilePresentation = getCapabilities().getUserProfilePresentation().value;
+  const identities = useMemo(() => {
+    const authenticatedName = humanIdentity?.displayName.trim() || humanIdentity?.userId.trim();
+    return identityViews.map((view) => {
+      const identity = mapIdentityViewToIdentity(view);
+      if (!userProfilePresentation.preferAuthenticatedUserProfile || identity.kind !== 'user' || !authenticatedName) {
+        return identity;
+      }
+      return { ...identity, name: authenticatedName };
+    });
+  }, [
+    humanIdentity?.displayName,
+    humanIdentity?.userId,
+    identityViews,
+    userProfilePresentation.preferAuthenticatedUserProfile,
+  ]);
   const switchIdentity = useCallback((identityId: string) => workspaceService.switchIdentity(identityId), []);
 
   return {

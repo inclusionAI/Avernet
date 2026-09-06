@@ -22,7 +22,7 @@ export function WelcomeHeader() {
   }, [checkAuth, isOauthProvider]);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
+    <header className="border-b border-border bg-background/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-[1200px] items-center justify-between gap-6 px-8 py-4">
         <brand.Logo className="h-9 w-auto" />
         {isOauthProvider && status !== 'authenticated' && (

@@ -87,7 +87,7 @@ export function Pagination({
           type="button"
           aria-label="上一页"
           disabled={!canPrev}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-panel-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg)] transition-colors cursor-pointer hover:bg-[var(--color-panel-muted)] disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => canPrev && onChange(current - 1)}
         >
           <ChevronLeft className="size-4" />
@@ -96,7 +96,7 @@ export function Pagination({
           type="button"
           aria-label="下一页"
           disabled={!canNext}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg)] transition-colors hover:bg-[var(--color-panel-muted)] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-border)] text-[var(--color-fg)] transition-colors cursor-pointer hover:bg-[var(--color-panel-muted)] disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => canNext && onChange(current + 1)}
         >
           <ChevronRight className="size-4" />

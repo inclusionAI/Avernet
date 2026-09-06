@@ -68,8 +68,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     expect(container.querySelector('.self-start')).not.toBeInTheDocument();
@@ -80,18 +79,12 @@ describe('BotSessionSidebar', () => {
     expect(inactiveTab).toHaveAttribute('aria-pressed', 'false');
     expect(activeTab).toHaveClass('bg-background', 'text-primary', 'shadow-sm');
     expect(inactiveTab).toHaveClass('text-muted-foreground');
-    expect(screen.getByRole('button', { name: '添加好友或发起协作' })).toHaveClass('h-9', 'w-9', 'rounded-md');
-    expect(screen.getByRole('button', { name: '添加好友或发起协作' })).toHaveClass(
-      'border-primary/20',
-      'bg-primary/5',
-      'text-primary',
-    );
-    expect(screen.getByRole('button', { name: '添加好友或发起协作' })).not.toHaveClass('bg-primary', 'text-primary-foreground');
-    expect(screen.getByRole('button', { name: '添加好友或发起协作' })).not.toHaveClass('lg:hidden');
+    expect(screen.queryByRole('button', { name: '发起协作' })).not.toBeInTheDocument();
     expect(botTrigger.parentElement).toHaveClass('min-h-16', 'bg-primary/5', 'px-4', 'py-2.5');
     expect(botTrigger.querySelector('svg.lucide-chevron-down')).toBeInTheDocument();
     expect(botTrigger).toHaveClass('gap-3', 'px-0', 'py-1');
-    expect(screen.getByText('可聊Bot')).toHaveClass('text-sm', 'font-semibold');
+    expect(screen.getByText('可聊Bot')).toHaveClass('text-sm', 'font-normal');
+    expect(screen.getByText('可聊Bot')).not.toHaveClass('font-semibold');
     expect(screen.getByText('OpenClaw').parentElement).toHaveClass('text-xs', 'leading-4');
     expect(screen.getByText('不可聊Bot')).toBeInTheDocument();
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
@@ -99,6 +92,78 @@ describe('BotSessionSidebar', () => {
     expect(screen.getByText('会话1')).toBeInTheDocument();
     expect(screen.getByText('08/30')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '会话更多操作' })).toBeInTheDocument();
+  });
+
+  it('收起态保留对话与协作群快捷切换图标', () => {
+    const onViewChange = jest.fn();
+    render(
+      <BotSessionSidebar
+        view="chat"
+        availableViews={['chat', 'group']}
+        onViewChange={onViewChange}
+        chatBots={bots}
+        friendBots={[]}
+        isMyBotsLoading={false}
+        isFriendBotsLoading={false}
+        expandedBotSectionKey={{}}
+        expandedBotIds={{}}
+        sessionsByBotId={{}}
+        isSessionsLoading={false}
+        selectedBotSessionId={null}
+        onToggleBotExpanded={noop}
+        onSelectSession={noop}
+        onCreateSession={noop}
+        onDeleteSession={noopBool}
+        onRenameSession={noopBool}
+        onClearSessionContext={noopBool}
+        onToggleFavorite={noopBool}
+        onLoadFavorites={noopAsync}
+        onOpenPublicBots={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
+
+    expect(screen.getByRole('button', { name: '切换到对话' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '切换到协作群' }));
+    expect(onViewChange).toHaveBeenCalledWith('group');
+    fireEvent.click(screen.getByRole('button', { name: '展开对话协作左栏' }));
+  });
+
+  it('Bot 身份无可协作 Bot 时引导前往公开 Bot', () => {
+    const onOpenPublicBots = jest.fn();
+    render(
+      <BotSessionSidebar
+        view="chat"
+        availableViews={['chat', 'group']}
+        onViewChange={noop}
+        identities={[{ id: 'bot-viewer', name: '当前 Bot', kind: 'bot', avatar: 'B' }]}
+        activeIdentityId="bot-viewer"
+        chatBots={[]}
+        friendBots={[]}
+        isMyBotsLoading={false}
+        isFriendBotsLoading={false}
+        expandedBotSectionKey={{}}
+        expandedBotIds={{}}
+        sessionsByBotId={{}}
+        isSessionsLoading={false}
+        selectedBotSessionId={null}
+        onToggleBotExpanded={noop}
+        onSelectSession={noop}
+        onCreateSession={noop}
+        onDeleteSession={noopBool}
+        onRenameSession={noopBool}
+        onClearSessionContext={noopBool}
+        onToggleFavorite={noopBool}
+        onLoadFavorites={noopAsync}
+        onOpenPublicBots={onOpenPublicBots}
+      />,
+    );
+
+    expect(screen.getByText('暂无可协作的 Bot')).toBeInTheDocument();
+    expect(screen.getByText('可前往「公开 Bot」发现并添加 Bot。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '前往公开 Bot' }));
+    expect(onOpenPublicBots).toHaveBeenCalledTimes(1);
   });
 
   it('Bot 分组错误不伪装成空态，并提供重试入口', () => {
@@ -129,8 +194,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('管理 Bot 加载失败');
@@ -154,7 +218,9 @@ describe('BotSessionSidebar', () => {
         expandedBotSectionKey={{ 'b:1': 'mine' }}
         expandedBotIds={{ 'b:1': true }}
         sessionsByBotId={{}}
-        sessionPageMetaByBotId={{ 'b:1': { total: 0, hasMore: false, nextPage: 1, isLoadingMore: false, error: '会话加载失败' } }}
+        sessionPageMetaByBotId={{
+          'b:1': { total: 0, hasMore: false, nextPage: 1, isLoadingMore: false, error: '会话加载失败' },
+        }}
         isSessionsLoading={false}
         selectedBotSessionId={null}
         onToggleBotExpanded={() => {}}
@@ -166,8 +232,7 @@ describe('BotSessionSidebar', () => {
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
         onReloadBot={onReloadBot}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('会话加载失败');
@@ -198,8 +263,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -231,8 +295,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -266,8 +329,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -300,8 +362,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     const searchInput = screen.getByRole('textbox', { name: '搜索 Bot' });
@@ -333,8 +394,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -371,8 +431,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     const botTrigger = screen.getByRole('button', { name: /^可聊Bot/ });
@@ -426,8 +485,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={onToggleFavorite}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -462,8 +520,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -496,8 +553,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     // 不可聊 bot(plain)点击不应展开
@@ -529,8 +585,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -560,8 +615,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -593,8 +647,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -629,8 +682,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
     const scopeButton = screen.getByRole('button', { name: '会话范围：全部会话' });
@@ -667,8 +719,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={onLoadFavorites}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -707,8 +758,7 @@ describe('BotSessionSidebar', () => {
         onClearSessionContext={noopBool}
         onToggleFavorite={noopBool}
         onLoadFavorites={noopAsync}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 
@@ -743,8 +793,7 @@ describe('BotSessionSidebar', () => {
         onLoadFavorites={noopAsync}
         hasAgentCodingBots
         onOpenBotWorkshop={onOpenBotWorkshop}
-        onCreateGroup={noop}
-        onAddFriend={noop}
+        onOpenPublicBots={noop}
       />,
     );
 

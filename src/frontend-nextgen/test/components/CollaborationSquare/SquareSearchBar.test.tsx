@@ -5,13 +5,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 describe('SquareSearchBar', () => {
   test('搜索工具栏不使用外层圆角卡片容器', () => {
-    const { container } = render(
-      <SquareSearchBar
-        resource="group"
-        query=""
-        onQueryChange={jest.fn()}
-      />,
-    );
+    const { container } = render(<SquareSearchBar resource="group" query="" onQueryChange={jest.fn()} />);
 
     const toolbar = container.firstElementChild as HTMLElement;
     expect(toolbar).toHaveClass('flex', 'min-h-8', 'flex-col', 'gap-3');
@@ -33,15 +27,7 @@ describe('SquareSearchBar', () => {
   });
 
   test('未选中的 Bot 搜索模式使用明确的弱化文字色', () => {
-    render(
-      <SquareSearchBar
-        resource="bot"
-        query=""
-        mode="name"
-        onQueryChange={jest.fn()}
-        onModeChange={jest.fn()}
-      />,
-    );
+    render(<SquareSearchBar resource="bot" query="" mode="name" onQueryChange={jest.fn()} onModeChange={jest.fn()} />);
 
     expect(screen.getByRole('button', { name: '智能搜索' })).toHaveClass('text-muted-foreground');
     expect(screen.getByRole('button', { name: '名称搜索' })).toHaveClass('text-primary');

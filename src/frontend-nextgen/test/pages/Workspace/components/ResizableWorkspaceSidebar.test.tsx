@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
 import {
   ResizableWorkspaceSidebar,
+  WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY,
+  WORKSPACE_SIDEBAR_COLLAPSED_WIDTH,
   WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
   WORKSPACE_SIDEBAR_MAX_WIDTH,
   WORKSPACE_SIDEBAR_MIN_WIDTH,
@@ -36,18 +38,21 @@ function dispatchPointer(
   type: string,
   init: { button?: number; clientX?: number; bubbles?: boolean },
 ) {
-  fireEvent(target, new MouseEvent(type, {
-    bubbles: init.bubbles ?? true,
-    cancelable: true,
-    button: init.button ?? 0,
-    clientX: init.clientX ?? 0,
-  }));
+  fireEvent(
+    target,
+    new MouseEvent(type, {
+      bubbles: init.bubbles ?? true,
+      cancelable: true,
+      button: init.button ?? 0,
+      clientX: init.clientX ?? 0,
+    }),
+  );
 }
 
 function renderSidebar() {
   return render(
     <div>
-      <ResizableWorkspaceSidebar ariaLabel="测试会话侧栏">
+      <ResizableWorkspaceSidebar ariaLabel="测试会话侧栏" collapsedContent={<button type="button">快捷入口</button>}>
         <div>列表内容</div>
       </ResizableWorkspaceSidebar>
       <main>消息区</main>
@@ -80,11 +85,59 @@ describe('ResizableWorkspaceSidebar', () => {
     );
   });
 
-  it('常驻拖拽提示胶囊可见，不再提供快速收窄按钮', () => {
+  it('拖拽调宽胶囊附近提供一键收起按钮', () => {
     renderSidebar();
-    expect(screen.getByTestId('workspace-sidebar-grip')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '收窄对话协作左栏' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('workspace-sidebar-grip')).toHaveClass('h-8', 'w-6', 'rounded-full');
+    expect(screen.getByRole('button', { name: '收起对话协作左栏' })).toHaveClass(
+      'right-0',
+      'top-1/2',
+      '-mt-10',
+      'h-8',
+      'w-6',
+      'rounded-full',
+    );
+    expect(screen.getByRole('button', { name: '收起对话协作左栏' })).toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByRole('button', { name: '展开对话协作左栏' })).not.toBeInTheDocument();
+  });
+
+  it('一键收起后保留快捷图标栏，并提供贴边恢复按钮', () => {
+    renderSidebar();
+    const sidebar = screen.getByLabelText('测试会话侧栏');
+
+    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
+
+    expect(sidebar).toHaveStyle({ width: `${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px` });
+    expect(sidebar).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.getByText('列表内容').parentElement).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('separator', { name: '调整对话协作左栏宽度' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '快捷入口' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '展开对话协作左栏' })).toHaveClass('h-8', 'w-6', 'rounded-full');
+    expect(screen.getByRole('button', { name: '展开对话协作左栏' })).toHaveAttribute('aria-expanded', 'false');
+    expect(window.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('true');
+  });
+
+  it('展开时恢复收起前宽度，不覆盖用户调宽偏好', () => {
+    window.localStorage.setItem(WORKSPACE_SIDEBAR_STORAGE_KEY, '400');
+    renderSidebar();
+    const sidebar = screen.getByLabelText('测试会话侧栏');
+
+    fireEvent.click(screen.getByRole('button', { name: '收起对话协作左栏' }));
+    fireEvent.click(screen.getByRole('button', { name: '展开对话协作左栏' }));
+
+    expect(sidebar).toHaveStyle({ width: '400px' });
+    expect(sidebar).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByText('列表内容').parentElement).toHaveAttribute('aria-hidden', 'false');
+    expect(screen.queryByRole('button', { name: '快捷入口' })).not.toBeInTheDocument();
+    expect(window.localStorage.getItem(WORKSPACE_SIDEBAR_STORAGE_KEY)).toBe('400');
+    expect(window.localStorage.getItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY)).toBe('false');
+  });
+
+  it('读取已持久化收起状态', () => {
+    window.localStorage.setItem(WORKSPACE_SIDEBAR_COLLAPSED_STORAGE_KEY, 'true');
+    renderSidebar();
+
+    expect(screen.getByLabelText('测试会话侧栏')).toHaveStyle({ width: `${WORKSPACE_SIDEBAR_COLLAPSED_WIDTH}px` });
+    expect(screen.getByRole('button', { name: '展开对话协作左栏' })).toBeInTheDocument();
   });
 
   it('拖动时钳制宽度，松开后持久化', () => {

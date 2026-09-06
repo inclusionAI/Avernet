@@ -9,8 +9,6 @@ import { useTaskExecution } from '@/hooks/useTaskExecution';
 import { useWorkspace } from '@/hooks/useWorkspace';
 import { AgentCodingGuide } from '@/pages/Workspace/components/AgentCodingGuide';
 import { ChatSessionSidebarSlot } from '@/pages/Workspace/components/ChatSessionSidebarSlot';
-import { AddFriendModal } from '@/pages/Workspace/components/Modals/AddFriendModal';
-import { CreateGroupModal } from '@/pages/Workspace/components/Modals/CreateGroupModal';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
@@ -18,7 +16,7 @@ import { resolveUserId } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ResourceReference } from '@tc-chat/core';
 import { PanelLeft } from 'lucide-react';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { GroupWorkspaceArea } from './GroupWorkspaceArea';
 import { useBotSessionFilesFeature } from './hooks/useBotSessionFilesFeature';
@@ -30,13 +28,11 @@ const WorkspacePage: React.FC = () => {
   const { view, setView } = workspacePage;
   const { availableViews } = workspace;
   const navigate = useNavigate();
-  const openCollaborationPermissions = () => navigate('/collaboration-privacy');
+  const openCollaborationPermissions = useCallback(() => {
+    navigate('/collaboration-privacy');
+  }, [navigate]);
   const openAgentCodingBot = (bot: ChatBotView) =>
     navigate(buildAgentCodingChatPath({ botId: bot.botId, spaceId: bot.spaceId, spaceName: bot.spaceName }));
-  // 聊天视图「+」打开的共享创建协作群弹窗；创建成功后切到协作群视图并选中该群。
-  const [createGroupOpen, setCreateGroupOpen] = useState(false);
-  // 添加好友（Bot 广场）弹窗状态，与创建协作群弹窗并列。
-  const [addFriendOpen, setAddFriendOpen] = useState(false);
   // <lg 二级会话列表抽屉开关。聊天/协作群两种视图共用同一开关，由当前视图渲染对应抽屉。
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const isDesktop = useMinWidth(1024);
@@ -183,8 +179,7 @@ const WorkspacePage: React.FC = () => {
           availableViews={availableViews}
           mobileListOpen={mobileListOpen}
           onMobileListClose={() => setMobileListOpen(false)}
-          onOpenCreateGroup={() => setCreateGroupOpen(true)}
-          onOpenAddFriend={() => setAddFriendOpen(true)}
+          onOpenPublicBots={() => navigate('/collaboration-square/bots')}
           onOpenBotWorkshop={() => navigate('/bot-workshop')}
         />
         {workspace.selectedAgentCodingBot ? (
@@ -250,36 +245,11 @@ const WorkspacePage: React.FC = () => {
             availableViews={availableViews}
             userAvatarUrl={workspace.currentUserAvatarUrl}
             userIdentityId={workspace.activeIdentityId}
-            onAddFriend={() => setAddFriendOpen(true)}
             mobileListOpen={mobileListOpen}
             onCloseMobileList={() => setMobileListOpen(false)}
           />
         )}
       </div>
-      <CreateGroupModal
-        open={createGroupOpen}
-        activeIdentity={activeIdentity}
-        onClose={() => setCreateGroupOpen(false)}
-        onCreated={(group) => {
-          setCreateGroupOpen(false);
-          setView('group');
-          if (group.initialSessionId && group.initialRun?.state === 'running') {
-            useWorkspaceStore.getState().setPendingGroupBootstrap({
-              groupId: group.groupId,
-              sessionId: group.initialSessionId,
-              run: group.initialRun,
-            });
-          }
-          useWorkspaceStore.getState().selectGroup(group.groupId);
-          if (group.initialSessionId) {
-            const store = useWorkspaceStore.getState();
-            if (!store.expandedGroupIds[group.groupId]) store.toggleGroupExpanded(group.groupId);
-            useWorkspaceStore.getState().selectSession(group.initialSessionId);
-            useWorkspaceStore.getState().bumpHistoryRefresh();
-          }
-        }}
-      />
-      <AddFriendModal open={addFriendOpen} activeIdentity={activeIdentity} onClose={() => setAddFriendOpen(false)} />
     </div>
   );
 };

@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
-import type { PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import type { PublicBot, PublicBotSearchQuery, PublicGroup, PublicTask } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import {
@@ -400,6 +400,8 @@ describe('useCollaborationSquare Bot Search', () => {
     expect(discoverBots).not.toHaveBeenCalled();
     await act(async () => {
       jest.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
     expect(discoverBots).toHaveBeenLastCalledWith(
@@ -571,7 +573,7 @@ describe('useCollaborationSquare Bot Search', () => {
 
     expect(legacyProfile).toHaveBeenCalledWith(bot.id);
     expect(realProfile).not.toHaveBeenCalled();
-    expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext);
+    expect(realFriendship).toHaveBeenCalledWith(bot.id, humanContext, undefined, { type: 'human', id: '327325' });
     expect(legacyFriendship).not.toHaveBeenCalled();
     expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('applying');
 
@@ -594,7 +596,10 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(requestFriendship).toHaveBeenCalledWith(bot.id, humanContext, 'default:366656');
+    expect(requestFriendship).toHaveBeenCalledWith(bot.id, humanContext, 'default:366656', {
+      type: 'human',
+      id: '327325',
+    });
     unmount();
   });
 
@@ -619,8 +624,11 @@ describe('useCollaborationSquare Bot Search', () => {
       await Promise.resolve();
     });
 
-    expect(requestFriendship).toHaveBeenCalledWith(botA.id, humanContext, botA.friendRequestBotId);
-    expect(useCollaborationSquareStore.getState().busyKeys).toEqual(['bot:default:entity-a']);
+    expect(requestFriendship).toHaveBeenCalledWith(botA.id, humanContext, botA.friendRequestBotId, {
+      type: 'human',
+      id: '327325',
+    });
+    expect(useCollaborationSquareStore.getState().busyKeys).toEqual(['bot:human:327325:default:entity-a']);
     expect(useCollaborationSquareStore.getState().bots.map((bot) => bot.relationshipStatus)).toEqual(['none', 'none']);
 
     await act(async () => {
@@ -662,7 +670,7 @@ describe('useCollaborationSquare Bot Search', () => {
   });
 
   test('自有公开 Bot 直接创建会话，不发起好友申请', async () => {
-    const bot = { ...resultBot('owned-bot'), isOwnedByViewer: true };
+    const bot = { ...resultBot('owned-bot'), isOwnedByLoggedInUser: true };
     jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
     const requestFriendship = jest.spyOn(collaborationSquareBotService, 'requestBotFriendship');
     const openConversation = jest
@@ -731,6 +739,73 @@ describe('useCollaborationSquare Bot Search', () => {
     expect(openConversation).toHaveBeenCalledWith(bot.id, humanContext);
     expect(history.push).toHaveBeenCalledWith('/workspace?tab=chat&bot=bot-direct-friend&session=session-direct');
 
+    unmount();
+  });
+
+  test('Bot 工作身份发起 Bot-Bot 好友申请，建立关系后不调用用户私聊', async () => {
+    const botIdentity = { id: 'bot-viewer', kind: 'bot' as const, displayName: '当前 Bot', online: true };
+    useWorkspaceStore
+      .getState()
+      .setIdentities(
+        [{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
+        botIdentity.id,
+      );
+    const bot = resultBot('bot-target');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([bot]));
+    const requestFriendship = jest
+      .spyOn(collaborationSquareBotService, 'requestBotFriendship')
+      .mockResolvedValue({ status: 'friend' });
+    const openConversation = jest.spyOn(collaborationSquareBotService, 'openBotConversation');
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      result.current.primaryBotAction(bot);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(requestFriendship).toHaveBeenCalledWith(bot.id, { actorId: 'bot-viewer', userId: '327325' }, undefined, {
+      type: 'bot',
+      id: 'bot-viewer',
+    });
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(history.push).not.toHaveBeenCalled();
+    expect(useCollaborationSquareStore.getState().bots[0].relationshipStatus).toBe('friend');
+    expect(mockedNotifySuccess).toHaveBeenCalledWith('好友关系已建立');
+    unmount();
+  });
+
+  test('Bot 工作身份已是好友或目标为自身时，不调用用户私聊或好友申请', async () => {
+    const botIdentity = { id: 'bot-viewer', kind: 'bot' as const, displayName: '当前 Bot', online: true };
+    useWorkspaceStore
+      .getState()
+      .setIdentities(
+        [{ id: 'human_327325', kind: 'user', displayName: '当前用户', online: true }, botIdentity],
+        botIdentity.id,
+      );
+    const friend = { ...resultBot('bot-friend'), relationshipStatus: 'friend' as const };
+    const self = resultBot('bot-viewer');
+    jest.spyOn(collaborationSquareBotService, 'listBotPage').mockResolvedValue(botPage([friend, self]));
+    const requestFriendship = jest.spyOn(collaborationSquareBotService, 'requestBotFriendship');
+    const openConversation = jest.spyOn(collaborationSquareBotService, 'openBotConversation');
+    const { result, unmount } = renderHook(() => useCollaborationSquare('bot'));
+
+    await act(async () => {
+      jest.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    act(() => {
+      result.current.primaryBotAction(friend);
+      result.current.primaryBotAction(self);
+    });
+
+    expect(requestFriendship).not.toHaveBeenCalled();
+    expect(openConversation).not.toHaveBeenCalled();
+    expect(history.push).not.toHaveBeenCalled();
     unmount();
   });
 

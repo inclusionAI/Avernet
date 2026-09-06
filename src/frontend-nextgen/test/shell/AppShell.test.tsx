@@ -1,10 +1,11 @@
 /** @jest-environment jsdom */
+import { useExternalAuthStore } from '@/stores/externalAuthStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
-import { act, render, waitFor } from '@testing-library/react';
-import { useExternalAuthStore } from '@/stores/externalAuthStore';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 
 let mockPathname = '/workspace';
 const mockInitSpaceContext = jest.fn(async () => undefined);
@@ -45,6 +46,38 @@ const { AppShell } = require('@/shell/AppShell') as typeof import('@/shell/AppSh
 beforeEach(() => {
   useWorkspaceStore.getState().reset();
   useExternalAuthStore.getState().reset();
+  window.localStorage.clear();
+});
+
+it('Open Core 体验提示位于 AppHeader 前', () => {
+  const view = render(<AppShell>工作内容</AppShell>);
+  const notice = view.getByRole('status', { name: '开源体验环境提示' });
+  const header = view.getByTestId('app-header');
+  expect(notice.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('关闭体验提示不重挂载页面业务状态', () => {
+  function StatefulPage() {
+    const [count, setCount] = useState(0);
+    return (
+      <button type="button" data-testid="stateful-page" onClick={() => setCount((value) => value + 1)}>
+        {count}
+      </button>
+    );
+  }
+
+  const view = render(
+    <AppShell>
+      <StatefulPage />
+    </AppShell>,
+  );
+  fireEvent.click(view.getByTestId('stateful-page'));
+  expect(view.getByTestId('stateful-page')).toHaveTextContent('1');
+
+  fireEvent.click(view.getByRole('button', { name: '我已知悉' }));
+
+  expect(view.queryByRole('status', { name: '开源体验环境提示' })).toBeNull();
+  expect(view.getByTestId('stateful-page')).toHaveTextContent('1');
 });
 
 it('仅进入管理区域时初始化空间上下文', async () => {

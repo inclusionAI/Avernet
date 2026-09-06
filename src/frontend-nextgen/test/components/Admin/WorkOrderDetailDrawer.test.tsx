@@ -225,7 +225,9 @@ describe('WorkOrderDetailDrawer JSON 负载块（JsonBlock）', () => {
     });
     render(<WorkOrderDetailDrawer open loading={false} detail={detail} onClose={noop} onNextUnread={noop} />);
 
-    expect(document.body.textContent).toContain(JSON.stringify({ space_id: 6, space_name: '测试空间2', reason: 'test' }, null, 2));
+    expect(document.body.textContent).toContain(
+      JSON.stringify({ space_id: 6, space_name: '测试空间2', reason: 'test' }, null, 2),
+    );
     expect(screen.queryByRole('button', { name: '展开' })).not.toBeInTheDocument();
   });
 });

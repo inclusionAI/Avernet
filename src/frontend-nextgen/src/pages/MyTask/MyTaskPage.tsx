@@ -1,14 +1,16 @@
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Card, CardContent } from '@/components/ui/Card';
-import { Segmented } from '@/components/ui/Segmented';
+import { Skeleton } from '@/components/ui/Skeleton';
+import type { IdentityView } from '@/domain/collaboration';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
 import { useOwnedBots } from '@/pages/Workspace/hooks/useOwnedBots';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MyTaskDrawers } from './components/MyTaskDrawers';
 import { RoutineTaskTab } from './components/RoutineTaskTab';
 import { UserTaskTab } from './components/UserTaskTab';
 import { useMyTaskTasks } from './hooks/useMyTaskTasks';
-import { ALL_ROUTINE_BOT_VALUE, makeRoutineKey, useRoutineTasks } from './hooks/useRoutineTasks';
+import { makeRoutineKey, useRoutineTasks, type RoutineBotTarget } from './hooks/useRoutineTasks';
 import type { UserTaskStatusFilter } from './userTaskUtils';
 
 const DEFAULT_PAGE = 1;
@@ -18,14 +20,31 @@ function normalizeBotNameKey(value?: string | null): string {
   return value?.trim().toLowerCase() ?? '';
 }
 
+function getActiveRoutineBot(activeIdentity: IdentityView | null): RoutineBotTarget | null {
+  if (activeIdentity?.kind !== 'bot') return null;
+  const botId = activeIdentity.id.split(':', 1)[0]?.trim() ?? '';
+  if (!botId) return null;
+  return { botId, botName: activeIdentity.displayName || botId };
+}
+
 export default function MyTaskPage() {
-  const { identity: humanIdentity } = useHumanIdentity();
+  const { identity: humanIdentity, status: humanIdentityStatus } = useHumanIdentity();
+  const { activeIdentity, activeIdentityKind } = useWorkIdentityAccess();
   const ownerUserId = humanIdentity?.userId.trim() ?? '';
+  const isUserIdentity = activeIdentityKind === 'user';
+  const isBotIdentity = activeIdentityKind === 'bot';
+  const currentRoutineBot = useMemo(() => getActiveRoutineBot(activeIdentity), [activeIdentity]);
+  const routineBots = useMemo(() => (currentRoutineBot ? [currentRoutineBot] : []), [currentRoutineBot]);
+  const selectedRoutineBotId = currentRoutineBot?.botId ?? '';
+
   const [userTaskPage, setUserTaskPage] = useState(DEFAULT_PAGE);
   const [userTaskPageSize, setUserTaskPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [userTaskStatusFilter, setUserTaskStatusFilter] = useState<UserTaskStatusFilter>('all');
   const [routinePage, setRoutinePage] = useState(DEFAULT_PAGE);
   const [routinePageSize, setRoutinePageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedRoutineKey, setSelectedRoutineKey] = useState<string | null>(null);
+  const [selectedRoutineHistoryId, setSelectedRoutineHistoryId] = useState<string | null>(null);
 
   const {
     taskRecords,
@@ -33,17 +52,16 @@ export default function MyTaskPage() {
     loading: userLoading,
     error: userError,
     refresh: refreshUserTasks,
-  } = useMyTaskTasks(ownerUserId, userTaskPage, userTaskPageSize, userTaskStatusFilter);
-  const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(ownerUserId || null, Boolean(ownerUserId));
-  const routineBots = useMemo(
-    () =>
-      chatBots
-        .map((bot) => ({
-          botId: bot.realBotId || bot.botId,
-          botName: bot.displayName || bot.botId,
-        }))
-        .filter((item) => Boolean(item.botId.trim())),
-    [chatBots],
+  } = useMyTaskTasks(
+    ownerUserId,
+    userTaskPage,
+    userTaskPageSize,
+    userTaskStatusFilter,
+    isUserIdentity && Boolean(ownerUserId),
+  );
+  const { chatBots, isLoading: ownedBotsLoading } = useOwnedBots(
+    ownerUserId || null,
+    isUserIdentity && Boolean(ownerUserId),
   );
   const botNameMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -54,21 +72,13 @@ export default function MyTaskPage() {
       if (botIdKey) map[botIdKey] = botName;
       if (realBotIdKey) map[realBotIdKey] = botName;
     });
+    if (currentRoutineBot) map[normalizeBotNameKey(currentRoutineBot.botId)] = currentRoutineBot.botName;
     return map;
-  }, [chatBots]);
+  }, [chatBots, currentRoutineBot]);
   const routineBotOptions = useMemo(
-    () => [
-      { value: ALL_ROUTINE_BOT_VALUE, label: '全部' },
-      ...routineBots.map((bot) => ({ value: bot.botId, label: bot.botName })),
-    ],
+    () => routineBots.map((bot) => ({ value: bot.botId, label: bot.botName })),
     [routineBots],
   );
-  const [selectedRoutineBotId, setSelectedRoutineBotId] = useState(ALL_ROUTINE_BOT_VALUE);
-
-  const [activeTab, setActiveTab] = useState<'user' | 'routine'>('user');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedRoutineKey, setSelectedRoutineKey] = useState<string | null>(null);
-  const [selectedRoutineHistoryId, setSelectedRoutineHistoryId] = useState<string | null>(null);
 
   const {
     routines,
@@ -91,14 +101,21 @@ export default function MyTaskPage() {
     routinePageSize,
     selectedRoutineKey,
     Boolean(selectedRoutineHistoryId),
-    // Bot 身份没有可用的 user_id（owner 聚合接口与 per-bot 接口都按 user 鉴权），保持静默空列表。
-    activeTab === 'routine' && Boolean(ownerUserId),
+    isBotIdentity && Boolean(selectedRoutineBotId) && Boolean(ownerUserId),
   );
+
+  useEffect(() => {
+    setUserTaskPage(DEFAULT_PAGE);
+    setUserTaskStatusFilter('all');
+    setRoutinePage(DEFAULT_PAGE);
+    setSelectedTaskId(null);
+    setSelectedRoutineKey(null);
+    setSelectedRoutineHistoryId(null);
+  }, [activeIdentity?.id]);
 
   const openRoutineFromHistory = (botId: string, routineId: string) => {
     setSelectedRoutineHistoryId(null);
     setSelectedRoutineKey(makeRoutineKey(botId, routineId));
-    setActiveTab('routine');
   };
 
   return (
@@ -108,25 +125,13 @@ export default function MyTaskPage() {
 
         <Card>
           <CardContent className="space-y-4 pt-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <Segmented
-                value={activeTab}
-                onChange={(value) => setActiveTab(value as 'user' | 'routine')}
-                options={[
-                  { value: 'user', label: '用户任务' },
-                  { value: 'routine', label: '定时任务' },
-                ]}
-                className="w-full max-w-md"
-              />
-            </div>
-
-            {activeTab === 'user' ? (
+            {isUserIdentity ? (
               <UserTaskTab
                 taskRecords={taskRecords}
                 total={userTaskTotal}
                 page={userTaskPage}
                 pageSize={userTaskPageSize}
-                loading={userLoading}
+                loading={humanIdentityStatus === 'loading' || ownedBotsLoading || userLoading}
                 error={userError}
                 statusFilter={userTaskStatusFilter}
                 onStatusFilterChange={(status) => {
@@ -143,22 +148,18 @@ export default function MyTaskPage() {
                 }}
                 botNameMap={botNameMap}
               />
-            ) : (
+            ) : isBotIdentity ? (
               <RoutineTaskTab
                 routines={routines}
                 total={routineTotal}
                 page={routinePage}
                 pageSize={routinePageSize}
-                loading={ownedBotsLoading || routineLoading}
+                loading={humanIdentityStatus === 'loading' || routineLoading}
                 error={routineError}
                 botOptions={routineBotOptions}
                 selectedBotId={selectedRoutineBotId}
-                onChangeBotId={(botId) => {
-                  setSelectedRoutineBotId(botId);
-                  setSelectedRoutineKey(null);
-                  setSelectedRoutineHistoryId(null);
-                  setRoutinePage(DEFAULT_PAGE);
-                }}
+                showBotSelector={false}
+                onChangeBotId={() => {}}
                 onRetry={() => void refreshRoutines()}
                 onSelectRoutine={(routine) =>
                   setSelectedRoutineKey(makeRoutineKey(routine.botId, routine.id, routine.runtimeStage))
@@ -174,23 +175,29 @@ export default function MyTaskPage() {
                 }}
                 botNameMap={botNameMap}
               />
+            ) : (
+              <div role="status" className="space-y-3 py-2">
+                <span className="sr-only">工作身份加载中</span>
+                <Skeleton.Block className="h-12 w-full rounded-lg" />
+                <Skeleton.Block className="h-64 w-full rounded-lg" />
+              </div>
             )}
           </CardContent>
         </Card>
       </div>
 
       <MyTaskDrawers
-        selectedTaskId={selectedTaskId}
+        selectedTaskId={isUserIdentity ? selectedTaskId : null}
         onCloseTask={() => setSelectedTaskId(null)}
         taskRecords={taskRecords}
         ownerUserId={ownerUserId}
-        selectedRoutine={selectedRoutine}
-        selectedRoutineKey={selectedRoutineKey}
+        selectedRoutine={isBotIdentity ? selectedRoutine : null}
+        selectedRoutineKey={isBotIdentity ? selectedRoutineKey : null}
         onCloseRoutine={() => setSelectedRoutineKey(null)}
         selectedRoutineRuns={selectedRoutineRuns}
         selectedRoutineRunsLoading={selectedRoutineRunsLoading}
         selectedRoutineRunsError={selectedRoutineRunsError}
-        selectedRoutineHistoryId={selectedRoutineHistoryId}
+        selectedRoutineHistoryId={isBotIdentity ? selectedRoutineHistoryId : null}
         onCloseRoutineHistory={() => setSelectedRoutineHistoryId(null)}
         historyRuns={historyRuns}
         historyLoading={historyLoading}

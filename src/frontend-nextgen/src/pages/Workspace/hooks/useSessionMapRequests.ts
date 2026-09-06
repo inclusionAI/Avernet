@@ -62,8 +62,7 @@ export function useSessionMapRequests({
             return next;
           });
           replaceGroupPage(groupId, res.data);
-        }
-        else if (cancelled) replaceGroupPage(groupId, []);
+        } else if (cancelled) replaceGroupPage(groupId, []);
         else {
           notifyError(res.error);
           setErrorByGroupId((current) => ({ ...current, [groupId]: res.error.friendlyMessage }));
@@ -121,8 +120,7 @@ export function useSessionMapRequests({
           return next;
         });
         replaceGroupPage(gid, res.data);
-      }
-      else {
+      } else {
         notifyError(res.error);
         setErrorByGroupId((current) => ({ ...current, [gid]: res.error.friendlyMessage }));
         const currentMeta = pageMetaByGroupIdRef.current[gid];

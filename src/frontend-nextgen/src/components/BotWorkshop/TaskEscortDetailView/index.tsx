@@ -1,17 +1,20 @@
-import type { TaskEscortFlowRun, TaskEscortWorkflowSpec } from '@/components/BotWorkshop/TaskEscort/types';
+import type {
+  NodeExecution,
+  TaskEscortFlowRun,
+  TaskEscortWorkflowSpec,
+} from '@/components/BotWorkshop/TaskEscort/types';
 import { STATUS_LABEL, STATUS_TONE, formatDuration, formatTime } from '@/components/BotWorkshop/TaskEscort/utils';
 import WorkflowDagView from '@/components/BotWorkshop/TaskEscortFlowConfig/WorkflowDagView';
 import { TaskEscortStatCard } from '@/components/BotWorkshop/TaskEscortStatCard';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Spin } from '@/components/ui/Spin';
 import { isLiveRunStatus } from '@/hooks/useTaskEscort';
-import type { NodeExecution } from '@/services/taskEscort';
 import { taskEscortService } from '@/services/taskEscort';
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
 import React, { useCallback, useMemo, useState } from 'react';
+import { RunNodeList } from './RunNodeList';
 
 const TRIGGER_LABEL: Record<string, string> = {
   manual: '手动触发',
@@ -47,6 +50,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RunTab>('nodes');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const stats = useMemo(() => {
     const total = flowRuns.length;
@@ -62,6 +66,10 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
 
   const hasLive = useMemo(() => flowRuns.some((r) => isLiveRunStatus(r.status)), [flowRuns]);
 
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+  }, []);
+
   const handleRunClick = useCallback(
     async (flowId: string) => {
       if (expandedRunId === flowId) {
@@ -69,6 +77,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
         setExpandedRunId(null);
         setRunNodes([]);
         setWorkflowSpec(null);
+        setSelectedNodeId(null);
         return;
       }
       setExpandedRunId(flowId);
@@ -76,6 +85,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
       setWorkflowSpec(null);
       setDetailError(null);
       setActiveTab('nodes');
+      setSelectedNodeId(null);
       setIsLoadingDetail(true);
       try {
         const [detail, spec] = await Promise.all([
@@ -235,26 +245,7 @@ const TaskEscortDetailView: React.FC<DetailViewProps> = ({
 
                     {/* Node list */}
                     {activeTab === 'nodes' && !isLoadingDetail && !detailError && runNodes.length > 0 && (
-                      <div className="space-y-1">
-                        {runNodes.map((node) => (
-                          <Card
-                            key={node.node_id}
-                            className="flex items-center gap-2 rounded-md bg-[var(--color-panel)] px-2 py-1.5 shadow-none"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-xs font-medium">{node.node_title || node.node_id}</div>
-                              <div className="truncate text-[10px] text-[var(--color-muted)]">
-                                {node.node_id} · {node.executor_type}
-                                {node.phase && ` · ${node.phase}`}
-                                {node.duration_ms !== null && ` · ${formatDuration(node.duration_ms)}`}
-                              </div>
-                            </div>
-                            <Badge tone={STATUS_TONE[node.status] || 'neutral'}>
-                              {STATUS_LABEL[node.status] || node.status}
-                            </Badge>
-                          </Card>
-                        ))}
-                      </div>
+                      <RunNodeList nodes={runNodes} selectedNodeId={selectedNodeId} onSelectNode={handleNodeClick} />
                     )}
 
                     {/* DAG view */}

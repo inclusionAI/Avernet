@@ -73,6 +73,24 @@ describe('PermissionCard', () => {
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
   });
 
+  it('keeps refresh and copy actions close to their related Bot information', () => {
+    renderCard();
+
+    const title = screen.getByRole('heading', { name: '协作助手' });
+    const refreshButton = screen.getByRole('button', { name: '刷新 协作助手 的权限状态' });
+    const uuidLabel = screen.getByText('Bot UUID');
+    const uuidValue = screen.getByTitle('bot-1');
+    const copyButton = screen.getByRole('button', { name: '复制 协作助手 的 Bot UUID' });
+
+    expect(title.parentElement).toContainElement(refreshButton);
+    expect(title.parentElement).toHaveClass('items-center', 'gap-2');
+    expect(title.parentElement).not.toHaveClass('justify-between');
+    expect(uuidLabel.parentElement).toContainElement(copyButton);
+    expect(uuidValue).not.toHaveClass('flex-1');
+    expect(uuidValue).toHaveClass('max-w-[48rem]');
+    expect(uuidValue.nextElementSibling).toBe(copyButton);
+  });
+
   it('refreshes only this Bot on demand instead of adding detail requests to page initialization', () => {
     const { onRefresh } = renderCard();
 

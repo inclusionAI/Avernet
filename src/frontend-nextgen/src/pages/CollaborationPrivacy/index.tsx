@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { FriendApprovalEditor } from '@/components/CollaborationPrivacy/FriendApprovalEditor';
 import { IdentityCard } from '@/components/CollaborationPrivacy/IdentityCard';
 import { PermissionCard } from '@/components/CollaborationPrivacy/PermissionCard';
@@ -35,6 +36,7 @@ function LoadingState() {
 export default function CollaborationPrivacyPage() {
   const privacy = useCollaborationPrivacy();
   const { identity: accountIdentity } = useHumanIdentity();
+  const userProfilePresentation = getCapabilities().getUserProfilePresentation().value;
   const overview = privacy.overview;
   return (
     <main className="h-full w-full overflow-y-auto">
@@ -64,6 +66,10 @@ export default function CollaborationPrivacyPage() {
               <IdentityCard
                 identity={overview.currentUser}
                 avatarUrl={accountIdentity?.avatarUrl}
+                authenticatedIdentity={
+                  userProfilePresentation.preferAuthenticatedUserProfile ? accountIdentity ?? undefined : undefined
+                }
+                showDepartment={userProfilePresentation.showDepartment}
                 syncing={privacy.busyAction === 'syncDepartment'}
                 onSync={() => void privacy.syncDepartment()}
               />

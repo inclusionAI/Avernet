@@ -304,7 +304,9 @@ describe('ensurePersonalSpaceOnAppEntry', () => {
 
   it('单飞：同一页面加载内并发/顺序重复调用只发一次请求', async () => {
     const { mod, svc } = await freshModule();
-    let resolveFirst!: (v: Awaited<ReturnType<typeof import('@/services/admin').adminService.ensurePersonalSpace>>) => void;
+    let resolveFirst!: (
+      v: Awaited<ReturnType<typeof import('@/services/admin').adminService.ensurePersonalSpace>>,
+    ) => void;
     mockedEnsure(svc).mockImplementationOnce(
       () =>
         new Promise((res) => {

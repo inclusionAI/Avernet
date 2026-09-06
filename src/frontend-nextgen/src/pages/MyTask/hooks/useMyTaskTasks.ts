@@ -5,7 +5,7 @@ import {
   normalizeMyTaskPage,
   runtimeStatusesFromProductFilter,
 } from '@/services/myTask';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { UserTaskStatusFilter } from '../userTaskUtils';
 
 /**
@@ -19,14 +19,17 @@ export function useMyTaskTasks(
   page: number,
   pageSize: number,
   statusFilter: UserTaskStatusFilter,
+  enabled = true,
 ) {
   const [taskRecords, setTaskRecords] = useState<TaskListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!ownerUserId) {
+    const requestId = ++requestIdRef.current;
+    if (!enabled || !ownerUserId) {
       setTaskRecords([]);
       setTotal(0);
       setError(null);
@@ -53,6 +56,7 @@ export function useMyTaskTasks(
         page_size: pageSize,
         status: statusParam,
       });
+      if (requestId !== requestIdRef.current) return;
       if (isEnvelopeFailure(result) || !result.data) {
         throw new Error(result.message || '用户任务列表加载失败');
       }
@@ -60,17 +64,21 @@ export function useMyTaskTasks(
       setTaskRecords(normalized.items);
       setTotal(normalized.total);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       const message = err instanceof Error ? err.message : '用户任务列表加载失败';
       setError(message);
       setTaskRecords([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [ownerUserId, page, pageSize, statusFilter]);
+  }, [enabled, ownerUserId, page, pageSize, statusFilter]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      requestIdRef.current += 1;
+    };
   }, [refresh]);
 
   return { taskRecords, total, loading, error, refresh };

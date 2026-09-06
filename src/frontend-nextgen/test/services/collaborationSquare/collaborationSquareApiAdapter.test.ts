@@ -283,7 +283,7 @@ describe('CollaborationSquareApiAdapter', () => {
       expect.objectContaining({
         id: 'owned-bot',
         relationshipStatus: 'none',
-        isOwnedByViewer: true,
+        isOwnedByLoggedInUser: true,
       }),
     );
   });
@@ -314,7 +314,7 @@ describe('CollaborationSquareApiAdapter', () => {
       viewerActorId: 'bot-viewer',
     });
 
-    expect(result.items[0]?.isOwnedByViewer).toBeUndefined();
+    expect(result.items[0]?.isOwnedByLoggedInUser).toBeUndefined();
   });
 
   it('viewer 为 bot 时关系回填以 bot 身份查询好友申请', async () => {

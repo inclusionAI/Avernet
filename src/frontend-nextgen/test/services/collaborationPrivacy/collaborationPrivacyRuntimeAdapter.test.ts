@@ -19,7 +19,13 @@ const orgUser: OrgUserDto = {
  * 构造一个已加载空 Overview 的运行期适配器,便于只聚焦 submitPublication 的终态映射。
  * publishBotPublic 固定返回给定结果,不触达真实网络。
  */
-function createAdapterWithPublishResult(publishResult: BcsPublishResult) {
+function createAdapterWithPublishResult(
+  publishResult: BcsPublishResult,
+  profile?: {
+    getUserProfilePresentation: () => { preferAuthenticatedUserProfile: boolean; showDepartment: boolean };
+    getHumanIdentity: () => { userId: string; displayName: string; online: boolean } | null;
+  },
+) {
   const listMyBots = jest.fn<(...args: any[]) => any>();
   const getCollaborationBot = jest.fn<(...args: any[]) => any>();
   const patchCollaborationBot = jest.fn<(...args: any[]) => any>();
@@ -48,12 +54,46 @@ function createAdapterWithPublishResult(publishResult: BcsPublishResult) {
     taskGrant: { grantTaskClaim, revokeTaskClaim },
     getWorkerConfig,
     updateWorkerConfig,
+    ...profile,
   });
-  return { adapter, publishBotPublic };
+  return { adapter, getOrgUser, listOrgDepts, listMyBots, publishBotPublic };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
+});
+
+describe('collaborationPrivacyRuntimeAdapter Open Core user profile', () => {
+  it('使用认证 User 名称并跳过组织 User 接口与部门同步请求', async () => {
+    const { adapter, getOrgUser, listMyBots } = createAdapterWithPublishResult(
+      {
+        success: true,
+        puid: 'unused',
+        approval_url: null,
+        state: 'SKIPPED',
+        last_operate: null,
+        visibility: 'public',
+        visibility_field: null,
+        error_msg: null,
+      },
+      {
+        getUserProfilePresentation: () => ({ preferAuthenticatedUserProfile: true, showDepartment: false }),
+        getHumanIdentity: () => ({ userId: 'external-user-1', displayName: '开源用户', online: true }),
+      },
+    );
+
+    const overview = await adapter.loadOverview('external-user-1');
+    const synced = await adapter.syncDepartment('external-user-1');
+
+    expect(getOrgUser).not.toHaveBeenCalled();
+    expect(listMyBots).toHaveBeenCalledWith({ kind: 'bot' }, undefined);
+    expect(overview.currentUser).toMatchObject({
+      displayName: '开源用户',
+      employeeNumber: 'external-user-1',
+      departmentPath: [],
+    });
+    expect(synced).toMatchObject({ displayName: '开源用户', employeeNumber: 'external-user-1', departmentPath: [] });
+  });
 });
 
 describe('collaborationPrivacyRuntimeAdapter.submitPublication', () => {

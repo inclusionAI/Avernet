@@ -1,16 +1,17 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { mapPublicBotCatalogSummaryToProfile } from '@/domain/collaborationSquare/mapper';
 import {
-  canStartPublicBotConversation,
+  getPublicBotActionKey,
   getPublicBotTargetId,
-  type HumanBotActionContext,
+  resolvePublicBotPrimaryAction,
   type PublicBot,
   type PublicGroup,
   type SquareResource,
 } from '@/domain/collaborationSquare/types';
-import { mapPublicBotCatalogSummaryToProfile } from '@/domain/collaborationSquare/mapper';
+import { useCollaborationSquareActorContext } from '@/hooks/useCollaborationSquareActorContext';
+import { useCollaborationSquareClipboardActions } from '@/hooks/useCollaborationSquareClipboardActions';
 import { useCollaborationSquareList } from '@/hooks/useCollaborationSquareList';
 import { useCollaborationSquareTask } from '@/hooks/useCollaborationSquareTask';
-import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useSquareDeepLink } from '@/hooks/useSquareDeepLink';
 import {
   CollaborationSquareError,
@@ -19,31 +20,18 @@ import {
   collaborationSquareService,
 } from '@/services/collaborationSquare';
 import { useCollaborationSquareStore } from '@/stores/collaborationSquareStore';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import {
   clearCollaborationSquareTargetingSearch,
   getCollaborationBotConversationUrl,
   getCollaborationSquareErrorMessage,
-  getCollaborationSquareShareUrl,
 } from '@/utils/collaborationSquare';
 import { history } from '@umijs/max';
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { useCreateGroupSessionFlow } from './useCreateGroupSessionFlow';
 
 export function useCollaborationSquare(resource: SquareResource) {
   const store = useCollaborationSquareStore();
-  const { identity: humanIdentity, status: humanIdentityStatus } = useHumanIdentity();
-  const actorId = useWorkspaceStore(
-    (state) => state.identities.find((item) => item.kind === 'user' && !item.id.startsWith('test-'))?.id ?? null,
-  );
-  const humanBotContext = useMemo<HumanBotActionContext | null>(
-    () => (actorId && humanIdentity?.userId ? { actorId, userId: humanIdentity.userId } : null),
-    [actorId, humanIdentity?.userId],
-  );
-  const viewer = useMemo(
-    () => (humanBotContext ? { viewerActorType: 'human' as const, viewerActorId: humanBotContext.userId } : null),
-    [humanBotContext],
-  );
+  const { humanIdentityStatus, humanBotContext, viewer, activeActor } = useCollaborationSquareActorContext(store.reset);
   const botGroupList = useCollaborationSquareList({
     resource,
     humanBotContext,
@@ -161,14 +149,22 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   const primaryBotAction = useCallback(
     (bot: PublicBot) => {
-      if (!humanBotContext) {
-        notifyError('当前用户身份不可用，请刷新后重试');
+      if (!humanBotContext || !activeActor) {
+        notifyError('当前工作身份不可用，请刷新后重试');
         return;
       }
       const targetId = getPublicBotTargetId(bot);
-      if (canStartPublicBotConversation(bot)) {
+      const action = resolvePublicBotPrimaryAction({
+        activeActor,
+        targetActorId: targetId,
+        relationshipStatus: bot.relationshipStatus,
+        isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
+      });
+      if (action === 'applying' || action === 'friendship_established' || action === 'self_target') return;
+      const busyKey = getPublicBotActionKey(activeActor, targetId);
+      if (action === 'open_human_bot_conversation') {
         void runBusy(
-          `bot:${targetId}`,
+          busyKey,
           async () => {
             const result = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
             history.push(getCollaborationBotConversationUrl(bot.id, result.sessionId));
@@ -178,43 +174,38 @@ export function useCollaborationSquare(resource: SquareResource) {
         return;
       }
       void runBusy(
-        `bot:${targetId}`,
+        busyKey,
         async () => {
           const result = bot.friendRequestBotId
-            ? await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, bot.friendRequestBotId)
-            : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext);
+            ? await collaborationSquareBotService.requestBotFriendship(
+                bot.id,
+                humanBotContext,
+                bot.friendRequestBotId,
+                activeActor,
+              )
+            : await collaborationSquareBotService.requestBotFriendship(bot.id, humanBotContext, undefined, activeActor);
           store.updateBotRelationship(targetId, result.status);
           if (result.status === 'friend') {
-            const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
-            notifySuccess('好友关系已建立，正在进入对话');
-            history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
+            if (activeActor.type === 'human') {
+              const conversation = await collaborationSquareBotService.openBotConversation(bot.id, humanBotContext);
+              notifySuccess('好友关系已建立，正在进入对话');
+              history.push(getCollaborationBotConversationUrl(bot.id, conversation.sessionId));
+            } else {
+              notifySuccess('好友关系已建立');
+            }
           } else if (result.status === 'applying') notifySuccess('好友申请已提交');
           else notifyError('当前未建立好友关系，申请未提交');
         },
         bot.id,
       );
     },
-    [humanBotContext, runBusy, store.updateBotRelationship],
+    [activeActor, humanBotContext, runBusy, store.updateBotRelationship],
   );
 
   const createSessionFlow = useCreateGroupSessionFlow(humanBotContext, runBusy);
   const createGroupSession = createSessionFlow.open;
 
-  const copyText = useCallback(async (value: string, success: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      notifySuccess(success);
-    } catch {
-      notifyError('复制失败，请检查浏览器剪贴板权限');
-    }
-  }, []);
-  const share = useCallback(
-    (targetResource: SquareResource, id: string, searchHint?: string) => {
-      const origin = typeof window === 'undefined' ? '' : window.location.origin;
-      void copyText(getCollaborationSquareShareUrl(origin, targetResource, id, searchHint), '分享链接已复制');
-    },
-    [copyText],
-  );
+  const { copyBotId, share } = useCollaborationSquareClipboardActions();
 
   const visibleBots = store.bots;
   const visibleGroups = store.groups;
@@ -222,6 +213,7 @@ export function useCollaborationSquare(resource: SquareResource) {
 
   return {
     ...store,
+    activeActor,
     visibleBots,
     visibleGroups,
     selectedGroup,
@@ -243,7 +235,7 @@ export function useCollaborationSquare(resource: SquareResource) {
     isCreatingSession: createSessionFlow.isCreating,
     closeCreateSessionModal: createSessionFlow.close,
     submitCreateSession: createSessionFlow.submit,
-    copyBotId: (id: string) => copyText(id, 'Bot UUID 已复制'),
+    copyBotId,
     share,
   };
 }

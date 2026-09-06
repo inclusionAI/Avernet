@@ -7,6 +7,7 @@ import {
 import { PageHeader } from '@/components/Common/PageHeader';
 import type { BotCatalogViewModel, SquareResource } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
+import { useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
 import { history, Link } from '@umijs/max';
 import { type MouseEvent, type UIEvent, useCallback, useEffect, useRef, useState } from 'react';
 
@@ -14,12 +15,13 @@ const LOAD_MORE_PRELOAD_DISTANCE = 420;
 const TAB_TRANSITION_DURATION_MS = 200;
 
 const BOT_DESCRIPTION =
-  '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能发现，并以当前用户身份发起好友申请。';
+  '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，并以当前工作身份发起好友申请。';
 const GROUP_DESCRIPTION = '发现协作群，支持基于公开协作群快速创建新会话。';
 const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态筛选适合当前协作目标的任务。';
 
 export function SquarePageShell({ resource }: { resource: SquareResource }) {
   const square = useCollaborationSquare(resource);
+  const { activeIdentity, canViewPublicGroups } = useWorkIdentityAccess();
   const scrollRootRef = useRef<HTMLElement>(null);
   const navigationTimerRef = useRef<number>();
   const [visualResource, setVisualResource] = useState(resource);
@@ -80,6 +82,7 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
   );
 
   const botViewModel: BotCatalogViewModel = {
+    activeActor: square.activeActor,
     bots: square.visibleBots,
     busyKeys: square.busyKeys,
     query: square.botQuery,
@@ -151,22 +154,24 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
               aria-hidden
             />
           </Link>
-          <Link
-            to="/collaboration-square/groups"
-            aria-current={resource === 'group' ? 'page' : undefined}
-            onClick={(event) => handleResourceNavigation(event, 'group', '/collaboration-square/groups')}
-            className={`relative flex h-[54px] items-center px-1 text-sm transition-colors hover:text-primary ${
-              visualResource === 'group' ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'
-            }`}
-          >
-            公开协作群
-            <span
-              className={`absolute inset-x-0 bottom-0 h-[3px] rounded-t-full bg-primary transition-transform duration-200 ease-out ${
-                visualResource === 'group' ? 'scale-x-100' : 'scale-x-0'
+          {canViewPublicGroups && (
+            <Link
+              to="/collaboration-square/groups"
+              aria-current={resource === 'group' ? 'page' : undefined}
+              onClick={(event) => handleResourceNavigation(event, 'group', '/collaboration-square/groups')}
+              className={`relative flex h-[54px] items-center px-1 text-sm transition-colors hover:text-primary ${
+                visualResource === 'group' ? 'font-medium text-foreground' : 'font-normal text-muted-foreground'
               }`}
-              aria-hidden
-            />
-          </Link>
+            >
+              公开协作群
+              <span
+                className={`absolute inset-x-0 bottom-0 h-[3px] rounded-t-full bg-primary transition-transform duration-200 ease-out ${
+                  visualResource === 'group' ? 'scale-x-100' : 'scale-x-0'
+                }`}
+                aria-hidden
+              />
+            </Link>
+          )}
           <Link
             to="/collaboration-square/tasks"
             aria-current={resource === 'task' ? 'page' : undefined}
@@ -194,6 +199,9 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
                 vm={botViewModel}
                 scrollRootRef={scrollRootRef}
                 smartEmptyHint="请输入关键词进行智能搜索"
+                activeIdentity={
+                  activeIdentity ? { name: activeIdentity.displayName, kind: activeIdentity.kind } : undefined
+                }
               />
             )}
             {resource === 'group' && (

@@ -117,7 +117,7 @@ export function HelpMenu() {
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <IconButton label="帮助" icon={<HelpCircle className="h-5 w-5" />} />
+          <IconButton label="帮助" icon={<HelpCircle className="h-4 w-4" />} />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-56 p-1.5">
           {hasAny ? (

@@ -10,6 +10,13 @@ describe('authService', () => {
     });
   });
 
+  it('falls back to user_id when /auth/user name is empty', () => {
+    expect(toAuthUser({ user_id: 'external-user-2', name: '   ', provider: 'github' })).toMatchObject({
+      userId: 'external-user-2',
+      displayName: 'external-user-2',
+    });
+  });
+
   it('selects only the configured Alipay provider URL', () => {
     expect(selectAlipayLoginUrl({ providers: [{ name: 'alipay', url: 'https://example.test/login' }] })).toBe(
       'https://example.test/login',

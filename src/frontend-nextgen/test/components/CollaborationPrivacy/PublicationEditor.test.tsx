@@ -1,12 +1,19 @@
 /** @jest-environment jsdom */
 import { PublicationEditor } from '@/components/CollaborationPrivacy/PublicationEditor';
 import type { OrganizationSearchEntry } from '@/domain/collaborationPrivacy/types';
-import { afterEach, describe, expect, it } from '@jest/globals';
-import { history } from '@umijs/max';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { history } from '@umijs/max';
 
 jest.mock('@umijs/max', () => ({ history: { push: jest.fn() } }));
+
+let mockRestrictedPublicationScopeEnabled = true;
+jest.mock('@/capabilities', () => ({
+  getCapabilities: () => ({
+    getRestrictedPublicationScopeEnabled: () => ({ status: 'available', value: mockRestrictedPublicationScopeEnabled }),
+  }),
+}));
 
 const existingEntry: OrganizationSearchEntry = {
   deptNo: 'TECH-001',
@@ -18,6 +25,10 @@ const addedEntry: OrganizationSearchEntry = {
 };
 
 describe('PublicationEditor', () => {
+  beforeEach(() => {
+    mockRestrictedPublicationScopeEnabled = true;
+  });
+
   afterEach(() => {
     jest.useRealTimers();
     (history.push as jest.Mock).mockClear();
@@ -58,6 +69,28 @@ describe('PublicationEditor', () => {
     expect(screen.getByRole('radio', { name: /限制组织范围/ })).toHaveTextContent(
       '仅所选组织范围可申请添加当前 Bot 为好友',
     );
+  });
+
+  it('Open Core 对用户和 Bot 公开窗口均隐藏限制组织范围', () => {
+    mockRestrictedPublicationScopeEnabled = false;
+    const props = {
+      open: true,
+      initialConfig: { scope: 'restricted' as const, organizationPaths: [existingEntry.path] },
+      onSearch: jest.fn(async () => []),
+      onClose: jest.fn(),
+      onSubmit: jest.fn(),
+    };
+    const { rerender } = render(<PublicationEditor {...props} audience="user" />);
+
+    expect(screen.queryByRole('radio', { name: /限制组织范围/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /不公开/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
+
+    rerender(<PublicationEditor {...props} audience="bot" />);
+
+    expect(screen.queryByRole('radio', { name: /限制组织范围/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /不公开/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
   });
 
   it('restores configured departments and submits their codes with original department names', async () => {

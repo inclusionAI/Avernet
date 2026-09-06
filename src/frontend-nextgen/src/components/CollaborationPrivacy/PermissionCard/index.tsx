@@ -89,13 +89,11 @@ export function PermissionCard({
     <Card className="overflow-hidden">
       <CardHeader className="border-b border-border pb-5">
         <div className="min-w-0 flex-1">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <CardTitle className="min-w-0 truncate text-lg" title={bot.name}>
-                {bot.name}
-              </CardTitle>
-              {bot.engine !== 'unknown' && <Badge tone="neutral">{bot.engine}</Badge>}
-            </div>
+          <div className="flex min-w-0 items-center gap-2">
+            <CardTitle className="min-w-0 truncate text-lg" title={bot.name}>
+              {bot.name}
+            </CardTitle>
+            {bot.engine !== 'unknown' && <Badge tone="neutral">{bot.engine}</Badge>}
             <IconButton
               className="shrink-0"
               label={`刷新 ${bot.name} 的权限状态`}
@@ -108,7 +106,7 @@ export function PermissionCard({
           <div className="mt-3 flex min-w-0 items-center gap-2">
             <span className="shrink-0 text-xs font-medium text-muted-foreground">Bot UUID</span>
             <code
-              className="min-w-0 flex-1 truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
+              className="min-w-0 max-w-[48rem] truncate rounded-md bg-muted/30 px-2 py-1 text-xs text-foreground"
               title={bot.id}
             >
               {bot.id}

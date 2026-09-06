@@ -1,8 +1,9 @@
 /** @jest-environment jsdom */
 import { extendCapabilities } from '@/capabilities';
 import { AppSidebar } from '@/shell/AppSidebar';
-import type { NavigationArea } from '@/shell/navigation';
-import { expect, it, jest } from '@jest/globals';
+import { navigationItems, type NavigationArea } from '@/shell/navigation';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { afterEach, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { render, screen } from '@testing-library/react';
@@ -17,6 +18,10 @@ jest.mock('@/shell/WorkspaceIdentitySwitcher', () => ({
 const renderSidebar = (area: NavigationArea) =>
   render(<AppSidebar area={area} activePath="/workspace" collapsed={false} items={[]} onNavigate={jest.fn()} />);
 
+afterEach(() => {
+  useWorkspaceStore.getState().reset();
+});
+
 it('工作区域在导航顶部展示协作身份入口，不展示空间切换器', () => {
   renderSidebar('work');
   const nav = screen.getByRole('navigation', { name: '工作导航' });
@@ -29,6 +34,38 @@ it('Open 默认:管理区域不展示空间切换器或协作身份入口', () =
   renderSidebar('manage');
   expect(screen.queryByTestId('space-switcher')).not.toBeInTheDocument();
   expect(screen.queryByTestId('identity-switcher')).not.toBeInTheDocument();
+});
+
+it('用户工作身份在展开与折叠导航中展示我的任务', () => {
+  useWorkspaceStore.setState({
+    activeIdentityId: 'human-1',
+    identities: [{ id: 'human-1', kind: 'user', displayName: '真实用户', online: true }],
+  });
+
+  const expanded = render(
+    <AppSidebar area="work" activePath="/workspace" collapsed={false} items={navigationItems} onNavigate={jest.fn()} />,
+  );
+  expect(screen.getByRole('button', { name: '我的任务' })).toBeInTheDocument();
+  expanded.unmount();
+
+  render(<AppSidebar area="work" activePath="/workspace" collapsed items={navigationItems} onNavigate={jest.fn()} />);
+  expect(screen.getByRole('button', { name: '我的任务' })).toBeInTheDocument();
+});
+
+it('Bot 工作身份在展开与折叠导航中继续展示我的任务', () => {
+  useWorkspaceStore.setState({
+    activeIdentityId: 'bot-1:447147',
+    identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+  });
+
+  const expanded = render(
+    <AppSidebar area="work" activePath="/workspace" collapsed={false} items={navigationItems} onNavigate={jest.fn()} />,
+  );
+  expect(screen.getByRole('button', { name: '我的任务' })).toBeInTheDocument();
+  expanded.unmount();
+
+  render(<AppSidebar area="work" activePath="/workspace" collapsed items={navigationItems} onNavigate={jest.fn()} />);
+  expect(screen.getByRole('button', { name: '我的任务' })).toBeInTheDocument();
 });
 
 // extendCapabilities 合并后无法恢复，capability override 用例置于文件末尾。

@@ -2,21 +2,45 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
-import { canStartPublicBotConversation, type PublicBot } from '@/domain/collaborationSquare/types';
+import {
+  getPublicBotTargetId,
+  resolvePublicBotPrimaryAction,
+  type FriendRequestActor,
+  type PublicBot,
+} from '@/domain/collaborationSquare/types';
 import { Bot, MessageCircle, Share2, UserPlus } from 'lucide-react';
 
 export interface SquareBotCardProps {
   bot: PublicBot;
+  activeActor: FriendRequestActor;
   busy: boolean;
   onShare: (bot: PublicBot) => void;
   onPrimaryAction: (bot: PublicBot) => void;
 }
 
-export default function SquareBotCard({ bot, busy, onShare, onPrimaryAction }: SquareBotCardProps) {
+export default function SquareBotCard({ bot, activeActor, busy, onShare, onPrimaryAction }: SquareBotCardProps) {
   const applying = bot.relationshipStatus === 'applying';
-  const owned = bot.isOwnedByViewer === true;
+  const owned = bot.isOwnedByLoggedInUser === true;
   const friend = bot.relationshipStatus === 'friend';
-  const canStartConversation = canStartPublicBotConversation(bot);
+  const primaryAction = resolvePublicBotPrimaryAction({
+    activeActor,
+    targetActorId: getPublicBotTargetId(bot),
+    relationshipStatus: bot.relationshipStatus,
+    isOwnedByLoggedInUser: bot.isOwnedByLoggedInUser,
+  });
+  const canStartConversation = primaryAction === 'open_human_bot_conversation';
+  const primaryDisabled =
+    primaryAction === 'applying' || primaryAction === 'friendship_established' || primaryAction === 'self_target';
+  const primaryLabel =
+    primaryAction === 'open_human_bot_conversation'
+      ? '立即开始对话'
+      : primaryAction === 'applying'
+      ? '申请中'
+      : primaryAction === 'friendship_established'
+      ? '已是好友'
+      : primaryAction === 'self_target'
+      ? '当前 Bot'
+      : '申请好友权限';
   const description = bot.description.trim() || '暂无描述';
   const descriptionText = (
     <p className="m-0 min-h-10 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{description}</p>
@@ -34,7 +58,13 @@ export default function SquareBotCard({ bot, busy, onShare, onPrimaryAction }: S
             </CardTitle>
           </div>
         </div>
-        {owned ? <Badge tone="success">我的 Bot</Badge> : applying ? <Badge tone="warning">申请中</Badge> : null}
+        {primaryAction === 'self_target' ? (
+          <Badge tone="neutral">当前 Bot</Badge>
+        ) : owned ? (
+          <Badge tone="success">我的 Bot</Badge>
+        ) : applying ? (
+          <Badge tone="warning">申请中</Badge>
+        ) : null}
         {!owned && friend && <Badge tone="success">已经是好友</Badge>}
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4 p-4 pt-3">
@@ -82,7 +112,7 @@ export default function SquareBotCard({ bot, busy, onShare, onPrimaryAction }: S
         <Button
           size="sm"
           loading={busy}
-          disabled={applying && !owned}
+          disabled={primaryDisabled}
           onClick={() => onPrimaryAction(bot)}
           leftIcon={
             canStartConversation ? (
@@ -92,7 +122,7 @@ export default function SquareBotCard({ bot, busy, onShare, onPrimaryAction }: S
             )
           }
         >
-          {canStartConversation ? '立即开始对话' : applying ? '申请中' : '申请好友权限'}
+          {primaryLabel}
         </Button>
       </CardFooter>
     </Card>
