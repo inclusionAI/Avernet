@@ -207,7 +207,7 @@ Bot 在一次激活里写的**每一段**文字都会被转发成群里的一条
 
 ```bash
 python3 -m unittest discover -s scripts/6bots_undercover_game_profile/referee/skills/undercover-game-referee/tests -v
-cd src/bcs/assets/undercover-game && npm run verify
+cd src/bcs/assets/panel && npm run verify
 ```
 
 覆盖：公开投影与脱敏、稳定标签、Human 私有 UI context、结构化/兼容投票解析、Action Dock、紧凑布局、可访问性、恢复消息、UMD 契约和公开扫描。

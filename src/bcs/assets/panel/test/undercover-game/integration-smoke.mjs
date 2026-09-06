@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import pkg from '../dist/index.umd.js';
+import pkg from '../../dist/index.umd.js';
 const {
   fetchNodeDetail,
   fetchPendingHumanNodes,

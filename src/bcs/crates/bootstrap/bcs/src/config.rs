@@ -2347,29 +2347,19 @@ file = "assets/panel/dist/index.umd.js"
     }
 
     #[test]
-    fn test_config_with_undercover_game_file_bundle() {
-        let toml = r#"
-bots_base_dir = "/bots"
-
-[[manifest.bundles]]
-name = "bcsPanel"
-type = "file"
-file = "assets/panel/dist/index.umd.js"
-
-[[manifest.bundles]]
-name = "undercoverGame"
-type = "file"
-file = "assets/undercover-game/dist/index.umd.js"
-"#;
-
-        let config: BcsConfig = toml::from_str(toml).unwrap();
-
-        assert_eq!(config.manifest.bundles.len(), 2);
-        assert_eq!(config.manifest.bundles[1].name, "undercoverGame");
-        assert_eq!(
-            config.manifest.bundles[1].file.as_deref(),
-            Some("assets/undercover-game/dist/index.umd.js")
-        );
+    fn test_shipped_manifests_use_the_shared_panel_bundle() {
+        for source in [
+            include_str!("../../../../configs/bcs-config-example.toml"),
+            include_str!("../../../../configs/bcs-config-local.toml"),
+            include_str!("../../../../configs/bcs-config-prod.toml"),
+        ] {
+            let config: BcsConfig = toml::from_str(source).unwrap();
+            assert_eq!(config.manifest.bundles.len(), 1);
+            let bundle = &config.manifest.bundles[0];
+            assert_eq!(bundle.name, "bcsPanel");
+            assert_eq!(bundle.url, None);
+            assert_eq!(bundle.file.as_deref(), Some("assets/panel/dist/index.umd.js"));
+        }
     }
 
     #[test]

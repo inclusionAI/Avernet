@@ -578,7 +578,7 @@ def forbid_line(word: str) -> str:
     return "；".join(parts) + "。"
 
 
-PANEL_COMPONENT = "undercoverGame.UndercoverGamePanel"
+PANEL_COMPONENT = "bcsPanel.UndercoverGamePanel"
 RUN_ID_TEMPLATE = "{{bcs.run_id}}"
 UI_CONTEXT_OPEN = "[UNDERCOVER_UI_CONTEXT_V1]"
 UI_CONTEXT_CLOSE = "[/UNDERCOVER_UI_CONTEXT_V1]"

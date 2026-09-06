@@ -14,3 +14,4 @@ export type {
   StateMachineRunViewData,
   StateMachineRunViewProps,
 } from './StateMachineRunView';
+export * from './undercover-game';

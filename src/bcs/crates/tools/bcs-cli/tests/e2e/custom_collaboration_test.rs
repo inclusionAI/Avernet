@@ -181,7 +181,7 @@ async fn collaborate_run_posts_undercover_game_opening_message() {
             "input": {},
             "opening_message": {
                 "type": "panel",
-                "component": "undercoverGame.UndercoverGamePanel",
+                "component": "bcsPanel.UndercoverGamePanel",
                 "params": {
                     "runId": "{{bcs.run_id}}",
                     "groupId": "{{bcs.group_id}}",
@@ -234,7 +234,7 @@ async fn collaborate_run_posts_undercover_game_opening_message() {
         .arg("--binding")
         .arg("writer=bot-writer")
         .arg("--panel-component")
-        .arg("undercoverGame.UndercoverGamePanel")
+        .arg("bcsPanel.UndercoverGamePanel")
         .arg("--panel-params")
         .arg(format!("@{}", params_file.display()))
         .arg("--panel-tab-id")

@@ -81,6 +81,7 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         for payload in (first, second):
             command = shlex.split(payload["run_command"])
             self.assertEqual(command[command.index("--panel-tab-closable") + 1], "false")
+            self.assertEqual(command[command.index("--panel-component") + 1], "bcsPanel.UndercoverGamePanel")
 
     def test_submission_command_matches_rendered_metadata(self) -> None:
         self.state["phase"] = "AWAIT_START"; self.state["round"] = 0; self.state["rounds"] = []
@@ -89,6 +90,8 @@ class UndercoverPanelParamsTest(unittest.TestCase):
         command = shlex.split(payload["run_command"])
         with patch.object(undercover, "bcs_cli", return_value=(0, '{"run_id":"run-created"}', "")) as bcs_cli:
             result = undercover.submit_run(self.state["session_id"], payload["yaml_path"], payload["input_path"], payload["panel_params_path"], payload["panel_tab"], payload["bindings"])
+        self.assertEqual(command[command.index("--panel-component") + 1], "bcsPanel.UndercoverGamePanel")
+        self.assertEqual(command[command.index("--session") + 1], self.state["session_id"])
         self.assertEqual(result["run_id"], "run-created")
         self.assertEqual(list(bcs_cli.call_args.args), command[1:])
 

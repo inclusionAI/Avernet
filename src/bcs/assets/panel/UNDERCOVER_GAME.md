@@ -1,6 +1,6 @@
-# `undercoverGame.UndercoverGamePanel`
+# `bcsPanel.UndercoverGamePanel`
 
-A dependency-free React UMD side panel for the existing BCS 谁是卧底 state-machine workflow. The exported component remains `undercoverGame.UndercoverGamePanel`.
+A React side panel in `@avernet-assets/bcs-panel` for the existing BCS 谁是卧底 state-machine workflow. The exported component remains `bcsPanel.UndercoverGamePanel`.
 
 ## Stable game-session panel
 
@@ -9,7 +9,7 @@ The referee opens one non-closable tab per game session and reuses it for speech
 ```bash
 bcs collaborate run ./phase.yaml \
   --session session-example \
-  --panel-component undercoverGame.UndercoverGamePanel \
+  --panel-component bcsPanel.UndercoverGamePanel \
   --panel-params @phase-panel-params.json \
   --panel-tab-id undercover-game-session-example \
   --panel-tab-title '谁是卧底 · 第 1 轮发言' \
@@ -60,7 +60,7 @@ The panel root is its own bounded viewport. The room scrolls inside the scene re
 
 ## Asset-backed pixel room
 
-Version 1.1 renders a local, atlas-backed indoor game room. The wall/floor, rug, oval table, directional chairs, host podium, window, lamp, shelf, plant, frames, clock, character variants, portraits, bubbles, cards, and lifecycle markers are embedded into the single UMD bundle; the panel makes no runtime image request to an asset host.
+The component renders a local, atlas-backed indoor game room. The wall/floor, rug, oval table, directional chairs, host podium, window, lamp, shelf, plant, frames, clock, character variants, portraits, bubbles, cards, and lifecycle markers are embedded into the single UMD bundle; the panel makes no runtime image request to an asset host.
 
 The room has three container-driven compositions:
 
@@ -98,7 +98,7 @@ The scan enforces complete provenance, no tracked source-pack archives, a 120 Ki
 ### Local design preview
 
 Run `npm exec vite -- --host 127.0.0.1 --port 4178`, then open
-`http://127.0.0.1:4178/test/visual-preview.html`. The preview uses synthetic
+`http://127.0.0.1:4178/test/undercover-game/visual-preview.html`. The preview uses synthetic
 players and local mock responses; submissions do not affect a real game.
 Use `width=320&height=600&mode=speech` or `width=560&height=600&mode=vote`
 in the query string to inspect input layouts; `mode=observe` shows the waiting

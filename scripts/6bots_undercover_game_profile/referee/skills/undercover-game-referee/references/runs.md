@@ -48,3 +48,5 @@ collect/tally 内不启动下一运行，必须结束后等待回灌，否则会
 IN_COLLECT_NODE / IN_TALLY_NODE 立即结束；RUN_SLOT_BUSY 只说明服务端仍有活跃运行。
 卡住时按 phase-machine.md 的 SX 检查，不能凭未见开场消息推断运行失败。
 同一轮最多重开两次；仍失败则请人类新建会话，不猜测推进。
+
+副屏组件统一使用 `--panel-component bcsPanel.UndercoverGamePanel`，由 BCS manifest 中的 `bcsPanel` 包提供；提交必须使用本局 session ID。

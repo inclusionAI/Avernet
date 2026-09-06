@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-const require=createRequire(import.meta.url);const api=require('../dist/index.umd.js');
+const require=createRequire(import.meta.url);const api=require('../../dist/index.umd.js');
 const {ApiRequestError,eligibleVoteCandidates,getSeatCoordinates,latestAttemptEvents,mapPublicOutputEvents,mergePublicOutputEvents,normalizeCurrentRoundUpstream,normalizePanelParams,normalizeUndercoverGameViewModel,parsePrivateActionContext,publicEventFromNodeDetail,requestJson,serializeVoteAbstain,serializeVoteTarget,spriteUrl,sprites,truncateBubbleText,unicodeLength,validateSpeech}=api;
 assert.equal(api.joinUrl('/api/','state-machine-runs'),'/api/state-machine-runs');
 assert.deepEqual(api.unwrapEnvelope({code:20000,request_id:'r',data:{ok:true}}),{ok:true});

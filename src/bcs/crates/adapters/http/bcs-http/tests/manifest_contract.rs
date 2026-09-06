@@ -69,12 +69,6 @@ async fn manifest_file_bundle_returns_asset_url_and_serves_file_at_runtime() {
                 url: None,
                 file: Some(bundle_path.display().to_string()),
             },
-            ManifestBundleConfig {
-                name: "undercoverGame".to_string(),
-                source_type: Some(ManifestBundleSourceType::File),
-                url: None,
-                file: Some(bundle_path.display().to_string()),
-            },
         ],
     };
     let app = build_router(
@@ -101,11 +95,7 @@ async fn manifest_file_bundle_returns_asset_url_and_serves_file_at_runtime() {
         manifest_body["bundles"][0]["url"],
         "/assets/bcsPanel/index.umd.js"
     );
-    assert_eq!(manifest_body["bundles"][1]["name"], "undercoverGame");
-    assert_eq!(
-        manifest_body["bundles"][1]["url"],
-        "/assets/undercoverGame/index.umd.js"
-    );
+    assert_eq!(manifest_body["bundles"].as_array().unwrap().len(), 1);
 
     let response = app
         .oneshot(

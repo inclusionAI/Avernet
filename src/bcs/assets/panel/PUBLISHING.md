@@ -52,7 +52,9 @@ Keep these fields in `package.json` when changing the package metadata:
     "dist/index.umd.js",
     "README.md",
     "PUBLISHING.md",
-    "LICENSE"
+    "LICENSE",
+    "UNDERCOVER_GAME.md",
+    "assets"
   ]
 }
 ```
@@ -153,3 +155,7 @@ npm view @avernet-assets/bcs-panel version
 
 - [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/)
 - [GitHub Actions OIDC](https://docs.github.com/en/actions/concepts/security/openid-connect)
+
+Both side panels ship in this package. Include `assets/` so the embedded CC0
+artwork retains its source pixels and license notices. No separate game package
+or release workflow is required.

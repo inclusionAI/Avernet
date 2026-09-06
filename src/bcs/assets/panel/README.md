@@ -99,3 +99,18 @@ npm pack --dry-run
 The `prepack` lifecycle also runs verification before the GitHub Action creates
 or publishes the package archive. See [PUBLISHING.md](PUBLISHING.md) for the
 OIDC configuration, versioning, tag, verification, and troubleshooting steps.
+
+## Undercover game panel
+
+The same `bcsPanel` bundle also exports `UndercoverGamePanel`. The referee uses
+`--panel-component bcsPanel.UndercoverGamePanel` with the current game session
+and a stable, non-closable tab across speech, voting, retries and later rounds.
+The default `bcsPanel.StateMachineRunView` remains available. See
+[game parameters, interactions and preview](UNDERCOVER_GAME.md).
+
+Build and deploy `assets/panel/dist/index.umd.js` alongside the BCS configuration;
+the checked-in manifests serve this single local bundle. CDN deployments must
+publish version 1.4.0 or later of this package before switching the manifest URL
+and referee together. Previously stored messages using the retired component
+name need a new panel submission from the referee. Game state and HTTP contracts
+are unchanged.

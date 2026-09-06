@@ -6114,7 +6114,7 @@ mod tests {
             overridden_run.opening_message_override = Some(
                 serde_json::from_value(serde_json::json!({
                     "type": "panel",
-                    "component": "undercoverGame.UndercoverGamePanel",
+                    "component": "bcsPanel.UndercoverGamePanel",
                     "params": {
                         "groupId": "{{bcs.group_id}}",
                         "sessionId": "{{bcs.session_id}}",
@@ -6133,7 +6133,7 @@ mod tests {
             let rendered =
                 render_state_machine_opening_message(&group, &overridden_run, Some("一次性任务"))
                     .expect("render explicit one-shot panel");
-            assert_eq!(rendered.component.as_deref(), Some("undercoverGame.UndercoverGamePanel"));
+            assert_eq!(rendered.component.as_deref(), Some("bcsPanel.UndercoverGamePanel"));
             assert!(rendered.content.contains("\"groupId\":\"group-1\""));
             assert!(rendered.content.contains("\"sessionId\":\"session-1\""));
             assert!(rendered.content.contains("\"runId\":\"run-1\""));

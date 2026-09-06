@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-const source=readFileSync(new URL('../src/speechBubbleLayout.ts',import.meta.url),'utf8');
+const source=readFileSync(new URL('../../src/undercover-game/speechBubbleLayout.ts',import.meta.url),'utf8');
 const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2020}}).outputText;
 const {placeSpeechBubble}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const intersects=(a,b)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.height,b.y+b.height)-Math.max(a.y,b.y));

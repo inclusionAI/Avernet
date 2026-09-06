@@ -2,7 +2,7 @@ import { sixPlayerFixtures } from './fixtures/six-player.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-const require=createRequire(import.meta.url);const api=require('../dist/index.umd.js');
+const require=createRequire(import.meta.url);const api=require('../../dist/index.umd.js');
 const baseline=JSON.parse(readFileSync(new URL('./fixtures/visual-baseline.json',import.meta.url),'utf8'));
 assert.deepEqual(Object.keys(sixPlayerFixtures),['wideSpeaking','mediumHumanSpeech','mediumVoting','narrowRoster','laterRoundElimination','shortHeightDock','reducedMotion']);
 for(const fixture of Object.values(sixPlayerFixtures))assert.equal(fixture.players.length,6);
