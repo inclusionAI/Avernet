@@ -4,7 +4,7 @@
 
 - Log-only operation timing, termination, request aggregation and correlation.
 - Parent/child observation IDs and explicit propagation into spawned tasks.
-- `with_trace_id`: a data-only scope for an adapter-supplied trace ID string.
+- Request-scoped correlation independent of distributed tracing.
 
 ## Consumes
 
@@ -30,33 +30,34 @@ cancellation. Operation names and outcomes are bounded constants. It never inspe
 or logs operation arguments, values or raw errors. It emits tracing log events;
 bootstrap controls filtering, formatting, files and subscriber lifecycle.
 
-`with_trace_id` accepts an opaque string, with empty meaning absent; the adapter
-owns validation/extraction. `current_trace_id` only reads that data. Nested scopes
+`with_request_context` scopes request IDs and operation summaries. Nested scopes
 restore outer values, and scope completion/cancellation removes the inner value.
 Detached work inherits IDs only through `in_current_context`, which copies the
-request/operation/trace correlation and logging subscriber, never a live span.
+request/operation correlation and logging subscriber, never a live span.
 The helper neither enters a span nor prolongs its lifetime. New tasks without an
 explicit wrapper do not inherit task-local correlation automatically.
 
-A future trace adapter may consume a declared observation hook from this package;
-the base must never import its implementation. This extraction uses the existing
-tracing event/subscriber extension mechanism and adds no plugin runtime or spans.
+The package does not acquire, store or emit distributed trace IDs. Future tracing
+integration needs its own declared context/propagation contract; the base must
+never import its implementation. This extraction uses the existing tracing
+event/subscriber extension mechanism and adds no plugin runtime or spans.
 
 ## Change impact
 
 Public and internal operation callers depend on this package. GenAI encoders stay
-in bcs-telemetry. HTTP and WebSocket tracing adapters explicitly inject existing trace IDs;
-callers outside an injected scope get an empty trace ID and may still correlate
-by request/operation ID. Log schemas, levels, thresholds and result semantics are
-unchanged. The public revision and internal path dependencies must move together.
+in bcs-telemetry. The temporary trace-ID helper APIs and added observation
+`trace_id` fields are removed from public and internal consumers together.
+Correlation uses request/operation IDs; levels, thresholds and result semantics
+are unchanged. Existing A2A tracing and dependency protocol trace fields remain
+independent. The public revision and internal path dependencies must move together.
 
 ## Tests
 
 - `cargo test -p bcs-observability` covers result preservation, redaction,
-  cancellation, stalled calls, nested/spawned IDs and trace scope isolation.
+  cancellation, stalled calls, nested/spawned IDs and request scope isolation.
 - `cargo test -p bcs-http --test request_observations` covers the real HTTP bridge
   and proves detached logs do not delay either existing A2A span's export.
 - `cargo test -p bcs-ws --test frame_compat` covers WebSocket callback trace
-  correlation, run aliases, missing trace mappings and scope cleanup.
+  correlation, run aliases and missing trace mappings remain intact.
 - `bash scripts/ci/check-observability-deps.sh` checks the normal/build dependency
   tree with all features for trace/metric implementations.

@@ -17,7 +17,6 @@ struct RequestContext {
 tokio::task_local! {
     static REQUEST_CONTEXT: RequestContext;
     static CURRENT_OPERATION: uuid::Uuid;
-    static TRACE_ID: String;
 }
 
 pub fn current_operation_id() -> String {
@@ -26,20 +25,6 @@ pub fn current_operation_id() -> String {
 
 pub fn current_request_id() -> String {
     REQUEST_CONTEXT.try_with(|context| context.id.clone()).unwrap_or_default()
-}
-
-/// Returns only the correlation ID supplied by an adapter, or an empty string.
-/// No tracing SDK or active span is consulted.
-pub fn current_trace_id() -> String {
-    TRACE_ID.try_with(Clone::clone).unwrap_or_default()
-}
-
-/// Scopes an adapter-supplied trace ID as log data, without creating or entering a span.
-/// The ID is opaque: validation/extraction belongs to the adapter. Empty means absent.
-/// Nested scopes restore the outer ID; completion or cancellation removes the scope.
-/// Spawned work inherits it only through an explicit `in_current_context` wrapper.
-pub async fn with_trace_id<T>(trace_id: String, future: impl Future<Output = T>) -> T {
-    TRACE_ID.scope(trace_id, future).await
 }
 
 fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static str, duration_ms: f64) {
@@ -62,7 +47,7 @@ pub async fn with_request_context<T>(request_id: String, future: impl Future<Out
     let observations = serde_json::to_string(&*totals).expect("finite operation durations");
     drop(totals);
     tracing::info!(target: "bcs_observation", request_id = %context.id,
-        trace_id = %current_trace_id(), observations = %observations, "http.request.operations");
+        observations = %observations, "http.request.operations");
     result
 }
 
@@ -72,14 +57,13 @@ pub fn in_current_context<T>(future: impl Future<Output = T>) -> impl Future<Out
     let future = Box::pin(future);
     let context = REQUEST_CONTEXT.try_with(Clone::clone).ok();
     let operation_id = CURRENT_OPERATION.try_with(|id| *id).ok();
-    let trace_id = current_trace_id();
     let future = async move {
         match operation_id {
             Some(id) => CURRENT_OPERATION.scope(id, future).await,
             None => future.await,
         }
     };
-    let future = TRACE_ID.scope(trace_id, future).with_current_subscriber();
+    let future = future.with_current_subscriber();
     async move {
         match context {
             Some(context) => REQUEST_CONTEXT.scope(context, future).await,
@@ -96,7 +80,6 @@ pub struct Operation {
     parent_operation_id: String,
     request_id: String,
     context: Option<RequestContext>,
-    trace_id: String,
     started: Instant,
     finished: bool,
 }
@@ -107,8 +90,7 @@ impl Operation {
         let parent_operation_id = current_operation_id();
         let request_id = current_request_id();
         let context_data = REQUEST_CONTEXT.try_with(Clone::clone).ok();
-        let trace_id = current_trace_id();
-        Self { name, id, parent_operation_id, request_id, context: context_data, trace_id, started: Instant::now(), finished: false }
+        Self { name, id, parent_operation_id, request_id, context: context_data, started: Instant::now(), finished: false }
     }
 
     pub fn elapsed_ms(&self) -> f64 { self.started.elapsed().as_secs_f64() * 1000.0 }
@@ -123,10 +105,10 @@ impl Operation {
         let duration_ms = self.elapsed_ms();
         if let Some(context) = &self.context { accumulate(context, self.name, outcome, duration_ms); }
         if matches!(outcome, "error" | "cancelled" | "panicked") || duration_ms >= 100.0 {
-            tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
+            tracing::warn!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, outcome,
                 duration_ms, "bcs.operation.finished");
         } else {
-            tracing::debug!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, trace_id = %self.trace_id, outcome,
+            tracing::debug!(target: "bcs_observation", operation = self.name, operation_id = %self.id, parent_operation_id = %self.parent_operation_id, request_id = %self.request_id, outcome,
                 duration_ms, "bcs.operation.finished");
         }
     }
@@ -158,7 +140,7 @@ async fn wait_inner<T>(operation: &Operation, future: impl Future<Output = T>) -
         if !warned && warning.as_mut().poll(cx).is_ready() {
             warned = true;
             tracing::warn!(target: "bcs_observation",
-                operation = operation.name, operation_id = %operation.id, parent_operation_id = %operation.parent_operation_id, request_id = %operation.request_id, trace_id = %operation.trace_id, duration_ms = operation.elapsed_ms(),
+                operation = operation.name, operation_id = %operation.id, parent_operation_id = %operation.parent_operation_id, request_id = %operation.request_id, duration_ms = operation.elapsed_ms(),
                 "bcs.operation.stalled");
         }
         std::task::Poll::Pending

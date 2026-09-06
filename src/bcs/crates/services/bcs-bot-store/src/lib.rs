@@ -39,7 +39,7 @@ use bcs_service_api::{
 
 fn log_bot_cache_source(source: &'static str) {
     bcs_observability::count("bot.memory", source);
-    debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), source, "bot.load.source");
+    debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), source, "bot.load.source");
 }
 
 pub mod memory;
@@ -666,7 +666,7 @@ impl PersistentBotRepo {
             .hash_set(&key, "status", status.status.as_bytes().to_vec())
             .await
         {
-            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
             return;
         }
 
@@ -698,9 +698,9 @@ impl PersistentBotRepo {
         failed_commands += u64::from(result.is_err());
 
         if failed_commands > 0 {
-            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
         } else {
-            debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+            debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
         }
     }
 
@@ -712,7 +712,7 @@ impl PersistentBotRepo {
             Ok(raw) => raw,
             Err(_) => {
                 bcs_observability::count("bot_status.fallback", "cache_error");
-                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
                 return BotDynamicStatus::default();
             }
         };
@@ -728,7 +728,7 @@ impl PersistentBotRepo {
             }
             Err(_) => {
                 bcs_observability::count("bot_status.fallback", "decode_error");
-                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
                 BotDynamicStatus::default()
             }
         }
@@ -1551,7 +1551,7 @@ impl BotRepoPort for PersistentBotRepo {
         match bcs_observability::observe_result("bot.load", self.try_get(bot_id)).await {
             Ok(value) => value,
             Err(_) => {
-                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), outcome = "load_error", fallback = "omitted", "bot.load.fallback");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "load_error", fallback = "omitted", "bot.load.fallback");
                 None
             }
         }

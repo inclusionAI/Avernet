@@ -361,7 +361,7 @@ pub async fn query_bots(
         .map(bot_query_entry_to_query_json)
         .collect();
 
-    tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), returned_count, duration_ms = response_started.elapsed().as_secs_f64() * 1000.0, "bots.query.response_built");
+    tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), returned_count, duration_ms = response_started.elapsed().as_secs_f64() * 1000.0, "bots.query.response_built");
     Ok(Json(Value::Array(entries)))
 }
 

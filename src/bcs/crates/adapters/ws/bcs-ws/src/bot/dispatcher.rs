@@ -976,13 +976,7 @@ async fn handle_event_frame(
             otel.kind = "consumer",
         );
         let _ = span.set_parent(Context::new().with_remote_span_context(trace_parent));
-        let trace_id = {
-            let context = span.context();
-            let context_span = context.span();
-            if context_span.span_context().is_valid() { context_span.span_context().trace_id().to_string() }
-            else { String::new() }
-        };
-        bcs_observability::with_trace_id(trace_id, async {
+        async {
             handle_default_group_event(
                 state,
                 &bot_id,
@@ -997,7 +991,7 @@ async fn handle_event_frame(
             .await?;
             record_ws_bot_response_trace(&bot_id, &run_id, &event_state, &event_payload);
             Ok::<(), BotWsDispatchError>(())
-        })
+        }
         .instrument(span)
         .await?;
     } else {

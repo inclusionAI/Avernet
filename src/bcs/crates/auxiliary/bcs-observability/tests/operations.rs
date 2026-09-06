@@ -21,7 +21,11 @@ async fn capture(future: impl Future<Output = ()>) -> String {
         .with_writer(move || writer.clone()).finish();
     future.with_subscriber(subscriber).await;
     let bytes = buffer.0.lock().unwrap().clone();
-    String::from_utf8(bytes).unwrap()
+    let logs = String::from_utf8(bytes).unwrap();
+    for event in logs.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()) {
+        assert!(event["fields"].get("trace_id").is_none(), "unexpected log trace ID: {event}");
+    }
+    logs
 }
 
 #[tokio::test]
@@ -34,6 +38,8 @@ async fn observations_emit_logs_without_creating_spans() {
         }).await.unwrap();
     })).await;
     let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(events.iter().all(|event| event["fields"].get("trace_id").is_none()),
+        "operation logs must use request/operation IDs without a trace ID: {logs}");
     assert!(events.iter().any(|event| event["fields"]["message"] == "http.request.operations"));
     assert_eq!(events.iter().filter(|event| event["fields"]["message"] == "bcs.operation.finished").count(), 2);
     assert!(events.iter().all(|event| event.get("span").is_none() && event.get("spans").is_none()),
@@ -146,44 +152,40 @@ async fn nested_and_spawned_operations_report_the_parent_id() {
 }
 
 #[tokio::test]
-async fn trace_strings_are_scoped_and_propagated_without_a_tracing_sdk() {
-    let logs = capture(bcs_observability::with_trace_id("outer-trace".into(),
-        bcs_observability::with_request_context("request-with-trace".into(), async {
-            let detached = bcs_observability::with_trace_id("inner-trace".into(), async {
-                assert_eq!(bcs_observability::current_trace_id(), "inner-trace");
-                bcs_observability::in_current_context(async {
-                    assert_eq!(bcs_observability::current_trace_id(), "inner-trace");
-                    assert_eq!(bcs_observability::current_request_id(), "request-with-trace");
-                    bcs_observability::observe_value("test.trace", async {}).await;
-                })
-            }).await;
-            assert_eq!(bcs_observability::current_trace_id(), "outer-trace");
-            tokio::spawn(detached).await.unwrap();
-            tokio::spawn(async { assert_eq!(bcs_observability::current_trace_id(), ""); }).await.unwrap();
-            let result = tokio::time::timeout(Duration::from_millis(5),
-                bcs_observability::with_trace_id("cancelled-trace".into(), std::future::pending::<()>())).await;
-            assert!(result.is_err());
-            assert_eq!(bcs_observability::current_trace_id(), "outer-trace");
-        }))).await;
+async fn request_scopes_restore_after_nested_work_and_cancellation() {
+    let logs = capture(bcs_observability::with_request_context("outer-request".into(), async {
+        let detached = bcs_observability::with_request_context("inner-request".into(), async {
+            assert_eq!(bcs_observability::current_request_id(), "inner-request");
+            bcs_observability::in_current_context(async {
+                assert_eq!(bcs_observability::current_request_id(), "inner-request");
+                bcs_observability::observe_value("test.detached", async {}).await;
+            })
+        }).await;
+        assert_eq!(bcs_observability::current_request_id(), "outer-request");
+        tokio::spawn(detached).await.unwrap();
+        tokio::spawn(async { assert_eq!(bcs_observability::current_request_id(), ""); }).await.unwrap();
+        let result = tokio::time::timeout(Duration::from_millis(5),
+            bcs_observability::with_request_context("cancelled-request".into(), std::future::pending::<()>())).await;
+        assert!(result.is_err());
+        assert_eq!(bcs_observability::current_request_id(), "outer-request");
+    })).await;
     let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    let operation = events.iter().find(|e| e["fields"]["operation"] == "test.trace").unwrap();
-    let summary = events.iter().find(|e| e["fields"]["message"] == "http.request.operations").unwrap();
-    assert_eq!(operation["fields"]["trace_id"], "inner-trace");
-    assert_eq!(summary["fields"]["trace_id"], "outer-trace");
-    assert_eq!(bcs_observability::current_trace_id(), "");
+    let operation = events.iter().find(|e| e["fields"]["operation"] == "test.detached").unwrap();
+    assert_eq!(operation["fields"]["request_id"], "inner-request");
+    assert_eq!(bcs_observability::current_request_id(), "");
 }
 
 #[tokio::test]
-async fn concurrent_trace_scopes_do_not_leak_between_requests() {
+async fn concurrent_request_scopes_do_not_leak() {
     let barrier = Arc::new(tokio::sync::Barrier::new(2));
-    let request = |trace_id: &'static str| {
+    let request = |request_id: &'static str| {
         let barrier = barrier.clone();
-        bcs_observability::with_trace_id(trace_id.into(), async move {
+        bcs_observability::with_request_context(request_id.into(), async move {
             barrier.wait().await;
             tokio::task::yield_now().await;
-            assert_eq!(bcs_observability::current_trace_id(), trace_id);
+            assert_eq!(bcs_observability::current_request_id(), request_id);
         })
     };
-    tokio::join!(request("trace-a"), request("trace-b"));
-    assert_eq!(bcs_observability::current_trace_id(), "");
+    tokio::join!(request("request-a"), request("request-b"));
+    assert_eq!(bcs_observability::current_request_id(), "");
 }

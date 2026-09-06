@@ -370,7 +370,7 @@ impl BotQueryService for Bot {
         for bot in bots {
             entries.push(bcs_observability::observe_value("bots.query.status_enrich", self.bot_to_query_entry(bot)).await);
         }
-        tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), input_count, unique_count, returned_count = entries.len(), load_ms, enrich_ms = enrich_started.elapsed().as_secs_f64() * 1000.0, duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bots.query.summary");
+        tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), input_count, unique_count, returned_count = entries.len(), load_ms, enrich_ms = enrich_started.elapsed().as_secs_f64() * 1000.0, duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bots.query.summary");
         Ok(BotQueryByIdsResult { bots: entries })
     }
 

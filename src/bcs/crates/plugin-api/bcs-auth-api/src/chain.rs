@@ -47,7 +47,7 @@ impl AuthPluginChain {
             }
             let started = std::time::Instant::now();
             let result = bcs_observability::observe_result("auth.plugin", plugin.authenticate(headers)).await;
-            tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), trace_id = %bcs_observability::current_trace_id(), plugin = name, plugin_index,
+            tracing::info!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), plugin = name, plugin_index,
                 duration_ms = started.elapsed().as_secs_f64() * 1000.0,
                 chain_elapsed_ms = chain_started.elapsed().as_secs_f64() * 1000.0,
                 outcome = match &result { Ok(Some(_)) => "success", Ok(None) => "no_match", Err(_) => "error" },

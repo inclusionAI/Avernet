@@ -42,6 +42,7 @@ async fn malformed_body_is_correlated_before_handler_and_payload_is_not_logged()
     assert!(!logs.contains("private-"));
     for line in logs.lines() {
         let event: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert!(event["fields"].get("trace_id").is_none());
         assert!(event.get("span").is_none() && event.get("spans").is_none(),
             "request logging must not create spans: {line}");
     }
@@ -89,7 +90,7 @@ async fn coordination_requests_are_logged_without_creating_spans() {
         let event = events.iter().find(|event| event["fields"]["message"] == name)
             .unwrap_or_else(|| panic!("missing {name}: {logs}"));
         assert_eq!(event["fields"]["request_id"], "coordination-42");
-        assert_eq!(event["fields"]["trace_id"], "");
+        assert!(event["fields"].get("trace_id").is_none());
     }
     let summary = events.iter().find(|event| event["fields"]["message"] == "http.request.operations").unwrap();
     let observations: serde_json::Value = serde_json::from_str(summary["fields"]["observations"].as_str().unwrap()).unwrap();
@@ -126,23 +127,42 @@ async fn cancelled_handler_emits_termination_without_success() {
     assert!(logs.contains("http.request.cancelled"));
     assert!(logs.contains("cancelled-42"));
     assert!(!logs.contains("http.request.response_ready"));
+    for event in logs.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()) {
+        assert!(event["fields"].get("trace_id").is_none());
+    }
 }
 
 #[tokio::test]
-async fn log_context_does_not_implicitly_read_an_otel_span() {
+async fn operation_logs_do_not_copy_existing_otel_trace_ids() {
     use opentelemetry::trace::TracerProvider as _;
-    use opentelemetry_sdk::trace::SdkTracerProvider;
+    use opentelemetry_sdk::trace::{InMemorySpanExporterBuilder, SdkTracerProvider};
     use tracing::Instrument;
     use tracing_subscriber::prelude::*;
 
-    let provider = SdkTracerProvider::builder().build();
+    let exporter = InMemorySpanExporterBuilder::new().build();
+    let provider = SdkTracerProvider::builder().with_simple_exporter(exporter.clone()).build();
+    let buffer = Buffer::default();
+    let writer = buffer.clone();
     let subscriber = tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().json().with_writer(move || writer.clone()))
         .with(tracing_opentelemetry::layer().with_tracer(provider.tracer("log-context-test")));
-    let trace_id = async {
-        async { bcs_observability::current_trace_id() }
-            .instrument(tracing::info_span!("existing-span")).await
+    async {
+        bcs_observability::with_request_context("independent-request".into(),
+            bcs_observability::observe_value("test.existing_span", async {}))
+            .instrument(tracing::info_span!("existing-span")).await;
     }.with_subscriber(subscriber).await;
-    assert_eq!(trace_id, "", "only an explicitly supplied trace ID belongs to log context");
+    let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
+    let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    assert!(events.iter().any(|event| event["fields"]["message"] == "bcs.operation.finished"));
+    for event in events {
+        assert_eq!(event["fields"]["request_id"], "independent-request");
+        assert!(event["fields"].get("trace_id").is_none());
+    }
+    provider.force_flush().unwrap();
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].name, "existing-span");
+    assert!(spans[0].span_context.is_valid());
 }
 
 #[tokio::test]
@@ -181,7 +201,7 @@ async fn detached_logging_does_not_extend_existing_a2a_spans() {
                     let task = tokio::spawn(bcs_observability::in_current_context(async move {
                         started_tx.send(()).unwrap();
                         release_rx.await.unwrap();
-                        let ids = (bcs_observability::current_request_id(), bcs_observability::current_trace_id());
+                        let ids = (bcs_observability::current_request_id(), bcs_observability::current_operation_id());
                         let has_active_span = tracing::Span::current().id().is_some();
                         bcs_observability::observe_value("test.background", async {}).await;
                         (ids, has_active_span)
@@ -205,7 +225,7 @@ async fn detached_logging_does_not_extend_existing_a2a_spans() {
         provider.force_flush().unwrap();
         let spans_before_background_finishes = exporter.get_finished_spans().unwrap();
         release_tx.send(()).unwrap();
-        let ((request_id, trace_id), has_active_span) = task.await.unwrap();
+        let ((request_id, operation_id), has_active_span) = task.await.unwrap();
         provider.force_flush().unwrap();
 
         assert_eq!(spans_before_background_finishes.len(), 1,
@@ -214,17 +234,21 @@ async fn detached_logging_does_not_extend_existing_a2a_spans() {
         assert_eq!(exporter.get_finished_spans().unwrap().len(), 1);
         assert!(!has_active_span, "log correlation must not enter the original A2A span");
         assert_eq!(request_id, "detached-request");
-        assert_eq!(trace_id, "0af7651916cd43dd8448eb211c80319c");
+        assert!(uuid::Uuid::parse_str(&operation_id).is_ok());
+        assert_eq!(spans_before_background_finishes[0].span_context.trace_id().to_string(),
+            "0af7651916cd43dd8448eb211c80319c");
+        assert_eq!(spans_before_background_finishes[0].parent_span_id.to_string(), "b7ad6b7169203331");
         let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
         for event in logs.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()) {
             if matches!(event["fields"]["message"].as_str(), Some("http.request.started" | "http.request.operations" | "http.request.response_ready")) {
                 assert_eq!(event["fields"]["request_id"], request_id);
-                assert_eq!(event["fields"]["trace_id"], trace_id);
+                assert!(event["fields"].get("trace_id").is_none());
             }
         }
         let background = logs.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
             .find(|event| event["fields"]["operation"] == "test.background").unwrap();
         assert_eq!(background["fields"]["request_id"], request_id);
-        assert_eq!(background["fields"]["trace_id"], trace_id);
+        assert_eq!(background["fields"]["parent_operation_id"], operation_id);
+        assert!(background["fields"].get("trace_id").is_none());
     }
 }
