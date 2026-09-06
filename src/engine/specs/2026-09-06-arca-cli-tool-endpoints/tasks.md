@@ -2,28 +2,28 @@
 
 > Status legend: `[ ]` todo · `[~]` in-progress · `[x]` done · `[!]` blocked
 
-## Task 1: Add the `cli_tools` core package — protocol, models, directory
+## Task 1 `[x]`: Add the `cli_tools` core package — protocol, models, directory
 - **Goal:** Define the service contract and the per-engine directory resolution,
   with no implementation behind them yet.
 - **Files:** `src/engine/community/core/cli_tools/__init__.py`,
   `core/cli_tools/protocol.py`, `core/cli_tools/models.py`,
   `core/cli_tools/directories.py`
 - **Done when:**
-  - [ ] `CliToolsService` Protocol declares `install`, `delete`, `list_tools`,
+  - [x] `CliToolsService` Protocol declares `install`, `delete`, `list_tools`,
         `read_tool`, `replace_all`, and is `@runtime_checkable`.
-  - [ ] **Every Protocol member is decorated `@abstractmethod`**, so an
+  - [x] **Every Protocol member is decorated `@abstractmethod`**, so an
         implementation that drops one fails at construction rather than
         inheriting a `...` stub that silently returns `None`.
-  - [ ] `CliToolInfo`, `CliToolPayload`, `CliToolResult` are frozen dataclasses.
-  - [ ] `cli_dir_beside(workspace)` states the shared rule once: a bot's `cli/`
+  - [x] `CliToolInfo`, `CliToolPayload`, `CliToolResult` are frozen dataclasses.
+  - [x] `cli_dir_beside(workspace)` states the shared rule once: a bot's `cli/`
         is its workspace's sibling.
-  - [ ] `openclaw_cli_dir()` resolves lazily from `workspace_root_strict()`,
+  - [x] `openclaw_cli_dir()` resolves lazily from `workspace_root_strict()`,
         returning the workspace's sibling when the env var is set and
         `~/.openclaw/cli` when it is not — never resolved at import time.
-  - [ ] `claude_code_cli_dir()` resolves `<home>/.claude_code/cli` from that
+  - [x] `claude_code_cli_dir()` resolves `<home>/.claude_code/cli` from that
         engine's own workspace root (`plugins/claude_code/layout_pool.py:45`),
         which has no env override.
-  - [ ] Module docstrings cite `engine-requirements.zh-CN.md` §4 A2 as the
+  - [x] Module docstrings cite `engine-requirements.zh-CN.md` §4 A2 as the
         contract and state that the directory is the engine's, not the platform's.
 - **Depends on:** —
 
