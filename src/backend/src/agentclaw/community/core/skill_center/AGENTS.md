@@ -153,6 +153,35 @@ Engine 拥有物理布局。Backend 通过 `community/core/skills_pool/` 的版�
 
 完整内容库与 active 发现入口分离。逐 Skill 入口可以指向 Repo/Local/Center，不能新增指向整库的 active 桥。受管链接、用户实体目录、悬空链接的降级处理以 Runtime mapping/apply contract 为准；操作结果应保留具体问题项。
 
+### 7.1 Engine 目录与 Legacy/Pool 对照
+
+排查软链、Local 文件操作、Pool 迁移、Service Artifact 排除目录时，必须核对本表与实际 Runtime probe。表格是上述基线的默认路径速查，不是另一套路径配置；权威实现为 `src/engine/src/engine/community/core/skills/layout_planner.py` 的 descriptor/resolver。Backend 现有兼容镜像位于 `community/core/workspace/skill_layout.py`，修改布局时两端及合同测试必须一致。
+
+下表路径均相对 Runtime home（默认 `/home/admin`）；例如 `.hermes/skills` 的完整默认路径为 `/home/admin/.hermes/skills`。Local/Repo/Center 列是内容库根目录，不是激活入口。
+
+| 实际文件型 Engine | layout | active root | Local root | Repo root | Center root |
+| --- | --- | --- | --- | --- | --- |
+| OpenClaw | Legacy | `.openclaw/workspace/skills` | `.openclaw/workspace/skills/skills-local` | `.openclaw/workspace/skills/skills-repo` | `.openclaw/workspace/skills-pool/skill-center` |
+| OpenClaw | Pool | `.openclaw/workspace/skills` | `.openclaw/workspace/skills-pool/skills-local` | `.openclaw/workspace/skills-pool/skills-repo` | `.openclaw/workspace/skills-pool/skill-center` |
+| Claude Code | Legacy | `.claude/skills` | `.claude_code/workspace/skills/skills-local` | `.claude_code/skills-repo` | `.claude_code/workspace/skills-pool/skill-center` |
+| Claude Code | Pool | `.claude/skills` | `.claude_code/workspace/skills-pool/skills-local` | `.claude_code/workspace/skills-pool/skills-repo` | `.claude_code/workspace/skills-pool/skill-center` |
+| AICoding | Legacy | `.claude/skills` | `.aicoding/workspace/skills/skills-local` | `.aicoding/skills-repo` | `.aicoding/workspace/skills-pool/skill-center` |
+| AICoding | Pool | `.claude/skills` | `.aicoding/workspace/skills-pool/skills-local` | `.aicoding/workspace/skills-pool/skills-repo` | `.aicoding/workspace/skills-pool/skill-center` |
+| Hermes | Legacy | `.hermes/skills` | `.hermes/workspace/skills/skills-local` | `.hermes/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
+| Hermes | Pool | `.hermes/skills` | `.hermes/workspace/skills-pool/skills-local` | `.hermes/workspace/skills-pool/skills-repo` | `.hermes/workspace/skills-pool/skill-center` |
+
+目录语义与排查规则：
+
+- Legacy → Pool 改变 Local/Repo 内容根，不改变该 Engine 的 active root。Center 在两种 layout 下都使用同一个 `skills-pool/skill-center` 根；存在该目录或 Center mount 不证明 Local/Repo 已完成 Pool 切换。
+- 正常逻辑映射为 `active_root/<link_name>` → Local/Repo 根下的 `<relative_path>`，或 Center 根下的 `<skill_uuid>/<sc_version_number>`。`link_name` 是运行时名称；Center 外部 `skill_code` 不用于拼接这里的内容路径。链接目标可以是绝对路径或等价的相对路径，按 Engine apply 实现核验。
+- Center 容器目录名是单数 `skill-center`，Canonical OSS 前缀使用 `skills-center`；两者不能混淆。Repo/Center 为外部共享内容，镜像/启动脚本负责 mount；上表仅定义地址，不保证当前容器已经挂载成功。
+- 迁移中的实际来源选择按 `community/core/skills_pool/types.py::runtime_uses_pool_paths` 和 Engine evidence 判断，不能只看配置、目录是否存在或 DB `active_layout`。数据面 cutover 已完成而 DB 尚未最终提交时，也可能必须读取 Pool。
+- 产品 `active_engine=claude_code` 可能实际运行 AICoding 模板；先用 `runtime_layout_engine_for_bot` 解析实际文件型身份，再选择路径，不能仅凭产品 Engine 字符串套 Claude Code 行。
+- Teclaw 是 Artifact capability：使用 Whole Artifact/StoreRef，不使用这张文件型 active-root 表，也不需要伪造 Legacy/Pool 文件目录。
+- 本表列出代码支持的布局，不表示所有引擎已完成迁移或现场验收。后续全量 Pool 推进范围是 OpenClaw/Hermes；Claude Code/AICoding 的 Engine 适配由 Aix 维护，不因表中存在 Pool descriptor 就扩大迁移范围。
+
+例如 OpenClaw 的 Center 链接在 Legacy/Pool 下均解析为 `/home/admin/.openclaw/workspace/skills/<name>` → `/home/admin/.openclaw/workspace/skills-pool/skill-center/<uuid>/<exact-version>`；Local 链接目标才随 layout 在 `skills/skills-local` 与 `skills-pool/skills-local` 之间变化。历史整库桥和用户实体目录按兼容/降级规则处理，不作为新映射的模板。
+
 ## 8. Offline 与 Copy
 
 读 `services/space_skill_offline_service.py`、`offline_policy.py`、Offline Repository，以及 `community/core/service_bot/` 的 Artifact lineage reader。
