@@ -1,0 +1,159 @@
+name: Task Design Guard
+
+on:
+  pull_request_target:
+    branches:
+      - dev
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: task-design-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  task-design-guard:
+    name: Publish TaskRunner design guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Mark TaskRunner design guard pending
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: process.env.HEAD_SHA,
+              state: "pending",
+              context: "TaskRunner design guard",
+              description: "Inspecting protected TaskRunner structure",
+            });
+
+      # pull_request_target checks out the trusted target revision. Never check
+      # out or execute code from the pull request head in this workflow.
+      - name: Check out trusted dev revision
+        id: trusted-checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Evaluate protected TaskRunner structure
+        id: evaluate
+        if: always()
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          CHECKOUT_OUTCOME: ${{ steps.trusted-checkout.outcome }}
+        run: |
+          set -u
+
+          degraded() {
+            local reason="$1"
+            echo "::warning title=TaskRunner design guard degraded::$reason"
+            {
+              echo "### ⚠️ TaskRunner design guard degraded"
+              echo
+              echo "$reason"
+              echo
+              echo "The check was allowed to pass by the approved fail-open policy."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "state=success" >> "$GITHUB_OUTPUT"
+            echo "description=Degraded (fail-open); inspect the workflow summary" >> "$GITHUB_OUTPUT"
+          }
+
+          if [[ "$CHECKOUT_OUTCOME" != "success" ]]; then
+            degraded "Could not check out the trusted dev revision."
+            exit 0
+          fi
+
+          set +e
+          git fetch --no-tags --force origin \
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/pull/${PR_NUMBER}/head"
+          fetch_status=$?
+          set -e
+          if [[ "$fetch_status" -ne 0 ]]; then
+            degraded "Could not fetch the pull request head for static inspection."
+            exit 0
+          fi
+
+          set +e
+          fetched_head="$(git rev-parse "refs/remotes/pull/${PR_NUMBER}/head")"
+          resolve_status=$?
+          set -e
+          if [[ "$resolve_status" -ne 0 ]]; then
+            degraded "Could not resolve the fetched pull request head."
+            exit 0
+          fi
+          if [[ "$fetched_head" != "$HEAD_SHA" ]]; then
+            degraded "The fetched pull request head did not match the event head SHA."
+            exit 0
+          fi
+
+          set +e
+          python3 scripts/ci/task_design_guard.py \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --actor "$PR_AUTHOR"
+          guard_status=$?
+          set -e
+
+          case "$guard_status" in
+            0)
+              echo "state=success" >> "$GITHUB_OUTPUT"
+              echo "description=Protected TaskRunner structure is accepted" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            1)
+              echo "state=failure" >> "$GITHUB_OUTPUT"
+              echo "description=Protected TaskRunner structure was changed" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            2)
+              degraded "The trusted guard could not complete its evaluation. See the log above."
+              exit 0
+              ;;
+            *)
+              degraded "The trusted guard returned unexpected status ${guard_status}."
+              exit 0
+              ;;
+          esac
+
+      - name: Publish TaskRunner design guard result on PR head
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          STATUS_STATE: ${{ steps.evaluate.outputs.state }}
+          STATUS_DESCRIPTION: ${{ steps.evaluate.outputs.description }}
+        with:
+          script: |
+            const state = process.env.STATUS_STATE || "success";
+            const description = process.env.STATUS_DESCRIPTION ||
+              "Degraded before evaluation (fail-open); inspect workflow logs";
+            await github.rest.repos.createCommitStatus({
+              ...context.repo,
+              sha: process.env.HEAD_SHA,
+              state,
+              context: "TaskRunner design guard",
+              description,
+            });
+
+      - name: Reject protected design change
+        if: steps.evaluate.outputs.state == 'failure'
+        run: exit 1
