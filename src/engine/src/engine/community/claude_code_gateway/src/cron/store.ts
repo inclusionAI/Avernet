@@ -41,7 +41,8 @@ export class CronStore {
   private runsDirty = false;
   private jobsTimer: NodeJS.Timeout | null = null;
   private runsTimer: NodeJS.Timeout | null = null;
-  private writeInFlight: Promise<void> | null = null;
+  private jobsWriteInFlight: Promise<void> | null = null;
+  private runsWriteInFlight: Promise<void> | null = null;
 
   constructor(jobsPath: string, options: CronStoreOptions = {}) {
     this.jobsPath = jobsPath;
@@ -129,11 +130,7 @@ export class CronStore {
   async flush(): Promise<void> {
     if (this.jobsTimer) { clearTimeout(this.jobsTimer); this.jobsTimer = null; }
     if (this.runsTimer) { clearTimeout(this.runsTimer); this.runsTimer = null; }
-    await Promise.all([
-      this.jobsDirty ? this.writeJobs() : Promise.resolve(),
-      this.runsDirty ? this.writeRuns() : Promise.resolve(),
-    ]);
-    if (this.writeInFlight) await this.writeInFlight;
+    await Promise.all([ this.writeJobs(), this.writeRuns() ]);
   }
 
   // ---- Internals ----
@@ -165,25 +162,47 @@ export class CronStore {
   }
 
   private async writeJobs(): Promise<void> {
+    if (this.jobsWriteInFlight) {
+      await this.jobsWriteInFlight;
+      if (this.jobsDirty) await this.writeJobs();
+      return;
+    }
     if (!this.jobsDirty) return;
+
     this.jobsDirty = false;
     const snapshot = JSON.stringify([ ...this.jobs.values() ], null, 2);
-    this.writeInFlight = this.writeAtomic(this.jobsPath, snapshot)
-      .catch(err => { this.jobsDirty = true; throw err; })
-      .finally(() => { this.writeInFlight = null; });
-    await this.writeInFlight;
+    const write = this.writeAtomic(this.jobsPath, snapshot)
+      .catch(err => { this.jobsDirty = true; throw err; });
+    this.jobsWriteInFlight = write;
+    try {
+      await write;
+    } finally {
+      if (this.jobsWriteInFlight === write) this.jobsWriteInFlight = null;
+    }
+    if (this.jobsDirty) await this.writeJobs();
   }
 
   private async writeRuns(): Promise<void> {
+    if (this.runsWriteInFlight) {
+      await this.runsWriteInFlight;
+      if (this.runsDirty) await this.writeRuns();
+      return;
+    }
     if (!this.runsDirty) return;
+
     this.runsDirty = false;
     const obj: Record<string, CronRunRecord[]> = {};
     for (const [ id, list ] of this.runs.entries()) obj[id] = list;
     const snapshot = JSON.stringify(obj, null, 2);
-    this.writeInFlight = this.writeAtomic(this.runsPath, snapshot)
-      .catch(err => { this.runsDirty = true; throw err; })
-      .finally(() => { this.writeInFlight = null; });
-    await this.writeInFlight;
+    const write = this.writeAtomic(this.runsPath, snapshot)
+      .catch(err => { this.runsDirty = true; throw err; });
+    this.runsWriteInFlight = write;
+    try {
+      await write;
+    } finally {
+      if (this.runsWriteInFlight === write) this.runsWriteInFlight = null;
+    }
+    if (this.runsDirty) await this.writeRuns();
   }
 
   private async writeAtomic(filePath: string, contents: string): Promise<void> {
