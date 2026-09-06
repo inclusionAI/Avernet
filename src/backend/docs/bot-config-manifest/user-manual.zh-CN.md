@@ -528,7 +528,8 @@ APPLYING                 清单 apply 进行中（取源 → 物化 → 下发�
   `bot_id` 都没有）；`CREATE_FAILED` = **没有可用的 bot**；`APPLY_FAILED` =
   **bot 正在运行**，只是配置缺了一块。别把后两个当成一件事。
 - **`APPLY_FAILED` 不需要重建 bot**：bot 记录从头到尾没被触碰，响应里**带着
-  `bot`**，改完清单 `POST …/apply` 收敛即可。
+  `bot`**，改完清单 `POST …/apply` 收敛即可。（响应里的 `apply` **可能为 `null`**——
+  容器后那一段没能启动时就没有报告可给；详见附录 B.3.2。）
 - **某个类目没被覆盖（`PARTIAL`）汇报为 `APPLY_FAILED`，不是 `READY`。**按 §3.3
   的类目覆盖语义，一个半途失败的类目可能已经**删掉**了旧条目却没写进新的——这是
   要处理的状态，不是带脚注的成功。
@@ -642,7 +643,7 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 | `result` | `RUNNING` 表示还在做；三个终态是从逐条结果推导出来的摘要，**给人看的**——没有任何东西读它然后据此行动 |
 | `categories[].removed` | **覆盖删掉了什么。**它不在 `entries` 里，因为被删的东西根本没有对应的声明条目 |
 | `categories[].aborted` / `partially_written` | 这个类目有没有收敛；**只有 `partially_written: true` 意味着「写了一半」**，需要再 apply 一次收敛。`aborted` 单独为真表示什么都没写、没有东西要回滚 |
-| `trigger` | 这次 apply 是谁发起的：`explicit`（`POST …/apply`）、`put`（`PUT` 之后自动跟的那一次）、`create:pre_container` / `create:on_container`（用清单创建 bot 的两个阶段）。**没有 `restart` / `republish`**——第一期它们不是 apply 点（§7） |
+| `trigger` | 这次 apply 是谁发起的：`explicit`（`POST …/apply`）、`put`（`PUT` 之后自动跟的那一次）、`create:pre_container` / `create:on_container`（用清单创建 bot 的两个阶段）、`dry_run`（预览报告，不落库）。**没有 `restart` / `republish`**——第一期它们不是 apply 点（§7） |
 
 > **完整字段表**（含 `sources[]` / `categories[]` / `entries[]` 每个字段的类型与含义、
 > 以及 `result` / `action` / `trigger` 的全部取值）见**附录 B.2.5** 与 **B.7**。
@@ -1563,7 +1564,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 
 | 查询参数 | 必填 | 类型 | 含义 |
 | --- | --- | --- | --- |
-| `dry_run` | ❌ | bool，默认 `false` | `true` = 返回计划而不执行。**不写 apply 记录**，所以不发 `apply_id`、不进 `last-apply`、不出现在历史里 |
+| `dry_run` | ❌ | bool，默认 `false` | `true` = 返回计划而不执行。**不写 apply 记录**，所以不发 `apply_id`、不进 `last-apply`、不出现在历史里。返回的那份报告里 **`trigger` 是 `dry_run`**、`apply_id` 是空串 |
 
 **响应 `data`**：一份 **apply 报告对象**（B.2.5），只是它描述的是「会发生什么」。
 
@@ -1616,7 +1617,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- |
 | `apply_id` | string | 这次 apply 的 id。**空报告时是空串** |
 | `bot_id` | string | 目标 bot |
-| `trigger` | enum \| `""` | 谁发起的：`explicit` / `put` / `create:pre_container` / `create:on_container`，见 B.7。**空报告时是空串** |
+| `trigger` | enum \| `""` | 谁发起的：`explicit` / `put` / `create:pre_container` / `create:on_container` / **`dry_run`**，见 B.7。**空报告时是空串** |
 | `result` | enum \| `""` | `RUNNING` / `SUCCEEDED` / `PARTIAL` / `FAILED`，见 B.7。终态是从逐条结果**推导出来的摘要，给人看的**。**空报告时是空串** |
 | `started_at` | datetime \| null | 开始时间；bot 从没 apply 过时 `null` |
 | `finished_at` | datetime \| null | 结束时间。**`null` 有两个原因，别拿它判「在跑」**：`result` 是 `RUNNING`（真的在跑），或者这是一份**空报告**（`result` 为空串）。要判在飞的活，读 `result == "RUNNING"`，不要读 `finished_at == null` |
@@ -1752,7 +1753,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `iframe_url` | string | **只在 `AWAITING_AUTHORIZATION` 时非空**，之后是空串 |
 | `redirect_url` | string | 同上 |
 | `bot` | object \| null | 创建出来的 `Bot`（B.0）。**只在 `READY` 与 `APPLY_FAILED` 时出现** |
-| `apply` | object \| null | apply 报告（B.2.5）。**只在 `READY` 与 `APPLY_FAILED` 时出现**，且**只会是这次创建自己的那份**——创建之后又跑过的显式 apply 不会顶替它（那个去 `last-apply` 看） |
+| `apply` | object \| null | apply 报告（B.2.5）。**只可能在 `READY` 与 `APPLY_FAILED` 出现，但即使在这两个状态也可能是 `null`——务必判空**（两种情形见下）。它只会是**这次创建自己的那份**：创建之后又跑过的显式 apply 不会顶替它（那个去 `last-apply` 看） |
 | `message` | string | 状态名说不清楚时的原因；其余状态是空串 |
 
 `state` 的八个取值：
@@ -1766,7 +1767,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | `CREATE_FAILED` | ✅ | **没有可用的 bot** | 建不出来，或容器始终没起来。**与清单无关** |
 | `APPLYING` | ❌ | 有，且在跑 | bot 起来了，清单的容器后阶段正在下发 |
 | `READY` | ✅ | 有，且在跑 | bot 起来了，**整份清单都落地了** |
-| `APPLY_FAILED` | ✅ | **有，且在跑** | bot 起来了，**部分配置没落地**。响应同时带着 `bot` 和 `apply`，所以这跟 `CREATE_FAILED` 一眼就分得开。改完清单 `POST …/apply` 即可，**不需要重建** |
+| `APPLY_FAILED` | ✅ | **有，且在跑** | bot 起来了，**部分配置没落地**。响应**一定**带着 `bot`（这就是它跟 `CREATE_FAILED` 一眼可分的依据），`apply` 则**可能为 `null`**（见下）。改完清单 `POST …/apply` 即可，**不需要重建** |
 
 > **三种失败不用读文案就能分辨**：清单不合法 = 提交时 `422`（连 `bot_id` 都没有）；
 > `CREATE_FAILED` = 没有可用的 bot；`APPLY_FAILED` = **bot 正在运行**，只是配置缺了一块。
@@ -1776,6 +1777,18 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 > 脚注的成功。
 >
 > 终态的报告**覆盖两个阶段**：容器前阶段的 `script` 会被带进来，不会看起来像是消失了。
+>
+> ⚠️ **两个终态下 `apply` 都可能是 `null`，别无条件解引用它。**`bot` 在这两个状态下一定
+> 有值，`apply` 不是——它只在「这次创建自己的那份报告还在」时才给：
+>
+> - **`APPLY_FAILED` 且 `apply` 为 `null`**：容器后那一段**根本没能启动**（不是跑了然后失败），
+>   创建任务放弃了，而 bot 已经在跑。没有报告可给，因为没有 apply 发生过。**这仍然是需要你
+>   处理的状态**——去 `POST …/config-manifest/apply` 手动跑一次，然后看它的报告。
+> - **`READY` 且 `apply` 为 `null`**：创建之后你（或别人）又跑过一次显式 apply，把创建那次
+>   的记录顶掉了。这个端点只答「这次创建是怎么结束的」，不会拿后来那次冒充它——**bot 现在
+>   的配置状态去 `GET …/config-manifest/last-apply` 看**。
+>
+> 一句话：**`apply` 非空时它是创建那次的权威报告；为 `null` 时改问 `last-apply`。**
 >
 > **teclaw 的顺序不同**（§7.1：先写记录、对着记录 apply、再开容器），所以它的状态流是
 > `CREATING → APPLYING → CREATING → READY`。
@@ -1913,8 +1926,8 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 状态 | 什么时候 |
 | --- | --- |
 | `404` | bot 不存在，**或**协作者等级不到 ADMIN（不可区分，见 B.0） |
-| `409` | 这个 bot 已经有同名工具。**单次安装不会替换你没提到的东西**——要换先删，或者用清单声明整套（清单 apply 是全量覆盖） |
-| `422` | 声明、取回的字节或引擎拒绝了这次安装：没钉 digest、源对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎不收 |
+| `409` | **两种情况，都是 `409`，但含义不同**：① 这个 bot 已经有同名工具——单次安装不会替换你没提到的东西，要换先删，或者用清单声明整套（清单 apply 是全量覆盖）；② **这个 bot 的引擎根本装不了 CLI 工具**（如 desktop bot），这一条在**取源之前**就判掉，message 是 `This bot's engine cannot take CLI tools` |
+| `422` | **声明或字节本身**被拒：没钉 digest、源对不上 digest、包里没有那个成员、二进制是别的架构、或者引擎拒绝了**这一次**安装。注意它与上面 ②的区别——②是「这个引擎压根不支持这个能力」，`422` 是「支持，但这次不行」 |
 
 #### B.5.2 `GET /openapi/v1/bots/{bot_id}/cli-tools`
 
@@ -2027,13 +2040,14 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 **apply 的 `trigger`**：
 
-| 值 | 什么发起的 |
-| --- | --- |
-| `""`（空串） | 空报告，没有哪次 apply 可说（见上） |
-| `explicit` | `POST …/config-manifest/apply` |
-| `put` | `PUT …/config-manifest` 之后自动跟的那一次 |
-| `create:pre_container` | 用清单创建 bot 的**容器前**阶段 |
-| `create:on_container` | 用清单创建 bot 的**容器后**阶段 |
+| 值 | 什么发起的 | 进历史吗 |
+| --- | --- | --- |
+| `""`（空串） | 空报告，没有哪次 apply 可说（见上） | —— |
+| `explicit` | `POST …/config-manifest/apply` | ✅ |
+| **`dry_run`** | **`POST …/apply?dry_run=true` 的预览报告**。它不落库、不进 `last-apply`，但**返回给你的那份报告里 `trigger` 就是这个值**——按 `trigger` 穷举分支时别漏了它 | ❌ |
+| `put` | `PUT …/config-manifest` 之后自动跟的那一次 | ✅ |
+| `create:pre_container` | 用清单创建 bot 的**容器前**阶段 | ✅ |
+| `create:on_container` | 用清单创建 bot 的**容器后**阶段 | ✅ |
 
 **没有 `restart` / `republish`**——第一期它们不是 apply 点（§7）。
 
