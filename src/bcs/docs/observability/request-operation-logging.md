@@ -8,8 +8,9 @@ retry policy, authorization decisions or business return values.
 
 1. Find `http.request.started` by `request_id`. The middleware accepts a safe
    `X-Request-ID` (1–128 ASCII letters/digits or `-_.:`), otherwise creates a UUID,
-   and echoes it in the response. Extractor errors are included. The coordination
-   callback and CORS short-circuit requests retain their existing special paths.
+   and echoes it in the response. Extractor errors and coordination callbacks are
+   included; coordination callbacks still do not create tracing spans. CORS
+   short-circuit requests retain their existing special path.
 2. Find `http.request.response_ready` or `http.request.cancelled`. The former
    measures time until the application constructs a response, including handler
    work. It is **not** the lifetime of an SSE/WS stream or network body transfer.

@@ -119,7 +119,6 @@ pub async fn observe_request(
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if request.uri().path() == "/bot/events/coordination" { return next.run(request).await; }
     let request_id = request.headers().get("x-request-id").and_then(|v| v.to_str().ok())
         .filter(|value| !value.is_empty() && value.len() <= 128
             && value.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.:".contains(&c)))
