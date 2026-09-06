@@ -1,0 +1,23 @@
+{
+  "contractVersion": "insight-serving/v1",
+  "dataAsOf": "2026-07-26T14:51:10+08:00",
+  "sourceBatchId": "20260726_local_01",
+  "scope": {
+    "userId": "dev_local",
+    "botId": null
+  },
+  "points": [
+    {
+      "date": "20260726",
+      "totalTaskCount": 3,
+      "validTaskCount": 3,
+      "completeTaskCount": 2,
+      "capabilityTaskCount": 3,
+      "capabilityCompleteTaskCount": 2,
+      "autoCompleteTaskCount": 0,
+      "completionRate": 0.6667,
+      "capabilityCompletionRate": 0.6667,
+      "autoCompletionRate": 0.0
+    }
+  ]
+}
