@@ -737,10 +737,11 @@ function resolveClawWebPublicBaseUrl(): string {
         : "dev"
     : getCurrentEnv();
 
-  if (runtimeMode !== "dev") {
-    throw new Error("CLAWWEB_PUBLIC_BASE_URL is required outside dev");
-  }
-  return "http://localhost:5173";
+  return runtimeMode === "pre"
+    ? "https://clawweb-pre.alipay.com"
+    : runtimeMode === "prod"
+      ? "https://clawweb.alipay.com"
+      : "http://localhost:5173";
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string {
