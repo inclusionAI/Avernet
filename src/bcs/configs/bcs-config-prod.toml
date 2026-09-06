@@ -313,6 +313,6 @@ max_response_body_bytes = 4096
 # SSRF 拒；此处显式放行 backend task callback 回投目标，cidrs 收窄到 RFC1918/IPv6 ULA 堵公网 SSRF（过渡），后续按 baas.inner.avernet.com 解析网段进一步收窄到单段
 # 应收窄回实际内网网段）。
 [[eventing.webhook.private_endpoint_allowlist]]
-host = "baas.inner.avernet.com"
+host = "*.avernet.com"
 cidrs = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]
-ports = [80, 8080, 443, 8443]
+ports = [80, 443, 8443]
