@@ -10,13 +10,7 @@
 import { Router, type Request, type Response } from "express";
 import type { IDatabase, Row } from "@avernet/clawweb-shared/server/db";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
-import type { FlowRunRepository } from "../../repositories/flow-run-repository.js";
-import type { NodeExecutionRepository } from "../../repositories/node-execution-repository.js";
-import type { NodeStepTraceRepository } from "../../repositories/node-step-traces-repository.js";
-import type { RunLogRepository } from "../../repositories/run-log-repository.js";
-import type { ExecutionStepLogRepository } from "../../repositories/execution-step-log-repository.js";
 import crypto from "node:crypto";
-import { buildRunTimeline } from "../../lib/timeline-builder.js";
 import { digestCanonicalJson, validateWorkflowEvolutionAnalysisResult } from "../../services/evolution/contracts.js";
 import {
   WorkflowAnalysisStateConflictError,
@@ -60,19 +54,50 @@ const ANALYSIS_PROGRESS_PHASES = [
 
 type AnalysisProgressPhase = typeof ANALYSIS_PROGRESS_PHASES[number];
 
+type WorkflowDataRepository = {
+  findByFlowId(flowId: string, options?: { limit?: number }): Promise<Array<Record<string, unknown>>>;
+};
+
+export type InternalEvolveWorkflowRuntime = {
+  flowRunRepo: {
+    findFullByFlowId(flowId: string): Promise<Record<string, unknown> | null>;
+    updateAnalysisStatus(flowId: string, status: string): Promise<boolean>;
+  };
+  nodeExecRepo: WorkflowDataRepository;
+  nodeStepTraceRepo: WorkflowDataRepository;
+  runLogRepo?: {
+    findByFlowId(flowId: string): Promise<Array<Record<string, unknown>>>;
+  } | null;
+  executionStepLogRepo?: {
+    getStepsByFlow(flowId: string, options?: { limit?: number }): Promise<Array<Record<string, unknown>>>;
+  } | null;
+  buildRunTimeline?: (input: {
+    flowId: string;
+    flow?: Record<string, unknown> | null;
+    flowEvents?: Array<Record<string, unknown>>;
+    stepTraces?: Array<Record<string, unknown>>;
+    stepLogs?: Array<Record<string, unknown>>;
+    runLogs?: Array<Record<string, unknown>>;
+  }) => unknown;
+};
+
 export interface InternalEvolveRepos {
   db: IDatabase;
   evolveRepo: EvolveRepository | null;
-  flowRunRepo: FlowRunRepository | null;
-  nodeExecRepo: NodeExecutionRepository | null;
-  nodeStepTraceRepo: NodeStepTraceRepository | null;
-  runLogRepo?: RunLogRepository | null;
-  executionStepLogRepo?: ExecutionStepLogRepository | null;
+  workflowRuntime?: InternalEvolveWorkflowRuntime | null;
 }
 
 export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
   const router = Router();
-  const { db, evolveRepo, flowRunRepo, nodeExecRepo, nodeStepTraceRepo, runLogRepo, executionStepLogRepo } = repos;
+  const { db, evolveRepo } = repos;
+  const {
+    flowRunRepo = null,
+    nodeExecRepo = null,
+    nodeStepTraceRepo = null,
+    runLogRepo = null,
+    executionStepLogRepo = null,
+    buildRunTimeline = null,
+  } = repos.workflowRuntime ?? {};
   const workflowEvolutionRepo = new WorkflowEvolutionRepository(db);
 
   const assertLinkedAnalysisBot = async (
@@ -511,9 +536,9 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
         return;
       }
 
-      const sessionKeys = nodes
-        .map((ne) => ne.embedded_session_key as string | null)
-        .filter((k): k is string => !!k);
+      const sessionKeys = (nodes as Array<Record<string, unknown>>)
+        .map((node) => typeof node.embedded_session_key === "string" ? node.embedded_session_key : null)
+        .filter((key): key is string => Boolean(key));
       const langfuseTraces = await queryLangfuseTraces(sessionKeys);
       const traceIds = langfuseTraces.map((t) => t.trace_id as string).filter(Boolean);
       const langfuseObservations = await queryLangfuseObservations(traceIds);
@@ -550,7 +575,7 @@ export function createInternalEvolveRouter(repos: InternalEvolveRepos): Router {
         res.status(400).json({ error: "Bad Request", message: "flowId is required" });
         return;
       }
-      if (!flowRunRepo || !nodeExecRepo || !nodeStepTraceRepo) {
+      if (!flowRunRepo || !nodeExecRepo || !nodeStepTraceRepo || !buildRunTimeline) {
         res.status(503).json({ error: "Service Unavailable", message: "Required repositories not configured" });
         return;
       }

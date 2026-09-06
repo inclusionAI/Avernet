@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { IDatabase } from "@avernet/clawweb-shared/server/db";
 import { getClawWebPublicBaseUrl } from "../../env.js";
-import type { FlowRunRepository } from "../../repositories/flow-run-repository.js";
 import type { EvolveRepository } from "../../repositories/evolve-repository.js";
 import { WorkflowEvolutionRepository } from "../../repositories/workflow-evolution-repository.js";
 import { dispatchEvolveCommand, type EvolveDispatchInput } from "../evolve-dispatcher.js";
@@ -250,7 +249,13 @@ function enabledWorkflowSet(value: string | string[] | undefined): Set<string> {
 }
 
 export function createFailedRunAutoAnalysisObserver(input: {
-  flowRunRepo: Pick<FlowRunRepository, "findByFlowId">;
+  flowRunRepo: {
+    findByFlowId(flowId: string): Promise<{
+      workflow_id: string;
+      origin_bot_id: string | null;
+      user_id: string | null;
+    } | null>;
+  };
   starter: RunAnalysisStarter;
   enabledWorkflows?: string | string[];
   isWorkflowEnabled?: (workflowId: string) => Promise<boolean>;

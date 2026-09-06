@@ -10,13 +10,11 @@ import { BenchTaskResultRepository } from "./repositories/bench-task-result-repo
 import { BenchArtifactRepository } from "./repositories/bench-artifact-repository.js";
 import { BenchTagRepository } from "./repositories/bench-tag-repository.js";
 import { BotWorkflowPermissionRepository } from "./repositories/bot-workflow-permission-repository.js";
-import { FlowRunRepository } from "./repositories/flow-run-repository.js";
-import { NodeExecutionRepository } from "./repositories/node-execution-repository.js";
-import { NodeStepTraceRepository } from "./repositories/node-step-traces-repository.js";
-import { RunLogRepository } from "./repositories/run-log-repository.js";
-import { ExecutionStepLogRepository } from "./repositories/execution-step-log-repository.js";
 import { createEvolveRouter, type EvolveRouterDeps } from "./routes/evolve.js";
-import { createInternalEvolveRouter } from "./routes/internal/evolve.js";
+import {
+  createInternalEvolveRouter,
+  type InternalEvolveWorkflowRuntime,
+} from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
 import { createBenchRouter } from "./routes/bench.js";
 import { TaskSourceService } from "./services/evolve/task-source-service.js";
@@ -40,6 +38,7 @@ export type ClawevolveModuleOptions = {
   clawInsight?: ClawInsightInternalApi;
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
+  workflowRuntime?: InternalEvolveWorkflowRuntime;
 };
 
 export type ClawevolveModule = {
@@ -124,11 +123,7 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const internalRouter = createInternalEvolveRouter({
     db,
     evolveRepo: evolve,
-    flowRunRepo: new FlowRunRepository(db),
-    nodeExecRepo: new NodeExecutionRepository(db),
-    nodeStepTraceRepo: new NodeStepTraceRepository(db),
-    runLogRepo: new RunLogRepository(db),
-    executionStepLogRepo: new ExecutionStepLogRepository(db),
+    workflowRuntime: options.workflowRuntime,
   });
   const taskGuardRouter = createInternalTaskGuardRouter(evolve);
   const benchRouter = createBenchRouter(
