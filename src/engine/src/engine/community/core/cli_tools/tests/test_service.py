@@ -18,6 +18,7 @@ from engine.community.core.cli_tools.directories import (
 )
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import (
+    MAX_NAME_LENGTH,
     TOOL_MODE,
     InvalidCliToolNameError,
     LocalCliToolsService,
@@ -282,3 +283,124 @@ class TestDirectories:
         monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/bots/late/workspace")
 
         assert service._dir() == Path("/bots/late/cli")
+
+
+class TestHostileDirectoryContents:
+    """The tool directory lives inside the bot container, where the agent can
+    create files. Nothing it can put there may break delivery or leak data."""
+
+    async def test_prune_survives_a_disk_name_the_validator_would_refuse(
+        self, service, cli_dir
+    ):
+        """A file the agent created can carry a name no caller could send.
+
+        Routing disk names back through the caller-input validator made the
+        prune raise, which both lost every per-name verdict and left the
+        replacement half-applied — permanently, since the offending file could
+        never be removed by that path.
+        """
+        await service.install("kept", ELF)
+        await service.install("dropped", ELF)
+        cli_dir.joinpath("trail ").write_bytes(b"agent-made")
+        cli_dir.joinpath("back\\slash").write_bytes(b"agent-made")
+
+        results = await service.replace_all([CliToolPayload("kept", ELF + b"v2")])
+
+        assert [(r.name, r.success) for r in results] == [("kept", True)]
+        # Everything unnamed is gone, hostile names included.
+        assert sorted(p.name for p in cli_dir.iterdir()) == ["kept"]
+
+    async def test_a_tool_named_like_a_scratch_file_is_still_a_tool(
+        self, service, cli_dir
+    ):
+        """``unpack.part`` is a legal tool name — dots are allowed after the
+        first character — so the scratch filter must not swallow it."""
+        await service.install("unpack.part", ELF)
+
+        assert [i.name for i in await service.list_tools()] == ["unpack.part"]
+
+        # ...and it is prunable, rather than stranded on the bot forever.
+        await service.replace_all([])
+        assert list(cli_dir.iterdir()) == []
+
+    async def test_a_symlink_is_not_a_readable_tool(self, service, cli_dir, tmp_path):
+        """Validating the name bounds the path built; it says nothing about
+        what that path points at. Following one would make the download
+        endpoint an arbitrary read of anything the engine account can open."""
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"TOP SECRET OUTSIDE THE CLI DIR")
+        cli_dir.mkdir(parents=True, exist_ok=True)
+        cli_dir.joinpath("leak").symlink_to(secret)
+
+        assert await service.read_tool("leak") is None
+        assert [i.name for i in await service.list_tools()] == []
+
+    async def test_an_unremovable_entry_does_not_abort_the_rest_of_the_prune(
+        self, service, cli_dir, monkeypatch
+    ):
+        await service.install("kept", ELF)
+        await service.install("dropped_a", ELF)
+        await service.install("dropped_b", ELF)
+
+        real_unlink = Path.unlink
+
+        def stubborn(self, *args, **kwargs):
+            if self.name == "dropped_a":
+                raise PermissionError("immutable")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", stubborn)
+        results = await service.replace_all([CliToolPayload("kept", ELF)])
+
+        assert results[0].success is True
+        # dropped_b was still pruned despite dropped_a refusing.
+        assert "dropped_b" not in {p.name for p in cli_dir.iterdir()}
+
+    async def test_a_refused_name_leaves_an_existing_directory_untouched(
+        self, service, cli_dir
+    ):
+        await service.install("kept", ELF)
+
+        with pytest.raises(InvalidCliToolNameError):
+            await service.install("../escape", ELF)
+
+        assert sorted(p.name for p in cli_dir.iterdir()) == ["kept"]
+
+    async def test_a_name_too_long_to_place_is_refused_consistently(self, service):
+        """Rejected by validation rather than only by ``install``.
+
+        ``mkstemp`` adds 15 characters, so an over-long name used to pass
+        validation, list and delete but fail on install alone — surfacing as a
+        permanently failing apply entry with no obvious cause.
+        """
+        too_long = "x" * (MAX_NAME_LENGTH + 1)
+
+        for call in (
+            service.install(too_long, ELF),
+            service.delete(too_long),
+            service.read_tool(too_long),
+        ):
+            with pytest.raises(InvalidCliToolNameError):
+                await call
+
+
+class TestConcurrency:
+    async def test_a_concurrent_install_is_not_pruned_by_a_replacement(
+        self, service, cli_dir
+    ):
+        """Unserialised, a replacement that had already installed its set
+        could prune a tool a concurrent install just reported as placed — the
+        platform records it as installed and the bot does not have it."""
+        import asyncio
+
+        await service.install("existing", ELF)
+
+        await asyncio.gather(
+            service.replace_all([CliToolPayload("existing", ELF + b"v2")]),
+            service.install("concurrent", ELF),
+        )
+
+        names = {p.name for p in cli_dir.iterdir()}
+        # Whichever order they serialised in, "concurrent" was reported
+        # successful, so it must be on disk.
+        assert "concurrent" in names

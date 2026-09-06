@@ -40,6 +40,31 @@ log = logging.getLogger("engine.cli_tools")
 TOOL_MODE = 0o755
 
 
+#: Longest name ``install`` can actually place. ``mkstemp`` builds a scratch
+#: name of ``.{name}.XXXXXXXX.part`` — 15 characters more than the tool's own —
+#: and most filesystems cap a component at 255 bytes. Bounding the *name* here
+#: keeps every operation consistent: without it a 250-character name would pass
+#: validation, delete and list fine, and fail only on install, which would show
+#: up as a permanently failing entry in an apply report with no obvious cause.
+MAX_NAME_LENGTH = 240
+
+
+#: Scratch files are named ``.{tool}.{random}.part``. **Both** halves identify
+#: one, and the leading dot is the half that matters: the platform's own name
+#: rule requires a tool name to start with an alphanumeric
+#: (``bot_config_manifest/schema/_support.py``), so no real tool can begin with
+#: a dot — while ``.part`` on its own is a legal ending for one. Matching the
+#: suffix alone would make a tool called ``unpack.part`` invisible to listing
+#: and immune to pruning, so it would sit on the bot forever after the user
+#: removed it from the manifest.
+SCRATCH_PREFIX = "."
+SCRATCH_SUFFIX = ".part"
+
+
+def _is_scratch(name: str) -> bool:
+    return name.startswith(SCRATCH_PREFIX) and name.endswith(SCRATCH_SUFFIX)
+
+
 class InvalidCliToolNameError(ValueError):
     """A name that cannot address a file in the tool directory."""
 
@@ -52,6 +77,9 @@ def validate_tool_name(name: str) -> str:
     rather than trusting a caller. That is not duplicated policy: the
     platform's rule is about a bot's command namespace, this one is a
     path-traversal guard on a write.
+
+    **Applies to caller input only.** Names read back off the disk are not
+    routed through here — see :meth:`LocalCliToolsService._delete_path`.
     """
     if not name or name != name.strip():
         raise InvalidCliToolNameError(f"cli tool name is empty or padded: {name!r}")
@@ -63,6 +91,10 @@ def validate_tool_name(name: str) -> str:
         )
     if Path(name).name != name:
         raise InvalidCliToolNameError(f"cli tool name is not a bare filename: {name!r}")
+    if len(name.encode("utf-8")) > MAX_NAME_LENGTH:
+        raise InvalidCliToolNameError(
+            f"cli tool name is longer than {MAX_NAME_LENGTH} bytes: {name!r}"
+        )
     return name
 
 
@@ -83,6 +115,14 @@ class LocalCliToolsService(CliToolsService):
 
     def __init__(self, directory: Callable[[], Path]) -> None:
         self._directory = directory
+        # Mutating operations are serialised. Without this, a `replace_all`
+        # that has already installed its set can prune a tool a concurrent
+        # `install` just reported as placed: the platform records that tool as
+        # installed and the bot does not have it — the "silence read as
+        # success" failure the contract exists to prevent. Overlapping calls
+        # are reachable in practice, because a client-side timeout does not
+        # stop the request already running here.
+        self._write_lock = asyncio.Lock()
 
     # ── the directory ────────────────────────────────────────────────────
 
@@ -95,7 +135,9 @@ class LocalCliToolsService(CliToolsService):
     # ── writes ───────────────────────────────────────────────────────────
 
     async def install(self, name: str, data: bytes) -> None:
-        await asyncio.to_thread(self._install_sync, name, data)
+        validate_tool_name(name)
+        async with self._write_lock:
+            await asyncio.to_thread(self._install_sync, name, data)
 
     def _install_sync(self, name: str, data: bytes) -> None:
         """Write, chmod, then rename — in that order, and atomically.
@@ -108,9 +150,19 @@ class LocalCliToolsService(CliToolsService):
         """
         target = self._path_of(name)
         target.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{name}.", suffix=".part")
+        fd, tmp = tempfile.mkstemp(
+            dir=str(target.parent), prefix=f"{SCRATCH_PREFIX}{name}.", suffix=SCRATCH_SUFFIX
+        )
         try:
-            with os.fdopen(fd, "wb") as handle:
+            # ``fdopen`` takes ownership of the descriptor, but only once it
+            # succeeds — if it raises, nothing else would ever close ``fd``.
+            handle = os.fdopen(fd, "wb")
+        except BaseException:
+            os.close(fd)
+            self._unlink_quietly(Path(tmp))
+            raise
+        try:
+            with handle:
                 handle.write(data)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -120,32 +172,77 @@ class LocalCliToolsService(CliToolsService):
             # Leave nothing runnable behind, then let the caller see the
             # failure — an install that did not land must never be reported
             # as installed.
-            try:
-                os.unlink(tmp)
-            except FileNotFoundError:
-                pass
+            self._unlink_quietly(Path(tmp))
             raise
+        self._fsync_dir(target.parent)
         log.info(
             "[cli_tools] installed name=%s size=%d dir=%s",
             name, len(data), target.parent,
         )
 
     async def delete(self, name: str) -> None:
-        await asyncio.to_thread(self._delete_sync, name)
+        validate_tool_name(name)
+        async with self._write_lock:
+            await asyncio.to_thread(self._delete_sync, name)
 
     def _delete_sync(self, name: str) -> None:
-        """Remove the command. Absent is success, not an error (§4 A2)."""
+        """Remove a **caller-named** command. Absent is success (§4 A2)."""
+        self._delete_path(self._path_of(name))
+
+    def _delete_path(self, path: Path) -> None:
+        """Remove one file by path, with no name validation.
+
+        Pruning feeds names that came from ``scandir``, not from a caller, and
+        those are not subject to :func:`validate_tool_name`: a file the agent
+        created inside the container may carry a name the validator refuses
+        (trailing space, a backslash). Re-validating it would raise out of a
+        prune, abandoning the rest of the loop and turning a whole replacement
+        into an unreadable failure — while the offending file, being
+        undeletable by that path, would make every future replacement for that
+        bot fail the same way.
+        """
         try:
-            self._path_of(name).unlink()
+            path.unlink()
         except FileNotFoundError:
-            log.info("[cli_tools] delete name=%s: already absent", name)
             return
-        log.info("[cli_tools] deleted name=%s", name)
+        except OSError as error:
+            # Replaced by a directory between the scan and here, or immutable.
+            # One stubborn entry must not abort the rest of the prune.
+            log.warning("[cli_tools] could not remove %s: %s", path, error)
+            return
+        log.info("[cli_tools] deleted %s", path.name)
+
+    @staticmethod
+    def _unlink_quietly(path: Path) -> None:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+    @staticmethod
+    def _fsync_dir(directory: Path) -> None:
+        """Persist the rename itself, not just the bytes it points at.
+
+        Without this a machine-level crash right after a successful install
+        can lose the directory entry and leave the previous binary in place.
+        Best-effort: some filesystems refuse to open a directory for sync.
+        """
+        try:
+            fd = os.open(str(directory), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
     async def replace_all(
         self, tools: Sequence[CliToolPayload]
     ) -> list[CliToolResult]:
-        return await asyncio.to_thread(self._replace_all_sync, tools)
+        async with self._write_lock:
+            return await asyncio.to_thread(self._replace_all_sync, tools)
 
     def _replace_all_sync(
         self, tools: Sequence[CliToolPayload]
@@ -177,9 +274,10 @@ class LocalCliToolsService(CliToolsService):
             results.append(CliToolResult(name=tool.name, success=True))
 
         keep = {result.name for result in results}
+        directory = self._dir()
         for present in self._names_on_disk():
             if present not in keep:
-                self._delete_sync(present)
+                self._delete_path(directory / present)
         return results
 
     # ── reads ────────────────────────────────────────────────────────────
@@ -191,10 +289,8 @@ class LocalCliToolsService(CliToolsService):
         """Read the directory now. No cache, no replay of the last write."""
         infos: list[CliToolInfo] = []
         for name in sorted(self._names_on_disk()):
-            path = self._dir() / name
-            try:
-                data = path.read_bytes()
-            except (FileNotFoundError, IsADirectoryError, PermissionError):
+            data = self._read_bytes_nofollow(self._dir() / name)
+            if data is None:
                 # Raced with a delete, or something unreadable landed in the
                 # directory. Either way it is not a command the bot can run.
                 continue
@@ -207,13 +303,36 @@ class LocalCliToolsService(CliToolsService):
         return await asyncio.to_thread(self._read_sync, name)
 
     def _read_sync(self, name: str) -> CliToolBytes | None:
-        try:
-            data = self._path_of(name).read_bytes()
-        except (FileNotFoundError, IsADirectoryError):
+        data = self._read_bytes_nofollow(self._path_of(name))
+        if data is None:
             return None
         return CliToolBytes(name=name, data=data, md5=_md5(data))
 
     # ── shared ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _read_bytes_nofollow(path: Path) -> bytes | None:
+        """Read a file, refusing to follow a symlink out of the directory.
+
+        Validating the *name* bounds the path this service builds; it says
+        nothing about what that path points at. The tool directory lives
+        inside the bot's container, where the agent can create a symlink, so
+        following one here would turn the download endpoint into an arbitrary
+        read of any file the engine account can open. ``O_NOFOLLOW`` makes the
+        final component's symlink an error, and a link reads as "no such
+        tool", which is exactly what it is.
+        """
+        try:
+            fd = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError:
+            # ELOOP (a symlink), ENOENT, EISDIR, EACCES — none of them is a
+            # command the bot can run.
+            return None
+        try:
+            with os.fdopen(fd, "rb") as handle:
+                return handle.read()
+        except OSError:
+            return None
 
     def _names_on_disk(self) -> list[str]:
         """Command names present in the directory, ignoring in-flight writes.
@@ -221,20 +340,27 @@ class LocalCliToolsService(CliToolsService):
         A missing directory reads as "no commands" rather than an error: a bot
         that never had a tool installed has no directory yet, and that is an
         ordinary state, not a failure.
+
+        ``follow_symlinks=False`` so a link to a regular file elsewhere is not
+        counted as a tool — the read side refuses it anyway, and counting it
+        would report a command that cannot be downloaded.
         """
         directory = self._dir()
         try:
             entries = list(os.scandir(directory))
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             return []
         return [
             entry.name
             for entry in entries
-            if entry.is_file() and not entry.name.endswith(".part")
+            if entry.is_file(follow_symlinks=False) and not _is_scratch(entry.name)
         ]
 
 
 __all__ = [
+    "MAX_NAME_LENGTH",
+    "SCRATCH_PREFIX",
+    "SCRATCH_SUFFIX",
     "TOOL_MODE",
     "InvalidCliToolNameError",
     "LocalCliToolsService",
