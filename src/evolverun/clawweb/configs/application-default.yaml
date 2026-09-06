@@ -1,0 +1,28 @@
+app_name: clawweb
+
+database:
+  mode: sqlite
+  sqlite:
+    path: "~/.openclaw/workflow/engine.db"
+
+baas:
+  iamtoken: ""
+  baseUrl: ""
+  environments:
+    pre:
+      apiKey: ""
+      baseUrl: ""
+    prod:
+      apiKey: ""
+      baseUrl: ""
+
+analysis:
+  apiUrl: ""
+  apiKey: ""
+  model: ""
+
+auth:
+  admins: []
+  log_admins: []
+  bench_admins: []
+  claw_evolve_admins: []
