@@ -97,6 +97,12 @@ GOLDEN_SUPPORTED = frozenset({
     Capability.DEFAULT_CONFIG_GET,
     # Web shell
     Capability.WEB_SHELL_OPEN,
+    # CLI tools (W9) — model-callable binaries placed by a config manifest.
+    Capability.CLI_INSTALL,
+    Capability.CLI_DELETE,
+    Capability.CLI_LIST,
+    Capability.CLI_REPLACE,
+    Capability.CLI_DOWNLOAD,
 })
 GOLDEN_LIMITED = frozenset({Capability.MCP_START, Capability.MCP_STOP})
 
@@ -225,3 +231,27 @@ class TestInjectionSeams:
         engine = OpenClawEngine(client=_fake_client(), pool=pool)
         await engine.shutdown()
         pool.shutdown.assert_not_awaited()
+
+
+class TestCliToolsBinding:
+    """W9. The service is bound, and it is *this* engine's directory."""
+
+    def test_cli_tools_service_is_assigned(self):
+        engine = OpenClawEngine(client=_fake_client())
+
+        assert engine.cli_tools is not None
+
+    def test_openclaw_and_claude_code_never_share_a_tool_directory(self):
+        """A future engine must not silently inherit OpenClaw's tree.
+
+        The two workspaces genuinely differ — OpenClaw's is env-injected,
+        Claude Code's is ``<home>/.claude_code/workspace`` — so one shared
+        resolver would put both engines' tools in one directory, where a
+        whole-set replacement on either would delete the other's.
+        """
+        from engine.community.core.cli_tools.directories import (
+            claude_code_cli_dir,
+            openclaw_cli_dir,
+        )
+
+        assert openclaw_cli_dir() != claude_code_cli_dir()

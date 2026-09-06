@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 
+from engine.community.core.cli_tools.directories import claude_code_cli_dir
+from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
 from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
@@ -73,6 +75,12 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         Capability.SKILLS_SYNC_BINDPATHS,
         Capability.SKILLS_CLEAN_SYMLINKS,
         Capability.SKILLS_CENTER_ENSURE,
+        # CLI tools (W9) — model-callable binaries placed by a manifest.
+        Capability.CLI_INSTALL,
+        Capability.CLI_DELETE,
+        Capability.CLI_LIST,
+        Capability.CLI_REPLACE,
+        Capability.CLI_DOWNLOAD,
         # ── Cron ──
         Capability.CRON_LIST,
         Capability.CRON_CREATE,
@@ -137,6 +145,9 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
+        # Claude Code keeps its own tool tree — its workspace is
+        # <home>/.claude_code/workspace, not OpenClaw's.
+        self._cli_tools = LocalCliToolsService(claude_code_cli_dir)
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)

@@ -91,19 +91,19 @@
         Protocol member by design, so extending the Protocol extends it too.
 - **Depends on:** Task 1
 
-## Task 5: Bind the service on both community engines
+## Task 5 `[x]`: Bind the service on both community engines
 - **Goal:** OpenClaw and Claude Code serve CLI tools; their declarations match
   their assignments.
 - **Files:** `src/engine/community/engines/openclaw/engine.py`,
   `engines/claude_code/engine.py`
 - **Done when:**
-  - [ ] OpenClaw assigns `LocalCliToolsService(openclaw_cli_dir)`; Claude Code
+  - [x] OpenClaw assigns `LocalCliToolsService(openclaw_cli_dir)`; Claude Code
         assigns `LocalCliToolsService(claude_code_cli_dir)` — each its own
         resolver, never a shared constant.
-  - [ ] A test asserts the two engines resolve to **different** directories, so
+  - [x] A test asserts the two engines resolve to **different** directories, so
         a future engine cannot silently inherit OpenClaw's tree.
-  - [ ] Both declare all five `CLI_*` capabilities in `_CAPABILITIES.supported`.
-  - [ ] `validate_capabilities()` passes for both at startup.
+  - [x] Both declare all five `CLI_*` capabilities in `_CAPABILITIES.supported`.
+  - [x] `validate_capabilities()` passes for both at startup.
 - **Depends on:** Tasks 2, 4
 
 ## Task 6: Add the `/api/cli` router
