@@ -6,6 +6,7 @@ share payload, retry, and result behavior.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 import time
 from typing import Any, Dict, List, Optional
 
@@ -14,8 +15,6 @@ from agentclaw.community.plugin_api.http_client import (
     HttpClientRequestError,
 )
 from agentclaw.community.core.devices.services.mcp_device_payload import (
-    MAX_RETRY_ATTEMPTS,
-    RETRY_BACKOFF_BASE,
     DeviceMCPConfig,
     convert_to_device_format,
     is_already_exists_error,
@@ -52,6 +51,67 @@ def mcp_base_url_from_conn_info(conn_info: Dict[str, Any]) -> str:
 
 
 _MCP_PATH = "/api/mcp"
+_MCP_RETRY_DELAYS_SECONDS = (1, 2, 4)
+_RETRYABLE_MCP_STATUS_CODES = frozenset({500, 502, 503, 504})
+
+
+def _request_with_transient_retry(
+        request: Callable[[], Any],
+        *,
+        operation: str,
+        server_code: str,
+        stop_on_already_exists: bool = False,
+) -> Any:
+    """Execute one MCP device request across the bounded startup window.
+
+    BaaS can expose a Bot before its engine Device is selectable, returning
+    ``503 NO_ACTIVE_DEVICES`` for the first few seconds.  Retry only transport
+    failures and retryable server responses; permanent 4xx responses are
+    returned immediately for the operation-specific caller to handle.
+    """
+    for attempt, delay_seconds in enumerate(
+        (*_MCP_RETRY_DELAYS_SECONDS, None), start=1
+    ):
+        try:
+            response = request()
+        except HttpClientRequestError as error:
+            if delay_seconds is None:
+                raise Exception(
+                    f"{operation} MCP failed after {attempt} attempts: {error}"
+                ) from error
+            error_detail = f"request_error={error}"
+        else:
+            response_error = Exception(
+                f"{operation} failed: {response.status_code}, {response.text}"
+            )
+            if stop_on_already_exists and is_already_exists_error(response_error):
+                return response
+            if response.status_code not in _RETRYABLE_MCP_STATUS_CODES:
+                return response
+            if delay_seconds is None:
+                raise Exception(
+                    f"{operation} MCP failed after {attempt} attempts: "
+                    f"{response_error}"
+                ) from response_error
+            reason = (
+                "NO_ACTIVE_DEVICES"
+                if "NO_ACTIVE_DEVICES" in response.text
+                else f"HTTP_{response.status_code}"
+            )
+            error_detail = f"reason={reason} response={response.text}"
+
+        logger.warning(
+            "[mcp_transport] transient MCP delivery failure; retrying "
+            "operation=%s server_code=%s attempt=%d delay_seconds=%d error=%s",
+            operation.lower(),
+            server_code,
+            attempt,
+            delay_seconds,
+            error_detail,
+        )
+        time.sleep(delay_seconds)
+
+    raise AssertionError("MCP retry loop must return or raise")
 
 
 def probe_mcp(
@@ -78,23 +138,14 @@ def filter_servers(
 
         server_codes = [get_server_code(s) for s in mcp_servers if get_server_code(s)]
 
-        response = None
-        for attempt in range(MAX_RETRY_ATTEMPTS):
-            try:
-                response = transport.post(
+        response = _request_with_transient_retry(
+            lambda: transport.post(
                     f"{_MCP_PATH}/filter-servers",
                     json={"server_codes": server_codes},
-                )
-                if response.status_code < 500:
-                    break
-                # 带容器 detail，便于定位（如 mcporter cwd deleted）。
-                raise Exception(f"Server error: {response.status_code}, {response.text}")
-            except Exception as e:
-                if attempt == MAX_RETRY_ATTEMPTS - 1:
-                    raise
-                wait = RETRY_BACKOFF_BASE * (2 ** attempt)
-                logger.warning("[filter_servers] Retry filter-servers in %ss: %s", wait, e)
-                time.sleep(wait)
+            ),
+            operation="Declare",
+            server_code=f"scope:{len(server_codes)}",
+        )
 
         if response.status_code == 200:
             result = response.json()
@@ -170,56 +221,41 @@ def remove_mcp(
 
 def _create_mcp(transport: Any, config: DeviceMCPConfig):
     """Create MCP with retry (409 不重试，直接抛出)."""
-    for attempt in range(MAX_RETRY_ATTEMPTS):
-        try:
-            response = transport.post(_MCP_PATH, json=config.to_dict())
-            if response.status_code in [200, 201]:
-                return
-            if response.status_code == 409:
-                raise Exception(f"Create failed: 409, {response.text}")
-            raise Exception(f"Create failed: {response.status_code}, {response.text}")
-        except Exception as e:
-            if is_already_exists_error(e):
-                raise
-            if attempt == MAX_RETRY_ATTEMPTS - 1:
-                raise Exception(f"Create MCP failed after {MAX_RETRY_ATTEMPTS} attempts: {e}")
-            wait = RETRY_BACKOFF_BASE * (2 ** attempt)
-            logger.warning("[_create_mcp] Retry in %ss for %s: %s", wait, config.server_code, e)
-            time.sleep(wait)
+    response = _request_with_transient_retry(
+        lambda: transport.post(_MCP_PATH, json=config.to_dict()),
+        operation="Create",
+        server_code=config.server_code,
+        stop_on_already_exists=True,
+    )
+    if response.status_code in [200, 201]:
+        return
+    raise Exception(f"Create failed: {response.status_code}, {response.text}")
 
 
 def _update_mcp(transport: Any, config: DeviceMCPConfig):
     """Update MCP with retry."""
     path = f"{_MCP_PATH}/{config.server_code}"
-    for attempt in range(MAX_RETRY_ATTEMPTS):
-        try:
-            response = transport.put(path, json=config.to_dict())
-            if response.status_code in [200, 201]:
-                return
-            raise Exception(f"Update failed: {response.status_code}, {response.text}")
-        except Exception as e:
-            if attempt == MAX_RETRY_ATTEMPTS - 1:
-                raise Exception(f"Update MCP failed after {MAX_RETRY_ATTEMPTS} attempts: {e}")
-            wait = RETRY_BACKOFF_BASE * (2 ** attempt)
-            logger.warning("[_update_mcp] Retry in %ss for %s: %s", wait, config.server_code, e)
-            time.sleep(wait)
+    response = _request_with_transient_retry(
+        lambda: transport.put(path, json=config.to_dict()),
+        operation="Update",
+        server_code=config.server_code,
+    )
+    if response.status_code in [200, 201]:
+        return
+    raise Exception(f"Update failed: {response.status_code}, {response.text}")
 
 
 def _delete_mcp(transport: Any, server_code: str):
     """Delete MCP with retry."""
     path = f"{_MCP_PATH}/{server_code}"
-    for attempt in range(MAX_RETRY_ATTEMPTS):
-        try:
-            response = transport.delete(path)
-            if response.status_code in [200, 204]:
-                return
-            if response.status_code == 404:
-                return
-            raise Exception(f"Delete failed: {response.status_code}, {response.text}")
-        except Exception as e:
-            if attempt == MAX_RETRY_ATTEMPTS - 1:
-                logger.error("[_delete_mcp] Failed after %s attempts: %s", MAX_RETRY_ATTEMPTS, e)
-                return
-            wait = RETRY_BACKOFF_BASE * (2 ** attempt)
-            logger.warning("[_delete_mcp] Retry in %ss for %s: %s", wait, server_code, e)
-            time.sleep(wait)
+    try:
+        response = _request_with_transient_retry(
+            lambda: transport.delete(path),
+            operation="Delete",
+            server_code=server_code,
+        )
+        if response.status_code in [200, 204, 404]:
+            return
+        raise Exception(f"Delete failed: {response.status_code}, {response.text}")
+    except Exception as error:
+        logger.error("[_delete_mcp] Failed: %s", error)
