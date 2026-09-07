@@ -139,6 +139,8 @@ SC Public 引用已是持久异步批量 Operation：
 
 修改投影时依次读 `services/bot_runtime_projector.py`、`runtime_resolver.py`、`services/runtime_projections/{per_domain,whole_artifact,registry}.py`。Reader 负责 DB 有效态，Resolver 负责计算，Projector/策略负责设备副作用；flush 本身没有设备 I/O。
 
+`services/runtime_projections/skill_runtime_delivery.py` 是文件型 Engine 的日常 Skill 交付边界：它接收已解析的 `ResolvedSkillPlan + retired_mappings`，内部统一维护 Legacy DeviceSync 与 Pool/Repo/Center Mapping 的布局分流、协议编排和 Skill 结果解释。`PerDomainRuntimeProjection` 只保留 Skill/MCP scope、异常隔离和结果组合；Pool cutover/rollback/recovery 仍直接消费 `SkillsPoolRuntimeProtocol`，Teclaw 仍走 Whole Artifact。
+
 `services/track_latest.py` 把 Version 发布转成 fanout 和逐 Bot reconcile 任务。候选 Bot 查询兼容尚未物化的历史 Set；最终有效态仍经 Reader。MCP 变化使用 claimed/released delta；投影 PENDING 可重试，DEGRADED 依当前任务语义记录后继续。Published Service Bot 的历史 Artifact 不跟随 latest。
 
 `services/skill_symlink_listener.py` 处理设备激活和重投影事件；通过正式 Projector 恢复当前 Desired State。既有兼容 fallback 不是新增业务写入入口。

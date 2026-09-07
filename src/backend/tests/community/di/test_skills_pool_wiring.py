@@ -61,6 +61,15 @@ from agentclaw.community.core.skill_center.factories import SkillServiceFactory
 from agentclaw.community.core.skill_center.services.skill_symlink_listener import (
     SkillSymlinkListener,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
+    PerDomainRuntimeProjection,
+)
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
+    SkillRuntimeDelivery,
+)
+from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
+    WholeArtifactRuntimeProjection,
+)
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
 )
@@ -71,6 +80,23 @@ from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
 from agentclaw.community.core.repository.implementations.skills_pool.layout import SkillsPoolLayoutRepository
 from agentclaw.community.core.repository.implementations.skill_center.skill import SkillRepository
+
+
+def test_skill_runtime_delivery_is_wired_only_into_per_domain_projection() -> None:
+    pool_runtime = MagicMock(spec=SkillsPoolRuntimeProtocol)
+    pool_layouts = MagicMock(spec=SkillsPoolLayoutRepositoryProtocol)
+
+    registry = SkillCenterModule().engine_runtime_projection_registry(
+        pool_runtime=pool_runtime,
+        pool_layouts=pool_layouts,
+    )
+
+    per_domain = registry.for_engine("openclaw")
+    assert isinstance(per_domain, PerDomainRuntimeProjection)
+    assert isinstance(per_domain._skill_delivery, SkillRuntimeDelivery)
+    assert per_domain._skill_delivery._pool_runtime is pool_runtime
+    assert per_domain._skill_delivery._pool_layouts is pool_layouts
+    assert isinstance(registry.for_engine("teclaw"), WholeArtifactRuntimeProjection)
 
 
 @pytest.mark.parametrize(

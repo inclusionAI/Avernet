@@ -511,6 +511,9 @@ def _registry(*, pool_runtime, pool_layouts):
     from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
         EngineRuntimeProjectionRegistry,
     )
+    from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
+        SkillRuntimeDelivery,
+    )
     from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
         WholeArtifactRuntimeProjection,
     )
@@ -519,8 +522,10 @@ def _registry(*, pool_runtime, pool_layouts):
     # stop describing production.
     return EngineRuntimeProjectionRegistry(
         default=PerDomainRuntimeProjection(
-            pool_runtime=pool_runtime,
-            pool_layouts=pool_layouts,
+            skill_delivery=SkillRuntimeDelivery(
+                pool_runtime=pool_runtime,
+                pool_layouts=pool_layouts,
+            ),
         ),
         by_engine={"teclaw": WholeArtifactRuntimeProjection()},
     )
@@ -751,6 +756,12 @@ class _RuntimePool:
     async def verify_mappings(self, **kwargs):
         self.verify_calls.append(kwargs)
         return self._verified
+
+
+class _FailingPublishRuntimePool(_RuntimePool):
+    async def publish_mappings(self, **kwargs):
+        self.publish_calls.append(kwargs)
+        raise RuntimeError("device unavailable")
 
 
 class _CenterRuntimePool(_RuntimePool):
@@ -3386,6 +3397,26 @@ def test_projector_and_per_domain_contain_no_engine_identity_test():
         )
 
 
+def test_per_domain_delegates_filesystem_delivery_without_layout_knowledge():
+    """PerDomain owns half scheduling, not filesystem compatibility."""
+    from pathlib import Path
+
+    from agentclaw.community.core.skill_center.services.runtime_projections import (
+        per_domain,
+    )
+
+    source = Path(per_domain.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "SkillsPoolLayoutRepositoryProtocol",
+        "SkillsPoolRuntimeProtocol",
+        "runtime_uses_pool_paths",
+        "mapping_contract_for",
+        "_apply_pool_mappings",
+        "_mapping_message",
+    ):
+        assert forbidden not in source
+
+
 
 @pytest.mark.asyncio
 async def test_per_domain_engine_keeps_the_scope_split():
@@ -3422,6 +3453,36 @@ async def test_per_domain_engine_keeps_the_scope_split():
     assert claimed <= set(declared)
     assert released == frozenset()
     assert pool.publish_calls == []
+
+
+@pytest.mark.asyncio
+async def test_failed_skill_delivery_does_not_skip_the_mcp_half():
+    pool = _FailingPublishRuntimePool()
+    factory = _RuntimeFactory()
+    repo_skill = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    runtime = BotRuntimeProjector(
+        factory=factory,
+        bot_repo=_RuntimeBots(),
+        repository=_McpInstallations(),
+        reader=_reader(_RuntimeSkills([repo_skill])),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
+        passport=_RuntimePassport(),
+        caller_identity_repo=_RuntimeCallerIdentity(),
+    )
+
+    result = await runtime.project(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        scope=ProjectionScope.everything(),
+    )
+
+    assert result.status.value == "PENDING"
+    assert result.issues[0].code == "SKILL_RUNTIME_UNAVAILABLE"
+    assert len(factory.service.mcp_projections) == 1
 
 
 # ── Skill mutations carry the Skill's MCP dependencies ───────────────
