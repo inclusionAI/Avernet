@@ -485,13 +485,16 @@ pub(crate) async fn try_persist_group_message(
     };
     let audience = match visibility_domain {
         MessageVisibilityDomain::Chat => None,
-        MessageVisibilityDomain::ManagerWorker => Some(match owner_bot_id.as_deref() {
-            Some(owner_actor_id) => {
-                MessageAudience::directed([sender_id.to_string(), owner_actor_id.to_string()])
-                    .map_err(|error| ServiceError::InternalError(error.to_string()))?
-            }
-            None => MessageAudience::Public,
-        }),
+        MessageVisibilityDomain::ManagerWorker => Some(
+            manager_worker_message_audience(
+                group.as_ref(),
+                sender_id,
+                sender_type,
+                message_type,
+                owner_bot_id.as_deref(),
+            )
+            .map_err(|error| ServiceError::InternalError(error.to_string()))?,
+        ),
         MessageVisibilityDomain::StateMachine => Some(
             if sender_type == SenderType::Human {
                 MessageAudience::directed([sender_id.to_string()])
@@ -634,6 +637,30 @@ pub(crate) async fn try_persist_group_message(
         "group message persisted"
     );
     Ok(Some(persisted))
+}
+
+fn manager_worker_message_audience(
+    group: Option<&Group>,
+    sender_id: &str,
+    sender_type: SenderType,
+    message_type: &str,
+    owner_actor_id: Option<&str>,
+) -> Result<MessageAudience, &'static str> {
+    if sender_type == SenderType::Human {
+        return MessageAudience::directed([sender_id.to_string()]);
+    }
+    if let Some(owner_actor_id) = owner_actor_id {
+        return MessageAudience::directed([sender_id.to_string(), owner_actor_id.to_string()]);
+    }
+    if sender_type == SenderType::Bot
+        && message_type == "chat"
+        && group
+            .and_then(|group| group.get_participant(sender_id))
+            .is_some_and(|participant| participant.role == ParticipantRole::Manager)
+    {
+        return Ok(MessageAudience::Public);
+    }
+    Ok(MessageAudience::FullOnly)
 }
 
 /// Persist the sender's original text verbatim so human-facing history keeps

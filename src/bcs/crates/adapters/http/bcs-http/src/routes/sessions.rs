@@ -1162,7 +1162,8 @@ pub async fn remove_session_participant(
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateParticipantModeRequest {
-    pub mode: String,
+    #[serde(default)]
+    pub mode: Option<String>,
     #[serde(default)]
     pub message_view_scope: Option<MessageViewScope>,
 }
@@ -1185,20 +1186,31 @@ pub async fn update_session_participant_mode(
         }
     };
 
-    let mode = match body.mode.as_str() {
-        "auto" => bcs_service_api::ParticipantMode::Auto,
-        "muted" => bcs_service_api::ParticipantMode::Muted,
-        "present" => bcs_service_api::ParticipantMode::Present,
-        "absent" => bcs_service_api::ParticipantMode::Absent,
-        _ => {
+    if body.mode.is_none() && body.message_view_scope.is_none() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "At least one of mode or message_view_scope must be provided"
+            })),
+        )
+            .into_response();
+    }
+
+    let mode = match body.mode.as_deref() {
+        Some("auto") => Some(bcs_service_api::ParticipantMode::Auto),
+        Some("muted") => Some(bcs_service_api::ParticipantMode::Muted),
+        Some("present") => Some(bcs_service_api::ParticipantMode::Present),
+        Some("absent") => Some(bcs_service_api::ParticipantMode::Absent),
+        Some(unknown) => {
             return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
-                    "error": format!("unknown mode: {}", body.mode)
+                    "error": format!("unknown mode: {unknown}")
                 })),
             )
                 .into_response();
         }
+        None => None,
     };
 
     if let Some(message_view_scope) = body.message_view_scope {
@@ -1219,7 +1231,7 @@ pub async fn update_session_participant_mode(
                     caller: application_caller(&caller),
                     session_id: sid.clone(),
                     bot_uuid: bot_uuid.clone(),
-                    mode: Some(mode),
+                    mode,
                     message_view_scope: Some(message_view_scope),
                 })
                 .await;
@@ -1244,7 +1256,7 @@ pub async fn update_session_participant_mode(
                         bcs_service_api::ParticipantRole::Observer,
                     );
                     participant.bot_name = human.nick_name.clone();
-                    participant.mode = Some(mode);
+                    participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
                     participant.message_view_scope = message_view_scope;
                     return match state
                         .services
@@ -1277,7 +1289,7 @@ pub async fn update_session_participant_mode(
             .update_participant_mode_and_message_view_scope(
                 &sid,
                 &bot_uuid,
-                Some(mode),
+                mode,
                 message_view_scope,
             )
             .await
@@ -1292,7 +1304,7 @@ pub async fn update_session_participant_mode(
                     bcs_service_api::ParticipantRole::Observer,
                 );
                 participant.bot_name = human.nick_name.clone();
-                participant.mode = Some(mode);
+                participant.mode = mode.or(Some(bcs_service_api::ParticipantMode::Present));
                 participant.message_view_scope = message_view_scope;
                 return match state
                     .services
@@ -1307,6 +1319,8 @@ pub async fn update_session_participant_mode(
             Err(error) => return session_error_to_response(&error),
         }
     }
+
+    let mode = mode.expect("mode is required when message_view_scope is absent");
 
     // Capture old mode before update so we can notify on change.
     let old_mode = state

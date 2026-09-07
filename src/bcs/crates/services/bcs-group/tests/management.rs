@@ -2026,6 +2026,19 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
     assert_eq!(human.message_view_scope, MessageViewScope::Participant);
     assert!(human.tags.is_empty());
 
+    let managed_scope = service
+        .update_participant_mode(GroupParticipantModeCommand {
+            caller_actor_id: "driver".to_string(),
+            group_id: "group-under-test".to_string(),
+            actor_id: "human_alice".to_string(),
+            mode: bcs_service_api::ParticipantMode::Absent,
+            message_view_scope: Some(MessageViewScope::Full),
+        })
+        .await
+        .expect("group coordinator may update a Human participant scope");
+    assert_eq!(managed_scope.mode, bcs_service_api::ParticipantMode::Present);
+    assert_eq!(managed_scope.message_view_scope, MessageViewScope::Full);
+
     let full_view = service
         .update_participant_mode(GroupParticipantModeCommand {
             caller_actor_id: "human_alice".to_string(),

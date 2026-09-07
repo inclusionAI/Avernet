@@ -1014,28 +1014,6 @@ export async function addGroupMember(
   );
 }
 
-/** 更新 Group Human 成员的消息可见范围。 */
-export async function updateGroupMember(
-  params: {
-    group_id: string;
-    actor_id: string;
-    message_view_scope: MessageViewScope;
-  },
-  options?: { [key: string]: any },
-) {
-  const { group_id, actor_id, message_view_scope } = params;
-  return request<{ success?: boolean; error?: string }>(
-    `/bcnproxy/groups/${group_id}/members/${actor_id}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      data: { message_view_scope },
-      skipErrorHandler: true,
-      ...(options || {}),
-    },
-  );
-}
-
 /** 删除 Group 成员响应 */
 export interface DeleteGroupMemberResponse {
   removed: boolean;
@@ -1214,6 +1192,7 @@ export interface UpdateParticipantModeResponse {
     group_id: string;
     actor_id: string;
     mode: string;
+    message_view_scope?: MessageViewScope;
     updated_at: number;
   };
   // 兼容旧格式（直接返回在顶层）
@@ -1645,7 +1624,7 @@ export async function updateSessionMember(
   options?: { [key: string]: any },
 ) {
   const { session_id, actor_id, mode, message_view_scope } = params;
-  return request<{ success?: boolean; error?: string }>(
+  return request<SessionInfoResponse>(
     `/bcnproxy/sessions/${session_id}/members/${actor_id}`,
     {
       method: 'PATCH',

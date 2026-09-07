@@ -62,6 +62,7 @@ pub async fn handle_client_connection(
     });
 
     let mut connection_state = WebClientConnectionState::default();
+    let connection_shutdown = connection_state.shutdown.clone();
 
     info!(
         client_id = client_id,
@@ -70,7 +71,15 @@ pub async fn handle_client_connection(
     );
 
     loop {
-        match tokio::time::timeout(CLIENT_IDLE_TIMEOUT, ws_rx.next()).await {
+        let next_message = tokio::select! {
+            _ = connection_shutdown.cancelled() => {
+                close_reason = WsCloseReason::ServerClose;
+                flush_server_close = true;
+                break;
+            }
+            next_message = tokio::time::timeout(CLIENT_IDLE_TIMEOUT, ws_rx.next()) => next_message,
+        };
+        match next_message {
             Ok(Some(msg_result)) => {
                 match msg_result {
                     Ok(Message::Text(text)) => {

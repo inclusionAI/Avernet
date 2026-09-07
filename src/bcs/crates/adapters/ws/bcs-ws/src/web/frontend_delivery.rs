@@ -129,7 +129,10 @@ impl WorkbenchFrontendDelivery {
         session_id: &str,
         cmd: &FrontendDeliveryCommand,
     ) -> usize {
-        let bound = self.connections.connection_count(session_id).await;
+        // A scope-invalidated connection remains in the registry until its
+        // socket handler unregisters run fallbacks. Count that closing slot so
+        // an event cannot race through a stale run binding.
+        let bound = self.connections.binding_slot_count(session_id).await;
         let delivered = self
             .connections
             .broadcast_visible_excluding(

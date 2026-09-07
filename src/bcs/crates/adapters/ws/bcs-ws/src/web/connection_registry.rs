@@ -9,6 +9,7 @@ use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChan
 use bcs_service_api::{BotDetailCommand, BotQueryService, ServiceError, ServiceResult};
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, mpsc};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 #[derive(Debug)]
@@ -27,6 +28,7 @@ struct FrontendConnection {
     connected_at: Instant,
     conn_id: u64,
     human_view: Option<HumanMessageView>,
+    shutdown: CancellationToken,
 }
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
@@ -77,6 +79,24 @@ impl WorkbenchConnectionRegistry {
         user_id: Option<String>,
         human_view: Option<HumanMessageView>,
     ) -> ServiceResult<u64> {
+        self.subscribe_with_shutdown(
+            session_id,
+            tx,
+            user_id,
+            human_view,
+            CancellationToken::new(),
+        )
+        .await
+    }
+
+    pub async fn subscribe_with_shutdown(
+        &self,
+        session_id: String,
+        tx: mpsc::Sender<String>,
+        user_id: Option<String>,
+        human_view: Option<HumanMessageView>,
+        shutdown: CancellationToken,
+    ) -> ServiceResult<u64> {
         // Hold the barrier mutex until the connection is inserted. This makes
         // subscribe linearizable with begin_scope_change: either the new
         // connection is removed by begin, or it observes the barrier and fails.
@@ -104,6 +124,7 @@ impl WorkbenchConnectionRegistry {
             connected_at: Instant::now(),
             conn_id,
             human_view,
+            shutdown,
         };
 
         self.sessions
@@ -123,6 +144,20 @@ impl WorkbenchConnectionRegistry {
     }
 
     pub async fn connection_count(&self, session_id: &str) -> usize {
+        self.sessions
+            .read()
+            .await
+            .get(session_id)
+            .map(|connections| {
+                connections
+                    .iter()
+                    .filter(|connection| !connection.shutdown.is_cancelled())
+                    .count()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) async fn binding_slot_count(&self, session_id: &str) -> usize {
         self.sessions
             .read()
             .await
@@ -177,6 +212,9 @@ impl WorkbenchConnectionRegistry {
         let mut delivered = 0usize;
         let mut disconnected = Vec::new();
         for conn in connections.iter() {
+            if conn.shutdown.is_cancelled() {
+                continue;
+            }
             if exclude_conn_id.is_some_and(|id| conn.conn_id == id) {
                 continue;
             }
@@ -290,16 +328,16 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
                 }
             })
             .to_string();
-            connections.retain(|connection| {
+            for connection in connections.iter() {
                 let matches_actor = connection
                     .human_view
                     .as_ref()
                     .is_some_and(|view| view.actor_id == human_actor_id);
                 if matches_actor {
                     let _ = connection.tx.try_send(close_event.clone());
+                    connection.shutdown.cancel();
                 }
-                !matches_actor
-            });
+            }
         }
         drop(sessions);
         drop(barriers);

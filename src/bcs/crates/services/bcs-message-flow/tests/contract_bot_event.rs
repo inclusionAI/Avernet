@@ -5562,6 +5562,7 @@ async fn manager_worker_task_message_persists_worker_message_to_manager_history_
     assert_eq!(msg.message_type, "chat");
     assert_eq!(msg.content, json!("blocked on missing schema"));
     assert_eq!(msg.owner_bot_id, None);
+    assert_eq!(msg.audience, Some(MessageAudience::FullOnly));
     assert!(!msg.run_id.is_empty());
     assert_eq!(msg.run_id, delivery_run_id);
     assert_ne!(msg.run_id, "group-1:abcdef12");
@@ -5706,6 +5707,10 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
     assert_eq!(appended[0].sender_id, "bot-worker");
     assert_eq!(appended[0].message_type, "chat");
     assert_eq!(appended[0].owner_bot_id.as_deref(), Some("bot-worker"));
+    assert_eq!(
+        appended[0].audience,
+        Some(MessageAudience::directed(["bot-worker"]).unwrap())
+    );
 
     flow.handle_bot_event(BotEventCommand {
         bot_id: "bot-manager".to_string(),
@@ -5730,6 +5735,7 @@ async fn bot_final_chat_persists_worker_owner_and_public_manager_owner_for_manag
     assert_eq!(appended[1].sender_id, "bot-manager");
     assert_eq!(appended[1].message_type, "chat");
     assert_eq!(appended[1].owner_bot_id, None);
+    assert_eq!(appended[1].audience, Some(MessageAudience::Public));
 
     let chat_support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let chat_repo = Arc::new(RecordingMessageRepo::default());
@@ -5908,6 +5914,7 @@ async fn agent_tool_result_persists_worker_owner_and_public_manager_owner_for_ma
     assert_eq!(appended[1].sender_id, "bot-manager");
     assert_eq!(appended[1].message_type, "tool_call");
     assert_eq!(appended[1].owner_bot_id, None);
+    assert_eq!(appended[1].audience, Some(MessageAudience::FullOnly));
 
     let chat_support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let chat_repo = Arc::new(RecordingMessageRepo::default());

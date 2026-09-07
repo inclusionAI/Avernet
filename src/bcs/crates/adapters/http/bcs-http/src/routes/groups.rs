@@ -1593,10 +1593,17 @@ pub async fn put_participant_mode(
     uri: Uri,
     Json(req): Json<PutParticipantModeRequest>,
 ) -> Response {
-    let caller = match resolve_put_caller(&state, &headers, &uri).await {
+    let mut caller = match resolve_put_caller(&state, &headers, &uri).await {
         Ok(caller) => caller,
         Err(response) => return response,
     };
+    if req.message_view_scope.is_some()
+        && caller != actor_id
+        && let Ok(manage_actor) =
+            resolve_group_member_caller(&state, &headers, &uri, &group_id).await
+    {
+        caller = manage_actor;
+    }
 
     let result = match state
         .services

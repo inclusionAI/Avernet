@@ -10,6 +10,7 @@ use bcs_service_api::{
 use bcs_ws::shared::RunChannelManager;
 use bcs_ws::web::{WorkbenchConnectionRegistry, WorkbenchFrontendDelivery};
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
 async fn frontend_delivery_publishes_to_group_connection() {
@@ -392,8 +393,9 @@ async fn frontend_delivery_keeps_unclassified_scoped_events_for_full_only() {
 async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished() {
     let connections = WorkbenchConnectionRegistry::new();
     let (tx, mut rx) = mpsc::channel(2);
+    let shutdown = CancellationToken::new();
     connections
-        .subscribe(
+        .subscribe_with_shutdown(
             "session-scoped".to_string(),
             tx,
             Some("human_target".to_string()),
@@ -402,6 +404,7 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
                 scope: MessageViewScope::Full,
                 allow_legacy_unclassified_chat: false,
             }),
+            shutdown.clone(),
         )
         .await
         .unwrap();
@@ -412,6 +415,7 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
         .unwrap();
     let close = rx.recv().await.expect("scope change close event");
     assert!(close.contains("view_scope_changed"));
+    assert!(shutdown.is_cancelled());
     assert_eq!(connections.connection_count("session-scoped").await, 0);
 
     let (blocked_tx, _blocked_rx) = mpsc::channel(1);
@@ -444,6 +448,36 @@ async fn scope_change_closes_existing_views_and_blocks_reconnect_until_finished(
         )
         .await
         .expect("reconnect after scope change");
+}
+
+#[tokio::test]
+async fn scope_change_cancels_socket_when_close_queue_is_full() {
+    let connections = WorkbenchConnectionRegistry::new();
+    let (tx, _rx) = mpsc::channel(1);
+    tx.try_send("queued event".to_string()).unwrap();
+    let shutdown = CancellationToken::new();
+    connections
+        .subscribe_with_shutdown(
+            "session-scoped".to_string(),
+            tx,
+            Some("human_target".to_string()),
+            Some(HumanMessageView {
+                actor_id: "human_target".to_string(),
+                scope: MessageViewScope::Full,
+                allow_legacy_unclassified_chat: false,
+            }),
+            shutdown.clone(),
+        )
+        .await
+        .unwrap();
+
+    connections
+        .begin_scope_change("session-scoped", "human_target")
+        .await
+        .unwrap();
+
+    assert!(shutdown.is_cancelled());
+    assert_eq!(connections.connection_count("session-scoped").await, 0);
 }
 
 #[tokio::test]

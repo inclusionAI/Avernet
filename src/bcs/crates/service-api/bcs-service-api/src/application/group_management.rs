@@ -137,7 +137,7 @@ pub struct GroupParticipantModeCommand {
     pub group_id: String,
     pub actor_id: String,
     pub mode: ParticipantMode,
-    /// Optional Human-tab message projection selected during legacy join.
+    /// Optional Human-tab message projection selected during join or settings update.
     pub message_view_scope: Option<MessageViewScope>,
 }
 

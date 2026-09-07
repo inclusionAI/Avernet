@@ -3218,6 +3218,67 @@ async fn session_manager_cannot_update_another_human_mode() {
 }
 
 #[tokio::test]
+async fn session_manager_can_update_another_human_scope_without_changing_mode() {
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .bots
+        .save_created_by("driver", "staff-manager", true)
+        .await
+        .expect("assign driver owner");
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let mut target = Participant::human("human_target", ParticipantRole::Observer);
+    target.mode = Some(ParticipantMode::Absent);
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    target,
+                ],
+                group_version: Some(group.version),
+                created_by: Some("driver".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed session");
+    let session_id = session.id.clone();
+
+    let updated = fixture
+        .service
+        .update_participant(UpdateSessionParticipant {
+            caller: human_principal("staff-manager"),
+            session_id: session.id,
+            bot_uuid: "human_target".into(),
+            mode: None,
+            message_view_scope: Some(MessageViewScope::Participant),
+        })
+        .await
+        .expect("Session manager may update another Human's scope");
+
+    assert_eq!(updated.mode, ParticipantMode::Absent);
+    assert_eq!(updated.message_view_scope, MessageViewScope::Participant);
+    let stored = fixture
+        .session_repo
+        .get(&session_id)
+        .await
+        .expect("stored session");
+    let target = stored
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_target")
+        .expect("target remains in session");
+    assert_eq!(target.mode, Some(ParticipantMode::Absent));
+    assert_eq!(target.message_view_scope, MessageViewScope::Participant);
+}
+
+#[tokio::test]
 async fn session_manager_cannot_auto_add_another_human() {
     let fixture = Fixture::new().await;
     fixture.add_bot("driver").await;

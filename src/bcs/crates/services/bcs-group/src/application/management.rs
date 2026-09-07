@@ -1852,28 +1852,52 @@ impl GroupManagementService for GroupManagement {
             ));
         }
 
-        self.ensure_actor_self_or_creator(&cmd.caller_actor_id, &cmd.actor_id)
-            .await?;
-
         let group = self
             .group
             .get(&cmd.group_id)
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-        let participant_exists = group
+        let coordinator_scope_only = if let Err(self_error) = self
+            .ensure_actor_self_or_creator(&cmd.caller_actor_id, &cmd.actor_id)
+            .await
+        {
+            if cmd.message_view_scope.is_some() {
+                self.ensure_group_coordinator(
+                    &group,
+                    &cmd.caller_actor_id,
+                    "update participant message scope",
+                )?;
+                true
+            } else {
+                return Err(self_error);
+            }
+        } else {
+            false
+        };
+        let existing_participant = group
             .participants
             .iter()
-            .any(|participant| participant.bot_uuid == cmd.actor_id);
-        let mutation = if participant_exists && cmd.message_view_scope.is_some() {
+            .find(|participant| participant.bot_uuid == cmd.actor_id);
+        if coordinator_scope_only && existing_participant.is_none() {
+            return Err(ServiceError::ParticipantNotFound(cmd.actor_id.clone()).into());
+        }
+        let effective_mode = if coordinator_scope_only {
+            existing_participant
+                .and_then(|participant| participant.mode)
+                .unwrap_or_else(|| ParticipantMode::default_for(target.actor_kind))
+        } else {
+            cmd.mode
+        };
+        let mutation = if existing_participant.is_some() && cmd.message_view_scope.is_some() {
             GroupMutationKind::UpdateParticipantMessageViewScope {
                 actor_id: cmd.actor_id.clone(),
                 message_view_scope: cmd.message_view_scope.expect("scope checked above"),
-                mode: Some(cmd.mode),
+                mode: Some(effective_mode),
             }
-        } else if participant_exists {
+        } else if existing_participant.is_some() {
             GroupMutationKind::UpdateParticipantMode {
                 actor_id: cmd.actor_id.clone(),
-                mode: cmd.mode,
+                mode: effective_mode,
             }
         } else if target.actor_kind == ActorKind::Human {
             GroupMutationKind::AddParticipant {
@@ -1883,7 +1907,7 @@ impl GroupManagementService for GroupManagement {
                     kind: None,
                     role: ParticipantRole::Observer,
                     actor_kind: ActorKind::Human,
-                    mode: Some(cmd.mode),
+                    mode: Some(effective_mode),
                     tags: Vec::new(),
                     message_view_scope: cmd.message_view_scope.unwrap_or(MessageViewScope::Full),
                 },
@@ -1910,7 +1934,7 @@ impl GroupManagementService for GroupManagement {
         Ok(GroupParticipantModeResult {
             group_id: cmd.group_id,
             actor_id: cmd.actor_id,
-            mode: cmd.mode,
+            mode: effective_mode,
             message_view_scope,
         })
     }

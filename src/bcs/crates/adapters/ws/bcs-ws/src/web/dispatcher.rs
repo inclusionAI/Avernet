@@ -22,6 +22,7 @@ use bcs_service_api::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use crate::shared::RunChannelManager;
@@ -96,6 +97,7 @@ pub struct WebClientConnectionState {
     pub active_run_ids: Vec<String>,
     pub subscribed_sessions: Vec<(String, u64, Option<HumanMessageView>)>,
     pub phase: WebConnectionPhase,
+    pub shutdown: CancellationToken,
 }
 
 pub async fn dispatch_client_frame(
@@ -395,11 +397,12 @@ async fn handle_connect(
     let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
     let conn_id = state
         .frontend_connections
-        .subscribe(
+        .subscribe_with_shutdown(
             subscription_key.clone(),
             tx.clone(),
             resolved_view_actor_id.map(str::to_string),
             connection_human_view.clone(),
+            connection_state.shutdown.clone(),
         )
         .await?;
     connection_state.subscribed_sessions.push((

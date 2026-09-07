@@ -87,7 +87,12 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
   isOwner,
   onClickAddMember,
 }) => {
-  const { removeSessionMember, isRemoving } = useSessionMembers();
+  const {
+    removeSessionMember,
+    updateSessionMemberScope,
+    isRemoving,
+    isUpdatingScope,
+  } = useSessionMembers();
   const [pendingRemove, setPendingRemove] = useState<DisplayMember | null>(
     null,
   );
@@ -199,7 +204,25 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
                     主节点
                   </span>
                 )}
-                {m.actorKind === 'human' && (
+                {m.actorKind === 'human' && isOwner ? (
+                  <select
+                    aria-label={`设置 ${m.name} 的会话消息视角`}
+                    value={m.messageViewScope || 'full'}
+                    disabled={isUpdatingScope}
+                    onChange={(event) => {
+                      void updateSessionMemberScope(
+                        session.sessionId,
+                        m.actorId,
+                        event.target.value as MessageViewScope,
+                      );
+                    }}
+                    className="h-6 rounded-md border border-slate-200 bg-white px-1 text-[10px] text-slate-600 disabled:cursor-wait disabled:opacity-50"
+                    title="当前会话的有效消息视角，可用于游戏准入判断"
+                  >
+                    <option value="full">完整视角</option>
+                    <option value="participant">参与者视角</option>
+                  </select>
+                ) : m.actorKind === 'human' ? (
                   <span
                     className={cn(
                       'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
@@ -213,7 +236,7 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
                       ? '参与者视角'
                       : '完整视角'}
                   </span>
-                )}
+                ) : null}
                 {m.isWorker && (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-100 text-slate-500 flex-shrink-0">
                     从节点

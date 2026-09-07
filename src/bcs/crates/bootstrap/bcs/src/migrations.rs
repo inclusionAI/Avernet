@@ -2277,9 +2277,11 @@ mod tests {
 
     #[test]
     fn mysql_human_participant_message_visibility_migration_is_additive() {
+        let baseline = include_str!("../../../../migrations/mysql/001_init_schema.sql");
         let migration = include_str!(
             "../../../../migrations/mysql/020_human_participant_message_visibility.sql"
         );
+        assert!(!baseline.contains("idx_messages_session_audience_created"));
         assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_view_scope`"));
         assert!(migration.contains("ADD COLUMN IF NOT EXISTS `message_visibility_version`"));
         assert!(migration.contains("ADD COLUMN IF NOT EXISTS `visibility_domain`"));

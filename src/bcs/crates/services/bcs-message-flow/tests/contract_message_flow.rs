@@ -1303,7 +1303,7 @@ async fn web_send_resets_message_count_routes_and_delivers() {
 }
 
 #[tokio::test]
-async fn web_send_persists_public_human_owner_for_manager_worker() {
+async fn web_send_persists_human_only_audience_for_manager_worker() {
     let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let mut group = support.group.get("group-1").await.unwrap();
     group.driver_bot = "control-plane-owner".to_string();
@@ -1351,6 +1351,10 @@ async fn web_send_persists_public_human_owner_for_manager_worker() {
     assert_eq!(appended[0].sender_id, "human_1");
     assert_eq!(appended[0].message_type, "chat");
     assert_eq!(appended[0].owner_bot_id, None);
+    assert_eq!(
+        appended[0].audience,
+        Some(bcs_domain::MessageAudience::directed(["human_1"]).unwrap())
+    );
 
     let chat_support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
     let chat_repo = Arc::new(RecordingMessageRepo::default());

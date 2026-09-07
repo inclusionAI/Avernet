@@ -155,6 +155,44 @@ async fn human_can_atomically_update_own_session_mode_and_scope() {
 }
 
 #[tokio::test]
+async fn human_can_update_own_session_scope_without_changing_mode() {
+    let (app, sessions, _temp_dir) = owner_app("alice", "driver-bot").await;
+    {
+        let mut stored = sessions.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        let mut human = Participant::human("human_alice", ParticipantRole::Observer);
+        human.mode = Some(ParticipantMode::Absent);
+        session.participants.push(human);
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/sessions/group-1:00000001/members/human_alice")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"message_view_scope": "participant"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = sessions.session.lock().await;
+    let human = stored
+        .as_ref()
+        .unwrap()
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .unwrap();
+    assert_eq!(human.mode, Some(ParticipantMode::Absent));
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
+}
+
+#[tokio::test]
 async fn human_cannot_update_another_session_participant_scope() {
     let (app, sessions, _temp_dir) = owner_app("bob", "driver-bot").await;
     {

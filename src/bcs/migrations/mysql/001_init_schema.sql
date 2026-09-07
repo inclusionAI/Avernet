@@ -363,8 +363,7 @@ CREATE TABLE IF NOT EXISTS `bcs_messages` (
   KEY `idx_group_session` (`group_id`, `session_id`),
   KEY `idx_session_created` (`session_id`, `created_at`),
   KEY `idx_session_sender_created` (`session_id`, `sender_id`, `created_at`),
-  KEY `idx_session_type_created` (`session_id`, `message_type`, `created_at`),
-  KEY `idx_messages_session_audience_created` (`session_id`, `visibility_domain`, `audience_kind`, `created_at`, `session_seq`)
+  KEY `idx_session_type_created` (`session_id`, `message_type`, `created_at`)
 ) DEFAULT CHARSET = utf8mb4;
 
 -- Table: bcs_providers

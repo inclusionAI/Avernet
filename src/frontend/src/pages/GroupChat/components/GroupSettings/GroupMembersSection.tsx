@@ -29,7 +29,7 @@ import { useGroupMembers } from '@/pages/GroupChat/hooks/useGroupMembers';
 import { cn } from '@/utils/utils';
 import { EyeOff, Plus, X } from 'lucide-react';
 import React, { useState } from 'react';
-import type { GroupInfo, GroupMember } from '../../types';
+import type { GroupInfo, GroupMember, MessageViewScope } from '../../types';
 
 interface GroupMembersSectionProps {
   group: GroupInfo;
@@ -71,7 +71,12 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
   isOwner,
   onClickAddMember,
 }) => {
-  const { removeGroupMember, isRemoving } = useGroupMembers();
+  const {
+    removeGroupMember,
+    updateGroupMemberScope,
+    isRemoving,
+    isUpdatingScope,
+  } = useGroupMembers();
   const [pendingRemove, setPendingRemove] = useState<GroupMember | null>(null);
 
   const participants = group.participants || [];
@@ -129,7 +134,25 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
                 >
                   {member.actorKind === 'human' ? '用户' : 'Bot'}
                 </span>
-                {member.actorKind === 'human' && (
+                {member.actorKind === 'human' && isOwner ? (
+                  <select
+                    aria-label={`设置 ${member.name} 的群级消息视角`}
+                    value={member.messageViewScope || 'full'}
+                    disabled={isUpdatingScope}
+                    onChange={(event) => {
+                      void updateGroupMemberScope(
+                        group.id,
+                        member,
+                        event.target.value as MessageViewScope,
+                      );
+                    }}
+                    className="h-6 rounded-md border border-slate-200 bg-white px-1 text-[10px] text-slate-600 disabled:cursor-wait disabled:opacity-50"
+                    title="群级默认消息视角；具体游戏以会话中的有效视角为准"
+                  >
+                    <option value="full">完整视角</option>
+                    <option value="participant">参与者视角</option>
+                  </select>
+                ) : member.actorKind === 'human' ? (
                   <span
                     className={cn(
                       'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
@@ -143,7 +166,7 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
                       ? '参与者视角'
                       : '完整视角'}
                   </span>
-                )}
+                ) : null}
                 <span
                   className={cn(
                     'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
