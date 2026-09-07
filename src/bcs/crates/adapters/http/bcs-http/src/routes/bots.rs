@@ -922,7 +922,7 @@ fn bot_use_case_error_to_visibility_response(error: BotUseCaseError, bot_uuid: &
     }
 }
 
-async fn dispatch_visibility_sync_after_update(
+pub(super) async fn dispatch_visibility_sync_after_update(
     state: &HttpAppState,
     bot_uuid: &str,
     visibility: &str,

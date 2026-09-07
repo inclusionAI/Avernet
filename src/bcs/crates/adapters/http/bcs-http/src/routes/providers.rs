@@ -378,10 +378,19 @@ pub async fn patch_provider_bot_attributes(
         has_friend_check_in_strategy = body.friend_check_in_strategy.is_some(),
         "Provider Bot attributes patch accepted"
     );
+    let sync_visibility = body.visibility.is_some();
     let attributes = internal_bot_attributes_service(&state)?
         .patch(body.into_command(bot_uuid.clone()))
         .await
         .map_err(internal_attributes_error)?;
+    if sync_visibility {
+        super::bots::dispatch_visibility_sync_after_update(
+            &state,
+            &bot_uuid,
+            &attributes.visibility,
+        )
+        .await;
+    }
     info!(
         provider_id,
         bot_uuid, "Provider Bot attributes patch completed"
