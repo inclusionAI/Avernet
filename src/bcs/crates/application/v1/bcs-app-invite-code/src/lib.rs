@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, BindInviteCode, BindInviteCodeResult,
+    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BindInviteCode, BindInviteCodeResult,
     GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult, InviteCodeBindingView,
     InviteCodeService,
 };
@@ -308,7 +308,7 @@ mod tests {
     fn human_caller(id: &str) -> AuthenticatedCaller {
         AuthenticatedCaller {
             tenant: None,
-            user: Some(bcs_service_api::AuthenticatedUserIdentity {
+            user: Some(AuthenticatedUserIdentity {
                 id: id.to_string(),
                 username: id.to_string(),
                 display_name: None,
