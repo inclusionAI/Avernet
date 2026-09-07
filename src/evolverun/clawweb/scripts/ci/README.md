@@ -29,16 +29,23 @@ the added test step is advisory during observation; install/build/check remain
 required. No coverage threshold is introduced. Existing business test failures
 must be tracked separately; this change does not repair or skip them.
 
-## 本地统一入口
+## Local entry
 
-在本仓库 `src/evolverun/clawweb` 执行：
+From this repository's `src/evolverun/clawweb` directory:
 
 ```sh
-npm run test:local
+./scripts/test-clawweb.sh
 ```
 
-自动安装依赖 → build → check → 所有包的 test/coverage。Public 使用 npm ci；
-OCB 使用 npm install（组合 lock 不提交）。OCB 先沿用现有本地开发方式关联 Avernet；
-此命令不 checkout、不切换分支、不复制源码。已有依赖和构建，只想重跑用例可用 `npm run test:ci`。
-安装/构建/检查失败立即停止并明确 tests NOT_RUN；测试断言失败仍收集其他包，最终返回非零。
-本轮目标是运行测试、暴露问题，不修业务用例，不要求全绿。
+The script installs dependencies, builds and checks packages, then runs every
+public package test with coverage. Existing test failures remain visible and
+produce a nonzero exit status.
+
+To test the internal composition, pass the OCB repository path:
+
+```sh
+./scripts/test-clawweb.sh --ocb /path/to/open_ocb
+```
+
+This uses the same local symlink association as `start-clawweb.sh`; it does not
+checkout, copy, or switch either repository.

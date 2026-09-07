@@ -14,8 +14,7 @@
     "test": "npm run test --workspaces --if-present",
     "test:ci": "node scripts/ci/run-tests.mjs test",
     "ci:build": "node scripts/ci/run-tests.mjs build",
-    "ci:check": "node scripts/ci/run-tests.mjs check",
-    "test:local": "node scripts/ci/test-local.mjs"
+    "ci:check": "node scripts/ci/run-tests.mjs check"
   },
   "devDependencies": {
     "fast-xml-parser": "5.5.6",
