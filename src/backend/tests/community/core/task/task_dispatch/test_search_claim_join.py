@@ -15,7 +15,9 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchBasedDispatchStrategy,
     SearchOutcome,
     SearchResult,
-    _rule_based_search_result,
+    _coverage_route,
+    _join_candidates_pool,
+    _offpath_normal,
 )
 
 
@@ -239,61 +241,100 @@ def test_empty_roster_fail_open():
     assert r.outcome == SearchOutcome.HIT_SINGLE and r.bot_id == "X"
 
 
-def test_rule_dispatch_single_candidate_random_miss_allows_bbs_escalation(monkeypatch):
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.39,
-    )
+# ===== off-path 正常派发(_offpath_normal): join+candidate-count,无随机/无回退/无定制 =====
 
-    result = _rule_based_search_result([{"bot_id": "candidate-a"}], [])
+
+def test_offpath_empty_joined_misses_without_fallback():
+    """joined 空(候选∩池=空)→ MISS(no_candidates),不回退池。"""
+    result = _offpath_normal([])
 
     assert result.outcome == SearchOutcome.MISS
-    assert result.bot_id is None
+    assert result.miss_reason == "no_candidates"
     assert result.group_formation is None
-    assert result.miss_reason == "rule_single_candidate_random_miss"
 
 
-def test_rule_dispatch_multi_candidate_caps_fixed_pool_group_at_three(monkeypatch):
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.99,
-    )
-    observed = {}
+def test_offpath_one_or_two_joined_single_bot():
+    """len(joined)≤2 → HIT_SINGLE(取 joined[0],owner 从 :owner 后缀解析)。"""
+    r1 = _offpath_normal(["rule-a:1"])
+    assert r1.outcome == SearchOutcome.HIT_SINGLE
+    assert r1.bot_id == "rule-a:1"
+    assert r1.owner_id == "1"
 
-    def sample(values, count):
-        observed["count"] = count
-        return list(values)[:count]
+    r2 = _offpath_normal(["rule-a:1", "rule-b:2"])
+    assert r2.outcome == SearchOutcome.HIT_SINGLE
+    assert r2.bot_id == "rule-a:1"
 
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
-        sample,
-    )
 
-    result = _rule_based_search_result(
-        [{"bot_id": f"candidate-{index}"} for index in range(8)],
-        RULE_POOL,
+def test_offpath_three_or_more_joined_manager_worker_group_capped_at_three():
+    """len(joined)≥3 → HIT_MULTI_BOTS(前 3 个,manager_worker),确定性不随机。"""
+    result = _offpath_normal(
+        ["rule-a:1", "rule-b:2", "rule-c:3", "rule-d:4", "rule-e:5"]
     )
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
-    assert observed["count"] == 3
-    assert len(result.group_formation.bot_ids) == 3
-    assert len(result.group_formation.members_info) == 3
+    assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+    assert result.group_formation.collab_mode == "manager_worker"
+    assert [m["role"] for m in result.group_formation.members_info] == [
+        "manager", "worker", "worker"
+    ]
 
 
-def test_rule_dispatch_single_candidate_keeps_hit_after_40_percent_threshold(monkeypatch):
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
-        lambda: 0.4,
+# ===== _join_candidates_pool: 候选∩池 by product =====
+
+
+def test_join_candidates_pool_intersects_by_product_in_candidate_order():
+    """候选 product ∩ 池,按候选出现顺序(score 降序)返回池条目(product:owner),去重。"""
+    joined = _join_candidates_pool(
+        [{"bot_id": "rule-b"}, {"bot_id": "rule-a"}, {"bot_id": "nobody"}, {"bot_id": "rule-a"}],
+        RULE_POOL,
     )
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
-        lambda values, count: list(values)[:count],
-    )
 
-    result = _rule_based_search_result([{"bot_id": "candidate-a"}], RULE_POOL)
+    assert joined == ["rule-b:2", "rule-a:1"]
+
+
+def test_join_candidates_pool_empty_when_no_intersection():
+    """候选与池无交集 → 空列表(off-path 兜底 MISS,不回退池)。"""
+    assert _join_candidates_pool([{"bot_id": "x"}, {"bot_id": "y"}], RULE_POOL) == []
+
+
+# ===== on-path 模式覆盖路由(_coverage_route): single→group→bbs =====
+
+
+def test_coverage_route_forces_single_first():
+    """covered={} & joined 非空 → 强制 single(joined[0])。"""
+    result = _coverage_route(["rule-a:1", "rule-b:2"], set())
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id in set(RULE_POOL)
+    assert result.bot_id == "rule-a:1"
+
+
+def test_coverage_route_forces_group_when_single_covered():
+    """covered={single} & len(joined)≥2 → 强制 group(前 3)。"""
+    result = _coverage_route(["rule-a:1", "rule-b:2", "rule-c:3"], {"single"})
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+
+
+def test_coverage_route_forces_bbs_miss_when_single_and_group_covered():
+    """covered={single,group} → 强制 MISS(mode_coverage_bbs) 升根级 BBS。"""
+    result = _coverage_route(["rule-a:1"], {"single", "group"})
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "mode_coverage_bbs"
+
+
+def test_coverage_route_bbs_feasible_even_when_joined_empty():
+    """joined 空挡不住 single/group → 直接 bbs MISS(恒可行)。"""
+    result = _coverage_route([], set())
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "mode_coverage_bbs"
+
+
+def test_coverage_route_returns_none_when_all_covered():
+    """全覆盖 → None(调用方兜底走 off-path 正常派发)。"""
+    assert _coverage_route(["rule-a:1", "rule-b:2"], {"single", "group", "bbs"}) is None
 
 
 def test_load_rule_test_pool_returns_claim_enabled_bot_ids():
@@ -312,7 +353,7 @@ def test_load_rule_test_pool_returns_claim_enabled_bot_ids():
 
 
 def test_load_rule_test_pool_empty_when_bcn_missing():
-    """bcn 未注入(stub/测试) → 空池,由 _rule_based_search_result 兜底。"""
+    """bcn 未注入(stub/测试) → 空池,由 _offpath_normal 兜底 MISS(no_candidates)。"""
     assert _run(_strat(None)._load_rule_test_pool()) == []
 
 
@@ -323,12 +364,3 @@ def test_load_rule_test_pool_empty_on_roster_failure():
     assert _run(_strat(bcn)._load_rule_test_pool()) == []
 
 
-def test_rule_based_search_result_empty_pool_degrades_to_miss():
-    """claim 池为空(无 claim+public bot) → MISS(no_claim_pool),不产出空协作群。"""
-    result = _rule_based_search_result(
-        [{"bot_id": "candidate-a"}, {"bot_id": "candidate-b"}], []
-    )
-
-    assert result.outcome == SearchOutcome.MISS
-    assert result.miss_reason == "no_claim_pool"
-    assert result.group_formation is None

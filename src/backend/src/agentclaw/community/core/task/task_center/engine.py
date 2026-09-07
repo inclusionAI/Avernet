@@ -2541,6 +2541,54 @@ class ExecutionEngine:
                 )
         if to_run:
             side.append(("run", to_run))
+        # 模式覆盖路由(动态规划链路):mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式
+        # 并 union 写回 graph.extend_props["mode_coverage"](框架内部态,跨 dispatch 持久;strategy 下轮读)。
+        self._record_mode_coverage(task_id, dispatched)
+
+    def _record_mode_coverage(self, task_id: str, dispatched: list) -> None:
+        """mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式(single/group/bbs)并 union 写回
+        graph.extend_props["mode_coverage"]。strategy 下轮派发读该标记决定覆盖路由;OFF/无产出不写。
+
+        映射:HIT_SINGLE→single(run_mode=single_bot)、HIT_MULTI→group(run_mode=coop_group)、
+        bbs 档 MISS(reason=mode_coverage_bbs)→bbs。仅 mode_coverage ON 写,避免 OFF 运行污染 extend_props。
+        best-effort:读/写图异常不阻断 dispatch 主流程(标记丢失仅影响覆盖路由,下轮重新评估)。
+        """
+        if self._task_settings is None or not self._task_settings.is_enabled("mode_coverage"):
+            return
+        new_modes: set[str] = set()
+        for node in dispatched or []:
+            run_mode = node.run_info.run_mode
+            if run_mode == "single_bot":
+                new_modes.add("single")
+            elif run_mode == "coop_group":
+                new_modes.add("group")
+            else:
+                miss_events = node.run_info.extend_props.get("miss_events") or []
+                if any(str(m) == "mode_coverage_bbs" for m in miss_events):
+                    new_modes.add("bbs")
+        if not new_modes:
+            return
+        try:
+            existing = set(
+                self._graph.query_task_dashboard(task_id).extend_props.get("mode_coverage") or []
+            )
+        except Exception:  # noqa: BLE001  读图容错:标记 best-effort
+            existing = set()
+        merged = existing | new_modes
+        if merged == existing:
+            return
+        try:
+            self._graph.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(extend_props_patch={"mode_coverage": sorted(merged)}),
+            )
+        except Exception as exc:  # noqa: BLE001  写图容错:不阻断 dispatch 主流程
+            logger.warning(
+                "[task][prepare] mode_coverage 标记写失败 task=%s modes=%s: %s",
+                task_id,
+                sorted(merged),
+                exc,
+            )
 
     async def _drain(self, task_id: str, side: list[tuple]) -> None:
         """锁外统一执行 side effects。投递/拉群 IO 锁外 await;翻态(side effect)收口锁内。

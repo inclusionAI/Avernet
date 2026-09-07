@@ -904,3 +904,86 @@ class TestOnPassBbsRecoverableGuard:
         assert svc._get_node(g, "c_new") is not None
         assert svc._get_node(g, "c_new").status == Status.RUNNING
         assert len(runner.run_calls) >= 1
+
+
+# ===== 模式覆盖路由:engine._record_mode_coverage 标记写回 =====
+class _McSettings:
+    """task_settings stub:仅 mode_coverage 可配,供 _record_mode_coverage 测试。"""
+
+    def __init__(self, mode_coverage: bool) -> None:
+        self._mc = mode_coverage
+
+    def is_enabled(self, setting_type: str) -> bool:
+        return self._mc if setting_type == "mode_coverage" else False
+
+
+class TestRecordModeCoverage:
+    """_prepare_into 派发收口后,按 outcome 映射模式 union 写回 graph.extend_props["mode_coverage"]。"""
+
+    def test_no_settings_no_write(self, svc, graph):
+        eng = _engine(svc)  # task_settings 默认 None
+        node = _child("c1")
+        node.run_info.run_mode = "single_bot"
+        eng._record_mode_coverage("t1", [node])
+        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
+
+    def test_mode_coverage_off_no_write(self, svc, graph):
+        eng = _engine(svc)
+        eng._task_settings = _McSettings(False)
+        node = _child("c1")
+        node.run_info.run_mode = "single_bot"
+        eng._record_mode_coverage("t1", [node])
+        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
+
+    def test_maps_single_group_bbs_and_writes(self, svc, graph):
+        eng = _engine(svc)
+        eng._task_settings = _McSettings(True)
+
+        n_single = _child("c1")
+        n_single.run_info.run_mode = "single_bot"
+        n_group = _child("c2")
+        n_group.run_info.run_mode = "coop_group"
+        n_bbs = _child("c3")
+        n_bbs.run_info.extend_props["miss_events"] = ["mode_coverage_bbs"]
+
+        eng._record_mode_coverage("t1", [n_single, n_group, n_bbs])
+
+        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage")) == {
+            "single", "group", "bbs"
+        }
+
+    def test_unions_with_existing(self, svc, graph):
+        eng = _engine(svc)
+        eng._task_settings = _McSettings(True)
+        svc.update_task_graph_info(
+            "t1", TaskGraphPatch(extend_props_patch={"mode_coverage": ["single"]})
+        )
+
+        node = _child("c1")
+        node.run_info.run_mode = "coop_group"
+        eng._record_mode_coverage("t1", [node])
+
+        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage")) == {
+            "single", "group"
+        }
+
+    def test_no_new_modes_skips_write(self, svc, graph):
+        eng = _engine(svc)
+        eng._task_settings = _McSettings(True)
+        # 中性 outcome(run_mode None,无 mode_coverage_bbs miss)→ 无新模式 → 不写
+        node = _child("c1")
+        eng._record_mode_coverage("t1", [node])
+        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
+
+    def test_merged_equals_existing_skips_write(self, svc, graph):
+        eng = _engine(svc)
+        eng._task_settings = _McSettings(True)
+        svc.update_task_graph_info(
+            "t1", TaskGraphPatch(extend_props_patch={"mode_coverage": ["single", "group"]})
+        )
+        node = _child("c1")
+        node.run_info.run_mode = "single_bot"  # 已覆盖 → merged==existing → 不写
+        before = dict(svc.query_task_dashboard("t1").extend_props)
+        eng._record_mode_coverage("t1", [node])
+        after = svc.query_task_dashboard("t1").extend_props
+        assert after.get("mode_coverage") == before.get("mode_coverage") == ["single", "group"]

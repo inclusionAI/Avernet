@@ -30,11 +30,16 @@ SKILL_REPORT_KEY = "skill_report_enabled"
 # TaskHarness 旁路巡检开关(默认关闭);through tasks/settings API (harness_poller).
 HARNESS_POLLER = "harness_poller"
 HARNESS_POLLER_KEY = "harness_poller_enabled"
+# 模式覆盖路由开关(默认开启):动态规划链路保证 single/group/bbs 三模式轮替覆盖一次,
+# 全覆盖后回落正常派发;关闭则纯走正常 join+candidate-count。经 tasks/settings API(mode_coverage)热改。
+MODE_COVERAGE = "mode_coverage"
+MODE_COVERAGE_KEY = "mode_coverage_enabled"
 _SETTING_KEYS = {
     CLAIM_JOIN_FILTER: CLAIM_JOIN_FILTER_KEY,
     SEARCH_SKILL: SEARCH_SKILL_KEY,
     SKILL_REPORT: SKILL_REPORT_KEY,
     HARNESS_POLLER: HARNESS_POLLER_KEY,
+    MODE_COVERAGE: MODE_COVERAGE_KEY,
 }
 _CACHE_TTL_S = 15.0
 _TRUE_LITERALS = ("true", "1", "yes", "on")
@@ -93,6 +98,8 @@ class TaskSettingsService(TaskSettingsServiceProtocol):
             # TaskHarness 旁路巡检默认开启:常驻兜底(SLA 超时复位/FAILED 重派/PENDING 派发超时重搜推);
             # 事件驱动为主推进,此为旁路兜底。可经 tasks/settings harness_poller 跨副本热改关闭。
             HARNESS_POLLER: True,
+            # 模式覆盖路由默认开启(动态规划链路 3 模式轮替覆盖)。
+            MODE_COVERAGE: True,
             **(defaults or {}),
         }
         self._lock = threading.Lock()

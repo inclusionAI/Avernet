@@ -201,10 +201,12 @@ class TestSearchBasedDispatchStrategy:
         assert strategy._bot.calls == []
 
 
-def test_search_strategy_default_rule_samples_one_test_bot_for_one_or_two_candidates(monkeypatch):
+def test_search_strategy_default_rule_single_for_one_or_two_joined():
+    """off-path(rule,task_settings=None):2 joined(候选∩池)→ HIT_SINGLE(joined[0]),无随机。"""
+
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {"items": [{"bot_id": "first"}, {"bot_id": "second"}]}
+            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
 
     class _Bot:
         def __init__(self):
@@ -223,29 +225,20 @@ def test_search_strategy_default_rule_samples_one_test_bot_for_one_or_two_candid
         extend_props={"owner_bot_id": "owner"},
     )
     bot = _Bot()
-    sampled = ["default:146836"]
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
-        lambda population, count: sampled[:count],
-    )
     result = _run(SearchBasedDispatchStrategy(bot, _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
-    assert result.bot_id == "default:146836"
-    assert result.owner_id == "146836"
+    assert result.bot_id == "rule-a:1"
+    assert result.owner_id == "1"
     assert bot.calls == []
 
 
-def test_search_strategy_default_rule_samples_all_count_as_manager_worker_for_more_than_two_candidates(monkeypatch):
+def test_search_strategy_default_rule_group_capped_at_three_for_more_than_two_joined():
+    """off-path(rule,task_settings=None):3 joined → HIT_MULTI_BOTS(前 3,manager_worker),确定性。"""
+
     class _Discover:
         def search_by_keyword(self, **kwargs):
-            return {
-                "items": [
-                    {"bot_id": "manager"},
-                    {"bot_id": "worker-1"},
-                    {"bot_id": "worker-2"},
-                ]
-            }
+            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
 
     class _Bot:
         async def send_and_wait_async(self, **kwargs):
@@ -259,20 +252,127 @@ def test_search_strategy_default_rule_samples_all_count_as_manager_worker_for_mo
         status=Status.PENDING,
         extend_props={"owner_bot_id": "owner"},
     )
-    sampled = ["bot-a:1", "bot-b:2", "bot-c:3"]
-    monkeypatch.setattr(
-        "agentclaw.community.core.task.task_dispatch.strategies.random.sample",
-        lambda population, count: sampled[:count],
-    )
     result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation is not None
-    assert result.group_formation.bot_ids == sampled
+    assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
     assert result.group_formation.collab_mode == "manager_worker"
     assert [m["role"] for m in result.group_formation.members_info] == [
         "manager", "worker", "worker"
     ]
+
+
+def test_search_strategy_default_rule_no_intersection_misses_without_fallback():
+    """off-path:候选与 claim 池无交集 → MISS(no_candidates),不回退池。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "stranger"}]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("default dispatch rule must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    result = _run(SearchBasedDispatchStrategy(_Bot(), _Discover(), bcn=_ClaimBcn()).apply(_node("c1"), graph))
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_candidates"
+
+
+class _ModeCoverageSettings:
+    """task_settings stub:仅 mode_coverage 可配(其余 False),供 on-path 覆盖路由测试。"""
+
+    def __init__(self, mode_coverage: bool) -> None:
+        self._mc = mode_coverage
+
+    def is_enabled(self, setting_type: str) -> bool:
+        return self._mc if setting_type == "mode_coverage" else False
+
+
+def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal():
+    """on-path(mode_coverage ON):同 run 连续派发 → single→group→bbs 依次覆盖,全覆盖后回落 off-path。
+    engine 负责写 graph 标记;此处手动推进 extend_props["mode_coverage"] 模拟 engine 写回。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}, {"bot_id": "rule-c"}]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule path must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
+    )
+    strat = SearchBasedDispatchStrategy(
+        _Bot(), _Discover(), bcn=_ClaimBcn(),
+        task_settings=_ModeCoverageSettings(True),
+    )
+    node = _node("c1")
+
+    r1 = _run(strat.apply(node, graph))
+    assert r1.outcome == SearchOutcome.HIT_SINGLE
+    assert r1.bot_id == "rule-a:1"
+    graph.extend_props["mode_coverage"] = ["single"]  # 模拟 engine 写回
+
+    r2 = _run(strat.apply(node, graph))
+    assert r2.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert r2.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+    graph.extend_props["mode_coverage"] = ["group", "single"]
+
+    r3 = _run(strat.apply(node, graph))
+    assert r3.outcome == SearchOutcome.MISS
+    assert r3.miss_reason == "mode_coverage_bbs"
+    graph.extend_props["mode_coverage"] = ["bbs", "group", "single"]  # 全覆盖
+
+    r4 = _run(strat.apply(node, graph))
+    # 全覆盖 → off-path 正常:3 joined → group
+    assert r4.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert r4.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+
+
+def test_search_strategy_rule_mode_coverage_off_falls_back_to_offpath():
+    """mode_coverage OFF(task_settings False)→ 走 off-path 正常 join+candidate-count。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "rule-a"}, {"bot_id": "rule-b"}]}
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule path must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
+    )
+    strat = SearchBasedDispatchStrategy(
+        _Bot(), _Discover(), bcn=_ClaimBcn(),
+        task_settings=_ModeCoverageSettings(False),
+    )
+    result = _run(strat.apply(_node("c1"), graph))
+
+    # 2 joined → single(off-path),不由覆盖路由强制
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "rule-a:1"
 
 
 def test_search_strategy_composes_owner_identity_for_openapi_call():

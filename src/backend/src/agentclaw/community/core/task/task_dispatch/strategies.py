@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
@@ -24,13 +23,16 @@ from agentclaw.community.core.task.domain.prompt_constants import (
 
 logger = logging.getLogger("task.dispatcher")
 
-# ===== PRE rule-mode test customization =====
-# Keep this block self-contained so the pre-release test behavior can be removed
-# without touching the generic dispatch strategy below.
-_SINGLE_CANDIDATE_MISS_PROBABILITY = 0.4
+# ===== 候选漏斗 + 派发模式常量 =====
+# off-path 正常派发(join+candidate-count)与 on-path 模式覆盖路由共用。
 _RULE_TEST_MAX_GROUP_MEMBERS = 3
 _PREFETCH_MAX_TOKENS = 5
 _PREFETCH_TOP_K_PER_TOKEN = 3
+# 模式覆盖路由(动态规划链路):run 内 single/group/bbs 三模式轮替覆盖一次,全覆盖后回落正常派发。
+# 覆盖状态存 graph.extend_props["mode_coverage"](框架内部态,非用户设置);
+# bbs 档经 MISS(_MODE_COVERAGE_BBS)→HUNG→根级 BBS 升级链路(复用现有动态路径,不新增 bbs 代码)。
+_MODE_COVERAGE_ALL = frozenset({"single", "group", "bbs"})
+_MODE_COVERAGE_BBS = "mode_coverage_bbs"
 _STOPWORDS: frozenset[str] = frozenset({
     # 2 字功能词/语气词(jieba 不带停用词,自建;≥2 字过滤已挡单字虚词 的/了/是/在…)。
     "可以", "需要", "能够", "应该", "应当", "必须", "可能", "想要",
@@ -56,7 +58,7 @@ _STOPWORDS: frozenset[str] = frozenset({
 
 # Rule 模式候选池不再写死:由 ``SearchBasedDispatchStrategy._load_rule_test_pool``
 # 在派发时动态查询 ``task_claim_mode=true & visibility=public`` 的 bot_id(``product:owner``),
-# 以适配不同环境 bot_id 不一致(见 ``_rule_based_search_result`` 的 ``bot_pool`` 形参)。
+# 以适配不同环境 bot_id 不一致(见 ``_join_candidates_pool`` 的 ``bot_pool`` 形参)。
 
 
 class SearchOutcome(StrEnum):
@@ -266,15 +268,32 @@ class SearchBasedDispatchStrategy:
             )
         else:
             bot_pool = await self._load_rule_test_pool()
-            sr = _rule_based_search_result(candidates, bot_pool)
+            joined = _join_candidates_pool(candidates, bot_pool)
+            mode_coverage_on = (
+                self._task_settings is not None
+                and self._task_settings.is_enabled("mode_coverage")
+            )
+            covered = set(graph.extend_props.get("mode_coverage") or [])
+            if mode_coverage_on and not _MODE_COVERAGE_ALL.issubset(covered):
+                # on-path 覆盖路由:force 未覆盖模式(single→group→bbs);全覆盖后回落 off-path
+                sr = _coverage_route(joined, covered)
+                if sr is None:  # 全覆盖兜底(预判已挡,防御)
+                    sr = _offpath_normal(joined)
+            else:
+                # off-path 正常:join+candidate-count,无随机/无回退;mode_coverage 关或已全覆盖
+                sr = _offpath_normal(joined)
             logger.info(
-                "[task][search] task=%s node=%s 使用候选数量规则 outcome=%s bot_id=%s bot_ids=%s pool_size=%s",
+                "[task][search] task=%s node=%s rule outcome=%s bot_id=%s bot_ids=%s "
+                "joined=%d pool_size=%d mode_coverage=%s covered=%s",
                 node.task_id,
                 node.node_id,
                 sr.outcome,
                 sr.bot_id,
                 sr.group_formation.bot_ids if sr.group_formation else None,
+                len(joined),
                 len(bot_pool),
+                mode_coverage_on,
+                sorted(covered),
             )
         before_join = _search_result_summary(sr)
         # JOIN 灰度开关:开启时对决出的 assignee 做 task_claim_mode-on 名单交集(下游 post-filter)
@@ -314,7 +333,8 @@ class SearchBasedDispatchStrategy:
         """Rule 模式候选池:动态取 ``task_claim_mode=true & visibility=public`` 的 bot_id(``product:owner``)。
 
         不同环境 claim 名单不同,不再写死。bcn 缺失 / 查询失败 / 名单空 → 返回空列表,
-        由 :func:`_rule_based_search_result` 兜底 ``MISS(no_claim_pool)``。复用与
+        由 :func:`_join_candidates_pool` 交空集 → :func:`_offpath_normal` 兜底 ``MISS(no_candidates)``。
+        复用与
         ``_apply_claim_join`` 完全相同的查询参数(进程内 TTL 缓存命中,无额外出网开销)。
         """
         if self._bcn is None:
@@ -572,63 +592,30 @@ async def _prefetch_candidates(
     return result
 
 
-def _rule_based_search_result(
-    candidates: list[dict], bot_pool: list[str]
-) -> SearchResult:
-    """Build a deterministic-shape result with random test Bot identities.
+def _join_candidates_pool(candidates: list[dict], bot_pool: list[str]) -> list[str]:
+    """off-path WHO:关键词候选 ∩ claim+public 池,按 product 归一,候选 score 降序保留。
 
-    The discovered candidate count controls the dispatch shape, while the
-    final assignees come from ``bot_pool`` — a dynamic roster of
-    ``task_claim_mode=true & visibility=public`` bots in ``product:owner`` form
-    (fetched by :meth:`SearchBasedDispatchStrategy._load_rule_test_pool`), so the
-    pool adapts to each environment instead of a hardcoded internal list. One or
-    two candidates produce one single-Bot assignee. More than two candidates
-    produce a manager-worker group with the same number of sampled Bots. An empty
-    pool (no claim-enabled public bot) degrades to ``MISS(no_claim_pool)``.
+    候选 ``bot_id`` 为 product(``{p}``),池条目为 bcs(``{p}:{o}``,与候选 ``bot_uuid`` 同形);
+    按 product(首段)交集,返回池条目按候选出现顺序(预查已 score 降序)去重。交集为空 → 空列表
+    (由 :func:`_offpath_normal` 兜底 ``MISS(no_candidates)``,**不回退池**)。
     """
-    candidate_count = sum(1 for candidate in candidates if candidate.get("bot_id"))
-    if candidate_count == 0:
-        return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+    pool_by_product: dict[str, str] = {}
+    for entry in bot_pool or []:
+        prod = _claim_product(entry)
+        if prod and prod not in pool_by_product:
+            pool_by_product[prod] = entry
+    joined: list[str] = []
+    seen: set[str] = set()
+    for cand in candidates or []:
+        prod = _claim_product(cand.get("bot_id"))
+        if prod and prod in pool_by_product and prod not in seen:
+            seen.add(prod)
+            joined.append(pool_by_product[prod])
+    return joined
 
-    if (
-        candidate_count == 1
-        and random.random() < _SINGLE_CANDIDATE_MISS_PROBABILITY
-    ):
-        logger.info(
-            "[task][search] rule mode single candidate randomly missed "
-            "to allow BBS escalation probability=%s",
-            _SINGLE_CANDIDATE_MISS_PROBABILITY,
-        )
-        return SearchResult(
-            outcome=SearchOutcome.MISS,
-            miss_reason="rule_single_candidate_random_miss",
-        )
 
-    if not bot_pool:
-        logger.info(
-            "[task][search] rule mode claim pool 为空→MISS(no_claim_pool) "
-            "candidate_count=%s",
-            candidate_count,
-        )
-        return SearchResult(
-            outcome=SearchOutcome.MISS, miss_reason="no_claim_pool"
-        )
-
-    dispatch_count = 1 if candidate_count <= 2 else candidate_count
-    # PRE 定制：固定候选池建协作群最多保留 3 个成员，避免搜推结果直接拉超大群。
-    dispatch_count = min(
-        dispatch_count, _RULE_TEST_MAX_GROUP_MEMBERS, len(bot_pool)
-    )
-    selected = random.sample(bot_pool, dispatch_count)
-    if dispatch_count == 1:
-        bot_id = selected[0]
-        _, _, owner_id = bot_id.partition(":")
-        return SearchResult(
-            outcome=SearchOutcome.HIT_SINGLE,
-            bot_id=bot_id,
-            owner_id=owner_id or None,
-        )
-
+def _build_manager_worker_group(bot_ids: list[str]) -> GroupFormation:
+    """构造 manager_worker 协作群(首位 manager,其余 worker)。供 off-path/coverage 共用。"""
     members_info = [
         {
             "bot_id": bot_id,
@@ -639,20 +626,69 @@ def _rule_based_search_result(
                 else "执行当前任务并向 manager 汇报产出"
             ),
         }
-        for index, bot_id in enumerate(selected)
+        for index, bot_id in enumerate(bot_ids)
     ]
-    return SearchResult(
-        outcome=SearchOutcome.HIT_MULTI_BOTS,
-        group_formation=GroupFormation(
-            bot_ids=selected,
-            collab_mode="manager_worker",
-            group_name="任务主从协作群",
-            members_info=members_info,
-        ),
+    return GroupFormation(
+        bot_ids=bot_ids,
+        collab_mode="manager_worker",
+        group_name="任务主从协作群",
+        members_info=members_info,
     )
 
 
-# ===== END PRE rule-mode test customization =====
+def _offpath_normal(joined: list[str]) -> SearchResult:
+    """off-path 正常派发:join 结果 + candidate-count,无随机/无回退/无定制。
+
+    joined 空 → ``MISS(no_candidates)``(不回退池);``len(joined)≤2 → HIT_SINGLE``(取 joined[0],
+    owner_id 从 ``:owner`` 后缀解析);``len(joined)≥3 → HIT_MULTI_BOTS``(取前
+    ``_RULE_TEST_MAX_GROUP_MEMBERS`` 个,manager_worker)。命中啥就是啥。
+    """
+    if not joined:
+        return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+    if len(joined) <= 2:
+        bot_id = joined[0]
+        _, _, owner_id = bot_id.partition(":")
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=bot_id,
+            owner_id=owner_id or None,
+        )
+    return SearchResult(
+        outcome=SearchOutcome.HIT_MULTI_BOTS,
+        group_formation=_build_manager_worker_group(joined[:_RULE_TEST_MAX_GROUP_MEMBERS]),
+    )
+
+
+def _coverage_route(joined: list[str], covered: set[str]) -> SearchResult | None:
+    """on-path 模式覆盖路由:按 ``single→group→bbs`` 取首个未覆盖模式强制覆盖。
+
+    - single 未覆盖 & ``joined`` 非空 → ``HIT_SINGLE(joined[0])``;
+    - group 未覆盖 & ``len(joined)≥2`` → ``HIT_MULTI_BOTS``(前 ``_RULE_TEST_MAX_GROUP_MEMBERS`` 个);
+    - bbs 未覆盖 → ``MISS(mode_coverage_bbs)``,交现有 miss→HUNG→根级 BBS 升级链路(恒可行)。
+    某档不可行(如 joined 空挡不住 single/group)→ 跳下一档;返回 ``None``=已全覆盖
+    (调用方预判,兜底由 :func:`_offpath_normal` 走正常派发)。
+    """
+    if "single" not in covered and joined:
+        bot_id = joined[0]
+        _, _, owner_id = bot_id.partition(":")
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=bot_id,
+            owner_id=owner_id or None,
+        )
+    if "group" not in covered and len(joined) >= 2:
+        return SearchResult(
+            outcome=SearchOutcome.HIT_MULTI_BOTS,
+            group_formation=_build_manager_worker_group(
+                joined[: min(_RULE_TEST_MAX_GROUP_MEMBERS, len(joined))]
+            ),
+        )
+    if "bbs" not in covered:
+        return SearchResult(outcome=SearchOutcome.MISS, miss_reason=_MODE_COVERAGE_BBS)
+    return None
+
+
+# ===== END 候选漏斗 + 派发模式常量 =====
 
 def _compose_search_prompt(node: TaskNode, candidates: list[dict]) -> str:
     """组 search prompt:{子任务需求, 候选集} + 约定返回格式(4 态)+ 示例。零 case 知识。
