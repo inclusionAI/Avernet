@@ -984,6 +984,8 @@ def test_each_friend_session_operation_reuses_expert_chat(
 
     assert response.status_code in (200, 201), response.json()
     assert expert_method in [call[0] for call in expert.calls]
+    operation = next(call for call in expert.calls if call[0] == expert_method)
+    assert operation[2]["bcn_friend_authorized"] is True
     assert relay.calls == []
 
 
