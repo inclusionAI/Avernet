@@ -13,14 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from engine.community.core.cli_tools.directories import (
-    ENGINE_CLI_DIRS,
-    cli_dir_beside,
-    cli_dir_env_var,
-    cli_dir_for,
-    cli_dir_resolver,
-    default_cli_dir,
-)
 from engine.community.core.cli_tools.models import CliToolPayload
 from engine.community.core.cli_tools.service import (
     MAX_NAME_LENGTH,
@@ -39,7 +31,7 @@ def cli_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def service(cli_dir: Path) -> LocalCliToolsService:
-    return LocalCliToolsService(lambda: cli_dir)
+    return LocalCliToolsService(cli_dir)
 
 
 class TestInstall:
@@ -257,113 +249,6 @@ class TestReplaceAll:
         assert sorted(p.name for p in cli_dir.iterdir()) == ["added", "kept"]
 
 
-class TestDirectories:
-    """Where tools land, and the knobs that move it."""
-
-    @pytest.fixture(autouse=True)
-    def _clean_env(self, monkeypatch):
-        monkeypatch.delenv("BOT_CLI_DIR", raising=False)
-        for engine in ("OPENCLAW", "CLAUDE_CODE"):
-            monkeypatch.delenv(f"BOT_CLI_DIR_{engine}", raising=False)
-
-    def test_the_default_rule_is_the_workspace_sibling(self):
-        assert cli_dir_beside(Path("/bots/b7/workspace")) == Path("/bots/b7/cli")
-
-    def test_the_default_follows_the_injected_workspace(self, monkeypatch):
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/bots/b7/openclaw/workspace")
-
-        assert cli_dir_for("openclaw") == Path("/bots/b7/openclaw/cli")
-
-    def test_the_default_falls_back_to_the_image_convention(self, monkeypatch):
-        monkeypatch.delenv("OPENCLAW_WORKSPACE_DIR", raising=False)
-        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: Path("/home/admin")))
-
-        assert default_cli_dir() == Path("/home/admin/.openclaw/cli")
-
-
-class TestTuning:
-    """Every knob, in precedence order — no code change required for any."""
-
-    @pytest.fixture(autouse=True)
-    def _clean_env(self, monkeypatch):
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/bots/b7/claude_code/workspace")
-        monkeypatch.delenv("BOT_CLI_DIR", raising=False)
-        for engine in ("OPENCLAW", "CLAUDE_CODE"):
-            monkeypatch.delenv(f"BOT_CLI_DIR_{engine}", raising=False)
-
-    def test_the_per_engine_variable_is_named_predictably(self):
-        assert cli_dir_env_var("claude_code") == "BOT_CLI_DIR_CLAUDE_CODE"
-
-    def test_a_global_override_moves_every_engine(self, monkeypatch):
-        monkeypatch.setenv("BOT_CLI_DIR", "/opt/tools")
-
-        assert cli_dir_for("claude_code") == Path("/opt/tools")
-        assert cli_dir_for("openclaw") == Path("/opt/tools")
-
-    def test_a_per_engine_override_moves_only_that_engine(self, monkeypatch):
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "/opt/cc-tools")
-
-        assert cli_dir_for("claude_code") == Path("/opt/cc-tools")
-        assert cli_dir_for("openclaw") == Path("/bots/b7/claude_code/cli")
-
-    def test_the_per_engine_override_beats_the_global_one(self, monkeypatch):
-        monkeypatch.setenv("BOT_CLI_DIR", "/opt/tools")
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "/opt/cc-tools")
-
-        assert cli_dir_for("claude_code") == Path("/opt/cc-tools")
-        assert cli_dir_for("openclaw") == Path("/opt/tools")
-
-    def test_an_override_is_used_verbatim(self, monkeypatch):
-        """No ``cli`` is appended — what you set is where tools land."""
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "/somewhere/else/bin")
-
-        assert cli_dir_for("claude_code") == Path("/somewhere/else/bin")
-
-    def test_a_blank_override_is_ignored_not_obeyed(self, monkeypatch):
-        """An empty variable must not resolve tools to the filesystem root."""
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "   ")
-
-        assert cli_dir_for("claude_code") == Path("/bots/b7/claude_code/cli")
-
-    def test_the_code_table_moves_one_engine_without_env(self, monkeypatch):
-        monkeypatch.setitem(
-            ENGINE_CLI_DIRS, "claude_code", lambda: Path("/home/admin/.claude_code/cli")
-        )
-
-        assert cli_dir_for("claude_code") == Path("/home/admin/.claude_code/cli")
-        assert cli_dir_for("openclaw") == Path("/bots/b7/claude_code/cli")
-
-    def test_an_env_override_beats_the_code_table(self, monkeypatch):
-        monkeypatch.setitem(
-            ENGINE_CLI_DIRS, "claude_code", lambda: Path("/home/admin/.claude_code/cli")
-        )
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "/opt/cc-tools")
-
-        assert cli_dir_for("claude_code") == Path("/opt/cc-tools")
-
-    def test_two_bots_on_one_host_never_share_a_tool_directory(self, monkeypatch):
-        """The isolation the default exists to preserve.
-
-        BaaS injects the workspace per bot *and* per engine, so reading it is
-        what keeps bots apart. A fixed constant would give every bot on the
-        host one tool directory, and one bot's whole-set replacement would
-        delete another bot's tools.
-        """
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
-        bot_a = cli_dir_for("openclaw")
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_b/openclaw/workspace")
-        bot_b = cli_dir_for("openclaw")
-
-        assert bot_a != bot_b
-
-    def test_resolution_is_lazy_not_bound_at_construction(self, monkeypatch):
-        """Overrides and the injected workspace both land after startup."""
-        service = LocalCliToolsService(cli_dir_resolver("claude_code"))
-        monkeypatch.setenv("BOT_CLI_DIR_CLAUDE_CODE", "/set/afterwards")
-
-        assert service._dir() == Path("/set/afterwards")
-
-
 class TestErrorPaths:
     """The defensive branches, exercised rather than assumed."""
 
@@ -408,7 +293,7 @@ class TestErrorPaths:
         """A path that exists but is not a directory is "no commands", not a crash."""
         not_a_dir = tmp_path / "cli"
         not_a_dir.write_bytes(b"surprise")
-        service = LocalCliToolsService(lambda: not_a_dir)
+        service = LocalCliToolsService(not_a_dir)
 
         assert await service.list_tools() == []
 

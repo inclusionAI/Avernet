@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import logging
 
-from engine.community.core.cli_tools.directories import cli_dir_resolver
 from engine.community.core.cli_tools.service import LocalCliToolsService
+from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
 from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
@@ -145,11 +145,11 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
-        # Where Claude Code's tools land is still open — the community image
-        # is not what production deploys. Tune with BOT_CLI_DIR_CLAUDE_CODE, or
-        # add an ENGINE_CLI_DIRS entry; see core/cli_tools/directories.py. Until
-        # then it takes the workspace-sibling default, which stays per-bot.
-        self._cli_tools = LocalCliToolsService(cli_dir_resolver("claude_code"))
+        # Beside this bot's workspace, as OpenClaw does. **This is the line to
+        # change once the deployment owners confirm where Claude Code's tools
+        # belong in production** — the community image is not what production
+        # deploys, so its layout is not evidence about production.
+        self._cli_tools = LocalCliToolsService(workspace_root().parent / "cli")
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)

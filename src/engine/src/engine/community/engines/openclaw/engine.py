@@ -34,8 +34,8 @@ from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
 from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAdapter
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
-from engine.community.core.cli_tools.directories import cli_dir_resolver
 from engine.community.core.cli_tools.service import LocalCliToolsService
+from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
 from engine.community.openclaw.client.gateway_client import (
@@ -175,11 +175,13 @@ class OpenClawEngine(BaseEngine):
         self._node = OpenClawNodeAdapter(self._port)
         self._mcp = OpenClawMcpAdapter(self._port)
         self._skills = OpenClawSkillsAdapter(self._port)
-        # CLI tools need no port: placing a command is local filesystem work.
-        # Where they land is a deployment fact — override with BOT_CLI_DIR_OPENCLAW
-        # or BOT_CLI_DIR, or add an entry to ENGINE_CLI_DIRS; see
-        # core/cli_tools/directories.py.
-        self._cli_tools = LocalCliToolsService(cli_dir_resolver("openclaw"))
+        # CLI tools need no port: placing a command is local filesystem work,
+        # so the only per-engine fact is the directory — stated here, once.
+        # Beside this bot's workspace: BaaS injects that per bot and per engine
+        # (so two bots on one host never share a tool directory), falling back
+        # to the image's ~/.openclaw/workspace. **This is the line to change if
+        # OpenClaw's tool location moves.**
+        self._cli_tools = LocalCliToolsService(workspace_root().parent / "cli")
         self._file = OpenClawFileAdapter(self._port)
         self._default_config = OpenClawDefaultConfigAdapter(self._port)
         self._web_shell = OpenClawWebShellAdapter(self._port)

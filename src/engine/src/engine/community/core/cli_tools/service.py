@@ -23,7 +23,7 @@ import logging
 import os
 import stat
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 from engine.community.core.cli_tools.models import (
@@ -109,13 +109,19 @@ def _md5(data: bytes) -> str:
 class LocalCliToolsService(CliToolsService):
     """CLI tools kept as executable files under one directory.
 
-    ``directory`` is a callable, not a ``Path``: OpenClaw's resolves an
-    environment variable BaaS injects at spawn time, so binding a value at
-    construction would capture whatever was set when the engine object was
-    built rather than what is true at the call.
+    ``directory`` is required and concrete: **each engine states where its
+    own tools live** when it binds this service. That is the whole of the
+    per-engine variation, and keeping it at the binding site means there is
+    exactly one line to change when an engine's layout is settled — no
+    resolver, no lookup table, and no environment read down here in ``core``.
+
+    A construction-time value is enough because BaaS puts the bot's workspace
+    in the *process* environment before the adapter starts
+    (``_process_manager.py`` builds ``env`` and passes it to ``Popen``), so an
+    engine reading it while composing itself already sees the right value.
     """
 
-    def __init__(self, directory: Callable[[], Path]) -> None:
+    def __init__(self, directory: Path) -> None:
         self._directory = directory
         # Mutating operations are serialised. Without this, a `replace_all`
         # that has already installed its set can prune a tool a concurrent
@@ -129,7 +135,7 @@ class LocalCliToolsService(CliToolsService):
     # ── the directory ────────────────────────────────────────────────────
 
     def _dir(self) -> Path:
-        return self._directory()
+        return self._directory
 
     def _path_of(self, name: str) -> Path:
         return self._dir() / validate_tool_name(name)

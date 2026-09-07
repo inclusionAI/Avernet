@@ -115,19 +115,20 @@ engine teams.
   subclasses in this repository. `aicoding` and `hermes` carry ports, not
   engines; if the corp build ships them they each need a binding, which this
   change does not cover.
-- **Where the tools land.** Not settled in code, and deliberately so: the
-  community `docker/` tree is not what production deploys, so the directory is
-  a deployment knob (`BOT_CLI_DIR_<ENGINE>`, `BOT_CLI_DIR`, `ENGINE_CLI_DIRS`)
-  with a per-bot workspace-sibling default. Claude Code's production location
-  is still to be confirmed with the deployment owners.
+- **Where the tools land.** Stated by each engine at the line where it binds
+  the service — the service takes a required concrete path. No resolver, no
+  lookup table, and no environment read inside `core/`. Both community engines
+  currently pass their bot's workspace sibling, which is what keeps two bots on
+  one host from sharing a directory. Claude Code's production location is still
+  to be confirmed with the deployment owners; settling it changes one line in
+  `engines/claude_code/engine.py`.
 
 ## Follow-ups
 
 - **End-to-end assertion on a live ARCA bot**: an apply declaring `cli_tools`
   reports the category succeeded and the tools are present. Platform-side.
 - **Confirm Claude Code's production tool directory** with the deployment
-  owners, then pin it via `BOT_CLI_DIR_CLAUDE_CODE` or an `ENGINE_CLI_DIRS`
-  entry.
+  owners, then set it at that engine's binding site.
 - **`aicoding` and `hermes`** need the same binding if the corp build ships
   them as engines.
 - **PATH injection**, which makes the workspace-sibling placement load-bearing

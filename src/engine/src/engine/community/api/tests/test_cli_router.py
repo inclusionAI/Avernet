@@ -54,7 +54,7 @@ def _make_engine(cli_dir: Path, *, caps: set[Capability]):
             self._session = MagicMock()
             self._chat = MagicMock()
             if caps:
-                self._cli_tools = LocalCliToolsService(lambda: cli_dir)
+                self._cli_tools = LocalCliToolsService(cli_dir)
 
     return _CliTestEngine
 

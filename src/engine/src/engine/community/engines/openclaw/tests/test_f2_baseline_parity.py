@@ -242,18 +242,24 @@ class TestCliToolsBinding:
 
         assert engine.cli_tools is not None
 
-    def test_the_tool_directory_follows_this_bots_workspace(self, monkeypatch):
-        """Per bot by default, and overridable per engine without code.
+    def test_the_tool_directory_sits_beside_this_bots_workspace(self, monkeypatch):
+        """Per bot, because BaaS injects the workspace per bot and per engine.
 
-        Where an engine's tools belong is a deployment fact, so the binding
-        resolves through ``cli_dir_for`` rather than a constant.
+        A constant here would give every bot on a singlebox host one tool
+        directory, and either bot's whole-set replacement would delete the
+        other's tools. Read at construction, which is enough: BaaS puts the
+        variable in the process environment before the adapter starts.
         """
-        monkeypatch.delenv("BOT_CLI_DIR", raising=False)
-        monkeypatch.delenv("BOT_CLI_DIR_OPENCLAW", raising=False)
         monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
+
         engine = OpenClawEngine(client=_fake_client())
 
         assert engine.cli_tools._dir() == Path("/data/bot_a/openclaw/cli")
 
-        monkeypatch.setenv("BOT_CLI_DIR_OPENCLAW", "/opt/tools")
-        assert engine.cli_tools._dir() == Path("/opt/tools")
+    def test_two_bots_never_share_a_tool_directory(self, monkeypatch):
+        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
+        bot_a = OpenClawEngine(client=_fake_client()).cli_tools._dir()
+        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_b/openclaw/workspace")
+        bot_b = OpenClawEngine(client=_fake_client()).cli_tools._dir()
+
+        assert bot_a != bot_b

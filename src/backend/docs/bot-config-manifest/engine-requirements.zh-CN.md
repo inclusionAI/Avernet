@@ -158,25 +158,19 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   **目录常量归引擎**，平台代码里没有它的副本。每个 ARCA 引擎有自己的一份，
   默认技能集本来就是按引擎分的，所以「告诉 agent 去哪找」这件事天然也按引擎走。
 
-  **本仓库的实现把它做成了部署可调的旋钮**（`core/cli_tools/directories.py`），
-  因为「哪个目录」是部署事实而不是代码事实：
+  **本仓库的实现把落点放在各引擎的装配处**
+  （`engines/<engine>/engine.py` 绑定 `_cli_tools` 的那一行）：服务要求传入一个
+  具体路径，由引擎自己给出。没有 resolver、没有查找表、`core/` 里也不读环境变量
+  ——某个引擎的落点定了，就只有一行要改。
 
-  | 优先级 | 形式 | 作用域 |
-  | --- | --- | --- |
-  | 1 | 环境变量 `BOT_CLI_DIR_<ENGINE>` | 单个引擎；绝对路径原样使用 |
-  | 2 | 环境变量 `BOT_CLI_DIR` | 该容器上所有引擎 |
-  | 3 | 代码表 `ENGINE_CLI_DIRS` | 单个引擎的代码默认值（当前为空） |
-  | 4 | 默认 | 该 bot **被注入的 workspace** 的兄弟目录，否则 `~/.openclaw/cli` |
+  当前两个社区引擎都取**该 bot workspace 的兄弟目录**。这一点是必要的：BaaS 按
+  bot **且**按引擎注入 workspace（`OPENCLAW_WORKSPACE_DIR`——名字有误导，它对每个
+  引擎都设），所以同一台 singlebox 上两个 bot 不会共用工具目录；写死常量会让它们
+  共用，而其中任何一个的整体替换都会删掉另一个的工具。构造时读取即可：BaaS 是在
+  拉起 adapter **进程之前**就把它放进进程环境的。
 
-  默认值读的是 BaaS 按 bot **且** 按引擎注入的 workspace
-  （`OPENCLAW_WORKSPACE_DIR`——名字有误导，它对每个引擎都设），这正是同一台
-  singlebox 上两个 bot 不会共用工具目录的原因；写死常量会让它们共用，而其中
-  任何一个的整体替换都会删掉另一个的工具。
-
-  > **Claude Code 的落点尚未定案。**社区镜像的 `start_claude_code.sh` 把该引擎
-  > 的 agent 指向 `/home/admin/.openclaw/workspace`，但**社区镜像不是生产部署
-  > 用的那个**，所以上面的默认值只是安全兜底，不是对任何具体部署的断言。定案后
-  > 设一个环境变量即可生效，或在 `ENGINE_CLI_DIRS` 里加一行把它钉进代码。
+  > **Claude Code 的落点尚未定案。**社区镜像不是生产部署用的那个，所以它的布局
+  > 不构成对生产的判断。定案后改 `engines/claude_code/engine.py` 里那一行即可。
 
   **v1 不做 PATH 注入**，这是一项明确的取舍：agent 由默认技能集里的一个 skill
   被告知落点，并以**绝对路径**调用。代价是 `mycli --help` 不工作、每次调用都
