@@ -437,6 +437,13 @@ class _DefaultResourceRepository(_ResourceRepository):
         self.list_set_calls.append(kwargs)
         return [{"id": "global-default", "is_default": True}]
 
+    def get_set(self, **kwargs):
+        return {
+            "id": kwargs["set_id"],
+            "is_default": kwargs["set_id"] == "global-default",
+            "is_active": True,
+        }
+
     def list_mcps(self, **kwargs):
         self.list_mcp_calls.append(kwargs)
         return [{"server_code": "visible-default-mcp"}]
@@ -469,6 +476,7 @@ class _McpAuth:
     def __init__(self, allowed: bool) -> None:
         self.allowed = allowed
         self.calls: list[tuple[str, str]] = []
+        self.apply_calls: list[dict] = []
 
     def check_mcp_permission_detail(self, actor_id: str, server_code: str) -> dict:
         self.calls.append((actor_id, server_code))
@@ -478,6 +486,7 @@ class _McpAuth:
         }
 
     def apply_permission(self, **_kwargs) -> dict:
+        self.apply_calls.append(_kwargs)
         return {"success": True, "process_url": None, "error": None}
 
 
@@ -1694,6 +1703,157 @@ def test_resources_reads_global_default_mcp_projection_for_collaborator_owner_sc
             "engine_type": "openclaw",
         }
     ]
+
+
+def test_list_mcps_reads_global_default_projection_for_collaborator_owner_scope():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcps(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+    )
+
+    assert result == [{"server_code": "legacy-default-mcp"}]
+    assert repository.list_mcp_calls == []
+    assert legacy.service.default_mcp_calls == [
+        {
+            "skill_set_id": "global-default",
+            "user_id": "true-owner",
+            "bot_id": "bot-1",
+            "engine_type": "openclaw",
+        }
+    ]
+
+
+def test_list_mcps_keeps_ordinary_membership_on_canonical_repository_path():
+    repository = _MixedResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcps(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="true-owner",
+        set_id="ordinary-set",
+    )
+
+    assert result == [{"server_code": "ordinary-set-mcp"}]
+    assert legacy.calls == []
+    assert repository.list_mcp_calls == [
+        {
+            "bot_id": "bot-1",
+            "owner_id": "true-owner",
+            "set_id": "ordinary-set",
+            "engine_type": "openclaw",
+            "default_engine_types": ("openclaw",),
+        }
+    ]
+
+
+def test_default_mcp_permissions_remain_scoped_to_persisted_membership():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    mcp_center = _McpCenter(allowed=True)
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=mcp_center,
+        mcp_auth=_McpAuth(allowed=True),
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.list_mcp_permissions(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+    )
+
+    assert result == [
+        {
+            "server_code": "visible-default-mcp",
+            "has_permission": True,
+            "access_level": "LOCAL",
+        }
+    ]
+    assert mcp_center.calls == [("collaborator", "visible-default-mcp")]
+    assert legacy.calls == []
+
+
+def test_default_mcp_permission_request_does_not_expand_platform_defaults():
+    repository = _DefaultResourceRepository()
+    legacy = _ResourceLegacyFactory()
+    mcp_auth = _McpAuth(allowed=True)
+    service = SkillSetManagementService(
+        repository=repository,
+        bot_repo=_Bots(),
+        runtime=_SuccessfulRuntime(),
+        legacy_factory=legacy,
+        passport=object(),
+        authorization=_Authorization(),
+        audit_log_repo=_Audit(),
+        mcp_center=_McpCenter(allowed=True),
+        mcp_auth=mcp_auth,
+        ext_info_provider=lambda _bot_id: None,
+    )
+
+    result = service.request_mcp_permissions(
+        bot_id="bot-1",
+        owner_id="true-owner",
+        user_id="collaborator",
+        set_id="global-default",
+        reason="needed",
+    )
+
+    assert result == [
+        {
+            "server_code": "visible-default-mcp",
+            "success": True,
+            "process_url": None,
+            "error": None,
+        }
+    ]
+    assert mcp_auth.apply_calls == [
+        {
+            "staff_no": "collaborator",
+            "service_code": "visible-default-mcp",
+            "tool_list": [],
+            "is_public": True,
+            "reason": "needed",
+        }
+    ]
+    assert legacy.calls == []
 
 
 def test_resources_keeps_ordinary_mcp_membership_on_canonical_repository_path():
