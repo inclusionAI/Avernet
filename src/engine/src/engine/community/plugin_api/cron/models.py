@@ -24,6 +24,12 @@ class CronJob(BaseModel):
     session_target: str = "isolated"
     state: dict[str, Any] = Field(default_factory=dict)
     notify: Optional[CronNotifyConfig] = None
+    # 引擎专属属性 bag：仅由对应引擎消费，其它引擎原样忽略（透传时也忽略）。
+    # 例如 aicoding agentTurn 任务的 ``reuse_session``（是否复用已有会话）。
+    engine_properties: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="引擎专属属性，仅由对应引擎处理；例如 aicoding 的 reuse_session",
+    )
     created_at_ms: int
     updated_at_ms: int
 
@@ -59,6 +65,10 @@ class CreateJobRequest(BaseModel):
     session_target: str = "isolated"
     enabled: bool = True
     notify: Optional[CronNotifyConfig] = None
+    engine_properties: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="引擎专属属性，仅由对应引擎处理；例如 aicoding 的 reuse_session",
+    )
 
 
 class CronNotifyPatch(BaseModel):
@@ -74,3 +84,7 @@ class UpdateJobRequest(BaseModel):
     payload: Optional[dict[str, Any]] = None
     enabled: Optional[bool] = None
     notify: Optional[CronNotifyPatch] = None
+    engine_properties: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="引擎专属属性，仅由对应引擎处理；整体替换该 bag（例如 aicoding 的 reuse_session）",
+    )

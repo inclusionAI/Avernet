@@ -186,7 +186,13 @@ async def create_task(request: CreateTaskRequest):
             bot_id=request.bot_id,
             session_target="isolated",
             enabled=request.enabled,
-            notify=notify
+            notify=notify,
+            # 引擎特有参数配置
+            engine_properties=(
+                request.engine_properties.model_dump(exclude_none=True)
+                if request.engine_properties is not None
+                else None
+            ),
         )
 
         job = await cron_api.add_job(create_request)
@@ -234,6 +240,13 @@ async def update_task(task_id: str, request: UpdateTaskRequest):
                     update_data["payload"]["model"] = request.model
                 if request.runtime is not None:
                     update_data["payload"]["runtime"] = request.runtime
+                # engine_properties 不在 payload 内（由各引擎按需展平），而 relay 的
+                # cron.update 对 payload 是整体替换，因此这里须把现存 engine_properties
+                # 原样带回，避免改 message/timeout/model/runtime 时丢掉 reuse_session 等
+                # 引擎特有参数。仅当本次未显式提供 engine_properties 时才回带。对 openclaw /
+                # claude_code 等不使用 engine_properties 的引擎是 no-op（其值为 None）。
+                if request.engine_properties is None and existing_job.engine_properties:
+                    update_data["engine_properties"] = existing_job.engine_properties
             else:
                 raise HTTPException(status_code=404, detail="Task not found")
 
@@ -245,6 +258,9 @@ async def update_task(task_id: str, request: UpdateTaskRequest):
             if request.notify.user_ids is not None:
                 notify_patch.user_ids = request.notify.user_ids
             update_data["notify"] = notify_patch
+
+        if request.engine_properties is not None:
+            update_data["engine_properties"] = request.engine_properties.model_dump(exclude_none=True)
 
         if not update_data:
             raise HTTPException(status_code=400, detail="No fields to update")

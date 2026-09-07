@@ -244,6 +244,17 @@ class TestCreateTask:
         call_args = mock_cron_api.add_job.call_args[0][0]
         assert "append_message" not in call_args.payload
 
+    def test_engine_properties_forwarded_to_create_request(self, client, mock_cron_api):
+        """engine_properties 原样透传到 CreateJobRequest，且不泄漏进 payload"""
+        payload = {**self._PAYLOAD, "engine_properties": {"reuse_session": False}}
+        resp = client.post("/api/cron", json=payload)
+        assert resp.status_code == 200
+        call_args = mock_cron_api.add_job.call_args[0][0]
+        assert call_args.engine_properties == {"reuse_session": False}
+        # engine_properties 是独立字段，不应塞进 payload
+        assert "engine_properties" not in call_args.payload
+        assert "reuse_session" not in call_args.payload
+
 
 # ── PUT /api/cron/{task_id} ───────────────────────────────────────────────────
 
@@ -321,6 +332,32 @@ class TestUpdateTask:
         mock_cron_api.update_job.side_effect = RuntimeError("update failed")
         resp = client.put("/api/cron/job-1", json={"name": "x"})
         assert resp.status_code == 500
+
+    def test_engine_properties_forwarded_to_update_request(self, client, mock_cron_api):
+        """仅更新 engine_properties 也能落到 UpdateJobRequest，且不触发 400"""
+        resp = client.put("/api/cron/job-1", json={"engine_properties": {"reuse_session": True}})
+        assert resp.status_code == 200
+        upd = mock_cron_api.update_job.call_args[0][1]
+        assert upd.engine_properties == {"reuse_session": True}
+
+    def test_unrelated_update_preserves_existing_engine_properties(self, client, mock_cron_api):
+        """改 message 等字段时不应丢掉已有 engine_properties（relay 对 payload 整体替换）"""
+        mock_cron_api.get_job.return_value = _make_job(engine_properties={"reuse_session": False})
+        resp = client.put("/api/cron/job-1", json={"command": "new command"})
+        assert resp.status_code == 200
+        upd = mock_cron_api.update_job.call_args[0][1]
+        # 既有 engine_properties 原样回带
+        assert upd.engine_properties == {"reuse_session": False}
+        # 同时 message 已更新
+        assert upd.payload["message"] == "new command"
+
+    def test_explicit_engine_properties_wins_over_preserve(self, client, mock_cron_api):
+        """显式提供 engine_properties 时不回带旧值，用新值覆盖"""
+        mock_cron_api.get_job.return_value = _make_job(engine_properties={"reuse_session": False})
+        resp = client.put("/api/cron/job-1", json={"command": "x", "engine_properties": {"reuse_session": True}})
+        assert resp.status_code == 200
+        upd = mock_cron_api.update_job.call_args[0][1]
+        assert upd.engine_properties == {"reuse_session": True}
 
 
 # ── DELETE /api/cron/{task_id} ────────────────────────────────────────────────
