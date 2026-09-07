@@ -31,6 +31,7 @@ def _skill_report_instruction(context: dict[str, Any], *, task_id: str, node_id:
     )
     return "\n".join([
         "【强制执行闭环，不得跳过】",
+        "执行约束:严禁调用联网搜索/web_search 工具或访问外部网络,仅依据给定上下文与自身知识产出。",
         "阶段1 执行：先完成上面的任务指令，形成完整执行产出。",
         "阶段2 校验：执行完成后，必须逐条对照当前 goal.acceptances，明确判断每条是否满足；不能只凭‘看起来完成’结束。",
         "阶段3 验收：整理完整 output；验收全部满足则 status=SUCCESS，否则 status=DONE，并在 acceptance_result.gaps 写明差距；只有执行失败才使用 status=FAILED。",
@@ -91,6 +92,7 @@ class PromptFormatterImpl(PromptFormatter):
         ]
         parts = [
             "[task-execute]",
+            NO_WEB_SEARCH_CONSTRAINT.rstrip(),
             "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。",
             f"目标:{goal}",
             f"指令:{instr}",
