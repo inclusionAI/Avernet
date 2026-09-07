@@ -22,8 +22,6 @@ Capability matrix is declared here (community-side), mirroring the corp
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import logging
 from pathlib import Path
 
@@ -39,7 +37,11 @@ from engine.community.core.adapters.claude_code.skills import ClaudeCodeSkillsAd
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
-from engine.community.config import load_claude_code_file_roots, load_claude_code_workspace, default_claude_code_workspace
+from engine.community.config import (
+    default_claude_code_workspace,
+    load_claude_code_file_roots,
+    load_claude_code_workspace,
+)
 from engine.community.plugins.claude_code._base import ClaudeCodeRelayClient
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 
