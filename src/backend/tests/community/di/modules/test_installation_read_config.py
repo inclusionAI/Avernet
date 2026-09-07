@@ -1,65 +1,125 @@
-"""Installation migration mode is YAML-owned and environment-isolated."""
+"""Installation migration mode is DB-owned and environment-isolated."""
 
 from unittest.mock import Mock
 
 import pytest
 from injector import Injector, InstanceProvider
 
+from agentclaw.community.api.common_config_service import CommonConfigServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.capability_desired_state import CapabilityDesiredStateRepositoryProtocol
-from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
-from agentclaw.community.core.skill_center.installation_read_config import InstallationReadConfig
-from agentclaw.community.core.skill_center.services.bot_capability_state_reader import BotCapabilityStateReader
-from agentclaw.community.core.skill_center.version_resolution_contract import SkillVersionResolverProtocol
-from agentclaw.community.di.modules import config_module
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
+from agentclaw.community.core.repository.protocols.skills_pool import (
+    SkillsPoolSkillRepositoryProtocol,
+)
+from agentclaw.community.core.skill_center.installation_read_config import (
+    INSTALLATION_READ_BUSINESS_CODE,
+    INSTALLATION_READ_PARAM_CODE,
+    InstallationReadConfig,
+)
+from agentclaw.community.core.skill_center.services.bot_capability_state_reader import (
+    BotCapabilityStateReader,
+)
+from agentclaw.community.core.skill_center.version_resolution_contract import (
+    SkillVersionResolverProtocol,
+)
 from agentclaw.community.di.modules.installation_read_config_module import (
     InstallationReadConfigModule,
 )
 
 
-@pytest.mark.parametrize("environment,expected", [("pre", True), ("prepub", True), ("prod", False), ("gray", False), ("dev", False)])
-def test_environment_selection_and_reader_injection(monkeypatch, environment, expected):
-    monkeypatch.setenv("SERVER_ENV", environment)
-    monkeypatch.setenv("SC_INSTALLATION_DEFAULT_SYNC_ONLY", "true")
-    monkeypatch.setattr(config_module, "read_user_config", lambda: {
-        "skill_installation": {"default_sync_only": {"pre": True, "prod": False}}
-    })
-    injector = Injector([config_module.ConfigModule(), InstallationReadConfigModule()])
+def _injector(*, common_config: Mock) -> Injector:
+    injector = Injector([InstallationReadConfigModule()])
     repository = Mock()
-    for protocol, value in [(CapabilityDesiredStateRepositoryProtocol, repository),
-                            (BotRepository, Mock()), (SkillsPoolSkillRepositoryProtocol, Mock()),
-                            (SkillVersionResolverProtocol, Mock())]:
+    for protocol, value in [
+        (CommonConfigServiceProtocol, common_config),
+        (CapabilityDesiredStateRepositoryProtocol, repository),
+        (BotRepository, Mock()),
+        (SkillsPoolSkillRepositoryProtocol, Mock()),
+        (SkillVersionResolverProtocol, Mock()),
+    ]:
         injector.binder.bind(protocol, to=InstanceProvider(value))
+    return injector
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ("pre", True),
+        ("prepub", True),
+        ("prod", False),
+        ("gray", False),
+        ("dev", False),
+    ],
+)
+def test_environment_scoped_common_config_drives_reader(monkeypatch, environment, expected):
+    monkeypatch.setenv("SERVER_ENV", environment)
+    common_config = Mock()
+    common_config.get_value.return_value = expected
+    injector = _injector(common_config=common_config)
+    repository = injector.get(CapabilityDesiredStateRepositoryProtocol)
+
     reader = injector.get(BotCapabilityStateReader)
-    reader.synchronize_installations(bot_id="default", owner_id="owner", bot={
-        "bot_id": "default", "owner_id": "owner", "env": "pre" if expected else "prod",
-        "active_engine": "openclaw",
-    })
+    reader.synchronize_installations(
+        bot_id="default",
+        owner_id="owner",
+        bot={
+            "bot_id": "default",
+            "owner_id": "owner",
+            "env": "pre" if expected else "prod",
+            "active_engine": "openclaw",
+        },
+    )
+
     assert repository.sync_default_installations.called is expected
     assert repository.flush_installations.called is not expected
-    assert injector.get(InstallationReadConfig).default_sync_only is expected
+    common_config.get_value.assert_called_with(
+        business_code=INSTALLATION_READ_BUSINESS_CODE,
+        param_code=INSTALLATION_READ_PARAM_CODE,
+        env={"prepub": "pre", "gray": "prod"}.get(environment, environment),
+        default=False,
+        only_enabled=True,
+    )
 
 
-@pytest.mark.parametrize("user_config", [{}, {"skill_installation": {}}, {"skill_installation": {"default_sync_only": {}}}])
-def test_missing_settings_are_disabled(monkeypatch, user_config):
-    monkeypatch.setenv("SC_INSTALLATION_DEFAULT_SYNC_ONLY", "true")
-    monkeypatch.setattr(config_module, "read_user_config", lambda: user_config)
-    assert InstallationReadConfigModule().installation_read() == InstallationReadConfig()
+@pytest.mark.parametrize("value", [None, "true", 1, {}, []])
+def test_missing_disabled_or_invalid_config_retains_complete_repair(value):
+    common_config = Mock()
+    common_config.get_value.return_value = value
+    config = InstallationReadConfig(common_config_service=common_config, env="pre")
+
+    assert config.default_sync_only is False
 
 
-@pytest.mark.parametrize("environment,expected", [("pre", False), ("prod", True)])
-def test_production_switch_does_not_enable_pre(monkeypatch, environment, expected):
-    monkeypatch.setenv("SERVER_ENV", environment)
-    monkeypatch.setattr(config_module, "read_user_config", lambda: {
-        "skill_installation": {"default_sync_only": {"prod": True}}
-    })
-    assert InstallationReadConfigModule().installation_read().default_sync_only is expected
+def test_common_config_read_error_retains_complete_repair():
+    common_config = Mock()
+    common_config.get_value.side_effect = RuntimeError("database unavailable")
+    config = InstallationReadConfig(common_config_service=common_config, env="prod")
+
+    assert config.default_sync_only is False
 
 
-@pytest.mark.parametrize("block", [None, True, {"typo": True}, {"default_sync_only": None},
-    {"default_sync_only": True}, {"default_sync_only": {"pre": "false"}},
-    {"default_sync_only": {"prod": 1}}, {"default_sync_only": {"prd": True}}])
-def test_invalid_settings_fail_explicitly(monkeypatch, block):
-    monkeypatch.setattr(config_module, "read_user_config", lambda: {"skill_installation": block})
-    with pytest.raises(ValueError, match="skill_installation"):
-        InstallationReadConfigModule().installation_read()
+def test_db_value_is_read_dynamically_for_emergency_rollback():
+    common_config = Mock()
+    common_config.get_value.side_effect = [True, False]
+    config = InstallationReadConfig(common_config_service=common_config, env="pre")
+
+    assert config.default_sync_only is True
+    assert config.default_sync_only is False
+    assert common_config.get_value.call_count == 2
+
+
+def test_pre_and_prod_read_independent_common_config_records():
+    common_config = Mock()
+    common_config.get_value.side_effect = lambda **kwargs: {
+        "pre": True,
+        "prod": False,
+    }[kwargs["env"]]
+
+    assert InstallationReadConfig(
+        common_config_service=common_config, env="pre"
+    ).default_sync_only is True
+    assert InstallationReadConfig(
+        common_config_service=common_config, env="prod"
+    ).default_sync_only is False
