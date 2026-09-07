@@ -9,7 +9,8 @@ interface NodeStepTracePanelProps {
 }
 
 /**
- * Displays embedded-agent node execution steps as a timeline.
+ * Displays agent node execution steps as a timeline.
+ * Works for embedded-agent, subagent, and collaboration nodes.
  * Shows tool_call inputs, tool_result outputs, and assistant_text content.
  */
 export default function NodeStepTracePanel({ flowId, nodeId, attempt = 1 }: NodeStepTracePanelProps) {

@@ -12,6 +12,8 @@ import AnalysisModal from './AnalysisModal'
 
 const EXECUTOR_LABELS: Record<string, string> = {
   'embedded-agent': '代理',
+  subagent: '子代理',
+  collaboration: '协作',
   action: '动作',
   human: '人工',
   'loop-group': '循环',
@@ -483,7 +485,9 @@ function NodeDetailPanel({
 
       {node.token_usage_json && <TokenUsageDisplay json={node.token_usage_json} />}
 
-      {node.executor_type === 'embedded-agent' && (
+      {(node.executor_type === 'embedded-agent' ||
+        node.executor_type === 'subagent' ||
+        node.executor_type === 'collaboration') && (
         <div className="border-t border-gray-100 pt-3">
           <NodeStepTracePanel flowId={flowId} nodeId={node.node_id} attempt={node.attempt} />
         </div>
