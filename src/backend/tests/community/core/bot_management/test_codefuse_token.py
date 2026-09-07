@@ -106,6 +106,7 @@ class TestBuildFromAuthCode:
 from unittest.mock import MagicMock, patch  # noqa: E402
 
 from agentclaw.community.core.bot_management.codefuse_runtime_targets import (  # noqa: E402
+    SERVICE_BOT_TYPE,
     resolve_codefuse_runtime_binding_ids,
 )
 
@@ -133,7 +134,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         binding_repo = MagicMock()
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 1, "bot_id": "p1", "owner_id": "u", "binding_id": 10, "bot_type": "personal"},
-            publish_repo=publish_repo, binding_repo=binding_repo,
+            publish_repo=publish_repo, binding_repo=binding_repo, env="dev",
         )
         assert ids == [10]
         publish_repo.list_by_source_bot.assert_not_called()
@@ -142,7 +143,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         publish_repo = MagicMock()
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 1, "bot_id": "p2", "owner_id": "u", "binding_id": 7},
-            publish_repo=MagicMock(), binding_repo=MagicMock(),
+            publish_repo=MagicMock(), binding_repo=MagicMock(), env="dev",
         )
         assert ids == [7]
 
@@ -155,7 +156,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         ]
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 100, "bot_id": "s1", "owner_id": "u", "binding_id": 1, "bot_type": "service"},
-            publish_repo=publish_repo, binding_repo=MagicMock(),
+            publish_repo=publish_repo, binding_repo=MagicMock(), env="dev",
         )
         # draft(1) + verify(2) + online(3)
         assert ids == [1, 2, 3]
@@ -173,7 +174,7 @@ class TestResolveCodefuseRuntimeBindingIds:
 
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 100, "bot_id": "s2", "owner_id": "u", "binding_id": None, "bot_type": "service"},
-            publish_repo=publish_repo, binding_repo=binding_repo,
+            publish_repo=publish_repo, binding_repo=binding_repo, env="dev",
         )
         assert ids == [8, 9]  # retained verify(8) + online(9)
 
@@ -182,7 +183,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         publish_repo.list_by_source_bot.return_value = []
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 100, "bot_id": "s3", "owner_id": "u", "binding_id": None, "bot_type": "service"},
-            publish_repo=publish_repo, binding_repo=MagicMock(),
+            publish_repo=publish_repo, binding_repo=MagicMock(), env="dev",
         )
         assert ids == []
 
@@ -193,7 +194,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         ]
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 100, "bot_id": "s4", "owner_id": "u", "binding_id": 1, "bot_type": "service"},
-            publish_repo=publish_repo, binding_repo=MagicMock(),
+            publish_repo=publish_repo, binding_repo=MagicMock(), env="dev",
         )
         assert ids == [1]
 
@@ -202,7 +203,7 @@ class TestResolveCodefuseRuntimeBindingIds:
         publish_repo.list_by_source_bot.side_effect = RuntimeError("boom")
         ids = resolve_codefuse_runtime_binding_ids(
             bot={"id": 100, "bot_id": "s5", "owner_id": "u", "binding_id": 1, "bot_type": "service"},
-            publish_repo=publish_repo, binding_repo=MagicMock(),
+            publish_repo=publish_repo, binding_repo=MagicMock(), env="dev",
         )
         # draft 仍返回；发布态查询失败被吞
         assert ids == [1]
@@ -218,7 +219,7 @@ class TestResolveCodefuseRuntimeBindingIds:
             ids = resolve_codefuse_runtime_binding_ids(
                 bot={"id": 100, "bot_id": "s6", "owner_id": "u",
                      "binding_id": "not-int", "bot_type": "service"},
-                publish_repo=MagicMock(), binding_repo=MagicMock(),
+                publish_repo=MagicMock(), binding_repo=MagicMock(), env="dev",
             )
         # 脏 draft 被吞；verify/online 返回 5
         assert ids == [5]
@@ -232,7 +233,7 @@ class TestResolveCodefuseRuntimeBindingIds:
             ids = resolve_codefuse_runtime_binding_ids(
                 bot={"id": 100, "bot_id": "s7", "owner_id": "u",
                      "binding_id": 1, "bot_type": "service"},
-                publish_repo=MagicMock(), binding_repo=MagicMock(),
+                publish_repo=MagicMock(), binding_repo=MagicMock(), env="dev",
             )
         # 仅 draft；verify/online 返回空被跳过
         assert ids == [1]
@@ -246,7 +247,7 @@ class TestResolveCodefuseRuntimeBindingIds:
             ids = resolve_codefuse_runtime_binding_ids(
                 bot={"id": 100, "bot_id": "s8", "owner_id": "u",
                      "binding_id": None, "bot_type": "service"},
-                publish_repo=MagicMock(), binding_repo=MagicMock(),
+                publish_repo=MagicMock(), binding_repo=MagicMock(), env="dev",
             )
         # draft 无；verify/online 非 int 被跳过
         assert ids == []
@@ -255,6 +256,15 @@ class TestResolveCodefuseRuntimeBindingIds:
         """bot 非 dict（类型错误防御）→ 返回空列表。"""
         ids = resolve_codefuse_runtime_binding_ids(
             bot=None,
-            publish_repo=MagicMock(), binding_repo=MagicMock(),
+            publish_repo=MagicMock(), binding_repo=MagicMock(), env="dev",
         )
         assert ids == []
+
+    def test_service_bot_type_matches_canonical_engine_stage(self):
+        """``SERVICE_BOT_TYPE`` 是 ``engine_runtime.stage`` 的 gate 副本（保持 personal
+        路径惰性 import、不在生产模块顶部 import engine_runtime），两者不得漂移
+        （arch.rules.md Rule 2 单一来源）。"""
+        from agentclaw.community.core.engine_runtime.stage import (
+            SERVICE_BOT_TYPE as CANONICAL_SERVICE_BOT_TYPE,
+        )
+        assert SERVICE_BOT_TYPE == CANONICAL_SERVICE_BOT_TYPE

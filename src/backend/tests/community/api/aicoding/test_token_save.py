@@ -20,11 +20,9 @@ from agentclaw.community.adapters.http.aicoding.router import (
 )
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
-from agentclaw.community.api.baas_service import BaasServiceProtocol
-from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
-from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
+from agentclaw.community.api.bot_service import BotServiceProtocol
+from agentclaw.community.core.bot_management.services.bot_service import BotService
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 
 
@@ -58,6 +56,42 @@ def _binding_record(
     )
 
 
+def _make_bot_service_for_router(
+    *,
+    device_binding_repo,
+    bot_publish_repo,
+    device_service,
+    baas_service,
+) -> BotService:
+    """构造一个真实 BotService，把 mock 的 device/baas/publish 接线进去，
+    使 router 委托的 ``write_codefuse_token_to_runtimes`` 走核心路径并由同一批 mock 驱动。"""
+    return BotService(
+        caller_identity_repo=MagicMock(),
+        drm_reader=MagicMock(),
+        repository=MagicMock(),
+        allocation_config=MagicMock(),
+        device_binding_repo=device_binding_repo,
+        skill_set_factory=MagicMock(),
+        cleanup_service=MagicMock(),
+        bcn_service=MagicMock(),
+        bot_publish_repo=bot_publish_repo,
+        passport_plugin=MagicMock(),
+        oss_record_repo=MagicMock(),
+        bot_publish_service_provider=lambda: MagicMock(),
+        device_service_provider=lambda: device_service,
+        bot_app_grant_service_provider=lambda: MagicMock(),
+        path_factory=MagicMock(),
+        template_service=MagicMock(),
+        workspace_hosting_service=MagicMock(),
+        collaborator_repo=MagicMock(),
+        restart_lock_repo=MagicMock(),
+        teclaw_provision_service_provider=lambda: MagicMock(is_teclaw=MagicMock(return_value=False)),
+        device_status_client=MagicMock(),
+        cron_auto_setup_service_provider=lambda: MagicMock(),
+        baas_service_provider=lambda: baas_service,
+    )
+
+
 def _make_client(
     bot_repo=None,
     device_repo=None,
@@ -71,6 +105,13 @@ def _make_client(
     _device_svc = device_service or MagicMock()
     _publish_repo = publish_repo or MagicMock()
 
+    _bot_service = _make_bot_service_for_router(
+        device_binding_repo=_device_repo,
+        bot_publish_repo=_publish_repo,
+        device_service=_device_svc,
+        baas_service=_baas,
+    )
+
     class _TestModule(Module):
         @provider
         @singleton
@@ -79,23 +120,8 @@ def _make_client(
 
         @provider
         @singleton
-        def provide_device_repo(self) -> DeviceBindingRepository:
-            return _device_repo
-
-        @provider
-        @singleton
-        def provide_baas(self) -> BaasServiceProtocol:
-            return _baas
-
-        @provider
-        @singleton
-        def provide_device_service(self) -> DeviceServiceProtocol:
-            return _device_svc
-
-        @provider
-        @singleton
-        def provide_publish_repo(self) -> BotPublishRepositoryProtocol:
-            return _publish_repo
+        def provide_bot_service(self) -> BotServiceProtocol:
+            return _bot_service
 
     app = FastAPI()
     app.include_router(router)

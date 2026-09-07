@@ -84,6 +84,16 @@ class TestUpdateBotCodefuseTokenDispatch:
         yield
         _FakeThread.instances.clear()
 
+    @pytest.fixture(autouse=True)
+    def _pin_env(self, monkeypatch):
+        # Finding 2：env 由 _maybe_refresh 在请求边界解析（get_current_env），
+        # 这里固定为 "dev" 使 dispatch 断言的 env 确定化。
+        monkeypatch.setattr(
+            "agentclaw.community.core.bot_management.services.bot_service.get_current_env",
+            lambda: "dev",
+        )
+        yield
+
     @pytest.fixture
     def repo(self):
         repo = Mock()
@@ -145,6 +155,7 @@ class TestUpdateBotCodefuseTokenDispatch:
                     bot_id="bot-1",
                     user_id="user1",
                     plaintext_token="new-plaintext-auth-code",
+                    env="dev",
                 )
 
     def test_no_dispatch_when_token_unchanged(self, repo, template_svc):
@@ -221,6 +232,7 @@ class TestUpdateBotCodefuseTokenDispatch:
                     bot_id="bot-1",
                     user_id="user1",
                     plaintext_token="new-plaintext-auth-code",
+                    env="dev",
                 )
 
     def test_no_dispatch_when_normal_template(self, repo, template_svc):
@@ -308,7 +320,7 @@ class TestRefreshCodefuseTokenOnDevice:
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
         ) as mock_write:
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_called_once()
             device_service.exec_shell.assert_not_called()
@@ -331,7 +343,7 @@ class TestRefreshCodefuseTokenOnDevice:
                 "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
             ) as mock_write:
                 service._refresh_codefuse_token_on_device(
-                    bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                    bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
                 )
                 mock_write.assert_not_called()
                 device_service.exec_shell.assert_called_once_with(
@@ -347,7 +359,7 @@ class TestRefreshCodefuseTokenOnDevice:
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
         ) as mock_write:
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_not_called()
             device_service.exec_shell.assert_not_called()
@@ -362,7 +374,7 @@ class TestRefreshCodefuseTokenOnDevice:
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
         ) as mock_write:
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_not_called()
             device_service.exec_shell.assert_not_called()
@@ -378,7 +390,7 @@ class TestRefreshCodefuseTokenOnDevice:
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
         ) as mock_write:
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_not_called()
             device_service.exec_shell.assert_not_called()
@@ -397,7 +409,7 @@ class TestRefreshCodefuseTokenOnDevice:
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas"
         ) as mock_write:
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_not_called()
             device_service.exec_shell.assert_not_called()
@@ -420,7 +432,7 @@ class TestRefreshCodefuseTokenOnDevice:
                 side_effect=_fake_cmd,
             ):
                 service._refresh_codefuse_token_on_device(
-                    bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                    bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
                 )
                 mock_write.assert_not_called()
                 device_service.exec_shell.assert_not_called()
@@ -434,7 +446,7 @@ class TestRefreshCodefuseTokenOnDevice:
         ) as mock_write:
             # 不应抛出
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok"
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev"
             )
             mock_write.assert_not_called()
 
@@ -560,7 +572,7 @@ class TestRefreshCodefuseServiceBotFanOut:
         ) as mock_write:
             # 不应抛出：draft 失败被隔离，verify 仍写入
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok",
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev",
             )
             # 两条 runtime 都被尝试写入
             assert mock_write.call_count == 2
@@ -608,7 +620,7 @@ class TestRefreshCodefuseServiceBotFanOut:
         ) as mock_write:
             # 不应抛出：arca 失败被隔离，baas 仍写入
             service._refresh_codefuse_token_on_device(
-                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok",
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok", env="dev",
             )
             baas_cmd_uuids = [c.args[1] for c in mock_write.call_args_list]
             assert baas_cmd_uuids == ["BOT-VERIFY"]

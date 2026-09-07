@@ -27,11 +27,15 @@ from agentclaw.community.core.repository.protocols.publishing import (
 from agentclaw.community.core.repository.protocols.devices import (
     DeviceBindingRepository,
 )
-from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
+# 这是 ``engine_runtime.stage.SERVICE_BOT_TYPE`` 的 "gate 副本"，故意不在模块顶部
+# import engine_runtime.stage（其 __init__ 会 eager 拉起 connection→device_context_resolver
+# 重链/潜在环），以便 personal bot 在此常量上短路、不触发重链。两值必须保持一致——
+# 由 ``test_codefuse_token.py`` 的 guard 测试把守（arch.rules.md Rule 2：单一来源，
+# 重复定义须有 drift 防护）。
 SERVICE_BOT_TYPE = "service"
 
 
@@ -40,7 +44,7 @@ def resolve_codefuse_runtime_binding_ids(
     bot: dict,
     publish_repo: BotPublishRepositoryProtocol,
     binding_repo: DeviceBindingRepository,
-    env: str | None = None,
+    env: str,
 ) -> List[int]:
     """Return the live runtime binding ids to write codefuse.json into.
 
@@ -48,7 +52,8 @@ def resolve_codefuse_runtime_binding_ids(
         bot: bot 行（需含 ``bot_type``/``bot_id``/``id``(pk)/``binding_id``）。
         publish_repo: ``ac_bot_publish`` 仓库（service bot 的 verify/online 用）。
         binding_repo: ``ac_entity_device_binding`` 仓库（retained-verify ACTIVE 检查用）。
-        env: 显式环境；不传则取 ``get_current_env()``，与 ``resolve_stage_bind_id`` 同口径。
+        env: 调用方在边界解析好的环境（``get_current_env()``），与 ``resolve_stage_bind_id``
+            同口径；**必填**——core 不再用 ``env or get_current_env()`` 兜底解析（arch.rules Rule 14）。
 
     Returns:
         去重后的 binding_id 列表，draft 在前；personal 仅含 draft；找不到任何
@@ -71,7 +76,7 @@ def resolve_codefuse_runtime_binding_ids(
 
     bot_pk = bot.get("id") if isinstance(bot, dict) else None
     bot_id = (bot.get("bot_id") or "") if isinstance(bot, dict) else ""
-    runtime_env = env or get_current_env()
+    runtime_env = env
 
     # 惰性 import：engine_runtime 包 __init__ 会 eagerly 拉 connection →
     # device_context_resolver（BaasService 等重依赖），放模块顶部会引入重链/潜在环。
