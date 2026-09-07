@@ -141,7 +141,8 @@ pub async fn observe_request(
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         route = %observation.route,
         status = response.status().as_u16(), duration_ms = elapsed.as_secs_f64() * 1000.0,
-        outcome = if response.status().is_success() { "success" } else { "http_error" },
+        outcome = if response.status() == axum::http::StatusCode::SWITCHING_PROTOCOLS { "upgraded" }
+            else if response.status().is_success() { "success" } else { "http_error" },
         "http.request.response_ready");
     response
 }

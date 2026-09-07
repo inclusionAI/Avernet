@@ -37,6 +37,11 @@ request/operation correlation and logging subscriber, never a live span.
 The helper neither enters a span nor prolongs its lifetime. New tasks without an
 explicit wrapper do not inherit task-local correlation automatically.
 
+`with_request_id` carries only log identity for long-lived tasks such as upgraded
+WebSocket connections. It retains no HTTP aggregate and emits no request summary.
+Capture the ID before the upgrade/spawn boundary. `process_instance_id` is a lazy
+process-lifetime UUID; it is log metadata, independent of distributed tracing.
+
 The package does not acquire, store or emit distributed trace IDs. Future tracing
 integration needs its own declared context/propagation contract; the base must
 never import its implementation. This extraction uses the existing tracing

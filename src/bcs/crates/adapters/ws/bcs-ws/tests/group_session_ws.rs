@@ -32,6 +32,7 @@ struct RecordingConnectionService {
     mode: VerifyMode,
     verified_tokens: Mutex<Vec<String>>,
     authorizations: Mutex<Vec<AuthorizeGroupSessionConnection>>,
+    authorization_request_ids: Mutex<Vec<String>>,
 }
 
 impl RecordingConnectionService {
@@ -40,6 +41,7 @@ impl RecordingConnectionService {
             mode,
             verified_tokens: Mutex::new(Vec::new()),
             authorizations: Mutex::new(Vec::new()),
+            authorization_request_ids: Mutex::new(Vec::new()),
         }
     }
 }
@@ -75,6 +77,7 @@ impl GroupSessionConnectionService for RecordingConnectionService {
         command: AuthorizeGroupSessionConnection,
     ) -> Result<AuthorizedGroupSessionConnection, GroupSessionConnectionError> {
         self.authorizations.lock().await.push(command);
+        self.authorization_request_ids.lock().await.push(bcs_observability::current_request_id());
         Ok(AuthorizedGroupSessionConnection {
             participants: Vec::new(),
         })
@@ -107,7 +110,12 @@ async fn start(
         .expect("bind test server");
     let addr = listener.local_addr().expect("test server address");
     let handle = tokio::spawn(async move {
-        axum::serve(listener, app(service))
+        let app = app(service).layer(axum::middleware::from_fn(
+            |request: axum::extract::Request, next: axum::middleware::Next| async move {
+                bcs_observability::with_request_context("group-ws-handshake-42".into(), next.run(request)).await
+            },
+        ));
+        axum::serve(listener, app)
             .await
             .expect("serve test app");
     });
@@ -197,6 +205,10 @@ async fn valid_token_upgrades_and_connect_uses_the_immutable_verified_binding() 
     };
     let response: BcsFrame = serde_json::from_str(&response).expect("BCS response frame");
     assert!(matches!(response, BcsFrame::Response(response) if response.ok));
+
+    // This authorization runs on a real post-upgrade Axum task, after the HTTP
+    // middleware has returned. The production upgrade boundary must carry its ID.
+    assert_eq!(service.authorization_request_ids.lock().await.as_slice(), ["group-ws-handshake-42"]);
 
     assert_eq!(
         service.verified_tokens.lock().await.as_slice(),

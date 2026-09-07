@@ -214,7 +214,7 @@ fn timer_for_output<F: Clone>(
     timer: &LocalTime<F>,
     millisecond_timer: &LocalTime<F>,
 ) -> LocalTime<F> {
-    if output_name == "common-error" {
+    if output_name == "common-error" || output_name == "observability" {
         millisecond_timer.clone()
     } else {
         timer.clone()
@@ -617,4 +617,48 @@ mod tests {
         assert_eq!(json["run_id"], "r1");
         assert_eq!(json["event_type"], "bot_accept");
     }
+    #[test]
+    fn observation_file_duplicates_diagnostics_as_json_with_milliseconds() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = LogOutputConfig {
+            name: "observability".into(), path: dir.path().to_string_lossy().into(),
+            file: "bcs-observability.log".into(), level: "info".into(), rotation: "daily".into(),
+            format: LogOutputFormat::Json, targets: vec!["bcs_observation".into(), "bcs_http_access".into()],
+            max_keep_days: 7,
+        };
+        let timer = LocalTime::new(format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"));
+        let millis = LocalTime::new(format_description!("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]"));
+        let (main_writer, main_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), "bcs.log"));
+        let (observation_writer, observation_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), &output.file));
+        let subscriber = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(main_writer))
+            .with(tracing_subscriber::fmt::layer().json().flatten_event(true)
+                .with_current_span(false).with_span_list(false)
+                .with_timer(timer_for_output(&output.name, &timer, &millis))
+                .with_writer(observation_writer).with_filter(build_output_targets_filter(&output)));
+        let dispatch = tracing::Dispatch::new(subscriber);
+        tracing::dispatcher::with_default(&dispatch, || {
+            tracing::warn!(target: "bcs_observation", request_id = "diagnostic-42", operation = "test.io",
+                duration_ms = 123.5, "bcs.operation.finished");
+            tracing::info!(target: "bcs_http_access", request_id = "diagnostic-42", status = 200, "http.request.response_ready");
+            tracing::info!(target: "unrelated_module", "ordinary business log");
+        });
+        drop(dispatch);
+        drop(main_guard);
+        drop(observation_guard);
+        let main = fs::read_to_string(dir.path().join("bcs.log")).unwrap();
+        assert!(main.contains("bcs.operation.finished") && main.contains("http.request.response_ready"));
+        assert!(main.contains("ordinary business log"));
+        let diagnostics = fs::read_to_string(dir.path().join(&output.file)).unwrap();
+        let events: Vec<serde_json::Value> = diagnostics.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(events.len(), 2);
+        for event in &events {
+            assert_eq!(event["request_id"], "diagnostic-42");
+            assert!(event.get("trace_id").is_none() && event.get("span").is_none() && event.get("spans").is_none());
+            assert_eq!(event["timestamp"].as_str().unwrap().as_bytes().get(19), Some(&b'.'));
+        }
+        assert_eq!(events[0]["duration_ms"], 123.5);
+        assert_eq!(events[1]["status"], 200);
+    }
+
 }

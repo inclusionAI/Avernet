@@ -21,6 +21,7 @@ use bcs_protocol::stream::{
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+use tracing::instrument::WithSubscriber;
 
 const COORDINATION_MAGIC_KEY: &str = "__bcs_coordination__";
 const CONTRACT_VERSION: u64 = 1;
@@ -387,12 +388,12 @@ impl ProviderBotEvents {
                     inflight: self.state_machine_terminals_inflight.clone(),
                     key: inflight_key,
                 };
-                tokio::spawn(async move {
+                tokio::spawn(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
                     let _inflight_guard = inflight_guard;
                     if let Err(error) = runtime.handle_bot_terminal_event(runtime_command).await {
-                        error!(%error, "provider ingest: async state-machine final failed");
+                        error!(request_id = %bcs_observability::current_request_id(), %error, "provider ingest: async state-machine final failed");
                     }
-                });
+                }).with_current_subscriber());
             }
             return Ok(provider_state_machine_outcome());
         }
@@ -583,6 +584,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                 let identity = self.authenticate_event(&command).await?;
                 if identity.bot_uuid != correlation.assignee_bot_id {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         provider_id = %command.provider_id,
                         run_id = %command.run_id,
                         provider_bot_id = %identity.bot_uuid,
@@ -656,13 +658,13 @@ impl ProviderBotEventService for ProviderBotEvents {
                         attempt = attempt,
                         "provider callback: state-machine final accepted for async processing"
                     );
-                    tokio::spawn(async move {
-                        let processing = tokio::spawn(async move {
+                    tokio::spawn(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
+                        let processing = tokio::spawn(bcs_observability::in_current_context(async move {
                             let _inflight_guard = inflight_guard;
                             collaboration_runtime
                                 .handle_bot_terminal_event(terminal_command)
                                 .await
-                        });
+                        }));
                         match processing.await {
                             Ok(Ok(outcome)) => info!(
                                 provider_id = %provider_id,
@@ -675,6 +677,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 "provider callback: async state-machine final processing completed"
                             ),
                             Ok(Err(processing_error)) => error!(
+                                request_id = %bcs_observability::current_request_id(),
                                 provider_id = %provider_id,
                                 run_id = %provider_run_id,
                                 bot_id = %bot_id,
@@ -685,6 +688,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 "provider callback: async state-machine final processing failed"
                             ),
                             Err(join_error) => error!(
+                                request_id = %bcs_observability::current_request_id(),
                                 provider_id = %provider_id,
                                 run_id = %provider_run_id,
                                 bot_id = %bot_id,
@@ -695,7 +699,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 "provider callback: async state-machine final task failed"
                             ),
                         }
-                    });
+                    }).with_current_subscriber());
                     return Ok(ProviderBotEventOutcome {
                         delivered_count: 1,
                         failed_count: 0,
@@ -754,6 +758,7 @@ impl ProviderBotEventService for ProviderBotEvents {
 
         if identity.bot_uuid != context_bot_id {
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 provider_id = %command.provider_id,
                 run_id = %command.run_id,
                 provider_bot_id = %identity.bot_uuid,
@@ -865,6 +870,7 @@ impl ProviderBotEventService for ProviderBotEvents {
         let identity = self.authenticate_coordination(&command).await?;
         if identity.bot_uuid != context.bot_id {
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 provider_id = %command.provider_id,
                 run_id = %command.run_id,
                 provider_bot_id = %identity.bot_uuid,

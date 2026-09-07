@@ -401,6 +401,7 @@ async fn execute_chat_task(
         if !bot_result.success {
             had_error = true;
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 run_id = %run_id,
                 bot_id = %bot_result.bot_uuid,
                 error = ?bot_result.error,

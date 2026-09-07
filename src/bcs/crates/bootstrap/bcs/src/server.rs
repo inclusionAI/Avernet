@@ -6220,17 +6220,18 @@ async fn ws_upgrade_handler(
         debug!("WS upgrade: anonymous session (no staff_no in cookie)");
     }
 
+    let request_id = bcs_observability::current_request_id();
     ws.on_upgrade(move |socket| {
         let ws_state = web_ws_dispatch_state(&state, None);
         let metrics_hook = ws_lifecycle_hook(&state);
-        bcs_ws::web::handle_client_connection(
+        bcs_observability::with_request_id(request_id, bcs_ws::web::handle_client_connection(
             socket,
             ws_state,
             bcs_ws::web::WorkbenchConnectionAuth::UserBound {
                 actor_id: bound_actor_id,
             },
             metrics_hook,
-        )
+        ))
     })
 }
 
@@ -6257,16 +6258,17 @@ async fn bot_ws_handler(
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
+    let request_id = bcs_observability::current_request_id();
     ws.on_upgrade(move |socket| {
         let ws_state = bot_ws_dispatch_state(&state);
         let metrics_hook = ws_lifecycle_hook(&state);
-        bcs_ws::bot::handle_connection(
+        bcs_observability::with_request_id(request_id, bcs_ws::bot::handle_connection(
             socket,
             ws_state,
             metrics_hook,
             agent_token,
             agent_code_header,
-        )
+        ))
     })
 }
 

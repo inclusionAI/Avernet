@@ -245,6 +245,7 @@ fn test_app_with_collaboration_runtime(
 struct BlockingCollaborationRuntime {
     correlations: RwLock<HashMap<String, StateMachineDeliveryCorrelation>>,
     terminal_calls: Mutex<Vec<HandleBotTerminalEventCommand>>,
+    terminal_request_ids: Mutex<Vec<String>>,
     terminal_started: Semaphore,
     terminal_release: Semaphore,
     terminal_completed: Semaphore,
@@ -255,6 +256,7 @@ impl Default for BlockingCollaborationRuntime {
         Self {
             correlations: RwLock::new(HashMap::new()),
             terminal_calls: Mutex::new(Vec::new()),
+            terminal_request_ids: Mutex::new(Vec::new()),
             terminal_started: Semaphore::new(0),
             terminal_release: Semaphore::new(0),
             terminal_completed: Semaphore::new(0),
@@ -364,6 +366,7 @@ impl CollaborationRuntimeService for BlockingCollaborationRuntime {
             .await
             .expect("terminal release semaphore should remain open")
             .forget();
+        self.terminal_request_ids.lock().await.push(bcs_observability::current_request_id());
         self.terminal_completed.add_permits(1);
         Ok(HandleBotTerminalEventOutcome {
             consumed: true,
@@ -443,13 +446,12 @@ async fn bot_events_returns_200_before_state_machine_final_processing_completes(
         .insert_correlation("provider-run-async", &registered.bot_uuid)
         .await;
 
+    let app = app.layer(axum::middleware::from_fn(bcs_http::gateway_trace::observe_request));
+    let mut request = state_machine_final_request(&registered.provider_id, &token, "provider-run-async");
+    request.headers_mut().insert("x-request-id", "async-final-42".parse().unwrap());
     let response = tokio::time::timeout(
         Duration::from_secs(1),
-        app.oneshot(state_machine_final_request(
-            &registered.provider_id,
-            &token,
-            "provider-run-async",
-        )),
+        app.oneshot(request),
     )
     .await
     .expect("state-machine final callback should not wait for background processing")
@@ -463,6 +465,7 @@ async fn bot_events_returns_200_before_state_machine_final_processing_completes(
     collaboration_runtime.wait_for_terminal_start().await;
     collaboration_runtime.release_terminal();
     collaboration_runtime.wait_for_terminal_completion().await;
+    assert_eq!(collaboration_runtime.terminal_request_ids.lock().await.as_slice(), ["async-final-42"]);
 }
 
 #[tokio::test]
@@ -606,6 +609,7 @@ async fn bot_events_accepts_empty_state_machine_final_for_runtime_failure_handli
 #[tokio::test]
 async fn bot_events_logs_json_rejections_before_handler() {
     let TestApp { app, .. } = test_app(Arc::new(StaticAgentpassResolver::default()));
+    let app = app.layer(axum::middleware::from_fn(bcs_http::gateway_trace::observe_request));
 
     let logs = capture_tracing_logs(async {
         let response = app
@@ -615,6 +619,7 @@ async fn bot_events_logs_json_rejections_before_handler() {
                     .uri("/bot/events")
                     .header("content-type", "application/json")
                     .header("X-BCN-Provider-Id", "prv-log")
+                    .header("x-request-id", "rejected-callback-42")
                     .header("authorization", "Bearer runtime-token")
                     .body(Body::from(
                         json!({
@@ -646,6 +651,8 @@ async fn bot_events_logs_json_rejections_before_handler() {
         logs.contains("provider callback: invalid bot event request"),
         "expected invalid request log, got:\n{logs}"
     );
+    let rejection = logs.lines().find(|line| line.contains("provider callback: invalid bot event request")).unwrap();
+    assert!(rejection.contains("request_id=rejected-callback-42"), "request ID missing from business error: {rejection}");
     assert!(
         logs.contains("provider_id=prv-log"),
         "expected provider id in log, got:\n{logs}"

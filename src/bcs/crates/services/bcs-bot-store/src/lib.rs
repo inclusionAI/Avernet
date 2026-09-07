@@ -491,7 +491,7 @@ impl PersistentBotRepo {
                 Value::from(env.as_str()),
             ]).await
         }.map_err(|e| {
-            warn!(bot_uuid = %bot_uuid, error = %e, "save_to_db: failed");
+            warn!(request_id = %bcs_observability::current_request_id(), bot_uuid = %bot_uuid, error = %e, "save_to_db: failed");
             ServiceError::InternalError(e.to_string())
         })?;
 
@@ -596,6 +596,7 @@ impl PersistentBotRepo {
                 }
                 (None, Some(code)) => {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         bot_uuid = %bot_uuid,
                         source = "bot_info_fallback",
                         "load_from_mysql: agent_code missing in column, fell back to bot_info JSON"
@@ -777,7 +778,7 @@ impl PersistentBotRepo {
             )
             .await
             .map_err(|e| {
-                warn!(bot_uuid = %bot_uuid, error = %e, "save_token_to_db: failed");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_uuid = %bot_uuid, error = %e, "save_token_to_db: failed");
                 ServiceError::InternalError(e.to_string())
             })?;
 
@@ -813,7 +814,7 @@ impl PersistentBotRepo {
             )
             .await
             .map_err(|e| {
-                warn!(bot_uuid = %bot_uuid, error = %e, "update_created_by_in_db: failed");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_uuid = %bot_uuid, error = %e, "update_created_by_in_db: failed");
                 ServiceError::InternalError(e.to_string())
             })?;
 
@@ -934,7 +935,7 @@ impl PersistentBotRepo {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(token = %token, env = %env, error = %e, "find_bot_by_token_in_db: database query failed");
+                warn!(request_id = %bcs_observability::current_request_id(), token = %token, env = %env, error = %e, "find_bot_by_token_in_db: database query failed");
                 return None;
             }
         };
@@ -948,13 +949,13 @@ impl PersistentBotRepo {
                     return Some(bot_uuid);
                 }
                 Err(e) => {
-                    warn!(token = %token, error = %e, "find_bot_by_token_in_db: failed to get bot_uuid");
+                    warn!(request_id = %bcs_observability::current_request_id(), token = %token, error = %e, "find_bot_by_token_in_db: failed to get bot_uuid");
                     return None;
                 }
             }
         }
 
-        warn!(token = %token, "find_bot_by_token_in_db: no bot found");
+        warn!(request_id = %bcs_observability::current_request_id(), token = %token, "find_bot_by_token_in_db: no bot found");
         None
     }
 
@@ -970,7 +971,7 @@ impl PersistentBotRepo {
         {
             Ok(rows) => rows,
             Err(e) => {
-                warn!(agent_code = %agent_code, env = %env, error = %e, "find_bot_by_agent_code_in_db: query failed");
+                warn!(request_id = %bcs_observability::current_request_id(), agent_code = %agent_code, env = %env, error = %e, "find_bot_by_agent_code_in_db: query failed");
                 return None;
             }
         };
@@ -982,13 +983,13 @@ impl PersistentBotRepo {
                     return Some(bot_uuid);
                 }
                 Err(e) => {
-                    warn!(agent_code = %agent_code, error = %e, "find_bot_by_agent_code_in_db: failed to get bot_uuid");
+                    warn!(request_id = %bcs_observability::current_request_id(), agent_code = %agent_code, error = %e, "find_bot_by_agent_code_in_db: failed to get bot_uuid");
                     return None;
                 }
             }
         }
 
-        warn!(agent_code = %agent_code, "find_bot_by_agent_code_in_db: no bot found");
+        warn!(request_id = %bcs_observability::current_request_id(), agent_code = %agent_code, "find_bot_by_agent_code_in_db: no bot found");
         None
     }
 
@@ -1093,7 +1094,7 @@ impl PersistentBotRepo {
         {
             Ok(r) => r,
             Err(e) => {
-                warn!(error = %e, "list_bots_by_name_and_cooperatable_with_impl (page): failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "list_bots_by_name_and_cooperatable_with_impl (page): failed");
                 return (Vec::new(), 0);
             }
         };
@@ -1140,7 +1141,7 @@ impl PersistentBotRepo {
                 .map(|v| v as usize)
                 .unwrap_or(0),
             Err(e) => {
-                warn!(error = %e, "list_bots_by_name_and_cooperatable_with_impl (count): failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "list_bots_by_name_and_cooperatable_with_impl (count): failed");
                 0
             }
         };
@@ -1258,7 +1259,7 @@ impl BotMetricsSnapshotPort for PersistentBotRepo {
             .db_query(sql, vec![Value::from(env.as_str())])
             .await
             .map_err(|e| {
-                warn!(env = %env, error = %e, "bot metrics snapshot query failed");
+                warn!(request_id = %bcs_observability::current_request_id(), env = %env, error = %e, "bot metrics snapshot query failed");
                 ServiceError::InternalError(format!("bot metrics snapshot query failed: {}", e))
             })?;
 
@@ -1321,7 +1322,7 @@ impl BotRepoPort for PersistentBotRepo {
         self.save_to_db(&bot_id, &capabilities, session_token.as_deref(), None)
             .await
             .map_err(|e| {
-                warn!(bot_id = %bot_id, error = %e, "Failed to save bot to database during register");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %e, "Failed to save bot to database during register");
                 e
             })?;
 
@@ -1439,7 +1440,7 @@ impl BotRepoPort for PersistentBotRepo {
         self.save_to_db(&bot_id, &capabilities, Some(token), Some(created_by))
             .await
             .map_err(|e| {
-                warn!(bot_id = %bot_id, error = %e, "Failed to save bot to database during register_with_owner_and_token");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %e, "Failed to save bot to database during register_with_owner_and_token");
                 e
             })?;
 
@@ -1665,7 +1666,7 @@ impl BotRepoPort for PersistentBotRepo {
         // 后期需要其他字段时，应在 RegisteredBotInner 上新增一个 HashMap 内存对象
         // 来承载任意 key/value，而不是继续往 capabilities 上加字段。
         if key != "agent_token" && key != "client_kind" {
-            tracing::warn!(bot_id = %bot_id, key = %key, "add_bot_info: unrecognized key, ignoring");
+            tracing::warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, key = %key, "add_bot_info: unrecognized key, ignoring");
             return;
         }
         if key == "client_kind" {
@@ -1722,7 +1723,7 @@ impl BotRepoPort for PersistentBotRepo {
                 .filter_map(|row| db_get_column::<String>(&row, "bot_uuid").ok())
                 .collect::<std::collections::HashSet<_>>(),
             Err(error) => {
-                warn!(env = %env, error = %error, "list_active: failed to load active bot ids from DB; returning empty result to preserve DB tombstone authority");
+                warn!(request_id = %bcs_observability::current_request_id(), env = %env, error = %error, "list_active: failed to load active bot ids from DB; returning empty result to preserve DB tombstone authority");
                 return Vec::new();
             }
         };
@@ -1744,7 +1745,7 @@ impl BotRepoPort for PersistentBotRepo {
         {
             Ok(rows) => rows,
             Err(error) => {
-                warn!(env = %env, error = %error, "list_all_bots: failed to load bot rows from DB; returning empty result");
+                warn!(request_id = %bcs_observability::current_request_id(), env = %env, error = %error, "list_all_bots: failed to load bot rows from DB; returning empty result");
                 return Vec::new();
             }
         };
@@ -1822,7 +1823,7 @@ impl BotRepoPort for PersistentBotRepo {
         {
             Ok(bots) => bots,
             Err(error) => {
-                warn!(created_by = %created_by, error = %error, "list_bots_by_creator_from_db: failed");
+                warn!(request_id = %bcs_observability::current_request_id(), created_by = %created_by, error = %error, "list_bots_by_creator_from_db: failed");
                 Vec::new()
             }
         }
@@ -1948,7 +1949,7 @@ impl BotRepoPort for PersistentBotRepo {
         bots.retain(|_, b| !b.is_expired());
         let removed = before - bots.len();
         if removed > 0 {
-            warn!(removed, "Removed expired bot registrations");
+            warn!(request_id = %bcs_observability::current_request_id(), removed, "Removed expired bot registrations");
         }
     }
 
@@ -2022,7 +2023,7 @@ impl BotRepoPort for PersistentBotRepo {
         )
         .await
         .map_err(|e| {
-            warn!(bot_uuid = %bot_id, error = %e, "update_visibility: failed to update database");
+            warn!(request_id = %bcs_observability::current_request_id(), bot_uuid = %bot_id, error = %e, "update_visibility: failed to update database");
             ServiceError::InternalError(e.to_string())
         })?;
 
@@ -2045,6 +2046,7 @@ impl BotRepoPort for PersistentBotRepo {
     #[allow(deprecated)]
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()> {
         warn!(
+            request_id = %bcs_observability::current_request_id(),
             bot_id = %bot_id,
             hidden = %hidden,
             "set_hidden is DEPRECATED and is now a Noop; use update_actor_status(bot_id, ActorStatus::Hidden) instead (Task H.1)"
@@ -2079,6 +2081,7 @@ impl BotRepoPort for PersistentBotRepo {
         .await
         .map_err(|e| {
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 bot_id = %bot_id,
                 status = %status_str,
                 error = %e,
@@ -2159,6 +2162,7 @@ impl BotRepoPort for PersistentBotRepo {
                 .await
                 .map_err(|e| {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         bot_uuid = %bot_uuid,
                         error = %e,
                         "ensure_human_actor: failed to backfill bot_info"
@@ -2227,6 +2231,7 @@ impl BotRepoPort for PersistentBotRepo {
             .await
             .map_err(|e| {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_uuid = %bot_uuid,
                     error = %e,
                     "ensure_human_actor: INSERT IGNORE failed"
@@ -2276,6 +2281,7 @@ impl BotRepoPort for PersistentBotRepo {
             .await
             .map_err(|e| {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     staff_no = %staff_no,
                     env = %env,
                     error = %e,
@@ -2378,6 +2384,7 @@ impl BotRepoPort for PersistentBotRepo {
         .await
         .map_err(|e| {
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 bot_uuid = %bot_uuid,
                 error = %e,
                 "update_human_name: failed to update database"
@@ -2479,7 +2486,7 @@ impl BotRepoPort for PersistentBotRepo {
         let result = self.find_bot_by_token_in_db(token).await;
         if result.is_none() {
             let prefix = &token[..8.min(token.len())];
-            warn!(token_prefix = %prefix, "find_bot_by_token: token not found in any layer (cache/memory/database)");
+            warn!(request_id = %bcs_observability::current_request_id(), token_prefix = %prefix, "find_bot_by_token: token not found in any layer (cache/memory/database)");
         }
         result
     }
@@ -2593,6 +2600,7 @@ impl BotRepoPort for PersistentBotRepo {
                 // surfaces as a stale-MOCK reconnect after a BCS restart.
                 if let Err(err) = self.save_token_to_db(&bot_id, &session_token).await {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         bot_id = %bot_id,
                         error = %err,
                         "connect_or_promote_streaming: promote_mock DB persist failed; refusing ws"
@@ -2649,6 +2657,7 @@ impl BotRepoPort for PersistentBotRepo {
             // real token, already connected → reject
             (true, false, true) => {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id = %bot_id,
                     branch = "already_connected",
                     "connect_or_promote_streaming: real-token bot already connected"
@@ -2660,6 +2669,7 @@ impl BotRepoPort for PersistentBotRepo {
             // via the existing reconnect_streaming(token) path.)
             (true, false, false) => {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id = %bot_id,
                     branch = "already_registered",
                     "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
@@ -2677,7 +2687,7 @@ impl BotRepoPort for PersistentBotRepo {
         // Check if bot is already connected
         if let Some(bot) = bots.get(&bot_id) {
             if bot.ws_connection.is_some() {
-                warn!(bot_id = %bot_id, "Bot already has an active streaming connection");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot already has an active streaming connection");
                 return Err(());
             }
         }
@@ -2743,7 +2753,7 @@ impl BotRepoPort for PersistentBotRepo {
         // Check if bot is already connected
         if let Some(bot) = bots.get(&bot_id) {
             if bot.ws_connection.is_some() {
-                warn!(bot_id = %bot_id, "Bot already has an active connection");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot already has an active connection");
                 return Err(());
             }
         }
@@ -2834,7 +2844,7 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn send_frame(&self, bot_id: &str, _frame: String) -> Result<(), ()> {
-        warn!(bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
+        warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
         Err(())
     }
 
@@ -2971,6 +2981,7 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         .map(|value| {
             serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id,
                     column = "user_visibility",
                     "Invalid persisted Bot attribute"
@@ -2985,6 +2996,7 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         .map(|value| {
             serde_json::from_str(&value).map_err(|error| {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id,
                     column = "friend_ext",
                     "Invalid persisted Bot attribute"
@@ -2999,6 +3011,7 @@ fn control_plane_record_from_row(row: &DbRow) -> ServiceResult<BotControlPlaneRe
         .map(|value| {
             serde_json::from_value(serde_json::Value::String(value)).map_err(|error| {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id,
                     column = "friend_check_in_strategy",
                     "Invalid persisted Bot attribute"

@@ -189,6 +189,7 @@ impl Bot {
                 .unwrap_or_else(|| staff_no.to_string()),
             Ok(None) => {
                 tracing::warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     staff_no = %staff_no,
                     "user directory returned no profile; falling back to staff_no for human actor name"
                 );
@@ -196,6 +197,7 @@ impl Bot {
             }
             Err(error) => {
                 tracing::warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     staff_no = %staff_no,
                     error = %error,
                     "user directory lookup failed; falling back to staff_no for human actor name"
@@ -1207,6 +1209,7 @@ impl Bot {
             }
             Err(error) => {
                 tracing::warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     elapsed_ms = %elapsed_ms,
                     selector = ?selector,
                     error = %error,

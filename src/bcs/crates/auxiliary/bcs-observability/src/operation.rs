@@ -12,7 +12,7 @@ struct Totals {
 #[derive(Clone)]
 struct RequestContext {
     id: String,
-    totals: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<&'static str, Totals>>>,
+    totals: Option<std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<&'static str, Totals>>>>,
 }
 tokio::task_local! {
     static REQUEST_CONTEXT: RequestContext;
@@ -28,7 +28,8 @@ pub fn current_request_id() -> String {
 }
 
 fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static str, duration_ms: f64) {
-    let mut totals = context.totals.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(totals) = &context.totals else { return; };
+    let mut totals = totals.lock().unwrap_or_else(|error| error.into_inner());
     let total = totals.entry(name).or_default();
     total.count += 1;
     total.total_ms += duration_ms;
@@ -41,14 +42,22 @@ pub fn count(name: &'static str, outcome: &'static str) {
 }
 
 pub async fn with_request_context<T>(request_id: String, future: impl Future<Output = T>) -> T {
-    let context = RequestContext { id: request_id, totals: Default::default() };
+    let totals = std::sync::Arc::default();
+    let context = RequestContext { id: request_id, totals: Some(std::sync::Arc::clone(&totals)) };
     let result = REQUEST_CONTEXT.scope(context.clone(), future).await;
-    let totals = context.totals.lock().unwrap_or_else(|error| error.into_inner());
+    let totals = totals.lock().unwrap_or_else(|error| error.into_inner());
     let observations = serde_json::to_string(&*totals).expect("finite operation durations");
     drop(totals);
     tracing::info!(target: "bcs_observation", request_id = %context.id,
         observations = %observations, "http.request.operations");
     result
+}
+
+/// Correlate long-lived work with its initiating request without collecting or
+/// emitting an HTTP request summary. Capture the ID before spawning/upgrading.
+/// This scope never retains a span or the initiating request's totals.
+pub async fn with_request_id<T>(request_id: String, future: impl Future<Output = T>) -> T {
+    REQUEST_CONTEXT.scope(RequestContext { id: request_id, totals: None }, future).await
 }
 
 /// Carry log correlation into detached work without retaining or entering spans.

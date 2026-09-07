@@ -27,7 +27,7 @@ pub async fn pull_secret(
 ) -> Response {
     let ip = addr.ip();
     if !ip.is_loopback() {
-        tracing::warn!(remote = %ip, "rejecting /admin/secret request from non-loopback");
+        tracing::warn!(request_id = %bcs_observability::current_request_id(), remote = %ip, "rejecting /admin/secret request from non-loopback");
         return (
             StatusCode::FORBIDDEN,
             Json(json!({ "error": "loopback_only" })),
@@ -51,7 +51,7 @@ pub async fn pull_secret(
                 SecretServiceError::Unavailable(_) => (StatusCode::SERVICE_UNAVAILABLE, "unavailable"),
                 SecretServiceError::InvalidInput(_) => (StatusCode::BAD_REQUEST, "invalid_input"),
             };
-            tracing::warn!(secret = %name, error = %err, "SecretService.get_secret failed");
+            tracing::warn!(request_id = %bcs_observability::current_request_id(), secret = %name, error = %err, "SecretService.get_secret failed");
             (
                 code,
                 Json(json!({ "error": kind, "message": err.to_string() })),
