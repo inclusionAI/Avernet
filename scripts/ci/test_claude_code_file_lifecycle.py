@@ -15,12 +15,17 @@ import tests.community.conftest  # noqa: F401 — bootstrap before either distri
 from agentclaw.community.core.devices.services.baas_device_filesystem import (
     BaasDeviceFileSystem,
 )
-from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
+from tests.community.contracts.test_local_skill_storage import (
+    factory as make_factory,
+)
+from agentclaw.community.plugins.community.local_skill_storage import (
+    EngineLocalSkillStorage,
+)
+from types import SimpleNamespace
 from agentclaw.community.core.skill_center.errors import LocalSkillStorageError
 from tests.community.core.skill_center.test_local_skill_upload_service import (
     _Bot,
     _ConcurrentRepo,
-    _Factory,
     _service,
     _skill_md,
     _zip,
@@ -47,22 +52,13 @@ class _HttpTransport:
         return self.client.post(path, files=files, data=data)
 
 
-class _RealStorageFactory(_Factory):
-    def local_skill_package_storage(self, *, name, directory_name=None, **kwargs):
-        directory = str(self.local_dir / (directory_name or name))
-        return directory, LocalSkillPackageStorage(self._filesystem, directory)
-
-    def local_skill_package_storage_for_locator(self, *, locator, **kwargs):
-        return LocalSkillPackageStorage(self._filesystem, locator)
-
-
 @pytest.mark.asyncio
 async def test_create_activate_replace_and_failed_replace_restore_nested_bytes(
     tmp_path, monkeypatch
 ):
     home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("CLAUDE_CODE_DEFAULT_CWD", str(home / ".claude_code/workspace"))
+    monkeypatch.setenv("CLAUDE_CODE_DEFAULT_CWD", str(home / ".openclaw/workspace"))
     engine = ClaudeCodeCommunityEngine()
     manager = EngineManager("claude_code")
     manager._active_engine = engine
@@ -73,8 +69,13 @@ async def test_create_activate_replace_and_failed_replace_restore_nested_bytes(
         fs = BaasDeviceFileSystem(
             transport=_HttpTransport(client), conn_info={}, path_mapper=lambda p: p
         )
-        factory = _RealStorageFactory(fs)
-        factory.local_dir = home / ".claude_code/workspace/skills/skills-local"
+        local_dir = home / ".claude_code/workspace/skills/skills-local"
+        monkeypatch.setattr(
+            "agentclaw.community.plugins.community.local_skill_storage.pool_paths_for_engine",
+            lambda engine: SimpleNamespace(legacy_local=str(local_dir)),
+        )
+        factory = make_factory(EngineLocalSkillStorage())
+        factory._device_fs_dispatcher.for_bot.return_value = fs
         repo = _ConcurrentRepo()
         service = _service(
             fs, bot=_Bot(engine="claude_code"), repo=repo, factory=factory
@@ -88,10 +89,11 @@ async def test_create_activate_replace_and_failed_replace_restore_nested_bytes(
             bot_id="bot", owner_id="owner", actor_id="owner", package=_zip(first)
         )
         assert result["skill"]["active"] is False
-        source = factory.local_dir / "upload-skill"
+        source = local_dir / "upload-skill"
         target = home / ".claude/skills/upload-skill"
         assert not target.exists()
-        # The image startup creates the empty discovery root, not active skills.
+        # Existing activation requires a discovery root; this test does not
+        # claim to validate fresh-container initialization.
         target.parent.mkdir(parents=True)
         mapping = SkillMapping(source=str(source), target=str(target))
         published = publish_claude_code_pool_mappings(
@@ -127,4 +129,4 @@ async def test_create_activate_replace_and_failed_replace_restore_nested_bytes(
             )
         for path, content in second.items():
             assert (target / path).read_bytes() == content
-        assert {p.name for p in factory.local_dir.iterdir()} == {"upload-skill"}
+        assert {p.name for p in local_dir.iterdir()} == {"upload-skill"}

@@ -712,8 +712,6 @@ class BaasService:  # pragma: no cover
                 entity_id=entity_id, bot_id=bot_id
             )
 
-        from agentclaw.community.core.workspace.claude_code_config import claude_code_workspace_from_ext
-
         # 一次成形，三个 composer 方法共用：同一个容器的同一份描述。
         deploy_ctx = BotDeployContext(
             bot_id=bot_id,
@@ -728,7 +726,6 @@ class BaasService:  # pragma: no cover
             version=version,
             mount_path=mount_path,
             ext_info=ext_info,
-            claude_code_workspace=claude_code_workspace_from_ext(bot.get("ext")) if engine == "claude_code" else None,
         )
 
         # 构建 sandbox 成功后执行的命令

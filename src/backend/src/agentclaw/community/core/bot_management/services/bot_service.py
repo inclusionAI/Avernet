@@ -1418,10 +1418,6 @@ class BotService(BotServiceProtocol):
             else:
                 ext = clear_image_policy_from_ext(ext)
 
-        if resolved_active_engine == "claude_code":
-            from agentclaw.community.core.workspace.claude_code_config import new_claude_code_ext
-            ext = new_claude_code_ext(ext)
-
         # Resolve bot name according to naming rules
         resolved_bot_name = self._resolve_bot_name(bot_name, bot_id, user_id, nick_name)
 

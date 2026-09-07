@@ -99,11 +99,11 @@ local mock → adapter), following the openclaw reference.
 
 The file port performs local Python I/O in the shared Engine/Claude filesystem;
 chat continues over the Node relay. File operations require no relay connection.
-The composition root supplies the Claude engine roots and effective cwd. The
-`workspace/` address namespace resolves against that cwd; absolute paths retain
-their identity. Recursive listing and binary content are supported.
+The composition root supplies permitted Engine file roots from the existing
+layout and configured workspace. Absolute addresses retain their identity.
+Recursive listing and binary content are supported.
 
-This deployment requires Engine and Claude to share the relevant filesystem.
-A configurable relay URL alone does not establish remote filesystem support.
-Startup retains known existing cwd configuration and rejects unknown/conflicting
-legacy state rather than silently moving sessions or project files.
+This requires Engine and Claude to share the relevant filesystem. The file
+implementation does not change startup cwd, move historical files, or initialize
+Skill activation directories. A configurable relay URL alone does not establish
+remote filesystem support.

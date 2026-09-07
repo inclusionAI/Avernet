@@ -18,8 +18,6 @@ same three questions.
 """
 from __future__ import annotations
 
-import shlex
-
 from agentclaw.community.core.service_bot.services.deploy.deploy_config_composer import (
     BotDeployContext,
     DeployConfigComposer,
@@ -45,23 +43,12 @@ class AckDeployConfigComposer(DeployConfigComposer):
         to substitute at dispatch; ``bot_id`` and ``owner_id`` are filled from
         the context.
         """
-        initial_cwd = ""
-        if ctx.engine == "claude_code" and ctx.claude_code_workspace is not None:
-            from agentclaw.community.core.workspace.claude_code_config import (
-                validate_claude_code_cwd,
-            )
-
-            selector = ctx.claude_code_workspace
-            if selector != "default":
-                selector = validate_claude_code_cwd(selector)
-            initial_cwd = " --claude-initial-cwd " + shlex.quote(selector)
-        command = (
-            f"nohup start_service.sh --token {{token}} "
+        return (
+            f"su admin -c 'nohup start_service.sh --token {{token}} "
             f"--client_id {{client_id}} --engine {ctx.engine} "
-            f"--bot_id {ctx.bot_id} --owner_id {ctx.owner_id}{initial_cwd} "
-            ">> /home/admin/start.log 2>&1"
+            f"--bot_id {ctx.bot_id} --owner_id {ctx.owner_id} "
+            f">> /home/admin/start.log 2>&1'"
         )
-        return "su admin -c " + shlex.quote(command)
 
     def build_mount_points(self, ctx: BotDeployContext) -> list[MountPointEntry]:
         """No bind-mounts: the ACK pod's volumes come from the ``storage``

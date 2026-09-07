@@ -14,19 +14,9 @@ from pathlib import Path
 
 class _FilePortMixin:
     _file_roots: tuple[Path, ...]
-    _file_workspace: Path | None
-    _file_config: Path | None
 
     def _file_path(self, path: str, *, unlink: bool = False) -> Path:
         target = Path(path)
-        if path == "config/config.json":
-            if self._file_config is None:
-                raise ValueError("Claude Code config path is not configured")
-            target = self._file_config
-        if target.parts[:1] == ("workspace",):
-            if self._file_workspace is None:
-                raise ValueError("Claude Code workspace is not configured")
-            target = self._file_workspace.joinpath(*target.parts[1:])
         if not path.strip() or not target.is_absolute() or ".." in target.parts:
             raise ValueError("File path must be absolute without parent traversal")
         # For removal, resolve ancestors but not the final symlink: unlink the

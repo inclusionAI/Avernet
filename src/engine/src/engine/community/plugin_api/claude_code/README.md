@@ -31,8 +31,8 @@ catalog and the native-shape / token conventions.
 ### File port v2
 
 The community file implementation is Engine-local and requires a shared
-filesystem with Claude. `workspace/` is resolved using configured cwd; other
-paths are absolute engine-view addresses. It does not connect to the relay.
+filesystem with Claude. Paths are absolute engine-view addresses. It does not
+connect to the relay.
 Upload requires bytes, read returns raw bytes, remove returns path/type metadata,
 and recursive listing parameters propagate end to end. Filesystem failures raise
 standard exceptions; the in-memory test implementation obeys the same contract.

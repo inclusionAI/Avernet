@@ -1,8 +1,7 @@
 """Claude Code native file port (v2): Engine-local filesystem operations.
 
 The community implementation shares a filesystem with the Claude runtime.
-Paths are engine-view absolute addresses, or workspace/<relative> within the
-configured cwd. The config/config.json address names the Engine configuration. Transport/NAS addressing belongs to
+Paths are engine-view absolute addresses. Transport/NAS addressing belongs to
 provider boundaries, not to callers or the core adapter. ``token`` is retained
 for caller compatibility, not interpreted as file authorization.
 

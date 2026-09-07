@@ -1,74 +1,72 @@
-# Claude Code local file I/O and workspace compatibility
+# Claude Code Local Skill file I/O and storage addresses
 
-Status: implementation of Plan B, targeting dev. The relay file-RPC proposal
-(#1955) remains a backup and is not implemented by this change.
+Status: narrowed Plan B, targeting dev in PR #1961. The Node relay file-RPC
+proposal (#1955) remains an unimplemented backup.
 
-## Scope and contract
+## Problem and scope
 
-The community Claude Code runtime shares its filesystem with the Python Engine.
-The existing HTTP FileService -> ClaudeCodeFileAdapter -> ClaudeCodeFilePort
-boundary remains. The concrete file port performs local I/O; chat and other
-relay capabilities retain their transport. No Node file RPC, Base64 file
-transport, extra relay credential, or automatic transport fallback is added.
+The community Claude Code file port calls Node relay file RPCs that do not exist.
+The Backend also derives remote Claude Local Skill uploads from the shared
+OpenClaw repository root. These are distinct defects: implementing local I/O
+alone can write a package which the existing Claude mapping rejects as outside
+its managed source layout.
 
-File operations cover the existing workspace, identity, configuration, and
-Local Skill consumers. Paths must be engine-view addresses within configured
-engine roots. Community BaaS addressing translates only this Bot's known host
-root; it does not import enterprise path rules. The existing workspace logical
-namespace (`workspace/<relative>`) resolves in Engine to the retained configured
-cwd, so Backend need not infer an old Bot's filesystem location. Identity and configuration also use the existing logical namespace boundary.
-Absolute saved
-Local Skill locators are never silently rewritten. Corp and singlebox retain
-their existing addressing assembly.
+Repair the community Claude Code file port and only the Local Skill storage
+address selection needed for upload, replacement, read and cleanup. Keep HTTP
+FileService -> ClaudeCodeFileAdapter -> ClaudeCodeFilePort. The concrete port
+uses the shared Engine/runtime filesystem; chat continues over the relay.
+Preserve bytes, recursive listing, standard filesystem errors, safe symlink
+removal, and configured-root containment. No Base64 transport is introduced.
 
-Local upload source directories follow the current engine Legacy/Pool layout.
-Content storage is distinct from active discovery; creation returns inactive.
-Existing Pool state remains authoritative, without a migration side effect.
-Recursive listing and binary readback must preserve complete packages. Reuse
-existing staged replacement, verified backup and restoration; do not substitute
-a new overwrite algorithm. Filesystem errors propagate distinctly. Deleting a
-symlink removes the link, not its target; root deletion and path escape fail.
+## Backend interface
 
-## New and existing Bot workspaces
+Reuse SkillServiceFactory's package storage and reopening methods. A small
+LocalSkillStorageResolver Plugin API returns a Legacy package root, not a
+profile flag. Public Skill services and WorkspacePathFactory do not distinguish
+corp/community. The default provider preserves existing configured roots;
+community's provider selects the existing Claude Code layout contract. Shared
+repository synchronization and other engines' configured roots are unchanged.
 
-A newly persisted Claude Code Bot receives an initialization-version marker in
-its existing ext metadata, and preserves an explicit valid cwd override. The
-Engine startup resolves the standard default from its versioned layout; Backend
-does not introduce a second physical directory constant. Idempotent creation of an existing Bot does not backfill
-or rewrite this field. ACK start commands carry this recorded initial default.
-No schema migration is required; managed deployment does not consume this flag.
+Use the same resolved root when constructing request-scoped SkillService,
+creating staged/canonical/backup storage and validating existing locators. The
+existing factory returns the persistent locator and a device storage port;
+keep their existing address adapters rather than adding a duplicate address
+DTO or a general filesystem framework. Existing Pool resolution takes priority
+and alone controls runtime_uses_pool_paths. Do not masquerade Legacy paths as
+Pool state. New absolute Local Skill locators feed the existing mapping logic;
+no profile-specific symlink generation or new mapping protocol is added.
 
-Startup validates saved Engine/relay cwd fields, explicit configuration and
-running process configuration before overwriting either environment file. A
-creation default is used only when no saved configuration exists. Unknown or
-conflicting old state is an error, never evidence of a fresh Bot. Existing
-processes are not restarted on such an error. Existing session bindings and
-project files are not moved; the relay's existing resume semantics remain.
-
-Startup runs after the home volume is mounted and creates the resolved cwd
-without recursively changing ownership of historical files. SDK configuration
-and history are not conflated with the workspace. This is not a Pool migration.
+Historical locators are never rewritten or moved. Existing readable addresses
+retain their identity through file I/O. Package replacement and cleanup retain
+the current canonical-root containment requirement; incompatible historical
+locators must fail before any package writes or metadata changes. Supporting a
+migration or expanding roots to bypass this check is outside this change.
 
 ## Validation
 
-- Real HTTP router, Claude Code adapter and concrete file port over temporary
-  directories: no mocked relay/file implementation for the core file proof.
-- Backend Local Skill create/replace and real package storage over Engine HTTP,
-  followed by real mapping publish/verify; nested and binary content, explicit
-  activation, and injected metadata-switch failure restoring the complete old
-  package. Repositories/permissions and device transport may be test doubles.
-- Existing workspace/identity/config consumers and profile-dependent addressing.
-- Startup CLI tests: explicit new default, retained old cwd, missing/conflicting
-  configuration, spaces, invalid inputs and running-vs-saved disagreement.
-- OpenClaw regression and OCB contract/assembly impact review. A passing public
-  suite does not prove a particular enterprise image has integrated the change.
-- Existing Skill size limits remain: compressed 10 MiB, individual file 10 MiB,
-  expanded 50 MiB, 500 entries. Do not impose these on unrelated generic files.
+- Real HTTP router, adapter and local file implementation: binary bytes,
+  recursive listings, missing/empty directories, overwrite and removal errors,
+  traversal/root protection and symlink unlink behavior.
+- Factory conformance with configured and community providers: persistent
+  locator equals the address reopened for the same package; Pool precedence;
+  other engines unchanged; historical incompatible locator rejected before I/O.
+- Real package storage through Engine HTTP: create, same-name replacement,
+  nested/binary contents and metadata-failure rollback. Use the actual storage
+  factory and local-address provider; repositories/device transport may be doubles.
+- Existing mapping publish/verify against the uploaded source, with its active
+  root pre-created. This proves mapping compatibility, not fresh-container
+  bootstrap or API-level activation. Upload stays inactive until activated.
+- Narrow DI, architecture, type and contract checks; Standards/Spec review;
+  affected full module suites and existing GitHub CI. No workflow changes.
+- Matching OCB source/gitlink impact analysis and corp file regression. Public
+  CI does not prove enterprise rollout or deployed-image compatibility.
 
-## Not included
+Existing package limits stay unchanged: compressed and per-file 10 MiB,
+expanded 50 MiB, 500 entries. Generic files do not gain these Skill-specific caps.
 
-Independent Engine/relay filesystems, automatic history/locator migrations,
-clearing old directories, implicit activation, new public file-management
-features, a cross-engine filesystem framework, or deployment/merge authorization.
-Report local validation, CI, review, merge, deployment and live validation
-separately. This PR supplies source changes and tests, not cloud rollout proof.
+## Explicitly excluded
+
+Bot creation metadata, ACK command arguments, Dockerfile/startup scripts, cwd
+selection or conflict checks, automatic history migration, fresh activation
+root initialization, general workspace/identity/config address redesign,
+shared-repository delivery, Pool migration, merging and cloud deployment.

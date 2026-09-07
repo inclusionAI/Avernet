@@ -148,36 +148,3 @@ def test_file_type_and_overwrite_errors(client, tmp_path):
         client.post("/api/file/read", json={"file_path": str(directory)}).status_code
         == 404
     )
-
-
-def test_workspace_namespace_uses_configured_cwd(client, tmp_path):
-    response = client.post(
-        "/api/file/upload",
-        data={"target_path": "workspace/project/file.txt"},
-        files={"file": ("file.txt", b"project")},
-    )
-    assert response.status_code == 200
-    assert (tmp_path / "project" / "file.txt").read_bytes() == b"project"
-
-
-def test_identity_and_config_namespaces_resolve_independently(client, tmp_path):
-    from engine.community.config import default_claude_code_workspace
-
-    for logical, target in [
-        ("workspace/.claude/CLAUDE.md", tmp_path / ".claude/CLAUDE.md"),
-        (
-            "config/config.json",
-            default_claude_code_workspace(tmp_path / "home").parent / "config.json",
-        ),
-    ]:
-        response = client.post(
-            "/api/file/upload",
-            data={"target_path": logical},
-            files={"file": ("content", b"configured")},
-        )
-        assert response.status_code == 200, response.text
-        assert target.read_bytes() == b"configured"
-        assert (
-            client.post("/api/file/read", json={"file_path": logical}).content
-            == b"configured"
-        )

@@ -277,7 +277,7 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
 async def test_file_adapter_distinguishes_missing_and_empty_directories(tmp_path, implementation):
     from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
     from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
-    port = LocalClaudeCodePluginImpl() if implementation == "memory" else ClaudeCodePluginImpl(file_roots=(tmp_path,), workspace=tmp_path)
+    port = LocalClaudeCodePluginImpl() if implementation == "memory" else ClaudeCodePluginImpl(file_roots=(tmp_path,))
     adapter = ClaudeCodeFileAdapter(port)
     project = str(tmp_path / 'project')
     with pytest.raises(FileNotFoundError):

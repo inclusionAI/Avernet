@@ -81,8 +81,6 @@ class BotDeployContext:
     #: Caller-supplied extra NAS mount, mounted at the same path it names.
     mount_path: Optional[str] = None
     ext_info: Optional[Dict[str, Any]] = None
-    #: Persisted creation selector ('default' or explicit cwd); None means legacy.
-    claude_code_workspace: str | None = None
 
 
 class DeployConfigComposer(abc.ABC):

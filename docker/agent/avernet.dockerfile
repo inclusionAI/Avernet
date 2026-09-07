@@ -355,7 +355,6 @@ COPY docker/agent/util.sh /usr/local/bin/util.sh
 # --engine, execs the right script) + one per-engine script.
 COPY docker/agent/start_service.sh /usr/local/bin/start_service.sh
 COPY docker/agent/start_openclaw.sh /usr/local/bin/start_openclaw.sh
-COPY docker/agent/resolve_claude_workspace.py /usr/local/bin/resolve_claude_workspace.py
 COPY docker/agent/start_claude_code.sh /usr/local/bin/start_claude_code.sh
 
 # Entrypoint: pre-init, config generation from template, then execs supervisord.

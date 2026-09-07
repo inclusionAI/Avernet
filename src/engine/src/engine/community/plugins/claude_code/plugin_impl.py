@@ -51,11 +51,9 @@ class ClaudeCodePluginImpl(
     fresh ``ClaudeCodeRelayClient`` on first use.
     """
 
-    def __init__(self, client: ClaudeCodeRelayClient | None = None, *, file_roots: tuple[Path, ...] = (), workspace: Path | None = None, config_path: Path | None = None) -> None:
+    def __init__(self, client: ClaudeCodeRelayClient | None = None, *, file_roots: tuple[Path, ...] = ()) -> None:
         super().__init__(client=client)
         self._file_roots = tuple(root.resolve() for root in file_roots)
-        self._file_workspace = workspace
-        self._file_config = config_path
 
 
 __all__ = ["ClaudeCodePluginImpl"]

@@ -173,6 +173,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.secret_resolver
   - agentclaw.community.plugin_api.skill_center_client
   - agentclaw.community.plugin_api.skill_center_gateway
+  - agentclaw.community.plugin_api.local_skill_storage
   - agentclaw.community.plugin_api.skill_repo_sync
   - agentclaw.community.plugin_api.skill_scanner
   - agentclaw.community.plugin_api.space_skill_source

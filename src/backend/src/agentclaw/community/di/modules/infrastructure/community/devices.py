@@ -13,9 +13,6 @@ Corp-free by construction: it imports only ``core`` + ``plugin_api``.
 """
 from __future__ import annotations
 
-from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
-from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
-
 from typing import cast  # noqa: UP035 - injector binding key must match provider side
 
 from injector import Binder, Module, inject, provider, singleton
@@ -46,9 +43,6 @@ class CommunityDevicesModule(Module):
     """community: BaaS-only device runtime wiring (no ARCA)."""
 
     def configure(self, binder: Binder) -> None:
-        from agentclaw.community.core.devices.services.device_filesystem_dispatcher import DeviceFileSystemResolver
-        from agentclaw.community.core.devices.services.community_device_filesystem_resolver import CommunityDeviceFileSystemResolver
-        binder.bind(DeviceFileSystemResolver, to=CommunityDeviceFileSystemResolver, scope=singleton)
         from agentclaw.community.plugins.community.device_adapter_transport import (
             CommunityDeviceAdapterTransport,
         )
@@ -134,8 +128,3 @@ class CommunityDevicesModule(Module):
                 identity_repository=caller_identity_repository,
             ),
         )
-
-    @singleton
-    @provider
-    def workspace_path_factory(self, skill_repo_sync: "SkillRepoSyncPlugin") -> "WorkspacePathFactory":
-        return WorkspacePathFactory(skill_repo_sync, container_engine_paths=True)
