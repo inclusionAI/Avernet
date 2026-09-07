@@ -7,15 +7,14 @@
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import express from "express";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { LessonRepository } from "../../repositories/lesson-repository.js";
 import { createLessonRouter } from "../lessons.js";
 
-type DbSync = DatabaseSync;
-const SQLITE = await import("node:sqlite");
+type DbSync = InstanceType<typeof Database>;
 
 function createTestDb(): { db: DbSync } {
-  const raw = new SQLITE.DatabaseSync(":memory:") as DbSync;
+  const raw = new Database(":memory:") as DbSync;
   raw.exec(`
     CREATE TABLE lessons (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

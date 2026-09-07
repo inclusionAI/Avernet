@@ -6,15 +6,15 @@
  */
 import { describe, it, beforeAll, afterAll, expect } from "vitest";
 import express from "express";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { DiagnosisCardRepository } from "../../repositories/diagnosis-card-repository.js";
 import { RepairHistoryRepository } from "@avernet/clawweb-shared/server/repositories/repair-history-repository";
 import { createDiagnosisCardRouter } from "../diagnosis-cards.js";
 
-type DbSync = DatabaseSync;
+type DbSync = InstanceType<typeof Database>;
 
 function createTestDb(): { db: any } {
-  const raw = new DatabaseSync(":memory:") as DbSync;
+  const raw = new Database(":memory:") as DbSync;
   raw.exec(`
     CREATE TABLE diagnosis_cards (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
