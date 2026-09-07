@@ -185,6 +185,15 @@ internal_dependencies:
 
 ### Change impact
 
+`SkillRuntimeDelivery` owns steady-state filesystem Skill delivery after plan
+resolution: Legacy Local-only and empty snapshots retain DeviceSync, while
+Pool, Repo, Center, and explicit retirement retain the logical Mapping route.
+`PerDomainRuntimeProjection` only schedules the Skill and MCP halves, isolates
+their failures, and combines results. Pool migration/recovery still consumes
+`SkillsPoolRuntimeProtocol` directly, and Teclaw still uses Whole Artifact;
+changing either route requires compatibility review across Projector, public
+Runtime, community DI, and the Corp transport binding.
+
 `SpaceSkillEditorRequestService` is an additional consumer of the existing
 `StaffDeptPlugin` profile lookup: newly created Skill editor-request approval
 notifications persist the applicant as `「花名」(工号)` when the directory returns

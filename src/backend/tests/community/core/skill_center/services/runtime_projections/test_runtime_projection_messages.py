@@ -5,11 +5,56 @@ from __future__ import annotations
 import pytest
 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
+    ResolvedSkillPlan,
     RuntimeProjectionResult,
 )
-from agentclaw.community.core.skill_center.services.runtime_projections.per_domain import (
-    PerDomainRuntimeProjection,
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeProjectionResolver,
 )
+from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
+    SkillRuntimeDelivery,
+)
+from agentclaw.community.core.skills_pool.models import (
+    MappingItemResult,
+    MappingProjectionStatus,
+    MappingPublishResult,
+    MappingVerificationResult,
+    RegisteredSkillAsset,
+)
+
+
+class _MappingResultRuntime:
+    def __init__(self, code: str) -> None:
+        self.item = MappingItemResult(
+            target="/runtime/active/repo-skill",
+            source="/runtime/repo/repo-skill",
+            status=MappingProjectionStatus.DEGRADED,
+            code=code,
+        )
+
+    async def publish_mappings(self, **_kwargs):
+        return MappingPublishResult(
+            published=False,
+            status=MappingProjectionStatus.DEGRADED,
+            items=(self.item,),
+        )
+
+    async def verify_mappings(self, **_kwargs):
+        return MappingVerificationResult(
+            valid=False,
+            status=MappingProjectionStatus.DEGRADED,
+            items=(self.item,),
+        )
+
+
+class _MissingLayouts:
+    def get(self, _scope):
+        return None
+
+
+class _UnusedLegacyService:
+    async def project_skills(self, **_kwargs):
+        raise AssertionError("Repo mapping must not use Legacy DeviceSync")
 
 
 @pytest.mark.parametrize(
@@ -36,13 +81,36 @@ from agentclaw.community.core.skill_center.services.runtime_projections.per_doma
         ),
     ],
 )
-def test_mapping_message_exposes_complete_user_action(
+@pytest.mark.asyncio
+async def test_mapping_message_exposes_complete_user_action(
     code: str,
     expected_action: str,
 ) -> None:
-    _, _, suggested_action, _, _ = PerDomainRuntimeProjection._mapping_message(code)
+    asset = RegisteredSkillAsset(
+        skill_id=7,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    plan = ResolvedSkillPlan(
+        bot_id="bot-1",
+        owner_id="owner-1",
+        service=_UnusedLegacyService(),
+        bot={
+            "env": "pre",
+            "entity_id": "owner-1",
+            "active_engine": "openclaw",
+        },
+        engine="openclaw",
+        projection=RuntimeProjectionResolver().resolve_skills((asset,)),
+    )
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=_MappingResultRuntime(code),
+        pool_layouts=_MissingLayouts(),
+    )
 
-    assert suggested_action == expected_action
+    result = await delivery.deliver(plan=plan)
+
+    assert result.issues[0].suggested_action == expected_action
 
 
 def test_pending_runtime_action_is_exposed_to_the_caller() -> None:
