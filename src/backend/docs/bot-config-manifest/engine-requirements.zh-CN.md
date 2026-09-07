@@ -161,16 +161,20 @@ v1 先以 publish-poll 的整体成败 + 平台侧 apply report（fetch/物化�
   **本仓库的实现把落点放在各引擎的装配处**
   （`engines/<engine>/engine.py` 绑定 `_cli_tools` 的那一行）：服务要求传入一个
   具体路径，由引擎自己给出。没有 resolver、没有查找表、`core/` 里也不读环境变量
-  ——某个引擎的落点定了，就只有一行要改。
+  ——某个引擎的落点变了，就只有一行要改。
 
-  当前两个社区引擎都取**该 bot workspace 的兄弟目录**。这一点是必要的：BaaS 按
-  bot **且**按引擎注入 workspace（`OPENCLAW_WORKSPACE_DIR`——名字有误导，它对每个
-  引擎都设），所以同一台 singlebox 上两个 bot 不会共用工具目录；写死常量会让它们
-  共用，而其中任何一个的整体替换都会删掉另一个的工具。构造时读取即可：BaaS 是在
-  拉起 adapter **进程之前**就把它放进进程环境的。
+  | 引擎 | 目录 |
+  | --- | --- |
+  | openclaw | `/home/admin/.openclaw/cli` |
+  | claude_code | `/home/admin/.aicoding/cli` |
 
-  > **Claude Code 的落点尚未定案。**社区镜像不是生产部署用的那个，所以它的布局
-  > 不构成对生产的判断。定案后改 `engines/claude_code/engine.py` 里那一行即可。
+  两者都是部署方给出的常量（claude_code 用 `.aicoding`，与部署方确认过——既不是
+  `.claude_code` 也不是 openclaw 那棵树）。**刻意写成字面量**：落点是镜像的属性，
+  不是运行时该推导的东西。
+
+  > **已知取舍：**同一台 singlebox 上的多个 bot 会共用同一个工具目录，因此其中
+  > 任何一个的整体替换都会删掉另一个的工具。这是当前有意接受的（"for now"）；
+  > 若 singlebox 上要跑 `cli_tools`，落点需要按 bot 区分。
 
   **v1 不做 PATH 注入**，这是一项明确的取舍：agent 由默认技能集里的一个 skill
   被告知落点，并以**绝对路径**调用。代价是 `mycli --help` 不工作、每次调用都

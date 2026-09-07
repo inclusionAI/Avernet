@@ -116,19 +116,20 @@ engine teams.
   engines; if the corp build ships them they each need a binding, which this
   change does not cover.
 - **Where the tools land.** Stated by each engine at the line where it binds
-  the service — the service takes a required concrete path. No resolver, no
-  lookup table, and no environment read inside `core/`. Both community engines
-  currently pass their bot's workspace sibling, which is what keeps two bots on
-  one host from sharing a directory. Claude Code's production location is still
-  to be confirmed with the deployment owners; settling it changes one line in
-  `engines/claude_code/engine.py`.
+  the service — the service takes a required concrete path, and each engine
+  names a literal. No resolver, no lookup table, and no environment read inside
+  `core/`. `openclaw` → `/home/admin/.openclaw/cli`; `claude_code` →
+  `/home/admin/.aicoding/cli`, confirmed with the deployment owners (`.aicoding`,
+  not `.claude_code`). Known trade-off, accepted for now: several bots on one
+  singlebox host share a directory, so a whole-set replace from one would delete
+  another's tools — running `cli_tools` there would need a per-bot location.
 
 ## Follow-ups
 
 - **End-to-end assertion on a live ARCA bot**: an apply declaring `cli_tools`
   reports the category succeeded and the tools are present. Platform-side.
-- **Confirm Claude Code's production tool directory** with the deployment
-  owners, then set it at that engine's binding site.
+- **A per-bot location if `cli_tools` is ever run on singlebox**, where the
+  hard-coded directories are shared across bots on one host.
 - **`aicoding` and `hermes`** need the same binding if the corp build ships
   them as engines.
 - **PATH injection**, which makes the workspace-sibling placement load-bearing

@@ -22,10 +22,11 @@ Capability matrix is declared here (community-side), mirroring the corp
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import logging
 
 from engine.community.core.cli_tools.service import LocalCliToolsService
-from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
 from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
@@ -115,6 +116,11 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
 )
 
 
+#: Where this engine keeps a bot's command-line tools, as the deployment
+#: defines it. A literal on purpose: the location is a property of the
+#: image, not something to derive at runtime.
+CLAUDE_CODE_CLI_DIR = Path("/home/admin/.aicoding/cli")
+
 class ClaudeCodeCommunityEngine(BaseEngine):
     """claude_code community engine — assembled from the ACL over one relay port impl."""
 
@@ -145,11 +151,10 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
-        # Beside this bot's workspace, as OpenClaw does. **This is the line to
-        # change once the deployment owners confirm where Claude Code's tools
-        # belong in production** — the community image is not what production
-        # deploys, so its layout is not evidence about production.
-        self._cli_tools = LocalCliToolsService(workspace_root().parent / "cli")
+        # Confirmed with the deployment owners: this engine's tools live under
+        # .aicoding — not .claude_code, and not OpenClaw's tree. **This is the
+        # line to change if that moves.**
+        self._cli_tools = LocalCliToolsService(CLAUDE_CODE_CLI_DIR)
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)

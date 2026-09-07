@@ -25,7 +25,7 @@ import pytest
 
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.protocol import Engine
-from engine.community.engines.openclaw.engine import OpenClawEngine
+from engine.community.engines.openclaw.engine import OPENCLAW_CLI_DIR, OpenClawEngine
 
 # ── Golden snapshot of OpenClaw's declared capabilities (pre-F2). ──
 # An INDEPENDENT copy — asserting against this (not against the engine's own
@@ -242,24 +242,16 @@ class TestCliToolsBinding:
 
         assert engine.cli_tools is not None
 
-    def test_the_tool_directory_sits_beside_this_bots_workspace(self, monkeypatch):
-        """Per bot, because BaaS injects the workspace per bot and per engine.
-
-        A constant here would give every bot on a singlebox host one tool
-        directory, and either bot's whole-set replacement would delete the
-        other's tools. Read at construction, which is enough: BaaS puts the
-        variable in the process environment before the adapter starts.
-        """
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
-
+    def test_the_tool_directory_is_the_deployments_constant(self):
+        """A literal, not derived — the deployment owns this location."""
         engine = OpenClawEngine(client=_fake_client())
 
-        assert engine.cli_tools._dir() == Path("/data/bot_a/openclaw/cli")
+        assert engine.cli_tools._dir() == Path("/home/admin/.openclaw/cli")
 
-    def test_two_bots_never_share_a_tool_directory(self, monkeypatch):
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_a/openclaw/workspace")
-        bot_a = OpenClawEngine(client=_fake_client()).cli_tools._dir()
-        monkeypatch.setenv("OPENCLAW_WORKSPACE_DIR", "/data/bot_b/openclaw/workspace")
-        bot_b = OpenClawEngine(client=_fake_client()).cli_tools._dir()
+    def test_claude_code_keeps_its_own_tree(self):
+        """`.aicoding`, confirmed with the deployment owners — not this
+        engine's tree, and not `.claude_code` either."""
+        from engine.community.engines.claude_code.engine import CLAUDE_CODE_CLI_DIR
 
-        assert bot_a != bot_b
+        assert CLAUDE_CODE_CLI_DIR == Path("/home/admin/.aicoding/cli")
+        assert CLAUDE_CODE_CLI_DIR != OPENCLAW_CLI_DIR

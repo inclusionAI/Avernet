@@ -17,6 +17,8 @@ OpenClaw WS server can `register`/`release` on handshake/disconnect.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import logging
 from typing import TYPE_CHECKING
 
@@ -35,7 +37,6 @@ from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAd
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.cli_tools.service import LocalCliToolsService
-from engine.community.plugin_api.workspace_root import workspace_root
 from engine.community.core.engine.capability import Capability, EngineCapabilities
 from engine.community.core.engine.context import AuthContext
 from engine.community.openclaw.client.gateway_client import (
@@ -53,6 +54,11 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("openclaw-engine")
 
+
+#: Where this engine keeps a bot's command-line tools, as the deployment
+#: defines it. A literal on purpose: the location is a property of the
+#: image, not something to derive at runtime.
+OPENCLAW_CLI_DIR = Path("/home/admin/.openclaw/cli")
 
 class OpenClawEngine(BaseEngine):
     """OpenClaw engine — assembled from the ACL over one gateway port impl."""
@@ -176,12 +182,10 @@ class OpenClawEngine(BaseEngine):
         self._mcp = OpenClawMcpAdapter(self._port)
         self._skills = OpenClawSkillsAdapter(self._port)
         # CLI tools need no port: placing a command is local filesystem work,
-        # so the only per-engine fact is the directory — stated here, once.
-        # Beside this bot's workspace: BaaS injects that per bot and per engine
-        # (so two bots on one host never share a tool directory), falling back
-        # to the image's ~/.openclaw/workspace. **This is the line to change if
-        # OpenClaw's tool location moves.**
-        self._cli_tools = LocalCliToolsService(workspace_root().parent / "cli")
+        # so the only per-engine fact is the directory — stated once, as the
+        # deployment's own constant. **This is the line to change if OpenClaw's
+        # tool location moves.**
+        self._cli_tools = LocalCliToolsService(OPENCLAW_CLI_DIR)
         self._file = OpenClawFileAdapter(self._port)
         self._default_config = OpenClawDefaultConfigAdapter(self._port)
         self._web_shell = OpenClawWebShellAdapter(self._port)
