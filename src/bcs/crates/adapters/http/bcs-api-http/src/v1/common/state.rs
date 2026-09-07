@@ -191,6 +191,10 @@ impl InviteCodeGateState for ApiState {
     fn invite_code_service(&self) -> Option<&Arc<dyn InviteCodeService>> {
         self.invite_code_service.as_ref()
     }
+
+    fn invite_code_gate_enabled(&self) -> bool {
+        self.invite_code_gate_enabled
+    }
 }
 
 impl PrincipalVerificationState for ApiState {
