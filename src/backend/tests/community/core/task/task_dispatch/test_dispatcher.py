@@ -328,11 +328,11 @@ class TestTokenize:
         assert "存储" in _tokenize("存储行业分析")
 
     def test_two_char_stopwords_filtered(self):
-        # 2 字功能词 进行/可以 被 _STOPWORDS 滤掉,业务词保留
-        toks = _tokenize("进行存储")
-        assert "进行" not in toks
-        assert "存储" in toks
-        assert "可以" not in _tokenize("可以分析")
+        # 2 字功能词/语气词 + 泛义动词 + 模糊量词 被 _STOPWORDS 滤掉
+        for w in ["进行", "可以", "需要", "产出", "提供", "给出", "不少", "梳理", "分析", "研究"]:
+            assert _tokenize(w) == [], f"{w} 应为停用词被滤掉"
+        # 业务名词保留(不被误滤)
+        assert "存储" in _tokenize("存储行业")
 
     def test_fallback_without_jieba_still_filters_min_length_and_stopwords(self, monkeypatch):
         # jieba 未装 → 退回整串,但仍受 ≥2 字 + 停用词过滤(双路径统一)
