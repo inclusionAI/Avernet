@@ -1,14 +1,19 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile, readdir, glob, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import * as path from "node:path";
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, "../..");
 
-async function* filesUnder(root: string, pattern = "**/*"): AsyncGenerator<string> {
-  for await (const rel of glob(pattern, { cwd: root })) {
-    const full = path.join(root, rel);
-    if ((await stat(full)).isFile()) yield full;
+/** Recursively collect files under dir matching the given extensions. */
+async function* filesUnder(root: string, exts: string[] = []): AsyncGenerator<string> {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const full = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      yield* filesUnder(full, exts);
+    } else if (exts.length === 0 || exts.some(e => entry.name.endsWith(e))) {
+      if ((await stat(full)).isFile()) yield full;
+    }
   }
 }
 
@@ -101,6 +106,11 @@ describe("Open-source hygiene: no hardcoded secrets or internal info", () => {
     const violations: string[] = [];
     for (const packName of COMMUNITY_PACKS) {
       const dir = path.join(PROJECT_ROOT, "packs", packName);
+      try {
+        await stat(dir);
+      } catch {
+        continue; // pack directory not present in this checkout
+      }
       for await (const full of filesUnder(dir)) {
         const content = await readFile(full, "utf-8");
         for (const pattern of ALL_FORBIDDEN) {
@@ -127,7 +137,7 @@ describe("Open-source hygiene: no hardcoded secrets or internal info", () => {
     ]);
     for (const root of roots) {
       const base = path.join(PROJECT_ROOT, root);
-      for await (const full of filesUnder(base, "**/*.{ts,tsx,js,mjs,sh,py,yaml,yml,json,md}")) {
+      for await (const full of filesUnder(base, [".ts", ".tsx", ".js", ".mjs", ".sh", ".py", ".yaml", ".yml", ".json", ".md"])) {
         const rel = path.relative(base, full);
         if (rel.includes("__tests__") || rel.includes("node_modules")) continue;
         if (skippedFiles.has(full)) continue;

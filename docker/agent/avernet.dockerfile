@@ -309,6 +309,7 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && chmod 440 /etc/sudoers.d/admin-supervisorctl \
     && mkdir -p /var/log/supervisor /var/run/agentclaw \
     && chown admin:admin /var/run/agentclaw \
+    && chown -R admin:admin /opt/openclawExt/taskguard \
     && su admin -s /bin/bash -c 'mkdir -p /home/admin/.openclaw/workspace /home/admin/.openclaw/extensions /home/admin/logs' \
     && ln -sfn /opt/openclawExt/openclaw-channel-bcn \
                /home/admin/.openclaw/extensions/openclaw-channel-bcn \
