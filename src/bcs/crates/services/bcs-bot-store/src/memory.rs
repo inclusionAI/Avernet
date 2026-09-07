@@ -314,7 +314,7 @@ impl MemoryBotRepo {
                     Some(BotCapabilities::from(&persisted))
                 }
                 Err(e) => {
-                    warn!(bot_id = %bot_id, error = %e, "Failed to parse capabilities file");
+                    warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %e, "Failed to parse capabilities file");
                     None
                 }
             },
@@ -975,7 +975,7 @@ impl BotRepoPort for MemoryBotRepo {
         bots.retain(|_, b| !b.is_expired());
         let removed = before - bots.len();
         if removed > 0 {
-            warn!(removed, "Removed expired bot registrations");
+            warn!(request_id = %bcs_observability::current_request_id(), removed, "Removed expired bot registrations");
         }
     }
 
@@ -1055,6 +1055,7 @@ impl BotRepoPort for MemoryBotRepo {
     #[allow(deprecated)]
     async fn set_hidden(&self, bot_id: &str, hidden: bool) -> ServiceResult<()> {
         warn!(
+            request_id = %bcs_observability::current_request_id(),
             bot_id = %bot_id,
             hidden = %hidden,
             "set_hidden is DEPRECATED and is now a Noop; use update_actor_status(bot_id, ActorStatus::Hidden) instead (Task H.1)"
@@ -1380,7 +1381,7 @@ impl BotRepoPort for MemoryBotRepo {
             Ok(content) => match serde_json::from_str::<PersistedCapabilities>(&content) {
                 Ok(persisted) => persisted.token,
                 Err(e) => {
-                    warn!(bot_id = %bot_id, error = %e, "Failed to parse capabilities file for token");
+                    warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %e, "Failed to parse capabilities file for token");
                     None
                 }
             },
@@ -1568,6 +1569,7 @@ impl BotRepoPort for MemoryBotRepo {
                 // `save_token` re-acquires `bots.write()`.
                 if let Err(err) = self.save_token(&bot_id, &session_token).await {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         bot_id = %bot_id,
                         error = %err,
                         "connect_or_promote_streaming: promote_mock disk persist failed; refusing ws"
@@ -1624,6 +1626,7 @@ impl BotRepoPort for MemoryBotRepo {
             }
             (true, false, true) => {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id = %bot_id,
                     branch = "already_connected",
                     "connect_or_promote_streaming: real-token bot already connected"
@@ -1632,6 +1635,7 @@ impl BotRepoPort for MemoryBotRepo {
             }
             (true, false, false) => {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     bot_id = %bot_id,
                     branch = "already_registered",
                     "connect_or_promote_streaming: refusing empty/stale-token claim of real-token bot"
@@ -1647,7 +1651,7 @@ impl BotRepoPort for MemoryBotRepo {
         // Check if bot is already connected
         if let Some(bot) = bots.get(&bot_id) {
             if bot.ws_connection.is_some() {
-                warn!(bot_id = %bot_id, "Bot already has an active streaming connection");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot already has an active streaming connection");
                 return Err(());
             }
         }
@@ -1705,7 +1709,7 @@ impl BotRepoPort for MemoryBotRepo {
             match token_to_bot.get(&existing_token) {
                 Some(id) => id.clone(),
                 None => {
-                    warn!(token = %existing_token, "Unknown token for reconnection");
+                    warn!(request_id = %bcs_observability::current_request_id(), token = %existing_token, "Unknown token for reconnection");
                     return Err(());
                 }
             }
@@ -1716,7 +1720,7 @@ impl BotRepoPort for MemoryBotRepo {
         // Check if bot is already connected
         if let Some(bot) = bots.get(&bot_id) {
             if bot.ws_connection.is_some() {
-                warn!(bot_id = %bot_id, "Bot already has an active connection");
+                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot already has an active connection");
                 return Err(());
             }
         }
@@ -1785,7 +1789,7 @@ impl BotRepoPort for MemoryBotRepo {
     }
 
     async fn send_frame(&self, bot_id: &str, _frame: String) -> Result<(), ()> {
-        warn!(bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
+        warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Bot frame delivery is owned by the ws adapter");
         Err(())
     }
 

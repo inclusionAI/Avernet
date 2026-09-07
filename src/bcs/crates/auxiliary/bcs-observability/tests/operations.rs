@@ -124,6 +124,37 @@ async fn stalled_warning_does_not_timeout_or_repeat() {
 }
 
 #[tokio::test]
+async fn long_lived_work_keeps_only_request_identity_after_handshake_finishes() {
+    let logs = capture(async {
+        let (release, ready) = tokio::sync::oneshot::channel();
+        let task = bcs_observability::with_request_context("ws-handshake-42".into(), async {
+            bcs_observability::observe_value("test.handshake", async {}).await;
+            let request_id = bcs_observability::current_request_id();
+            tokio::spawn(bcs_observability::with_request_id(request_id, async move {
+                ready.await.unwrap();
+                assert_eq!(bcs_observability::current_request_id(), "ws-handshake-42");
+                bcs_observability::observe_value("test.ws_frame", async {}).await;
+                tokio::spawn(bcs_observability::in_current_context(async {
+                    tracing::warn!(request_id = %bcs_observability::current_request_id(), "old WS business error");
+                })).await.unwrap();
+            }).with_current_subscriber())
+        }).await;
+        release.send(()).unwrap();
+        task.await.unwrap();
+        assert_eq!(bcs_observability::current_request_id(), "");
+    }).await;
+    let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let summaries: Vec<_> = events.iter().filter(|event| event["fields"]["message"] == "http.request.operations").collect();
+    assert_eq!(summaries.len(), 1, "WS lifetime must not emit another HTTP summary");
+    let totals: serde_json::Value = serde_json::from_str(summaries[0]["fields"]["observations"].as_str().unwrap()).unwrap();
+    assert_eq!(totals["test.handshake"]["count"], 1);
+    assert!(totals.get("test.ws_frame").is_none());
+    let error = events.iter().find(|event| event["fields"]["message"] == "old WS business error").unwrap();
+    assert_eq!(error["fields"]["request_id"], "ws-handshake-42");
+    assert!(events.iter().all(|event| event.get("span").is_none() && event.get("spans").is_none()));
+}
+
+#[tokio::test]
 async fn non_send_error_can_be_discarded_by_send_caller() {
     tokio::spawn(async {
         let failed = bcs_observability::observe_result("test.non_send", async {

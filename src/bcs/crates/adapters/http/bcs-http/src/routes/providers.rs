@@ -231,6 +231,7 @@ pub async fn register_provider_bot(
             }
             None => {
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     provider_id = %outcome.provider_id,
                     bot_uuid = %outcome.bot_uuid,
                     "register_provider_bot: allowlisted provider but capabilities missing; \
@@ -356,6 +357,7 @@ pub async fn patch_provider_bot_attributes(
     require_provider_bot_attributes_access(&state, &provider_id, &bot_uuid, &headers).await?;
     let Json(body) = body.map_err(|_| {
         warn!(
+            request_id = %bcs_observability::current_request_id(),
             provider_id,
             bot_uuid,
             failure = "invalid_json_body",
@@ -659,6 +661,7 @@ async fn require_provider_bot_attributes_access(
         .any(|configured_id| configured_id == provider_id)
     {
         warn!(
+            request_id = %bcs_observability::current_request_id(),
             provider_id,
             bot_uuid,
             failure = "provider_not_allowed",

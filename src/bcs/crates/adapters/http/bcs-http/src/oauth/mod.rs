@@ -171,12 +171,12 @@ impl AuthService for OAuthRouteState {
         })?;
         let redirect_uri = format!("{callback_base_url}/{}", request.provider);
         let token = provider.exchange_code(&code, &redirect_uri).await.map_err(|e| {
-            warn!(error = %e, provider = %request.provider, "OAuth token exchange failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, provider = %request.provider, "OAuth token exchange failed");
             ApplicationError::bad_gateway("token_exchange_failed", "token exchange failed")
         })?;
 
         let user_info = provider.get_user_info(&token).await.map_err(|e| {
-            warn!(error = %e, provider = %request.provider, "OAuth userinfo failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, provider = %request.provider, "OAuth userinfo failed");
             ApplicationError::bad_gateway("userinfo_request_failed", "userinfo request failed")
         })?;
 
@@ -191,7 +191,7 @@ impl AuthService for OAuthRouteState {
             )
             .await
             .map_err(|e| {
-                warn!(error = %e, "ensure_identity failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "ensure_identity failed");
                 ApplicationError::internal("identity creation failed")
             })?;
 
@@ -207,7 +207,7 @@ impl AuthService for OAuthRouteState {
             name: user_info.name.clone(),
         };
         let jwt = self.jwt_service.sign(&claims).map_err(|e| {
-            warn!(error = %e, "JWT signing failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "JWT signing failed");
             ApplicationError::internal("session creation failed")
         })?;
 
@@ -215,7 +215,7 @@ impl AuthService for OAuthRouteState {
             .update_token(&claims.sub, &bcs_jwt::token_hash(&jwt), claims.exp)
             .await
             .map_err(|e| {
-                warn!(error = %e, "update_token failed; aborting login");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "update_token failed; aborting login");
                 ApplicationError::internal("session creation failed")
             })?;
 
@@ -249,7 +249,7 @@ impl AuthService for OAuthRouteState {
                 _ => Err(ApplicationError::Unauthenticated),
             },
             Err(e) => {
-                warn!(error = %e, "auth chain failed in OpenAPI auth user");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "auth chain failed in OpenAPI auth user");
                 Err(ApplicationError::internal("auth chain failed"))
             }
         }
@@ -267,7 +267,7 @@ impl AuthService for OAuthRouteState {
             Ok(Some(info)) if info.user_id == claims.sub => info,
             Ok(_) => return Err(ApplicationError::Unauthenticated),
             Err(e) => {
-                warn!(error = %e, "refresh: identity lookup failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: identity lookup failed");
                 return Err(ApplicationError::internal("identity lookup failed"));
             }
         };
@@ -285,14 +285,14 @@ impl AuthService for OAuthRouteState {
             name: info.user_name.or(info.external_user_name),
         };
         let new_jwt = self.jwt_service.sign(&new_claims).map_err(|e| {
-            warn!(error = %e, "refresh: JWT signing failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: JWT signing failed");
             ApplicationError::internal("session renewal failed")
         })?;
         self.user_port
             .update_token(&new_claims.sub, &bcs_jwt::token_hash(&new_jwt), new_claims.exp)
             .await
             .map_err(|e| {
-                warn!(error = %e, "refresh: update_token failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: update_token failed");
                 ApplicationError::internal("session renewal failed")
             })?;
 
@@ -306,7 +306,7 @@ impl AuthService for OAuthRouteState {
         if let Some(jwt) = extract_session_cookie(&headers) {
             if let Ok(claims) = self.jwt_service.verify(&jwt) {
                 if let Err(e) = self.user_port.update_token(&claims.sub, "", 0).await {
-                    warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
+                    warn!(request_id = %bcs_observability::current_request_id(), error = %e, user_id = %claims.sub, "logout: token revocation failed");
                 }
             }
         }
@@ -382,14 +382,14 @@ pub async fn callback_handler(
     let provider_key = match state.state_store.consume(&params.state).await {
         Ok(key) => key,
         Err(e) => {
-            warn!(error = %e, "OAuth callback: invalid state");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "OAuth callback: invalid state");
             return (StatusCode::BAD_REQUEST, "invalid state").into_response();
         }
     };
 
     // 2. Verify provider matches state
     if provider_key != provider_name {
-        warn!(expected = %provider_key, got = %provider_name, "OAuth callback: provider mismatch");
+        warn!(request_id = %bcs_observability::current_request_id(), expected = %provider_key, got = %provider_name, "OAuth callback: provider mismatch");
         return (StatusCode::BAD_REQUEST, "provider mismatch").into_response();
     }
 
@@ -405,7 +405,7 @@ pub async fn callback_handler(
     let code = match params.code.or(params.auth_code) {
         Some(c) => c,
         None => {
-            warn!("OAuth callback: missing code or auth_code");
+            warn!(request_id = %bcs_observability::current_request_id(), "OAuth callback: missing code or auth_code");
             return (StatusCode::BAD_REQUEST, "missing code or auth_code").into_response();
         }
     };
@@ -413,7 +413,7 @@ pub async fn callback_handler(
     let token = match provider.exchange_code(&code, &redirect_uri).await {
         Ok(t) => t,
         Err(e) => {
-            warn!(error = %e, provider = %provider_name, "OAuth token exchange failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, provider = %provider_name, "OAuth token exchange failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "token exchange failed").into_response();
         }
     };
@@ -422,7 +422,7 @@ pub async fn callback_handler(
     let user_info = match provider.get_user_info(&token).await {
         Ok(u) => u,
         Err(e) => {
-            warn!(error = %e, provider = %provider_name, "OAuth userinfo failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, provider = %provider_name, "OAuth userinfo failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "userinfo request failed").into_response();
         }
     };
@@ -441,7 +441,7 @@ pub async fn callback_handler(
     {
         Ok(id) => id,
         Err(e) => {
-            warn!(error = %e, "ensure_identity failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "ensure_identity failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "identity creation failed").into_response();
         }
     };
@@ -461,7 +461,7 @@ pub async fn callback_handler(
     let jwt = match state.jwt_service.sign(&claims) {
         Ok(j) => j,
         Err(e) => {
-            warn!(error = %e, "JWT signing failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "JWT signing failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "session creation failed").into_response();
         }
     };
@@ -475,7 +475,7 @@ pub async fn callback_handler(
         .update_token(&claims.sub, &bcs_jwt::token_hash(&jwt), claims.exp)
         .await
     {
-        warn!(error = %e, "update_token failed; aborting login");
+        warn!(request_id = %bcs_observability::current_request_id(), error = %e, "update_token failed; aborting login");
         return (StatusCode::INTERNAL_SERVER_ERROR, "session creation failed").into_response();
     }
 
@@ -531,7 +531,7 @@ pub async fn logout_handler(
     if let Some(jwt) = extract_session_cookie(&headers) {
         if let Ok(claims) = state.jwt_service.verify(&jwt) {
             if let Err(e) = state.user_port.update_token(&claims.sub, "", 0).await {
-                warn!(error = %e, user_id = %claims.sub, "logout: token revocation failed");
+                warn!(request_id = %bcs_observability::current_request_id(), error = %e, user_id = %claims.sub, "logout: token revocation failed");
             }
         }
     }
@@ -570,7 +570,7 @@ pub async fn refresh_handler(
         Ok(Some(info)) if info.user_id == claims.sub => info,
         Ok(_) => return (StatusCode::UNAUTHORIZED, "not authenticated").into_response(),
         Err(e) => {
-            warn!(error = %e, "refresh: identity lookup failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: identity lookup failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response();
         }
     };
@@ -589,7 +589,7 @@ pub async fn refresh_handler(
     let new_jwt = match state.jwt_service.sign(&new_claims) {
         Ok(j) => j,
         Err(e) => {
-            warn!(error = %e, "refresh: JWT signing failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: JWT signing failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "session renewal failed").into_response();
         }
     };
@@ -600,7 +600,7 @@ pub async fn refresh_handler(
         .update_token(&new_claims.sub, &bcs_jwt::token_hash(&new_jwt), new_claims.exp)
         .await
     {
-        warn!(error = %e, "refresh: update_token failed");
+        warn!(request_id = %bcs_observability::current_request_id(), error = %e, "refresh: update_token failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "session renewal failed").into_response();
     }
 
@@ -670,7 +670,7 @@ pub async fn current_user_handler(
                 .into_response(),
         },
         Err(e) => {
-            warn!(error = %e, "auth chain failed in /auth/user");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "auth chain failed in /auth/user");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }
@@ -711,7 +711,7 @@ pub async fn get_user_handler(
         })).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "not found"}))).into_response(),
         Err(e) => {
-            warn!(error = %e, "get_identity_by_user_id failed");
+            warn!(request_id = %bcs_observability::current_request_id(), error = %e, "get_identity_by_user_id failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
         }
     }

@@ -92,6 +92,7 @@ impl ProviderManagement {
                 .unwrap_or_else(|| staff_no.to_string()),
             Ok(None) => {
                 tracing::warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     staff_no = %staff_no,
                     "user directory returned no profile; falling back to staff_no for human actor name"
                 );
@@ -99,6 +100,7 @@ impl ProviderManagement {
             }
             Err(error) => {
                 tracing::warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     staff_no = %staff_no,
                     error = %error,
                     "user directory lookup failed; falling back to staff_no for human actor name"
@@ -144,6 +146,7 @@ impl ProviderManagement {
             .await?;
         if provider.disabled {
             tracing::warn!(
+                request_id = %bcs_observability::current_request_id(),
                 provider_id = %provider.provider_id,
                 "disabled provider admin access rejected"
             );
@@ -289,6 +292,7 @@ impl ProviderManagementService for ProviderManagement {
                 Some(bot) => Some(bot.capabilities),
                 None => {
                     tracing::warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         bot_uuid = %binding.bot_uuid,
                         provider_id = %binding.provider_id,
                         "register_provider_bot: freshly created bot missing from registry; \

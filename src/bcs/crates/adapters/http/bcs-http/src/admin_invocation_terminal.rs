@@ -65,6 +65,7 @@ impl AdminInvocationTerminalObserver {
                 Ok(url) => url,
                 Err(error) => {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         run_id = %run_id,
                         provider_id = %provider_id,
                         callback_url = %callback_url,
@@ -85,6 +86,7 @@ impl AdminInvocationTerminalObserver {
                 Ok(client) => client,
                 Err(error) => {
                     warn!(
+                        request_id = %bcs_observability::current_request_id(),
                         run_id = %run_id,
                         provider_id = %provider_id,
                         callback_url = %callback_url,
@@ -106,10 +108,10 @@ impl AdminInvocationTerminalObserver {
                     info!(run_id = %run_id, "organization admin terminal callback acknowledged")
                 }
                 Ok(response) => {
-                    warn!(run_id = %run_id, status = %response.status(), "organization admin terminal callback was not acknowledged")
+                    warn!(request_id = %bcs_observability::current_request_id(), run_id = %run_id, status = %response.status(), "organization admin terminal callback was not acknowledged")
                 }
                 Err(error) => {
-                    warn!(run_id = %run_id, error = %error, "organization admin terminal callback failed")
+                    warn!(request_id = %bcs_observability::current_request_id(), run_id = %run_id, error = %error, "organization admin terminal callback failed")
                 }
             }
         }));

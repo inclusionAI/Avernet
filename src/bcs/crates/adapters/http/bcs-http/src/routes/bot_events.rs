@@ -75,6 +75,7 @@ where
             let status = StatusCode::UNSUPPORTED_MEDIA_TYPE;
             let body_text = "Expected request with `Content-Type: application/json`";
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 provider_id = %provider_id,
                 status = %status.as_u16(),
                 error = %body_text,
@@ -89,6 +90,7 @@ where
                 let status = StatusCode::BAD_REQUEST;
                 let body_text = format!("Failed to read request body: {error}");
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     provider_id = %provider_id,
                     status = %status.as_u16(),
                     error = %body_text,
@@ -105,6 +107,7 @@ where
                 let body_text = rejection.body_text();
                 let request_body = String::from_utf8_lossy(&body_bytes);
                 warn!(
+                    request_id = %bcs_observability::current_request_id(),
                     provider_id = %provider_id,
                     status = %status.as_u16(),
                     error = %body_text,
@@ -290,6 +293,7 @@ pub async fn post_bot_event(
         Ok(outcome) => outcome,
         Err(error) => {
             warn!(
+                request_id = %bcs_observability::current_request_id(),
                 provider_id = %provider_id,
                 error = %error,
                 "provider callback: bot event rejected"

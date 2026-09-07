@@ -69,7 +69,7 @@ impl AuthPluginChain {
                     tracing::debug!(plugin = name, "auth: plugin no match, trying next");
                 }
                 Err(e) => {
-                    tracing::warn!(plugin = name, outcome = "error", "auth: plugin failed");
+                    tracing::warn!(request_id = %bcs_observability::current_request_id(), plugin = name, outcome = "error", "auth: plugin failed");
                     return Err(e);
                 }
             }
