@@ -55,10 +55,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::middleware::from_fn_with_state;
     use axum::http::HeaderMap;
+    use axum::middleware::from_fn_with_state;
     use axum::Router;
-    use bcs_service_api::application::v1::{AuthenticatedCaller, InviteCodeService, PrincipalVerificationError, PrincipalVerifier};
+    use crate::{PrincipalVerificationError, PrincipalVerifier};
 
     #[derive(Clone)]
     struct DummyVerifier;
@@ -78,7 +78,7 @@ mod tests {
         verifier: Arc<dyn PrincipalVerifier>,
     }
 
-    impl super::PrincipalVerificationState for DummyState {
+    impl PrincipalVerificationState for DummyState {
         fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
             &self.verifier
         }
@@ -97,12 +97,12 @@ mod tests {
     #[test]
     fn middleware_compiles_for_router_state() {
         let state = DummyState { verifier: Arc::new(DummyVerifier) };
-        let _ = Router::new().layer(from_fn_with_state(state, enforce_invite_code_gate::<DummyState>));
+        let _: Router = Router::new().layer(from_fn_with_state(state, enforce_invite_code_gate::<DummyState>));
     }
 
     #[test]
     fn request_id_can_be_constructed_from_headers() {
-        let headers = axum::http::HeaderMap::new();
+        let headers = HeaderMap::new();
         let _ = RequestId::from_headers(&headers);
         let _ = AuthenticatedCaller { tenant: None, user: None, bot: None, app: None, access_key: None };
     }
@@ -112,7 +112,7 @@ mod tests {
         verifier: Arc<dyn PrincipalVerifier>,
     }
 
-    impl super::PrincipalVerificationState for DisabledGateState {
+    impl PrincipalVerificationState for DisabledGateState {
         fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
             &self.verifier
         }
@@ -131,6 +131,6 @@ mod tests {
     #[test]
     fn middleware_compiles_when_gate_is_disabled() {
         let state = DisabledGateState { verifier: Arc::new(DummyVerifier) };
-        let _ = Router::new().layer(from_fn_with_state(state, enforce_invite_code_gate::<DisabledGateState>));
+        let _: Router = Router::new().layer(from_fn_with_state(state, enforce_invite_code_gate::<DisabledGateState>));
     }
 }
