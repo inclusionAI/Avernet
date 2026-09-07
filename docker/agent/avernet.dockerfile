@@ -303,8 +303,15 @@ RUN if [ -f /tmp/mitm-ca.crt ]; then \
     && ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 
 # Recreate admin user at runtime stage (uid/gid 10001).
+# `admin:*` locking the password is REQUIRED: the startup scripts
+# (start_openclaw.sh, start_claude_code.sh, avernet-entrypoint.sh) run as
+# root and drop to admin via non-interactive `su admin -c ...`; su needs a
+# usable (locked-with-`*`) password field for that path. useradd alone
+# leaves the account as "!" (disabled login) → su prompts for a password
+# and fails ("Authentication failure").
 RUN groupadd --gid 10001 admin 2>/dev/null || true \
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin 2>/dev/null || true \
+    && echo 'admin:*' | chpasswd -e \
     && echo 'admin ALL=(ALL) NOPASSWD: /usr/local/bin/supervisorctl *' > /etc/sudoers.d/admin-supervisorctl \
     && chmod 440 /etc/sudoers.d/admin-supervisorctl \
     && mkdir -p /var/log/supervisor /var/run/agentclaw \
@@ -319,7 +326,26 @@ RUN groupadd --gid 10001 admin 2>/dev/null || true \
 # Supervisor configuration: engine(autostart=false) + openclaw(autostart=false).
 COPY docker/agent/avernet-supervisord.conf /etc/supervisor/supervisord.conf
 
-# OpenClaw default config template (env-var placeholders substituted at runtime).
+# Config deep-merge helper. /home/admin is NAS-mounted and outlives image
+# upgrades, so first-boot-generated configs (openclaw.json, models.json)
+# would stay stale forever. start_openclaw.sh / start_claude_code.sh call
+# this on every startup to merge the freshly rendered image template INTO
+# the NAS copy: image-defined keys take the image value, user/deployment-
+# only keys survive, no-op merges write nothing. See merge-config.py for
+# the exact merge rules.
+COPY docker/agent/merge-config.py /usr/local/bin/merge-config
+
+# merge key allowlists, one per engine config (see merge-config --keys).
+# Maintained in the repo next to their configs: adding a template key to
+# openclaw.json means adding it to openclaw.path for image updates to
+# reach pods with an existing NAS copy; claude_code.path carries '*' since
+# models.json's top level is an array merged entry-by-id.
+COPY docker/agent/openclaw.path /opt/openclaw.path
+COPY docker/agent/claude_code.path /opt/claude_code.path
+
+# OpenClaw default config template (rendered with pod env at startup by
+# start_openclaw.sh: installed on first boot, deep-merged into the NAS copy
+# on later boots via merge-config).
 COPY docker/agent/openclaw.json /opt/openclaw.json.template
 
 # Claude Code provider settings template — staged like openclaw.json above:
@@ -327,7 +353,7 @@ COPY docker/agent/openclaw.json /opt/openclaw.json.template
 # there, so the file must live in /opt and be copied into ~/.claude AFTER
 # the mount (start_claude_code.sh does the copy, substituting the
 # MODEL_PROVIDER_HOST placeholder from the pod env — same variable and
-# bare-host contract as the entrypoint's openclaw.json rendering, defaulting
+# bare-host contract as start_openclaw.sh's openclaw.json rendering, defaulting
 # to dashscope.aliyuncs.com; mount-wins: a file already on the NAS is kept).
 # Everything else is static, mirroring openclaw.json's hardcoded config:
 # model (glm-5.2), and the auth token as the literal
@@ -339,6 +365,19 @@ COPY docker/agent/openclaw.json /opt/openclaw.json.template
 # RELAY_MODEL_SETTINGS_SOURCE (set in start_claude_code.sh). A deployment
 # with a different provider scenario mounts its own file at the final path.
 COPY docker/agent/claude-settings.json /opt/claude-settings.json.template
+
+# Claude Code model catalogue (relay providers file) — array of ProviderConfig
+# (id/name/enabled/models[].env), the schema the relay gateway's claude-code-
+# router.ts parses via RELAY_MODELS_FILE. Each model entry selects itself
+# through env overrides (ANTHROPIC_MODEL set per-model at request time, so
+# session/default model selection in the workbench routes to the right one —
+# e.g. glm-5.2 vs the multimodal qwen3.8-max). Staged like the templates
+# above: /opt hosts the copy, start_claude_code.sh installs it into ~/.claude/
+# after the NAS mount on first boot and deep-merges it into the NAS copy on
+# later boots (merge-config, array entries merged by id), then points
+# RELAY_MODELS_FILE at it.
+# Without it the relay serves its built-in default anthropic catalogue.
+COPY docker/agent/models.json /opt/models.json.template
 
 # HEARTBEAT.md template — staged in /opt like the templates above, but with
 # opposite runtime semantics. openclaw appends its own tasks to
@@ -364,9 +403,10 @@ RUN chmod +x /usr/local/bin/avernet-entrypoint \
              /usr/local/bin/start_service.sh \
              /usr/local/bin/start_openclaw.sh \
              /usr/local/bin/start_claude_code.sh \
-             /usr/local/bin/util.sh
+             /usr/local/bin/util.sh \
+             /usr/local/bin/merge-config
 
-EXPOSE 20003 18789 18900
+EXPOSE 20003
 
 HEALTHCHECK --interval=10s --timeout=5s --start-period=120s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:20003/health" >/dev/null || exit 1
