@@ -2656,3 +2656,93 @@ class TestEvalSessionLogStream:
             context=context,
             metadata={"eval_id": "eval-str-4", "session_id": "original-sess"},
         )
+
+
+# ==================== deliver_chat_abort (engine abort forwarding) tests ===
+
+
+class TestDeliverChatAbort:
+    """BotRunner.deliver_chat_abort forwards chat.abort best-effort to the bot service.
+
+    resolve_binding → select → getattr(service, "send_chat_abort", None). Binding
+    not found or service lacking send_chat_abort logs and returns without raising.
+    """
+
+    @pytest.mark.asyncio
+    async def test_deliver_chat_abort_dispatches_to_send_chat_abort(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+    ):
+        """WHEN service exposes send_chat_abort, deliver_chat_abort calls it with
+        the resolved binding_info, session_id and run_id."""
+        abort_service = MagicMock()
+        abort_service.send_chat_abort = AsyncMock()
+        mock_selector.select.return_value = abort_service
+        mock_bot_service_plugin.get_binding = AsyncMock(return_value=baas_binding_data)
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        await runner.deliver_chat_abort(
+            bot_id=BOT_ID, session_id="sess-1", run_id="run-1"
+        )
+
+        abort_service.send_chat_abort.assert_awaited_once()
+        call = abort_service.send_chat_abort.call_args
+        assert call.kwargs["session_id"] == "sess-1"
+        assert call.kwargs["run_id"] == "run-1"
+        # binding_info is the resolved BotBindingInfo derived from baas_binding_data
+        binding_info = call.kwargs["binding_info"]
+        assert isinstance(binding_info, BotBindingInfo)
+        assert binding_info.bot_id == BOT_ID
+
+    @pytest.mark.asyncio
+    async def test_deliver_chat_abort_skips_when_service_has_no_send_chat_abort(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+    ):
+        """WHEN the selected service type has no send_chat_abort (e.g. a non-baas
+        service), deliver_chat_abort logs and returns without raising."""
+        # spec=list restricts attrs; getattr(..., "send_chat_abort", None) -> None
+        no_abort_service = MagicMock(
+            spec=["create_session", "send_message", "inject_message", "get_messages"]
+        )
+        no_abort_service.create_session = AsyncMock()
+        no_abort_service.send_message = AsyncMock()
+        no_abort_service.inject_message = AsyncMock()
+        no_abort_service.get_messages = AsyncMock()
+        mock_selector.select.return_value = no_abort_service
+        mock_bot_service_plugin.get_binding = AsyncMock(return_value=baas_binding_data)
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        # Should not raise and should not attempt any send_chat_abort call
+        await runner.deliver_chat_abort(
+            bot_id=BOT_ID, session_id="sess-1", run_id="run-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_deliver_chat_abort_skips_when_binding_not_found(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+    ):
+        """WHEN binding resolution returns None (NOT_FOUND), deliver_chat_abort logs
+        and returns without selecting a service or raising."""
+        mock_bot_service_plugin.get_binding.side_effect = PaasError(
+            ErrorCode.NOT_FOUND, "not found"
+        )
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        await runner.deliver_chat_abort(
+            bot_id=BOT_ID, session_id="sess-1", run_id="run-1"
+        )
+
+        mock_selector.select.assert_not_called()

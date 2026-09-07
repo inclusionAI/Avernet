@@ -359,6 +359,59 @@ class BotRunner:
         )
         return message_id, actual_session_id
 
+    async def deliver_chat_abort(
+        self,
+        *,
+        bot_id: str,
+        session_id: str,
+        run_id: str | None = None,
+        lifecycle_stage: str = "online",
+    ) -> None:
+        """向 engine 转发 ``chat.abort`` 控制帧（best-effort）。
+
+        解析 bot 的 binding → 选择 ``BotService`` → 调用 ``service.send_chat_abort``；
+        解析失败（binding 不存在）或该 service 类型不支持 engine abort（无
+        ``send_chat_abort``）时记日志并返回，不抛异常。engine 通知失败由调用方
+        （``BotRequestWorker.abort_runs_by_session`` 的 ``engine_abort_notifier`` 闭包）
+        的 try/except 兜底，不阻断 BaaS 侧 abort 主流程（FAILED + force_done + 本机 cancel）。
+
+        选用 ``getattr`` 而非 ``isinstance`` 判定 ``send_chat_abort`` 是否可用，避免触达
+        ``ClawBotService``（ARCA）与本变更范围无关的改动——仅在 ``BaasBotService`` 上
+        提供该方法。
+
+        Args:
+            bot_id: 目标 bot id。
+            session_id: 会话 id（即 sessionKey，用于解析 WS 与 engine 通知）。
+            run_id: 本次取消的 run id，None 时仅按 sessionKey 取消。
+            lifecycle_stage: binding 解析阶段，默认 ``online``。
+        """
+        binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
+        if binding_info is None:
+            logger.warning(
+                "[runner.deliver_chat_abort] binding not found, skip engine abort: "
+                "bot_id=%s, session_id=%s, lifecycle_stage=%s",
+                bot_id,
+                session_id,
+                lifecycle_stage,
+            )
+            return
+
+        service = self._bot_service_selector.select(binding_info)
+        send_chat_abort = getattr(service, "send_chat_abort", None)
+        if send_chat_abort is None:
+            logger.info(
+                "[runner.deliver_chat_abort] service type has no send_chat_abort, "
+                "skip engine abort: bot_id=%s, session_id=%s, service=%s",
+                bot_id,
+                session_id,
+                type(service).__name__,
+            )
+            return
+
+        await send_chat_abort(
+            binding_info=binding_info, session_id=session_id, run_id=run_id
+        )
+
     async def deliver_message_stream(
         self,
         *,

@@ -5,12 +5,13 @@ config.from_dict.  Services requiring repo/infra deps are verified
 structurally — they exist and accept overrides.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from secbaas.community.api.health_check.bot import BotHealthCheckerConfig
 from secbaas.community.bootstrap._core_services import CoreServiceContainer
+from secbaas.community.core.service.bot_run import BotRequestWorkerConfig
 
 
 class TestCoreServiceContainerStandalone:
@@ -246,3 +247,96 @@ class TestSandboxDeviceRouterDIResolution:
         assert callable(getattr(router, "query_active_sandboxes", None))
         assert callable(getattr(router, "warn_device", None))
         assert callable(getattr(router, "renew_ttl", None))
+
+
+class TestBotRequestWorkerEngineAbortNotifierWiring:
+    """Verify bootstrap wires engine_abort_notifier into bot_request_worker.
+
+    Regression: bootstrap previously constructed BotRequestWorker without
+    engine_abort_notifier, so chat.abort never reached the engine and runs
+    survived until the 120s heartbeat-stale fallback. The bootstrap-defined
+    notifier must be non-None, callable, and dispatch via BotRunner.deliver_chat_abort.
+    """
+
+    @pytest.fixture()
+    def worker_container(self):
+        """CoreServiceContainer with the bot_request_worker dep path overridden.
+
+        Overrides all Dependency()/config-heavy providers on bot_request_worker's
+        resolution path so the real BotRequestWorker constructs; bot_runner is
+        overridden with a mock whose deliver_chat_abort is awaitable so we can
+        assert the notifier dispatches end-to-end.
+        """
+        c = CoreServiceContainer()
+        # Dependency() providers consumed directly by bot_request_worker.
+        c.bot_run_queue_repository.override(MagicMock())
+        c.bot_run_repository.override(MagicMock())
+        # Heavy / config-dependent singletons on the worker's dep path: override
+        # to avoid resolving their transitive (config / secret / plugin) deps.
+        c.bot_qpm_manager.override(MagicMock())
+        c.result_guard_executor.override(MagicMock())
+        c.machine_count_provider.override(MagicMock())
+        c.bot_request_worker_config.override(BotRequestWorkerConfig())
+        # post_run_callback_factories providers.Dict resolves these two singletons.
+        c.bcn_uplink_callback.override(MagicMock())
+        c.http_callback.override(MagicMock())
+        # bot_runner: the notifier closure captures this provider and resolves it
+        # via bot_runner() at invoke time; override with a mock so deliver_chat_abort
+        # is assertable without resolving the (deep) bot_runner chain.
+        mock_runner = MagicMock()
+        mock_runner.deliver_chat_abort = AsyncMock()
+        c.bot_runner.override(mock_runner)
+
+        overridden = (
+            "bot_run_queue_repository",
+            "bot_run_repository",
+            "bot_qpm_manager",
+            "result_guard_executor",
+            "machine_count_provider",
+            "bot_request_worker_config",
+            "bcn_uplink_callback",
+            "http_callback",
+            "bot_runner",
+        )
+        yield c, mock_runner
+        for dep in overridden:
+            getattr(c, dep).reset_override()
+
+    def test_engine_abort_notifier_is_wired_and_callable(self, worker_container):
+        """bot_request_worker resolves with a non-None, callable _engine_abort_notifier."""
+        c, _mock_runner = worker_container
+        worker = c.bot_request_worker()
+        assert worker._engine_abort_notifier is not None
+        assert callable(worker._engine_abort_notifier)
+
+    @pytest.mark.asyncio
+    async def test_engine_abort_notifier_invokes_deliver_chat_abort(
+        self, worker_container
+    ):
+        """The notifier closure dispatches to BotRunner.deliver_chat_abort with the
+        (session_id, bot_id, run_id) signature."""
+        c, mock_runner = worker_container
+        worker = c.bot_request_worker()
+        assert worker._engine_abort_notifier is not None
+
+        await worker._engine_abort_notifier("sess-1", "bot-1", "run-1")
+
+        mock_runner.deliver_chat_abort.assert_awaited_once_with(
+            bot_id="bot-1", session_id="sess-1", run_id="run-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_engine_abort_notifier_swallows_dispatch_error(
+        self, worker_container
+    ):
+        """A failing deliver_chat_abort must not propagate (best-effort, log-only)."""
+        c, mock_runner = worker_container
+        worker = c.bot_request_worker()
+        mock_runner.deliver_chat_abort.side_effect = RuntimeError("dispatch boom")
+
+        # Must not raise.
+        await worker._engine_abort_notifier("sess-1", "bot-1", "run-1")
+
+        mock_runner.deliver_chat_abort.assert_awaited_once_with(
+            bot_id="bot-1", session_id="sess-1", run_id="run-1"
+        )

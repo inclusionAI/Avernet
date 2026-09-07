@@ -88,8 +88,9 @@ class BotRequestWorkerConfig:
 
 #: Engine 通知回调类型：``chat.abort`` best-effort 通知 engine 取消 session/run。
 #: 失败仅记录日志，不影响 abort 主流程。``session_id`` 用于 engine 侧 session 定位，
+#: ``bot_id`` 用于解析归属 WS 连接（BaasBotService.send_chat_abort），
 #: ``run_id`` 为本次取消的 run（非 None 时通知 engine 取消该 run）。
-EngineAbortNotifier = Callable[[str, str | None], Awaitable[None]]
+EngineAbortNotifier = Callable[[str, str, str | None], Awaitable[None]]
 
 
 def _default_worker_id() -> str:
@@ -354,7 +355,9 @@ class BotRequestWorker:
         # 4. best-effort 通知 engine（一次 维度通知，run_id 取首个）
         if self._engine_abort_notifier is not None and aborted_run_ids:
             try:
-                await self._engine_abort_notifier(session_id, aborted_run_ids[0])
+                await self._engine_abort_notifier(
+                    session_id, bot_id, aborted_run_ids[0]
+                )
             except Exception as e:
                 logger.warning(
                     "[BotRequestWorker] abort engine notify failed session_id=%s "

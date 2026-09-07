@@ -2995,3 +2995,79 @@ class TestSendMessageStreamEvalConsistencyCheck:
                 chat_metadata={"eval_id": "eval-789"},
             ):
                 chunks.append(chunk)
+
+
+class TestSendChatAbort:
+    """BaasBotService.send_chat_abort resolves WS + pool and forwards to client.
+
+    Reuses _resolve_ws_connection_for_binding + _client_pool.get (the same path
+    as send_message) and forwards chat.abort via AsyncChatClient.chat_abort.
+    Errors propagate to the caller (best-effort handled upstream); no session
+    state is marked here (abort does not write session terminal state).
+    """
+
+    @pytest.mark.asyncio
+    async def test_send_chat_abort_forwards_to_client(self, service, mock_pool):
+        """Resolves conn_info via binding, gets client from pool, calls chat_abort."""
+        binding = _make_binding_info()
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock()
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            await service.send_chat_abort(
+                binding_info=binding,
+                session_id=SESSION_ID,
+                run_id="run-1",
+            )
+
+        mock_pool.get.assert_awaited_once_with(
+            TARGET, WS_URL, {"x-proxypass-token": TOKEN}
+        )
+        mock_client.chat_abort.assert_awaited_once_with(SESSION_ID, "run-1")
+
+    @pytest.mark.asyncio
+    async def test_send_chat_abort_run_id_none_forwarded(self, service, mock_pool):
+        """run_id=None is forwarded as-is to the underlying client."""
+        binding = _make_binding_info()
+        mock_client = AsyncMock()
+        mock_client.chat_abort = AsyncMock()
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ):
+            await service.send_chat_abort(
+                binding_info=binding,
+                session_id=SESSION_ID,
+                run_id=None,
+            )
+
+        mock_client.chat_abort.assert_awaited_once_with(SESSION_ID, None)
+
+    @pytest.mark.asyncio
+    async def test_send_chat_abort_propagates_resolve_error(self, service, mock_pool):
+        """A WS resolution error propagates to the caller (best-effort upstream)."""
+        binding = _make_binding_info()
+        mock_client = AsyncMock()
+        mock_pool.get.return_value = mock_client
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            side_effect=RuntimeError("resolve boom"),
+        ):
+            with pytest.raises(RuntimeError, match="resolve boom"):
+                await service.send_chat_abort(
+                    binding_info=binding,
+                    session_id=SESSION_ID,
+                    run_id="run-1",
+                )
+        mock_pool.get.assert_not_awaited()
+        mock_client.chat_abort.assert_not_awaited()

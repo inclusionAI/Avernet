@@ -87,7 +87,52 @@ from secbaas.community.core.service.sse import (
 )
 from secbaas.community.core.service.template_manage import DefaultDeviceTemplateService
 from secbaas.community.core.service.tenant_manage import DefaultTenantManageService
+from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
+
+logger = get_logger("bootstrap-core-services")
+
+
+class _EngineAbortNotifier:
+    """Best-effort ``chat.abort`` 通知器，供 ``BotRequestWorker`` 在
+    ``abort_runs_by_session`` 命中归属机 run 时调用。
+
+    ``bot_runner`` 通过 DI 注入（容器在解析 ``engine_abort_notifier`` 时经
+    ``providers.Singleton`` 解析 bot_runner，与 ``bcn_downlink_service`` 共享同一
+    BotRunner 实例），经 ``BotRunner.deliver_chat_abort`` →
+    ``BaasBotService.send_chat_abort`` → ``AsyncChatClient.chat_abort`` 转发
+    chat.abort 控制帧到 engine。失败仅记日志（与 worker 侧 best-effort 语义一致，
+    双重兜底），不阻断 abort 主流程（FAILED + force_done + 本机 cancel）。
+
+    之所以用一个 ``__call__`` 类而非 class body 内 ``async def`` 闭包：class 作用域
+    变量不对方法内部可见，且 class body 内 ``async def`` 会被当作需要 ``self`` 的方法；
+    更重要的是，只有作为 DI provider 的依赖（而非捕获 class-level provider 对象），
+    容器实例 ``container.bot_runner.override(...)`` 才能在测试中对通知器生效。
+    """
+
+    def __init__(self, bot_runner: BotRunner) -> None:
+        self._bot_runner = bot_runner
+
+    async def __call__(
+        self,
+        session_id: str,
+        bot_id: str,
+        run_id: str | None,
+    ) -> None:
+        try:
+            await self._bot_runner.deliver_chat_abort(
+                bot_id=bot_id, session_id=session_id, run_id=run_id
+            )
+        except Exception as e:
+            logger.warning(
+                "[bootstrap] engine_abort_notifier failed: session_id=%s "
+                "bot_id=%s run_id=%s: %s",
+                session_id,
+                bot_id,
+                run_id,
+                e,
+                exc_info=True,
+            )
 
 
 def _real_bot_service_plugin(base_url: str = "", timeout: float = 10.0):
@@ -684,12 +729,25 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         count=config.bot_run_queue.machine_count,
     )
 
+    # engine_abort_notifier: bootstrap 装配的 chat.abort 通知器，DI 注入 bot_runner
+    # Singleton（与 bcn_downlink_service 共享同一 BotRunner 实例）。BotRequestWorker
+    # .abort_runs_by_session 命中归属机 run 时 best-effort 调用，经
+    # BotRunner.deliver_chat_abort → BaasBotService.send_chat_abort →
+    # AsyncChatClient.chat_abort 转发 chat.abort 到 engine。失败仅记日志（双重兜底），
+    # 不阻断 abort 主流程（FAILED + force_done + 本机 cancel）。作为 provider 依赖
+    # 注入 bot_runner（而非捕获 class-level provider 对象），使容器实例 override 能在
+    # 测试中对通知器生效。
+    engine_abort_notifier = providers.Singleton(
+        _EngineAbortNotifier, bot_runner=bot_runner
+    )
+
     bot_request_worker = providers.Singleton(
         BotRequestWorker,
         queue_repository=bot_run_queue_repository,
         qpm_manager=bot_qpm_manager,
         executor=result_guard_executor,
         run_repository=bot_run_repository,
+        engine_abort_notifier=engine_abort_notifier,
         post_run_callback_factories=providers.Dict(
             {
                 "bcn_uplink": bcn_uplink_callback,

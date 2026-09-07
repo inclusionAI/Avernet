@@ -626,6 +626,32 @@ class AsyncChatClient:
             if self._concurrency_sem is not None:
                 self._concurrency_sem.release()
 
+    async def chat_abort(
+        self,
+        session_key: str,
+        run_id: str | None = None,
+    ) -> None:
+        """发送 ``chat.abort`` 控制帧，best-effort 通知 engine 取消 session/run。
+
+        与 ``send_message`` 不同，``chat.abort`` 是带外控制帧：不获取 sessionKey 并发
+        发送锁，直接经底层 ``BotWebSocketClient`` 发送。与在跑 ``chat.send`` 帧的交错
+        由 engine 的 abort 优先级语义处理。底层 ``_client`` 未建立（未连接）时记日志
+        并返回，不抛异常——避免 abort 链路因连接瞬时不可用而中断。
+
+        Args:
+            session_key: 会话 key（即 session_id）。
+            run_id: 本次取消的 run id，None 时仅按 sessionKey 取消。
+        """
+        client = self._client
+        if client is None:
+            logger.warning(
+                "[chat_abort] client not connected, skip: session_key=%s, run_id=%s",
+                session_key,
+                run_id,
+            )
+            return
+        await client.chat_abort(session_key=session_key, run_id=run_id)
+
     async def close(self) -> None:
         """关闭连接并清理所有 session state。"""
         self._closed_intentionally = True

@@ -470,6 +470,34 @@ class BaasBotService(BotService):
                 f"Failed to send message: {_safe_client_msg(e)}"
             ) from e
 
+    async def send_chat_abort(
+        self,
+        *,
+        binding_info: BotBindingInfo,
+        session_id: str,
+        run_id: str | None = None,
+    ) -> None:
+        """向 engine 发送 ``chat.abort`` 控制帧（best-effort）。
+
+        复用既有 ``_resolve_ws_connection_for_binding`` + ``_client_pool.get`` 解析归属
+        WS 连接，经 ``AsyncChatClient.chat_abort`` 转发到底层 ``BotWebSocketClient.chat_abort``。
+        异常向上抛由调用方 best-effort 捕获记日志；本方法不做任何 session 状态标记
+        （abort 不改写会话终态，BaaS 侧终态由 ``BotRequestWorker.abort_runs_by_session``
+        写入）。与 ``send_message`` 共享同一连接解析与 pool 取连接路径，保证 abort 帧落到
+        与 chat.send 相同的归属连接。
+
+        Args:
+            binding_info: bot binding（含 device_id/tenant/engine_type）。
+            session_id: 会话 id（即 sessionKey）。
+            run_id: 本次取消的 run id，None 时仅按 sessionKey 取消。
+        """
+        conn_info = await self._resolve_ws_connection_for_binding(
+            binding_info, session_id, context=None
+        )
+        headers = {"x-proxypass-token": conn_info.token}
+        client = await self._client_pool.get(conn_info.target, conn_info.ws_url, headers)
+        await client.chat_abort(session_id, run_id)
+
     async def send_message_stream(
         self,
         *,

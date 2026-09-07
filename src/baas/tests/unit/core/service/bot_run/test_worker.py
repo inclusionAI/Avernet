@@ -1133,8 +1133,9 @@ async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
 
     notified = asyncio.Event()
 
-    async def notifier(session_id: str, rid: str | None) -> None:
+    async def notifier(session_id: str, bot_id: str, rid: str | None) -> None:
         assert session_id == "sess-abort"
+        assert bot_id == "bot-1"
         assert rid == run_id
         notified.set()
 
@@ -1155,7 +1156,7 @@ async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue
     claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert claimed is not None and claimed.run_id == run_id
 
-    async def notifier(session_id: str, rid: str | None) -> None:
+    async def notifier(session_id: str, bot_id: str, rid: str | None) -> None:
         raise RuntimeError("engine notify boom")
 
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)

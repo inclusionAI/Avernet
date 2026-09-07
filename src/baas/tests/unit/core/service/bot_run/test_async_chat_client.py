@@ -1868,3 +1868,72 @@ class TestBotSessionError:
         # Session should be cleaned up
         assert "sk-err" not in client._sessions
         assert "sk-err" not in client._active_sessions
+
+
+# ==================== chat_abort tests ====================
+
+
+class TestChatAbort:
+    """AsyncChatClient.chat_abort forwards to BotWebSocketClient.chat_abort."""
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_forwards_with_run_id(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort forwards (session_key, run_id) to the underlying client."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        mock_bot_ws_instance.chat_abort = AsyncMock()
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        await client.chat_abort("sk-abort", run_id="run-1")
+
+        mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
+            session_key="sk-abort", run_id="run-1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_forwards_without_run_id(
+        self, mock_bot_ws, mock_bot_ws_instance
+    ):
+        """chat_abort forwards run_id=None when not provided."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        mock_bot_ws_instance.connect.return_value = {
+            "server": {"host": "srv"},
+            "features": {},
+        }
+        mock_bot_ws_instance.chat_abort = AsyncMock()
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        await client.connect()
+
+        await client.chat_abort("sk-abort")
+
+        mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
+            session_key="sk-abort", run_id=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_client_none_does_not_raise(self, mock_bot_ws):
+        """When _client is None, chat_abort logs and returns without raising."""
+        from secbaas.community.core.service.bot_run._async_chat_client import (
+            AsyncChatClient,
+        )
+
+        client = AsyncChatClient(uri="ws://host/ws")
+        # Never connected -> _client is None
+        assert client._client is None
+
+        # Should not raise
+        await client.chat_abort("sk-abort", run_id="run-1")
