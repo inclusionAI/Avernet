@@ -19,7 +19,7 @@ use bcs_event_store::{
     EventAppendTransactionPlan, GroupDeletionEventTransactionPlan,
     GroupProvisioningEventTransactionPlan,
 };
-use chrono::{SecondsFormat, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -98,9 +98,12 @@ fn transaction_lock_row_is_missing(error: &DbError) -> bool {
 fn db_timestamp_from_millis(timestamp_ms: u64) -> ServiceResult<String> {
     let timestamp_ms = i64::try_from(timestamp_ms)
         .map_err(|_| ServiceError::InternalError("Group timestamp is out of range".to_string()))?;
+    // `YYYY-MM-DD HH:MM:SS.mmm` is accepted by both MySQL `timestamp` columns
+    // (RFC3339 `T`/`Z` forms fail with ERROR 1292) and SQLite `strftime('%s')`
+    // reads.
     Utc.timestamp_millis_opt(timestamp_ms)
         .single()
-        .map(|timestamp| timestamp.to_rfc3339_opts(SecondsFormat::Millis, true))
+        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
         .ok_or_else(|| ServiceError::InternalError("Group timestamp is invalid".to_string()))
 }
 
@@ -4353,6 +4356,18 @@ mod tests {
 
         assert!(deleted.is_none());
         assert!(repo.cache.read().await.get("group-1").is_none());
+    }
+
+    #[test]
+    fn test_db_timestamp_from_millis_is_mysql_compatible() {
+        // The `gmt_modified` value must stay in `YYYY-MM-DD HH:MM:SS.mmm`
+        // form: MySQL `timestamp` columns reject RFC3339 `T`/`Z` strings with
+        // ERROR 1292, while SQLite `strftime('%s')` reads keep parsing this
+        // form.
+        let formatted = db_timestamp_from_millis(1_756_902_260_462).expect("valid timestamp");
+        assert_eq!(formatted, "2025-09-03 12:24:20.462");
+        assert!(!formatted.contains('T'));
+        assert!(!formatted.ends_with('Z'));
     }
 
     #[test]
