@@ -2256,6 +2256,397 @@ class TestHandleMngRegisterOwnershipMigration:
             "machine-001", "test", "ONLINE"
         )
 
+    @pytest.mark.asyncio
+    async def test_migration_offline_batch_uses_old_user(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+        caplog,
+    ):
+        """D-03 scoping: the device OFFLINE batch is queried by the OLD user id
+        (never the new one) and logs the [MIGRATION_DEVICE_UPDATE] INFO record."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = [
+            MagicMock(id="dev-1")
+        ]
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        with caplog.at_level(logging.INFO):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        # D-03: batch scoped to machine + OLD user on the registering env
+        list_kwargs = (
+            mock_device_repo.list_active_local_devices_by_machine_user.call_args.kwargs
+        )
+        assert list_kwargs["machine_id"] == "machine-001"
+        assert list_kwargs["user_id"] == "user-old"
+        assert list_kwargs["env"] == "test"
+        mock_device_repo.batch_update_status_to_offline.assert_called_once_with(
+            device_ids=["dev-1"],
+            env="test",
+        )
+        update_logs = [
+            r for r in caplog.records if "[MIGRATION_DEVICE_UPDATE]" in r.getMessage()
+        ]
+        assert len(update_logs) == 1
+        # Migration still completed through the critical step and the ONLINE path
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_device_step_failure_is_best_effort(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+        caplog,
+    ):
+        """D-06 step 1 failure degrades to a [MIGRATION_DEVICE_OFFLINE_FAIL]
+        WARNING and the migration proceeds to the critical ownership update."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.side_effect = (
+            RuntimeError("boom")
+        )
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        with caplog.at_level(logging.WARNING):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        # Best-effort: WARNING logged, no exception escaped the migration
+        fail_logs = [
+            r
+            for r in caplog.records
+            if "[MIGRATION_DEVICE_OFFLINE_FAIL]" in r.getMessage()
+        ]
+        assert len(fail_logs) == 1
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_without_device_repository_warns_and_proceeds(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+        caplog,
+    ):
+        """D-06 step 1 with no wired DeviceRepository (constructor default None):
+        defensive [MACHINE_OWNERSHIP_MIGRATED_DEVICE_SKIP] WARNING, then the
+        migration proceeds."""
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            # device_repository intentionally omitted -> constructor default None
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        with caplog.at_level(logging.WARNING):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        skip_logs = [
+            r
+            for r in caplog.records
+            if "[MACHINE_OWNERSHIP_MIGRATED_DEVICE_SKIP]" in r.getMessage()
+        ]
+        assert len(skip_logs) == 1
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_no_active_devices_skips_batch(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+    ):
+        """Empty ACTIVE device list: the batch update is skipped and the
+        migration completes through the ONLINE path."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        await service.handle_mng_register(
+            machine_id="machine-001",
+            user_id="user-new",
+        )
+
+        mock_device_repo.batch_update_status_to_offline.assert_not_called()
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_clear_route_info_failure_is_best_effort(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+        caplog,
+    ):
+        """D-06 step 2 failure degrades to a [MIGRATION_ROUTE_CLEAR_FAIL]
+        WARNING; the critical ownership update still runs, no exception."""
+        mock_repository.clear_route_info.side_effect = RuntimeError("route fail")
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        with caplog.at_level(logging.WARNING):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        fail_logs = [
+            r
+            for r in caplog.records
+            if "[MIGRATION_ROUTE_CLEAR_FAIL]" in r.getMessage()
+        ]
+        assert len(fail_logs) == 1
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_race_resolved_continues_online(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+        caplog,
+    ):
+        """D-05 re-query-once rule: update_user_id affects 0 rows but the
+        re-query already shows the new owner -> race resolved, the ONLINE path
+        continues without raising."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+
+        existing = self._stale_record("user-old")
+        fresh_record = self._stale_record("user-new")
+        # handle_mng_register queries first; the migration re-query is 2nd call
+        mock_repository.get_by_machine_id.side_effect = [existing, fresh_record]
+        mock_repository.update_user_id.return_value = 0
+
+        with caplog.at_level(logging.INFO):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        race_logs = [
+            r
+            for r in caplog.records
+            if "MACHINE_OWNERSHIP_MIGRATION_RACE_RESOLVED" in r.getMessage()
+        ]
+        assert len(race_logs) == 1
+        # No exception raised; the normal ONLINE path continues
+        mock_repository.update_machine_info.assert_called_once()
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_does_not_query_template_repository(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+    ):
+        """Regression pin: migrating an EXISTING machine never queries the
+        device template repository (template lookup is new-machine-only)."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+
+        await service.handle_mng_register(
+            machine_id="machine-001",
+            user_id="user-new",
+        )
+
+        mock_device_template_repository.get_default_local_template_id.assert_not_called()
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+
+    @pytest.mark.asyncio
+    async def test_migration_ignores_stored_db_status(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+    ):
+        """D-04 pin: migration fires regardless of the stored DB status (a
+        crash-leftover ONLINE is not a precondition); the upstream WS
+        is_connected guard already rejected concurrent connections."""
+        mock_device_repo = MagicMock()
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+
+        existing = self._stale_record("user-old")
+        existing.status = "ONLINE"  # crash-leftover: stale ONLINE stored in DB
+        mock_repository.get_by_machine_id.return_value = existing
+
+        await service.handle_mng_register(
+            machine_id="machine-001",
+            user_id="user-new",
+        )
+
+        # D-04: no status precondition read — the drift migration fired anyway
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
 
 # =============================================================================
 # Tests for untested methods: get_credentials, get_platform_type,
