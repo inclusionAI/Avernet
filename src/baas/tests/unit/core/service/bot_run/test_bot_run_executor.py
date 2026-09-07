@@ -465,10 +465,9 @@ async def test_executor_stream_agent_merge():
     assert len(final_calls) == 1
     assert final_calls[0][1]["content"] == "hello world"
 
-    # seq 递增：delta(1) → agent(2) → final(3)
-    # _flush_buffers() 先 flush delta 再 flush agent
-    assert delta_calls[0][1]["seq"] == 1
-    assert agent_calls[0][1]["seq"] == 2
+    # seq 递增：按到达顺序 agent(1) → delta(2) → final(3)
+    assert agent_calls[0][1]["seq"] == 1
+    assert delta_calls[0][1]["seq"] == 2
     assert final_calls[0][1]["seq"] == 3
 
     # update_result 写入 final content
