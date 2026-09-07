@@ -301,29 +301,42 @@ def test_bundled_discriminator_mappings_resolve_inside_the_document(
     visit(contract)
 
 
-def test_add_group_participant_accepts_only_actor_id() -> None:
+def test_add_group_participant_accepts_actor_id_and_optional_scope() -> None:
     contract = load_contract(CONTRACT_ROOT)
     operation = contract["paths"][
         "/openapi/v1/collaboration/groups/{group_id}/participants"
     ]["post"]
     schema = operation["requestBody"]["content"]["application/json"]["schema"]
 
-    assert schema == {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["actor_id"],
-        "properties": {"actor_id": {"type": "string"}},
-    }
+    assert schema["type"] == "object"
+    assert schema["additionalProperties"] is False
+    assert schema["required"] == ["actor_id"]
+    assert set(schema["properties"]) == {"actor_id", "message_view_scope"}
+    assert schema["properties"]["actor_id"] == {"type": "string"}
+    assert schema["properties"]["message_view_scope"]["enum"] == [
+        "full",
+        "participant",
+    ]
 
 
-def test_update_group_participant_endpoint_is_not_in_public_contract() -> None:
+def test_update_group_participant_accepts_mode_or_scope() -> None:
     contract = load_contract(CONTRACT_ROOT)
     path_item = contract["paths"][
         "/openapi/v1/collaboration/groups/{group_id}/participants/{actor_id}"
     ]
 
-    assert "patch" not in path_item
+    assert "patch" in path_item
     assert "delete" in path_item
+    operation = path_item["patch"]
+    assert operation["operationId"] == "update_group_participant"
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    assert schema["minProperties"] == 1
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) == {"mode", "message_view_scope"}
+    assert schema["properties"]["message_view_scope"]["enum"] == [
+        "full",
+        "participant",
+    ]
 
 
 def test_list_groups_uses_the_shared_view_actor_query() -> None:

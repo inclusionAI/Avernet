@@ -1,12 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-use bcs_domain::ActorStatus;
-use bcs_service_api::{BotDetailCommand, BotQueryService};
+use async_trait::async_trait;
+use bcs_domain::{ActorStatus, HumanMessageView, MessageAudience, MessageVisibilityDomain};
+use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
+use bcs_service_api::{BotDetailCommand, BotQueryService, ServiceError, ServiceResult};
 use serde_json::Value;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{Mutex, RwLock, mpsc};
 use tracing::{debug, warn};
 
 #[derive(Debug)]
@@ -24,14 +26,18 @@ struct FrontendConnection {
     silent: bool,
     connected_at: Instant,
     conn_id: u64,
+    human_view: Option<HumanMessageView>,
 }
 
 static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_SCOPE_CHANGE_LEASE_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 pub struct WorkbenchConnectionRegistry {
     sessions: RwLock<HashMap<String, Vec<FrontendConnection>>>,
     bot_query: RwLock<Option<Arc<dyn BotQueryService>>>,
+    scope_change_barriers: Mutex<HashSet<(String, String, u64)>>,
+    scope_changes_disabled: bool,
 }
 
 impl std::fmt::Debug for WorkbenchConnectionRegistry {
@@ -50,7 +56,14 @@ impl WorkbenchConnectionRegistry {
         Self {
             sessions: RwLock::new(HashMap::new()),
             bot_query: RwLock::new(Some(bot_query)),
+            scope_change_barriers: Mutex::new(HashSet::new()),
+            scope_changes_disabled: false,
         }
+    }
+
+    pub fn with_scope_changes_enabled(mut self, enabled: bool) -> Self {
+        self.scope_changes_disabled = !enabled;
+        self
     }
 
     pub async fn set_bot_query(&self, bot_query: Arc<dyn BotQueryService>) {
@@ -62,7 +75,23 @@ impl WorkbenchConnectionRegistry {
         session_id: String,
         tx: mpsc::Sender<String>,
         user_id: Option<String>,
-    ) -> u64 {
+        human_view: Option<HumanMessageView>,
+    ) -> ServiceResult<u64> {
+        // Hold the barrier mutex until the connection is inserted. This makes
+        // subscribe linearizable with begin_scope_change: either the new
+        // connection is removed by begin, or it observes the barrier and fails.
+        let barriers = self.scope_change_barriers.lock().await;
+        if let Some(view) = human_view.as_ref()
+            && barriers
+                .iter()
+                .any(|(blocked_session_id, blocked_actor_id, _)| {
+                    blocked_session_id == &session_id && blocked_actor_id == &view.actor_id
+                })
+        {
+            return Err(ServiceError::Conflict(
+                "view_scope_change_in_progress".to_string(),
+            ));
+        }
         let conn_id = NEXT_CONN_ID.fetch_add(1, Ordering::Relaxed);
         // Resolve the silent (hidden-user) flag ONCE here — before taking the
         // sessions lock — so the broadcast hot path never awaits a remote lookup
@@ -74,6 +103,7 @@ impl WorkbenchConnectionRegistry {
             silent,
             connected_at: Instant::now(),
             conn_id,
+            human_view,
         };
 
         self.sessions
@@ -82,7 +112,8 @@ impl WorkbenchConnectionRegistry {
             .entry(session_id)
             .or_default()
             .push(conn);
-        conn_id
+        drop(barriers);
+        Ok(conn_id)
     }
 
     pub async fn unsubscribe(&self, session_id: &str, conn_id: u64) {
@@ -100,6 +131,16 @@ impl WorkbenchConnectionRegistry {
             .unwrap_or_default()
     }
 
+    pub async fn scope_change_in_progress(&self, session_id: &str, actor_id: &str) -> bool {
+        self.scope_change_barriers
+            .lock()
+            .await
+            .iter()
+            .any(|(blocked_session_id, blocked_actor_id, _)| {
+                blocked_session_id == session_id && blocked_actor_id == actor_id
+            })
+    }
+
     pub async fn broadcast(&self, session_id: &str, event_json: &str) -> usize {
         self.broadcast_excluding(session_id, event_json, None).await
     }
@@ -108,6 +149,24 @@ impl WorkbenchConnectionRegistry {
         &self,
         session_id: &str,
         event_json: &str,
+        exclude_conn_id: Option<u64>,
+    ) -> usize {
+        self.broadcast_visible_excluding(
+            session_id,
+            event_json,
+            MessageVisibilityDomain::Chat,
+            None,
+            exclude_conn_id,
+        )
+        .await
+    }
+
+    pub async fn broadcast_visible_excluding(
+        &self,
+        session_id: &str,
+        event_json: &str,
+        visibility_domain: MessageVisibilityDomain,
+        audience: Option<&MessageAudience>,
         exclude_conn_id: Option<u64>,
     ) -> usize {
         let mut sessions = self.sessions.write().await;
@@ -119,6 +178,13 @@ impl WorkbenchConnectionRegistry {
         let mut disconnected = Vec::new();
         for conn in connections.iter() {
             if exclude_conn_id.is_some_and(|id| conn.conn_id == id) {
+                continue;
+            }
+            if conn
+                .human_view
+                .as_ref()
+                .is_some_and(|view| !view.allows_artifact(visibility_domain, audience))
+            {
                 continue;
             }
 
@@ -182,6 +248,84 @@ impl WorkbenchConnectionRegistry {
                 );
                 false
             }
+        }
+    }
+}
+
+#[async_trait]
+impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
+    async fn begin_scope_change(
+        &self,
+        session_id: &str,
+        human_actor_id: &str,
+    ) -> ServiceResult<ParticipantViewScopeChangeLease> {
+        if self.scope_changes_disabled {
+            return Err(ServiceError::InvalidOperation {
+                message: "view_scope_change_requires_cluster_binding".to_string(),
+                request_id: None,
+            });
+        }
+        let lease_id = NEXT_SCOPE_CHANGE_LEASE_ID.fetch_add(1, Ordering::Relaxed);
+        let mut barriers = self.scope_change_barriers.lock().await;
+        if barriers
+            .iter()
+            .any(|(blocked_session_id, blocked_actor_id, _)| {
+                blocked_session_id == session_id && blocked_actor_id == human_actor_id
+            })
+        {
+            return Err(ServiceError::Conflict(
+                "view_scope_change_in_progress".to_string(),
+            ));
+        }
+        barriers.insert((session_id.to_string(), human_actor_id.to_string(), lease_id));
+
+        let mut sessions = self.sessions.write().await;
+        if let Some(connections) = sessions.get_mut(session_id) {
+            let close_event = serde_json::json!({
+                "type": "event",
+                "event": "close",
+                "payload": {
+                    "reason": "view_scope_changed",
+                    "message": "Participant message view scope changed; reconnect to refresh the view"
+                }
+            })
+            .to_string();
+            connections.retain(|connection| {
+                let matches_actor = connection
+                    .human_view
+                    .as_ref()
+                    .is_some_and(|view| view.actor_id == human_actor_id);
+                if matches_actor {
+                    let _ = connection.tx.try_send(close_event.clone());
+                }
+                !matches_actor
+            });
+        }
+        drop(sessions);
+        drop(barriers);
+
+        Ok(ParticipantViewScopeChangeLease {
+            session_id: session_id.to_string(),
+            human_actor_id: human_actor_id.to_string(),
+            lease_id,
+        })
+    }
+
+    async fn finish_scope_change(
+        &self,
+        lease: ParticipantViewScopeChangeLease,
+    ) -> ServiceResult<()> {
+        let removed = self.scope_change_barriers.lock().await.remove(&(
+            lease.session_id,
+            lease.human_actor_id,
+            lease.lease_id,
+        ));
+        if removed {
+            Ok(())
+        } else {
+            Err(ServiceError::InternalError(
+                "participant view-scope change lease was not active".to_string(),
+            ))
         }
     }
 }

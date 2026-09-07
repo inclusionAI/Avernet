@@ -57,7 +57,7 @@ import { useGroupChatProviders } from './hooks/useGroupChatProviders';
 import { useGroups } from './hooks/useGroups';
 import { useGroupSessions } from './hooks/useGroupSessions';
 import './index.less';
-import type { BotTabItem, GroupInfo } from './types';
+import type { BotTabItem, GroupInfo, MessageViewScope } from './types';
 
 /** GroupChat 组件 Props */
 interface GroupChatProps {
@@ -316,6 +316,8 @@ const GroupChat: React.FC<GroupChatProps> = ({
     showServiceInvocationSessionModal,
     setShowServiceInvocationSessionModal,
   ] = useState(false);
+  const [pendingSessionMessageViewScope, setPendingSessionMessageViewScope] =
+    useState<MessageViewScope>('full');
   const [groupListCollapsed, setGroupListCollapsed] = useState(false);
   const [sessionListCollapsed, setSessionListCollapsed] = useState(false);
   const [showSessionDrawer, setShowSessionDrawer] = useState(false);
@@ -657,6 +659,18 @@ const GroupChat: React.FC<GroupChatProps> = ({
     }
   };
 
+  // 判断当前卡片类型：根据选中 Bot 的 actor_kind
+  const currentCardType = useMemo(() => {
+    const currentMyBot = myBots.find(
+      (b: BotNetworkInfo) => b.bot_uuid === driverBot?.bot_uuid,
+    );
+    // 判断 Actor 类型：优先使用 actor_kind，否则根据 bot_id/bot_uuid 前缀判断
+    return (
+      currentMyBot?.actor_kind ||
+      (currentMyBot?.bot_uuid?.startsWith('human_') ? 'human' : 'bot')
+    );
+  }, [myBots, driverBot]);
+
   // === 会话操作回调 ===
   const handleSelectSession = useCallback(
     (sessionId: string) => {
@@ -666,28 +680,35 @@ const GroupChat: React.FC<GroupChatProps> = ({
     [selectSession, driverBot?.bot_uuid],
   );
 
-  const handleCreateSession = useCallback(async () => {
-    if (!groupId) return;
-    if (currentGroup?.groupStrategy === 'state_machine') {
-      setShowServiceInvocationSessionModal(true);
-      return;
-    }
+  const handleCreateSession = useCallback(
+    async (messageViewScope: MessageViewScope = 'full') => {
+      if (!groupId) return;
+      if (currentGroup?.groupStrategy === 'state_machine') {
+        setPendingSessionMessageViewScope(messageViewScope);
+        setShowServiceInvocationSessionModal(true);
+        return;
+      }
 
-    await createSession(
+      await createSession(
+        groupId,
+        {
+          session_kind: 'chat',
+          session_title: '新会话',
+          created_by: driverBot?.bot_uuid,
+          message_view_scope:
+            currentCardType === 'human' ? messageViewScope : undefined,
+        },
+        { viewBotId: driverBot?.bot_uuid },
+      );
+    },
+    [
       groupId,
-      {
-        session_kind: 'chat',
-        session_title: '新会话',
-        created_by: driverBot?.bot_uuid,
-      },
-      { viewBotId: driverBot?.bot_uuid },
-    );
-  }, [
-    groupId,
-    currentGroup?.groupStrategy,
-    createSession,
-    driverBot?.bot_uuid,
-  ]);
+      currentGroup?.groupStrategy,
+      createSession,
+      driverBot?.bot_uuid,
+      currentCardType,
+    ],
+  );
 
   const handleCreateServiceInvocationSession = useCallback(
     async ({ title, query }: { title: string; query: string }) => {
@@ -698,13 +719,23 @@ const GroupChat: React.FC<GroupChatProps> = ({
           session_kind: 'service_invocation',
           session_title: title,
           created_by: driverBot?.bot_uuid,
+          message_view_scope:
+            currentCardType === 'human'
+              ? pendingSessionMessageViewScope
+              : undefined,
           input: { query },
         },
         { viewBotId: driverBot?.bot_uuid },
       );
       return !!result;
     },
-    [groupId, createSession, driverBot?.bot_uuid],
+    [
+      groupId,
+      createSession,
+      driverBot?.bot_uuid,
+      currentCardType,
+      pendingSessionMessageViewScope,
+    ],
   );
 
   const serviceInvocationDefaultQuery = useMemo(() => {
@@ -759,8 +790,12 @@ const GroupChat: React.FC<GroupChatProps> = ({
   }, [clearCurrentSession]);
 
   const handleJoinSession = useCallback(
-    async (sessionId: string, actorId: string) => {
-      return joinSession(sessionId, actorId);
+    async (
+      sessionId: string,
+      actorId: string,
+      messageViewScope: MessageViewScope,
+    ) => {
+      return joinSession(sessionId, actorId, 'human', messageViewScope);
     },
     [joinSession],
   );
@@ -861,18 +896,6 @@ const GroupChat: React.FC<GroupChatProps> = ({
       is_online: currentMyBot.is_online,
       status: currentMyBot.status,
     };
-  }, [myBots, driverBot]);
-
-  // 判断当前卡片类型：根据选中 Bot 的 actor_kind
-  const currentCardType = useMemo(() => {
-    const currentMyBot = myBots.find(
-      (b: BotNetworkInfo) => b.bot_uuid === driverBot?.bot_uuid,
-    );
-    // 判断 Actor 类型：优先使用 actor_kind，否则根据 bot_id/bot_uuid 前缀判断
-    const actor_kind =
-      currentMyBot?.actor_kind ||
-      (currentMyBot?.bot_uuid?.startsWith('human_') ? 'human' : 'bot');
-    return actor_kind;
   }, [myBots, driverBot]);
 
   // 获取当前 Bot 完整信息（用于 LicenceInfo）

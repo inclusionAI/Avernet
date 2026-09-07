@@ -30,7 +30,12 @@ import { useSessionMembers } from '@/pages/GroupChat/hooks/useSessionMembers';
 import { cn } from '@/utils/utils';
 import { EyeOff, Mic, MicOff, Plus, User, X } from 'lucide-react';
 import React, { useMemo, useState } from 'react';
-import type { GroupInfo, GroupSession, ParticipantMode } from '../../types';
+import type {
+  GroupInfo,
+  GroupSession,
+  MessageViewScope,
+  ParticipantMode,
+} from '../../types';
 
 interface SessionMembersSectionProps {
   session: GroupSession;
@@ -47,6 +52,7 @@ interface DisplayMember {
   avatar?: string;
   botUuid?: string;
   mode?: ParticipantMode;
+  messageViewScope?: MessageViewScope;
   role?: string;
   isOwner: boolean;
   isMaster: boolean;
@@ -120,6 +126,7 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
         avatar: matched?.avatar,
         botUuid: matched?.botUuid,
         mode: sm.mode,
+        messageViewScope: sm.messageViewScope,
         role: sm.role,
         isOwner,
         isMaster,
@@ -190,6 +197,21 @@ const SessionMembersSection: React.FC<SessionMembersSectionProps> = ({
                 {m.isMaster && (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-violet-50 text-violet-600 flex-shrink-0">
                     主节点
+                  </span>
+                )}
+                {m.actorKind === 'human' && (
+                  <span
+                    className={cn(
+                      'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
+                      m.messageViewScope === 'participant'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-orange-50 text-orange-600',
+                    )}
+                    title="当前会话的有效消息视角，可用于游戏准入判断"
+                  >
+                    {m.messageViewScope === 'participant'
+                      ? '参与者视角'
+                      : '完整视角'}
                   </span>
                 )}
                 {m.isWorker && (

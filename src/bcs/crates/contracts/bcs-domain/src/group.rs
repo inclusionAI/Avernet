@@ -78,6 +78,28 @@ pub enum ParticipantMode {
     Absent,
 }
 
+/// Message projection selected for a Human participant.
+///
+/// This is intentionally orthogonal to [`ParticipantMode`]: mode controls
+/// presence/response posture, while this value controls the Human-tab message
+/// projection for ManagerWorker and StateMachine artifacts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageViewScope {
+    /// Preserve the legacy complete Human collaboration view.
+    #[default]
+    Full,
+    /// Show only public messages and directed messages that include the Human.
+    Participant,
+}
+
+impl MessageViewScope {
+    /// Bots always use the legacy Bot view and therefore only accept `full`.
+    pub fn is_valid_for(self, kind: ActorKind) -> bool {
+        kind == ActorKind::Human || self == Self::Full
+    }
+}
+
 impl Default for ParticipantMode {
     fn default() -> Self {
         // Default mirrors the legacy implicit assumption (bot-driven groups).
@@ -148,6 +170,10 @@ pub struct Participant {
     /// Provider routing tags scoped to this Group/Session membership.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Persistent Human-tab message projection. Missing legacy JSON defaults
+    /// to `full`; Bot participants must always carry `full`.
+    #[serde(default)]
+    pub message_view_scope: MessageViewScope,
 }
 
 impl Participant {
@@ -161,6 +187,7 @@ impl Participant {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         }
     }
 
@@ -181,6 +208,7 @@ impl Participant {
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::default_for(ActorKind::Human)),
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
         }
     }
 

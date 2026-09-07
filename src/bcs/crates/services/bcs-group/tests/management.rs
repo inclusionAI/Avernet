@@ -24,7 +24,7 @@ use bcs_service_api::{
     WorkbenchChatAbortAuthorizationCommand, WorkbenchChatAuthorizationCommand,
     WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
 };
-use bcs_service_api::types::OpeningMessage;
+use bcs_service_api::types::{MessageViewScope, OpeningMessage};
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -679,6 +679,7 @@ async fn add_member_allows_provider_downlink_bot_in_manager_worker_group() {
             human_actor_id: None,
             group_id: group.group_id,
             bot_id: "provider-worker".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("provider downlink bot can be added to manager_worker group");
@@ -713,6 +714,7 @@ async fn add_member_assigns_worker_in_manager_worker_group() {
             human_actor_id: None,
             group_id: group.group_id,
             bot_id: "new-worker".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("member should be added with the strategy-owned role");
@@ -1134,6 +1136,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
+            message_view_scope: None,
         })
         .await;
     assert!(matches!(
@@ -1148,6 +1151,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "stranger".to_string(),
+            message_view_scope: None,
         })
         .await;
     assert!(matches!(
@@ -1161,6 +1165,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "private-friend".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("private friend target is reachable");
@@ -1172,6 +1177,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_impostor".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
+            message_view_scope: None,
         })
         .await;
     assert!(matches!(
@@ -1186,6 +1192,7 @@ async fn add_member_authorizes_coordinator_and_checks_reachability() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "friend".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("friend target is reachable");
@@ -1230,6 +1237,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "public-helper".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("originator can add public helper");
@@ -1239,6 +1247,7 @@ async fn add_member_writes_subscription_edge_with_driver_identity_for_public_tar
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "protected-helper".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("originator can add protected friend of driver");
@@ -1984,6 +1993,7 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
             group_id: "group-under-test".to_string(),
             actor_id: "member".to_string(),
             mode: bcs_service_api::ParticipantMode::Muted,
+            message_view_scope: None,
         })
         .await
         .unwrap();
@@ -1995,10 +2005,15 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
             group_id: "group-under-test".to_string(),
             actor_id: "human_alice".to_string(),
             mode: bcs_service_api::ParticipantMode::Present,
+            message_view_scope: Some(MessageViewScope::Participant),
         })
         .await
         .unwrap();
     assert_eq!(human_update.actor_id, "human_alice");
+    assert_eq!(
+        human_update.message_view_scope,
+        MessageViewScope::Participant,
+    );
 
     let stored = fixture.group.get("group-under-test").await.unwrap();
     let human = stored
@@ -2008,7 +2023,20 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
         .expect("human participant should be inserted on first mode update");
     assert_eq!(human.actor_kind, ActorKind::Human);
     assert_eq!(human.mode, Some(bcs_service_api::ParticipantMode::Present));
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
     assert!(human.tags.is_empty());
+
+    let full_view = service
+        .update_participant_mode(GroupParticipantModeCommand {
+            caller_actor_id: "human_alice".to_string(),
+            group_id: "group-under-test".to_string(),
+            actor_id: "human_alice".to_string(),
+            mode: bcs_service_api::ParticipantMode::Present,
+            message_view_scope: Some(MessageViewScope::Full),
+        })
+        .await
+        .unwrap();
+    assert_eq!(full_view.message_view_scope, MessageViewScope::Full);
 
     let forbidden = service
         .update_participant_mode(GroupParticipantModeCommand {
@@ -2016,6 +2044,7 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
             group_id: "group-under-test".to_string(),
             actor_id: "member".to_string(),
             mode: bcs_service_api::ParticipantMode::Auto,
+            message_view_scope: None,
         })
         .await
         .expect_err("non-self non-creator caller is forbidden");
@@ -2045,9 +2074,10 @@ async fn workbench_session_service_connects_for_owner_and_authorizes_owned_sende
             bound_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             session_id: None,
+            view_actor_id: Some("driver".to_string()),
         })
         .await
-        .expect("human owner can connect");
+        .expect("human owner can connect through an owned Bot view");
 
     assert_eq!(connected.group_id, "group-under-test");
     assert_eq!(connected.participants.len(), 2);
@@ -2089,6 +2119,7 @@ async fn workbench_normal_group_allows_bound_human_sender_when_participant() {
             group_id: "group-under-test".to_string(),
             actor_id: "human_alice".to_string(),
             mode: bcs_service_api::ParticipantMode::Present,
+            message_view_scope: None,
         })
         .await
         .unwrap();
@@ -2170,6 +2201,7 @@ async fn workbench_session_service_rejects_invalid_sender_states() {
             bound_actor_id: None,
             group_id: "group-under-test".to_string(),
             session_id: None,
+            view_actor_id: None,
         })
         .await;
     assert!(matches!(no_cookie, Err(WorkbenchUseCaseError::Unauthorized)));
@@ -2179,6 +2211,7 @@ async fn workbench_session_service_rejects_invalid_sender_states() {
             bound_actor_id: Some("human_charlie".to_string()),
             group_id: "group-under-test".to_string(),
             session_id: None,
+            view_actor_id: None,
         })
         .await;
     assert!(matches!(
@@ -2269,6 +2302,7 @@ async fn workbench_connect_allows_bound_human_when_present_in_session() {
             bound_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             session_id: Some(session_id),
+            view_actor_id: None,
         })
         .await
         .expect("session participants should be allowed to connect to that session");
@@ -2436,6 +2470,7 @@ fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -2649,6 +2684,7 @@ fn participant(bot_id: &str, role: Option<&str>) -> GroupCreateParticipantComman
         bot_id: bot_id.to_string(),
         role: role.map(str::to_string),
         tags: Vec::new(),
+        message_view_scope: None,
     }
 }
 
@@ -3283,6 +3319,7 @@ async fn add_member_human_consultant_ok() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("adding human consultant should succeed");
@@ -3312,6 +3349,7 @@ async fn add_member_human_worker_in_manager_worker_ok() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "human_bob".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("adding human worker to mw group should succeed");
@@ -3368,6 +3406,7 @@ async fn originator_human_can_add_member() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("human originator should be able to add member");
@@ -3448,6 +3487,7 @@ async fn originator_bot_self_driver_can_manage() {
             human_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
             bot_id: "helper".to_string(),
+            message_view_scope: None,
         })
         .await
         .expect("driver should still be able to add member");
@@ -3698,6 +3738,7 @@ async fn add_non_public_bot_to_public_group_rejected() {
         human_actor_id: None,
         group_id: "group-under-test".to_string(),
         bot_id: "bot_private".to_string(),
+        message_view_scope: None,
     }).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("Cannot add non-public bot"));
@@ -3721,6 +3762,7 @@ async fn add_human_to_public_group_succeeds() {
         human_actor_id: None,
         group_id: "group-under-test".to_string(),
         bot_id: "human_123".to_string(),
+        message_view_scope: None,
     }).await;
     assert!(result.is_ok(), "error: {:?}", result.unwrap_err());
 }

@@ -922,6 +922,7 @@ fn apply_group_participant_tags(
                     bot_uuid: lead_bot.to_string(),
                     role: lead_role.map(str::to_string),
                     tags: Vec::new(),
+                    message_view_scope: None,
                 },
             );
         }
@@ -2949,6 +2950,7 @@ pub async fn run() -> Result<()> {
                         }
                     }),
                     tags: Vec::new(),
+                    message_view_scope: None,
                 })
                 .collect();
             if group_strategy.is_some()
@@ -2962,6 +2964,7 @@ pub async fn run() -> Result<()> {
                         bot_uuid: driver.clone(),
                         role: Some("manager".to_string()),
                         tags: Vec::new(),
+                        message_view_scope: None,
                     },
                 );
             }
@@ -5079,6 +5082,7 @@ mod tests {
             bot_uuid: "driver-bot".to_string(),
             role: None,
             tags: Vec::new(),
+            message_view_scope: None,
         };
 
         for value in ["=tenant-a", "driver-bot="] {

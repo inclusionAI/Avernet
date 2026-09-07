@@ -244,6 +244,7 @@ async fn human_originator_can_manage_participants_without_human_membership() {
             caller: human_caller("staff-unrelated"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("unrelated Human cannot manage originator-only group");
@@ -255,6 +256,7 @@ async fn human_originator_can_manage_participants_without_human_membership() {
             caller: human_caller("staff-originator"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect("Human originator can manage participants without membership");
@@ -272,6 +274,7 @@ async fn human_owner_of_group_driver_can_add_participant_without_human_membershi
             caller: human_caller("staff-unrelated"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("unrelated Human cannot manage group through Bot ownership");
@@ -283,6 +286,7 @@ async fn human_owner_of_group_driver_can_add_participant_without_human_membershi
             caller: human_caller("staff-driver"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect("Human owner of driver Bot can manage group");
@@ -300,6 +304,7 @@ async fn human_owner_of_group_driver_can_add_human_participant() {
             caller: human_caller("staff-driver"),
             group_id: GROUP_ID.into(),
             actor_id: "human_bob".into(),
+            message_view_scope: None,
         })
         .await
         .expect("Human owner of driver Bot can add a Human participant");
@@ -318,7 +323,8 @@ async fn human_owner_of_bot_participant_can_update_that_participant_as_self_serv
             caller: human_caller("staff-unrelated"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect_err("unrelated Human cannot self-service an unowned Bot participant");
@@ -330,7 +336,8 @@ async fn human_owner_of_bot_participant_can_update_that_participant_as_self_serv
             caller: human_caller("staff-owner"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect("Human owner can self-service the owned Bot participant");
@@ -370,6 +377,7 @@ async fn chat_manager_role_does_not_grant_group_management_to_human_owner() {
             caller: human_caller("staff-manager-owner"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("Chat manager role must not grant management authority");
@@ -386,6 +394,7 @@ async fn human_manager_can_add_bot_participant() {
             caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect("driver can add");
@@ -403,6 +412,7 @@ async fn non_manager_cannot_add_participant() {
             caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-b".into(),
+            message_view_scope: None,
         })
         .await
         .expect_err("plain participant forbidden");
@@ -419,7 +429,8 @@ async fn update_participant_mode_returns_participant() {
             caller,
             group_id: GROUP_ID.into(),
             actor_id: "bot-a".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect("update ok");
@@ -470,7 +481,8 @@ async fn participant_can_update_own_mode() {
             caller: human_caller("staff-member"),
             group_id: GROUP_ID.into(),
             actor_id: "human_staff-member".into(),
-            mode: ParticipantMode::Absent,
+            mode: Some(ParticipantMode::Absent),
+            message_view_scope: None,
         })
         .await
         .expect("plain participant can update own mode");
@@ -524,7 +536,8 @@ async fn participant_cannot_update_others() {
             caller: human_caller("staff-member"),
             group_id: GROUP_ID.into(),
             actor_id: "bot-driver".into(),
-            mode: ParticipantMode::Muted,
+            mode: Some(ParticipantMode::Muted),
+            message_view_scope: None,
         })
         .await
         .expect_err("plain participant cannot update another participant");

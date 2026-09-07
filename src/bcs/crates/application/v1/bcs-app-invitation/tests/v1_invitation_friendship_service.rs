@@ -269,6 +269,7 @@ impl Fixture {
             session_title: Some(format!("{group_id}-session")),
             id: None,
             meta: None,
+            message_visibility_version: 1,
         };
         let outcome = self
             .sessions
@@ -725,6 +726,7 @@ async fn accept_invitation_human_joins_group() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
+            message_view_scope: None,
         })
         .await
         .expect("human accepts");
@@ -774,6 +776,7 @@ async fn accept_invitation_human_display_name_provides_nick_name() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal_with_display("staff-1", "Alice"),
             token: invitation.token,
+            message_view_scope: None,
         })
         .await
         .expect("human accepts with display_name");
@@ -813,6 +816,7 @@ async fn accept_invitation_caller_without_user_rejected() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::bot_only_caller("bot-b"),
             token: invitation.token,
+            message_view_scope: None,
         })
         .await
         .expect_err("caller without User rejected");
@@ -855,6 +859,7 @@ async fn accept_invitation_expired_is_gone() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: expired,
+            message_view_scope: None,
         })
         .await
         .expect_err("expired token is Gone");
@@ -884,6 +889,7 @@ async fn accept_invitation_legacy_token_without_target_type_rejected() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: legacy,
+            message_view_scope: None,
         })
         .await
         .expect_err("legacy token rejected");
@@ -993,6 +999,7 @@ async fn accept_invitation_already_member_is_idempotent() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: invitation.token.clone(),
+            message_view_scope: None,
         })
         .await
         .expect("first accept");
@@ -1002,6 +1009,7 @@ async fn accept_invitation_already_member_is_idempotent() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
+            message_view_scope: None,
         })
         .await
         .expect("second accept is idempotent");
@@ -1045,6 +1053,7 @@ async fn accept_invitation_session_target_joins() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token: invitation.token,
+            message_view_scope: None,
         })
         .await
         .expect("human joins session");
@@ -1094,6 +1103,7 @@ async fn accept_invitation_target_group_deleted_returns_invitation_not_found() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token,
+            message_view_scope: None,
         })
         .await
         .expect_err("missing group target is invitation_not_found");
@@ -1134,6 +1144,7 @@ async fn accept_invitation_target_session_deleted_returns_invitation_not_found()
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-1"),
             token,
+            message_view_scope: None,
         })
         .await
         .expect_err("missing session target is invitation_not_found");

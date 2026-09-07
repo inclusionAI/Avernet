@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{
     ActorKind, DefaultDelivery, GroupKind, GroupStatus, GroupStrategy, ParticipantKind,
-    ParticipantMode, RoutingMode, RoutingPolicy, ServiceError, ServiceSpec, Workspace,
+    MessageViewScope, ParticipantMode, RoutingMode, RoutingPolicy, ServiceError, ServiceSpec,
+    Workspace,
 };
 
 /// Request for creating a group collaboration session.
@@ -45,6 +46,7 @@ pub struct GroupCreateParticipantCommand {
     pub bot_id: String,
     pub role: Option<String>,
     pub tags: Vec<String>,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 /// Request for creating or reusing a 1:1 direct message group.
@@ -77,6 +79,7 @@ pub struct GroupAddMemberCommand {
     pub human_actor_id: Option<String>,
     pub group_id: String,
     pub bot_id: String,
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 /// Request for deleting a group.
@@ -134,6 +137,8 @@ pub struct GroupParticipantModeCommand {
     pub group_id: String,
     pub actor_id: String,
     pub mode: ParticipantMode,
+    /// Optional Human-tab message projection selected during legacy join.
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +183,7 @@ pub struct GroupParticipantView {
     pub mode: Option<ParticipantMode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    pub message_view_scope: MessageViewScope,
 }
 
 /// Group detail shape returned by group management use cases.
@@ -313,6 +319,7 @@ pub struct GroupParticipantModeResult {
     pub group_id: String,
     pub actor_id: String,
     pub mode: ParticipantMode,
+    pub message_view_scope: MessageViewScope,
 }
 
 /// Patch the mutable `ServiceSpec` fields of a group's settings.

@@ -4,21 +4,15 @@
  * 显示群组内的会话列表，支持新建、搜索、分页、标题编辑
  */
 
-import Button from '@/components/Button';
 import Empty from '@/components/Empty';
 import { Skeleton } from '@/components/Skeleton';
 import { Drawer, DrawerContent } from '@/components/ui/drawer';
 import { Sidebar } from '@/components/ui/sidebar';
 import { cn } from '@/utils/utils';
-import {
-  Loader2,
-  MessageSquare,
-  MoreHorizontal,
-  Plus,
-  Search,
-} from 'lucide-react';
+import { Loader2, MessageSquare, MoreHorizontal, Search } from 'lucide-react';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { GroupSession } from '../types';
+import type { GroupSession, MessageViewScope } from '../types';
+import CreateSessionControl from './CreateSessionControl';
 
 interface SessionListPanelProps {
   /** 会话列表 */
@@ -34,7 +28,7 @@ interface SessionListPanelProps {
   /** 选中会话回调 */
   onSelectSession: (sessionId: string) => void;
   /** 新建会话回调 */
-  onCreateSession: () => void;
+  onCreateSession: (messageViewScope?: MessageViewScope) => void;
   /** 加载更多回调 */
   onLoadMore: () => void;
   /** 搜索回调 */
@@ -163,21 +157,11 @@ const SessionListPanel: React.FC<SessionListPanelProps> = ({
                 <span className="text-sm font-semibold text-slate-800">
                   会话
                 </span>
-                <Button
-                  variant="secondary"
-                  soft
-                  size="sm"
-                  onClick={onCreateSession}
-                  disabled={isCreating}
-                  className="h-7 gap-1 text-xs"
-                >
-                  {isCreating ? (
-                    <Loader2 className="w-3 h-3 animate-spin" />
-                  ) : (
-                    <Plus className="w-3.5 h-3.5" />
-                  )}
-                  新建会话
-                </Button>
+                <CreateSessionControl
+                  isCreating={isCreating}
+                  showScopeMenu={actorKind === 'human'}
+                  onCreateSession={onCreateSession}
+                />
               </div>
             </div>
 
@@ -298,21 +282,11 @@ const SessionListPanel: React.FC<SessionListPanelProps> = ({
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-800">会话</span>
           </div>
-          <Button
-            variant="secondary"
-            soft
-            size="sm"
-            onClick={onCreateSession}
-            disabled={isCreating}
-            className="h-7 gap-1 text-xs"
-          >
-            {isCreating ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <Plus className="w-3.5 h-3.5" />
-            )}
-            新建会话
-          </Button>
+          <CreateSessionControl
+            isCreating={isCreating}
+            showScopeMenu={actorKind === 'human'}
+            onCreateSession={onCreateSession}
+          />
         </div>
         <p className="mt-1.5 text-[10px] text-slate-400 leading-relaxed">
           {actorKind === 'human'

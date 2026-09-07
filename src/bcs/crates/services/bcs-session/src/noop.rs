@@ -11,6 +11,7 @@ use bcs_service_api::{
     SessionLaunchService,
 };
 use bcs_service_api::{Participant, ParticipantMode, Session, SessionStatus};
+use bcs_service_api::types::MessageViewScope;
 
 #[derive(Default)]
 pub struct NoopSessionManagementService;
@@ -127,6 +128,15 @@ impl SessionManagementService for NoopSessionManagementService {
         _session_id: &str,
         _bot_uuid: &str,
         _mode: ParticipantMode,
+    ) -> Result<Session, SessionUseCaseError> {
+        Err(SessionUseCaseError::Conflict(NOT_SUPPORTED.into()))
+    }
+
+    async fn update_participant_message_view_scope(
+        &self,
+        _session_id: &str,
+        _actor_id: &str,
+        _message_view_scope: MessageViewScope,
     ) -> Result<Session, SessionUseCaseError> {
         Err(SessionUseCaseError::Conflict(NOT_SUPPORTED.into()))
     }

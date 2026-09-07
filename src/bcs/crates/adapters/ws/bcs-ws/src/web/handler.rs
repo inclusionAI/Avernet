@@ -8,6 +8,7 @@ use bcs_service_api::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -47,9 +48,13 @@ pub async fn handle_client_connection(
     let write_send_error = send_error_seen.clone();
     let write_handle = tokio::spawn(async move {
         while let Some(msg) = client_rx.recv().await {
+            let close_after_send = is_view_scope_changed_event(&msg);
             if ws_tx.send(Message::Text(msg.into())).await.is_err() {
                 debug!("WebSocket send error, connection likely closed");
                 write_send_error.store(true, Ordering::Relaxed);
+                break;
+            }
+            if close_after_send {
                 break;
             }
         }
@@ -215,7 +220,7 @@ pub async fn handle_client_connection(
         state.run_channels.unregister(run_id).await;
         debug!(client_id = client_id, run_id = %run_id, "Unregistered run channel on disconnect");
     }
-    for (session_id, conn_id) in &connection_state.subscribed_sessions {
+    for (session_id, conn_id, _) in &connection_state.subscribed_sessions {
         state.frontend_connections.unsubscribe(session_id, *conn_id).await;
         debug!(
             client_id = client_id,
@@ -247,6 +252,15 @@ pub async fn handle_client_connection(
             connected_at.elapsed(),
         )
         .await;
+}
+
+fn is_view_scope_changed_event(message: &str) -> bool {
+    serde_json::from_str::<Value>(message).is_ok_and(|frame| {
+        frame.get("type").and_then(Value::as_str) == Some("event")
+            && frame.get("event").and_then(Value::as_str) == Some("close")
+            && frame.pointer("/payload/reason").and_then(Value::as_str)
+                == Some("view_scope_changed")
+    })
 }
 
 fn is_ping_frame(text: &str) -> bool {

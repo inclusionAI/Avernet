@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use bcs_domain::{MessageAudience, MessageVisibilityDomain};
 use bcs_message_flow::{BcsMessageFlow, MemoryBotRunContextStore};
 use bcs_message_flow::task_store::{new_task_entry, TaskLedgerStatus, TASK_TTL_MS};
 use bcs_protocol::BcsFrame;
@@ -359,6 +360,184 @@ async fn bot_event_with_bcs_session_id_publishes_to_session_target() {
         .as_ref()
         .expect("bot event should carry run fallback");
     assert_eq!(fallback.session_id, "group-1:abcdef12");
+}
+
+#[tokio::test]
+async fn manager_worker_bot_events_publish_with_participant_safe_audiences() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    group.participants = vec![
+        Participant::bot("bot-manager", ParticipantRole::Manager),
+        Participant::bot("bot-worker", ParticipantRole::Worker),
+    ];
+    support.group.upsert(group).await.unwrap();
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    );
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-manager".to_string(),
+        run_id: "manager-chat".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "delta",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "public reply"}],
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-manager".to_string(),
+        run_id: "manager-thinking".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {"stream": "thinking", "delta": "internal reasoning"},
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "unmatched-worker-chat".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "delta",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "unmatched worker reply"}],
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.task_store
+        .register(new_task_entry(
+            "task-worker-chat".to_string(),
+            "group-1".to_string(),
+            Some("group-1:abcdef12".to_string()),
+            "bot-manager".to_string(),
+            "bot-worker".to_string(),
+            None,
+            1,
+            ChatResponseMode::AfterLastToolCall,
+        ))
+        .await;
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-worker".to_string(),
+        run_id: "task-worker-chat".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "delta",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "task worker reply"}],
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let commands = support.frontend_delivery.commands().await;
+    assert_eq!(commands.len(), 4);
+    assert_eq!(commands[0].visibility_domain, MessageVisibilityDomain::ManagerWorker);
+    assert_eq!(commands[0].audience, Some(MessageAudience::Public));
+    assert_eq!(commands[1].audience, Some(MessageAudience::FullOnly));
+    assert_eq!(commands[2].audience, Some(MessageAudience::FullOnly));
+    assert_eq!(
+        commands[3].audience,
+        Some(MessageAudience::directed(["bot-manager", "bot-worker"]).unwrap())
+    );
+}
+
+#[tokio::test]
+async fn state_machine_group_manager_chat_is_public_in_realtime_and_history() {
+    let support = support::FlowTestSupport::new_group_with_driver_and_observer().await;
+    let mut group = support.group.get("group-1").await.unwrap();
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.participants = vec![
+        Participant::bot("bot-manager", ParticipantRole::Manager),
+        Participant::bot("bot-worker", ParticipantRole::Worker),
+    ];
+    support.group.upsert(group).await.unwrap();
+    let repo = Arc::new(RecordingMessageRepo::default());
+    let flow = BcsMessageFlow::new(
+        support.group.clone(),
+        support.routing.clone(),
+        support.registry.clone(),
+        support.bot_delivery.clone(),
+        support.frontend_delivery.clone(),
+    )
+    .with_message_repo(repo.clone());
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-manager".to_string(),
+        run_id: "manager-announcement".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "chat.event".to_string(),
+        event_payload: json!({
+            "state": "delta",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "round result"}],
+            },
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    flow.handle_bot_event(BotEventCommand {
+        bot_id: "bot-manager".to_string(),
+        run_id: "manager-announcement".to_string(),
+        group_id: "group-1".to_string(),
+        event_type: "agent".to_string(),
+        event_payload: json!({
+            "stream": "thinking",
+            "data": {"stream": "thinking", "delta": "next round"},
+        }),
+        state: ChatEventState::Delta,
+        bcs_session_id: Some("group-1:abcdef12".to_string()),
+    })
+    .await
+    .unwrap();
+
+    let commands = support.frontend_delivery.commands().await;
+    assert_eq!(commands[0].visibility_domain, MessageVisibilityDomain::StateMachine);
+    assert_eq!(commands[0].audience, Some(MessageAudience::Public));
+    assert_eq!(commands[1].audience, Some(MessageAudience::FullOnly));
+
+    let messages = repo.appended().await;
+    let announcement = messages
+        .iter()
+        .find(|message| message.message_type == "chat")
+        .expect("manager announcement should be persisted");
+    assert_eq!(announcement.visibility_domain, MessageVisibilityDomain::StateMachine);
+    assert_eq!(announcement.audience, Some(MessageAudience::Public));
 }
 
 
@@ -1065,8 +1244,9 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
         Participant {
             bot_uuid: "bot-observer".to_string(),
             bot_name: Some("Observer".to_string()),
@@ -1074,8 +1254,9 @@ async fn bot_final_event_in_human_bot_dm_does_not_self_relay_to_sender_bot() {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::Auto),
-            tags: Vec::new(),
-        },
+        tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
+    },
     ];
     support.group.upsert(group).await.unwrap();
     let flow = BcsMessageFlow::new(
@@ -4519,6 +4700,7 @@ fn test_session(id: &str, group_id: &str, kind: SessionKind) -> Session {
         error_message: None,
         callback_status: Some("pending".to_string()),
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -4777,6 +4959,8 @@ impl bcs_service_api::port::repo::MessageRepoPort for RecordingMessageRepo {
             status: bcs_domain::PersistedMessageStatus::Normal,
             created_at: msg.created_at,
             run_id: msg.run_id.clone(),
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience.clone(),
         };
         self.appended.write().await.push(msg);
         Ok(persisted)
@@ -4864,6 +5048,8 @@ impl bcs_service_api::port::repo::MessageRepoPort for BlockingMessageRepo {
             status: bcs_domain::PersistedMessageStatus::Normal,
             created_at: msg.created_at,
             run_id: msg.run_id.clone(),
+            visibility_domain: Some(msg.visibility_domain),
+            audience: msg.audience.clone(),
         };
         self.appended.write().await.push(msg);
         Ok(persisted)

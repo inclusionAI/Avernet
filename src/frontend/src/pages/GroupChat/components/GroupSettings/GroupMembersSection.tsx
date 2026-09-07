@@ -129,6 +129,21 @@ const GroupMembersSection: React.FC<GroupMembersSectionProps> = ({
                 >
                   {member.actorKind === 'human' ? '用户' : 'Bot'}
                 </span>
+                {member.actorKind === 'human' && (
+                  <span
+                    className={cn(
+                      'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',
+                      member.messageViewScope === 'participant'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-orange-50 text-orange-600',
+                    )}
+                    title="群级默认消息视角；具体游戏以会话中的有效视角为准"
+                  >
+                    {member.messageViewScope === 'participant'
+                      ? '参与者视角'
+                      : '完整视角'}
+                  </span>
+                )}
                 <span
                   className={cn(
                     'inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium flex-shrink-0',

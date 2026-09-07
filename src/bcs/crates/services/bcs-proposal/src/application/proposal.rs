@@ -1,6 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     BotRegistryCoreService, CreateOrReactivateCommand, FriendCoreService, Group,
     GroupChatProposal, GroupCoreService, GroupProposalConfirmCommand, GroupProposalConfirmResult,
@@ -294,6 +295,7 @@ impl GroupProposalService for GroupProposalUseCases {
                 actor_kind: bot.actor_kind,
                 mode: Some(ParticipantMode::default_for(bot.actor_kind)),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             });
         }
 

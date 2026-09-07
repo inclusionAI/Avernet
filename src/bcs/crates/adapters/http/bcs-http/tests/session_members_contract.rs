@@ -13,6 +13,7 @@ use axum::{
 };
 use bcs_bot::BotCore;
 use bcs_auth_api::{AuthError, UserIdentityInfo};
+use bcs_domain::MessageViewScope;
 use bcs_group::GroupStore;
 use bcs_http::{
     router::build_router,
@@ -111,6 +112,81 @@ async fn update_session_participant_mode_rejects_unauthenticated_caller() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn human_can_atomically_update_own_session_mode_and_scope() {
+    let (app, sessions, _temp_dir) = owner_app("alice", "driver-bot").await;
+    {
+        let mut stored = sessions.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        let mut human = Participant::human("human_alice", ParticipantRole::Observer);
+        human.mode = Some(ParticipantMode::Absent);
+        session.participants.push(human);
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/sessions/group-1:00000001/members/human_alice")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "mode": "present",
+                        "message_view_scope": "participant"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = sessions.session.lock().await;
+    let human = stored
+        .as_ref()
+        .unwrap()
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .unwrap();
+    assert_eq!(human.mode, Some(ParticipantMode::Present));
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
+}
+
+#[tokio::test]
+async fn human_cannot_update_another_session_participant_scope() {
+    let (app, sessions, _temp_dir) = owner_app("bob", "driver-bot").await;
+    {
+        let mut stored = sessions.session.lock().await;
+        stored
+            .as_mut()
+            .unwrap()
+            .participants
+            .push(Participant::human("human_alice", ParticipantRole::Observer));
+    }
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/sessions/group-1:00000001/members/human_alice")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "mode": "present",
+                        "message_view_scope": "participant"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
 // ----- helpers -----
 
 async fn test_app(
@@ -143,6 +219,7 @@ async fn test_app(
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -155,6 +232,7 @@ async fn test_app(
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
         ],
     );
@@ -191,6 +269,7 @@ async fn test_app(
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         current_msg_seq: 0,
@@ -311,10 +390,12 @@ impl SessionManagementService for RecordingSessions {
     async fn add_participant(
         &self,
         _session_id: &str,
-        _participant: Participant,
+        participant: Participant,
     ) -> Result<Session, SessionUseCaseError> {
-        let s = self.session.lock().await.clone().unwrap();
-        Ok(s)
+        let mut stored = self.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        session.participants.push(participant);
+        Ok(session.clone())
     }
 
     async fn remove_participant(
@@ -329,11 +410,39 @@ impl SessionManagementService for RecordingSessions {
     async fn update_participant_mode(
         &self,
         _session_id: &str,
-        _bot_uuid: &str,
-        _mode: ParticipantMode,
+        bot_uuid: &str,
+        mode: ParticipantMode,
     ) -> Result<Session, SessionUseCaseError> {
-        let s = self.session.lock().await.clone().unwrap();
-        Ok(s)
+        let mut stored = self.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        let participant = session
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == bot_uuid)
+            .ok_or_else(|| SessionUseCaseError::NotFound(bot_uuid.to_string()))?;
+        participant.mode = Some(mode);
+        Ok(session.clone())
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        _session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> Result<Session, SessionUseCaseError> {
+        let mut stored = self.session.lock().await;
+        let session = stored.as_mut().unwrap();
+        let participant = session
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| SessionUseCaseError::NotFound(actor_id.to_string()))?;
+        participant.message_view_scope = message_view_scope;
+        if let Some(mode) = mode {
+            participant.mode = Some(mode);
+        }
+        Ok(session.clone())
     }
 
     async fn update_title(
@@ -468,6 +577,7 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
             Participant {
                 bot_uuid: "worker-bot".to_string(),
@@ -477,6 +587,7 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: MessageViewScope::Full,
             },
         ],
     );
@@ -501,6 +612,7 @@ async fn owner_app(staff: &str, owned_bot: &str) -> (axum::Router, Arc<Recording
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         current_msg_seq: 0,

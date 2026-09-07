@@ -21,9 +21,11 @@ use bcs_service_api::core::session::{
 };
 use bcs_service_api::port::repo::{
     AddSessionParticipantWithEvent, AppendEventRecord, ClaimSessionCallback,
-    CompleteSessionCallback, CompleteSessionWithEvent, CreateSessionWithEvent,
-    NewSessionParams, RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    CompleteSessionCallback, CompleteSessionWithEvent, CreateSessionWithEvent, NewSessionParams,
+    RemoveSessionParticipantWithEvent, SessionCallbackClaim, SessionRepoPort,
+    UpdateSessionParticipantMessageViewScopeWithEvent,
 };
+use bcs_service_api::types::MessageViewScope;
 use bcs_service_api::{
     GroupSessionMetricCount, GroupSessionMetricsSnapshotPort, Participant, ParticipantMode,
     ServiceError, ServiceResult, Session, SessionKind, SessionStatus,
@@ -34,12 +36,12 @@ use bcs_service_api::{
 // ---------------------------------------------------------------------------
 
 const INSERT_SQL: &str = "INSERT INTO bcs_group_sessions \
-    (session_id, group_id, session_title, env, status, session_kind, group_version, \
+    (session_id, group_id, session_title, env, status, session_kind, message_visibility_version, group_version, \
      caller_id, input, caller_principal, activation_count, \
      callback_status, callback_lease_token, callback_lease_owner, callback_lease_until_ms, \
      created_by, participants, completed_at, meta,
      current_msg_seq, participant_join_seq) \
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL)";
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, NULL, ?, ?, NULL, ?, 0, NULL)";
 
 // ---------------------------------------------------------------------------
 // Public type
@@ -55,18 +57,26 @@ pub struct MySqlSessionStore {
 
 impl MySqlSessionStore {
     pub fn new(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Mysql }
+        Self {
+            db,
+            env,
+            flavor: DbSqlFlavor::Mysql,
+        }
     }
 
     pub fn sqlite(db: Arc<dyn DbPlugin>, env: String) -> Self {
-        Self { db, env, flavor: DbSqlFlavor::Sqlite }
+        Self {
+            db,
+            env,
+            flavor: DbSqlFlavor::Sqlite,
+        }
     }
 
     /// Build the SELECT column list including flavor-aware timestamp expressions.
     fn select_cols(&self) -> String {
         format!(
             "session_id, group_id, session_title, group_version, env, status, \
-             session_kind, caller_id, input, output, error_message, callback_status, \
+             session_kind, message_visibility_version, caller_id, input, output, error_message, callback_status, \
              caller_principal, activation_count, created_by, participants, completed_at, meta, \
              current_msg_seq, participant_join_seq, \
              ({})*1000 AS gmt_create_ms, ({})*1000 AS gmt_modified_ms",
@@ -79,7 +89,7 @@ impl MySqlSessionStore {
     fn select_cols_prefixed(&self) -> String {
         format!(
             "s.session_id, s.group_id, s.session_title, s.group_version, s.env, \
-             s.status, s.session_kind, s.caller_id, s.input, s.output, s.error_message, \
+             s.status, s.session_kind, s.message_visibility_version, s.caller_id, s.input, s.output, s.error_message, \
              s.callback_status, s.caller_principal, s.activation_count, s.created_by, \
              s.participants, s.completed_at, s.meta, \
              s.current_msg_seq, s.participant_join_seq, \
@@ -120,6 +130,7 @@ impl MySqlSessionStore {
             env: Some(self.env.clone()),
             status: SessionStatus::Running,
             session_kind,
+            message_visibility_version: params.message_visibility_version,
             participants: params.participants.clone(),
             group_version: params.group_version,
             caller_id: params.caller_id.clone(),
@@ -150,8 +161,8 @@ impl MySqlSessionStore {
         let env = self.env.clone();
         let participants_for_side_table = params.participants.clone();
 
-        let mut steps: Vec<DbTransactionStep> = vec![DbTransactionStep::Execute(
-            DbStatement::with_params(
+        let mut steps: Vec<DbTransactionStep> =
+            vec![DbTransactionStep::Execute(DbStatement::with_params(
                 INSERT_SQL,
                 vec![
                     DbValue::from(session_id.as_str()),
@@ -160,6 +171,7 @@ impl MySqlSessionStore {
                     DbValue::from(env.as_str()),
                     DbValue::from("running"),
                     DbValue::from(kind_str),
+                    DbValue::I64(i64::from(params.message_visibility_version)),
                     group_version_value,
                     DbValue::from(params.caller_id.as_deref()),
                     input_value,
@@ -170,8 +182,7 @@ impl MySqlSessionStore {
                     DbValue::from(participants_json.as_str()),
                     meta_value,
                 ],
-            ),
-        )];
+            ))];
 
         // Same-transaction write to bcs_session_participants side table
         // so list_by_group JOIN queries can find participants set at creation.
@@ -216,10 +227,7 @@ fn json_to_db_value(v: &Option<serde_json::Value>) -> DbValue {
     }
 }
 
-fn validate_session_event_scope(
-    session: &Session,
-    event: &AppendEventRecord,
-) -> ServiceResult<()> {
+fn validate_session_event_scope(session: &Session, event: &AppendEventRecord) -> ServiceResult<()> {
     if event.event.scope.group_id.as_deref() != Some(session.group_id.as_str())
         || event.event.scope.session_id.as_deref() != Some(session.id.as_str())
     {
@@ -374,6 +382,15 @@ fn row_to_session(row: &DbRow) -> ServiceResult<Session> {
         .map_err(|e| ServiceError::InternalError(format!("session_kind: {e}")))?
         .unwrap_or_else(|| "chat".to_string());
     let session_kind = parse_session_kind(&kind_raw)?;
+    let message_visibility_version = db_get_column_opt::<i64>(row, "message_visibility_version")
+        .map_err(|e| ServiceError::InternalError(format!("message_visibility_version: {e}")))?
+        .unwrap_or(0);
+    let message_visibility_version = u8::try_from(message_visibility_version)
+        .ok()
+        .filter(|version| *version <= 1)
+        .ok_or_else(|| {
+            ServiceError::InternalError("invalid message_visibility_version".to_string())
+        })?;
 
     let participants_raw: Option<String> = db_get_column_opt(row, "participants")
         .map_err(|e| ServiceError::InternalError(format!("participants: {e}")))?;
@@ -402,6 +419,7 @@ fn row_to_session(row: &DbRow) -> ServiceResult<Session> {
             .map_err(|e| ServiceError::InternalError(format!("env: {e}")))?,
         status,
         session_kind,
+        message_visibility_version,
         participants,
         group_version,
         caller_id: db_get_column_opt(row, "caller_id")
@@ -452,7 +470,9 @@ impl GroupSessionMetricsSnapshotPort for MySqlSessionStore {
             ))
             .await
             .map_err(|e| {
-                ServiceError::InternalError(format!("group session metrics snapshot query failed: {e}"))
+                ServiceError::InternalError(format!(
+                    "group session metrics snapshot query failed: {e}"
+                ))
             })?;
 
         let mut counts = Vec::with_capacity(rows.len());
@@ -473,9 +493,7 @@ impl GroupSessionMetricsSnapshotPort for MySqlSessionStore {
                 ))
             })?;
             let count = u64::try_from(session_count).map_err(|e| {
-                ServiceError::InternalError(format!(
-                    "group session metrics count is invalid: {e}"
-                ))
+                ServiceError::InternalError(format!("group session metrics count is invalid: {e}"))
             })?;
             if count == 0 {
                 continue;
@@ -519,9 +537,8 @@ impl SessionRepoPort for MySqlSessionStore {
 
         // Auto-generate path: up to 3 retries on uk_session_id collision.
         for _ in 0..3 {
-            let id = new_session_id(group_id).map_err(|error| {
-                ServiceError::SessionInvalidParams(error.to_string())
-            })?;
+            let id = new_session_id(group_id)
+                .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
             match self
                 .insert_session(
                     id,
@@ -620,10 +637,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .db
             .query(DbStatement::with_params(
                 &sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
             ))
             .await
             .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
@@ -1076,14 +1090,10 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> ServiceResult<Vec<Session>> {
-        let mut conditions: Vec<String> = vec![
-            "s.env = ?".to_string(),
-            "s.group_id = ?".to_string(),
-        ];
-        let mut params: Vec<DbValue> = vec![
-            DbValue::from(self.env.as_str()),
-            DbValue::from(group_id),
-        ];
+        let mut conditions: Vec<String> =
+            vec!["s.env = ?".to_string(), "s.group_id = ?".to_string()];
+        let mut params: Vec<DbValue> =
+            vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
 
         if let Some(s) = status {
             let status_str = match s {
@@ -1147,10 +1157,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .db
             .query(DbStatement::with_params(
                 sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(group_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)],
             ))
             .await
         {
@@ -1182,14 +1189,10 @@ impl SessionRepoPort for MySqlSessionStore {
         title_contains: Option<&str>,
         participant_id: Option<&str>,
     ) -> ServiceResult<u64> {
-        let mut conditions: Vec<String> = vec![
-            "s.env = ?".to_string(),
-            "s.group_id = ?".to_string(),
-        ];
-        let mut params: Vec<DbValue> = vec![
-            DbValue::from(self.env.as_str()),
-            DbValue::from(group_id),
-        ];
+        let mut conditions: Vec<String> =
+            vec!["s.env = ?".to_string(), "s.group_id = ?".to_string()];
+        let mut params: Vec<DbValue> =
+            vec![DbValue::from(self.env.as_str()), DbValue::from(group_id)];
 
         if let Some(s) = status {
             let status_str = match s {
@@ -1225,9 +1228,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .query(DbStatement::with_params(&sql, params))
             .await
             .map_err(|e| {
-                ServiceError::InternalError(format!(
-                    "count sessions for Group '{group_id}': {e}"
-                ))
+                ServiceError::InternalError(format!("count sessions for Group '{group_id}': {e}"))
             })?;
         let total = rows
             .into_iter()
@@ -1281,10 +1282,7 @@ impl SessionRepoPort for MySqlSessionStore {
              AND callback_lease_token IS NOT NULL \
              AND (callback_lease_until_ms IS NULL OR callback_lease_until_ms <= ?)"
         );
-        let mut params = vec![
-            DbValue::from(self.env.as_str()),
-            DbValue::U64(now_ms),
-        ];
+        let mut params = vec![DbValue::from(self.env.as_str()), DbValue::U64(now_ms)];
         if let Some(after_session_id) = after_session_id {
             sql.push_str(" AND session_id > ?");
             params.push(DbValue::from(after_session_id));
@@ -1297,9 +1295,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .query(DbStatement::with_params(&sql, params))
             .await
             .map_err(|error| {
-                ServiceError::InternalError(format!(
-                    "list recoverable Session callbacks: {error}"
-                ))
+                ServiceError::InternalError(format!("list recoverable Session callbacks: {error}"))
             })?;
         rows.iter().map(row_to_session).collect()
     }
@@ -1330,7 +1326,11 @@ impl SessionRepoPort for MySqlSessionStore {
         let mut current = row_to_session(&row)?;
 
         // Idempotent: if bot already in list, return current state unchanged.
-        if current.participants.iter().any(|p| p.bot_uuid == participant.bot_uuid) {
+        if current
+            .participants
+            .iter()
+            .any(|p| p.bot_uuid == participant.bot_uuid)
+        {
             return Ok(current);
         }
         let group_id = current.group_id.clone();
@@ -1384,7 +1384,8 @@ impl SessionRepoPort for MySqlSessionStore {
              VALUES (?, ?, ?, ?, ?, {}) \
              {}",
             self.flavor.now(),
-            self.flavor.on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
+            self.flavor
+                .on_conflict_nothing(&["env", "session_id", "bot_uuid"]),
         );
         self.db
             .execute(DbStatement::with_params(
@@ -1443,7 +1444,10 @@ impl SessionRepoPort for MySqlSessionStore {
             .and_then(serde_json::Value::as_object)
             .cloned()
             .unwrap_or_default();
-        join_map.insert(bot_uuid.clone(), serde_json::json!(candidate.current_msg_seq));
+        join_map.insert(
+            bot_uuid.clone(),
+            serde_json::json!(candidate.current_msg_seq),
+        );
         let join_seq_json = serde_json::Value::Object(join_map);
         candidate.participant_join_seq = Some(join_seq_json.clone());
         candidate.participants.push(command.participant);
@@ -1519,11 +1523,7 @@ impl SessionRepoPort for MySqlSessionStore {
         Ok(candidate)
     }
 
-    async fn remove_participant(
-        &self,
-        session_id: &str,
-        bot_uuid: &str,
-    ) -> ServiceResult<Session> {
+    async fn remove_participant(&self, session_id: &str, bot_uuid: &str) -> ServiceResult<Session> {
         // TODO(phase-2): wrap in a DbPlugin transaction once supported.
         let select_cols = self.select_cols();
         let select_sql = format!(
@@ -1740,6 +1740,227 @@ impl SessionRepoPort for MySqlSessionStore {
         Ok(current)
     }
 
+    async fn update_participant_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let select_cols = self.select_cols();
+        let select_sql = format!(
+            "SELECT {select_cols} FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? LIMIT 1"
+        );
+        let rows = self
+            .db
+            .query(DbStatement::with_params(
+                &select_sql,
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        let row = rows
+            .into_iter()
+            .next()
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        let mut current = row_to_session(&row)?;
+        let participant = current
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {actor_id} not in session {session_id}"
+                ))
+            })?;
+        if !message_view_scope.is_valid_for(participant.actor_kind) {
+            return Err(ServiceError::SessionInvalidParams(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
+        participant.message_view_scope = message_view_scope;
+        current.updated_at = current_millis();
+        let participants_json = serde_json::to_string(&current.participants).map_err(|error| {
+            ServiceError::SessionInvalidParams(format!("participants: {error}"))
+        })?;
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions SET participants = ?, {} \
+             WHERE env = ? AND session_id = ?",
+            self.flavor.set_modified_now(),
+        );
+        self.db
+            .execute(DbStatement::with_params(
+                &update_sql,
+                vec![
+                    DbValue::from(participants_json.as_str()),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(session_id),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        Ok(current)
+    }
+
+    async fn update_participant_mode_and_message_view_scope(
+        &self,
+        session_id: &str,
+        actor_id: &str,
+        mode: Option<ParticipantMode>,
+        message_view_scope: MessageViewScope,
+    ) -> ServiceResult<Session> {
+        let mut current = self
+            .get(session_id)
+            .await
+            .ok_or_else(|| ServiceError::SessionNotFound(session_id.to_string()))?;
+        let expected_participants_json = serde_json::to_string(&current.participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let participant = current
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {actor_id} not in session {session_id}"
+                ))
+            })?;
+        if !message_view_scope.is_valid_for(participant.actor_kind)
+            || mode.is_some_and(|mode| !mode.is_valid_for(participant.actor_kind))
+        {
+            return Err(ServiceError::SessionInvalidParams(
+                "Participant mode or message_view_scope is invalid for the actor kind".to_string(),
+            ));
+        }
+        participant.message_view_scope = message_view_scope;
+        if let Some(mode) = mode {
+            participant.mode = Some(mode);
+        }
+        current.updated_at = current_millis();
+        let participants_json = serde_json::to_string(&current.participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions SET participants = ?, {} \
+             WHERE env = ? AND session_id = ? AND participants = ?",
+            self.flavor.set_modified_now(),
+        );
+        let result = self
+            .db
+            .execute(DbStatement::with_params(
+                &update_sql,
+                vec![
+                    DbValue::from(participants_json.as_str()),
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(session_id),
+                    DbValue::from(expected_participants_json.as_str()),
+                ],
+            ))
+            .await
+            .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
+        if result.affected_rows != 1 {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{session_id}' participants changed during message-view scope update"
+            )));
+        }
+        Ok(current)
+    }
+
+    async fn update_participant_message_view_scope_with_event(
+        &self,
+        command: UpdateSessionParticipantMessageViewScopeWithEvent,
+    ) -> ServiceResult<Session> {
+        let mut candidate = self
+            .get(&command.session_id)
+            .await
+            .ok_or_else(|| ServiceError::SessionNotFound(command.session_id.clone()))?;
+        if serde_json::to_value(&candidate.participants).ok()
+            != serde_json::to_value(&command.expected_participants).ok()
+        {
+            return Err(ServiceError::Conflict(format!(
+                "Session '{}' participants changed during scope update",
+                command.session_id
+            )));
+        }
+        let participant = candidate
+            .participants
+            .iter_mut()
+            .find(|participant| participant.bot_uuid == command.actor_id)
+            .ok_or_else(|| {
+                ServiceError::SessionInvalidParams(format!(
+                    "participant {} not in session {}",
+                    command.actor_id, command.session_id
+                ))
+            })?;
+        if !command
+            .message_view_scope
+            .is_valid_for(participant.actor_kind)
+        {
+            return Err(ServiceError::SessionInvalidParams(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
+        participant.message_view_scope = command.message_view_scope;
+        if let Some(mode) = command.mode {
+            if !mode.is_valid_for(participant.actor_kind) {
+                return Err(ServiceError::SessionInvalidParams(
+                    "Participant mode is invalid for the actor kind".to_string(),
+                ));
+            }
+            participant.mode = Some(mode);
+        }
+        candidate.updated_at = current_millis();
+        validate_session_event_scope(&candidate, &command.event)?;
+
+        let expected_json = serde_json::to_string(&command.expected_participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let participants_json = serde_json::to_string(&candidate.participants)
+            .map_err(|error| ServiceError::SessionInvalidParams(error.to_string()))?;
+        let lock_sql = format!(
+            "SELECT session_id FROM bcs_group_sessions \
+             WHERE env = ? AND session_id = ? AND participants = ?{}",
+            transaction_lock_suffix(self.flavor),
+        );
+        let update_sql = format!(
+            "UPDATE bcs_group_sessions SET participants = ?, {} \
+             WHERE env = ? AND session_id = ? AND participants = ?",
+            self.flavor.set_modified_now(),
+        );
+        let mut steps = vec![
+            DbTransactionStep::Query(DbStatement::with_params(
+                lock_sql,
+                vec![
+                    DbValue::from(self.env.as_str()),
+                    DbValue::from(command.session_id.as_str()),
+                    DbValue::from(expected_json.as_str()),
+                ],
+            )),
+            DbTransactionStep::Execute(DbStatement::with_transaction_params(
+                update_sql,
+                vec![
+                    DbTransactionParam::value(participants_json.as_str()),
+                    DbTransactionParam::value(self.env.as_str()),
+                    DbTransactionParam::query_result(0, 0, "session_id"),
+                    DbTransactionParam::value(expected_json.as_str()),
+                ],
+            )),
+        ];
+        let event_plan = EventAppendTransactionPlan::build(
+            &command.event,
+            self.flavor,
+            steps.len(),
+        )
+        .map_err(|error| {
+            ServiceError::InternalError(format!("prepare Session participant scope Event: {error}"))
+        })?;
+        steps.extend(event_plan.steps);
+        self.db.transaction(steps).await.map_err(|error| {
+            ServiceError::Conflict(format!(
+                "Session '{}' changed during participant scope update: {error}",
+                command.session_id
+            ))
+        })?;
+        Ok(candidate)
+    }
+
     async fn list_group_ids_by_session_participant(&self, bot_uuid: &str) -> Vec<String> {
         let sql = "SELECT DISTINCT group_id FROM bcs_session_participants \
                    WHERE env = ? AND bot_uuid = ?";
@@ -1747,10 +1968,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .db
             .query(DbStatement::with_params(
                 sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(bot_uuid),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)],
             ))
             .await
         {
@@ -1758,11 +1976,7 @@ impl SessionRepoPort for MySqlSessionStore {
             Err(_) => return Vec::new(),
         };
         rows.iter()
-            .filter_map(|row| {
-                db_get_column_opt::<String>(row, "group_id")
-                    .ok()
-                    .flatten()
-            })
+            .filter_map(|row| db_get_column_opt::<String>(row, "group_id").ok().flatten())
             .collect()
     }
 
@@ -1776,10 +1990,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .db
             .query(DbStatement::with_params(
                 sql,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(bot_uuid),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(bot_uuid)],
             ))
             .await
             .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
@@ -1799,10 +2010,7 @@ impl SessionRepoPort for MySqlSessionStore {
         self.db
             .execute(DbStatement::with_params(
                 del_participants,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
             ))
             .await
             .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
@@ -1812,10 +2020,7 @@ impl SessionRepoPort for MySqlSessionStore {
             .db
             .execute(DbStatement::with_params(
                 del_session,
-                vec![
-                    DbValue::from(self.env.as_str()),
-                    DbValue::from(session_id),
-                ],
+                vec![DbValue::from(self.env.as_str()), DbValue::from(session_id)],
             ))
             .await
             .map_err(|error| ServiceError::InternalError(format!("session db: {error}")))?;
@@ -1950,12 +2155,8 @@ impl SessionRepoPort for MySqlSessionStore {
         // fractional seconds — decodes cleanly to i64 instead of failing
         // row_to_session. SQLite's strftime already yields INTEGER.
         let collected_at_expr = match self.flavor {
-            DbSqlFlavor::Mysql => format!(
-                "CAST((UNIX_TIMESTAMP(sp.collected_at))*1000 AS SIGNED)"
-            ),
-            DbSqlFlavor::Sqlite => format!(
-                "CAST(strftime('%s', sp.collected_at) AS INTEGER)*1000"
-            ),
+            DbSqlFlavor::Mysql => format!("CAST((UNIX_TIMESTAMP(sp.collected_at))*1000 AS SIGNED)"),
+            DbSqlFlavor::Sqlite => format!("CAST(strftime('%s', sp.collected_at) AS INTEGER)*1000"),
         };
         let select_cols = format!(
             "{}, {} AS collected_at_ms",
@@ -1982,11 +2183,7 @@ impl SessionRepoPort for MySqlSessionStore {
         rows.iter().filter_map(|r| row_to_session(r).ok()).collect()
     }
 
-    async fn collected_at_map(
-        &self,
-        session_ids: &[&str],
-        bot_uuid: &str,
-    ) -> Vec<(String, u64)> {
+    async fn collected_at_map(&self, session_ids: &[&str], bot_uuid: &str) -> Vec<(String, u64)> {
         if session_ids.is_empty() {
             return Vec::new();
         }

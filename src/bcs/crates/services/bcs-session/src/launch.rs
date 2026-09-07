@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use bcs_domain::MessageViewScope;
 use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::{
     ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
@@ -204,6 +205,32 @@ impl SessionLaunchApplication {
             }
         }
 
+        let human_message_view_scope = match &request.caller {
+            SessionCaller::Human { actor_id, .. } => request
+                .human_message_view_scope
+                .or_else(|| {
+                    group
+                        .participants
+                        .iter()
+                        .find(|participant| {
+                            participant.actor_kind == ActorKind::Human
+                                && participant.bot_uuid == *actor_id
+                        })
+                        .map(|participant| participant.message_view_scope)
+                })
+                .unwrap_or_default(),
+            SessionCaller::Bot { .. } => MessageViewScope::Full,
+        };
+
+        if let SessionCaller::Human { actor_id, .. } = &request.caller
+            && request.human_message_view_scope.is_some()
+            && let Some(participant) = participants.iter_mut().find(|participant| {
+                participant.actor_kind == ActorKind::Human && participant.bot_uuid == *actor_id
+            })
+        {
+            participant.message_view_scope = human_message_view_scope;
+        }
+
         if group.group_strategy == GroupStrategy::StateMachine
             && kind == SessionKind::ServiceInvocation
             && let SessionCaller::Human {
@@ -221,6 +248,7 @@ impl SessionLaunchApplication {
                 actor_kind: ActorKind::Human,
                 mode: Some(ParticipantMode::Present),
                 tags: Vec::new(),
+                message_view_scope: human_message_view_scope,
             });
         }
 
@@ -261,6 +289,11 @@ impl SessionLaunchApplication {
                     ParticipantMode::Auto
                 }),
                 tags: Vec::new(),
+                message_view_scope: if is_human {
+                    human_message_view_scope
+                } else {
+                    MessageViewScope::Full
+                },
             });
         }
 
@@ -271,8 +304,7 @@ impl SessionLaunchApplication {
         let deferred_after_create = (explicit_human_creator
             && !participants
                 .iter()
-                .any(|participant| participant.bot_uuid == creator)
-        )
+                .any(|participant| participant.bot_uuid == creator))
         .then(|| Participant {
             bot_uuid: creator.to_string(),
             bot_name: request.caller.display_name().map(str::to_string),
@@ -281,6 +313,7 @@ impl SessionLaunchApplication {
             actor_kind: ActorKind::Human,
             mode: Some(ParticipantMode::Present),
             tags: Vec::new(),
+            message_view_scope: human_message_view_scope,
         });
 
         Ok(BuiltParticipants {
@@ -504,9 +537,7 @@ impl SessionLaunchService for SessionLaunchApplication {
             .map_err(map_session_error)?;
         let created = outcome.created;
         let mut session = outcome.session;
-        if created
-            && let Some(participant) = prepared.deferred_after_create.clone()
-        {
+        if created && let Some(participant) = prepared.deferred_after_create.clone() {
             session = self
                 .sessions
                 .add_participant(&session.id, participant)

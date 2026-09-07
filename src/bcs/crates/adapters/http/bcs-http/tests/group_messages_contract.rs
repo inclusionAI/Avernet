@@ -14,25 +14,22 @@ use bcs_http::{
 use bcs_protocol::{BcsFrame, BotDeliveryKind, FrontendDeliveryKind, FrontendDeliveryTarget};
 use bcs_service_api::{
     BotCapabilities, BotDeliveryCommand, BotDeliveryPort, BotDeliveryResult, BotDeliveryTarget,
-    BotEventCommand, BotEventOutcome, BotRegistryCoreService, BotSendResult, CallerContext, ChatAbortCommand,
-    ChatAbortOutcome, CancelStateMachineRunCommand, CollaborationDefinition,
+    BotEventCommand, BotEventOutcome, BotRegistryCoreService, BotSendResult, CallerContext,
+    CancelStateMachineRunCommand, ChatAbortCommand, ChatAbortOutcome, CollaborationDefinition,
     CollaborationRuntimeError, CollaborationRuntimeService, ConfigureGroupRuntimeCommand,
     ConfigureGroupRuntimeOutcome, DeliveryType, FrontendDeliveryCommand, FrontendDeliveryPort,
     FrontendDeliveryResult, Group, GroupCallbackCommand, GroupCallbackOutcome, GroupChatCommand,
     GroupChatOutcome, GroupCoreService, GroupHistoryCommand, GroupHistoryResult, GroupMessage,
-    GroupMessageHistoryService, GroupMessageType, GroupStatus, GroupUseCaseError,
-    GroupStrategy, HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome,
-    MessageDeliveryResult, MessageFlowService, MessageRole, Participant, ParticipantRole,
-    ParticipantMode,
-    SessionHistoryCommand, SessionHistoryResult,
+    GroupMessageHistoryService, GroupMessageType, GroupStatus, GroupStrategy, GroupUseCaseError,
+    HandleBotTerminalEventCommand, HandleBotTerminalEventOutcome, MessageDeliveryResult,
+    MessageFlowService, MessageRole, Participant, ParticipantMode, ParticipantRole,
     PersistentGroupSendCommand, PersistentGroupSendOutcome, RouteAndSendResult, RoutingCoreService,
-    RoutingDecision, RoutingTarget, ServiceError, ServiceResult, Session, SessionKind,
-    SessionManagementService, SessionStatus, SessionUseCaseError, SystemMessageEvent,
-    SystemMessageService, TaskCompleteCommand,
-    TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome, TaskRunAliasRegistration,
-    WebSendCommand, WebSendOutcome,
-    StartStateMachineRunCommand, StartStateMachineRunOutcome, StateMachineDeliveryCorrelation,
-    StateMachineRunView,
+    RoutingDecision, RoutingTarget, ServiceError, ServiceResult, Session, SessionHistoryCommand,
+    SessionHistoryResult, SessionKind, SessionManagementService, SessionStatus,
+    SessionUseCaseError, StartStateMachineRunCommand, StartStateMachineRunOutcome,
+    StateMachineDeliveryCorrelation, StateMachineRunView, SystemMessageEvent, SystemMessageService,
+    TaskCompleteCommand, TaskCompleteOutcome, TaskDispatchCommand, TaskDispatchOutcome,
+    TaskRunAliasRegistration, WebSendCommand, WebSendOutcome,
 };
 use bcs_services_container::Services;
 use bcs_test_support::NoopFriendCoreService;
@@ -95,7 +92,9 @@ fn static_auth_chain(staff_no: &str, nick_name: &str) -> Arc<AuthPluginChain> {
         user_name: Some(nick_name.to_string()),
         ..Default::default()
     };
-    Arc::new(AuthPluginChain::new(vec![Box::new(StaticAuthPlugin::with_principal(principal))]))
+    Arc::new(AuthPluginChain::new(vec![Box::new(
+        StaticAuthPlugin::with_principal(principal),
+    )]))
 }
 
 #[derive(Default)]
@@ -369,7 +368,9 @@ impl SessionManagementService for StaticSessionManagement {
     ) -> Result<Vec<String>, SessionUseCaseError> {
         unimplemented!("not needed by this test")
     }
-    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> { Ok(false) }
+    async fn delete(&self, _session_id: &str) -> Result<bool, SessionUseCaseError> {
+        Ok(false)
+    }
 }
 
 fn test_session(session_id: &str, group_id: &str, participants: Vec<Participant>) -> Session {
@@ -397,6 +398,7 @@ fn test_session_with_status(
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -653,6 +655,7 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
 
 struct RecordingStateMachineHistoryRuntime {
     calls: Mutex<Vec<(String, u64, Option<u64>)>>,
+    human_views: Mutex<Vec<bcs_domain::HumanMessageView>>,
     result: SessionHistoryResult,
 }
 
@@ -683,6 +686,18 @@ impl CollaborationRuntimeService for RecordingStateMachineHistoryRuntime {
             .await
             .push((session_id.to_string(), limit, before));
         Ok(Some(self.result.clone()))
+    }
+
+    async fn get_state_machine_session_history_for_view(
+        &self,
+        session_id: &str,
+        limit: u64,
+        before: Option<u64>,
+        human_view: bcs_domain::HumanMessageView,
+    ) -> Result<Option<SessionHistoryResult>, CollaborationRuntimeError> {
+        self.human_views.lock().await.push(human_view);
+        self.get_state_machine_session_history(session_id, limit, before)
+            .await
     }
 
     async fn cancel_state_machine_run(
@@ -794,10 +809,7 @@ async fn build_group_app_with_identity_and_session_status(
             .unwrap();
     }
     registry
-        .store_token_mapping(
-            "intruder-token".to_string(),
-            "intruder-bot".to_string(),
-        )
+        .store_token_mapping("intruder-token".to_string(), "intruder-bot".to_string())
         .await;
     registry
         .save_created_by("owner-bot", "123", true)
@@ -885,9 +897,9 @@ async fn build_group_app_with_identity_and_session_status(
 
 #[tokio::test]
 async fn group_chat_missing_group_preserves_legacy_404_before_auth() {
-    let (app, ..) = build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(
-        Arc::new(AuthPluginChain::new(vec![])),
-    )))
+    let (app, ..) = build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(Arc::new(
+        AuthPluginChain::new(vec![]),
+    ))))
     .await;
 
     let response = app
@@ -917,8 +929,16 @@ async fn group_chat_missing_group_preserves_legacy_404_before_auth() {
 
 #[tokio::test]
 async fn session_messages_without_identity_returns_unauthorized() {
-    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
-        build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        _message_flow,
+        group_message_history,
+    ) = build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
 
     let response = app
         .oneshot(
@@ -936,9 +956,17 @@ async fn session_messages_without_identity_returns_unauthorized() {
 }
 
 #[tokio::test]
-async fn session_messages_authenticated_human_uses_history_service_without_view_bot() {
-    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
-        build_group_app().await;
+async fn session_messages_authenticated_human_defaults_to_its_own_view() {
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        _message_flow,
+        group_message_history,
+    ) = build_group_app().await;
 
     let response = app
         .oneshot(
@@ -954,7 +982,7 @@ async fn session_messages_authenticated_human_uses_history_service_without_view_
     assert_eq!(response.status(), StatusCode::OK);
     let session_calls = group_message_history.session_calls.lock().await;
     assert_eq!(session_calls.len(), 1);
-    assert_eq!(session_calls[0].view_bot_id, None);
+    assert_eq!(session_calls[0].view_bot_id, Some("human_123".to_string()));
     assert!(matches!(
         &session_calls[0].caller,
         CallerContext::Human(human)
@@ -964,11 +992,19 @@ async fn session_messages_authenticated_human_uses_history_service_without_view_
 
 #[tokio::test]
 async fn session_messages_non_session_human_returns_forbidden() {
-    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
-        build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(static_auth_chain(
-            "456", "Intruder",
-        ))))
-        .await;
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        _message_flow,
+        group_message_history,
+    ) = build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(static_auth_chain(
+        "456", "Intruder",
+    ))))
+    .await;
 
     let response = app
         .oneshot(
@@ -987,8 +1023,16 @@ async fn session_messages_non_session_human_returns_forbidden() {
 
 #[tokio::test]
 async fn session_messages_non_participant_bot_token_returns_forbidden() {
-    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
-        build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        _message_flow,
+        group_message_history,
+    ) = build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
 
     let response = app
         .oneshot(
@@ -1008,8 +1052,16 @@ async fn session_messages_non_participant_bot_token_returns_forbidden() {
 
 #[tokio::test]
 async fn session_messages_uses_history_service() {
-    let (app, _group_store, _routing, _bot_delivery, _frontend_delivery, _bot_request, _message_flow, group_message_history) =
-        build_group_app().await;
+    let (
+        app,
+        _group_store,
+        _routing,
+        _bot_delivery,
+        _frontend_delivery,
+        _bot_request,
+        _message_flow,
+        group_message_history,
+    ) = build_group_app().await;
 
     let response = app
         .oneshot(
@@ -1230,11 +1282,13 @@ async fn session_chat_does_not_auto_join_authenticated_bot() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap();
-    assert!(json["participants"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|participant| participant["bot_uuid"] != "intruder-bot"));
+    assert!(
+        json["participants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|participant| participant["bot_uuid"] != "intruder-bot")
+    );
 }
 
 async fn post_session_chat_with_flow_error(error: ServiceError) -> (StatusCode, Value) {
@@ -1332,6 +1386,7 @@ async fn state_machine_session_messages_use_runtime_history() {
     let group_message_history = Arc::new(RecordingGroupMessageHistory::default());
     let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
         calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
         result: SessionHistoryResult {
             session_id: session.id.clone(),
             messages: vec![GroupMessage {
@@ -1357,11 +1412,9 @@ async fn state_machine_session_messages_use_runtime_history() {
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.group_message_history = group_message_history.clone();
     services.collaboration_runtime = collaboration_runtime.clone();
-    let app = build_router(
-        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(
-            static_auth_chain("123", "Owner"),
-        ))),
-    );
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
+    )));
 
     let response = app
         .oneshot(
@@ -1387,7 +1440,164 @@ async fn state_machine_session_messages_use_runtime_history() {
         "state-machine sessions must not fetch history from a single driver bot"
     );
     let calls = collaboration_runtime.calls.lock().await;
-    assert_eq!(calls.as_slice(), &[("sm-group:abcdef12".to_string(), 20, None)]);
+    assert_eq!(
+        calls.as_slice(),
+        &[("sm-group:abcdef12".to_string(), 20, None)]
+    );
+    drop(calls);
+    let views = collaboration_runtime.human_views.lock().await;
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].actor_id, "human_123");
+    assert_eq!(views[0].scope, bcs_domain::MessageViewScope::Full);
+}
+
+#[tokio::test]
+async fn participant_session_history_merges_own_legacy_one_shot_response_snapshot() {
+    let mut group = Group::new(
+        "mw-group",
+        "driver-bot",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+
+    let mut human = Participant::human("human_123", ParticipantRole::Observer);
+    human.message_view_scope = bcs_domain::MessageViewScope::Participant;
+    let session = test_session(
+        "mw-group:abcdef12",
+        "mw-group",
+        vec![
+            Participant::bot("driver-bot", ParticipantRole::Driver),
+            human,
+        ],
+    );
+    let group_message_history = Arc::new(RecordingGroupMessageHistory::default());
+    let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: vec![GroupMessage {
+                id: "run-1:review:0:1-output".to_string(),
+                timestamp: 84,
+                sender: "human_123".to_string(),
+                content: "通过".to_string(),
+                message_type: GroupMessageType::Bot,
+                bot_name: None,
+                role: MessageRole::User,
+                history_meta: None,
+                metadata: Some(serde_json::json!({
+                    "state_machine": {"node_id": "review", "event": "output"}
+                })),
+                run_id: "run-1".to_string(),
+                attachments: None,
+            }],
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.group_message_history = group_message_history.clone();
+    services.collaboration_runtime = collaboration_runtime.clone();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/mw-group:abcdef12/messages?limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().map(Vec::len), Some(2));
+    assert_eq!(json[0]["id"], "run-1:review:0:1-output");
+    assert_eq!(json[0]["sender"], "human_123");
+    assert_eq!(json[0]["content"], "通过");
+    assert_eq!(json[0]["role"], "user");
+    assert_eq!(json[1]["id"], "hist-1");
+    assert_eq!(group_message_history.session_calls.lock().await.len(), 1);
+    assert_eq!(collaboration_runtime.calls.lock().await.len(), 1);
+    let views = collaboration_runtime.human_views.lock().await;
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].actor_id, "human_123");
+    assert_eq!(views[0].scope, bcs_domain::MessageViewScope::Participant);
+}
+
+#[tokio::test]
+async fn legacy_state_machine_session_allows_participant_human_history() {
+    let mut group = Group::new(
+        "sm-group-legacy",
+        "driver-bot",
+        vec![Participant::bot("driver-bot", ParticipantRole::Driver)],
+    );
+    group.group_strategy = GroupStrategy::StateMachine;
+    group.status = GroupStatus::Active;
+    let group_store = Arc::new(GroupStore::new());
+    group_store.upsert(group).await.unwrap();
+
+    let mut human = Participant::human("human_123", ParticipantRole::Observer);
+    human.message_view_scope = bcs_domain::MessageViewScope::Participant;
+    let mut session = test_session(
+        "sm-group-legacy:abcdef12",
+        "sm-group-legacy",
+        vec![
+            Participant::bot("driver-bot", ParticipantRole::Driver),
+            human,
+        ],
+    );
+    session.message_visibility_version = 0;
+    let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
+        calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
+        result: SessionHistoryResult {
+            session_id: session.id.clone(),
+            messages: vec![],
+            limit: 20,
+            before: None,
+            next_before: None,
+        },
+    });
+    let mut services = Services::noop();
+    services.group = group_store;
+    services.session_management = Arc::new(StaticSessionManagement::new(session));
+    services.collaboration_runtime = collaboration_runtime.clone();
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("123", "Owner")),
+    )));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/sessions/sm-group-legacy:abcdef12/messages?limit=20")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json, serde_json::json!([]));
+    assert_eq!(collaboration_runtime.calls.lock().await.len(), 1);
+    let views = collaboration_runtime.human_views.lock().await;
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].actor_id, "human_123");
+    assert_eq!(views[0].scope, bcs_domain::MessageViewScope::Participant);
 }
 
 #[tokio::test]
@@ -1409,6 +1619,7 @@ async fn state_machine_session_messages_non_session_human_returns_forbidden() {
     );
     let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
         calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
         result: SessionHistoryResult {
             session_id: session.id.clone(),
             messages: vec![],
@@ -1421,11 +1632,9 @@ async fn state_machine_session_messages_non_session_human_returns_forbidden() {
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.collaboration_runtime = collaboration_runtime.clone();
-    let app = build_router(
-        HttpAppState::new(services).with_user_identity(Arc::new(ChainUserIdentityPort::new(
-            static_auth_chain("456", "Intruder"),
-        ))),
-    );
+    let app = build_router(HttpAppState::new(services).with_user_identity(Arc::new(
+        ChainUserIdentityPort::new(static_auth_chain("456", "Intruder")),
+    )));
 
     let response = app
         .oneshot(
@@ -1469,10 +1678,7 @@ async fn state_machine_session_messages_group_only_bot_returns_forbidden() {
         .await
         .unwrap();
     registry
-        .store_token_mapping(
-            "intruder-token".to_string(),
-            "intruder-bot".to_string(),
-        )
+        .store_token_mapping("intruder-token".to_string(), "intruder-bot".to_string())
         .await;
 
     let mut group = Group::new(
@@ -1495,6 +1701,7 @@ async fn state_machine_session_messages_group_only_bot_returns_forbidden() {
     );
     let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
         calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
         result: SessionHistoryResult {
             session_id: session.id.clone(),
             messages: vec![],
@@ -1508,9 +1715,8 @@ async fn state_machine_session_messages_group_only_bot_returns_forbidden() {
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.collaboration_runtime = collaboration_runtime.clone();
-    let app = build_router(
-        HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)),
-    );
+    let app =
+        build_router(HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)));
 
     let response = app
         .oneshot(
@@ -1547,6 +1753,7 @@ async fn state_machine_session_messages_without_identity_returns_unauthorized() 
     );
     let collaboration_runtime = Arc::new(RecordingStateMachineHistoryRuntime {
         calls: Mutex::new(Vec::new()),
+        human_views: Mutex::new(Vec::new()),
         result: SessionHistoryResult {
             session_id: session.id.clone(),
             messages: vec![],
@@ -1559,9 +1766,8 @@ async fn state_machine_session_messages_without_identity_returns_unauthorized() 
     services.group = group_store;
     services.session_management = Arc::new(StaticSessionManagement::new(session));
     services.collaboration_runtime = collaboration_runtime.clone();
-    let app = build_router(
-        HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)),
-    );
+    let app =
+        build_router(HttpAppState::new(services).with_user_identity(Arc::new(NoUserIdentity)));
 
     let response = app
         .oneshot(

@@ -27,23 +27,25 @@ use bcs_service_api::application::v1::{
     message::{ListSessionMessages, SessionMessageService},
     require_authenticated_user, require_human, select_principal,
     session::{
-        AddSessionParticipant, CollectSession, CompleteSession, CreateSession, CreateSessionOutcome,
-        DeleteSession, DeleteSessionParticipant, GetSession, ListSessions, SessionCollectionResult,
-        SessionCompletionResult, SessionDetail, SessionParticipant, SessionService,
-        SessionStatus as V1SessionStatus, SessionSummary, UncollectSession, UpdateSession,
-        UpdateSessionParticipant,
+        AddSessionParticipant, CollectSession, CompleteSession, CreateSession,
+        CreateSessionOutcome, DeleteSession, DeleteSessionParticipant, GetSession, ListSessions,
+        SessionCollectionResult, SessionCompletionResult, SessionDetail, SessionParticipant,
+        SessionService, SessionStatus as V1SessionStatus, SessionSummary, UncollectSession,
+        UpdateSession, UpdateSessionParticipant,
     },
 };
 use bcs_service_api::port::repo::SessionRepoPort;
+use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
+use bcs_service_api::types::{HumanMessageView, MessageViewScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, CallerContext, CollaborationRuntimeError,
     CollaborationRuntimeService, CreateSessionLaunch, FriendCoreService, Group as DomainGroup,
     GroupCoreService, GroupMessage, GroupMessageHistoryService, GroupStrategy, GroupUseCaseError,
-    HumanActor, Participant, ParticipantMode, ParticipantRole, RegisteredBot, RelationCoreService,
-    MessageHistoryOptions, RequestedSessionRole, ServiceError, Session, SessionHistoryCommand, SessionKind,
-    SessionLaunchError, SessionLaunchRequest, SessionLaunchService,
-    SessionStatus as DomainSessionStatus, StateMachineRunView, SystemMessageEvent,
-    backfill_participant_names,
+    HumanActor, MessageHistoryOptions, Participant, ParticipantMode, ParticipantRole,
+    RegisteredBot, RelationCoreService, RequestedSessionRole, ServiceError, Session,
+    SessionHistoryCommand, SessionKind, SessionLaunchError, SessionLaunchRequest,
+    SessionLaunchService, SessionStatus as DomainSessionStatus, StateMachineRunView,
+    SystemMessageEvent, backfill_participant_names,
 };
 
 #[derive(Debug, Clone)]
@@ -70,6 +72,7 @@ pub struct SessionServiceImpl {
     history: Arc<dyn GroupMessageHistoryService>,
     collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     system_message: Arc<dyn SystemMessageService>,
+    participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     config: SessionServiceConfig,
 }
 
@@ -99,8 +102,17 @@ impl SessionServiceImpl {
             history,
             collaboration_runtime,
             system_message,
+            participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             config,
         }
+    }
+
+    pub fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.participant_view_bindings = participant_view_bindings;
+        self
     }
 
     // ── authorization helpers ──────────────────────────────────────────
@@ -256,9 +268,7 @@ impl SessionServiceImpl {
         }
         Err(ApplicationError::invalid(
             "invalid_participant_mode",
-            format!(
-                "Participant mode '{mode:?}' is invalid for actor kind '{actor_kind:?}'"
-            ),
+            format!("Participant mode '{mode:?}' is invalid for actor kind '{actor_kind:?}'"),
         ))
     }
 
@@ -392,11 +402,11 @@ impl SessionServiceImpl {
             .load_bot(requested)
             .await
             .map_err(|error| match error {
-            ApplicationError::NotFound { .. } => {
-                ApplicationError::forbidden("The explicit View Actor is not authorized")
-            }
-            other => other,
-        })?;
+                ApplicationError::NotFound { .. } => {
+                    ApplicationError::forbidden("The explicit View Actor is not authorized")
+                }
+                other => other,
+            })?;
         if bot.actor_kind == ActorKind::Bot && bot.created_by.as_deref() == Some(user.id.as_str()) {
             Ok(requested.to_string())
         } else {
@@ -431,9 +441,9 @@ impl SessionServiceImpl {
             .map(|bot| bot.bot_uuid)
             .collect::<HashSet<_>>();
         Ok(session.participants.iter().any(|participant| {
-                participant.actor_kind == ActorKind::Bot
-                    && owned_bot_ids.contains(&participant.bot_uuid)
-            }))
+            participant.actor_kind == ActorKind::Bot
+                && owned_bot_ids.contains(&participant.bot_uuid)
+        }))
     }
 
     async fn load_session_for_detail(
@@ -625,6 +635,7 @@ impl SessionService for SessionServiceImpl {
                     input: command.input,
                     meta: command.meta,
                     public_creator_role: command.creator_role.map(RequestedSessionRole::from),
+                    human_message_view_scope: command.message_view_scope,
                     context_delivery: command.context_delivery,
                 },
             })
@@ -756,7 +767,8 @@ impl SessionService for SessionServiceImpl {
         let can_delete = if let Some(requested) = command.acting_bot_id.as_deref() {
             let acting_actor_id = match &principal {
                 Principal::Human(_) => {
-                    self.resolve_view_actor(&command.caller, Some(requested)).await?
+                    self.resolve_view_actor(&command.caller, Some(requested))
+                        .await?
                 }
                 Principal::Bot(bot) if requested == bot.bot_uuid => requested.to_string(),
                 Principal::Bot(_) => {
@@ -918,7 +930,18 @@ impl SessionService for SessionServiceImpl {
                 ),
             ));
         }
-        let mode = ParticipantMode::Auto;
+        let target = self
+            .registry
+            .try_get(&command.bot_uuid)
+            .await
+            .map_err(map_service_error)?
+            .ok_or_else(|| {
+                ApplicationError::not_found(
+                    "actor_not_found",
+                    format!("Actor '{}' was not found", command.bot_uuid),
+                )
+            })?;
+        let mode = ParticipantMode::default_for(target.actor_kind);
         // VfhG3: derive role from parent group.participants if the bot is already
         // there; otherwise strategy default (ManagerWorker→Worker, else
         // Consultant). Mirrors legacy bcs-http add_session_participant which picks
@@ -928,21 +951,38 @@ impl SessionService for SessionServiceImpl {
             .participants
             .iter()
             .find(|p| p.bot_uuid == command.bot_uuid);
-        let role = group_participant.map(|p| p.role).unwrap_or_else(|| match group.group_strategy {
-            GroupStrategy::ManagerWorker => ParticipantRole::Worker,
-            _ => ParticipantRole::Consultant,
+        let role = group_participant.map(|p| p.role).unwrap_or_else(|| {
+            if target.actor_kind == ActorKind::Human {
+                ParticipantRole::Observer
+            } else {
+                match group.group_strategy {
+                    GroupStrategy::ManagerWorker => ParticipantRole::Worker,
+                    _ => ParticipantRole::Consultant,
+                }
+            }
         });
         let tags = group_participant
             .map(|participant| participant.tags.clone())
             .unwrap_or_default();
+        let message_view_scope = command
+            .message_view_scope
+            .or_else(|| group_participant.map(|participant| participant.message_view_scope))
+            .unwrap_or(MessageViewScope::Full);
+        if !message_view_scope.is_valid_for(target.actor_kind) {
+            return Err(ApplicationError::invalid(
+                "invalid_message_view_scope",
+                "Bot participants must use full message_view_scope",
+            ));
+        }
         let participant = Participant {
             bot_uuid: command.bot_uuid.clone(),
             bot_name: None,
             kind: None,
             role,
-            actor_kind: ActorKind::Bot,
+            actor_kind: target.actor_kind,
             mode: Some(mode),
             tags,
+            message_view_scope,
         };
         let mut updated = self
             .sessions
@@ -992,84 +1032,111 @@ impl SessionService for SessionServiceImpl {
         &self,
         command: UpdateSessionParticipant,
     ) -> Result<SessionParticipant, ApplicationError> {
+        if command.mode.is_none() && command.message_view_scope.is_none() {
+            return Err(ApplicationError::invalid(
+                "empty_participant_update",
+                "At least one of mode or message_view_scope must be provided",
+            ));
+        }
         let principal = require_human(&command.caller)?;
         let session = self.load_session(&command.session_id).await?;
         let group = self.load_group(&session.group_id).await?;
-        // Capture the participant's pre-update identity so a
-        // `ParticipantModeChanged` system message can be emitted when the
-        // mode actually changes — mirroring the legacy
-        // `bcs_http::routes::sessions::update_session_participant_mode` path
-        // (the OpenAPI route previously had no such notification).
         let existing = session
             .participants
             .iter()
             .find(|participant| participant.bot_uuid == command.bot_uuid)
             .cloned();
-        let old_mode = existing.as_ref().and_then(|p| p.mode);
-        let actor_kind = existing
-            .as_ref()
-            .map(|p| p.actor_kind)
-            .unwrap_or_else(|| {
-                if command.bot_uuid.starts_with("human_") {
-                    ActorKind::Human
-                } else {
-                    ActorKind::Bot
-                }
-            });
-        let actor_name = self
-            .registry
-            .try_get(&command.bot_uuid)
-            .await
-            .map_err(map_service_error)?
-            .and_then(|bot| bot.capabilities.name)
-            .unwrap_or_else(|| command.bot_uuid.clone());
-        if let Some(actor_kind) = session
-            .participants
-            .iter()
-            .find(|participant| participant.bot_uuid == command.bot_uuid)
-            .map(|participant| participant.actor_kind)
-        {
-            match actor_kind {
-                ActorKind::Human => {
-                    self.authorize_human_self_mode_update(
-                        &principal,
-                        &session,
-                        &command.bot_uuid,
-                    )
+        if existing.is_none() {
+            if command.bot_uuid.starts_with("human_") {
+                self.authorize_human_self_mode_update(&principal, &session, &command.bot_uuid)
                     .await?;
+                if let Some(mode) = command.mode {
+                    Self::validate_participant_mode(mode, ActorKind::Human)?;
                 }
-                ActorKind::Bot => {
-                    if !self.can_manage_session(&principal, &session, &group).await? {
-                        return Err(ApplicationError::forbidden(
-                            "Principal may not manage this Session",
-                        ));
+                let group_scope = group
+                    .participants
+                    .iter()
+                    .find(|participant| participant.bot_uuid == command.bot_uuid)
+                    .map(|participant| participant.message_view_scope);
+                let message_view_scope = command
+                    .message_view_scope
+                    .or(group_scope)
+                    .unwrap_or(MessageViewScope::Full);
+                let mut participant =
+                    Participant::human(&command.bot_uuid, ParticipantRole::Observer);
+                participant.mode = Some(
+                    command
+                        .mode
+                        .unwrap_or_else(|| ParticipantMode::default_for(ActorKind::Human)),
+                );
+                participant.message_view_scope = message_view_scope;
+                let lease = if message_view_scope == MessageViewScope::Participant {
+                    Some(
+                        self.participant_view_bindings
+                            .begin_scope_change(&command.session_id, &command.bot_uuid)
+                            .await
+                            .map_err(map_service_error)?,
+                    )
+                } else {
+                    None
+                };
+                let add_result = self
+                    .sessions
+                    .add_participant(&command.session_id, participant)
+                    .await
+                    .map_err(map_session_error);
+                let release_result = if let Some(lease) = lease {
+                    self.participant_view_bindings
+                        .finish_scope_change(lease)
+                        .await
+                        .map_err(map_service_error)
+                } else {
+                    Ok(())
+                };
+                let mut updated = add_result?;
+                release_result?;
+                if let Some(mode) = command.mode {
+                    let actor_name = self
+                        .registry
+                        .try_get(&command.bot_uuid)
+                        .await
+                        .map_err(map_service_error)?
+                        .and_then(|bot| bot.capabilities.name)
+                        .unwrap_or_else(|| command.bot_uuid.clone());
+                    let event = SystemMessageEvent::ParticipantModeChanged {
+                        group_id: updated.group_id.clone(),
+                        actor_id: command.bot_uuid.clone(),
+                        actor_name,
+                        actor_kind: ActorKind::Human,
+                        from: None,
+                        to: mode,
+                    };
+                    if let Err(error) = self
+                        .system_message
+                        .notify(
+                            &updated.group_id,
+                            event,
+                            &command.session_id,
+                            &updated.participants,
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            session_id = %command.session_id,
+                            bot_uuid = %command.bot_uuid,
+                            error = %error,
+                            "notify participant mode changed failed"
+                        );
                     }
                 }
+                return self
+                    .backfill_and_project_participant(&mut updated.participants, &command.bot_uuid)
+                    .await;
             }
-            Self::validate_participant_mode(command.mode, actor_kind)?;
-        } else if command.bot_uuid.starts_with("human_") {
-            // Preserve legacy Human first-insert while binding the target to
-            // the authenticated Human and the existing V1 read boundary.
-            self.authorize_human_self_mode_update(
-                &principal,
-                &session,
-                &command.bot_uuid,
-            )
-            .await?;
-            Self::validate_participant_mode(command.mode, ActorKind::Human)?;
-            // Match the legacy endpoint's two-step first-insert flow: add the
-            // Human idempotently with its kind-aware default (Absent), then
-            // always apply the requested mode.  The second write is important
-            // when another request inserts the same Human between our read and
-            // add: an idempotent add may return that concurrent state, but this
-            // request must still apply its own mode.
-            let participant = Participant::human(&command.bot_uuid, ParticipantRole::Observer);
-            self.sessions
-                .add_participant(&command.session_id, participant)
-                .await
-                .map_err(map_session_error)?;
-        } else {
-            if !self.can_manage_session(&principal, &session, &group).await? {
+            if !self
+                .can_manage_session(&principal, &session, &group)
+                .await?
+            {
                 return Err(ApplicationError::forbidden(
                     "Principal may not manage this Session",
                 ));
@@ -1082,39 +1149,157 @@ impl SessionService for SessionServiceImpl {
                 ),
             ));
         }
-        let mut updated = self
-            .sessions
-            .update_participant_mode(&command.session_id, &command.bot_uuid, command.mode)
+        let existing = existing.expect("checked above");
+        let old_mode = existing.mode;
+        let actor_kind = existing.actor_kind;
+        let actor_name = self
+            .registry
+            .try_get(&command.bot_uuid)
             .await
-            .map_err(map_session_error)?;
-        // Emit the participant-mode-changed system message only when the mode
-        // actually changed (same gating as the legacy endpoint). Best-effort:
-        // a dispatch failure is logged and never surfaces to the caller.
-        if old_mode != Some(command.mode) {
-            let event = SystemMessageEvent::ParticipantModeChanged {
-                group_id: updated.group_id.clone(),
-                actor_id: command.bot_uuid.clone(),
-                actor_name: actor_name.clone(),
-                actor_kind,
-                from: old_mode,
-                to: command.mode,
+            .map_err(map_service_error)?
+            .and_then(|bot| bot.capabilities.name)
+            .unwrap_or_else(|| command.bot_uuid.clone());
+        if let Some(mode) = command.mode {
+            match actor_kind {
+                ActorKind::Human => {
+                    self.authorize_human_self_mode_update(&principal, &session, &command.bot_uuid)
+                        .await?;
+                }
+                ActorKind::Bot => {
+                    if !self
+                        .can_manage_session(&principal, &session, &group)
+                        .await?
+                    {
+                        return Err(ApplicationError::forbidden(
+                            "Principal may not manage this Session",
+                        ));
+                    }
+                }
+            }
+            Self::validate_participant_mode(mode, actor_kind)?;
+        }
+        if let Some(message_view_scope) = command.message_view_scope {
+            if !message_view_scope.is_valid_for(actor_kind) {
+                return Err(ApplicationError::invalid(
+                    "invalid_message_view_scope",
+                    "Bot participants must use full message_view_scope",
+                ));
+            }
+            match actor_kind {
+                ActorKind::Human if principal.actor_id() == command.bot_uuid => {
+                    self.authorize_human_self_mode_update(&principal, &session, &command.bot_uuid)
+                        .await?;
+                }
+                _ if !self
+                    .can_manage_session(&principal, &session, &group)
+                    .await? =>
+                {
+                    return Err(ApplicationError::forbidden_code(
+                        "message_view_scope_forbidden",
+                        "A Human may only update its own scope unless it manages the Session",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        let mut updated = session;
+        if let Some(mode) = command.mode
+            && command.message_view_scope.is_none()
+        {
+            updated = self
+                .sessions
+                .update_participant_mode(&command.session_id, &command.bot_uuid, mode)
+                .await
+                .map_err(map_session_error)?;
+            if old_mode != Some(mode) {
+                let event = SystemMessageEvent::ParticipantModeChanged {
+                    group_id: updated.group_id.clone(),
+                    actor_id: command.bot_uuid.clone(),
+                    actor_name: actor_name.clone(),
+                    actor_kind,
+                    from: old_mode,
+                    to: mode,
+                };
+                if let Err(error) = self
+                    .system_message
+                    .notify(
+                        &updated.group_id,
+                        event,
+                        &command.session_id,
+                        &updated.participants,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        session_id = %command.session_id,
+                        bot_uuid = %command.bot_uuid,
+                        error = %error,
+                        "notify participant mode changed failed"
+                    );
+                }
+            }
+        }
+        if let Some(message_view_scope) = command.message_view_scope {
+            let lease = if actor_kind == ActorKind::Human
+                && existing.message_view_scope != message_view_scope
+            {
+                Some(
+                    self.participant_view_bindings
+                        .begin_scope_change(&command.session_id, &command.bot_uuid)
+                        .await
+                        .map_err(map_service_error)?,
+                )
+            } else {
+                None
             };
-            if let Err(error) = self
-                .system_message
-                .notify(
-                    &updated.group_id,
-                    event,
+            let update_result = self
+                .sessions
+                .update_participant_mode_and_message_view_scope(
                     &command.session_id,
-                    &updated.participants,
+                    &command.bot_uuid,
+                    command.mode,
+                    message_view_scope,
                 )
                 .await
+                .map_err(map_session_error);
+            let release_result = if let Some(lease) = lease {
+                self.participant_view_bindings
+                    .finish_scope_change(lease)
+                    .await
+                    .map_err(map_service_error)
+            } else {
+                Ok(())
+            };
+            updated = update_result?;
+            release_result?;
+            if let Some(mode) = command.mode
+                && old_mode != Some(mode)
             {
-                tracing::warn!(
-                    session_id = %command.session_id,
-                    bot_uuid = %command.bot_uuid,
-                    error = %error,
-                    "notify participant mode changed failed"
-                );
+                let event = SystemMessageEvent::ParticipantModeChanged {
+                    group_id: updated.group_id.clone(),
+                    actor_id: command.bot_uuid.clone(),
+                    actor_name,
+                    actor_kind,
+                    from: old_mode,
+                    to: mode,
+                };
+                if let Err(error) = self
+                    .system_message
+                    .notify(
+                        &updated.group_id,
+                        event,
+                        &command.session_id,
+                        &updated.participants,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        session_id = %command.session_id,
+                        bot_uuid = %command.bot_uuid,
+                        error = %error,
+                        "notify participant mode changed failed"
+                    );
+                }
             }
         }
         match self
@@ -1239,17 +1424,44 @@ impl SessionMessageService for SessionServiceImpl {
             ));
         }
         let group = self.load_group(&session.group_id).await?;
-
+        let view_participant = session
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == view_actor_id)
+            .expect("membership checked above");
         if group.group_strategy == GroupStrategy::StateMachine {
-            return self
-                .collaboration_runtime
-                .get_state_machine_session_history(&query.session_id, query.limit, query.before)
-            .await
+            let history = if view_participant.actor_kind == ActorKind::Human {
+                self.collaboration_runtime
+                    .get_state_machine_session_history_for_view(
+                        &query.session_id,
+                        query.limit,
+                        query.before,
+                        HumanMessageView {
+                            actor_id: view_actor_id,
+                            scope: view_participant.message_view_scope,
+                            allow_legacy_unclassified_chat: false,
+                        },
+                    )
+                    .await
+            } else {
+                self.collaboration_runtime
+                    .get_state_machine_session_history(&query.session_id, query.limit, query.before)
+                    .await
+            };
+            return history
                 .map(|result| result.map_or_else(Vec::new, |result| result.messages))
                 .map_err(map_runtime_error);
         }
 
         let user = require_authenticated_user(&query.caller)?;
+        let session_id = query.session_id.clone();
+        let human_view = (view_participant.actor_kind == ActorKind::Human
+            && view_participant.message_view_scope == MessageViewScope::Participant)
+            .then(|| HumanMessageView {
+                actor_id: view_actor_id.clone(),
+                scope: view_participant.message_view_scope,
+                allow_legacy_unclassified_chat: false,
+            });
         let result = self
             .history
             .get_session_history_with_options(
@@ -1269,11 +1481,64 @@ impl SessionMessageService for SessionServiceImpl {
             )
             .await
             .map_err(map_group_use_case_error)?;
-        Ok(result.messages)
+        let Some(human_view) = human_view else {
+            return Ok(result.messages);
+        };
+
+        // One-shot StateMachine runs can live inside Chat or ManagerWorker
+        // Sessions. Responses created before they became durable messages are
+        // still present in the run snapshot, so merge the participant-safe
+        // projection for backwards compatibility. The runtime projection only
+        // contains this Human's own outputs and directed prompts; persisted
+        // history remains authoritative when the stable IDs overlap.
+        let snapshot = self
+            .collaboration_runtime
+            .get_state_machine_session_history_for_view(
+                &session_id,
+                query.limit,
+                query.before,
+                human_view,
+            )
+            .await
+            .map_err(map_runtime_error)?;
+        Ok(merge_participant_state_machine_snapshot(
+            result.messages,
+            snapshot.map(|history| history.messages),
+            query.limit,
+        ))
     }
 }
 
 // ── projection helpers ────────────────────────────────────────────────
+
+fn merge_participant_state_machine_snapshot(
+    mut persisted: Vec<GroupMessage>,
+    snapshot: Option<Vec<GroupMessage>>,
+    limit: u64,
+) -> Vec<GroupMessage> {
+    let mut seen_ids = persisted
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<HashSet<_>>();
+    if let Some(snapshot) = snapshot {
+        persisted.extend(
+            snapshot
+                .into_iter()
+                .filter(|message| seen_ids.insert(message.id.clone())),
+        );
+    }
+    persisted.sort_by(|left, right| {
+        right
+            .timestamp
+            .cmp(&left.timestamp)
+            .then_with(|| right.id.cmp(&left.id))
+    });
+    let keep = usize::try_from(limit).unwrap_or(usize::MAX);
+    if persisted.len() > keep {
+        persisted.truncate(keep);
+    }
+    persisted
+}
 
 fn project_participant(participant: &Participant) -> SessionParticipant {
     // Vey7i: pass `actor_kind` and the 4-value domain `ParticipantMode`
@@ -1289,6 +1554,7 @@ fn project_participant(participant: &Participant) -> SessionParticipant {
         role: participant.role,
         tags: participant.tags.clone(),
         mode: participant.effective_mode(),
+        message_view_scope: participant.message_view_scope,
         joined_at: None,
     }
 }
@@ -1523,7 +1789,10 @@ mod tests {
             "conflict"
         );
         assert_eq!(
-            map_runtime_error(CollaborationRuntimeError::JudgeUnavailable("offline".into())).code(),
+            map_runtime_error(CollaborationRuntimeError::JudgeUnavailable(
+                "offline".into()
+            ))
+            .code(),
             "internal_error"
         );
     }
@@ -1542,6 +1811,7 @@ mod tests {
             role: ParticipantRole::Consultant,
             actor_kind: ActorKind::Human,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
             mode: Some(ParticipantMode::Present),
         };
         let projected = project_participant(&human);
@@ -1560,6 +1830,7 @@ mod tests {
             role: ParticipantRole::Observer,
             actor_kind: ActorKind::Human,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
             mode: None,
         };
         let projected_absent = project_participant(&absent);
@@ -1574,6 +1845,7 @@ mod tests {
             role: ParticipantRole::Driver,
             actor_kind: ActorKind::Bot,
             tags: Vec::new(),
+            message_view_scope: MessageViewScope::Full,
             mode: Some(ParticipantMode::Muted),
         };
         let projected_bot = project_participant(&bot);

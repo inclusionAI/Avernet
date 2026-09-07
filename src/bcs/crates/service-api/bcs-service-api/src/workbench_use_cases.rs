@@ -6,11 +6,17 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+use crate::types::MessageViewScope;
 use crate::{GroupUseCaseError, ParticipantKind, ParticipantMode, ServiceError};
 
 #[derive(Debug, Clone)]
 pub struct WorkbenchConnectCommand {
+    /// Authenticated actor bound by the transport. For Workbench this is the
+    /// Human principal and cannot be overridden by request params.
     pub bound_actor_id: Option<String>,
+    /// Persisted participant view selected by the tab. Omission means the
+    /// authenticated Human itself; an explicit Bot must pass ownership checks.
+    pub view_actor_id: Option<String>,
     pub group_id: String,
     pub session_id: Option<String>,
 }
@@ -41,6 +47,7 @@ pub struct WorkbenchParticipantView {
     pub kind: ParticipantKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<ParticipantMode>,
+    pub message_view_scope: MessageViewScope,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +62,8 @@ pub enum WorkbenchUseCaseError {
     Unauthorized,
     #[error("current Human is not a participant and owns no Bot in this group")]
     ForbiddenGroupAccess,
+    #[error("view actor must be the authenticated Human or one of their owned Bots")]
+    ForbiddenViewActor,
     #[error("sender must be the current Human or a Bot owned by the current Human")]
     ForbiddenSender,
     #[error("participant mode is absent; switch to present before sending")]
@@ -92,6 +101,7 @@ impl WorkbenchUseCaseError {
         match self {
             Self::Unauthorized => "unauthorized",
             Self::ForbiddenGroupAccess => "forbidden_group_access",
+            Self::ForbiddenViewActor => "forbidden_view_actor",
             Self::ForbiddenSender => "forbidden_sender",
             Self::ParticipantAbsent => "participant_absent",
             Self::SenderNotInGroup => "sender_not_in_group",

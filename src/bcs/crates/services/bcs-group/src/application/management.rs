@@ -8,26 +8,26 @@ use crate::core::validate_service_spec_patch;
 use crate::noop::{
     EmptyRelationCoreService, EmptySessionManagementService, NoopSystemMessageService,
 };
-use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
+use bcs_service_api::types::{EventActor, EventActorType, MessageViewScope, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, BotRegistryCoreService, BotRuntimeConnectionService,
     CallbackChannelConfig, CanResolveInteraction, CanResolveInteractionCommand,
-    ChannelBindingCleanupPort, CollaborationRuntimeService, DmActorSpec, DmCreateCommand,
-    DmCreateResult, FriendCoreService, Group as DomainGroup, GroupAddMemberCommand,
-    GroupAddMemberResult, GroupCoreService, GroupCreateCommand, GroupDeleteCommand,
-    GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind, GroupListCommand,
-    InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
-    GroupListEntry, GroupListResult, GroupManagementService, GroupMutableFieldsPatch,
-    GroupParticipantModeCommand, GroupParticipantModeResult, GroupParticipantView,
-    GroupPatchSettingsCommand, GroupPatchSettingsConflict, GroupPatchSettingsResult,
-    GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
+    ChannelBindingCleanupPort, CollaborationRuntimeService, DeliveryType, DmActorSpec,
+    DmCreateCommand, DmCreateResult, FriendCoreService, Group as DomainGroup,
+    GroupAddMemberCommand, GroupAddMemberResult, GroupCoreService, GroupCreateCommand,
+    GroupDeleteCommand, GroupDeleteResult, GroupDetailCommand, GroupDetailResult, GroupKind,
+    GroupListCommand, GroupListEntry, GroupListResult, GroupManagementService,
+    GroupMutableFieldsPatch, GroupParticipantModeCommand, GroupParticipantModeResult,
+    GroupParticipantView, GroupPatchSettingsCommand, GroupPatchSettingsConflict,
+    GroupPatchSettingsResult, GroupQueryService, GroupRemoveMemberCommand, GroupRemoveMemberResult,
     GroupRoutingPolicyCommand, GroupRoutingPolicyResult, GroupStatus, GroupStatusCommand,
     GroupStrategy, GroupTerminateCommand, GroupUpdateLabelCommand, GroupUpdateVisibilityCommand,
     GroupUpdateWorkspaceCommand, GroupUseCaseError, GroupWorkspaceQueryCommand,
-    GroupWorkspaceResult, NoopChannelBindingCleanupPort, Participant, ParticipantMode,
-    ParticipantRole, RegisteredBot, RelationCoreService, ServiceError, ServiceResult, ServiceSpec,
-    ServiceSpecPatchConflictField, Session, SessionKind, SessionManagementService,
-    DeliveryType, SystemMessageEvent, WorkbenchChatAbortAuthorizationCommand,
+    GroupWorkspaceResult, InitialGroupRun, InitialGroupRunActivityKind, InitialGroupRunState,
+    NoopChannelBindingCleanupPort, Participant, ParticipantMode, ParticipantRole, RegisteredBot,
+    RelationCoreService, ServiceError, ServiceResult, ServiceSpec, ServiceSpecPatchConflictField,
+    Session, SessionKind, SessionManagementService, SystemMessageEvent,
+    WorkbenchChatAbortAuthorizationCommand,
     WorkbenchChatAuthorizationCommand, WorkbenchConnectCommand, WorkbenchConnectOutcome,
     WorkbenchParticipantView, WorkbenchSessionService, WorkbenchUseCaseError, backfill_bot_names,
     generated_group_id, validate_sender_routes,
@@ -933,19 +933,25 @@ impl GroupManagementService for GroupManagement {
             .unwrap_or_else(|| generated_group_id(GroupKind::Normal));
         let mut requested = Vec::new();
         for participant in cmd.participants {
-            requested.push((participant.bot_id, participant.role, participant.tags));
+            requested.push((
+                participant.bot_id,
+                participant.role,
+                participant.tags,
+                participant.message_view_scope,
+            ));
         }
         for bot_id in cmd.member_bot_ids {
-            requested.push((bot_id, None, Vec::new()));
+            requested.push((bot_id, None, Vec::new(), None));
         }
         if !requested
             .iter()
-            .any(|(bot_id, _, _)| bot_id == &cmd.driver_bot_id)
+            .any(|(bot_id, _, _, _)| bot_id == &cmd.driver_bot_id)
         {
             requested.push((
                 cmd.driver_bot_id.clone(),
                 Some("driver".to_string()),
                 Vec::new(),
+                None,
             ));
         }
 
@@ -953,7 +959,7 @@ impl GroupManagementService for GroupManagement {
         let mut participants = Vec::with_capacity(requested.len());
         let mut participant_ids = Vec::with_capacity(requested.len());
         let mut subscription_targets = Vec::new();
-        for (bot_id, role, tags) in requested {
+        for (bot_id, role, tags, message_view_scope) in requested {
             if !seen.insert(bot_id.clone()) {
                 continue;
             }
@@ -1014,6 +1020,12 @@ impl GroupManagementService for GroupManagement {
                 ActorKind::Human => ParticipantMode::Present,
                 ActorKind::Bot => ParticipantMode::default_for(ActorKind::Bot),
             };
+            let message_view_scope = message_view_scope.unwrap_or(MessageViewScope::Full);
+            if !message_view_scope.is_valid_for(bot.actor_kind) {
+                return Err(GroupUseCaseError::InvalidProposal(
+                    "Bot participants must use full message_view_scope".to_string(),
+                ));
+            }
             participants.push(Participant {
                 bot_uuid: bot_id.clone(),
                 bot_name: bot.capabilities.name,
@@ -1022,6 +1034,7 @@ impl GroupManagementService for GroupManagement {
                 actor_kind: bot.actor_kind,
                 mode: Some(mode),
                 tags,
+                message_view_scope,
             });
             participant_ids.push(bot_id);
         }
@@ -1172,7 +1185,8 @@ impl GroupManagementService for GroupManagement {
                     let sid = outcome.session.id.clone();
                     let gid = group.id.clone();
                     let session_participants = outcome.session.participants.clone();
-                    match self.system_message
+                    match self
+                        .system_message
                         .notify_with_outcome(
                             &gid,
                             SystemMessageEvent::SessionContext {
@@ -1201,12 +1215,11 @@ impl GroupManagementService for GroupManagement {
                                 GroupStrategy::StateMachine => None,
                             };
                             if let Some(bot_uuid) = bootstrap_responder
-                                && let Some(result) = dispatch.recipient_results.iter().find(
-                                    |result| {
+                                && let Some(result) =
+                                    dispatch.recipient_results.iter().find(|result| {
                                         result.recipient_id == bot_uuid
                                             && result.delivery_type == DeliveryType::Send
-                                    },
-                                )
+                                    })
                             {
                                 initial_run = Some(InitialGroupRun {
                                     run_id: result.run_id.clone(),
@@ -1463,7 +1476,16 @@ impl GroupManagementService for GroupManagement {
             actor_kind: bot.actor_kind,
             mode,
             tags: Vec::new(),
+            message_view_scope: cmd.message_view_scope.unwrap_or(MessageViewScope::Full),
         };
+        if !participant
+            .message_view_scope
+            .is_valid_for(participant.actor_kind)
+        {
+            return Err(GroupUseCaseError::InvalidProposal(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
 
         self.group
             .mutate(group_mutation_command(
@@ -1492,6 +1514,7 @@ impl GroupManagementService for GroupManagement {
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
                 tags: participant.tags,
+                message_view_scope: participant.message_view_scope,
             },
         })
     }
@@ -1820,6 +1843,14 @@ impl GroupManagementService for GroupManagement {
                 actor_kind: target.actor_kind,
             });
         }
+        if cmd
+            .message_view_scope
+            .is_some_and(|scope| !scope.is_valid_for(target.actor_kind))
+        {
+            return Err(GroupUseCaseError::InvalidProposal(
+                "Bot participants must use full message_view_scope".to_string(),
+            ));
+        }
 
         self.ensure_actor_self_or_creator(&cmd.caller_actor_id, &cmd.actor_id)
             .await?;
@@ -1829,11 +1860,17 @@ impl GroupManagementService for GroupManagement {
             .get(&cmd.group_id)
             .await
             .ok_or_else(|| ServiceError::GroupNotFound(cmd.group_id.clone()))?;
-        let mutation = if group
+        let participant_exists = group
             .participants
             .iter()
-            .any(|participant| participant.bot_uuid == cmd.actor_id)
-        {
+            .any(|participant| participant.bot_uuid == cmd.actor_id);
+        let mutation = if participant_exists && cmd.message_view_scope.is_some() {
+            GroupMutationKind::UpdateParticipantMessageViewScope {
+                actor_id: cmd.actor_id.clone(),
+                message_view_scope: cmd.message_view_scope.expect("scope checked above"),
+                mode: Some(cmd.mode),
+            }
+        } else if participant_exists {
             GroupMutationKind::UpdateParticipantMode {
                 actor_id: cmd.actor_id.clone(),
                 mode: cmd.mode,
@@ -1848,24 +1885,33 @@ impl GroupManagementService for GroupManagement {
                     actor_kind: ActorKind::Human,
                     mode: Some(cmd.mode),
                     tags: Vec::new(),
+                    message_view_scope: cmd.message_view_scope.unwrap_or(MessageViewScope::Full),
                 },
                 actor_is_public: true,
             }
         } else {
             return Err(ServiceError::ParticipantNotFound(cmd.actor_id.clone()).into());
         };
-        self.group
+        let updated_group = self
+            .group
             .mutate(group_mutation_command(
                 &cmd.group_id,
                 &cmd.caller_actor_id,
                 mutation,
             ))
             .await?;
+        let message_view_scope = updated_group
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == cmd.actor_id)
+            .map(|participant| participant.message_view_scope)
+            .ok_or_else(|| ServiceError::ParticipantNotFound(cmd.actor_id.clone()))?;
 
         Ok(GroupParticipantModeResult {
             group_id: cmd.group_id,
             actor_id: cmd.actor_id,
             mode: cmd.mode,
+            message_view_scope,
         })
     }
 
@@ -1945,11 +1991,11 @@ impl WorkbenchSessionService for GroupManagement {
             .await
             .ok_or_else(|| WorkbenchUseCaseError::GroupNotFound(command.group_id.clone()))?;
 
-        let participants = match self
+        let authenticated = match self
             .authorize_workbench_group_access(&group, command.bound_actor_id.as_deref())
             .await
         {
-            Ok(_) => workbench_participants(&group),
+            Ok(authenticated) => authenticated,
             Err(WorkbenchUseCaseError::ForbiddenGroupAccess) => {
                 let actor_id = command
                     .bound_actor_id
@@ -1974,9 +2020,49 @@ impl WorkbenchSessionService for GroupManagement {
                 if participant.mode == Some(ParticipantMode::Absent) {
                     return Err(WorkbenchUseCaseError::ParticipantAbsent);
                 }
-                workbench_participants_from_slice(&session.participants)
+                WorkbenchAuthorizedHuman {
+                    actor_id: actor_id.to_string(),
+                    staff_no: staff_no_from_bound_actor(Some(actor_id))?.to_string(),
+                }
             }
             Err(error) => return Err(error),
+        };
+
+        let view_actor_id = command
+            .view_actor_id
+            .as_deref()
+            .unwrap_or(authenticated.actor_id.as_str());
+        self.authorize_workbench_sender(&group, view_actor_id, &authenticated)
+            .await
+            .map_err(|error| match error {
+                WorkbenchUseCaseError::ForbiddenSender => WorkbenchUseCaseError::ForbiddenViewActor,
+                other => other,
+            })?;
+
+        let participants = if let Some(session_id) = command.session_id.as_deref() {
+            let session = self
+                .session_management
+                .get(session_id)
+                .await
+                .map_err(|error| {
+                    WorkbenchUseCaseError::Service(ServiceError::InternalError(error.to_string()))
+                })?
+                .filter(|session| session.group_id == command.group_id)
+                .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+            let participant = find_session_participant(&session, view_actor_id)
+                .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+            if participant.mode == Some(ParticipantMode::Absent) {
+                return Err(WorkbenchUseCaseError::ParticipantAbsent);
+            }
+            workbench_participants_from_slice(&session.participants)
+        } else {
+            let participant = group
+                .get_participant(view_actor_id)
+                .ok_or(WorkbenchUseCaseError::ForbiddenGroupAccess)?;
+            if participant.mode == Some(ParticipantMode::Absent) {
+                return Err(WorkbenchUseCaseError::ParticipantAbsent);
+            }
+            workbench_participants(&group)
         };
 
         Ok(WorkbenchConnectOutcome {
@@ -2228,6 +2314,7 @@ fn workbench_participants_from_slice(
             role: participant_role_to_wire(participant.role).to_string(),
             kind: participant.effective_kind(),
             mode: participant.mode,
+            message_view_scope: participant.message_view_scope,
         })
         .collect()
 }
@@ -2396,6 +2483,7 @@ fn group_to_detail_with_context(group: DomainGroup, context_injected: u64) -> Gr
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
                 tags: participant.tags,
+                message_view_scope: participant.message_view_scope,
             })
             .collect(),
         message_count,
@@ -2437,6 +2525,7 @@ fn group_to_list_entry(group: DomainGroup) -> GroupListEntry {
                 actor_kind: participant.actor_kind,
                 mode: participant.mode,
                 tags: participant.tags,
+                message_view_scope: participant.message_view_scope,
             })
             .collect(),
         participant_count,

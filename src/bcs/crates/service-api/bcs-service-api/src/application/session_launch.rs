@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::types::MessageViewScope;
 use crate::{
     CollaborationRuntimeError, DeliveryType, ParticipantRole, ServiceError, Session, SessionKind,
     StateMachineRunView,
@@ -81,6 +82,9 @@ pub struct SessionLaunchRequest {
     pub meta: Option<Value>,
     /// Role for a public-Group creator who is not already a participant.
     pub public_creator_role: Option<RequestedSessionRole>,
+    /// Optional Session-level message projection for the authenticated Human
+    /// when Session creation inserts or inherits that Human participant.
+    pub human_message_view_scope: Option<MessageViewScope>,
     pub context_delivery: Option<DeliveryType>,
 }
 

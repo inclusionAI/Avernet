@@ -86,6 +86,7 @@ async fn participant_scoped_empty_result_does_not_create_legacy_session_when_gro
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -149,6 +150,7 @@ async fn list_sessions_treats_human_owner_of_participant_bot_as_formal_member() 
         error_message: None,
         callback_status: None,
         activation_count: 1,
+        message_visibility_version: 1,
         caller_principal: None,
         created_by: None,
         created_at: 1,
@@ -222,6 +224,7 @@ async fn human_owner_app() -> (axum::Router, Arc<RecordingSessions>, TempDir, Ar
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             }],
         ))
         .await
@@ -319,6 +322,7 @@ async fn test_app(
                 actor_kind: ActorKind::Bot,
                 mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                 tags: Vec::new(),
+                message_view_scope: bcs_domain::MessageViewScope::Full,
             }],
         ))
         .await
@@ -363,6 +367,7 @@ async fn test_app_with_observer() -> (
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
                 Participant {
                     bot_uuid: "observer-bot".to_string(),
@@ -372,6 +377,7 @@ async fn test_app_with_observer() -> (
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
             ],
         ))
@@ -436,6 +442,7 @@ impl SessionManagementService for RecordingSessions {
             error_message: None,
             callback_status: None,
             activation_count: 1,
+            message_visibility_version: cmd.params.message_visibility_version,
             caller_principal: cmd.params.caller_principal.clone(),
             created_by: cmd.params.created_by.clone(),
             current_msg_seq: 0,

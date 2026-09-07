@@ -6,6 +6,7 @@
  */
 
 import { useUserStore } from '@/stores/userStore';
+import { useBotNetworkStore } from '@/stores/botNetworkStore';
 import {
   ensureMessageBlocks,
   getMessageBlocks as getMessageBlocksUtil,
@@ -454,6 +455,10 @@ export interface UseGroupChatResult {
 export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
   const { group, historyMessages, activeSessionId, refetchMessages } = config;
   const userId = useUserStore((state) => state.userId);
+  const selectedActorId = useBotNetworkStore(
+    (state) => state.driverBot?.bot_uuid,
+  );
+  const viewActorId = selectedActorId || (userId ? `human_${userId}` : '');
 
   // 用 ref 持有最新的 refetchMessages,避免 reconnect 因它变化而重建闭包
   const refetchMessagesRef = useRef(refetchMessages);
@@ -481,10 +486,10 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
 
   // 建立 WebSocket 连接（仅会话维度）
   useEffect(() => {
-    if (!group?.id || !activeSessionId) return;
+    if (!group?.id || !activeSessionId || !viewActorId) return;
 
     // 按需建立会话级连接
-    connectGroup(group.id, activeSessionId);
+    connectGroup(group.id, activeSessionId, viewActorId);
 
     // 清理函数：组件卸载或 group/session 变化时断开旧连接
     return () => {
@@ -492,12 +497,12 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       // 如果需要立即断开，可以取消注释下面这行
       // disconnectGroup(group.id, activeSessionId);
     };
-  }, [group?.id, activeSessionId, connectGroup]);
+  }, [group?.id, activeSessionId, viewActorId, connectGroup]);
 
   // 从全局缓存获取 provider（仅会话维度）
   const providerInfo =
     group && activeSessionId
-      ? getProvider(group.id, activeSessionId)
+      ? getProvider(group.id, activeSessionId, viewActorId)
       : undefined;
   const provider = providerInfo?.provider ?? null;
   const isConnected = providerInfo?.isConnected ?? false;
@@ -819,12 +824,18 @@ export function useGroupChat(config: UseGroupChatConfig): UseGroupChatResult {
       }
     }
     // 2. 重建 provider 恢复实时连接
-    disconnectGroup(group.id, activeSessionId);
+    disconnectGroup(group.id, activeSessionId, viewActorId);
     // 下一帧重新连接，确保旧 provider 清理完成
     requestAnimationFrame(() => {
-      connectGroup(group.id, activeSessionId);
+      connectGroup(group.id, activeSessionId, viewActorId);
     });
-  }, [group?.id, activeSessionId, disconnectGroup, connectGroup]);
+  }, [
+    group?.id,
+    activeSessionId,
+    viewActorId,
+    disconnectGroup,
+    connectGroup,
+  ]);
 
   // 时间戳兜底:
   // SDK resultToMessage 只设了 createdAt,而 MessageList 读 msg.timestamp,

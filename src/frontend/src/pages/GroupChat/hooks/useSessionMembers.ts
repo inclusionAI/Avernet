@@ -44,6 +44,7 @@ function membersFromParticipants(
       (p.type === 'bot' ? 'bot' : 'human')) as ActorKind,
     name: p.bot_name,
     mode: p.mode,
+    messageViewScope: p.message_view_scope,
     role: p.role,
     type: p.type,
   }));

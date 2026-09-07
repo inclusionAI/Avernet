@@ -3,8 +3,8 @@ use bcs_service_api::application::v1::{
     CreateCollaborationGroup, CreateDirectMessageGroup, CreateGroupSpec, CreateParticipant,
     GroupDeliveryPolicy, GroupKindFilter, GroupPatch, GroupStrategy, GroupVisibility,
     InlineGroupEventSubscriptionRequest, ManagerWorkerConfiguration, MembershipFilter,
-    OpeningMessage, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
-    StateMachineDefinitionContent, StateMachineParticipantBinding,
+    OpeningMessage, ParticipantMode, ParticipantRole, StateMachineConfiguration, StateMachineDefinition,
+    StateMachineDefinitionContent, StateMachineParticipantBinding, MessageViewScope,
 };
 use serde::{Deserialize, Deserializer, de::Error as _};
 
@@ -98,12 +98,25 @@ pub struct ParticipantRequest {
     pub role: ParticipantRole,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddParticipantRequest {
     pub actor_id: String,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateParticipantRequest {
+    #[serde(default)]
+    pub mode: Option<ParticipantMode>,
+    #[serde(default)]
+    pub message_view_scope: Option<MessageViewScope>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,6 +260,7 @@ impl CreateGroupRequest {
                             actor_id: participant.actor_id,
                             role: participant.role,
                             tags: participant.tags,
+                            message_view_scope: participant.message_view_scope,
                         })
                         .collect(),
                     collaboration: collaboration.into(),

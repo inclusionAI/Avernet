@@ -4,6 +4,7 @@
  * 从 BottomPanel 中提取的弹窗组件，减少主组件行数
  */
 
+import { Button } from '@/components';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,14 +15,15 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { AlertCircle, Info } from 'lucide-react';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import type { MessageViewScope } from '../../types';
 
 interface CollabAlertDialogsProps {
   showJoinDialog: boolean;
   setShowJoinDialog: (v: boolean) => void;
   showLeaveDialog: boolean;
   setShowLeaveDialog: (v: boolean) => void;
-  onJoin: () => Promise<void>;
+  onJoin: (messageViewScope: MessageViewScope) => Promise<void>;
   onLeave: () => Promise<void>;
   /** 是否为任务协作群（主从模式） */
   isManagerWorker?: boolean;
@@ -36,6 +38,15 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
   onLeave,
   isManagerWorker,
 }) => {
+  const [messageViewScope, setMessageViewScope] =
+    useState<MessageViewScope>('full');
+
+  useEffect(() => {
+    if (showJoinDialog) {
+      setMessageViewScope('full');
+    }
+  }, [showJoinDialog]);
+
   return (
     <>
       {/* 加入协作确认弹窗 */}
@@ -58,6 +69,48 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                 </li>
               </ul>
             </div>
+            <div>
+              <h4 className="text-sm font-medium text-slate-800 mb-2">
+                消息视角
+              </h4>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  {
+                    value: 'full' as const,
+                    title: '完整视角',
+                    description: '显示主消息流内的全部协作消息',
+                  },
+                  {
+                    value: 'participant' as const,
+                    title: '参与者视角',
+                    description: '仅显示公共消息和与您直接相关的流程消息',
+                  },
+                ].map((option) => (
+                  <Button
+                    key={option.value}
+                    ghost
+                    aria-pressed={messageViewScope === option.value}
+                    onClick={() => setMessageViewScope(option.value)}
+                    className={
+                      messageViewScope === option.value
+                        ? 'rounded-lg border border-blue-500 bg-blue-50 p-3 text-left'
+                        : 'rounded-lg border border-slate-200 bg-white p-3 text-left hover:border-slate-300'
+                    }
+                  >
+                    <span className="block text-sm font-medium text-slate-800">
+                      {option.title}
+                    </span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">
+                      {option.description}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                此视角仅影响主消息流；状态机副屏仍按原有成员和操作权限展示流程信息。
+                群主可查看当前选择并据此判断游戏准入。
+              </p>
+            </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
               <h4 className="text-sm font-medium text-amber-800 mb-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -69,7 +122,8 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                     您可与主节点Bot进行对话，由主节点Bot负责任务分发、状态推进、质量核验
                   </li>
                   <li className="relative pl-2 before:content-['·'] before:absolute before:left-0 before:text-amber-500">
-                    顶栏切换至用户视角时，您可见的任务协作群的会话上下文，将与主节点Bot可见的上下文保持一致
+                    用户视角将按照上方选择隔离协作内部消息；切换到您拥有的 Bot
+                    视角不受此设置影响
                   </li>
                 </ul>
               ) : (
@@ -98,7 +152,7 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
               取消
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={onJoin}
+              onClick={() => onJoin(messageViewScope)}
               className="bg-blue-600 hover:bg-blue-700"
               data-aspm-click="ca114903.da194170"
               data-aspm-desc="GroupChat-确认加入协作"

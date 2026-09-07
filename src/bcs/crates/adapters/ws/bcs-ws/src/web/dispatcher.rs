@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bcs_domain::HumanMessageView;
 use bcs_protocol::{BcsFrame, ErrorShape, RequestFrame, ResponseFrame};
 use bcs_service_api::application::v1::{
     AuthorizeGroupSessionConnection, GroupSessionConnectionBinding, GroupSessionConnectionService,
@@ -93,7 +94,7 @@ pub enum WebConnectionPhase {
 #[derive(Debug, Default)]
 pub struct WebClientConnectionState {
     pub active_run_ids: Vec<String>,
-    pub subscribed_sessions: Vec<(String, u64)>,
+    pub subscribed_sessions: Vec<(String, u64, Option<HumanMessageView>)>,
     pub phase: WebConnectionPhase,
 }
 
@@ -198,12 +199,16 @@ struct ConnectParams {
     group_id: String,
     #[serde(default, alias = "bcs_session_id", alias = "sessionId")]
     session_id: Option<String>,
+    #[serde(default, alias = "viewActorId")]
+    view_actor_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct ConnectResponse {
     group_id: String,
     participants: Vec<Value>,
+    view_actor_id: String,
+    message_view_scope: bcs_domain::MessageViewScope,
 }
 
 async fn handle_connect(
@@ -268,6 +273,7 @@ async fn handle_connect(
             .workbench_sessions
             .connect(WorkbenchConnectCommand {
                 bound_actor_id: bound_actor_id.map(str::to_string),
+                view_actor_id: params.view_actor_id.clone(),
                 group_id: group_id.clone(),
                 session_id: session_id.clone(),
             })
@@ -294,6 +300,20 @@ async fn handle_connect(
             group_id,
             session_id,
         } => {
+            if params
+                .view_actor_id
+                .as_deref()
+                .is_some_and(|view_actor_id| view_actor_id != actor_id)
+            {
+                send_error(
+                    tx,
+                    &req.id,
+                    "forbidden_view_actor",
+                    "Session-bound connections may only use the authenticated Human view",
+                )
+                .await?;
+                return Ok(());
+            }
             let user_id = actor_id
                 .strip_prefix("human_")
                 .filter(|user_id| !user_id.is_empty());
@@ -328,6 +348,7 @@ async fn handle_connect(
                             role: participant_role_to_wire(participant.role).to_string(),
                             kind: ParticipantKind::Bot,
                             mode: Some(participant.mode),
+                            message_view_scope: participant.message_view_scope,
                         })
                         .collect(),
                 },
@@ -344,18 +365,48 @@ async fn handle_connect(
         }
     };
 
+    let resolved_view_actor_id = params.view_actor_id.as_deref().or(bound_actor_id);
+    let resolved_participant = match resolved_view_actor_id {
+        Some(actor_id) => Some(
+            outcome
+                .participants
+                .iter()
+                .find(|participant| participant.bot_uuid == actor_id)
+                .ok_or_else(|| {
+                    WebWsDispatchError::InvalidFrameFormat(
+                        "authorized view actor is not a participant".to_string(),
+                    )
+                })?,
+        ),
+        None => None,
+    };
+    let resolved_message_view_scope = resolved_participant
+        .map(|participant| participant.message_view_scope)
+        .unwrap_or_default();
+    let connection_human_view = resolved_view_actor_id
+        .filter(|actor_id| actor_id.starts_with("human_"))
+        .and_then(|actor_id| {
+            resolved_participant.map(|participant| HumanMessageView {
+                actor_id: actor_id.to_string(),
+                scope: participant.message_view_scope,
+                allow_legacy_unclassified_chat: true,
+            })
+        });
     let subscription_key = session_id.clone().unwrap_or_else(|| group_id.clone());
     let conn_id = state
         .frontend_connections
         .subscribe(
             subscription_key.clone(),
             tx.clone(),
-            bound_actor_id.map(str::to_string),
+            resolved_view_actor_id.map(str::to_string),
+            connection_human_view.clone(),
         )
-        .await;
-    connection_state
-        .subscribed_sessions
-        .push((subscription_key, conn_id));
+        .await?;
+    connection_state.subscribed_sessions.push((
+        subscription_key,
+        conn_id,
+        connection_human_view.clone(),
+    ));
     connection_state.phase = WebConnectionPhase::Connected;
 
     let participants: Vec<Value> = outcome
@@ -367,14 +418,24 @@ async fn handle_connect(
     let response = ConnectResponse {
         group_id: outcome.group_id,
         participants,
+        view_actor_id: resolved_view_actor_id.unwrap_or_default().to_string(),
+        message_view_scope: resolved_message_view_scope,
     };
 
     send_ok(tx, &req.id, serde_json::to_value(response)?).await?;
     if let Some(session_id) = session_id.as_deref() {
         match state.interactions.list_pending(session_id).await {
             Ok(pending) => {
-                for event in pending {
-                    send_interaction_event(tx, &event).await?;
+                let pending_visible = connection_human_view.as_ref().is_none_or(|view| {
+                    view.allows_artifact(
+                        bcs_domain::MessageVisibilityDomain::StateMachine,
+                        Some(&bcs_domain::MessageAudience::FullOnly),
+                    )
+                });
+                if pending_visible {
+                    for event in pending {
+                        send_interaction_event(tx, &event).await?;
+                    }
                 }
             }
             Err(error) => {
@@ -764,17 +825,76 @@ async fn handle_chat_send(
     }
 
     let sender_subscription_key = session_id.as_deref().unwrap_or(&group_id);
-    let sender_conn_id = connection_state
+    let exact_sender_subscription = connection_state
         .subscribed_sessions
         .iter()
-        .find(|(key, _)| key.as_str() == sender_subscription_key)
+        .find(|(key, _, _)| key.as_str() == sender_subscription_key);
+    let sender_subscription = exact_sender_subscription
         .or_else(|| {
             connection_state
                 .subscribed_sessions
                 .iter()
-                .find(|(key, _)| key == &group_id)
-        })
-        .map(|(_, id)| *id);
+                .find(|(key, _, _)| key == &group_id)
+        });
+    let sender_conn_id = sender_subscription.map(|(_, id, _)| *id);
+    // A Session run must never inherit a broader Group subscription. User-bound
+    // clients historically may send before connect, so resolve the authoritative
+    // Session participant view on demand instead of registering an unrestricted
+    // run channel.
+    let mut sender_human_view = exact_sender_subscription.and_then(|(_, _, view)| view.clone());
+    if from_id.starts_with("human_") {
+        if let Some(session_id) = session_id.as_deref()
+            && state
+                .frontend_connections
+                .scope_change_in_progress(session_id, &from_id)
+                .await
+        {
+            send_error(
+                tx,
+                &req.id,
+                "view_scope_change_in_progress",
+                "Participant message view scope is changing; retry after reconnect",
+            )
+            .await?;
+            return Ok(());
+        }
+        let outcome = match state
+            .workbench_sessions
+            .connect(WorkbenchConnectCommand {
+                bound_actor_id: bound_actor_id.map(str::to_string),
+                view_actor_id: Some(from_id.clone()),
+                group_id: group_id.clone(),
+                session_id: session_id.clone(),
+            })
+            .await
+        {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                let message = error.message();
+                send_error(tx, &req.id, error.code(), &message).await?;
+                return Ok(());
+            }
+        };
+        let Some(participant) = outcome
+            .participants
+            .iter()
+            .find(|participant| participant.bot_uuid == from_id)
+        else {
+            send_error(
+                tx,
+                &req.id,
+                "forbidden_view_actor",
+                "Authorized Human is not a participant of the requested scope",
+            )
+            .await?;
+            return Ok(());
+        };
+        sender_human_view = Some(HumanMessageView {
+            actor_id: from_id.clone(),
+            scope: participant.message_view_scope,
+            allow_legacy_unclassified_chat: true,
+        });
+    }
 
     let caller = caller_context_from_bound_actor(bound_actor_id, &from_id);
 
@@ -817,12 +937,13 @@ async fn handle_chat_send(
     for run_id in &outcome.active_run_ids {
         state
             .run_channels
-            .register(
+            .register_with_view(
                 run_id.clone(),
                 run_session_key.clone(),
                 tx.clone(),
                 Some("workbench-ws".to_string()),
                 bound_actor_id.map(str::to_string),
+                sender_human_view.clone(),
             )
             .await;
     }
@@ -982,7 +1103,7 @@ async fn handle_chat_abort(
     let subscribed = connection_state
         .subscribed_sessions
         .iter()
-        .any(|(subscription, _)| subscription == &session_id);
+        .any(|(subscription, _, _)| subscription == &session_id);
     if !subscribed {
         send_error(
             tx,

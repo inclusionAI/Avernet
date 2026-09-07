@@ -7,6 +7,7 @@ use axum::routing::{delete, get, post};
 use bcs_service_api::application::v1::{
     AddGroupParticipant, AuthenticatedCaller, CreateGroup, DeleteGroup, DeleteGroupParticipant,
     EventSubscription, GetGroup, GroupDetail, ListGroups, ListPublicGroups, UpdateGroup,
+    UpdateGroupParticipant,
 };
 use serde::Serialize;
 
@@ -15,7 +16,7 @@ use crate::v1::common::{
 };
 use crate::v1::openapi::dto::group::{
     AddParticipantRequest, CreateGroupRequest, DeleteGroupQuery, ListGroupsQuery,
-    ListPublicGroupsQuery, UpdateGroupRequest,
+    ListPublicGroupsQuery, UpdateGroupRequest, UpdateParticipantRequest,
 };
 
 pub fn router() -> Router<ApiState> {
@@ -32,7 +33,7 @@ pub fn router() -> Router<ApiState> {
         )
         .route(
             "/groups/{group_id}/participants/{actor_id}",
-            delete(remove_group_participant),
+            delete(remove_group_participant).patch(update_group_participant),
         )
 }
 
@@ -224,6 +225,41 @@ async fn add_group_participant(
             caller,
             group_id,
             actor_id: body.actor_id,
+            message_view_scope: body.message_view_scope,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn update_group_participant(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<(String, String)>, PathRejection>,
+    body: Result<Json<UpdateParticipantRequest>, JsonRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path((group_id, actor_id)) =
+        path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Json(body) = body.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    if body.mode.is_none() && body.message_view_scope.is_none() {
+        return Err(invalid_request(
+            &request_id,
+            "At least one of mode or message_view_scope must be provided",
+        ));
+    }
+    let result = state
+        .group_service
+        .update_participant(UpdateGroupParticipant {
+            caller,
+            group_id,
+            actor_id,
+            mode: body.mode,
+            message_view_scope: body.message_view_scope,
         })
         .await
         .map_err(|error| application_error_response(&request_id, error))?;

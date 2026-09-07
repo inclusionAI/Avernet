@@ -727,6 +727,7 @@ impl GroupManagementService for RecordingGroupManagement {
             group_id: cmd.group_id.clone(),
             actor_id: cmd.actor_id.clone(),
             mode: cmd.mode,
+            message_view_scope: cmd.message_view_scope.unwrap_or_default(),
         };
         self.participant_mode_calls.lock().await.push(cmd);
         Ok(result)
@@ -2468,6 +2469,7 @@ async fn get_group_preserves_legacy_detail_payload_from_query_service() {
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
     );
     group.messages = vec![GroupMessage {
@@ -2918,6 +2920,7 @@ async fn test_app_with_service_spec_and_store(
             actor_kind: ActorKind::Bot,
             mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
             tags: Vec::new(),
+            message_view_scope: bcs_domain::MessageViewScope::Full,
         }],
     );
     g.service_spec = initial_spec;
@@ -2964,6 +2967,7 @@ async fn test_app() -> (axum::Router, Arc<RecordingGroupManagement>, TempDir) {
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
                 Participant {
                     bot_uuid: "target-bot".to_string(),
@@ -2973,6 +2977,7 @@ async fn test_app() -> (axum::Router, Arc<RecordingGroupManagement>, TempDir) {
                     actor_kind: ActorKind::Bot,
                     mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
                     tags: Vec::new(),
+                    message_view_scope: bcs_domain::MessageViewScope::Full,
                 },
             ],
         ))
@@ -3110,6 +3115,7 @@ fn participant_view(bot_id: &str, role: &str) -> GroupParticipantView {
         actor_kind: ActorKind::Bot,
         mode: Some(ParticipantMode::default_for(ActorKind::Bot)),
         tags: Vec::new(),
+        message_view_scope: bcs_domain::MessageViewScope::Full,
     }
 }
 

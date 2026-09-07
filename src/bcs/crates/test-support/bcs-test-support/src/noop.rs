@@ -977,6 +977,15 @@ impl GroupCoreService for NoopGroupCoreService {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }
 
+    async fn update_participant_message_view_scope(
+        &self,
+        id: &str,
+        _actor_id: &str,
+        _message_view_scope: bcs_domain::MessageViewScope,
+    ) -> ServiceResult<()> {
+        Err(ServiceError::GroupNotFound(id.to_string()))
+    }
+
     async fn update_workspace(&self, id: &str, _workspace: Workspace) -> ServiceResult<()> {
         Err(ServiceError::GroupNotFound(id.to_string()))
     }

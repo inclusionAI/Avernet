@@ -118,6 +118,7 @@ impl Fixture {
             session_title: Some(format!("{group_id}-session")),
             id: None,
             meta: None,
+            message_visibility_version: 1,
         };
         let outcome = self
             .sessions
