@@ -125,8 +125,10 @@ def test_stable_repo_bridge_check_is_conditional_and_verified(
     assert resolved["layout_contract_version"] == LAYOUT_CONTRACT_VERSION
     assert resolved["pool_center"] == str(layout.pool_center)
     checks = active.evidence["checks"]
-    if engine in {"aicoding", "hermes"}:
+    if engine == "aicoding":
         assert checks["stable_repo_bridge_valid"] is True
+    elif engine == "hermes":
+        assert checks["legacy_repo_bridge_status"] == "absent"
     else:
         assert "stable_repo_bridge_valid" not in checks
 

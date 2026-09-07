@@ -181,6 +181,26 @@ def _lexical_symlink_target(path: Path) -> Path:
     return Path(os.path.abspath(target))
 
 
+def _hermes_repo_bridge_status(layout: _FilesystemPoolLayout) -> str:
+    """Describe the obsolete external bridge without mutating or gating Pool."""
+
+    try:
+        entry_stat = layout.repo_bridge.lstat()
+    except FileNotFoundError:
+        return "absent"
+    except OSError:
+        return "retained_unreadable"
+    if not stat.S_ISLNK(entry_stat.st_mode):
+        return "retained_object"
+    try:
+        target = _lexical_symlink_target(layout.repo_bridge)
+    except OSError:
+        return "retained_unreadable"
+    if target == Path(os.path.abspath(layout.pool_repo)):
+        return "expected_bridge_present"
+    return "retained_unexpected_symlink"
+
+
 def _marker_contract_valid(
     marker: dict[str, Any],
     *,
@@ -773,7 +793,7 @@ def inspect_runtime_layout(
                         reason=f"retired_{bridge_name}_bridge_present",
                         preparation_id=preparation_id,
                     )
-            if engine in {"aicoding", "hermes"}:
+            if engine == "aicoding":
                 try:
                     repo_bridge_valid = (
                         layout.repo_bridge.is_symlink()
@@ -839,11 +859,12 @@ def inspect_runtime_layout(
         if center_mount.status is CenterMountStatus.READY:
             active_checks["pool_center_mounted"] = True
             active_checks["pool_center_readable"] = True
-        if (
-            engine in {"aicoding", "hermes"}
-            and active_marker["activation_state"] == "active"
-        ):
+        if engine == "aicoding" and active_marker["activation_state"] == "active":
             active_checks["stable_repo_bridge_valid"] = True
+        if engine == "hermes" and active_marker["activation_state"] == "active":
+            active_checks["legacy_repo_bridge_status"] = _hermes_repo_bridge_status(
+                layout
+            )
         return RuntimeLayoutInspection(
             status=RuntimeLayoutInspectionStatus.READY,
             engine=engine,

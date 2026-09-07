@@ -123,15 +123,11 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
     )
 
     assert activated.status is PoolActivationStatus.COMMITTED
-    assert (layout.pool_repo / "business/reviewer/SKILL.md").read_text() == (
-        "repo"
-    )
+    assert (layout.pool_repo / "business/reviewer/SKILL.md").read_text() == ("repo")
     assert layout.pool_repo.is_dir()
     assert not layout.pool_repo.is_symlink()
-    assert _target(layout.active_root / "handmade") == (
-        layout.pool_local / "handmade"
-    )
-    if engine in {"aicoding", "hermes"}:
+    assert _target(layout.active_root / "handmade") == (layout.pool_local / "handmade")
+    if engine == "aicoding":
         assert _target(layout.repo_bridge) == layout.pool_repo
     else:
         assert not layout.repo_bridge.exists()
@@ -142,8 +138,10 @@ def test_desktop_download_layout_uses_public_cutover_and_rollback(
         repo_delivery=RepoDelivery.DOWNLOAD,
     )
     assert active.status is RuntimeLayoutInspectionStatus.READY
-    if engine in {"aicoding", "hermes"}:
+    if engine == "aicoding":
         assert active.evidence["checks"]["stable_repo_bridge_valid"] is True
+    elif engine == "hermes":
+        assert active.evidence["checks"]["legacy_repo_bridge_status"] == "absent"
     else:
         assert "stable_repo_bridge_valid" not in active.evidence["checks"]
 

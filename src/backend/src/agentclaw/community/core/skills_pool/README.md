@@ -59,8 +59,11 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
   best-effort 后置合并；随后发布并验证直接指向 canonical Pool 的 active
   mapping。持久化 `.pool-active` 的 `finalizing → active` 后，active root
   中的 local corpus bridge 必须退役；OpenClaw、Claude Code 位于 active
-  root 内的 repo bridge 同时退役，AICoding、Hermes 位于 active root 外的
-  稳定 repo namespace 则保留并继续只读指向 canonical Pool。
+  root 内的 repo bridge 同时退役。AICoding 位于 active root 外的稳定 repo
+  namespace 保留并继续只读指向 canonical Pool；Hermes 的外部 Legacy Repo
+  地址在准备期保留，Pool 生效后由 Engine/启动收敛幂等退休。该地址若已被用户
+  占用或指向意外目标则保留并记录诊断，不影响 canonical Pool 与逐 Skill 映射
+  已经有效的布局。
 - 激活前同时核对已登记 local，并从文件系统枚举未登记 local、受管 active
   entry 与外部 entry；完整 local 内容进入 Pool，但不会为未登记内容创建
   数据库记录，外部 entry 保持原目标。
