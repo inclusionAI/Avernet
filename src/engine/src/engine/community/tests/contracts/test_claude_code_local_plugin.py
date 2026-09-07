@@ -360,3 +360,12 @@ async def test_local_activation_rejects_parent_link_from_previous_request():
     with pytest.raises(ValueError):
         await plugin.skills_sync_bindpaths({"symlinks": [{"source": "/source", "target": "/active/retro/nested"}]})
     assert plugin._skill_links == {"/active/retro": "/source"}
+
+
+async def test_local_cleanup_rejects_active_link_directory():
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.file_upload("/source/SKILL.md", b"skill")
+    await plugin.skills_sync_bindpaths({"symlinks": [{"source": "/source", "target": "/active/retro"}]})
+    with pytest.raises(ValueError):
+        await plugin.skills_clean_symlinks({"directories": ["/active/retro"]})
+    assert plugin._skill_links == {"/active/retro": "/source"}

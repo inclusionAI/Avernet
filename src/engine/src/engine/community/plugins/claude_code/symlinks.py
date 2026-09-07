@@ -73,7 +73,9 @@ class LocalSkillSymlinks:
         return result
 
     def clean(self, params: dict) -> dict:
-        directories = [self._path(raw) for raw in params.get("directories", [])]
+        directories = [self._path(raw, link=True) for raw in params.get("directories", [])]
+        if any(directory.is_symlink() for directory in directories):
+            raise ValueError("Skill cleanup directory must not be a symlink")
         removed: list[str] = []
         scanned = 0
         for directory in directories:

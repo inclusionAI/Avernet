@@ -240,3 +240,14 @@ def test_separate_request_cannot_write_through_existing_skill_link(runtime, rela
     assert response.status_code == 400, response.text
     assert target.resolve() == source
     assert not (source / "nested").exists()
+
+
+def test_cleanup_cannot_follow_active_link_into_source(runtime):
+    client, source, target = runtime
+    resource = source / "shared"
+    resource.symlink_to("SKILL.md")
+    assert bind(client, source, target).status_code == 200
+    response = client.post("/api/skills/symlink/clean", json={"directories": [str(target)]})
+    assert response.status_code == 400, response.text
+    assert target.is_symlink()
+    assert resource.is_symlink()

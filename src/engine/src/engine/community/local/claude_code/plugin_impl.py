@@ -538,6 +538,8 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         directories = {PurePosixPath(path) for path in params.get("directories", [])}
         if any(not path.is_absolute() or ".." in path.parts for path in directories):
             raise ValueError("Invalid Skill cleanup path")
+        if any(str(part) in self._skill_links for path in directories for part in (path, *path.parents)):
+            raise ValueError("Skill cleanup directory must not traverse a symlink")
         if any(str(path) in self._files for path in directories):
             raise ValueError("Skill cleanup path is not a directory")
         removed = [target for target in self._skill_links if PurePosixPath(target).parent in directories]
