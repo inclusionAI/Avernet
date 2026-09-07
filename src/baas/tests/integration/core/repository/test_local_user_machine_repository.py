@@ -764,3 +764,63 @@ class TestLocalUserMachineRepositoryProtocol:
         assert record2 is not None
         assert record2.last_heartbeat == heartbeat_2
         assert record2.status == "OFFLINE"
+
+    # ── 12. update_user_id (ownership migration) ──
+
+    def test_update_user_id_migrates_ownership(
+        self,
+        local_user_machine_repository: LocalUserMachineRepository,
+        db_transaction,
+    ):
+        """Ownership drift (D-01/D-05): conditional UPDATE rewrites user_id in place."""
+        machine_id = _generate_uuid()
+        now = _now()
+
+        local_user_machine_repository.insert_machine(
+            template_id=1,
+            user_id="user-old",
+            machine_id=machine_id,
+            machine_info=None,
+            last_heartbeat=now,
+            connected_server_instance="test-instance",
+            status="ONLINE",
+            env=TEST_ENV,
+        )
+
+        updated = local_user_machine_repository.update_user_id(
+            machine_id, TEST_ENV, "user-old", "user-new"
+        )
+        assert updated == 1
+
+        record = local_user_machine_repository.get_by_machine_id(machine_id, TEST_ENV)
+        assert record is not None
+        assert record.user_id == "user-new"
+
+    def test_update_user_id_stale_guard_returns_zero(
+        self,
+        local_user_machine_repository: LocalUserMachineRepository,
+        db_transaction,
+    ):
+        """D-05 stale old_user_id loses the guard race: 0 rows, record unchanged."""
+        machine_id = _generate_uuid()
+        now = _now()
+
+        local_user_machine_repository.insert_machine(
+            template_id=1,
+            user_id="user-old",
+            machine_id=machine_id,
+            machine_info=None,
+            last_heartbeat=now,
+            connected_server_instance="test-instance",
+            status="ONLINE",
+            env=TEST_ENV,
+        )
+
+        updated = local_user_machine_repository.update_user_id(
+            machine_id, TEST_ENV, "user-wrong-old", "user-new"
+        )
+        assert updated == 0
+
+        record = local_user_machine_repository.get_by_machine_id(machine_id, TEST_ENV)
+        assert record is not None
+        assert record.user_id == "user-old"
