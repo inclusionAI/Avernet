@@ -65,7 +65,9 @@ def resolve(home: Path, env: dict[str, str], pids: list[int]) -> str:
                 child
                 for child in process.children(recursive=True)
                 if any(
-                    arg.endswith(("start.py", "server.js")) for arg in child.cmdline()
+                    arg.endswith(("start.py", "server.js"))
+                    or arg == "engine.community.api.app:app"
+                    for arg in child.cmdline()
                 )
             ]
         if not workers:

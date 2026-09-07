@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 SCRIPT = (
     next(p for p in Path(__file__).resolve().parents if (p / "docker").is_dir())
@@ -202,3 +204,53 @@ def test_start_script_rejects_running_conflict_before_rewriting_or_restarting(tm
     finally:
         worker.terminate()
         worker.wait(timeout=5)
+
+
+@pytest.mark.parametrize("saved_cwd", ["/retained", "/conflicting"])
+def test_supervisor_shell_checks_uvicorn_worker_environment(tmp_path, saved_cwd):
+    # Stub only uvicorn's server loop, preserving the production shell ->
+    # python -m uvicorn command line and real inherited process environment.
+    (tmp_path / "uvicorn.py").write_text(
+        "import time; print('ready', flush=True); time.sleep(30)"
+    )
+    (tmp_path / ".adaptorEnv").write_text(
+        "export CLAUDE_CODE_DEFAULT_CWD=" + saved_cwd + "\n"
+    )
+    env = dict(
+        os.environ,
+        PYTHONPATH=str(tmp_path),
+        CLAUDE_CODE_DEFAULT_CWD="/retained",
+        RELAY_DEFAULT_CWD="/retained",
+        OPENCLAW_WORKSPACE_DIR="/retained",
+    )
+    parent = subprocess.Popen(
+        [
+            "bash",
+            "-c",
+            '"$1" -m uvicorn engine.community.api.app:app || exit 1',
+            "worker",
+            sys.executable,
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    import psutil
+
+    try:
+        assert parent.stdout.readline().strip() == "ready"
+        workers = psutil.Process(parent.pid).children(recursive=True)
+        assert workers
+        result = run(tmp_path, pids=[parent.pid])
+        if saved_cwd == "/retained":
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip() == "/retained"
+        else:
+            assert result.returncode != 0
+            assert "conflict" in result.stderr.lower()
+        assert parent.poll() is None
+    finally:
+        for worker in psutil.Process(parent.pid).children(recursive=True):
+            worker.terminate()
+        parent.terminate()
+        parent.wait(timeout=5)
