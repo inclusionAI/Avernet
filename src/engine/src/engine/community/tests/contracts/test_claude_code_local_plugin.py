@@ -340,3 +340,14 @@ async def test_local_activation_rejects_invalid_payload(method, params, error):
     with pytest.raises(error):
         await getattr(plugin, method)(params)
     assert plugin._skill_links == {}
+
+
+async def test_local_activation_rejects_nested_batch_targets():
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.file_upload("/source/SKILL.md", b"skill")
+    with pytest.raises(ValueError):
+        await plugin.skills_sync_bindpaths({"symlinks": [
+            {"source": "/source", "target": "/active/retro"},
+            {"source": "/source", "target": "/active/retro/nested"},
+        ]})
+    assert plugin._skill_links == {}

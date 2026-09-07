@@ -516,6 +516,8 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
             ):
                 raise RuntimeError("Skill target is occupied")
             desired[target] = source
+        if any(PurePosixPath(other) in PurePosixPath(target).parents for target in desired for other in desired):
+            raise ValueError("Skill targets cannot contain another requested target")
         result: dict[str, Any] = {"ok": True, "total": len(desired), "created": [], "updated": [], "kept": [], "removed": []}
         for target, source in desired.items():
             key = "kept" if self._skill_links.get(target) == source else "updated" if target in self._skill_links else "created"

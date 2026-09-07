@@ -176,3 +176,14 @@ def test_replace_existing_mapping_and_cleanup_paths(runtime):
     assert client.post("/api/skills/symlink/clean", json={"directories": [str(source / "absent")]}).json()["data"]["directories_scanned"] == 0
     assert client.post("/api/skills/symlink/clean", json={"directories": [str(source / "SKILL.md")]}).status_code == 400
     assert client.post("/api/skills/symlink", json={"symlinks": [{"source": "../escape", "target": "retro"}]}).status_code == 400
+
+
+def test_nested_batch_targets_do_not_write_into_uploaded_source(runtime):
+    client, source, target = runtime
+    response = client.post("/api/skills/symlink/bindpath", json={"symlinks": [
+        {"source": str(source), "target": str(target)},
+        {"source": str(source), "target": str(target / "nested")},
+    ]})
+    assert response.status_code == 400
+    assert not target.exists()
+    assert not (source / "nested").exists()

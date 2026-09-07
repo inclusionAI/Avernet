@@ -41,6 +41,8 @@ class LocalSkillSymlinks:
             if target.exists() and not target.is_symlink():
                 raise RuntimeError(f"Skill target is occupied: {target}")
             desired[target] = source
+        if any(other in target.parents for target in desired for other in desired):
+            raise ValueError("Skill targets cannot contain another requested target")
         result: dict[str, Any] = {"total": len(desired), "created": [], "updated": [], "kept": [], "removed": []}
         for target, source in desired.items():
             target.parent.mkdir(parents=True, exist_ok=True)
