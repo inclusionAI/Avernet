@@ -17,6 +17,8 @@ from typing import Protocol
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
+    AcceptanceResult,
+    AcceptanceVerdict,
     Context,
     Goal,
     Metadata,
@@ -181,33 +183,34 @@ def _compose_planning_prompt(graph: TaskExecutionGraph, target: TaskNode) -> str
     }
 
     return_fmt = (
-        '## 返回数据格式约定\n'
-        '硬约束：单次规划最多返回 3 个子任务，``tasks`` 数组长度不得超过 3；如果剩余事项超过 3 个，按依赖关系和优先级选择当前最重要的 3 个，未选事项留给后续规划，禁止返回第 4 个及之后的子任务。\n'
-        '返回 JSON 字符串,结构为对象 ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str, "acceptance_verdicts": List[{"ac_id": str, "passed": bool, "reason": str}]}``:\n'
-        '```json\n'
-        '{"tasks": [{"metadata": {"task_id": "<子节点node_id>", "title": "<标题>", "instruction": "<指令>"},\n'
-        '              "context": {"background": "<背景>", "extend_props": {}},\n'
-        '              "goal": {"objective": "<目标>", "acceptances": [{"id": "<ac_id>", "description": "<描述>"}]}}],\n'
-        ' "has_gap": true,\n'
-        ' "gap_detail": ""}\n'
-        '```\n'
-        '- ``tasks`` = 下一批可执行子任务;gap 已闭(验收通过)→ ``{"tasks": [], "has_gap": false, "gap_detail": "done"}``;\n'
-        '- 有 gap 但无规划能力拆不出子 → ``{"tasks": [], "has_gap": true, "gap_detail": "<原因>"}``;\n'
-        '- ``has_gap`` = 目标 - 已完成产出 是否仍有差距;``done_children`` 已列出已 DONE 子节点及产出,据此产**尚未完成**的下一批(不重复产已 DONE 的)。\n'
-        '- ``acceptance_verdicts`` = 逐条对照目标节点自身 acceptances(id 取自 acceptances.id)给结论:``passed``=true/false、``reason``=判定依据;gap 闭(验收通过)全为 true 且 ``has_gap`` 应为 false。\n\n'
-        '### 示例(gap 未闭,产 1 个子任务)\n'
-        '```json\n'
-        '{"tasks": [{"metadata": {"task_id": "N_market", "title": "市场规模分析", "instruction": "分析存储行业过去5年市场规模与增速"},\n'
-        '              "context": {"background": "存储行业尽调·市场维度", "extend_props": {}},\n'
-        '              "goal": {"objective": "产出市场规模模型与周期判断", "acceptances": [{"id": "ac_scale", "description": "提供过去5年市场规模/增速/出货量/价格变化"}]}}],\n'
-        ' "has_gap": true, "gap_detail": "", "acceptance_verdicts": [{"ac_id": "ac_scale", "passed": false, "reason": "市场规模未产出"}]}\n'
-        '```\n'
-        '### 示例(gap 已闭,验收通过)\n'
-        '```json\n'
-        '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_verdicts": [{"ac_id": "<acceptance的id>", "passed": true, "reason": "已由已 DONE 子节点交付达成"}]}\n'
-        '```'
+        '## 返回格式硬约束(必须遵守)\n'
+        '- 必须只返回**一个合法 JSON 对象**,禁止输出任何 JSON 之外的文字:不要解释、不要散文、不要 Markdown 代码块围栏(```json)、不要前后缀说明。\n'
+        '- 下游用严格 JSON 解析;返回非 JSON 或在 JSON 之外夹带文字,整条响应将被丢弃并判定规划失败(plan_parse_fail),任务无法继续。\n'
+        '- 单次规划最多返回 3 个子任务,``tasks`` 数组长度不得超过 3;超出按依赖与优先级取最重要的 3 个,未选事项留给后续规划,禁止返回第 4 个及之后。\n\n'
+        '## 协议格式(顶层对象字段)\n'
+        '| 字段 | 类型 | 必需 | 说明 |\n'
+        '| --- | --- | --- | --- |\n'
+        '| tasks | Array<TaskSpec> | 是 | 下一批可执行子任务;gap 已闭(验收通过)时为空数组 ``[]`` |\n'
+        '| has_gap | bool | 是 | 目标 - 已完成产出是否仍有差距;gap 闭(验收通过)=false |\n'
+        '| gap_detail | string | 是 | gap 闭填 ``"done"``;有 gap 拆不出填原因;正常产子填 ``""`` |\n'
+        '| acceptance_result | object{verdict,acceptances_metric,gaps} | 否 | owner 自评本节点 acceptance(对齐验收 common_task 协议);gap 闭→verdict=DONE/gaps=[];未闭→verdict=FAILED/gaps=[gap_detail] |\n\n'
+        '## 子任务 TaskSpec 字段格式\n'
+        '| 字段路径 | 类型 | 必需 | 缺失处理 |\n'
+        '| --- | --- | --- | --- |\n'
+        '| metadata.task_id | string | 是 | 用作子节点 node_id,必须唯一,不可与已有节点重复 |\n'
+        '| metadata.title | string | 是 | 子任务标题(缺失继承父节点) |\n'
+        '| metadata.instruction | string | 是 | 子任务执行指令(缺失继承父节点) |\n'
+        '| context.background | string | 否 | 缺失继承父节点 |\n'
+        '| context.extend_props | object | 否 | 默认 ``{}`` |\n'
+        '| goal.objective | string | 否 | 缺失继承父节点 |\n'
+        '| goal.acceptances | Array<{id,description}> | 否 | 缺失继承父节点 |\n\n'
+        '## 协议示例(严格按此 JSON 结构输出,禁止围栏/散文)\n'
+        '示例1(gap 未闭,产 1 个子任务):\n'
+        '{"tasks": [{"metadata": {"task_id": "N_market", "title": "市场规模分析", "instruction": "分析存储行业过去5年市场规模与增速"}, "context": {"background": "存储行业尽调·市场维度", "extend_props": {}}, "goal": {"objective": "产出市场规模模型与周期判断", "acceptances": [{"id": "ac_scale", "description": "提供过去5年市场规模/增速/出货量/价格变化"}]}}], "has_gap": true, "gap_detail": "", "acceptance_result": {"verdict": "FAILED", "acceptances_metric": [{"id": "ac_scale", "passed": false, "summary": "市场规模未产出"}], "gaps": ["市场规模未产出"]}}\n\n'
+        '示例2(gap 已闭,验收通过):\n'
+        '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "acceptances_metric": [{"id": "<acceptance的id>", "passed": true, "summary": "已由已 DONE 子节点交付达成"}], "gaps": []}}'
     )
-    return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务;gap 已闭返回 has_gap=false。单次最多产出 3 个子任务，禁止超过 3 个。\n"
+    return (f"[task-planning] 请基于以下任务状态计算 gap,产下一步可执行子任务。**最终只输出一个符合下方协议的合法 JSON 对象,禁止任何 JSON 之外的文字。**gap 已闭返回 has_gap=false。单次最多产出 3 个子任务,禁止超过 3 个。\n"
             f"目标节点 node_id={target.node_id}\n"
             f"已完成的子节点及其产出见快照 done_children;gap = 目标 - 已完成产出,据此产**尚未完成**的下一批子任务。\n"
             f"任务态快照\n{_json.dumps(snapshot, ensure_ascii=False)}\n\n{return_fmt}\n\n{NO_WEB_SEARCH_CONSTRAINT}")
@@ -217,9 +220,9 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
     """解析 owner bot round-trip 结果 run{status,result,error} → PlanResult。
 
     约定 result.content 为 JSON(裸或被散文/```json 包裹,经 ``extract_json`` 提取),结构:
-    ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str}``。
-    向后兼容:裸 ``List[TaskSpec]`` 数组 → tasks=数组, has_gap=len>0。
-    异常/非终态/解析失败 → PlanResult([], has_gap=False, "plan_parse_fail")(编排核据 gap 闭语义处理)。
+    ``{"tasks": List[TaskSpec], "has_gap": bool, "gap_detail": str, "acceptance_result": {verdict,acceptances_metric,gaps}}``。
+    裸 ``List[TaskSpec]`` 数组按 tasks 解析(has_gap=len>0)。
+    非终态/空 content/解析失败 → PlanResult([], has_gap=True, gap_detail=plan_*);编排核据 gap 闭语义处理。
     node_id 取自 metadata.task_id;与已存 nodes 去重;task_id(根任务)取自 target.task_id。
     """
     status = str(run.get("status") or "").upper()
@@ -230,13 +233,23 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
         return PlanResult(children=[], has_gap=True, gap_detail="plan_empty_content")
     try:
         data = extract_json(content)  # 鲁棒解析:裸 JSON / ```json 代码块 / 散文包裹
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
+        # 诊断缺口补齐:解析失败时落 content 摘要日志,便于排查 owner bot 回投非 JSON 散文
+        _snippet = repr(content)
+        _snippet = _snippet if len(_snippet) <= 500 else _snippet[:497] + "..."
+        logger.warning(
+            "[plan] plan_parse_fail target=%s content_len=%s content=%s exc=%r",
+            target.node_id,
+            len(content) if isinstance(content, str) else -1,
+            _snippet,
+            exc,
+        )
         return PlanResult(children=[], has_gap=True, gap_detail="plan_parse_fail")
     # 归一:对象 {tasks,has_gap,gap_detail} 或裸 list
     tasks_data: list = []
     has_gap = False
     gap_detail = ""
-    acceptance_verdicts: list[dict] = []
+    acceptance_result: AcceptanceResult | None = None
     if isinstance(data, list):
         tasks_data = data
         has_gap = len(data) > 0
@@ -246,8 +259,7 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
         gap_detail = str(data.get("gap_detail") or "")
         if not isinstance(tasks_data, list):
             tasks_data = []
-        _av = data.get("acceptance_verdicts") or []
-        acceptance_verdicts = [v for v in _av if isinstance(v, dict)] if isinstance(_av, list) else []
+        acceptance_result = _acceptance_result_from_plan(data, has_gap)
     else:
         return PlanResult(children=[], has_gap=True, gap_detail="plan_shape_unexpected")
     existing = {n.node_id for n in graph.tasks}
@@ -264,7 +276,26 @@ def _parse_plan_result(run: dict, target: TaskNode, graph: TaskExecutionGraph) -
             task_spec=spec, run_info=RuntimeInfo(),
             node_run_graph=None,  # type: ignore[arg-type]  store 回填
         ))
-    return PlanResult(children=children, has_gap=has_gap, gap_detail=gap_detail, acceptance_verdicts=acceptance_verdicts)
+    return PlanResult(children=children, has_gap=has_gap, gap_detail=gap_detail, acceptance_result=acceptance_result)
+
+
+def _acceptance_result_from_plan(
+    data: dict, has_gap: bool
+) -> AcceptanceResult | None:
+    """从 plan 返回 dict 解析 owner 自评 acceptance_result(对齐 common_task 协议)。
+
+    读 ``data["acceptance_result"]``({verdict,acceptances_metric,gaps});缺失/非法 → None(编排核回退合成)。"""
+    ar = data.get("acceptance_result")
+    if not isinstance(ar, dict):
+        return None
+    try:
+        return AcceptanceResult(
+            verdict=AcceptanceVerdict(str(ar.get("verdict") or ("DONE" if not has_gap else "FAILED"))),
+            acceptances_metric=list(ar.get("acceptances_metric") or []),
+            gaps=list(ar.get("gaps") or []),
+        )
+    except (ValueError, TypeError):
+        return None
 
 
 def _build_child_task_spec(data: dict, parent: TaskNode) -> TaskSpec | None:

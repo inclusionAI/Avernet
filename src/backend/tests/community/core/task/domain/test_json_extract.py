@@ -10,6 +10,8 @@ import pytest
 from agentclaw.community.core.task.domain.json_extract import extract_json
 from agentclaw.community.core.task.domain.models import (
     AcceptanceCriteria,
+    AcceptanceResult,
+    AcceptanceVerdict,
     Context,
     Goal,
     Metadata,
@@ -117,6 +119,34 @@ class TestPlanParserWiring:
         g = _graph()
         assert _parse_plan_result({"status": "COMPLETED", "result": {"content": "纯散文无 json"}}, g.tasks[0], g).children == []
 
+
+    def test_planning_prompt_enforces_strict_json_contract(self):
+        from agentclaw.community.core.task.task_plan.strategies import _compose_planning_prompt
+        g = _graph()
+        prompt = _compose_planning_prompt(g, g.tasks[0])
+        # 硬约束:必须只返回 JSON,禁止散文/围栏/前后缀
+        assert "JSON" in prompt
+        assert "禁止" in prompt
+        assert "plan_parse_fail" in prompt
+        # 协议格式表:必须字段及类型
+        assert "metadata.task_id" in prompt
+        assert "has_gap" in prompt
+        assert "gap_detail" in prompt
+        assert "acceptance_result" in prompt
+        # 协议示例为裸 JSON 对象(含 tasks 数组,无围栏前后缀)
+        assert '{"tasks":' in prompt
+        assert '"has_gap"' in prompt
+
+
+    def test_parse_acceptance_result_new_protocol(self):
+        from agentclaw.community.core.task.task_plan.strategies import _parse_plan_result
+        g = _graph()
+        run = {"status": "COMPLETED", "result": {"content": '{"tasks": [], "has_gap": false, "gap_detail": "done", "acceptance_result": {"verdict": "DONE", "acceptances_metric": [{"id": "ac1", "passed": true, "summary": "ok"}], "gaps": []}}'}}
+        pr = _parse_plan_result(run, g.tasks[0], g)
+        assert pr.acceptance_result is not None
+        assert pr.acceptance_result.verdict == AcceptanceVerdict.DONE
+        assert pr.acceptance_result.acceptances_metric == [{"id": "ac1", "passed": True, "summary": "ok"}]
+        assert pr.acceptance_result.gaps == []
 
 class TestDispatchParserWiring:
     def test_parses_prose_fence_hit_single(self):

@@ -424,12 +424,12 @@ class TestOnReportPass:
 
 # 3 级图 root->结构中父 m->叶执行 lm:owner bot plan 逐条验收 + 结构父 gap 闭翻 DONE 补全 run_info
 class _VerdictPlanner:
-    def __init__(self, verdicts):
-        self.verdicts = verdicts
+    def __init__(self, acceptance_result):
+        self.acceptance_result = acceptance_result
         self.plan_calls = 0
     async def plan(self, graph, target_node_id=None) -> PlanResult:
         self.plan_calls += 1
-        return PlanResult(children=[], has_gap=False, acceptance_verdicts=list(self.verdicts))
+        return PlanResult(children=[], has_gap=False, acceptance_result=self.acceptance_result)
 
 
 class TestStructuralParentGapClosedRollup:
@@ -441,7 +441,7 @@ class TestStructuralParentGapClosedRollup:
         svc.add_task_nodes([_child("m1")], parent_node_id="t1")
         svc.add_task_nodes([_child("lm")], parent_node_id="m1")
         svc.update_task_node_info(_patch("t1", "lm", status=Status.RUNNING, run_mode="single_bot", assignee="worker_bot"))
-        planner = _VerdictPlanner([{"ac_id": "ac1", "passed": True, "reason": "名册3位齐全"}])
+        planner = _VerdictPlanner(AcceptanceResult(verdict=AcceptanceVerdict.DONE, acceptances_metric=[{"id": "ac1", "passed": True, "summary": "名册3位齐全"}], gaps=[]))
         eng = _engine(svc, planner=planner)
         _run(eng.on_report(_patch("t1", "lm",
             acceptance_result=AcceptanceResult(verdict=AcceptanceVerdict.DONE),
@@ -454,7 +454,7 @@ class TestStructuralParentGapClosedRollup:
         assert m.run_info.output == {"output": "# 架构师名册\n章文嵩/毕玄/唐洪"}
         assert m.run_info.acceptance_result is not None
         assert m.run_info.acceptance_result.verdict == AcceptanceVerdict.DONE
-        assert m.run_info.acceptance_result.acceptances_metric == [{"ac1": "名册3位齐全"}]
+        assert m.run_info.acceptance_result.acceptances_metric == [{"id": "ac1", "passed": True, "summary": "名册3位齐全"}]
         # root: 一跳 SUCCESS children 看到非空 m1.output -> plan(t1) gap 闭 -> 图 SUCCESS
         root = svc._get_node(graph, "t1")
         assert root.status == Status.SUCCESS

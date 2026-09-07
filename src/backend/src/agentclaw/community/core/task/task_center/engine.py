@@ -538,25 +538,16 @@ class ExecutionEngine:
     ) -> AcceptanceResult:
         """结构父/根 gap 闭(自身验收通过)翻 DONE 时的父自身验收结果(验收执行者=owner)。
 
-        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_verdicts`` 非空 →
-        用 owner bot plan 逐条结论填 ``acceptances_metric``(每条 ac 的 reason);否则回退合成"验收通过"。"""
-        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
-        verdicts: list[dict] = []
-        if pr is not None:
-            verdicts = getattr(pr, "acceptance_verdicts", None) or []
-        if verdicts:
-            vmap: dict[str, dict] = {}
-            for v in verdicts:
-                if isinstance(v, dict):
-                    vmap[str(v.get("ac_id", ""))] = v
-            metrics: list[Any] = []
-            for ac_id in ac_ids:
-                v = vmap.get(ac_id)
-                reason = str(v.get("reason") or "") if v else ""
-                metrics.append({ac_id: reason or "验收通过(子节点交付达成)"})
+        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_result``(owner bot plan
+        自评,对齐 common_task 协议)非空 → 直接用(acceptances_metric 透传);空 → 回退合成逐条"验收通过"。"""
+        if pr is not None and pr.acceptance_result is not None:
+            ar = pr.acceptance_result
             return AcceptanceResult(
-                verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
+                verdict=AcceptanceVerdict.DONE,  # gap 闭语境恒 DONE(防御 owner 自评 FAILED)
+                acceptances_metric=list(ar.acceptances_metric or []),
+                gaps=[],
             )
+        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
         metrics = [{ac_id: "验收通过(子节点交付达成)"} for ac_id in ac_ids]
         if not metrics:
             metrics = [{"all": "验收通过"}]
