@@ -651,13 +651,13 @@ class _FakeSkillsPort:
     async def skills_discover(self, source, token=None) -> list[dict]:
         return [{"skillId": "new", "name": "New", "description": ""}]
 
-    async def skills_sync_symlinks(self, token=None) -> dict:
+    async def skills_sync_symlinks(self, params, token=None) -> dict:
         return {"total": 2, "created": ["a"], "kept": ["b"]}
 
-    async def skills_sync_bindpaths(self, token=None) -> dict:
+    async def skills_sync_bindpaths(self, params, token=None) -> dict:
         return {"total": 1, "created": ["c"]}
 
-    async def skills_clean_symlinks(self, token=None) -> dict:
+    async def skills_clean_symlinks(self, params, token=None) -> dict:
         return {"directories_scanned": 2, "removed": ["x"]}
 
     async def skills_ensure_center(self, token=None) -> dict:

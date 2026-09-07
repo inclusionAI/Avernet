@@ -425,8 +425,7 @@ async def test_send_request_on_unconnected_client_raises_connectionerror():
 
 
 def test_skills_sync_signatures_match_port_protocol():
-    """Community skills sync_* must match the port Protocol (token-only, no
-    out-of-contract ``params`` positional)."""
+    """Community skills sync_* must match the port Protocol including the filesystem request payload."""
     import inspect
 
     from engine.community.plugin_api.claude_code.skills import ClaudeCodeSkillsPort

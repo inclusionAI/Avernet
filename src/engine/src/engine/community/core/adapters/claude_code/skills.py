@@ -282,23 +282,16 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         return [_skill_from_payload(s) for s in raw if isinstance(s, dict)]
 
     # ── Bulk symlink reconciliation ───────────────────────────────────────────
-    #
-    # The port method signatures take only ``token`` — no symlinks payload.
-    # The corp impl performed the FS reconciliation locally; the OSS port
-    # routes the same-named relay RPCs (``skills.sync_symlinks`` etc.). The
-    # adapter forwards the token and builds the DTO from the returned dict.
-    # (GAP NOTE: the port does not accept the ``symlinks`` / ``directories``
-    # payload from the request DTO. See report — the port signature may need
-    # widening, or the impl reads them from server-side config. This adapter
-    # calls the port as-is; tests only verify the DTO build.)
-
     async def sync_symlinks(
         self,
         request: SyncSymlinksRequest,
         auth: AuthContext | None = None,
     ) -> SyncSymlinksResult:
         token = auth.token if auth is not None else None
-        raw = await self._port.skills_sync_symlinks(token=token)
+        raw = await self._port.skills_sync_symlinks(
+            params={"symlinks": [_serialize_pool_mapping(item) for item in request.symlinks]},
+            token=token,
+        )
         return SyncSymlinksResult(
             total=raw.get("total", 0),
             created=raw.get("created", []),
@@ -314,7 +307,13 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         auth: AuthContext | None = None,
     ) -> SyncSymlinksResult:
         token = auth.token if auth is not None else None
-        raw = await self._port.skills_sync_bindpaths(token=token)
+        raw = await self._port.skills_sync_bindpaths(
+            params={
+                "symlinks": [_serialize_pool_mapping(item) for item in request.symlinks],
+                "clean_target_dir": request.clean_target_dir,
+            },
+            token=token,
+        )
         return SyncSymlinksResult(
             total=raw.get("total", 0),
             created=raw.get("created", []),
@@ -330,7 +329,9 @@ class ClaudeCodeSkillsAdapter(SkillsService):
         auth: AuthContext | None = None,
     ) -> CleanSymlinksResult:
         token = auth.token if auth is not None else None
-        raw = await self._port.skills_clean_symlinks(token=token)
+        raw = await self._port.skills_clean_symlinks(
+            params={"directories": list(request.directories)}, token=token,
+        )
         return CleanSymlinksResult(
             directories_scanned=raw.get("directories_scanned", 0),
             removed=raw.get("removed", []),

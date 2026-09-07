@@ -1466,13 +1466,13 @@ class _SkillsPort:
     async def skills_discover(self, source, token=None) -> list[dict]:
         return [{"skillId": "new", "name": "New", "description": ""}]
 
-    async def skills_sync_symlinks(self, token=None) -> dict:
+    async def skills_sync_symlinks(self, params, token=None) -> dict:
         return {"total": 2, "created": ["a"], "kept": ["b"]}
 
-    async def skills_sync_bindpaths(self, token=None) -> dict:
+    async def skills_sync_bindpaths(self, params, token=None) -> dict:
         return {"total": 1, "created": ["c"]}
 
-    async def skills_clean_symlinks(self, token=None) -> dict:
+    async def skills_clean_symlinks(self, params, token=None) -> dict:
         return {"directories_scanned": 2, "removed": ["x"]}
 
     async def skills_ensure_center(self, token=None) -> dict:
@@ -1560,7 +1560,7 @@ class TestSkillsAdapterCoverage:
     async def test_sync_symlinks_with_all_fields(self):
         port = _SkillsPort()
 
-        async def sync(token=None):
+        async def sync(params, token=None):
             return {"total": 5, "created": ["a"], "updated": ["b"],
                     "kept": ["c"], "removed": ["d"], "base_dir": "/base"}
         port.skills_sync_symlinks = sync  # type: ignore[assignment]
@@ -1574,7 +1574,7 @@ class TestSkillsAdapterCoverage:
     async def test_clean_symlinks_with_defaults(self):
         port = _SkillsPort()
 
-        async def clean(token=None):
+        async def clean(params, token=None):
             return {}  # empty → defaults
         port.skills_clean_symlinks = clean  # type: ignore[assignment]
         adapter = ClaudeCodeSkillsAdapter(port)

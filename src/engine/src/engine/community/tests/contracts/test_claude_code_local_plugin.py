@@ -224,9 +224,9 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     assert (await plugin.skills_execute("sk1", {"x": 1}))["success"] is True
     assert (await plugin.skills_validate({"id": "sk1"}))["valid"] is True
     assert (await plugin.skills_discover("registry"))[0]["source"] == "registry"
-    assert (await plugin.skills_sync_symlinks())["ok"] is True
-    assert (await plugin.skills_sync_bindpaths())["ok"] is True
-    assert (await plugin.skills_clean_symlinks())["ok"] is True
+    assert (await plugin.skills_sync_symlinks({}))["ok"] is True
+    assert (await plugin.skills_sync_bindpaths({}))["ok"] is True
+    assert (await plugin.skills_clean_symlinks({}))["ok"] is True
     assert (await plugin.skills_ensure_center())["ok"] is True
     assert await plugin.skills_uninstall("sk1") is True
     assert await plugin.skills_uninstall("sk1") is False
@@ -289,3 +289,54 @@ async def test_file_adapter_distinguishes_missing_and_empty_directories(tmp_path
     await adapter.rmtree(project)
     with pytest.raises(FileNotFoundError):
         await adapter.list_dir(project)
+
+
+async def test_adapter_local_skill_activation_contract():
+    from engine.community.core.adapters.claude_code.skills import ClaudeCodeSkillsAdapter
+    from engine.community.core.skills.models import SyncBindPathsRequest, SymlinkItem, CleanSymlinksRequest
+    plugin = LocalClaudeCodePluginImpl()
+    adapter = ClaudeCodeSkillsAdapter(plugin)
+    source, target = "/source/retro", "/active/retro"
+    await plugin.file_upload(source + "/SKILL.md", b"retro")
+    request = SyncBindPathsRequest(symlinks=[SymlinkItem(source=source, target=target)])
+    assert (await adapter.sync_bindpaths(request)).created == [target]
+    assert plugin._skill_links == {target: source}
+    assert (await adapter.sync_bindpaths(request)).kept == [target]
+    with pytest.raises(RuntimeError):
+        await adapter.sync_bindpaths(SyncBindPathsRequest(symlinks=[SymlinkItem(source="/absent", target=target)]))
+    assert plugin._skill_links == {target: source}
+    assert (await adapter.clean_symlinks(CleanSymlinksRequest(directories=["/active"]))).removed == [target]
+    assert (await plugin.file_read(source + "/SKILL.md"))["content"] == b"retro"
+
+
+async def test_local_activation_replacement_and_relative_cleanup():
+    plugin = LocalClaudeCodePluginImpl()
+    base = "/home/admin/.claude/skills"
+    for name in ("one", "two"):
+        await plugin.file_upload(f"{base}/sources/{name}/SKILL.md", b"skill")
+    def relative(source, target):
+        return {"symlinks": [{"source": f"sources/{source}", "target": target}]}
+    assert (await plugin.skills_sync_symlinks(relative("one", "nested/active")))["created"] == ["nested/active"]
+    assert (await plugin.skills_sync_symlinks(relative("two", "nested/active")))["updated"] == ["nested/active"]
+    assert (await plugin.skills_sync_symlinks({"symlinks": []}))["removed"] == ["nested/active"]
+    for name in ("old", "new"):
+        await plugin.skills_sync_bindpaths({"symlinks": [{"source": f"{base}/sources/one", "target": f"{base}/{name}"}], "clean_target_dir": False})
+    result = await plugin.skills_sync_bindpaths({"symlinks": [{"source": f"{base}/sources/one", "target": f"{base}/new"}]})
+    assert result["kept"] == [f"{base}/new"]
+    assert result["removed"] == [f"{base}/old"]
+
+
+@pytest.mark.parametrize("method,params,error", [
+    ("skills_sync_symlinks", {"symlinks": [{"source": "../escape", "target": "x"}]}, ValueError),
+    ("skills_sync_bindpaths", {"symlinks": [{"source": "relative", "target": "/x"}]}, ValueError),
+    ("skills_sync_bindpaths", {"symlinks": [{"source": "/source", "target": "/source"}]}, ValueError),
+    ("skills_sync_bindpaths", {"symlinks": [{"source": "/source", "target": "/source/SKILL.md"}]}, RuntimeError),
+    ("skills_clean_symlinks", {"directories": ["relative"]}, ValueError),
+    ("skills_clean_symlinks", {"directories": ["/source/SKILL.md"]}, ValueError),
+])
+async def test_local_activation_rejects_invalid_payload(method, params, error):
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.file_upload("/source/SKILL.md", b"skill")
+    with pytest.raises(error):
+        await getattr(plugin, method)(params)
+    assert plugin._skill_links == {}
