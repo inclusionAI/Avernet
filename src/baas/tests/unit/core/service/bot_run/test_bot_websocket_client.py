@@ -163,10 +163,14 @@ async def test_interaction_resolve_sends_complete_normalized_frame(client) -> No
         selected_options=(("staging",),),
     )
 
-    exchange = await client.interaction_resolve(
-        interaction_id="int-1",
-        resolution=resolution,
-    )
+    with patch(
+        "secbaas.community.core.service.bot_run._bot_websocket_client.get_tracer_plugin"
+    ) as mock_get_tracer:
+        mock_get_tracer.return_value.get_trace_id.return_value = "-"
+        exchange = await client.interaction_resolve(
+            interaction_id="int-1",
+            resolution=resolution,
+        )
 
     assert exchange.accepted is True
     client._send_request_frame.assert_awaited_once_with(
@@ -182,10 +186,158 @@ async def test_interaction_resolve_sends_complete_normalized_frame(client) -> No
                 "values": {"target": "staging"},
                 "answers": {"Where?": "staging"},
                 "selectedOptions": [["staging"]],
+                "traceId": "-",
             },
         },
         timeout=30.0,
     )
+
+
+# ==================== Tests: downlink traceId injection ====================
+
+
+class TestDownlinkTraceIdInjection:
+    """Tests that the four downlink methods inject traceId into params.
+
+    Covers both the active-span (32-char hex) and no-span ("-") paths by
+    patching _bot_websocket_client.get_tracer_plugin.
+    """
+
+    _TRACE_ID_WITH_SPAN = "0123456789abcdef0123456789abcdef"
+    _TRACE_ID_NO_SPAN = "-"
+
+    async def _setup_mock_ws(self, client):
+        """Helper: set up a mock ws that auto-responds ok=True and captures frames."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+        sent_frames = []
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            sent_frames.append(sent)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+        return sent_frames
+
+    def _patch_tracer(self, trace_id: str):
+        """Patch get_tracer_provider to return a mock whose get_trace_id is trace_id."""
+        return patch(
+            "secbaas.community.core.service.bot_run._bot_websocket_client.get_tracer_plugin",
+            return_value=MagicMock(get_trace_id=MagicMock(return_value=trace_id)),
+        )
+
+    # [单测用例]测试场景：chat_send 有活跃 span 时注入 32 位 hex traceId
+    @pytest.mark.asyncio
+    async def test_chat_send_injects_trace_id_with_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_WITH_SPAN):
+            await client.chat_send(session_key="sk-1", message="hi")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_WITH_SPAN
+
+    # [单测用例]测试场景：chat_send 无活跃 span 时注入 "-"
+    @pytest.mark.asyncio
+    async def test_chat_send_injects_trace_id_no_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_NO_SPAN):
+            await client.chat_send(session_key="sk-1", message="hi")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_NO_SPAN
+
+    # [单测用例]测试场景：chat_inject 有活跃 span 时注入 32 位 hex traceId
+    @pytest.mark.asyncio
+    async def test_chat_inject_injects_trace_id_with_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_WITH_SPAN):
+            await client.chat_inject(session_key="sk-2", message="hi")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_WITH_SPAN
+
+    # [单测用例]测试场景：chat_inject 无活跃 span 时注入 "-"
+    @pytest.mark.asyncio
+    async def test_chat_inject_injects_trace_id_no_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_NO_SPAN):
+            await client.chat_inject(session_key="sk-2", message="hi")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_NO_SPAN
+
+    # [单测用例]测试场景：chat_abort 有活跃 span 时注入 32 位 hex traceId
+    @pytest.mark.asyncio
+    async def test_chat_abort_injects_trace_id_with_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_WITH_SPAN):
+            await client.chat_abort(session_key="sk-3", run_id="run-1")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_WITH_SPAN
+
+    # [单测用例]测试场景：chat_abort 无活跃 span 时注入 "-"
+    @pytest.mark.asyncio
+    async def test_chat_abort_injects_trace_id_no_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with self._patch_tracer(self._TRACE_ID_NO_SPAN):
+            await client.chat_abort(session_key="sk-3", run_id="run-1")
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == self._TRACE_ID_NO_SPAN
+
+    # [单测用例]测试场景：interaction_resolve 有活跃 span 时注入 32 位 hex traceId
+    @pytest.mark.asyncio
+    async def test_interaction_resolve_injects_trace_id_with_span(self, client):
+        client._send_request_frame = AsyncMock(
+            return_value={"type": "res", "id": "1", "ok": True}
+        )
+        resolution = InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="yes",
+            message="yes",
+            values={"q": "yes"},
+            answers={"Q?": "yes"},
+            selected_options=(("yes",),),
+        )
+        with self._patch_tracer(self._TRACE_ID_WITH_SPAN):
+            await client.interaction_resolve(
+                interaction_id="int-2",
+                resolution=resolution,
+            )
+        sent_frame = client._send_request_frame.await_args.args[0]
+        assert sent_frame["params"]["traceId"] == self._TRACE_ID_WITH_SPAN
+
+    # [单测用例]测试场景：interaction_resolve 无活跃 span 时注入 "-"
+    @pytest.mark.asyncio
+    async def test_interaction_resolve_injects_trace_id_no_span(self, client):
+        client._send_request_frame = AsyncMock(
+            return_value={"type": "res", "id": "1", "ok": True}
+        )
+        resolution = InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="yes",
+            message="yes",
+            values={"q": "yes"},
+            answers={"Q?": "yes"},
+            selected_options=(("yes",),),
+        )
+        with self._patch_tracer(self._TRACE_ID_NO_SPAN):
+            await client.interaction_resolve(
+                interaction_id="int-3",
+                resolution=resolution,
+            )
+        sent_frame = client._send_request_frame.await_args.args[0]
+        assert sent_frame["params"]["traceId"] == self._TRACE_ID_NO_SPAN
 
 
 # ==================== Tests: _next_request_id ====================
