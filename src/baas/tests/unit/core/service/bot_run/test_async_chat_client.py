@@ -1880,7 +1880,7 @@ class TestChatAbort:
     async def test_chat_abort_forwards_with_run_id(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        """chat_abort forwards (session_key, run_id) to the underlying client."""
+        """chat_abort forwards (session_key, run_id) and returns the underlying response."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
             AsyncChatClient,
         )
@@ -1889,22 +1889,24 @@ class TestChatAbort:
             "server": {"host": "srv"},
             "features": {},
         }
-        mock_bot_ws_instance.chat_abort = AsyncMock()
+        response = {"ok": True, "payload": {"aborted": True, "run_ids": ["run-1"]}}
+        mock_bot_ws_instance.chat_abort = AsyncMock(return_value=response)
 
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        await client.chat_abort("sk-abort", run_id="run-1")
+        result = await client.chat_abort("sk-abort", run_id="run-1")
 
         mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
             session_key="sk-abort", run_id="run-1"
         )
+        assert result == response
 
     @pytest.mark.asyncio
     async def test_chat_abort_forwards_without_run_id(
         self, mock_bot_ws, mock_bot_ws_instance
     ):
-        """chat_abort forwards run_id=None when not provided."""
+        """chat_abort forwards run_id=None and returns the underlying response."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
             AsyncChatClient,
         )
@@ -1913,20 +1915,22 @@ class TestChatAbort:
             "server": {"host": "srv"},
             "features": {},
         }
-        mock_bot_ws_instance.chat_abort = AsyncMock()
+        response = {"ok": True, "payload": {"aborted": False}}
+        mock_bot_ws_instance.chat_abort = AsyncMock(return_value=response)
 
         client = AsyncChatClient(uri="ws://host/ws")
         await client.connect()
 
-        await client.chat_abort("sk-abort")
+        result = await client.chat_abort("sk-abort")
 
         mock_bot_ws_instance.chat_abort.assert_awaited_once_with(
             session_key="sk-abort", run_id=None
         )
+        assert result == response
 
     @pytest.mark.asyncio
     async def test_chat_abort_client_none_does_not_raise(self, mock_bot_ws):
-        """When _client is None, chat_abort logs and returns without raising."""
+        """When _client is None, chat_abort logs and returns None without raising."""
         from secbaas.community.core.service.bot_run._async_chat_client import (
             AsyncChatClient,
         )
@@ -1935,5 +1939,6 @@ class TestChatAbort:
         # Never connected -> _client is None
         assert client._client is None
 
-        # Should not raise
-        await client.chat_abort("sk-abort", run_id="run-1")
+        # Should not raise and should return None
+        result = await client.chat_abort("sk-abort", run_id="run-1")
+        assert result is None

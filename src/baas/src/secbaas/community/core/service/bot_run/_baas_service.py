@@ -476,7 +476,8 @@ class BaasBotService(BotService):
         binding_info: BotBindingInfo,
         session_id: str,
         run_id: str | None = None,
-    ) -> None:
+        context: BotChatContext | None = None,
+    ) -> dict[str, Any] | None:
         """向 engine 发送 ``chat.abort`` 控制帧（best-effort）。
 
         复用既有 ``_resolve_ws_connection_for_binding`` + ``_client_pool.get`` 解析归属
@@ -486,17 +487,29 @@ class BaasBotService(BotService):
         写入）。与 ``send_message`` 共享同一连接解析与 pool 取连接路径，保证 abort 帧落到
         与 chat.send 相同的归属连接。
 
+        ``context`` 仅用于解析归属 WS 连接时透传 ``tenant``：abort 路径无原始请求上下文，
+        由 ``BotRequestWorker`` 从 ``baas_bot_run.metadata["tenant"]`` 恢复后传入。
+        缺失 tenant 时 ``_resolve_ws_connection_for_binding`` 会以空串查询 bot，对
+        tenant 非空的多租户记录会 miss——因此上层必须尽力恢复 tenant。
+
         Args:
             binding_info: bot binding（含 device_id/tenant/engine_type）。
             session_id: 会话 id（即 sessionKey）。
             run_id: 本次取消的 run id，None 时仅按 sessionKey 取消。
+            context: 可选请求上下文，仅取 ``tenant`` 用于 WS 连接解析。
+
+        Returns:
+            底层 ``chat.abort`` 响应 dict（含 ``ok``/``payload.aborted`` 语义），
+            未送达时为 ``None``。
         """
         conn_info = await self._resolve_ws_connection_for_binding(
-            binding_info, session_id, context=None
+            binding_info, session_id, context=context
         )
         headers = {"x-proxypass-token": conn_info.token}
-        client = await self._client_pool.get(conn_info.target, conn_info.ws_url, headers)
-        await client.chat_abort(session_id, run_id)
+        client = await self._client_pool.get(
+            conn_info.target, conn_info.ws_url, headers
+        )
+        return await client.chat_abort(session_id, run_id)
 
     async def send_message_stream(
         self,

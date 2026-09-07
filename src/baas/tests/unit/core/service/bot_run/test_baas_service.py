@@ -3071,3 +3071,37 @@ class TestSendChatAbort:
                 )
         mock_pool.get.assert_not_awaited()
         mock_client.chat_abort.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_chat_abort_threads_context_and_returns_response(
+        self, service, mock_pool
+    ):
+        """The ``context`` (carrying tenant) is forwarded to
+        _resolve_ws_connection_for_binding, and the underlying chat.abort response is
+        returned so callers can observe ok:false / aborted:false (no silent success)."""
+        from secbaas.community.api.bot_runtime import BotChatContext
+
+        binding = _make_binding_info()
+        mock_client = AsyncMock()
+        response = {"ok": True, "payload": {"aborted": True, "run_ids": ["run-1"]}}
+        mock_client.chat_abort = AsyncMock(return_value=response)
+        mock_pool.get.return_value = mock_client
+
+        context = BotChatContext.from_api_key(
+            api_key_prefix="", app_id="", tenant="tenant-x"
+        )
+
+        with patch.object(
+            service,
+            "_resolve_ws_connection_for_binding",
+            return_value=_make_conn_info(),
+        ) as mock_resolve:
+            result = await service.send_chat_abort(
+                binding_info=binding,
+                session_id=SESSION_ID,
+                run_id="run-1",
+                context=context,
+            )
+
+        mock_resolve.assert_awaited_once_with(binding, SESSION_ID, context=context)
+        assert result == response

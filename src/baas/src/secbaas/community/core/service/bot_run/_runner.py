@@ -365,8 +365,9 @@ class BotRunner:
         bot_id: str,
         session_id: str,
         run_id: str | None = None,
+        tenant: str = "",
         lifecycle_stage: str = "online",
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """向 engine 转发 ``chat.abort`` 控制帧（best-effort）。
 
         解析 bot 的 binding → 选择 ``BotService`` → 调用 ``service.send_chat_abort``；
@@ -374,6 +375,10 @@ class BotRunner:
         ``send_chat_abort``）时记日志并返回，不抛异常。engine 通知失败由调用方
         （``BotRequestWorker.abort_runs_by_session`` 的 ``engine_abort_notifier`` 闭包）
         的 try/except 兜底，不阻断 BaaS 侧 abort 主流程（FAILED + force_done + 本机 cancel）。
+
+        ``tenant`` 由调用方从 ``baas_bot_run.metadata["tenant"]`` 恢复后透传，仅用于
+        解析归属 WS 连接（``_resolve_ws_connection_for_binding`` 取 ``context.tenant``）。
+        缺失 tenant 会让多租户 bot 查询 miss，故尽力恢复。
 
         选用 ``getattr`` 而非 ``isinstance`` 判定 ``send_chat_abort`` 是否可用，避免触达
         ``ClawBotService``（ARCA）与本变更范围无关的改动——仅在 ``BaasBotService`` 上
@@ -383,7 +388,12 @@ class BotRunner:
             bot_id: 目标 bot id。
             session_id: 会话 id（即 sessionKey，用于解析 WS 与 engine 通知）。
             run_id: 本次取消的 run id，None 时仅按 sessionKey 取消。
+            tenant: 原始请求租户，用于 WS 连接解析。
             lifecycle_stage: binding 解析阶段，默认 ``online``。
+
+        Returns:
+            底层 ``chat.abort`` 响应 dict（含 ``ok``/``payload.aborted`` 语义），
+            未送达或被跳过时为 ``None``。
         """
         binding_info = await self._resolve_binding(bot_id, lifecycle_stage)
         if binding_info is None:
@@ -394,7 +404,7 @@ class BotRunner:
                 session_id,
                 lifecycle_stage,
             )
-            return
+            return None
 
         service = self._bot_service_selector.select(binding_info)
         send_chat_abort = getattr(service, "send_chat_abort", None)
@@ -406,10 +416,19 @@ class BotRunner:
                 session_id,
                 type(service).__name__,
             )
-            return
+            return None
 
-        await send_chat_abort(
-            binding_info=binding_info, session_id=session_id, run_id=run_id
+        # 仅透传 tenant 给 _resolve_ws_connection_for_binding；其余字段不参与 abort 解析。
+        context = (
+            BotChatContext.from_api_key(api_key_prefix="", app_id="", tenant=tenant)
+            if tenant
+            else None
+        )
+        return await send_chat_abort(
+            binding_info=binding_info,
+            session_id=session_id,
+            run_id=run_id,
+            context=context,
         )
 
     async def deliver_message_stream(

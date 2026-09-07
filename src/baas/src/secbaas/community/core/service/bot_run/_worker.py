@@ -90,7 +90,7 @@ class BotRequestWorkerConfig:
 #: 失败仅记录日志，不影响 abort 主流程。``session_id`` 用于 engine 侧 session 定位，
 #: ``bot_id`` 用于解析归属 WS 连接（BaasBotService.send_chat_abort），
 #: ``run_id`` 为本次取消的 run（非 None 时通知 engine 取消该 run）。
-EngineAbortNotifier = Callable[[str, str, str | None], Awaitable[None]]
+EngineAbortNotifier = Callable[[str, str, str | None, str], Awaitable[None]]
 
 
 def _default_worker_id() -> str:
@@ -352,12 +352,28 @@ class BotRequestWorker:
                 record.assigned_worker,
             )
 
-        # 4. best-effort 通知 engine（一次 维度通知，run_id 取首个）
+        # 4. best-effort 通知 engine（一次 维度通知）
+        #    run_id 传 None：BaaS queue run id ≠ engine run id（chat.send 未持久化两者映射），
+        #    传 BaaS run id 会让带 runId 的 gateway 精确查找 miss 且不回退 sessionKey，得到
+        #    aborted:false；故按 sessionKey 维度取消，由 engine 按 sessionKey 查 active run。
+        #    tenant 从 baas_bot_run.metadata["tenant"] 恢复（Runner 入库时写入），透传给
+        #    deliver_chat_abort 解析归属 WS 连接——避免 tenant 空串导致多租户 bot 查询 miss。
         if self._engine_abort_notifier is not None and aborted_run_ids:
+            tenant = ""
+            if self._run_repository is not None:
+                try:
+                    run_record = self._run_repository.get_by_run_id(aborted_run_ids[0])
+                    if run_record is not None and run_record.metadata:
+                        tenant = run_record.metadata.get("tenant", "") or ""
+                except Exception as e:
+                    logger.warning(
+                        "[BotRequestWorker] abort tenant recovery failed run_id=%s: %s",
+                        aborted_run_ids[0],
+                        e,
+                        exc_info=True,
+                    )
             try:
-                await self._engine_abort_notifier(
-                    session_id, bot_id, aborted_run_ids[0]
-                )
+                await self._engine_abort_notifier(session_id, bot_id, None, tenant)
             except Exception as e:
                 logger.warning(
                     "[BotRequestWorker] abort engine notify failed session_id=%s "

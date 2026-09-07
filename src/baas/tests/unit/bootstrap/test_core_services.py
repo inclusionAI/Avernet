@@ -314,15 +314,36 @@ class TestBotRequestWorkerEngineAbortNotifierWiring:
         self, worker_container
     ):
         """The notifier closure dispatches to BotRunner.deliver_chat_abort with the
-        (session_id, bot_id, run_id) signature."""
+        (session_id, bot_id, run_id, tenant) signature."""
         c, mock_runner = worker_container
         worker = c.bot_request_worker()
         assert worker._engine_abort_notifier is not None
 
-        await worker._engine_abort_notifier("sess-1", "bot-1", "run-1")
+        await worker._engine_abort_notifier("sess-1", "bot-1", "run-1", "tenant-x")
 
         mock_runner.deliver_chat_abort.assert_awaited_once_with(
-            bot_id="bot-1", session_id="sess-1", run_id="run-1"
+            bot_id="bot-1",
+            session_id="sess-1",
+            run_id="run-1",
+            tenant="tenant-x",
+        )
+
+    @pytest.mark.asyncio
+    async def test_engine_abort_notifier_observes_rejection(self, worker_container):
+        """When deliver_chat_abort returns ok:false / aborted:false the notifier must
+        not raise (best-effort) — the rejection is observable only via logs."""
+        c, mock_runner = worker_container
+        worker = c.bot_request_worker()
+        mock_runner.deliver_chat_abort.return_value = {
+            "ok": False,
+            "error": {"code": "FORBIDDEN"},
+        }
+
+        # Must not raise.
+        await worker._engine_abort_notifier("sess-1", "bot-1", None, "tenant-x")
+
+        mock_runner.deliver_chat_abort.assert_awaited_once_with(
+            bot_id="bot-1", session_id="sess-1", run_id=None, tenant="tenant-x"
         )
 
     @pytest.mark.asyncio
@@ -338,5 +359,8 @@ class TestBotRequestWorkerEngineAbortNotifierWiring:
         await worker._engine_abort_notifier("sess-1", "bot-1", "run-1")
 
         mock_runner.deliver_chat_abort.assert_awaited_once_with(
-            bot_id="bot-1", session_id="sess-1", run_id="run-1"
+            bot_id="bot-1",
+            session_id="sess-1",
+            run_id="run-1",
+            tenant="",
         )

@@ -118,10 +118,14 @@ class _EngineAbortNotifier:
         session_id: str,
         bot_id: str,
         run_id: str | None,
+        tenant: str = "",
     ) -> None:
         try:
-            await self._bot_runner.deliver_chat_abort(
-                bot_id=bot_id, session_id=session_id, run_id=run_id
+            result = await self._bot_runner.deliver_chat_abort(
+                bot_id=bot_id,
+                session_id=session_id,
+                run_id=run_id,
+                tenant=tenant,
             )
         except Exception as e:
             logger.warning(
@@ -132,6 +136,32 @@ class _EngineAbortNotifier:
                 run_id,
                 e,
                 exc_info=True,
+            )
+            return
+
+        # best-effort 可观测性：deliver_chat_abort 返回底层 chat.abort 响应语义，
+        # 区分“engine 实际已取消”与“engine 拒绝/未命中 active run”。不抛异常、不阻断
+        # BaaS 侧 abort 主流程（FAILED + force_done + 本机 cancel 仍已执行）。
+        if not isinstance(result, dict):
+            return
+        payload = result.get("payload")
+        aborted = payload.get("aborted") if isinstance(payload, dict) else None
+        if result.get("ok") is False:
+            logger.warning(
+                "[bootstrap] engine_abort_notifier rejected by engine: "
+                "session_id=%s bot_id=%s run_id=%s result=%s",
+                session_id,
+                bot_id,
+                run_id,
+                result,
+            )
+        elif aborted is False:
+            logger.info(
+                "[bootstrap] engine_abort_notifier returned aborted=false "
+                "(no active run matched): session_id=%s bot_id=%s run_id=%s",
+                session_id,
+                bot_id,
+                run_id,
             )
 
 

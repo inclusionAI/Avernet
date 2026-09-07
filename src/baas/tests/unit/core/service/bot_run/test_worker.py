@@ -1126,17 +1126,24 @@ async def test_abort_runs_by_session_empty_session_or_bot_returns_empty(repo, qu
 
 
 async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
-    """engine_abort_notifier is awaited once per (bot,session); failure logged, not raised."""
+    """engine_abort_notifier is awaited once per (bot,session); failure logged, not raised.
+
+    run_id 传 None（BaaS run id ≠ engine run id，按 sessionKey 维度取消）；
+    metadata=None 时 tenant 回退为空串。
+    """
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert claimed is not None and claimed.run_id == run_id
 
     notified = asyncio.Event()
 
-    async def notifier(session_id: str, bot_id: str, rid: str | None) -> None:
+    async def notifier(
+        session_id: str, bot_id: str, rid: str | None, tenant: str = ""
+    ) -> None:
         assert session_id == "sess-abort"
         assert bot_id == "bot-1"
-        assert rid == run_id
+        assert rid is None
+        assert tenant == ""
         notified.set()
 
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
@@ -1150,13 +1157,51 @@ async def test_abort_runs_by_session_engine_notifier_best_effort(repo, queue):
     assert notified.is_set()
 
 
+async def test_abort_runs_by_session_engine_notifier_recovers_tenant(repo, queue):
+    """tenant 从 baas_bot_run.metadata["tenant"] 恢复并透传给 notifier。"""
+    run_id = uuid4().hex
+    repo.insert_run(
+        run_id=run_id,
+        bot_id="bot-1",
+        api_key_prefix="sk-",
+        message_long="m",
+        metadata={"tenant": "tenant-x", "app_id": "app-1", "app_type": "UNKNOWN"},
+    )
+    queue.insert_queue(run_id=run_id, bot_id="bot-1", session_id="sess-abort")
+    claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
+    assert claimed is not None and claimed.run_id == run_id
+
+    seen: dict[str, object] = {}
+
+    async def notifier(
+        session_id: str, bot_id: str, rid: str | None, tenant: str = ""
+    ) -> None:
+        seen["session_id"] = session_id
+        seen["bot_id"] = bot_id
+        seen["rid"] = rid
+        seen["tenant"] = tenant
+
+    ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)
+    worker = _worker(
+        queue, repo, ex, run_repository=repo, engine_abort_notifier=notifier
+    )
+
+    outcome = await worker.abort_runs_by_session("sess-abort", "bot-1")
+
+    assert outcome.aborted_run_ids == [run_id]
+    assert seen["rid"] is None
+    assert seen["tenant"] == "tenant-x"
+
+
 async def test_abort_runs_by_session_engine_notifier_error_swallowed(repo, queue):
     """engine_abort_notifier raising must not fail the abort."""
     run_id = _insert_with_session(repo, queue, "bot-1", "sess-abort")
     claimed = queue.claim_pending_by_bot("bot-1", "worker-1", candidates=5)
     assert claimed is not None and claimed.run_id == run_id
 
-    async def notifier(session_id: str, bot_id: str, rid: str | None) -> None:
+    async def notifier(
+        session_id: str, bot_id: str, rid: str | None, tenant: str = ""
+    ) -> None:
         raise RuntimeError("engine notify boom")
 
     ex = ResultGuardExecutor(_CompletingExecutor(repo), repo)

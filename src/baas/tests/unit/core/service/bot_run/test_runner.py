@@ -1555,7 +1555,8 @@ class TestSelectDispatcherConfig:
 
         assert runner._select_dispatcher("bot-1", "openclaw", metadata={}) is queue_d
         assert (
-            runner._select_dispatcher("bot-1", "openclaw", method="stream", metadata={}) is task_d
+            runner._select_dispatcher("bot-1", "openclaw", method="stream", metadata={})
+            is task_d
         )
 
     def test_config_fallback_to_default(
@@ -1694,7 +1695,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is queue_d
 
     def test_bcn_switch_off_keeps_task(
@@ -1720,7 +1723,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_bcn_switch_get_config_exception_falls_through(
@@ -1746,7 +1751,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_bcn_metadata_unconfigured_switch_keeps_task(
@@ -1765,7 +1772,9 @@ class TestSelectDispatcherBcnSwitch:
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_non_bcn_metadata_ignores_switch(
@@ -2693,10 +2702,40 @@ class TestDeliverChatAbort:
         call = abort_service.send_chat_abort.call_args
         assert call.kwargs["session_id"] == "sess-1"
         assert call.kwargs["run_id"] == "run-1"
+        # 无 tenant 时 context=None（不构造空 context）
+        assert call.kwargs["context"] is None
         # binding_info is the resolved BotBindingInfo derived from baas_binding_data
         binding_info = call.kwargs["binding_info"]
         assert isinstance(binding_info, BotBindingInfo)
         assert binding_info.bot_id == BOT_ID
+
+    @pytest.mark.asyncio
+    async def test_deliver_chat_abort_threads_tenant_into_context(
+        self,
+        mock_selector,
+        mock_run_repo,
+        mock_bot_service_plugin,
+        baas_binding_data,
+    ):
+        """WHEN tenant is provided, deliver_chat_abort builds a BotChatContext carrying
+        it and forwards to send_chat_abort, so _resolve_ws_connection_for_binding can
+        resolve the multi-tenant WS connection instead of querying with tenant="".
+        """
+        abort_service = MagicMock()
+        abort_service.send_chat_abort = AsyncMock()
+        mock_selector.select.return_value = abort_service
+        mock_bot_service_plugin.get_binding = AsyncMock(return_value=baas_binding_data)
+
+        runner = _make_runner(mock_selector, mock_run_repo, mock_bot_service_plugin)
+
+        await runner.deliver_chat_abort(
+            bot_id=BOT_ID, session_id="sess-1", run_id=None, tenant="tenant-x"
+        )
+
+        call = abort_service.send_chat_abort.call_args
+        context = call.kwargs["context"]
+        assert isinstance(context, BotChatContext)
+        assert context.tenant == "tenant-x"
 
     @pytest.mark.asyncio
     async def test_deliver_chat_abort_skips_when_service_has_no_send_chat_abort(
