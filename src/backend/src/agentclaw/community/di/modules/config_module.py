@@ -19,6 +19,7 @@ from dataclasses import fields
 from typing import Any
 from injector import Module, inject, provider, singleton
 from agentclaw.community.core.skill_center import draft_content
+from agentclaw.community.core.skill_center.installation_read_config import InstallationReadConfig
 from agentclaw.community.core.task_queue.types import MAX_APP_LEN
 from agentclaw.community.core.skill_center.canonical_center_store import CanonicalCenterStoreConfig
 from agentclaw.community.di import config as cfg
@@ -232,6 +233,24 @@ def _pool_policy(
 
 class ConfigModule(Module):
     """Bind every typed config dataclass."""
+
+    @singleton
+    @provider
+    def installation_read(self) -> InstallationReadConfig:
+        """Resolve the migration gate independently for pre and prod."""
+        block = _user_config().get("skill_installation", {})
+        if not isinstance(block, dict) or set(block) - {"default_sync_only"}:
+            raise ValueError("skill_installation must contain only default_sync_only")
+        modes = block.get("default_sync_only", {})
+        if not isinstance(modes, dict) or set(modes) - {"pre", "prod"}:
+            raise ValueError("skill_installation.default_sync_only must map pre/prod")
+        if any(type(value) is not bool for value in modes.values()):
+            raise ValueError("skill_installation.default_sync_only values must be booleans")
+        env = get_current_env()
+        default = InstallationReadConfig().default_sync_only
+        config = InstallationReadConfig(default_sync_only=modes.get(env, default))
+        logger.info("[installation_read_config] env=%s default_sync_only=%s", env, config.default_sync_only)
+        return config
 
     # ── Workspace ───────────────────────────────────────────────────
 
