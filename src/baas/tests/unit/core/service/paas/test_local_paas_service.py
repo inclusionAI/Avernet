@@ -2108,6 +2108,160 @@ class TestHandleMngRegister:
         mock_repository.update_status.assert_called_once()
 
 
+class TestHandleMngRegisterOwnershipMigration:
+    """Phase 87: ownership-drift auto-migration inside handle_mng_register."""
+
+    @pytest.fixture
+    def service_with_device_repo(
+        self,
+        local_credentials,
+        mock_repository,
+        mock_connection_manager,
+        mock_instance_router,
+        mock_device_template_repository,
+    ):
+        """Create a LocalPaasService with a mocked device_repository."""
+        mock_device_repo = MagicMock()
+        service = LocalPaasService(
+            credentials=local_credentials,
+            repository=mock_repository,
+            connection_manager=mock_connection_manager,
+            instance_router=mock_instance_router,
+            server_ip="test-instance",
+            desktop_sandbox_plugin=MagicMock(),
+            secret_plugin=MagicMock(),
+            callback_handler=_build_callback_handler(),
+            env="test",
+            device_template_repository=mock_device_template_repository,
+            device_repository=mock_device_repo,
+        )
+        return service, mock_repository, mock_device_repo
+
+    def _stale_record(self, user_id):
+        """Build a machine record mock pinned to the given user_id."""
+        record = MagicMock()
+        record.user_id = user_id
+        return record
+
+    @pytest.mark.asyncio
+    async def test_ownership_drift_migrates_and_continues_online(
+        self, service_with_device_repo, caplog
+    ):
+        """D-01/D-03/D-06/D-07: drift registration migrates in place,
+        OFFLINEs the old user's devices, logs the WARNING audit record, and
+        the normal ONLINE path continues."""
+        service, mock_repository, mock_device_repo = service_with_device_repo
+
+        mock_repository.get_by_machine_id.return_value = self._stale_record(
+            "user-old"
+        )
+        device1 = MagicMock()
+        device1.id = 101
+        device2 = MagicMock()
+        device2.id = 102
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = [
+            device1,
+            device2,
+        ]
+        mock_device_repo.batch_update_status_to_offline.return_value = 2
+
+        with caplog.at_level(logging.WARNING):
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+                machine_name="New Name",
+            )
+
+        # D-06 step 1: old-user ACTIVE devices queried then batch-OFFLINE'd
+        mock_device_repo.list_active_local_devices_by_machine_user.assert_called_once_with(
+            machine_id="machine-001",
+            user_id="user-old",
+            env="test",
+        )
+        mock_device_repo.batch_update_status_to_offline.assert_called_once_with(
+            device_ids=[101, 102],
+            env="test",
+        )
+        # D-06 step 2: best-effort route clear
+        mock_repository.clear_route_info.assert_called_once_with(
+            "machine-001", "test"
+        )
+        # D-06 step 3: critical conditional ownership update
+        mock_repository.update_user_id.assert_called_once_with(
+            "machine-001", "test", "user-old", "user-new"
+        )
+        # D-06 step 4: normal ONLINE path continues unchanged
+        mock_repository.update_machine_info.assert_called_once()
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+        # D-07: one WARNING audit record with all five fields
+        audit = [
+            r
+            for r in caplog.records
+            if "MACHINE_OWNERSHIP_MIGRATED" in r.getMessage()
+        ]
+        assert len(audit) == 1
+        msg = audit[0].getMessage()
+        assert "machine_id=machine-001" in msg
+        assert "from_user=user-old" in msg
+        assert "to_user=user-new" in msg
+        assert "env=test" in msg
+        assert "instance=test-instance" in msg
+
+    @pytest.mark.asyncio
+    async def test_fail_closed_when_critical_update_affects_zero_rows(
+        self, service_with_device_repo
+    ):
+        """D-02: update_user_id returns 0 and the single re-query still shows
+        the old user_id → DeviceCreationError with MACHINE_OWNERSHIP_MIGRATION_FAILED
+        and no ONLINE status write."""
+        service, mock_repository, mock_device_repo = service_with_device_repo
+
+        existing = self._stale_record("user-old")
+        still_old = self._stale_record("user-old")
+        mock_repository.get_by_machine_id.side_effect = [existing, still_old]
+        mock_repository.update_user_id.return_value = 0
+        mock_device_repo.list_active_local_devices_by_machine_user.return_value = []
+
+        with pytest.raises(DeviceCreationError) as exc_info:
+            await service.handle_mng_register(
+                machine_id="machine-001",
+                user_id="user-new",
+            )
+
+        assert exc_info.value.error_code == "MACHINE_OWNERSHIP_MIGRATION_FAILED"
+        assert "machine-001" in exc_info.value.message
+        # Fail-closed: rejected before any ONLINE write
+        mock_repository.update_status.assert_not_called()
+        mock_repository.update_machine_info.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_user_registration_skips_migration(
+        self, service_with_device_repo
+    ):
+        """Same-user registration performs zero migration calls — plain ONLINE
+        path only (regression pin against a spurious drift migration)."""
+        service, mock_repository, mock_device_repo = service_with_device_repo
+
+        mock_repository.get_by_machine_id.return_value = self._stale_record(
+            "user-001"
+        )
+
+        await service.handle_mng_register(
+            machine_id="machine-001",
+            user_id="user-001",
+            machine_name="Same User",
+        )
+
+        mock_repository.update_user_id.assert_not_called()
+        mock_repository.clear_route_info.assert_not_called()
+        mock_repository.update_machine_info.assert_called_once()
+        mock_repository.update_status.assert_called_once_with(
+            "machine-001", "test", "ONLINE"
+        )
+
+
 # =============================================================================
 # Tests for untested methods: get_credentials, get_platform_type,
 # resolve_ws_conn_info, invoke_http_in_device, update_outbound_operation_rule,

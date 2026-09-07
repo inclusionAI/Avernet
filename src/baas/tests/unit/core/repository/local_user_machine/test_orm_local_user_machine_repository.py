@@ -6,7 +6,7 @@ test_orm_bot_session_repository.py and test_orm_device_repository.py.
 Covers all methods from OrmLocalUserMachineRepository:
 insert_machine, get_by_machine_id, list_by_user_id,
 update_heartbeat, update_status, update_instance, update_machine_info,
-update_route_info, clear_route_info, get_route_info.
+update_route_info, clear_route_info, get_route_info, update_user_id.
 """
 
 import json
@@ -303,6 +303,49 @@ class TestUpdateMachineInfo:
         )
         update_dict = call_kwargs[0][0]
         assert update_dict["machine_info"] is None
+
+
+# ==================== update_user_id ====================
+
+
+class TestUpdateUserId:
+    def test_returns_rowcount_on_success(self, repository, mock_session):
+        """Conditional ownership UPDATE returns int 1 when one row matched."""
+        mock_session.query.return_value.filter.return_value.update.return_value = 1
+
+        result = repository.update_user_id(
+            "machine-001", "dev", "user-old", "user-new"
+        )
+
+        assert result == 1
+        mock_session.query.assert_called_once()
+        mock_session.query.return_value.filter.return_value.update.assert_called_once()
+        call_kwargs = (
+            mock_session.query.return_value.filter.return_value.update.call_args
+        )
+        update_dict = call_kwargs[0][0]
+        assert update_dict["user_id"] == "user-new"
+        assert "gmt_modified" in update_dict
+        # D-05 concurrency guard: WHERE must include machine_id + env + user_id=old
+        filter_args = mock_session.query.return_value.filter.call_args[0]
+        assert len(filter_args) == 3
+        machine_expr, env_expr, old_user_expr = filter_args
+        assert "machine_id" in str(machine_expr.left)
+        assert machine_expr.right.value == "machine-001"
+        assert "env" in str(env_expr.left)
+        assert env_expr.right.value == "dev"
+        assert "user_id" in str(old_user_expr.left)
+        assert old_user_expr.right.value == "user-old"
+
+    def test_returns_zero_rowcount_passthrough(self, repository, mock_session):
+        """Rowcount 0 (lost race) is passed through — fail-closed lives in service."""
+        mock_session.query.return_value.filter.return_value.update.return_value = 0
+
+        result = repository.update_user_id(
+            "machine-001", "dev", "user-old", "user-new"
+        )
+
+        assert result == 0
 
 
 # ==================== update_route_info ====================
