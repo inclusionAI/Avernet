@@ -14,8 +14,9 @@ pub struct WorkbenchConnectCommand {
     /// Authenticated actor bound by the transport. For Workbench this is the
     /// Human principal and cannot be overridden by request params.
     pub bound_actor_id: Option<String>,
-    /// Persisted participant view selected by the tab. Omission means the
-    /// authenticated Human itself; an explicit Bot must pass ownership checks.
+    /// Persisted participant view explicitly selected by the tab. Omission
+    /// preserves the legacy unprojected Workbench connection; an explicit Bot
+    /// must pass ownership checks.
     pub view_actor_id: Option<String>,
     pub group_id: String,
     pub session_id: Option<String>,

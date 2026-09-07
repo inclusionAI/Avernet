@@ -102,7 +102,9 @@ GroupSessionWebSocketPath:
       to a Bot participant that the Human is authorized to operate. Clients
       cannot supply `message_view_scope`: the server resolves that value from
       the Session participant snapshot and returns both `view_actor_id` and
-      `message_view_scope` in the successful `connect` response.
+      `message_view_scope` in the successful `connect` response. Omitting
+      `view_actor_id` preserves the legacy full-view connection: the server does
+      not infer a participant projection from the authenticated Human.
 
       Human connections are projected per connection. `participant` receives
       public artifacts and directed artifacts whose audience contains that

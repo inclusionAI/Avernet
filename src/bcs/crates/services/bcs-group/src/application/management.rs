@@ -2015,11 +2015,11 @@ impl WorkbenchSessionService for GroupManagement {
             .await
             .ok_or_else(|| WorkbenchUseCaseError::GroupNotFound(command.group_id.clone()))?;
 
-        let authenticated = match self
+        let (authenticated, legacy_participants) = match self
             .authorize_workbench_group_access(&group, command.bound_actor_id.as_deref())
             .await
         {
-            Ok(authenticated) => authenticated,
+            Ok(authenticated) => (authenticated, workbench_participants(&group)),
             Err(WorkbenchUseCaseError::ForbiddenGroupAccess) => {
                 let actor_id = command
                     .bound_actor_id
@@ -2044,18 +2044,27 @@ impl WorkbenchSessionService for GroupManagement {
                 if participant.mode == Some(ParticipantMode::Absent) {
                     return Err(WorkbenchUseCaseError::ParticipantAbsent);
                 }
-                WorkbenchAuthorizedHuman {
-                    actor_id: actor_id.to_string(),
-                    staff_no: staff_no_from_bound_actor(Some(actor_id))?.to_string(),
-                }
+                (
+                    WorkbenchAuthorizedHuman {
+                        actor_id: actor_id.to_string(),
+                        staff_no: staff_no_from_bound_actor(Some(actor_id))?.to_string(),
+                    },
+                    workbench_participants_from_slice(&session.participants),
+                )
             }
             Err(error) => return Err(error),
         };
 
-        let view_actor_id = command
-            .view_actor_id
-            .as_deref()
-            .unwrap_or(authenticated.actor_id.as_str());
+        let Some(view_actor_id) = command.view_actor_id.as_deref() else {
+            // Compatibility path for Workbench clients that predate explicit
+            // participant views. Its authorization and participant list are
+            // the values produced by the original full-view connection.
+            return Ok(WorkbenchConnectOutcome {
+                group_id: command.group_id,
+                participants: legacy_participants,
+            });
+        };
+
         self.authorize_workbench_sender(&group, view_actor_id, &authenticated)
             .await
             .map_err(|error| match error {

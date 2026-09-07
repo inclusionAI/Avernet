@@ -88,6 +88,10 @@ audience_actor_ids = [...]
 建立 Human tab 连接时解析当前 session participant 的有效 scope，并把 actor id、scope
 绑定到连接。每次 fan-out 前按连接执行投影，不能只在前端隐藏。
 
+只有客户端显式传入 `view_actor_id` 时才绑定 participant view。旧客户端省略该字段时，
+必须沿用改造前的 full 连接授权、participant 列表和未投影投递逻辑；不得从登录 Human
+推断 view actor，也不得要求该 Human 本身已作为 participant 加入群或 session。
+
 scope 更新后，应使旧连接失效或要求重连，避免旧连接继续使用缓存 scope。
 
 ### Group/Session message history
@@ -179,6 +183,7 @@ API 默认值为 `full`。不应引入 `participant_view_unsupported` 之类由 
 ### 兼容性
 
 - 未传 scope 的旧调用得到 `full`。
+- 未传 `view_actor_id` 的旧 Workbench 连接保持原授权与未投影消息行为。
 - `full` 的 WS 帧、历史消息集合、排序和副屏行为与基线一致。
 - 旧群、旧 session 可以继续创建运行、加入和查询状态机。
 

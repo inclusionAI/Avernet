@@ -367,8 +367,11 @@ async fn handle_connect(
         }
     };
 
-    let resolved_view_actor_id = params.view_actor_id.as_deref().or(bound_actor_id);
-    let resolved_participant = match resolved_view_actor_id {
+    // The bound actor remains the registry identity for legacy clients, but it
+    // must not implicitly opt those clients into participant projection.
+    let explicit_view_actor_id = params.view_actor_id.as_deref();
+    let resolved_view_actor_id = explicit_view_actor_id.or(bound_actor_id);
+    let resolved_participant = match explicit_view_actor_id {
         Some(actor_id) => Some(
             outcome
                 .participants
@@ -385,7 +388,7 @@ async fn handle_connect(
     let resolved_message_view_scope = resolved_participant
         .map(|participant| participant.message_view_scope)
         .unwrap_or_default();
-    let connection_human_view = resolved_view_actor_id
+    let connection_human_view = explicit_view_actor_id
         .filter(|actor_id| actor_id.starts_with("human_"))
         .and_then(|actor_id| {
             resolved_participant.map(|participant| HumanMessageView {

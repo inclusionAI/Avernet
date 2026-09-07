@@ -202,6 +202,7 @@ struct RecordingWorkbenchSessions {
     abort_authorizations: Mutex<Vec<WorkbenchChatAbortAuthorizationCommand>>,
     connect_error: Mutex<Option<WorkbenchUseCaseError>>,
     connect_scope: Mutex<Option<MessageViewScope>>,
+    connect_participants: Mutex<Option<Vec<WorkbenchParticipantView>>>,
 }
 
 #[derive(Default)]
@@ -259,9 +260,12 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
         if let Some(error) = self.connect_error.lock().await.take() {
             return Err(error);
         }
-        Ok(WorkbenchConnectOutcome {
-            group_id: command.group_id,
-            participants: vec![WorkbenchParticipantView {
+        let participants = if let Some(participants) =
+            self.connect_participants.lock().await.clone()
+        {
+            participants
+        } else {
+            vec![WorkbenchParticipantView {
                 bot_uuid: "human_100001".to_string(),
                 role: "observer".to_string(),
                 kind: ParticipantKind::Bot,
@@ -271,7 +275,11 @@ impl WorkbenchSessionService for RecordingWorkbenchSessions {
                     .lock()
                     .await
                     .unwrap_or(MessageViewScope::Full),
-            }],
+            }]
+        };
+        Ok(WorkbenchConnectOutcome {
+            group_id: command.group_id,
+            participants,
         })
     }
 
@@ -617,8 +625,16 @@ async fn frontend_socket_malformed_binary_and_abrupt_close_logs_keep_request_id(
 }
 
 #[tokio::test]
-async fn web_connect_frame_subscribes_frontend_registry() {
+async fn web_connect_without_view_actor_preserves_legacy_full_subscription() {
     let state = new_state();
+    *state.workbench_sessions.connect_participants.lock().await =
+        Some(vec![WorkbenchParticipantView {
+            bot_uuid: "owned-bot".to_string(),
+            role: "driver".to_string(),
+            kind: ParticipantKind::Bot,
+            mode: Some(ParticipantMode::Present),
+            message_view_scope: MessageViewScope::Full,
+        }]);
 
     let (tx, mut rx) = mpsc::channel(8);
     let mut connection_state = WebClientConnectionState::default();
@@ -655,11 +671,29 @@ async fn web_connect_frame_subscribes_frontend_registry() {
         1
     );
     assert_eq!(connection_state.subscribed_sessions.len(), 1);
+    assert!(connection_state.subscribed_sessions[0].2.is_none());
+    assert_eq!(
+        state
+            .dispatch_state
+            .frontend_connections
+            .broadcast_visible_excluding(
+                "group-web-1",
+                "legacy-full-only",
+                MessageVisibilityDomain::ManagerWorker,
+                Some(&MessageAudience::FullOnly),
+                None,
+            )
+            .await,
+        1,
+        "omitting view_actor_id must keep the legacy unprojected connection"
+    );
+    assert_eq!(rx.recv().await.as_deref(), Some("legacy-full-only"));
     let connects = state.workbench_sessions.connects.lock().await;
     assert_eq!(connects.len(), 1);
     assert_eq!(connects[0].group_id, "group-web-1");
     assert_eq!(connects[0].session_id, None);
     assert_eq!(connects[0].bound_actor_id.as_deref(), Some("human_100001"));
+    assert_eq!(connects[0].view_actor_id, None);
     assert!(
         state
             .group_session_connections
@@ -668,6 +702,64 @@ async fn web_connect_frame_subscribes_frontend_registry() {
             .await
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn web_connect_with_explicit_human_view_binds_participant_projection() {
+    let state = new_state();
+    *state.workbench_sessions.connect_scope.lock().await = Some(MessageViewScope::Participant);
+
+    let (tx, mut rx) = mpsc::channel(8);
+    let mut connection_state = WebClientConnectionState::default();
+    let connect = BcsFrame::Request(RequestFrame::new(
+        "connect-participant",
+        "connect",
+        Some(serde_json::json!({
+            "group_id": "group-web-1",
+            "view_actor_id": "human_100001"
+        })),
+    ));
+
+    dispatch_client_frame(
+        &state.dispatch_state,
+        &serde_json::to_string(&connect).unwrap(),
+        &tx,
+        &mut connection_state,
+        &WorkbenchConnectionAuth::UserBound {
+            actor_id: Some("human_100001".to_string()),
+        },
+    )
+    .await
+    .unwrap();
+
+    let connected = recv_response(&mut rx).await;
+    assert!(connected.ok);
+    let payload = connected.payload.expect("connect payload");
+    assert_eq!(payload["view_actor_id"], "human_100001");
+    assert_eq!(payload["message_view_scope"], "participant");
+    assert_eq!(
+        connection_state.subscribed_sessions[0].2,
+        Some(HumanMessageView {
+            actor_id: "human_100001".to_string(),
+            scope: MessageViewScope::Participant,
+            allow_legacy_unclassified_chat: true,
+        })
+    );
+    assert_eq!(
+        state
+            .dispatch_state
+            .frontend_connections
+            .broadcast_visible_excluding(
+                "group-web-1",
+                "hidden",
+                MessageVisibilityDomain::ManagerWorker,
+                Some(&MessageAudience::FullOnly),
+                None,
+            )
+            .await,
+        0
+    );
+    assert!(rx.try_recv().is_err());
 }
 
 #[tokio::test]

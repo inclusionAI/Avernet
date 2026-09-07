@@ -2082,6 +2082,22 @@ async fn workbench_session_service_connects_for_owner_and_authorizes_owned_sende
         .await
         .unwrap();
 
+    let legacy_connected = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: None,
+        })
+        .await
+        .expect("legacy full view must allow access through an owned Bot");
+
+    assert_eq!(legacy_connected.participants.len(), 2);
+    assert!(legacy_connected
+        .participants
+        .iter()
+        .all(|participant| participant.bot_uuid != "human_alice"));
+
     let connected = service
         .connect(WorkbenchConnectCommand {
             bound_actor_id: Some("human_alice".to_string()),
@@ -2232,6 +2248,19 @@ async fn workbench_session_service_rejects_invalid_sender_states() {
         Err(WorkbenchUseCaseError::ForbiddenGroupAccess)
     ));
 
+    let explicit_unowned_view = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: None,
+            view_actor_id: Some("bob-bot".to_string()),
+        })
+        .await;
+    assert!(matches!(
+        explicit_unowned_view,
+        Err(WorkbenchUseCaseError::ForbiddenViewActor)
+    ));
+
     let mut group = fixture.group.get("group-under-test").await.unwrap();
     let helper = group
         .participants
@@ -2295,6 +2324,7 @@ async fn workbench_connect_allows_bound_human_when_present_in_session() {
             {
                 let mut human = Participant::human("human_alice", ParticipantRole::Observer);
                 human.mode = Some(ParticipantMode::Present);
+                human.message_view_scope = MessageViewScope::Participant;
                 human
             },
         ],
@@ -2314,7 +2344,7 @@ async fn workbench_connect_allows_bound_human_when_present_in_session() {
         .connect(WorkbenchConnectCommand {
             bound_actor_id: Some("human_alice".to_string()),
             group_id: "group-under-test".to_string(),
-            session_id: Some(session_id),
+            session_id: Some(session_id.clone()),
             view_actor_id: None,
         })
         .await
@@ -2325,6 +2355,22 @@ async fn workbench_connect_allows_bound_human_when_present_in_session() {
         .participants
         .iter()
         .any(|participant| participant.bot_uuid == "human_alice"));
+
+    let participant_view = service
+        .connect(WorkbenchConnectCommand {
+            bound_actor_id: Some("human_alice".to_string()),
+            group_id: "group-under-test".to_string(),
+            session_id: Some(session_id),
+            view_actor_id: Some("human_alice".to_string()),
+        })
+        .await
+        .expect("explicit Human view should resolve the persisted participant scope");
+    let human = participant_view
+        .participants
+        .iter()
+        .find(|participant| participant.bot_uuid == "human_alice")
+        .expect("Human participant");
+    assert_eq!(human.message_view_scope, MessageViewScope::Participant);
 }
 
 struct StaticSessionManagement {
