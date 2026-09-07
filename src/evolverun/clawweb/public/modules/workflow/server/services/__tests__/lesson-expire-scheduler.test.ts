@@ -12,12 +12,12 @@
  *      exposes runOnce() that delegates to retireStale.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { LessonRepository } from "../../repositories/lesson-repository.js";
 import { LessonExpireScheduler } from "../lesson-expire-scheduler.js";
 
 function createTestDb() {
-  const raw = new DatabaseSync(":memory:") as DatabaseSync;
+  const raw = new Database(":memory:");
   raw.exec(`
     CREATE TABLE lessons (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
