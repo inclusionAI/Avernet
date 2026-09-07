@@ -49,6 +49,9 @@ from agentclaw.community.di.modules.grt_chat_module import GrtChatModule
 from agentclaw.community.di.modules.harness_module import HarnessModule
 from agentclaw.community.di.modules.http_client_module import HttpClientModule
 from agentclaw.community.di.modules.identity_module import IdentityModule
+from agentclaw.community.di.modules.installation_read_config_module import (
+    InstallationReadConfigModule,
+)
 from agentclaw.community.di.modules.mcp_module import McpModule
 from agentclaw.community.di.modules.quality_module import QualityModule
 from agentclaw.community.di.modules.resources_module import ResourcesModule
@@ -110,6 +113,7 @@ def build_injector(
     """
     modules: list[Module] = [
         ConfigModule(),
+        InstallationReadConfigModule(),
         SkillCenterModule(),
         SkillCenterGroup4Module(),
         SkillVersionModule(),
