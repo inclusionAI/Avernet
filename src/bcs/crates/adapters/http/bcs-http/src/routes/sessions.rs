@@ -575,7 +575,7 @@ pub async fn list_sessions_for_group(
                     }
                     Err(e) => {
                         tracing::warn!(
-                            request_id = %bcs_observability::current_request_id(),
+                            request_id = %bcs_observability::CurrentRequestId,
                             group_id = %group_id,
                             error = %e,
                             "auto-create legacy session failed"
@@ -1217,7 +1217,7 @@ pub async fn update_session_participant_mode(
                     .await
                 {
                     tracing::warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         session_id = %sid,
                         error = %e,
                         "notify participant mode changed failed"
@@ -1271,7 +1271,7 @@ pub async fn update_session_participant_mode(
                                         .await
                                     {
                                         tracing::warn!(
-                                            request_id = %bcs_observability::current_request_id(),
+                                            request_id = %bcs_observability::CurrentRequestId,
                                             session_id = %sid,
                                             error = %e,
                                             "notify participant mode changed failed"
@@ -1462,7 +1462,7 @@ pub async fn session_chat(
             };
             if code.is_server_error() {
                 tracing::error!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     route = "/sessions/{sid}/chat",
                     session_id = %sid,
                     group_id = %sess.group_id,
@@ -1761,7 +1761,7 @@ pub async fn delete_session(
                     "cleaned up session files after session delete"
                 ),
                 Err(e) => tracing::warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     error = ?e,
                     session_id = %sid,
                     "session file cleanup partial failure (orphan sweep will reconcile)"

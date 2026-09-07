@@ -42,6 +42,14 @@ WebSocket connections. It retains no HTTP aggregate and emits no request summary
 Capture the ID before the upgrade/spawn boundary. `process_instance_id` is a lazy
 process-lifetime UUID; it is log metadata, independent of distributed tracing.
 
+`CurrentRequestId` is a display value for synchronous log fields. It borrows the
+active ID while the subscriber formats the event, avoiding a string clone at each
+call site. Use `current_request_id()` to capture an owned ID before spawning work
+or when cancellation can outlive the task-local scope. This also gives the lookup
+one ordinary Rust implementation instead of duplicating its expression across
+tracing and legacy-log macro branches, whose source coverage can map to the unused
+branch. Existing log targets, fields, levels and request IDs are preserved.
+
 The package does not acquire, store or emit distributed trace IDs. Future tracing
 integration needs its own declared context/propagation contract; the base must
 never import its implementation. This extraction uses the existing tracing

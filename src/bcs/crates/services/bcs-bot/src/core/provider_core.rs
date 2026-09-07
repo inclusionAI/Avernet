@@ -205,7 +205,7 @@ impl ProviderCore {
                     .await
                     .inspect_err(|err| {
                         warn!(
-                            request_id = %bcs_observability::current_request_id(),
+                            request_id = %bcs_observability::CurrentRequestId,
                             provider_id = %provider.provider_id,
                             bot_uuid = %bot_uuid,
                             error = %err,
@@ -227,7 +227,7 @@ impl ProviderCore {
                     .await
                     .inspect_err(|err| {
                         warn!(
-                            request_id = %bcs_observability::current_request_id(),
+                            request_id = %bcs_observability::CurrentRequestId,
                             provider_id = %provider.provider_id,
                             bot_uuid = %bot_uuid,
                             provider_bot_ref = %provider_bot_ref,
@@ -269,7 +269,7 @@ impl ProviderCore {
                     .await
                     .inspect_err(|err| {
                         warn!(
-                            request_id = %bcs_observability::current_request_id(),
+                            request_id = %bcs_observability::CurrentRequestId,
                             provider_id = %provider.provider_id,
                             bot_uuid = %bot_uuid,
                             error = %err,
@@ -684,7 +684,7 @@ impl ProviderCoreService for ProviderCore {
             .await
             .inspect_err(|err| {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     provider_id = %provider_id,
                     error = %err,
                     "register_provider: insert_provider failed"
@@ -703,7 +703,7 @@ impl ProviderCoreService for ProviderCore {
             .await
             .inspect_err(|err| {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     provider_id = %provider_id,
                     kind = "provider_admin",
                     error = %err,
@@ -722,7 +722,7 @@ impl ProviderCoreService for ProviderCore {
             .await
             .inspect_err(|err| {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     provider_id = %provider_id,
                     kind = "downlink_bcs_to_provider",
                     error = %err,

@@ -172,7 +172,7 @@ pub async fn register_bot(
 
     if let Err(e) = onboard_result {
         tracing::warn!(
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             bot_uuid = %connect_result.bot_uuid,
             error = %e,
             "register: admin_onboard_bot failed after connect"

@@ -420,7 +420,7 @@ impl DbProviderStore {
             .await
             .map(|result| result.affected_rows)
             .map_err(|err| {
-                warn!(request_id = %bcs_observability::current_request_id(), operation, error = %err, "db_provider: execute failed");
+                warn!(request_id = %bcs_observability::CurrentRequestId, operation, error = %err, "db_provider: execute failed");
                 service_db_error(operation, err)
             })
     }
@@ -449,7 +449,7 @@ impl DbProviderStore {
         statement: DbStatement,
     ) -> ServiceResult<Vec<DbRow>> {
         self.db.query(statement).await.map_err(|err| {
-            warn!(request_id = %bcs_observability::current_request_id(), operation, error = %err, "db_provider: query failed");
+            warn!(request_id = %bcs_observability::CurrentRequestId, operation, error = %err, "db_provider: query failed");
             service_db_error(operation, err)
         })
     }

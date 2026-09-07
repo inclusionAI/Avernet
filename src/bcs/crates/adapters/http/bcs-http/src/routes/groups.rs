@@ -491,7 +491,7 @@ async fn create_group_with_inline_subscriptions(
                 Ok(sessions) => sessions.into_iter().next().map(|session| session.id),
                 Err(error) => {
                     tracing::warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         group_id = %group_id,
                         error = %error,
                         "failed to load initial Session for legacy Group create response"
@@ -852,7 +852,7 @@ async fn start_initial_state_machine_run_for_group(
         })?;
     let Some(session) = session else {
         tracing::warn!(
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             group_id = %group.group_id,
             session_id = %session_id,
             "default state-machine session not found after group creation"
@@ -1052,7 +1052,7 @@ fn group_application_error_response(error: ApplicationError) -> Response {
         }
         // COSEC: keep persistence and infrastructure details out of the legacy response.
         ApplicationError::Internal(error) => {
-            tracing::error!(request_id = %bcs_observability::current_request_id(), error = %error, "legacy Group application request failed");
+            tracing::error!(request_id = %bcs_observability::CurrentRequestId, error = %error, "legacy Group application request failed");
             legacy_group_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "internal_error",

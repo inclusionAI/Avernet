@@ -94,7 +94,7 @@ impl BotConnectionRegistry {
         };
 
         tx.send(frame_json).await.map_err(|err| {
-            warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %err, "bot delivery failed");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err, "bot delivery failed");
         })
     }
 
@@ -320,7 +320,7 @@ impl BotConnectionControlPort for BotConnectionRegistry {
         let frame_str = match serde_json::to_string(&frame) {
             Ok(s) => s,
             Err(err) => {
-                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %err, "kick: failed to serialize event frame");
+                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err, "kick: failed to serialize event frame");
                 return true;
             }
         };

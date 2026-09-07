@@ -138,11 +138,13 @@ pub async fn observe_request(
     let elapsed = observation.started.elapsed();
     response.headers_mut().insert("x-request-id", header);
     observation.completed = true;
+    let outcome = if response.status() == axum::http::StatusCode::SWITCHING_PROTOCOLS {
+        "upgraded"
+    } else if response.status().is_success() { "success" } else { "http_error" };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         route = %observation.route,
         status = response.status().as_u16(), duration_ms = elapsed.as_secs_f64() * 1000.0,
-        outcome = if response.status() == axum::http::StatusCode::SWITCHING_PROTOCOLS { "upgraded" }
-            else if response.status().is_success() { "success" } else { "http_error" },
+        outcome,
         "http.request.response_ready");
     response
 }

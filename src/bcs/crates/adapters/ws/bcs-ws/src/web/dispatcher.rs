@@ -130,10 +130,10 @@ pub async fn dispatch_client_frame(
             }
         }
         BcsFrame::Response(res) => {
-            warn!(request_id = %bcs_observability::current_request_id(), id = %res.id, ok = res.ok, "Unexpected ResponseFrame from frontend client");
+            warn!(request_id = %bcs_observability::CurrentRequestId, id = %res.id, ok = res.ok, "Unexpected ResponseFrame from frontend client");
         }
         BcsFrame::Event(event) => {
-            warn!(request_id = %bcs_observability::current_request_id(), event = %event.event, "Unexpected EventFrame from frontend client");
+            warn!(request_id = %bcs_observability::CurrentRequestId, event = %event.event, "Unexpected EventFrame from frontend client");
         }
     }
 
@@ -276,7 +276,7 @@ async fn handle_connect(
             Ok(outcome) => outcome,
             Err(err) => {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     group_id = %group_id,
                     session_id = ?session_id,
                     bound_actor_id = ?bound_actor_id,
@@ -312,7 +312,7 @@ async fn handle_connect(
                         .await
                 }
                 _ => {
-                    warn!(request_id = %bcs_observability::current_request_id(), "session-bound connect is missing a valid V1 authorization context");
+                    warn!(request_id = %bcs_observability::CurrentRequestId, "session-bound connect is missing a valid V1 authorization context");
                     send_session_access_revoked(tx, &req.id, connection_state).await?;
                     return Ok(());
                 }
@@ -333,7 +333,7 @@ async fn handle_connect(
                 },
                 Err(err) => {
                     warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         error = ?err,
                         "connect rejected by V1 group-session authorization"
                     );
@@ -378,7 +378,7 @@ async fn handle_connect(
                 }
             }
             Err(error) => {
-                warn!(request_id = %bcs_observability::current_request_id(), session_id, %error, "pending interaction replay failed after connect");
+                warn!(request_id = %bcs_observability::CurrentRequestId, session_id, %error, "pending interaction replay failed after connect");
             }
         }
     }
@@ -573,7 +573,7 @@ async fn handle_interaction_resolve(
             .await?;
         }
         Err(InteractionServiceError::Internal(message)) => {
-            warn!(request_id = %bcs_observability::current_request_id(), %message, "interaction resolve application service failed");
+            warn!(request_id = %bcs_observability::CurrentRequestId, %message, "interaction resolve application service failed");
             send_error_shape(
                 tx,
                 &req.id,
@@ -703,7 +703,7 @@ async fn handle_chat_send(
         .await
     {
         warn!(
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             from = %from_id,
             group_id = %group_id,
             bound_actor_id = ?bound_actor_id,
@@ -742,7 +742,7 @@ async fn handle_chat_send(
         }
         Err(error) => {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 group_id = %group_id,
                 session_id = ?session_id,
                 error = %error,
@@ -1005,7 +1005,7 @@ async fn handle_chat_abort(
         .await
     {
         warn!(
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             actor_id = %bound_actor_id,
             group_id = %group_id,
             session_id = %session_id,
@@ -1051,7 +1051,7 @@ async fn handle_chat_abort(
             // best-effort and must not turn that successful command into a WS
             // failure.
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 run_id = %aborted_run_id,
                 %error,
                 "failed to invalidate aborted run interactions"

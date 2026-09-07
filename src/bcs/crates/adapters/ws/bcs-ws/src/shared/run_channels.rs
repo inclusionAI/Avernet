@@ -91,7 +91,7 @@ impl RunChannelManager {
                 }
                 Err(err) => {
                     warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         run_id = %run_id,
                         resolved_run_id = %resolved_run_id,
                         error = %err,
@@ -251,7 +251,7 @@ impl RunChannelManager {
             Some(session_id) => session_id,
             None => {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     alias_run_id = %alias_run_id,
                     source_run_id = %source_run_id,
                     resolved_source_run_id = %resolved_source_run_id,
@@ -263,7 +263,7 @@ impl RunChannelManager {
 
         if !self.channels.read().await.contains_key(&resolved_source_run_id) {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 alias_run_id = %alias_run_id,
                 source_run_id = %source_run_id,
                 resolved_source_run_id = %resolved_source_run_id,
@@ -345,7 +345,7 @@ impl RunChannelManager {
 
         let removed = before - channels.len();
         if removed > 0 {
-            warn!(request_id = %bcs_observability::current_request_id(), removed, "Removed expired run channels");
+            warn!(request_id = %bcs_observability::CurrentRequestId, removed, "Removed expired run channels");
         }
     }
 }
