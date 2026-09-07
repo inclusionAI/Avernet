@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
+
+from agentclaw.community.core.repository.protocols.capability_desired_state import (
+    CapabilityDesiredStateRepositoryProtocol,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,3 +75,37 @@ class LegacySkillSetCompatibilityFactoryProtocol(Protocol):
     def create(
         self, *args: Any, **kwargs: Any
     ) -> LegacySkillSetCompatibilityProtocol: ...
+
+
+def list_skill_set_mcp_projection(
+    *,
+    repository: CapabilityDesiredStateRepositoryProtocol,
+    legacy_factory: LegacySkillSetCompatibilityFactoryProtocol,
+    bot: Mapping[str, Any],
+    target: Mapping[str, Any],
+    bot_id: str,
+    owner_id: str,
+    engine_type: str,
+    default_engine_types: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    """Project Default policy MCPs; read ordinary Set membership directly."""
+    if target["is_default"]:
+        legacy = legacy_factory.create(
+            entity_id=str(bot.get("entity_id") or owner_id),
+            bot_id=bot_id,
+            engine_type=engine_type,
+            entity_type=bot.get("entity_type") or "staff",
+        )
+        return legacy.get_set_mcp_servers(
+            str(target["id"]),
+            user_id=owner_id,
+            bot_id=bot_id,
+            engine_type=engine_type,
+        )
+    return repository.list_mcps(
+        bot_id=bot_id,
+        owner_id=owner_id,
+        set_id=str(target["id"]),
+        engine_type=engine_type,
+        default_engine_types=default_engine_types,
+    )
