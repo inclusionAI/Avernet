@@ -219,3 +219,24 @@ def test_relative_reconcile_preserves_all_skill_package_symlinks(runtime):
     assert cleared.status_code == 200
     assert cleared.json()["data"]["removed"] == ["active/selected"]
     assert all(link.is_symlink() and link.read_text() == "keep" for link in internal)
+
+
+@pytest.mark.parametrize("relative", [False, True])
+def test_separate_request_cannot_write_through_existing_skill_link(runtime, relative):
+    client, source, target = runtime
+    if relative:
+        source = target.parent / "sources/retro"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("retro")
+        def activate(name):
+            return client.post("/api/skills/symlink", json={"symlinks": [
+                {"source": "sources/retro", "target": name}
+            ]})
+        assert activate("retro").status_code == 200
+        response = activate("retro/nested")
+    else:
+        assert bind(client, source, target).status_code == 200
+        response = bind(client, source, target / "nested")
+    assert response.status_code == 400, response.text
+    assert target.resolve() == source
+    assert not (source / "nested").exists()

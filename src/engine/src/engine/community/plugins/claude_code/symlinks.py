@@ -14,6 +14,8 @@ class LocalSkillSymlinks:
         path = Path(raw)
         if not raw.strip() or not path.is_absolute() or ".." in path.parts:
             raise ValueError("Skill path must be absolute without parent traversal")
+        if link and any(parent.is_symlink() for parent in path.parents):
+            raise ValueError("Skill target parent must not traverse a symlink")
         resolved = path.parent.resolve() / path.name if link else path.resolve()
         if not any(resolved.is_relative_to(root) for root in self.roots):
             raise ValueError("Skill path is outside the configured engine roots")

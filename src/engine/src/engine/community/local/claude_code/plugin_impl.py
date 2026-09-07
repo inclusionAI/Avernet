@@ -507,6 +507,8 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
             for path in (source, target):
                 if not PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
                     raise ValueError("Invalid absolute Skill path")
+            if any(str(parent) in self._skill_links for parent in PurePosixPath(target).parents):
+                raise ValueError("Skill target parent must not traverse a symlink")
             if target in desired or target == source:
                 raise ValueError("Duplicate or self-referencing Skill target")
             if str(PurePosixPath(source) / "SKILL.md") not in self._files:

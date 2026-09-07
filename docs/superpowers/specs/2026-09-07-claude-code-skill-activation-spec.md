@@ -17,7 +17,9 @@ Docker startup, GitHub workflows and Corp-specific path conversion unchanged.
 - First activation creates the target directory and readable Skill symlink.
   Retry is idempotent; replacement, cleanup and errors report actual outcomes.
 - Validate paths, source availability and target conflicts before mutating links.
-  Do not overwrite ordinary files/directories or delete uploaded sources.
+  Target parent chains must not traverse existing symlinks; check this before
+  resolving paths, including links created by previous requests. Do not
+  overwrite ordinary files/directories or delete uploaded sources.
 - Forward relative sync and cleanup payloads across the same private port seam.
   Retain the existing public HTTP DTOs and response fields. Full reconciliation
   cleans active links outside real Skill packages; links inside directories
