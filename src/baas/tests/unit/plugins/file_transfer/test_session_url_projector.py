@@ -20,6 +20,7 @@ import pytest
 from secbaas.community.api.session_file_sharing import (
     SessionFileTransferProxyUnavailableError,
 )
+from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 from secbaas.community.plugins.file_transfer.aliyun_ack import (
     AliyunAckSessionFileUrlProjector,
 )
@@ -131,7 +132,7 @@ class TestProxyUnavailableGuard:
     """D-06: ALIYUN_ACK with an empty proxy_base_url refuses instead of
     handing out a bare OSS URL."""
 
-    def test_aliyun_ack_empty_proxy_raises(self):
+    def test_proxy_missing_raises(self):
         projector = AliyunAckSessionFileUrlProjector(
             proxy_base_url="",
             deploy_tenant="ALIYUN_ACK",
@@ -146,3 +147,41 @@ class TestProxyUnavailableGuard:
         assert exc_info.value.http_status == 503
         assert "proxy_base_url" in exc_info.value.reason
         assert "deploy_tenant=ALIYUN_ACK" in exc_info.value.reason
+
+
+class TestNoopSessionFileUrlProjector:
+    """Noop matrix rows: identity passthrough for every non-ALIYUN_ACK
+    tenant (row 1), and the D-06 refusal when the stub projector is
+    selected for ALIYUN_ACK (row 3 — naked-URL leak prevention)."""
+
+    def test_noop_identity_passthrough_default_tenant(self):
+        projector = NoopSessionFileUrlProjector()
+
+        result = projector.project(_MULTIPART_PART_URL)
+
+        assert result == _MULTIPART_PART_URL
+        assert urlsplit(result).query == urlsplit(_MULTIPART_PART_URL).query
+
+    @pytest.mark.parametrize("deploy_tenant", ["", "SIGMA"])
+    def test_noop_identity_passthrough_explicit_tenant(self, deploy_tenant):
+        projector = NoopSessionFileUrlProjector(deploy_tenant=deploy_tenant)
+
+        result = projector.project(_ORIGINAL_UPLOAD_URL)
+
+        assert result == _ORIGINAL_UPLOAD_URL
+
+    def test_stub_raises_for_aliyun_ack_tenant(self):
+        projector = NoopSessionFileUrlProjector(deploy_tenant="ALIYUN_ACK")
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
+            projector.project(_ORIGINAL_UPLOAD_URL)
+
+        assert (
+            exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+        )
+        assert exc_info.value.http_status == 503
+        assert "'stub'" in exc_info.value.reason
+        assert "aliyun_ack" in exc_info.value.reason
+
+    def test_noop_implements_protocol(self):
+        assert isinstance(NoopSessionFileUrlProjector(), SessionFileUrlProjector)

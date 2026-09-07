@@ -18,6 +18,7 @@ from secbaas.community.api.session_file_sharing import (
 from secbaas.community.core.service.session_file_sharing._dispatcher import (
     DefaultSessionFileSharingDispatcher,
 )
+from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 
 # All six dispatch method names defined by the Protocol
 DISPATCH_METHODS = [
@@ -38,6 +39,7 @@ class TestSessionFileSharingContract:
         return DefaultSessionFileSharingDispatcher(
             file_transfer_backend=MagicMock(),
             ticket_repo=MagicMock(),
+            session_file_url_projector=NoopSessionFileUrlProjector(),
         )
 
     def test_isinstance_satisfies_runtime_checkable_protocol(self, dispatcher):
