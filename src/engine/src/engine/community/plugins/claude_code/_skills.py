@@ -1,17 +1,15 @@
-"""_SkillsPortMixin — skill lifecycle + sync (relay RPC).
+"""Skill discovery/lifecycle via Relay; bulk symlink mutations on local disk.
 
-All skill ops are forwarded to the relay (``skills.*``). The corp
-``engines/claude_code/skills.py`` also performs local filesystem rsync/symlink
-work for ``sync_symlinks`` / ``ensure_center``; that local-OS work moves into
-the adapter (or a local plugin) in the ACL split, and the community port only
-owns the relay RPC shape. Returning the raw ``{success, payload|error}`` /
-dict / list / bool shapes the adapter consumes.
+The adapter carries complete request payloads to the filesystem implementation.
+Filesystem failures propagate instead of becoming empty successful DTOs.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+
+from engine.community.plugins.claude_code.symlinks import LocalSkillSymlinks
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +52,8 @@ class _SkillsPortMixin:
     """Domain mixin: skills.{list,get,install,uninstall,update,enable,disable,
     execute,validate,discover,sync_symlinks,sync_bindpaths,clean_symlinks,
     ensure_center}."""
+
+    _local_symlinks: LocalSkillSymlinks
 
     @staticmethod
     def _pool_mappings(
@@ -303,14 +303,14 @@ class _SkillsPortMixin:
             return resp.payload if isinstance(resp.payload, dict) else {"success": True}
         return _resp_dict(resp)
 
-    async def skills_sync_symlinks(self, token: str | None = None) -> dict:
-        return await self._skills_passthrough("skills.sync_symlinks", {})
+    async def skills_sync_symlinks(self, params: dict, token: str | None = None) -> dict:
+        return await asyncio.to_thread(self._local_symlinks.sync_relative, params)
 
-    async def skills_sync_bindpaths(self, token: str | None = None) -> dict:
-        return await self._skills_passthrough("skills.sync_bindpaths", {})
+    async def skills_sync_bindpaths(self, params: dict, token: str | None = None) -> dict:
+        return await asyncio.to_thread(self._local_symlinks.sync, params)
 
-    async def skills_clean_symlinks(self, token: str | None = None) -> dict:
-        return await self._skills_passthrough("skills.clean_symlinks", {})
+    async def skills_clean_symlinks(self, params: dict, token: str | None = None) -> dict:
+        return await asyncio.to_thread(self._local_symlinks.clean, params)
 
     async def skills_ensure_center(self, token: str | None = None) -> dict:
         return await self._skills_passthrough("skills.ensure_center", {})

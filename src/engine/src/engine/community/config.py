@@ -506,3 +506,8 @@ def load_claude_code_file_roots() -> tuple[Path, ...]:
         layout.active_root,
         load_claude_code_workspace(),
     )
+
+
+def load_claude_code_skills_root() -> Path:
+    """Active Skill discovery directory from the existing Engine layout."""
+    return _claude_code_file_layout(Path.home()).active_root

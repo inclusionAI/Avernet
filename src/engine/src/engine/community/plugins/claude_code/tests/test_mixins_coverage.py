@@ -801,37 +801,6 @@ class TestSkillsMixin:
         impl, _ = _impl(c)
         assert await impl.skills_discover(source="market") == []
 
-    async def test_sync_symlinks_success_payload(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _ok({"synced": 3}))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_symlinks() == {"synced": 3}
-
-    async def test_sync_symlinks_success_non_dict(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _ok("raw"))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_symlinks() == {"success": True}
-
-    async def test_sync_symlinks_error(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_symlinks", _err("SYNC_FAIL", "nope"))
-        impl, _ = _impl(c)
-        out = await impl.skills_sync_symlinks()
-        assert out == {"success": False, "error": {"code": "SYNC_FAIL", "message": "nope"}}
-
-    async def test_sync_bindpaths_success(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.sync_bindpaths", _ok({"ok": True}))
-        impl, _ = _impl(c)
-        assert await impl.skills_sync_bindpaths() == {"ok": True}
-
-    async def test_clean_symlinks_success(self):
-        c = _FakeRelayClient()
-        c.set_response("skills.clean_symlinks", _ok({"cleaned": 1}))
-        impl, _ = _impl(c)
-        assert await impl.skills_clean_symlinks() == {"cleaned": 1}
-
     async def test_ensure_center_success(self):
         c = _FakeRelayClient()
         c.set_response("skills.ensure_center", _ok({"ensured": True}))

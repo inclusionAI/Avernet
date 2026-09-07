@@ -1,7 +1,7 @@
 """ClaudeCodeSkillsPort — native port for skill lifecycle management.
 
-Skills are pooled (client + relay), so port methods take
-``token: str | None = None`` for per-token routing. Returns raw
+Relay-backed operations accept
+``token: str | None = None`` for routing; bulk symlink methods act locally. Returns raw
 dicts / list[dict] / bool — the adapter builds the core DTOs.
 
 Relay RPC mapping (teamclaw-aicoding-relay v3 protocol):
@@ -19,9 +19,9 @@ Port method                 Relay RPC (method name on the wire)
 ``skills_execute``          ``skills.execute``
 ``skills_validate``         ``skills.validate``
 ``skills_discover``         ``skills.discover``
-``skills_sync_symlinks``    ``skills.sync_symlinks``
-``skills_sync_bindpaths``   ``skills.sync_bindpaths``
-``skills_clean_symlinks``   ``skills.clean_symlinks``
+``skills_sync_symlinks``    Local filesystem
+``skills_sync_bindpaths``   Local filesystem
+``skills_clean_symlinks``   Local filesystem
 ``skills_ensure_center``    ``skills.ensure_center``
 ==========================  ================================================
 """
@@ -32,7 +32,11 @@ from typing import Protocol
 
 
 class ClaudeCodeSkillsPort(Protocol):
-    """Native skill lifecycle operations over the claude_code gateway (vendored Node relay)."""
+    """Relay lifecycle and local filesystem activation operations.
+
+    Bulk methods require the full params payload and raise on invalid paths,
+    conflicts or I/O failure. They never encode failure as an empty success.
+    """
 
     async def skills_list(
         self,
@@ -182,9 +186,10 @@ class ClaudeCodeSkillsPort(Protocol):
 
     async def skills_sync_symlinks(
         self,
+        params: dict,
         token: str | None = None,
     ) -> dict:
-        """Call ``skills.sync_symlinks`` to synchronize skill symlinks.
+        """Reconcile relative symlinks locally; params contains symlinks.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.
@@ -193,9 +198,10 @@ class ClaudeCodeSkillsPort(Protocol):
 
     async def skills_sync_bindpaths(
         self,
+        params: dict,
         token: str | None = None,
     ) -> dict:
-        """Call ``skills.sync_bindpaths`` to synchronize skill bindpaths.
+        """Reconcile absolute symlinks locally; params contains symlinks and clean_target_dir.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.
@@ -204,9 +210,10 @@ class ClaudeCodeSkillsPort(Protocol):
 
     async def skills_clean_symlinks(
         self,
+        params: dict,
         token: str | None = None,
     ) -> dict:
-        """Call ``skills.clean_symlinks`` to remove stale skill symlinks.
+        """Remove local symlinks in params directories without deleting sources.
 
         Args:
             token: MCP token for per-token pool routing; None -> default client.
