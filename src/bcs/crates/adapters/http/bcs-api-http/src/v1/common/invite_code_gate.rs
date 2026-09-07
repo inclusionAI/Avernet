@@ -144,6 +144,23 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct DefaultGateState {
+        verifier: Arc<dyn PrincipalVerifier>,
+    }
+
+    impl PrincipalVerificationState for DefaultGateState {
+        fn principal_verifier(&self) -> &Arc<dyn PrincipalVerifier> {
+            &self.verifier
+        }
+    }
+
+    impl InviteCodeGateState for DefaultGateState {
+        fn invite_code_service(&self) -> Option<&Arc<dyn InviteCodeService>> {
+            None
+        }
+    }
+
     #[test]
     fn middleware_compiles_for_router_state() {
         let state = DummyState { verifier: Arc::new(DummyVerifier) };
@@ -182,6 +199,61 @@ mod tests {
     fn middleware_compiles_when_gate_is_disabled() {
         let state = DisabledGateState { verifier: Arc::new(DummyVerifier) };
         let _: Router = Router::new().layer(from_fn_with_state(state, enforce_invite_code_gate::<DisabledGateState>));
+    }
+
+    #[tokio::test]
+    async fn middleware_skips_invite_code_checks_for_exempt_paths_and_default_gate_state() {
+        let service = Arc::new(CountingInviteCodeService { allow_access: false, ..Default::default() });
+        let state = RuntimeState {
+            verifier: Arc::new(DummyVerifier),
+            service: Some(service.clone()),
+            enabled: true,
+        };
+
+        let mut request = Request::builder()
+            .uri("/openapi/v1/collaboration/invite-codes/me")
+            .body(Body::empty())
+            .expect("request");
+        request.extensions_mut().insert(caller());
+
+        let response = Router::new()
+            .route("/openapi/v1/collaboration/invite-codes/me", get(|| async { "ok" }))
+            .layer(from_fn_with_state(state, enforce_invite_code_gate::<RuntimeState>))
+            .oneshot(request)
+            .await
+            .expect("response");
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(service.ensure_access_calls.lock().expect("ensure access lock").len(), 0);
+
+        let default_state = DefaultGateState { verifier: Arc::new(DummyVerifier) };
+        assert!(default_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
+        assert!(InviteCodeGateState::invite_code_gate_enabled(&default_state));
+    }
+
+    #[tokio::test]
+    async fn invite_code_service_helpers_and_state_impls_are_exercised() {
+        let service = CountingInviteCodeService { allow_access: true, ..Default::default() };
+        assert_eq!(service.init_invite_codes(bcs_service_api::application::v1::InitInviteCodes { count: 0 }).await.expect("init").codes, Vec::<String>::new());
+        assert!(service.bind_invite_code(bcs_service_api::application::v1::BindInviteCode { caller: caller(), code: "ABC123".to_string() }).await.expect("bind").bound);
+        assert_eq!(service.get_my_invite_code_binding(bcs_service_api::application::v1::GetMyInviteCodeBinding { caller: caller() }).await.expect("binding").bound_at, Some(1));
+        assert!(service.ensure_invite_code_access(&caller()).await.is_ok());
+
+        let deny_service = CountingInviteCodeService { allow_access: false, ..Default::default() };
+        assert!(deny_service.ensure_invite_code_access(&caller()).await.is_err());
+
+        let dummy_state = DummyState { verifier: Arc::new(DummyVerifier) };
+        assert!(dummy_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
+
+        let disabled_state = DisabledGateState { verifier: Arc::new(DummyVerifier) };
+        assert!(disabled_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
+
+        let runtime_state = RuntimeState {
+            verifier: Arc::new(DummyVerifier),
+            service: None,
+            enabled: false,
+        };
+        assert!(runtime_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
     }
 
     #[derive(Clone)]
