@@ -428,6 +428,7 @@ dependencies = [
  "bcs-domain",
  "bcs-service-api",
  "bcs-storage-api",
+ "bcs-test-support",
  "bytes",
  "futures",
  "jsonwebtoken",

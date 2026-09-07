@@ -8,8 +8,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
+use bcs_config_api::ManifestConfig;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::*;
+use bcs_test_support::{NoopChannelService, NoopCollaborationRuntimeService};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -41,6 +43,64 @@ impl PrincipalVerifier for HeaderVerifier {
         } else {
             Err(PrincipalVerificationError::Missing)
         }
+    }
+}
+
+#[derive(Default)]
+struct NoopAuthService;
+
+#[async_trait]
+impl AuthService for NoopAuthService {
+    async fn login_urls(
+        &self,
+        _request: BuildLoginUrls,
+    ) -> Result<AuthProviderUrlList, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn complete_login(
+        &self,
+        _request: CompleteOAuthLogin,
+    ) -> Result<AuthRedirect, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn current_user(
+        &self,
+        _request: ReadCurrentUser,
+    ) -> Result<AuthUserInfo, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn refresh_session(
+        &self,
+        _request: RefreshSession,
+    ) -> Result<SessionRenewal, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+}
+
+#[derive(Default)]
+struct NoopCollaborationTemplateService;
+
+#[async_trait]
+impl CollaborationTemplateService for NoopCollaborationTemplateService {
+    async fn list_templates(
+        &self,
+        _command: ListCollaborationTemplates,
+    ) -> Result<CollaborationTemplateListResponse, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn get_template(
+        &self,
+        _query: GetCollaborationTemplate,
+    ) -> Result<CollaborationTemplateDetail, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
     }
 }
 
@@ -436,6 +496,32 @@ fn invite_code_test_router(
         .with_invite_code_gate_enabled(gate_enabled)
         .with_bot_service(service),
     )
+}
+
+#[test]
+fn api_state_builder_methods_attach_optional_services() {
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(HeaderVerifier),
+    )
+    .with_auth_service(Arc::new(NoopAuthService), "http://127.0.0.1/openapi/v1/auth".to_string())
+    .with_channel_service(Arc::new(NoopChannelService))
+    .with_collaboration_runtime_service(Arc::new(NoopCollaborationRuntimeService))
+    .with_collaboration_template_service(Arc::new(NoopCollaborationTemplateService))
+    .with_manifest_config("test".to_string(), ManifestConfig::default());
+
+    assert!(state.auth_service.is_some());
+    assert_eq!(state.auth_public_base_url, "http://127.0.0.1/openapi/v1/auth");
+    assert!(state.channel_service.is_some());
+    assert!(state.collaboration_runtime_service.is_some());
+    assert!(state.collaboration_template_service.is_some());
+    assert_eq!(state.manifest_env, "test");
+    assert_eq!(state.manifest, ManifestConfig::default());
 }
 
 #[tokio::test]
@@ -956,6 +1042,54 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
         .await
         .expect("missing principal response");
     assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn bot_routes_reject_invalid_queries_and_missing_service() {
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
+
+    for uri in [
+        "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10&unexpected=1",
+        "/openapi/v1/collaboration/bots/human_staff-1/eligible-candidates?purpose=collaboration&name=planner&offset=5&limit=10&unexpected=1",
+        "/openapi/v1/collaboration/bots/mine?kind=human&name=vin&status=online&reachability=unreachable&offset=2&limit=3&unexpected=1",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request("GET", uri, Value::Null))
+            .await
+            .expect("invalid query response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(response_json(response).await["data"]["error_code"], "invalid_request", "{uri}");
+    }
+
+    assert!(service.candidates.lock().expect("candidates lock").is_none());
+    assert!(service.eligible_candidates.lock().expect("eligible candidates lock").is_none());
+    assert!(service.mine.lock().expect("mine lock").is_none());
+
+    let missing_service_app = router(
+        ApiState::new(
+            Arc::new(NoopGroupService),
+            Arc::new(NoopSessionService),
+            Arc::new(NoopMessageService),
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
+            Arc::new(NoopFriendshipService),
+            Arc::new(HeaderVerifier),
+        )
+        .with_invite_code_gate_enabled(false),
+    );
+
+    let missing_service = missing_service_app
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/bot-1",
+            Value::Null,
+        ))
+        .await
+        .expect("missing bot service response");
+    assert_eq!(missing_service.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(missing_service).await["data"]["error_code"], "internal_error");
 }
 
 #[tokio::test]
