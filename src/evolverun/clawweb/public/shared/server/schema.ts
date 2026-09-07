@@ -2884,4 +2884,12 @@ END`,
     ],
   },
 
+  {
+    version: 119,
+    description: "Preserve cross-instance retry execution options",
+    sql: [
+      `ALTER TABLE flow_retry_requests ADD COLUMN options_json TEXT`,
+      `CREATE INDEX IF NOT EXISTS idx_flow_runs_origin_id ON flow_runs (origin_bot_id, id)`,
+    ],
+  },
 ];
