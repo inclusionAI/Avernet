@@ -205,6 +205,7 @@ fn test_app_with_options(
     let provider_management = Arc::new(provider_management);
 
     let services = Services::builder()
+        .bot_query(Arc::new(bcs_bot::Bot::new(registry_service.clone())))
         .registry(registry_service)
         .provider_core(provider_core)
         .provider_bot_core(provider_bot_core)
@@ -3098,6 +3099,57 @@ async fn seed_allowed_provider(
 ) {
     seed_provider_admin(provider_repo, provider_credentials, provider_id, admin_token, "11111111")
         .await;
+}
+
+#[tokio::test]
+async fn provider_attributes_sync_agent_visibility_but_not_user_or_approval_metadata() {
+    let provider_id = "prv_publication_sync".to_string();
+    let admin_token = "admin-token";
+    let sync = Arc::new(RecordingVisibilitySyncPort::default());
+    let TestApp { app, provider_repo, provider_credentials, .. } =
+        test_app_with_allowed_switch_provider_ids_and_visibility_sync(
+            vec![provider_id.clone()], sync.clone(),
+        );
+    seed_allowed_provider(&provider_repo, &provider_credentials, &provider_id, admin_token).await;
+    let bot_uuid = "teamclaw-bot:alice";
+    register_provider_bot(&app, &provider_id, admin_token, bot_uuid).await;
+    sync.wait_for(1).await;
+
+    for (index, visibility) in ["public", "protected", "private"].iter().enumerate() {
+        let response = app.clone().oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/{bot_uuid}/attributes"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(json!({"visibility": visibility}).to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        sync.wait_for(index + 2).await;
+        let requests = sync.requests.lock().await;
+        assert_eq!(requests[index + 1].bot_uuid, bot_uuid);
+        assert_eq!(requests[index + 1].visibility, *visibility);
+    }
+
+    for (body, expected) in [
+        (json!({"user_visibility": "private"}), StatusCode::OK),
+        (json!({"friend_ext": {"public_user_approval": {"status": "PROCESSING"}}}), StatusCode::OK),
+        (json!({"visibility": "public", "unknown_field": true}), StatusCode::BAD_REQUEST),
+    ] {
+        let response = app.clone().oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/providers/{provider_id}/bots/{bot_uuid}/attributes"))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {admin_token}"))
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        ).await.unwrap();
+        assert_eq!(response.status(), expected);
+    }
+    tokio::task::yield_now().await;
+    assert_eq!(sync.requests.lock().await.len(), 4);
 }
 
 #[tokio::test]

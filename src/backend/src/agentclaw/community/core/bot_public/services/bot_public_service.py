@@ -388,6 +388,17 @@ class BotPublicService(BotPublicServiceProtocol):
         self, bot_id: str, owner_id: str, public: str
     ) -> None:
         """Best-effort sync bot visibility to BCSFuse runtime state."""
+        worker_id = (
+            f"{bot_id}:{owner_id}"
+            if self._bcsfuse_config.worker_id_with_owner is True
+            else bot_id
+        )
+        self._sync_bcsfuse_worker_runtime_state(bot_id, worker_id, public)
+
+    def _sync_bcsfuse_worker_runtime_state(
+        self, bot_id: str, worker_id: str, public: str
+    ) -> None:
+        """Sync an exact worker identity; BCS UUIDs must not be qualified again."""
         base_url = self._resolve_bcsfuse_base_url()
         if not base_url:
             logger.info(
@@ -399,11 +410,6 @@ class BotPublicService(BotPublicServiceProtocol):
             return
 
         runtime_state = "online" if public == "1" else "offline"
-        worker_id = (
-            f"{bot_id}:{owner_id}"
-            if self._bcsfuse_config.worker_id_with_owner is True
-            else bot_id
-        )
         url = f"{base_url}/v1/workers/{worker_id}/{runtime_state}"
         request = Request(url, data=b"", method="PUT")
         request.add_header("Content-Type", "application/json")
@@ -929,6 +935,8 @@ class BotPublicService(BotPublicServiceProtocol):
         # provider creds (non prod/pre); report that truthfully as SKIPPED
         # instead of faking COMPLETED.
         skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
+        if public_scope == "user" and not skipped:
+            self._sync_bcsfuse_worker_runtime_state(bot_uid, bot_uid, "0")
         return {
             "success": True,
             "state": "SKIPPED" if skipped else "COMPLETED",
@@ -985,7 +993,11 @@ class BotPublicService(BotPublicServiceProtocol):
             friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
                 block.get("view_friend_deps") or []
             )
-        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
+        patched = self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
+        skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
+        if public_scope == "user" and block["status"] == "AGREE" and not skipped:
+            public = "0" if body["user_visibility"] == "private" else "1"
+            self._sync_bcsfuse_worker_runtime_state(bot_uid, bot_uid, public)
         return {
             "success": True, "public": None,
             "message": f"public_scope={public_scope} callback status={block['status']}",
@@ -1009,10 +1021,8 @@ class BotPublicService(BotPublicServiceProtocol):
         # New-version publish (public_scope non-empty, e.g. "user"/"agent"): the
         # bot's visibility is delegated to BCS, so this callback must NOT flip
         # ac_bots.public or run the passport / auth-relationship / device-sync
-        # side effects of the legacy path. For now we only LOG the would-be BCS
-        # status update; the real call is wired once BCS exposes its internal
-        # (no-auth) API, invoked via httpclient — no end-user cookie is involved
-        # on this callback path. public_scope's value is preserved for that call.
+        # side effects of the legacy path. Persist BCS attributes first, then
+        # sync user publication to BCSFuse using the exact BCS identity.
         if public_scope:
             # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
             # GET friend_ext → 按 public_scope 子块 (public_user_approval/
