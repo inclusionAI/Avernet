@@ -43,7 +43,7 @@ class LocalUserMachineRepository(Protocol):
     def list_by_user_id(self, user_id: str, env: str) -> list[LocalUserMachineRecord]:
         """List all machine records for a user in an environment.
 
-        Uses uk_user_env unique constraint (user_id + env).
+        Uses idx_user_env index (user_id + env, non-unique).
         """
         ...
 
