@@ -15,9 +15,14 @@ from pathlib import Path
 class _FilePortMixin:
     _file_roots: tuple[Path, ...]
     _file_workspace: Path | None
+    _file_config: Path | None
 
     def _file_path(self, path: str, *, unlink: bool = False) -> Path:
         target = Path(path)
+        if path == "config/config.json":
+            if self._file_config is None:
+                raise ValueError("Claude Code config path is not configured")
+            target = self._file_config
         if target.parts[:1] == ("workspace",):
             if self._file_workspace is None:
                 raise ValueError("Claude Code workspace is not configured")

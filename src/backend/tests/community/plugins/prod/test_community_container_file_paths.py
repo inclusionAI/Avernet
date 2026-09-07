@@ -62,9 +62,9 @@ async def test_workspace_address_reaches_container_namespace():
         (
             "identity",
             "identity/AGENTS.md",
-            "/home/admin/.claude_code/workspace/.claude/AGENTS.md",
+            "workspace/.claude/AGENTS.md",
         ),
-        ("config", "config/engine.json", "/home/admin/.claude_code/config.json"),
+        ("config", "config/engine.json", "config/config.json"),
     ],
 )
 async def test_other_file_consumers_keep_correct_engine_addresses(

@@ -46,10 +46,15 @@ class AckDeployConfigComposer(DeployConfigComposer):
         the context.
         """
         initial_cwd = ""
-        if ctx.engine == "claude_code" and ctx.claude_code_default_cwd is not None:
-            from agentclaw.community.core.workspace.claude_code_config import validate_claude_code_cwd
-            initial_cwd = " --claude-initial-cwd " + shlex.quote(
-                validate_claude_code_cwd(ctx.claude_code_default_cwd))
+        if ctx.engine == "claude_code" and ctx.claude_code_workspace is not None:
+            from agentclaw.community.core.workspace.claude_code_config import (
+                validate_claude_code_cwd,
+            )
+
+            selector = ctx.claude_code_workspace
+            if selector != "default":
+                selector = validate_claude_code_cwd(selector)
+            initial_cwd = " --claude-initial-cwd " + shlex.quote(selector)
         command = (
             f"nohup start_service.sh --token {{token}} "
             f"--client_id {{client_id}} --engine {ctx.engine} "

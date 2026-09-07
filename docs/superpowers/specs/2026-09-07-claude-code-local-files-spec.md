@@ -16,7 +16,8 @@ Local Skill consumers. Paths must be engine-view addresses within configured
 engine roots. Community BaaS addressing translates only this Bot's known host
 root; it does not import enterprise path rules. The existing workspace logical
 namespace (`workspace/<relative>`) resolves in Engine to the retained configured
-cwd, so Backend need not infer an old Bot's filesystem location. Absolute saved
+cwd, so Backend need not infer an old Bot's filesystem location. Identity and configuration also use the existing logical namespace boundary.
+Absolute saved
 Local Skill locators are never silently rewritten. Corp and singlebox retain
 their existing addressing assembly.
 
@@ -30,9 +31,10 @@ symlink removes the link, not its target; root deletion and path escape fail.
 
 ## New and existing Bot workspaces
 
-A newly persisted Claude Code Bot receives a default cwd in its existing ext
-metadata, defaulting to `/home/admin/.claude_code/workspace` and preserving an
-explicit valid value. Idempotent creation of an existing Bot does not backfill
+A newly persisted Claude Code Bot receives an initialization-version marker in
+its existing ext metadata, and preserves an explicit valid cwd override. The
+Engine startup resolves the standard default from its versioned layout; Backend
+does not introduce a second physical directory constant. Idempotent creation of an existing Bot does not backfill
 or rewrite this field. ACK start commands carry this recorded initial default.
 No schema migration is required; managed deployment does not consume this flag.
 

@@ -11,6 +11,7 @@ from agentclaw.community.core.devices.services.device_filesystem_resolver import
     DefaultDeviceFileSystemResolver,
 )
 from agentclaw.community.core.workspace.path_factory import get_bot_engine_dir
+from agentclaw.community.core.workspace.skill_layout import runtime_layout_engine_for_bot
 
 
 class CommunityDeviceFileSystemResolver(DefaultDeviceFileSystemResolver):
@@ -20,7 +21,7 @@ class CommunityDeviceFileSystemResolver(DefaultDeviceFileSystemResolver):
         if ctx.provider != "baas":
             return super().__call__(ctx, path_mapper)
         bot = self._bot_repo.get_by_id(ctx.bot_id)
-        if not bot or bot.get("active_engine") != "claude_code":
+        if not bot or runtime_layout_engine_for_bot(bot) != "claude_code":
             return super().__call__(ctx, path_mapper)
         host_root = get_bot_engine_dir(
             str(bot["entity_id"]),
@@ -30,6 +31,13 @@ class CommunityDeviceFileSystemResolver(DefaultDeviceFileSystemResolver):
         )
 
         def container_path(path: str) -> str:
+            if path.startswith("identity/"):
+                relative = Path(path.removeprefix("identity/"))
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError("Invalid identity address")
+                return "workspace/.claude/" + relative.as_posix()
+            if path.startswith("config/"):
+                return "config/config.json"
             mapped = path_mapper(path)
             candidate = Path(mapped)
             if ".." in candidate.parts:
@@ -44,6 +52,8 @@ class CommunityDeviceFileSystemResolver(DefaultDeviceFileSystemResolver):
                 # Engine resolves its configured workspace, including a retained
                 # legacy cwd. Backend must not guess it from the engine name.
                 return relative.as_posix()
-            return str(Path("/home/admin/.claude_code") / relative)
+            if relative == Path("config.json"):
+                return "config/config.json"
+            raise ValueError("Unsupported community container file address")
 
         return super().__call__(ctx, container_path)

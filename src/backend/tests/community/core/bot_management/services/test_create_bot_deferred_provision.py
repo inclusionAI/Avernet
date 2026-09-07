@@ -250,7 +250,7 @@ def test_a_failed_provisioning_releases_the_claim_when_the_record_survives() -> 
 def test_new_claude_bot_persists_workspace_default_without_rewriting_existing():
     svc = _service([])
     record = svc.create_bot(**_ARGS, engine_type='claude_code', bot_type='personal', provision=False)
-    assert record['ext']['claude_code_default_cwd'] == '/home/admin/.claude_code/workspace'
+    assert record['ext']['claude_code_workspace_version'] == 1
     svc._repository.rows['g-1']['ext'] = {'avatar_url': 'old'}
     repeated = svc.create_bot(**_ARGS, engine_type='claude_code', bot_type='personal', provision=False)
     assert repeated['ext'] == {'avatar_url': 'old'}

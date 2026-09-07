@@ -13,6 +13,8 @@ dict so round-trip assertions work.
 """
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 import logging
 import re
 from collections.abc import AsyncGenerator
@@ -64,6 +66,7 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         self._skills: dict[str, dict[str, Any]] = {}
         self._cron: dict[str, dict[str, Any]] = {}
         self._files: dict[str, bytes] = {}
+        self._file_dirs: set[str] = {"/"}
 
     # ----------------------------------------------------------------- chat
 
@@ -587,6 +590,12 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
 
     async def file_upload(self, path: str, content_bytes: bytes,
                           token: str | None = None) -> dict:
+        if path in self._file_dirs:
+            raise IsADirectoryError(path)
+        parents = [str(parent) for parent in PurePosixPath(path).parents]
+        if any(parent in self._files for parent in parents):
+            raise NotADirectoryError(path)
+        self._file_dirs.update(parents)
         overwritten = path in self._files
         self._files[path] = content_bytes
         return {"path": path, "size": len(content_bytes), "overwritten": overwritten}
@@ -601,8 +610,9 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
             del self._files[path]
             return {"target_path": path, "path_type": "file"}
         removed = [key for key in self._files if key.startswith(path.rstrip("/") + "/")]
-        if not removed:
+        if path not in self._file_dirs:
             raise FileNotFoundError(path)
+        self._file_dirs = {key for key in self._file_dirs if key != path and not key.startswith(path.rstrip("/") + "/")}
         for key in removed:
             del self._files[key]
         return {"target_path": path, "path_type": "directory"}
@@ -614,21 +624,26 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
     async def file_list_dir(self, path: str, token: str | None = None, *,
                             recursive: bool = False,
                             exclude_dirs: set[str] | None = None) -> list[dict]:
+        if path in self._files:
+            raise NotADirectoryError(path)
+        if path not in self._file_dirs:
+            raise FileNotFoundError(path)
         prefix = path.rstrip("/") + "/"
-        entries: dict[str, dict] = {}
-        for key, content in sorted(self._files.items()):
-            if not key.startswith(prefix):
+        entries = []
+        for key in sorted(self._file_dirs | self._files.keys()):
+            if key == path or not key.startswith(prefix):
                 continue
-            parts = key[len(prefix):].split("/")
-            if any(part in (exclude_dirs or set()) for part in parts[:-1]):
+            relative = key[len(prefix):]
+            parts = relative.split("/")
+            directory = key in self._file_dirs
+            if not recursive and len(parts) > 1:
                 continue
-            for index in range(len(parts) if recursive else 1):
-                relative = "/".join(parts[:index + 1])
-                directory = index < len(parts) - 1
-                entries[relative] = {"name": parts[index], "path": prefix + relative,
-                                     "relative_path": relative, "is_dir": directory,
-                                     "size": 0 if directory else len(content)}
-        return list(entries.values())
+            directories = parts if directory else parts[:-1]
+            if any(part in (exclude_dirs or set()) for part in directories):
+                continue
+            entries.append({"name": parts[-1], "path": key, "relative_path": relative,
+                            "is_dir": directory, "size": 0 if directory else len(self._files[key])})
+        return entries
 
     # ------------------------------------------------------------- commands
 

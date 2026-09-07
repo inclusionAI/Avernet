@@ -264,7 +264,7 @@ class TestAckComposer:
 def test_ack_claude_initial_cwd_is_explicit_and_shell_quoted():
     import dataclasses
     import shlex
-    ctx = dataclasses.replace(_CTX, engine='claude_code', claude_code_default_cwd="/home/admin/project's files")
+    ctx = dataclasses.replace(_CTX, engine='claude_code', claude_code_workspace="/home/admin/project's files")
     command = AckDeployConfigComposer().build_start_command(ctx)
     inner = shlex.split(command)[3]
     tokens = shlex.split(inner)

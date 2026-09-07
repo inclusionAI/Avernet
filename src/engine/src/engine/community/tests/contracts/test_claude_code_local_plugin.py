@@ -271,3 +271,21 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     assert (await plugin.resolve_exec_approval("s", "r1", "allow"))["payload"]["decision"] == "allow"
     assert (await plugin.resolve_interaction("s", "r1", "yes"))["payload"]["response"] == "yes"
     assert (await plugin.resolve_mode_transition("s", "r1", "accept"))["payload"]["decision"] == "accept"
+
+
+@pytest.mark.parametrize("implementation", ["memory", "filesystem"])
+async def test_file_adapter_distinguishes_missing_and_empty_directories(tmp_path, implementation):
+    from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
+    from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
+    port = LocalClaudeCodePluginImpl() if implementation == "memory" else ClaudeCodePluginImpl(file_roots=(tmp_path,), workspace=tmp_path)
+    adapter = ClaudeCodeFileAdapter(port)
+    project = str(tmp_path / 'project')
+    with pytest.raises(FileNotFoundError):
+        await adapter.list_dir(project)
+    await adapter.upload(project + '/last.bin', b'\xff\x00')
+    assert await adapter.read(project + '/last.bin') == b'\xff\x00'
+    await adapter.remove(project + '/last.bin')
+    assert (await adapter.list_dir(project)).files == []
+    await adapter.rmtree(project)
+    with pytest.raises(FileNotFoundError):
+        await adapter.list_dir(project)

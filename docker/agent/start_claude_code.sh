@@ -90,7 +90,7 @@ for program in engine claude_relay; do
         workspace_args+=(--running-pid "$pid")
     fi
 done
-CLAUDE_WORKSPACE=$(python3 "$SCRIPT_DIR/resolve_claude_workspace.py" "${workspace_args[@]}") || {
+CLAUDE_WORKSPACE=$(/opt/.venv/bin/python "$SCRIPT_DIR/resolve_claude_workspace.py" "${workspace_args[@]}") || {
     fail "Cannot determine Claude Code cwd; saved configuration and running services were not changed"
     exit 1
 }
