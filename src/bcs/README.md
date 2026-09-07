@@ -262,6 +262,12 @@ base `bcs-config.toml` plus an environment override such as
 | `configs/bcs-config-local.toml` | **Local development** — loopback addresses, SQLite, local auth, safe to publish |
 | `configs/bcs-config-example.toml` | **Deployment template** — placeholder values, copy and fill in real credentials |
 
+The BCS Docker image installs `bcs-config-example.toml` as its base
+`/app/configs/bcs-config.toml`. Replace its placeholders through deployment
+configuration before starting the service. Environment-specific settings can
+be mounted separately as `/app/configs/bcs-config-{env}.toml` and selected with
+`SERVER_ENV`.
+
 Key config fields:
 
 | Field | Local default | Description |

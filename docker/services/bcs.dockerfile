@@ -50,8 +50,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM debian:bookworm-slim AS runtime
 
 # BCS_CONFIG_DIR points the binary at its config directory (clap reads this env
-# directly). SERVER_ENV selects the bcs-config-{env}.toml overlay; leave it to
-# the deployment to set a value whose matching config exists in /app/configs.
+# directly). The public deployment example is installed as the base config;
+# deployments can mount bcs-config-{env}.toml to override it.
 ENV DEBIAN_FRONTEND=noninteractive \
     HOME=/home/admin \
     BCS_CONFIG_DIR=/app/configs
@@ -67,13 +67,13 @@ RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list.d/debia
     && useradd --uid 10001 --gid admin --create-home --shell /bin/bash admin
 
 COPY --from=builder /build/bcs /usr/local/bin/bcs
-COPY src/bcs/configs /app/configs
+COPY src/bcs/configs/bcs-config-example.toml /app/configs/bcs-config.toml
 
 # Persistence: bots_base_dir and the session-file data_dir must live on a
 # writable volume. The shipped example config uses /var/lib/bcs; mount a
 # PVC/emptyDir here and point the config's data paths at it.
-RUN mkdir -p /app/tmp /var/lib/bcs /home/admin/logs \
-    && chown -R admin:admin /app /var/lib/bcs /home/admin
+RUN mkdir -p /app/tmp /var/lib/bcs /var/log/bcs /home/admin/logs \
+    && chown -R admin:admin /app /var/lib/bcs /var/log/bcs /home/admin
 
 # The service runs as admin (non-root). Root stays available for debugging —
 # it is merely password-locked, and container exec needs no password:
@@ -89,6 +89,6 @@ EXPOSE 21000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=6 \
     CMD curl -fsS "http://127.0.0.1:21000/health" >/dev/null || exit 1
 
-# clap picks up BCS_CONFIG_DIR from the environment; override SERVER_ENV /
-# BCS_CONFIG_DIR via the deployment to select the config overlay.
+# clap picks up BCS_CONFIG_DIR from the environment; set SERVER_ENV and mount an
+# environment-specific config when the deployment needs to override the base.
 ENTRYPOINT ["bcs"]

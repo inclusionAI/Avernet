@@ -17,3 +17,14 @@ code.
 
 If formatting is accidentally applied beyond the intended files, stop and clean
 the formatter-only diff before continuing.
+
+## Production Configuration
+
+Do not commit `configs/bcs-config-prod.toml` or any other real production
+configuration to the public repository. Keep public deployment guidance in
+`configs/bcs-config-example.toml` using public endpoints, placeholders, and
+environment-variable references only. Actual production configuration belongs
+in the private deployment system and must be mounted or injected at runtime.
+
+Tests, documentation, Dockerfiles, and startup scripts must not require a
+checked-in production configuration.
