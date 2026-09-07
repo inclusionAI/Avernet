@@ -30,12 +30,26 @@ _SQL_DIR = (
 
 #: Columns filled by the application, which must stay DATETIME. TIMESTAMP reads
 #: the bound naive value as session-local and converts it, so an instant the
-#: application already normalised to UTC (``fetched_at``) or took from
-#: ``datetime.now()`` (the apply times) is stored shifted by the session offset.
+#: application already normalised to UTC (``fetched_at``) is stored shifted by
+#: the session offset.
+#:
+#: The apply table's started_at/finished_at used to be listed here and are
+#: not any more: the DDL review standard refused them as DATETIME (see
+#: ``_DDL_STANDARD_FORBIDDEN_TYPES``), and their round trip through one
+#: session is the identity, so TIMESTAMP loses nothing the application reads.
 _APPLICATION_SUPPLIED = {
-    "2026_08_31_bot_config_manifest_apply.sql": ("started_at", "finished_at"),
     "2026_08_31_manifest_content.sql": ("fetched_at",),
 }
+
+#: The DDL review standard (研发规范) that gates provisioning on OceanBase.
+#: ac_bot_config_manifest_apply was refused on exactly these two rules -- a
+#: column named `trigger`, and DATETIME started_at/finished_at -- which is why
+#: the record table never existed in production while its lock table did.
+_DDL_STANDARD_FORBIDDEN_TYPES = {"bit", "float", "double", "datetime", "enum", "set"}
+_DDL_STANDARD_FILES = (
+    "2026_08_31_bot_config_manifest_apply.sql",
+    "2026_09_07_repair_misprovisioned_bot_config_manifest_apply.sql",
+)
 
 #: Filled by the database itself, so TIMESTAMP's conversion is a no-op round
 #: trip and matches ac_bots. Every table here has both.
@@ -65,7 +79,7 @@ def _tables(path: Path) -> dict[str, dict[str, str]]:
     )
     starts = [
         (match.group(1), match.start())
-        for match in re.finditer(r"CREATE TABLE\s+`(\w+)`", body)
+        for match in re.finditer(r"CREATE TABLE\s+(?:IF NOT EXISTS\s+)?`(\w+)`", body)
     ]
     assert starts, f"{path.name}: no CREATE TABLE found"
 
@@ -157,6 +171,31 @@ def test_every_table_in_every_file_is_parsed() -> None:
         "ac_source_credential",
         "ac_bot_cli_tool",
     }
+
+
+def test_apply_tables_pass_the_ddl_review_standard() -> None:
+    """The two findings the standard raised, held so they cannot come back.
+
+    Scoped to the apply file: ac_manifest_content.fetched_at is still DATETIME
+    and is a separate change with its own UTC-normalisation reasoning.
+    """
+    for filename in _DDL_STANDARD_FILES:
+        tables = _tables(_SQL_DIR / filename)
+        assert tables, f"{filename}: nothing parsed"
+        for table, declarations in tables.items():
+            assert "trigger" not in declarations, (
+                f"{table}: `trigger` is a SQL keyword; the column is apply_trigger"
+            )
+            for column, rest in declarations.items():
+                declared_type = rest.split()[0].lower().split("(")[0]
+                assert declared_type not in _DDL_STANDARD_FORBIDDEN_TYPES, (
+                    f"{table}.{column} is declared {declared_type}, which the DDL "
+                    "review standard refuses"
+                )
+        apply_columns = tables["ac_bot_config_manifest_apply"]
+        assert "apply_trigger" in apply_columns
+        for column in ("started_at", "finished_at"):
+            assert apply_columns[column].split()[0].lower() == "timestamp"
 
 
 def test_no_bare_timestamp_column_can_attach_an_implicit_on_update() -> None:
