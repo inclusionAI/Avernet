@@ -14,10 +14,19 @@ import pydantic
 import pytest
 
 from secbaas.community.api.device_manage import (
+    DeviceCallbackContext,
     TeClawCreateConfig,
     TeClawCreationResult,
     TeClawCredentials,
     TeClawDeviceConfig,
+)
+
+_DEFAULT_CTX = DeviceCallbackContext(
+    callback_url="http://cb",
+    publish_id="p1",
+    device_uuid="d1",
+    tenant="t1",
+    operator="op1",
 )
 from secbaas.community.api.template_manage import (
     TeClawTemplateConfig,
@@ -116,6 +125,7 @@ class TestFacadeMergeConfigForTeClaw:
             teclaw_bot_config={"cpu": 2, "mem": "4Gi"},
             name="test-device",
             description="test desc",
+            callback_context=_DEFAULT_CTX,
         )
         merged = facade._merge_config(template_config, detail_config, "TECLAW")
 
@@ -138,6 +148,7 @@ class TestFacadeMergeConfigForTeClaw:
         detail_config = TeClawDeviceConfig(
             teclaw_bot_config={"cpu": 2},
             name="test-device",
+            callback_context=_DEFAULT_CTX,
         )
         merged = facade._merge_config(template_config, detail_config, "TECLAW")
 
@@ -250,6 +261,7 @@ class TestFacadeCreateDeviceForTeClaw:
             detail_config=TeClawDeviceConfig(
                 name="test-device",
                 teclaw_bot_config={"cpu": 2},
+                callback_context=_DEFAULT_CTX,
             ),
         )
 
@@ -289,9 +301,10 @@ class TestFacadeCreateDeviceForTeClaw:
             await facade.create_device(
                 tenant_name="test-tenant",
                 device_template_uuid="test-teclaw-template-uuid",
-                detail_config=TeClawDeviceConfig(
-                    name="test-device",
-                ),
+detail_config=TeClawDeviceConfig(
+                name="test-device",
+                callback_context=_DEFAULT_CTX,
+            ),
             )
 
         assert exc_info.value.operation == "create_device"

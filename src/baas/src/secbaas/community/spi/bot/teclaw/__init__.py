@@ -2,6 +2,7 @@
 
 from ._protocols import TeClawBotPlugin
 from ._types import (
+    BotAsyncTaskResult,
     BotCreateResult,
     BotDestroyResult,
     BotInfo,
@@ -11,6 +12,7 @@ from ._types import (
 
 __all__ = [
     "TeClawBotPlugin",
+    "BotAsyncTaskResult",
     "BotCreateResult",
     "BotDestroyResult",
     "BotInfo",

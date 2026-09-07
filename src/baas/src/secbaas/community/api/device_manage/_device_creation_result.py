@@ -119,6 +119,14 @@ class TeClawCreationResult(DeviceCreationResult):
     """TeClaw platform-specific device creation result.
 
     Full API fidelity -- all fields from emergencyOnline API response.
+
+    Callback-driven mode:
+        When ``callback_context`` is provided, ``status`` is ``"RUNNING"`` and
+        ``teclaw_bot_config`` carries ``task_id``/``operation``/``version``
+        for callback correlation. The caller persists these in
+        ``provider_device_props`` via ``device_repo.update_device()``
+        so the inbound ``TeclawCallbackRequest`` can be matched and
+        de-duplicated.
     """
 
     teclaw_bot_id: str = Field(..., description="TeClaw bot ID (returned by API)")

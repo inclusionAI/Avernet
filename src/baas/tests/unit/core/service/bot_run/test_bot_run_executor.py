@@ -1339,7 +1339,12 @@ async def test_executor_eval_session_log_enriches_chat_metadata():
     }
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(),
+        repo,
+        plugin,
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
         eval_session_log=eval_log,
     )
     await executor.execute(
@@ -1393,7 +1398,12 @@ async def test_executor_without_eval_id_does_not_write_eval_session_log():
     }
 
     executor = BotRunRequestExecutor(
-        repo, plugin, selector, MagicMock(), MagicMock(), _api_key_repo(),
+        repo,
+        plugin,
+        selector,
+        MagicMock(),
+        MagicMock(),
+        _api_key_repo(),
         eval_session_log=eval_log,
     )
     await executor.execute(

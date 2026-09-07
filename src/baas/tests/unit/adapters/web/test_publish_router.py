@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from secbaas.community.adapters.web.routers.bot_service.publish_router import (
+    TeclawCallbackRequest,
     callback_router,
     router,
 )
@@ -20,6 +21,7 @@ from secbaas.community.api.publish_manage import (
     DeviceCallbackRequest,
     DrainResult,
     PublishConfig,
+    PublishNotFoundError,
     PublishProgressResponse,
     PublishResponse,
     PublishType,
@@ -888,6 +890,229 @@ class TestDeviceCallback:
             },
         )
         assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# POST /api/v1/publish/teclaw-callback — teclaw_callback
+# ---------------------------------------------------------------------------
+
+
+class TestTeclawCallback:
+    """POST /api/v1/publish/teclaw-callback
+
+    Tests the async-task callback endpoint added by the
+    teclaw-emergency-online-async-callback change (Section 9).
+    """
+
+    def test_teclaw_callback_success(self, client):
+        """16.1 — valid full envelope → 200, ApiResponse shape with service dict."""
+        result = {"status": "processed"}
+
+        mock_svc = AsyncMock()
+        mock_svc.handle_device_callback = AsyncMock(return_value=result)
+
+        _install_override(client, mock_svc)
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-1",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-1",
+                    "version": 1,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 0
+        assert body["data"]["status"] == "processed"
+        assert body["message"] == "success"
+
+        mock_svc.handle_device_callback.assert_awaited_once()
+        call_arg = mock_svc.handle_device_callback.await_args.args[0]
+        assert isinstance(call_arg, DeviceCallbackRequest)
+        assert call_arg.device_uuid == "DEV-1"
+        assert call_arg.publish_id == 42
+        assert call_arg.event_type == "start"
+        assert call_arg.result_status == "SUCCESS"
+        assert call_arg.tenant == "t1"
+
+    def test_teclaw_callback_not_found(self, client):
+        """16.2 — service raises PublishNotFoundError → 404 (DEVICE_NOT_FOUND envelope)."""
+        mock_svc = AsyncMock()
+        mock_svc.handle_device_callback = AsyncMock(
+            side_effect=PublishNotFoundError("DEV-999")
+        )
+
+        _install_override(client, mock_svc)
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-999",
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-2",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-2",
+                    "version": 1,
+                },
+            },
+        )
+
+        assert response.status_code == 404
+        body = response.json()
+        assert body["detail"]["error_code"] == "DEVICE_NOT_FOUND"
+
+    def test_teclaw_callback_generic_error(self, client):
+        """16.3 — generic Exception → 500, test client does NOT crash."""
+        mock_svc = AsyncMock()
+        mock_svc.handle_device_callback = AsyncMock(side_effect=Exception("boom"))
+
+        _install_override(client, mock_svc)
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-3",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-3",
+                    "version": 1,
+                },
+            },
+        )
+
+        assert response.status_code == 500
+
+    def test_teclaw_callback_validation_missing_fields(self, client):
+        """16.4 — empty body → 422 (missing required success + data)."""
+        response = client.post("/api/v1/publish/teclaw-callback", json={})
+        assert response.status_code == 422
+
+    def test_teclaw_callback_invalid_success_type(self, client):
+        """16.5 — `success` passed as a non-coercible string → 422.
+
+        Pydantic v2 coerces common truthy/falsy strings ("true"/"false"/"yes"/"no")
+        to bool in non-strict mode, so we send a string that is unambiguously NOT
+        a valid bool representation to force a validation error.
+        """
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": "not-a-bool",
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {"device_uuid": "DEV-1"},
+                    "task_id": "t-4",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-4",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 422
+
+    def test_teclaw_callback_missing_task_id_in_data(self, client):
+        """16.6 — valid outer envelope but `data` missing `task_id` → 422."""
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {"device_uuid": "DEV-1"},
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-5",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 422
+
+    def test_teclaw_callback_missing_tenant_in_context(self, client):
+        """callback_context missing 'tenant' → 400 (tenant is required,
+        not nullable — per AGENTS.md type contract rules).
+        """
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "123",
+                    },
+                    "task_id": "t-tenant-missing",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-6",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "INVALID_CALLBACK_CONTEXT"
+
+    def test_teclaw_callback_idempotent_response_shape(self, client):
+        """16.7 — service returns idempotency marker dict → 200, dict flows
+        through to ApiResponse.data unchanged.
+        """
+        result = {"status": "ignored", "reason": "no PROCESSING record found"}
+
+        mock_svc = AsyncMock()
+        mock_svc.handle_device_callback = AsyncMock(return_value=result)
+
+        _install_override(client, mock_svc)
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-6",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-6",
+                    "version": 1,
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["code"] == 0
+        assert body["data"]["status"] == "ignored"
 
 
 # ---------------------------------------------------------------------------

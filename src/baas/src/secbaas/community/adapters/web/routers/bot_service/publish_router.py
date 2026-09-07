@@ -13,6 +13,15 @@ Endpoints:
 - POST /api/v1/publishes/{publish_id}/execute - Execute current stage
 - POST /api/v1/publishes/{publish_id}/complete - Complete publish
 - POST /api/v1/publishes/{publish_id}/retry - Retry failed publish (recovery)
+
+Callback endpoints (``/api/v1/publish`` prefix, no publish_id in path):
+- POST /api/v1/publish/device-callback - Handle device start-hook callback from
+  async workers or external systems. Body: ``DeviceCallbackRequest``. Idempotent;
+  404 if device_uuid not found.
+- POST /api/v1/publish/teclaw-callback - Handle async-task callback from the
+  TeClaw platform. Body: ``TeclawCallbackRequest``. Converts to
+  ``DeviceCallbackRequest`` and delegates to ``handle_device_callback``.
+  Idempotent; 404 if device not found; 400 if callback_context missing keys.
 """
 
 from typing import Annotated, Any
@@ -29,6 +38,7 @@ from secbaas.community.api.bot_runtime import (
 from secbaas.community.api.publish_manage import (
     DeviceCallbackRequest,
     PublishConfig,
+    PublishNotFoundError,
     PublishProgressResponse,
     PublishResponse,
     PublishService,
@@ -513,6 +523,35 @@ async def retry_publish(
 callback_router = APIRouter(prefix="/api/v1/publish", tags=["发布管理"])
 
 
+class TeclawCallbackData(BaseModel):
+    schema_version: int = Field(..., description="TeClaw envelope schema version")
+    callback_context: dict[str, Any] = Field(
+        ...,
+        description="Echo of the callback_context BaaS sent at initial POST — carries device_uuid, publish_id, tenant",
+    )
+    task_id: str = Field(..., description="TeClaw-side task ID for async correlation")
+    operation: str = Field(
+        ..., description="emergencyOnline operation: CREATE / UPDATE / DELETE"
+    )
+    task_status: str = Field(
+        ..., description="Terminal status: SUCCESS / FAILED / DELETED / etc."
+    )
+    bot_id: str | None = Field(default=None)
+    version: int | None = Field(default=None)
+    logical_id: str | None = Field(default=None)
+    stage: str | None = Field(default=None)
+    tenant: str | None = Field(default=None)
+    env: str | None = Field(default=None)
+    cluster: str | None = Field(default=None)
+
+
+class TeclawCallbackRequest(BaseModel):
+    success: bool = Field(..., description="True if the async operation succeeded")
+    data: TeclawCallbackData = Field(..., description="Inner payload")
+    error: str | None = Field(default=None)
+    error_code: str | None = Field(default=None)
+
+
 @callback_router.post("/device-callback", response_model=ApiResponse[dict[str, Any]])
 @inject
 async def device_callback(
@@ -532,6 +571,97 @@ async def device_callback(
     try:
         result = await service.handle_device_callback(request)
         return ApiResponse(data=result)
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "DEVICE_NOT_FOUND",
+                    "message": str(e),
+                },
+            )
+        raise
+
+
+@callback_router.post("/teclaw-callback", response_model=ApiResponse[dict[str, Any]])
+@inject
+async def teclaw_callback(
+    request: TeclawCallbackRequest,
+    service: PublishService = Depends(
+        Provide[ApplicationContainer.services.publish_service]
+    ),
+) -> ApiResponse[dict[str, Any]]:
+    """Handle async-task callback from the TeClaw platform.
+
+    Converts the TeClaw callback envelope to a ``DeviceCallbackRequest`` and
+    delegates to ``service.handle_device_callback`` for the publish_record
+    PROCESSING→SUCCESS|FAILED transition, device status update, and
+    batch/stage cascade. Idempotency is provided by the publish_record
+    PROCESSING guard in ``handle_device_callback``.
+
+    See design.md D3 (callback envelope).
+    """
+    data = request.data
+    ctx = data.callback_context or {}
+    device_uuid = ctx.get("device_uuid")
+    publish_id_raw = ctx.get("publish_id")
+    tenant = ctx.get("tenant")
+
+    if not device_uuid:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CALLBACK_CONTEXT",
+                "message": "callback.data.callback_context must contain 'device_uuid'",
+            },
+        )
+    if not publish_id_raw:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CALLBACK_CONTEXT",
+                "message": "callback.data.callback_context must contain 'publish_id'",
+            },
+        )
+    if not tenant:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CALLBACK_CONTEXT",
+                "message": "callback.data.callback_context must contain 'tenant'",
+            },
+        )
+    try:
+        publish_id = int(publish_id_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_CALLBACK_CONTEXT",
+                "message": f"callback.data.callback_context.publish_id is not an integer: {publish_id_raw!r}",
+            },
+        )
+
+    arca_request = DeviceCallbackRequest(
+        device_uuid=device_uuid,
+        publish_id=publish_id,
+        event_type="start",
+        result_status="SUCCESS" if request.success else "FAILED",
+        stderr=request.error if not request.success else None,
+        tenant=tenant,
+    )
+
+    try:
+        result = await service.handle_device_callback(arca_request)
+        return ApiResponse(data=result)
+    except PublishNotFoundError as e:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "DEVICE_NOT_FOUND",
+                "message": str(e),
+            },
+        )
     except Exception as e:
         if "not found" in str(e).lower():
             raise HTTPException(

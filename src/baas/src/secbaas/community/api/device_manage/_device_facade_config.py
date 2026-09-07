@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ._callback import DeviceCallbackContext
 from ._deploy_config import DeviceCredentials
 from ._device_config import (
     ArcaCreateConfig,
@@ -352,6 +353,13 @@ class TeClawDeviceConfig(BaseDeviceConfig):
         default=None,
         description="TeClaw bot 透传配置",
     )
+    # Optional callback context for async-mode delegation (Section 10 of
+    # teclaw-emergency-online-async-callback). When present, the PaaS service
+    # delegates to the plugin's async path and TeClaw will POST the result back to
+    # /api/v1/publish/teclaw-callback.
+    callback_context: DeviceCallbackContext = Field(
+        description="TeClaw async callback context (callback_url, publish_id, device_uuid, tenant)",
+    )
 
     def to_create_config(self) -> TeClawCreateConfig:  # noqa: F821
         """Extract create config fields into TeClawCreateConfig."""
@@ -361,6 +369,7 @@ class TeClawDeviceConfig(BaseDeviceConfig):
             name=self.name,
             description=self.description,
             teclaw_bot_config=self.teclaw_bot_config,
+            callback_context=self.callback_context,
         )
 
 

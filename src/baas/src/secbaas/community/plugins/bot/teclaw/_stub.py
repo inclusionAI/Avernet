@@ -11,8 +11,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
+from secbaas.community.api.device_manage import DeviceCallbackContext
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.bot.teclaw import (
+    BotAsyncTaskResult,
     BotCreateResult,
     BotDestroyResult,
     BotInfo,
@@ -38,20 +40,58 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         self._bots: dict[str, dict[str, Any]] = {}
         # Storage keys ("bot_config", "status", "outbound_rule") align with TeClaw API v2 response field names
 
-    async def create_bot(self, bot_config: dict[str, Any]) -> BotCreateResult:
+    async def create_bot(
+        self,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotCreateResult | BotAsyncTaskResult:
         """Create a new bot in the in-memory store.
+
+        When ``callback_context`` is provided, returns ``BotAsyncTaskResult``
+        with ``task_id='stub-task-*'`` and ``status='RUNNING'``; otherwise
+        returns ``BotCreateResult`` (sync) with ``ONLINE`` status.
 
         Args:
             bot_config: Bot configuration dict (opaque passthrough).
+            callback_context: Optional callback context stored on the
+                internal bot record under ``last_callback_context`` for
+                later assertion by callers/callback receivers. When
+                provided, the async path is used.
 
         Returns:
-            BotCreateResult with generated stubbed bot_id and ONLINE status.
+            ``BotAsyncTaskResult`` when ``callback_context`` is provided
+            (with ``operation="CREATE"``, ``status="RUNNING"``,
+            ``version=1``), otherwise ``BotCreateResult`` with generated
+            stubbed bot_id and ``ONLINE`` status (sync).
         """
+        if callback_context is not None:
+            bot_id = f"stub-teclaw-{uuid.uuid4().hex[:12]}"
+            self._bots[bot_id] = {
+                "bot_config": bot_config,
+                "status": "RUNNING",
+                "outbound_rule": None,
+                "last_callback_context": callback_context,
+            }
+            task_id = f"stub-task-{uuid.uuid4().hex[:12]}"
+            logger.info(
+                "[stub-teclaw] bot created (async) bot_id=%s task_id=%s",
+                bot_id,
+                task_id,
+            )
+            return BotAsyncTaskResult(
+                task_id=task_id,
+                bot_id=bot_id,
+                operation="CREATE",
+                status="RUNNING",
+                version=1,
+            )
         bot_id = f"stub-teclaw-{uuid.uuid4().hex[:12]}"
         self._bots[bot_id] = {
             "bot_config": bot_config,
             "status": "ONLINE",
             "outbound_rule": None,
+            "last_callback_context": callback_context,
         }
         logger.info("[stub-teclaw] bot created bot_id=%s", bot_id)
         return BotCreateResult(
@@ -69,15 +109,19 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
             bot_id: The teclaw_bot_id to destroy.
 
         Returns:
-            BotDestroyResult with DELETED status.
+            ``BotDestroyResult`` with ``DELETED`` status.
         """
         self._bots.pop(bot_id, None)
         logger.info("[stub-teclaw] bot destroyed bot_id=%s", bot_id)
         return BotDestroyResult(teclaw_bot_id=bot_id, status="DELETED")
 
     async def update_bot(
-        self, bot_id: str, bot_config: dict[str, Any]
-    ) -> BotUpdateResult:
+        self,
+        bot_id: str,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotUpdateResult | BotAsyncTaskResult:
         """Update a bot's config in the in-memory store.
 
         Uses ``setdefault`` to create the entry with all known keys when
@@ -87,13 +131,51 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         Args:
             bot_id: The teclaw_bot_id to update.
             bot_config: New bot configuration dict.
+            callback_context: Optional callback context stored on the
+                internal bot record under ``last_callback_context`` for
+                later assertion by callers/callback receivers. When
+                provided, the async path is used.
 
         Returns:
-            BotUpdateResult with ONLINE status.
+            ``BotAsyncTaskResult`` when ``callback_context`` is provided
+            (with ``operation="UPDATE"``, ``status="RUNNING"``,
+            ``version=1``), otherwise ``BotUpdateResult`` with ``ONLINE``
+            status (sync).
         """
+        if callback_context is not None:
+            entry = self._bots.setdefault(
+                bot_id,
+                {
+                    "bot_config": {},
+                    "status": "UNKNOWN",
+                    "outbound_rule": None,
+                    "last_callback_context": callback_context,
+                },
+            )
+            entry["bot_config"] = bot_config
+            entry["status"] = "RUNNING"
+            entry["last_callback_context"] = callback_context
+            task_id = f"stub-task-{uuid.uuid4().hex[:12]}"
+            logger.info(
+                "[stub-teclaw] bot updated (async) bot_id=%s task_id=%s",
+                bot_id,
+                task_id,
+            )
+            return BotAsyncTaskResult(
+                task_id=task_id,
+                bot_id=bot_id,
+                operation="UPDATE",
+                status="RUNNING",
+                version=1,
+            )
         entry = self._bots.setdefault(
             bot_id,
-            {"bot_config": {}, "status": "UNKNOWN", "outbound_rule": None},
+            {
+                "bot_config": {},
+                "status": "UNKNOWN",
+                "outbound_rule": None,
+                "last_callback_context": None,
+            },
         )
         entry["bot_config"] = bot_config
         entry["status"] = "ONLINE"
@@ -127,18 +209,56 @@ class StubTeClawBotPlugin(TeClawBotPlugin):
         logger.info("[stub-teclaw] outbound rule updated bot_id=%s", bot_id)
         return True
 
-    async def restart_bot(self, bot_id: str) -> BotRestartResult:
+    async def restart_bot(
+        self,
+        bot_id: str,
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotRestartResult | BotAsyncTaskResult:
         """Restart a bot by re-applying its stored config.
 
-        Delegates to update_bot internally with the stored bot_config.
+        Delegates to ``update_bot`` internally with the stored bot_config.
 
         Args:
             bot_id: The teclaw_bot_id to restart.
+            callback_context: Optional callback context stored on the
+                internal bot record under ``last_callback_context`` for
+                later assertion by callers/callback receivers. When
+                provided, the async path is used.
 
         Returns:
-            BotRestartResult with ONLINE status.
+            ``BotAsyncTaskResult`` when ``callback_context`` is provided
+            (with ``operation="UPDATE"``, ``status="RUNNING"``,
+            ``version=1``) — restart proxies to UPDATE so the operation
+            string is ``UPDATE``. Otherwise ``BotRestartResult`` with
+            ``ONLINE`` status (sync).
         """
         stored = self._bots.get(bot_id, {})
+        if callback_context is not None:
+            entry = self._bots.setdefault(
+                bot_id,
+                {
+                    "bot_config": stored.get("bot_config", {}),
+                    "status": "UNKNOWN",
+                    "outbound_rule": stored.get("outbound_rule"),
+                    "last_callback_context": callback_context,
+                },
+            )
+            entry["status"] = "RUNNING"
+            entry["last_callback_context"] = callback_context
+            task_id = f"stub-task-{uuid.uuid4().hex[:12]}"
+            logger.info(
+                "[stub-teclaw] bot restarted (async) bot_id=%s task_id=%s",
+                bot_id,
+                task_id,
+            )
+            return BotAsyncTaskResult(
+                task_id=task_id,
+                bot_id=bot_id,
+                operation="UPDATE",
+                status="RUNNING",
+                version=1,
+            )
         await self.update_bot(bot_id, stored.get("bot_config", {}))
         logger.info("[stub-teclaw] bot restarted bot_id=%s", bot_id)
         return BotRestartResult(teclaw_bot_id=bot_id, status="ONLINE")

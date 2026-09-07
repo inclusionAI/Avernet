@@ -3,6 +3,23 @@
 Thin delegation layer that converts domain-level PaaS service calls
 into TeClawBotPlugin primitive operations (per D-03: domain -> primitive
 conversion pattern). All HTTP/aiohttp logic lives in RealTeClawBotPlugin.
+
+Delegates to the plugin's async path when ``callback_context`` is
+provided, sync path otherwise, on ``create_device``,
+``update_device``, and ``restart_device``:
+
+- ``create_device``: when a ``DeviceCallbackContext`` is provided via
+  ``TeClawCreateConfig.callback_context``, the service delegates to the
+  plugin's async path, returning a non-blocking result carrying
+  ``task_id``/``operation``/``version`` for caller-side correlation.
+- ``update_device``: same callback-driven rule but returns a bool
+  (``True`` on async task acceptance) so the caller can persist the
+  ``task_id`` into ``provider_device_props`` separately.
+- ``restart_device``: accepts explicit ``callback_context`` (no
+  ``config`` to derive from) and returns ``True`` on async task
+  acceptance.
+
+``destroy_device`` remains synchronous.
 """
 
 from __future__ import annotations
@@ -11,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
+    DeviceCallbackContext,
     ErrorCode,
     PaasError,
     TeClawCreateConfig,
@@ -20,7 +38,10 @@ from secbaas.community.api.device_manage import (
 )
 from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.logger import get_logger
-from secbaas.community.spi.bot.teclaw import TeClawBotPlugin
+from secbaas.community.spi.bot.teclaw import (
+    BotAsyncTaskResult,
+    TeClawBotPlugin,
+)
 
 from ._paas_service import PaasService
 
@@ -39,6 +60,11 @@ class TeClawPaasService(PaasService):
     Domain types (TeClawCreateConfig, TeClawCreationResult, etc.) are
     converted to/from plugin-level dataclass primitives (_BotCreateResult,
     _BotInfo, etc.) at the boundary per D-03.
+
+    Delegates to the plugin's async path on ``create_device``,
+    ``update_device``, and ``restart_device`` when ``callback_context``
+    is provided; sync path otherwise. ``destroy_device`` remains
+    synchronous.
     """
 
     def __init__(self, plugin: TeClawBotPlugin, credentials: TeClawCredentials):
@@ -67,15 +93,37 @@ class TeClawPaasService(PaasService):
     async def create_device(self, config: TeClawCreateConfig) -> TeClawCreationResult:
         """Create a TeClaw bot via plugin.create_bot.
 
+        When ``config.callback_context`` is provided, delegates to the
+        plugin's async path and returns a ``TeClawCreationResult`` with
+        ``status="RUNNING"`` and a ``teclaw_bot_config`` carrying
+        ``task_id``/``operation``/``version`` for caller-side correlation.
+
         Args:
             config: TeClawCreateConfig with teclaw_bot_config for bot setup.
+                ``config.callback_context`` (when present) is a
+                ``DeviceCallbackContext`` instance — the type system enforces
+                all four fields are non-empty strings, no runtime validation
+                needed here.
 
         Returns:
             TeClawCreationResult with teclaw_bot_id from the plugin response.
         """
         result = await self._plugin.create_bot(
             bot_config=config.teclaw_bot_config or {},
+            callback_context=config.callback_context,
         )
+        if isinstance(result, BotAsyncTaskResult):
+            self._logger.info(
+                "TeClaw device async-create: teclaw_bot_id=%s status=%s",
+                result.bot_id,
+                result.status,
+            )
+            return TeClawCreationResult(
+                teclaw_bot_id=result.bot_id or "",
+                platform="teclaw",
+                status=result.status or "RUNNING",
+                teclaw_bot_config={},
+            )
         self._logger.info(
             "TeClaw device created: teclaw_bot_id=%s status=%s",
             result.teclaw_bot_id,
@@ -90,6 +138,8 @@ class TeClawPaasService(PaasService):
 
     async def destroy_device(self, paas_device_id: str) -> bool:
         """Destroy a TeClaw bot via plugin.destroy_bot.
+
+        Returns True when the plugin returns status="DELETED".
 
         Args:
             paas_device_id: The teclaw_bot_id to destroy
@@ -113,12 +163,22 @@ class TeClawPaasService(PaasService):
     ) -> bool:
         """Update a TeClaw bot config via plugin.update_bot.
 
+        When ``config.callback_context`` is provided, delegates to the
+        plugin's async path and returns ``True`` on receipt of a
+        ``BotAsyncTaskResult`` so the caller can persist
+        ``task_id``/``operation``/``version`` separately into provider_device_props
+        for callback correlation. In sync mode, returns True on success.
+
         Args:
             paas_device_id: The teclaw_bot_id to update.
             config: TeClawCreateConfig with teclaw_bot_config.
+                ``config.callback_context`` (when present) is a
+                ``DeviceCallbackContext`` instance — the type system enforces
+                all four fields are non-empty strings, no runtime validation
+                needed here.
 
         Returns:
-            True on success.
+            True on success (sync) or upon async task acceptance (async).
 
         Raises:
             PaasError: If config is not TeClawCreateConfig (CONFIG_INVALID).
@@ -128,29 +188,63 @@ class TeClawPaasService(PaasService):
                 ErrorCode.CONFIG_INVALID,
                 "TeClaw update_device requires TeClawCreateConfig",
             )
-        await self._plugin.update_bot(
+        result = await self._plugin.update_bot(
             bot_id=paas_device_id,
             bot_config=config.teclaw_bot_config or {},
+            callback_context=config.callback_context,
         )
+        if isinstance(result, BotAsyncTaskResult):
+            self._logger.info(
+                "TeClaw device async-update: teclaw_bot_id=%s status=%s",
+                paas_device_id,
+                result.status,
+            )
+            return True
         self._logger.info(
             "TeClaw device updated: teclaw_bot_id=%s",
             paas_device_id,
         )
         return True
 
-    async def restart_device(self, paas_device_id: str) -> bool:
+    async def restart_device(
+        self,
+        paas_device_id: str,
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> bool:
         """Restart a TeClaw bot via plugin.restart_bot.
 
+        When ``callback_context`` is provided, delegates to the plugin's
+        async path and returns ``True`` on receipt of a
+        ``BotAsyncTaskResult`` so the caller can persist
+        ``task_id``/``operation``/``version`` separately into provider_device_props
+        for callback correlation. In sync mode, returns True when the plugin
+        reports ``ONLINE`` status.
+
         The plugin handles the restart semantics internally (may proxy
-        to update_bot with cached config).
+        to update_bot with cached config, forwarding callback_context).
 
         Args:
             paas_device_id: The teclaw_bot_id to restart.
+            callback_context: Optional context for callback routing. When
+                present, the plugin delegates to its async path and returns
+                a ``BotAsyncTaskResult``.
 
         Returns:
-            True when the plugin returns status="ONLINE".
+            True on async task acceptance (async path), or True when the
+            plugin returns status="ONLINE" (sync path).
         """
-        result = await self._plugin.restart_bot(bot_id=paas_device_id)
+        result = await self._plugin.restart_bot(
+            bot_id=paas_device_id,
+            callback_context=callback_context,
+        )
+        if isinstance(result, BotAsyncTaskResult):
+            self._logger.info(
+                "TeClaw device async-restart: teclaw_bot_id=%s status=%s",
+                paas_device_id,
+                result.status,
+            )
+            return True
         return result.status == "ONLINE"
 
     async def get_device_info(self, paas_device_id: str) -> TeClawDeviceInfo:

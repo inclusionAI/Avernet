@@ -13,6 +13,7 @@ from secbaas.community.api.device_manage import (
     ArcaCreationResult,
     ArcaDeviceConfig,
     CommandResult,
+    DeviceCallbackContext,
     DeviceCreationError,
     DeviceFacadeException,
     DeviceInfo,
@@ -30,6 +31,14 @@ from secbaas.community.api.device_manage import (
     SigmaDeviceConfig,
     TeClawCreationResult,
     TeClawDeviceConfig,
+)
+
+_DEFAULT_CTX = DeviceCallbackContext(
+    callback_url="http://cb",
+    publish_id="p1",
+    device_uuid="d1",
+    tenant="t1",
+    operator="op1",
 )
 from secbaas.community.api.health_check.bot import TTLInfo
 from secbaas.community.api.template_manage import (
@@ -527,6 +536,7 @@ class TestMergeConfig:
         )
         detail = TeClawDeviceConfig(
             name="my-teclaw",
+            callback_context=_DEFAULT_CTX,
         )
         result = f._merge_config(tpl_config, detail, "TECLAW")
         assert result["name"] == "my-teclaw"
@@ -689,7 +699,7 @@ class TestCreateDevice:
         )
         factory.create.return_value = mock_svc
 
-        detail = TeClawDeviceConfig(name="my-teclaw")
+        detail = TeClawDeviceConfig(name="my-teclaw", callback_context=_DEFAULT_CTX)
         result = await f.create_device("test-tenant", detail_config=detail)
         assert isinstance(result, TeClawCreationResult)
         assert result.teclaw_bot_id == "bot-1@9"

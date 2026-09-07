@@ -259,6 +259,7 @@ class PaasServiceFacade(PaasServiceFacadeProtocol):
         "description",
         "name",
         "teclaw_bot_config",
+        "callback_context",
     }
 
     # K8s credentials (kubeconfig, namespace, image, resources) come from

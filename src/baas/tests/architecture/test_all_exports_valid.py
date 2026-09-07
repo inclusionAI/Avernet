@@ -145,3 +145,41 @@ def test_all_names_in_all_are_resolvable():
             + "\n".join(violations)
             + "\n\nRemove or fix these stale exports."
         )
+
+
+def test_community_does_not_import_enterprise():
+    """Architecture rule: community code must NOT import from secbaas.enterprise."""
+    violations: list[str] = []
+    for py_file in sorted(SECBAAS.rglob("*.py")):
+        if "__pycache__" in str(py_file):
+            continue
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("secbaas.enterprise")
+            ):
+                violations.append(f"{py_file}: from {node.module} import ...")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("secbaas.enterprise"):
+                        violations.append(f"{py_file}: import {alias.name}")
+    assert not violations, "community imports from enterprise:\n" + "\n".join(
+        violations
+    )
+
+
+def test_spi_protocols_and_stub_no_http_concerns():
+    """Architecture rule: SPI protocols and stub must NOT embed HTTP-body concerns."""
+    banned_files = [
+        SECBAAS / "spi" / "bot" / "teclaw" / "_protocols.py",
+        SECBAAS / "plugins" / "bot" / "teclaw" / "_stub.py",
+    ]
+    for path in banned_files:
+        assert path.exists(), f"file not found: {path}"
+        content = path.read_text()
+        assert "'async': True" not in content or "body['async']" in content, (
+            f"{path} contains raw 'async: True' dict literal — HTTP-body "
+            f"concerns must stay in enterprise _real.py, not in stub/Protocol"
+        )

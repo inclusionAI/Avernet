@@ -13,6 +13,7 @@ import pytest
 
 from secbaas.community.api.bot_runtime import HttpConnectionInfo, WsConnectionInfo
 from secbaas.community.api.device_manage import (
+    DeviceCallbackContext,
     ErrorCode,
     PaasError,
     TeClawCreateConfig,
@@ -24,6 +25,7 @@ from secbaas.community.api.tenant_manage import TenantType
 from secbaas.community.core.service.paas._teclaw_paas_service import TeClawPaasService
 from secbaas.community.spi.bot.teclaw._protocols import TeClawBotPlugin
 from secbaas.community.spi.bot.teclaw._types import (
+    BotAsyncTaskResult,
     BotCreateResult,
     BotDestroyResult,
     BotInfo,
@@ -42,6 +44,17 @@ def teclaw_credentials():
         teclaw_endpoint="http://teclaw.test:8080",
         template_id=1,
         template_uuid="tpl-test-001",
+    )
+
+
+@pytest.fixture
+def callback_context():
+    return DeviceCallbackContext(
+        callback_url="http://cb",
+        publish_id="p1",
+        device_uuid="d1",
+        tenant="t1",
+        operator="op1",
     )
 
 
@@ -91,26 +104,37 @@ class TestGetCredentialsAndPlatform:
 
 class TestCreateDevice:
     @pytest.mark.asyncio
-    async def test_delegates_to_plugin(self, service, mock_plugin):
+    async def test_delegates_to_plugin(self, service, mock_plugin, callback_context):
         """Verify plugin.create_bot called with config.teclaw_bot_config."""
         mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"key": "value"},
         )
-        config = TeClawCreateConfig(teclaw_bot_config={"key": "value"})
+        config = TeClawCreateConfig(
+            teclaw_bot_config={"key": "value"},
+            callback_context=callback_context,
+        )
         result = await service.create_device(config)
-        mock_plugin.create_bot.assert_awaited_once_with(bot_config={"key": "value"})
+        mock_plugin.create_bot.assert_awaited_once_with(
+            bot_config={"key": "value"},
+            callback_context=callback_context,
+        )
 
     @pytest.mark.asyncio
-    async def test_converts_result_to_creation_result(self, service, mock_plugin):
+    async def test_converts_result_to_creation_result(
+        self, service, mock_plugin, callback_context
+    ):
         """Mock BotCreateResult, verify TeClawCreationResult field mapping."""
         mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"model": "gpt-4"},
         )
-        config = TeClawCreateConfig(teclaw_bot_config={"model": "gpt-4"})
+        config = TeClawCreateConfig(
+            teclaw_bot_config={"model": "gpt-4"},
+            callback_context=callback_context,
+        )
         result = await service.create_device(config)
         assert isinstance(result, TeClawCreationResult)
         assert result.teclaw_bot_id == "bot-abc123"
@@ -119,16 +143,95 @@ class TestCreateDevice:
         assert result.teclaw_bot_config == {"model": "gpt-4"}
 
     @pytest.mark.asyncio
-    async def test_handles_empty_config(self, service, mock_plugin):
+    async def test_handles_empty_config(self, service, mock_plugin, callback_context):
         """config.teclaw_bot_config is None -> bot_config={}."""
         mock_plugin.create_bot.return_value = BotCreateResult(
             teclaw_bot_id="bot-xyz",
             status="ONLINE",
         )
-        config = TeClawCreateConfig(teclaw_bot_config=None)
+        config = TeClawCreateConfig(
+            teclaw_bot_config=None,
+            callback_context=callback_context,
+        )
         result = await service.create_device(config)
-        mock_plugin.create_bot.assert_awaited_once_with(bot_config={})
+        mock_plugin.create_bot.assert_awaited_once_with(
+            bot_config={},
+            callback_context=callback_context,
+        )
         assert result.teclaw_bot_id == "bot-xyz"
+
+
+# ---------------------------------------------------------------------------
+# Test create_device async-mode (callback_context present)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateDeviceAsync:
+    """Tests for async-path create_device (OpenSpec Section 12.1 / 12.2).
+
+    When ``config.callback_context`` is provided (non-None) the service
+    delegates to the plugin's async path; the plugin returns
+    ``BotAsyncTaskResult`` and the service wraps it into a
+    ``TeClawCreationResult`` with ``status="RUNNING"`` and an empty
+    ``teclaw_bot_config`` (carrying ``task_id``/``operation``/``version``
+    via the plugin's result, not the config dict). When the plugin returns
+    a sync ``BotCreateResult`` (regardless of callback_context presence)
+    the service preserves that reply unchanged.
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_device_async_with_callback_context(
+        self, service, mock_plugin, callback_context
+    ):
+        """callback_context present -> async delegation."""
+        mock_plugin.create_bot.return_value = BotAsyncTaskResult(
+            task_id="t-1",
+            bot_id="b-1",
+            operation="CREATE",
+            status="RUNNING",
+            version=1,
+        )
+        config = TeClawCreateConfig(
+            callback_context=callback_context,
+            teclaw_bot_config={"model": "gpt-4"},
+        )
+        result = await service.create_device(config)
+
+        assert isinstance(result, TeClawCreationResult)
+        assert result.status == "RUNNING"
+        assert result.teclaw_bot_config == {}
+        assert result.teclaw_bot_id == "b-1"
+
+        mock_plugin.create_bot.assert_awaited_once()
+        call_kwargs = mock_plugin.create_bot.await_args.kwargs
+        assert call_kwargs["bot_config"] == {"model": "gpt-4"}
+        assert call_kwargs["callback_context"] is callback_context
+
+    @pytest.mark.asyncio
+    async def test_create_device_forwards_callback_context_with_sync_result(
+        self, service, mock_plugin, callback_context
+    ):
+        """callback_context present with sync BotCreateResult -> service forwards ctx, sync result preserved."""
+        mock_plugin.create_bot.return_value = BotCreateResult(
+            teclaw_bot_id="bot-abc123",
+            status="ONLINE",
+            teclaw_bot_config={"model": "gpt-4"},
+        )
+        config = TeClawCreateConfig(
+            callback_context=callback_context,
+            teclaw_bot_config={"model": "gpt-4"},
+        )
+        result = await service.create_device(config)
+
+        assert isinstance(result, TeClawCreationResult)
+        assert result.status == "ONLINE"
+        assert result.teclaw_bot_config == {"model": "gpt-4"}
+        assert "task_id" not in (result.teclaw_bot_config or {})
+
+        mock_plugin.create_bot.assert_awaited_once_with(
+            bot_config={"model": "gpt-4"},
+            callback_context=callback_context,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -175,18 +278,22 @@ class TestDestroyDevice:
 
 class TestUpdateDevice:
     @pytest.mark.asyncio
-    async def test_delegates_to_plugin(self, service, mock_plugin):
+    async def test_delegates_to_plugin(self, service, mock_plugin, callback_context):
         """Verify plugin.update_bot called with correct args."""
         mock_plugin.update_bot.return_value = BotUpdateResult(
             teclaw_bot_id="bot-abc123",
             status="ONLINE",
             teclaw_bot_config={"updated": True},
         )
-        config = TeClawCreateConfig(teclaw_bot_config={"updated": True})
+        config = TeClawCreateConfig(
+            teclaw_bot_config={"updated": True},
+            callback_context=callback_context,
+        )
         result = await service.update_device("bot-abc123", config)
         mock_plugin.update_bot.assert_awaited_once_with(
             bot_id="bot-abc123",
             bot_config={"updated": True},
+            callback_context=callback_context,
         )
         assert result is True
 
@@ -207,6 +314,66 @@ class TestUpdateDevice:
 
 
 # ---------------------------------------------------------------------------
+# Test update_device async-mode (callback_context present)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateDeviceAsync:
+    """Async-path for ``update_device`` — evaluates ``config.callback_context``
+    presence and returns ``True`` on receipt of a ``BotAsyncTaskResult`` so
+    the caller can persist ``task_id`` separately.
+    """
+
+    @pytest.mark.asyncio
+    async def test_update_device_async_with_callback_context(
+        self, service, mock_plugin, callback_context
+    ):
+        """callback_context present -> async delegation; BotAsyncTaskResult -> True."""
+        mock_plugin.update_bot.return_value = BotAsyncTaskResult(
+            task_id="t-update-1",
+            bot_id="bot-abc123",
+            operation="UPDATE",
+            status="RUNNING",
+            version=1,
+        )
+        config = TeClawCreateConfig(
+            callback_context=callback_context,
+            teclaw_bot_config={"updated": True},
+        )
+        result = await service.update_device("bot-abc123", config)
+
+        assert result is True
+        mock_plugin.update_bot.assert_awaited_once()
+        call_kwargs = mock_plugin.update_bot.await_args.kwargs
+        assert call_kwargs["bot_id"] == "bot-abc123"
+        assert call_kwargs["bot_config"] == {"updated": True}
+        assert call_kwargs["callback_context"] is callback_context
+
+    @pytest.mark.asyncio
+    async def test_update_device_forwards_callback_context_with_sync_result(
+        self, service, mock_plugin, callback_context
+    ):
+        """callback_context with sync BotUpdateResult -> service forwards ctx, returns True."""
+        mock_plugin.update_bot.return_value = BotUpdateResult(
+            teclaw_bot_id="bot-abc123",
+            status="ONLINE",
+            teclaw_bot_config={"updated": True},
+        )
+        config = TeClawCreateConfig(
+            callback_context=callback_context,
+            teclaw_bot_config={"updated": True},
+        )
+        result = await service.update_device("bot-abc123", config)
+
+        assert result is True
+        mock_plugin.update_bot.assert_awaited_once_with(
+            bot_id="bot-abc123",
+            bot_config={"updated": True},
+            callback_context=callback_context,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Test restart_device (delegation)
 # ---------------------------------------------------------------------------
 
@@ -220,7 +387,10 @@ class TestRestartDevice:
             status="ONLINE",
         )
         result = await service.restart_device("bot-abc123")
-        mock_plugin.restart_bot.assert_awaited_once_with(bot_id="bot-abc123")
+        mock_plugin.restart_bot.assert_awaited_once_with(
+            bot_id="bot-abc123",
+            callback_context=None,
+        )
 
     @pytest.mark.asyncio
     async def test_returns_true_when_online(self, service, mock_plugin):
@@ -241,6 +411,84 @@ class TestRestartDevice:
         )
         result = await service.restart_device("bot-abc123")
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Test restart_device async path (explicit callback_context)
+# ---------------------------------------------------------------------------
+
+
+class TestRestartDeviceAsync:
+    """Async-path for ``restart_device`` — accepts explicit ``callback_context``
+    (no config object to derive from) and returns ``True`` on receipt of a
+    ``BotAsyncTaskResult``.
+    """
+
+    @pytest.mark.asyncio
+    async def test_restart_device_async_returns_true_on_async_task_result(
+        self, service, mock_plugin
+    ):
+        """callback_context present -> BotAsyncTaskResult returns True."""
+        mock_plugin.restart_bot.return_value = BotAsyncTaskResult(
+            task_id="t-restart-1",
+            bot_id="bot-abc123",
+            operation="UPDATE",
+            status="RUNNING",
+            version=1,
+        )
+        ctx = DeviceCallbackContext(
+            callback_url="http://cb",
+            publish_id="p1",
+            device_uuid="d1",
+            tenant="t1",
+            operator="op1",
+        )
+        result = await service.restart_device(
+            "bot-abc123", callback_context=ctx
+        )
+
+        assert result is True
+        mock_plugin.restart_bot.assert_awaited_once_with(
+            bot_id="bot-abc123",
+            callback_context=ctx,
+        )
+
+    @pytest.mark.asyncio
+    async def test_restart_device_sync_passes_callback_context_none(
+        self, service, mock_plugin
+    ):
+        """No callback_context kwarg -> defaults to None (sync path)."""
+        mock_plugin.restart_bot.return_value = BotRestartResult(
+            teclaw_bot_id="bot-abc123",
+            status="ONLINE",
+        )
+        result = await service.restart_device("bot-abc123")
+
+        assert result is True
+        mock_plugin.restart_bot.assert_awaited_once_with(
+            bot_id="bot-abc123",
+            callback_context=None,
+        )
+
+    @pytest.mark.asyncio
+    async def test_restart_device_returns_true_on_async_result_with_callback_context_none(
+        self, service, mock_plugin
+    ):
+        """Service returns True whenever plugin returns BotAsyncTaskResult, even with callback_context=None."""
+        mock_plugin.restart_bot.return_value = BotAsyncTaskResult(
+            task_id="t-restart-2",
+            bot_id="bot-abc123",
+            operation="UPDATE",
+            status="RUNNING",
+            version=1,
+        )
+        result = await service.restart_device("bot-abc123", callback_context=None)
+
+        assert result is True
+        mock_plugin.restart_bot.assert_awaited_once_with(
+            bot_id="bot-abc123",
+            callback_context=None,
+        )
 
 
 # ---------------------------------------------------------------------------

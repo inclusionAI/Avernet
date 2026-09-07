@@ -9,7 +9,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from secbaas.community.api.device_manage import DeviceCallbackContext
 from ._types import (
+    BotAsyncTaskResult,
     BotCreateResult,
     BotDestroyResult,
     BotInfo,
@@ -31,14 +33,26 @@ class TeClawBotPlugin(Protocol):
     All methods are async — TeClaw operations involve I/O over HTTP.
     """
 
-    async def create_bot(self, bot_config: dict[str, Any]) -> BotCreateResult:
+    async def create_bot(
+        self,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotCreateResult | BotAsyncTaskResult:
         """Create a new bot on the TeClaw platform.
+
+        When ``callback_context`` is provided, the TeClaw platform POSTs a
+        ``TeclawCallbackRequest`` to ``callback_context.callback_url`` on
+        operation completion and the plugin returns ``BotAsyncTaskResult``
+        carrying ``task_id`` for correlation.
 
         Args:
             bot_config: Bot configuration dict (opaque passthrough from caller).
+            callback_context: BaaS-side identifiers for callback routing.
 
         Returns:
-            BotCreateResult with teclaw_bot_id, status, and optional config.
+            ``BotAsyncTaskResult`` with ``task_id`` when ``callback_context``
+            is provided, otherwise ``BotCreateResult`` with teclaw_bot_id.
         """
         ...
 
@@ -54,29 +68,52 @@ class TeClawBotPlugin(Protocol):
         ...
 
     async def update_bot(
-        self, bot_id: str, bot_config: dict[str, Any]
-    ) -> BotUpdateResult:
+        self,
+        bot_id: str,
+        bot_config: dict[str, Any],
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotUpdateResult | BotAsyncTaskResult:
         """Update a bot's configuration on the TeClaw platform.
+
+        When ``callback_context`` is provided, the TeClaw platform POSTs a
+        ``TeclawCallbackRequest`` to ``callback_context.callback_url`` on
+        operation completion and the plugin returns ``BotAsyncTaskResult``
+        carrying ``task_id`` for correlation.
 
         Args:
             bot_id: The teclaw_bot_id to update.
             bot_config: New bot configuration dict (opaque passthrough).
+            callback_context: BaaS-side identifiers for callback routing.
 
         Returns:
-            BotUpdateResult with teclaw_bot_id, status, and optional config.
+            ``BotAsyncTaskResult`` with ``task_id`` when ``callback_context``
+            is provided, otherwise ``BotUpdateResult`` with teclaw_bot_id.
         """
         ...
 
-    async def restart_bot(self, bot_id: str) -> BotRestartResult:
+    async def restart_bot(
+        self,
+        bot_id: str,
+        *,
+        callback_context: DeviceCallbackContext | None = None,
+    ) -> BotRestartResult | BotAsyncTaskResult:
         """Restart a bot by re-applying its last-known configuration.
 
         Internally proxies to the UPDATE operation with the cached config.
 
+        When ``callback_context`` is provided, the TeClaw platform POSTs a
+        ``TeclawCallbackRequest`` to ``callback_context.callback_url`` on
+        operation completion and the plugin returns ``BotAsyncTaskResult``
+        carrying ``task_id`` for correlation.
+
         Args:
             bot_id: The teclaw_bot_id to restart.
+            callback_context: BaaS-side identifiers for callback routing.
 
         Returns:
-            BotRestartResult with teclaw_bot_id and status.
+            ``BotAsyncTaskResult`` with ``task_id`` when ``callback_context``
+            is provided, otherwise ``BotRestartResult`` with teclaw_bot_id.
         """
         ...
 
