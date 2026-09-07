@@ -1,4 +1,5 @@
 """Local filesystem implementation of the existing bulk Skill symlink contract."""
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -99,8 +100,18 @@ class LocalSkillSymlinks:
             for item in params.get("symlinks", [])
         ]
         desired = {self._path(item["target"], link=True) for item in mappings}
-        stale = [entry for entry in sorted(base.rglob("*"))
-                 if entry.is_symlink() and entry not in desired]
+        def active_links(directory: Path) -> Iterator[Path]:
+            # A real Skill directory owns its contents, including symlinks.
+            # Never traverse packages, even when absent from this request.
+            if (directory / "SKILL.md").is_file():
+                return
+            for entry in sorted(directory.iterdir()):
+                if entry.is_symlink():
+                    yield entry
+                elif entry.is_dir():
+                    yield from active_links(entry)
+
+        stale = [entry for entry in active_links(base) if entry not in desired] if base.exists() else []
         result = self.sync({"symlinks": mappings, "clean_target_dir": False})
         for entry in stale:
             entry.unlink()

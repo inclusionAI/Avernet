@@ -19,7 +19,10 @@ Docker startup, GitHub workflows and Corp-specific path conversion unchanged.
 - Validate paths, source availability and target conflicts before mutating links.
   Do not overwrite ordinary files/directories or delete uploaded sources.
 - Forward relative sync and cleanup payloads across the same private port seam.
-  Retain the existing public HTTP DTOs and response fields.
+  Retain the existing public HTTP DTOs and response fields. Full reconciliation
+  cleans active links outside real Skill packages; links inside directories
+  containing `SKILL.md` are package content and must be preserved, including
+  packages not selected in the request and empty-set cleanup.
 - Missing active directories are empty inventories for mapping verification.
   Verification stays read-only; publishing initializes directories after validation,
   in STRICT and BEST_EFFORT modes. Preserve existing external-entry conflict rules.

@@ -191,3 +191,31 @@ def test_nested_batch_targets_do_not_write_into_uploaded_source(runtime, existin
     assert response.status_code == 400
     assert target.exists() is existing
     assert not (source / "nested").exists()
+
+
+def test_relative_reconcile_preserves_all_skill_package_symlinks(runtime):
+    client, source, target = runtime
+    base = target.parent
+    internal = []
+    for name in ("selected", "unselected"):
+        package = base / "sources" / name
+        (package / "assets").mkdir(parents=True)
+        (package / "SKILL.md").write_text(name)
+        (package / "assets/data").write_text("keep")
+        link = package / "assets/shared"
+        link.symlink_to("data")
+        internal.append(link)
+    active = base / "active"
+    active.mkdir()
+    old = active / "old"
+    old.symlink_to(base / "sources/unselected")
+    response = client.post("/api/skills/symlink", json={"symlinks": [
+        {"source": "sources/selected", "target": "active/selected"}
+    ]})
+    assert response.status_code == 200, response.text
+    assert not old.is_symlink()
+    assert all(link.is_symlink() and link.read_text() == "keep" for link in internal)
+    cleared = client.post("/api/skills/symlink", json={"symlinks": []})
+    assert cleared.status_code == 200
+    assert cleared.json()["data"]["removed"] == ["active/selected"]
+    assert all(link.is_symlink() and link.read_text() == "keep" for link in internal)
