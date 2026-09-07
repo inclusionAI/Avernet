@@ -65,7 +65,7 @@ def _tables(path: Path) -> dict[str, dict[str, str]]:
     )
     starts = [
         (match.group(1), match.start())
-        for match in re.finditer(r"CREATE TABLE\s+`(\w+)`", body)
+        for match in re.finditer(r"CREATE TABLE\s+(?:IF NOT EXISTS\s+)?`(\w+)`", body)
     ]
     assert starts, f"{path.name}: no CREATE TABLE found"
 
