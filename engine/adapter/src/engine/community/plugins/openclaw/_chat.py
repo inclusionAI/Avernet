@@ -11,10 +11,12 @@ import os
 import re
 import tempfile
 from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from pathlib import Path
 from typing import Any
 
 from engine.community.kernel.frames import EventFrame
+from engine.community.plugin_api.openclaw.chat import ChatAckCallback, OpenClawChatAck
 from engine.community.openclaw.config import get_config
 
 log = logging.getLogger("openclaw-port")
@@ -91,6 +93,7 @@ class _ChatPortMixin:
         idempotency_key: str | None = None,
         attachments: list[Any] | None = None,
         token: str | None = None,
+        on_ack: ChatAckCallback | None = None,
     ) -> AsyncGenerator[EventFrame, None]:
         """Stream chat events from the OpenClaw gateway as EventFrames.
 
@@ -111,25 +114,32 @@ class _ChatPortMixin:
             )
 
         client = await self._pooled_client(token)
-        async for event_data in client.chat_stream(
+        async def forward_ack(response):
+            await on_ack(OpenClawChatAck(response.ok, response.payload or {}, response.error))
+
+        ack_options = {"on_ack": forward_ack} if on_ack is not None else {}
+        upstream = client.chat_stream(
             session_key=session_key,
             message=message,
             timeout_ms=timeout_ms,
             idempotency_key=idempotency_key,
             attachments=attachments,
-        ):
-            event_data.setdefault("sessionKey", session_key)
-            state = event_data.get("state", "")
-            event_name = _derive_event_name(event_data)
-            frame = EventFrame(event=event_name, payload=event_data)
-            yield frame
+            **ack_options,
+        )
+        async with aclosing(upstream):
+            async for event_data in upstream:
+                event_data.setdefault("sessionKey", session_key)
+                state = event_data.get("state", "")
+                event_name = _derive_event_name(event_data)
+                frame = EventFrame(event=event_name, payload=event_data)
+                yield frame
 
-            if state in ("final", "error", "aborted"):
-                run_id = event_data.get("runId", "")
-                if isinstance(run_id, str) and run_id.startswith("inject-"):
-                    continue
-                log.info("[chat_stream] stream ended: state=%s", state)
-                break
+                if state in ("final", "error", "aborted"):
+                    run_id = event_data.get("runId", "")
+                    if isinstance(run_id, str) and run_id.startswith("inject-"):
+                        continue
+                    log.info("[chat_stream] stream ended: state=%s", state)
+                    break
 
     async def chat_abort(
         self,

@@ -9,10 +9,38 @@ returns a raw dict (`{success, error, payload}`) — the adapter builds
 """
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
-from engine.community.kernel.frames import EventFrame
+from engine.community.kernel.frames import ErrorShape, EventFrame, ResponseFrame
+
+
+@dataclass(frozen=True)
+class OpenClawChatAck:
+    """Upstream acknowledgement; cached is inferred, not an upstream wire field."""
+
+    ok: bool
+    payload: dict[str, Any]
+    error: ErrorShape | None = None
+
+    def response(self, request_id: str) -> ResponseFrame:
+        status = self.payload.get("status")
+        cached = None
+        if self.ok:
+            if status == "started":
+                cached = False
+            elif status in ("in_flight", "ok"):
+                cached = True
+        return ResponseFrame(
+            id=request_id,
+            ok=self.ok,
+            payload={**self.payload, "accepted": self.ok, "cached": cached},
+            error=self.error,
+        )
+
+
+ChatAckCallback = Callable[[OpenClawChatAck], Awaitable[None]]
 
 
 class OpenClawChatPort(Protocol):
@@ -26,6 +54,7 @@ class OpenClawChatPort(Protocol):
         idempotency_key: str | None = None,
         attachments: list[Any] | None = None,
         token: str | None = None,
+        on_ack: ChatAckCallback | None = None,
     ) -> AsyncGenerator[EventFrame, None]:
         """Stream chat events from the OpenClaw gateway as EventFrames.
 
@@ -45,6 +74,10 @@ class OpenClawChatPort(Protocol):
 
         Yields:
             EventFrame instances matching the OpenClaw event vocabulary.
+
+        If on_ack is supplied, await it before yielding events. Failed or
+        completed-replay ACKs end the stream without waiting for new events.
+        Closing the stream must release its upstream listeners.
         """
         ...
 
