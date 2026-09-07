@@ -2173,7 +2173,7 @@ class TestHandleMngRegisterOwnershipMigration:
                 machine_name="New Name",
             )
 
-        # D-06 step 1: old-user ACTIVE devices queried then batch-OFFLINE'd
+        # D-06 step 2: old-user ACTIVE devices queried then batch-OFFLINE'd
         mock_device_repo.list_active_local_devices_by_machine_user.assert_called_once_with(
             machine_id="machine-001",
             user_id="user-old",
@@ -2183,9 +2183,9 @@ class TestHandleMngRegisterOwnershipMigration:
             device_ids=[101, 102],
             env="test",
         )
-        # D-06 step 2: best-effort route clear
+        # D-06 step 3: best-effort route clear
         mock_repository.clear_route_info.assert_called_once_with("machine-001", "test")
-        # D-06 step 3: critical conditional ownership update
+        # D-06 step 1: critical conditional ownership update
         mock_repository.update_user_id.assert_called_once_with(
             "machine-001", "test", "user-old", "user-new"
         )
@@ -2232,6 +2232,12 @@ class TestHandleMngRegisterOwnershipMigration:
         # Fail-closed: rejected before any ONLINE write
         mock_repository.update_status.assert_not_called()
         mock_repository.update_machine_info.assert_not_called()
+        # WR-01 pin: the rejection path performs zero side-effect writes — the
+        # critical update now runs first, so the device OFFLINE batch and the
+        # route clear are never reached on a rejected takeover.
+        mock_device_repo.list_active_local_devices_by_machine_user.assert_not_called()
+        mock_device_repo.batch_update_status_to_offline.assert_not_called()
+        mock_repository.clear_route_info.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_same_user_registration_skips_migration(
@@ -2327,8 +2333,8 @@ class TestHandleMngRegisterOwnershipMigration:
         mock_device_template_repository,
         caplog,
     ):
-        """D-06 step 1 failure degrades to a [MIGRATION_DEVICE_OFFLINE_FAIL]
-        WARNING and the migration proceeds to the critical ownership update."""
+        """D-06 step 2 failure degrades to a [MIGRATION_DEVICE_OFFLINE_FAIL]
+        WARNING; the migration still completes through the ONLINE path."""
         mock_device_repo = MagicMock()
         mock_device_repo.list_active_local_devices_by_machine_user.side_effect = (
             RuntimeError("boom")
@@ -2379,7 +2385,7 @@ class TestHandleMngRegisterOwnershipMigration:
         mock_device_template_repository,
         caplog,
     ):
-        """D-06 step 1 with no wired DeviceRepository (constructor default None):
+        """D-06 step 2 with no wired DeviceRepository (constructor default None):
         defensive [MACHINE_OWNERSHIP_MIGRATED_DEVICE_SKIP] WARNING, then the
         migration proceeds."""
         service = LocalPaasService(
@@ -2468,8 +2474,8 @@ class TestHandleMngRegisterOwnershipMigration:
         mock_device_template_repository,
         caplog,
     ):
-        """D-06 step 2 failure degrades to a [MIGRATION_ROUTE_CLEAR_FAIL]
-        WARNING; the critical ownership update still runs, no exception."""
+        """D-06 step 3 failure degrades to a [MIGRATION_ROUTE_CLEAR_FAIL]
+        WARNING; the migration still completes, no exception."""
         mock_repository.clear_route_info.side_effect = RuntimeError("route fail")
         mock_device_repo = MagicMock()
         mock_device_repo.list_active_local_devices_by_machine_user.return_value = []

@@ -1837,9 +1837,9 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         """Auto-migrate machine ownership in place on sno drift (D-01).
 
         D-06 step order:
-        1. Old user's ACTIVE devices batch-OFFLINE (best-effort, D-03).
-        2. clear_route_info (best-effort).
-        3. update_user_id conditional UPDATE (CRITICAL per D-02/D-05).
+        1. update_user_id conditional UPDATE (CRITICAL per D-02/D-05).
+        2. Old user's ACTIVE devices batch-OFFLINE (best-effort, D-03).
+        3. clear_route_info (best-effort).
         4. Normal ONLINE path continues in the caller.
 
         Raises:
@@ -1849,7 +1849,38 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
         """
         old_user_id = existing.user_id
 
-        # Step 1: best-effort OFFLINE of the old user's ACTIVE devices (D-03)
+        # Step 1: CRITICAL conditional ownership update (D-02, D-05)
+        updated = self._repository.update_user_id(
+            machine_id, self._env, old_user_id, new_user_id
+        )
+        if updated is None or updated == 0:
+            # Re-query ONCE: another instance may have already migrated it
+            fresh = self._repository.get_by_machine_id(machine_id, self._env)
+            if fresh is not None and fresh.user_id == new_user_id:
+                logger.info(
+                    f"[MACHINE_OWNERSHIP_MIGRATION_RACE_RESOLVED] "
+                    f"machine_id={machine_id} user_id={new_user_id} env={self._env}"
+                )
+                return
+            logger.error(
+                f"[MACHINE_OWNERSHIP_MIGRATION_FAILED] machine_id={machine_id} "
+                f"old_user_id={old_user_id} new_user_id={new_user_id} "
+                f"env={self._env}"
+            )
+            raise DeviceCreationError(
+                error_code="MACHINE_OWNERSHIP_MIGRATION_FAILED",
+                message=(
+                    f"Ownership migration for machine {machine_id} affected 0 rows"
+                ),
+                context={
+                    "machine_id": machine_id,
+                    "old_user_id": old_user_id,
+                    "new_user_id": new_user_id,
+                    "env": self._env,
+                },
+            )
+
+        # Step 2: best-effort OFFLINE of the old user's ACTIVE devices (D-03)
         if self._device_repository is None:
             logger.warning(
                 f"[MACHINE_OWNERSHIP_MIGRATED_DEVICE_SKIP] machine_id={machine_id} "
@@ -1884,44 +1915,13 @@ class LocalPaasService(PaasService, LocalPaasServiceProtocol):
                     f"old_user_id={old_user_id} err={e}"
                 )
 
-        # Step 2: best-effort clear_route_info (D-14 idiom)
+        # Step 3: best-effort clear_route_info (D-14 idiom)
         try:
             self._repository.clear_route_info(machine_id, self._env)
             logger.info(f"[MIGRATION_ROUTE_CLEARED] machine_id={machine_id}")
         except Exception as e:
             logger.warning(
                 f"[MIGRATION_ROUTE_CLEAR_FAIL] machine_id={machine_id} err={e}"
-            )
-
-        # Step 3: CRITICAL conditional ownership update (D-02, D-05)
-        updated = self._repository.update_user_id(
-            machine_id, self._env, old_user_id, new_user_id
-        )
-        if updated is None or updated == 0:
-            # Re-query ONCE: another instance may have already migrated it
-            fresh = self._repository.get_by_machine_id(machine_id, self._env)
-            if fresh is not None and fresh.user_id == new_user_id:
-                logger.info(
-                    f"[MACHINE_OWNERSHIP_MIGRATION_RACE_RESOLVED] "
-                    f"machine_id={machine_id} user_id={new_user_id} env={self._env}"
-                )
-                return
-            logger.error(
-                f"[MACHINE_OWNERSHIP_MIGRATION_FAILED] machine_id={machine_id} "
-                f"old_user_id={old_user_id} new_user_id={new_user_id} "
-                f"env={self._env}"
-            )
-            raise DeviceCreationError(
-                error_code="MACHINE_OWNERSHIP_MIGRATION_FAILED",
-                message=(
-                    f"Ownership migration for machine {machine_id} affected 0 rows"
-                ),
-                context={
-                    "machine_id": machine_id,
-                    "old_user_id": old_user_id,
-                    "new_user_id": new_user_id,
-                    "env": self._env,
-                },
             )
 
         # Step 4: WARNING audit log — migration completed (D-07, audit-log-only)
