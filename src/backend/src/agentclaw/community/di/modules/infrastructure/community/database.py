@@ -60,8 +60,22 @@ class CommunityDatabaseModule(Module):
                 "set both to the same store"
             )
 
+        pool_size = block.get("pool_size")
+        max_overflow = block.get("max_overflow")
+        pool_timeout = block.get("pool_timeout")
+        # Coerce defensively so a quoted ``"10"`` behaves like the bare int and
+        # a bad value fails loudly at boot rather than at first checkout.
+        pool_size = None if pool_size is None else int(pool_size)
+        max_overflow = None if max_overflow is None else int(max_overflow)
+        pool_timeout = None if pool_timeout is None else float(pool_timeout)
+
         return cfg.CommunityDatabaseConfig(
-            backend=backend, url=url, create_schema=bool(create_schema)
+            backend=backend,
+            url=url,
+            create_schema=bool(create_schema),
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
         )
 
     @singleton
@@ -79,9 +93,19 @@ class CommunityDatabaseModule(Module):
         except Exception:  # pragma: no cover — malformed URL surfaces on connect
             safe_url = "<unparseable>"
         logger.info(
-            "DatabasePlugin: CommunityDatabase (backend=%s, url=%s, create_schema=%s)",
+            "DatabasePlugin: CommunityDatabase (backend=%s, url=%s, "
+            "create_schema=%s, pool_size=%s, max_overflow=%s, pool_timeout=%s)",
             config.backend,
             safe_url,
             config.create_schema,
+            config.pool_size,
+            config.max_overflow,
+            config.pool_timeout,
         )
-        return CommunityDatabase(config.url, create_schema=config.create_schema)
+        return CommunityDatabase(
+            config.url,
+            create_schema=config.create_schema,
+            pool_size=config.pool_size,
+            max_overflow=config.max_overflow,
+            pool_timeout=config.pool_timeout,
+        )

@@ -63,6 +63,17 @@ class CommunityDatabaseConfig:
     backend: str = "sqlite"
     url: str = "sqlite:///./data/agentclaw.db"
     create_schema: bool = True
+    # Optional SQLAlchemy ``QueuePool`` sizing for the MySQL/Postgres engine
+    # (SQLite ignores these). ``None`` for each keeps SQLAlchemy's defaults
+    # (pool_size=5, max_overflow=10, pool_timeout=30) — sourced from the
+    # optional ``pool_size`` / ``max_overflow`` / ``pool_timeout`` keys of the
+    # ``database`` block. See ``plugins/community/database.py`` for the sizing
+    # tradeoff (worker_count × pool_size vs the DB's ``max_connections``); the
+    # default ``pool_timeout=30`` is the cliff behind the ~30s hang-then-502
+    # seen on the bots list surface during deploy-time pool contention.
+    pool_size: int | None = None
+    max_overflow: int | None = None
+    pool_timeout: float | None = None
 
 
 #: Accepted ``database.backend`` values mapped to the SQLAlchemy URL scheme each

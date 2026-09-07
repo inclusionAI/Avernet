@@ -182,6 +182,16 @@ user_config:
     backend: "mysql"
     url: "${DATABASE_URL}"
     create_schema: false
+    # Optional SQLAlchemy QueuePool sizing (SQLite ignores these). Omit a key
+    # to keep SQLAlchemy's default (pool_size=5, max_overflow=10,
+    # pool_timeout=30). Tune per deployment: each worker process owns its own
+    # pool, so pool_size × worker_count × instance_count must stay under the
+    # DB's max_connections. Lowering pool_timeout makes a saturated pool fail
+    # fast instead of hanging up to the default 30s (the cliff observed on the
+    # /openapi/v1/bots list surface during deploy-time connection contention).
+    # pool_size: 10
+    # max_overflow: 20
+    # pool_timeout: 10
 
   # Cache + distributed lock — consumed by the community CommunityCache.
   # Set redis_url to a Redis endpoint for a multi-worker deploy (KV + SET NX

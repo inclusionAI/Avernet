@@ -192,3 +192,82 @@ class TestBootstrapSchemaOwnership:
         await database.bootstrap()
 
         assert calls[0]["mysql"] is True
+
+
+def test_mysql_pool_sizing_is_forwarded_when_configured(monkeypatch):
+    # The optional pool knobs reach create_engine alongside pre_ping/recycle.
+    import agentclaw.community.plugins.community.database as dbmod
+
+    seen: dict = {}
+
+    def fake_create_engine(url, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()  # dummy engine; sessionmaker only stores the bind
+
+    monkeypatch.setattr(dbmod, "create_engine", fake_create_engine)
+    CommunityDatabase(
+        "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4",
+        pool_size=8,
+        max_overflow=16,
+        pool_timeout=10,
+    )
+    kw = seen["kwargs"]
+    assert kw["pool_pre_ping"] is True
+    assert kw["pool_recycle"] == 3600
+    assert kw["pool_size"] == 8
+    assert kw["max_overflow"] == 16
+    assert kw["pool_timeout"] == 10
+
+
+def test_mysql_pool_sizing_omitted_when_not_configured(monkeypatch):
+    # Unset knobs must stay out of create_engine's kwargs so SQLAlchemy's own
+    # defaults apply — i.e. this is an additive knob with no behaviour change.
+    import agentclaw.community.plugins.community.database as dbmod
+
+    seen: dict = {}
+
+    def fake_create_engine(url, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(dbmod, "create_engine", fake_create_engine)
+    CommunityDatabase(
+        "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4"
+    )
+    kw = seen["kwargs"]
+    assert kw["pool_pre_ping"] is True
+    assert kw["pool_recycle"] == 3600
+    for absent in ("pool_size", "max_overflow", "pool_timeout"):
+        assert absent not in kw
+
+
+def test_postgres_plain_engine_forwards_pool_sizing(monkeypatch):
+    import agentclaw.community.plugins.community.database as dbmod
+
+    seen: dict = {}
+
+    def fake_create_engine(url, **kwargs):
+        seen["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(dbmod, "create_engine", fake_create_engine)
+    CommunityDatabase(
+        "postgresql://user:pw@localhost/agentclaw",
+        pool_size=4,
+        pool_timeout=5,
+    )
+    kw = seen["kwargs"]
+    assert kw["pool_size"] == 4
+    assert kw["pool_timeout"] == 5
+    assert "pool_pre_ping" not in kw  # MySQL-only setup not applied here
+
+
+def test_sqlite_ignores_pool_sizing(tmp_path):
+    # SQLite's default pool is not a QueuePool, so pool sizing is deliberately
+    # dropped — it must not error and must not leak into connect_args.
+    db = CommunityDatabase(f"sqlite:///{tmp_path}/pool.db", pool_size=8)
+    Base.metadata.create_all(db._engine)
+    with db.orm_session() as s:
+        s.add(_Parent(id=42, name="pool-check"))
+    with db.session() as s:
+        assert s.query(_Parent).filter_by(id=42).one().name == "pool-check"

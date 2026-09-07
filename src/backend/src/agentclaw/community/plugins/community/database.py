@@ -20,6 +20,7 @@ A real, deployable implementation (not a ``MockSeam`` test double).
 from __future__ import annotations
 
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
@@ -42,21 +43,61 @@ def _is_mysql(url: str) -> bool:
 class CommunityDatabase(DatabasePlugin, LifecycleBase):
     """DatabasePlugin backed by a configured SQLAlchemy engine."""
 
-    def __init__(self, url: str, *, create_schema: bool = True) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        create_schema: bool = True,
+        pool_size: int | None = None,
+        max_overflow: int | None = None,
+        pool_timeout: float | None = None,
+    ) -> None:
         self._url = url
         self._create_schema = create_schema
-        self._engine = self._make_engine(url)
+        self._engine = self._make_engine(
+            url,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+        )
         self._session_factory = sessionmaker(
             autocommit=False, autoflush=False, bind=self._engine
         )
 
     @staticmethod
-    def _make_engine(url: str):
+    def _make_engine(
+        url: str,
+        *,
+        pool_size: int | None = None,
+        max_overflow: int | None = None,
+        pool_timeout: float | None = None,
+    ):
+        # Optional SQLAlchemy ``QueuePool`` sizing. Each key is applied only
+        # when configured; omitting all three keeps SQLAlchemy's defaults
+        # (pool_size=5, max_overflow=10, pool_timeout=30). That default
+        # ``pool_timeout=30`` is the cliff behind the ~30s/hang-then-502
+        # signature observed on the bots list surface during deploy-time
+        # connection contention — making it configurable lets a deployment
+        # fail fast or size the pool to its worker count without a code change.
+        # NB each worker process owns its own pool, so
+        # ``pool_size`` × worker_count × instance_count must stay under the
+        # database's ``max_connections`` — tune per deployment, don't blindly
+        # raise it.
+        pool_kwargs: dict[str, Any] = {}
+        if pool_size is not None:
+            pool_kwargs["pool_size"] = pool_size
+        if max_overflow is not None:
+            pool_kwargs["max_overflow"] = max_overflow
+        if pool_timeout is not None:
+            pool_kwargs["pool_timeout"] = pool_timeout
+
         if _is_sqlite(url):
             # SQLite needs ``check_same_thread=False`` for FastAPI's threaded
             # request handling, and a per-connection ``PRAGMA foreign_keys=ON``
             # so ``ON DELETE CASCADE`` fires (parity with prod and the local
-            # impl — SQLite does not enforce FKs otherwise).
+            # impl — SQLite does not enforce FKs otherwise). SQLite's default
+            # pool is not a QueuePool, so pool_size/overflow/timeout do not
+            # apply and are intentionally ignored here.
             engine = create_engine(
                 url, connect_args={"check_same_thread": False}
             )
@@ -80,10 +121,12 @@ class CommunityDatabase(DatabasePlugin, LifecycleBase):
                 url,
                 pool_pre_ping=True,
                 pool_recycle=3600,
+                **pool_kwargs,
             )
 
-        # Postgres / etc.: default pooling is appropriate.
-        return create_engine(url)
+        # Postgres / etc.: default pooling is appropriate, with the optional
+        # QueuePool sizing layered on top when configured.
+        return create_engine(url, **pool_kwargs)
 
     async def bootstrap(self) -> None:
         """Lifecycle hook — create the schema unless the operator owns it."""

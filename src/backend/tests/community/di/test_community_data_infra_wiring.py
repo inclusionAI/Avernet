@@ -111,6 +111,62 @@ def test_mysql_backend_builds_a_pooled_engine(monkeypatch):
     assert plugin._engine.pool._recycle == 3600
 
 
+def test_database_config_reads_optional_pool_sizing(monkeypatch):
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {
+            "backend": "mysql",
+            "url": "mysql+pymysql://u:p@db.example:3306/agentclaw",
+            "pool_size": 8,
+            "max_overflow": 16,
+            "pool_timeout": 10,
+        },
+    )
+    config = CommunityDatabaseModule().database_config()
+    assert config.pool_size == 8
+    assert config.max_overflow == 16
+    assert config.pool_timeout == 10
+
+
+def test_database_config_defaults_pool_sizing_to_none(monkeypatch):
+    # No pool keys → None each → SQLAlchemy defaults apply downstream.
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {
+            "backend": "mysql",
+            "url": "mysql+pymysql://u:p@db.example:3306/agentclaw",
+        },
+    )
+    config = CommunityDatabaseModule().database_config()
+    assert config.pool_size is None
+    assert config.max_overflow is None
+    assert config.pool_timeout is None
+
+
+def test_mysql_pool_sizing_reaches_the_engine_pool(monkeypatch):
+    # End-to-end: yaml block -> config -> CommunityDatabase -> engine pool.
+    # mysql+pymysql is lazy, so no server is contacted.
+    monkeypatch.setattr(
+        "agentclaw.community.di.modules.config_module._block",
+        lambda name: {
+            "backend": "mysql",
+            "url": "mysql+pymysql://u:p@db.example:3306/agentclaw?charset=utf8mb4",
+            "create_schema": False,
+            "pool_size": 8,
+            "max_overflow": 16,
+            "pool_timeout": 10,
+        },
+    )
+    config = CommunityDatabaseModule().database_config()
+    plugin = CommunityDatabaseModule().database(config)
+    pool = plugin._engine.pool
+    assert pool.size() == 8
+    assert pool._max_overflow == 16
+    assert pool._timeout == 10
+    assert pool._pre_ping is True
+    assert pool._recycle == 3600
+
+
 def test_community_binds_cache(community_injector):
     resolved = community_injector.get(CachePlugin)
     assert isinstance(resolved, CommunityCache)
