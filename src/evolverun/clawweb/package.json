@@ -17,7 +17,7 @@
     "ci:check": "node scripts/ci/run-tests.mjs check"
   },
   "devDependencies": {
-    "fast-xml-parser": "5.5.6",
+    "fast-xml-parser": "5.7.0",
     "istanbul-lib-coverage": "3.2.2",
     "istanbul-lib-report": "3.0.1",
     "istanbul-reports": "3.2.0"
