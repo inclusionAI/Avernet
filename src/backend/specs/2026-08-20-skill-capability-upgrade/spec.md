@@ -503,7 +503,7 @@ Canonical 前缀：`/openapi/v1/bots/{bot_id}/skill-sets`。
 | POST | `/skill-sets/{set_id}/activate` | 原子激活全部 Skill/MCP，一次 reconcile |
 | POST | `/skill-sets/{set_id}/deactivate` | 原子停用全部 Skill/MCP，一次 reconcile |
 | GET | `/skill-sets/resources` | 所有 Set 的 MCP/Default CLI 聚合 |
-| GET | `/skill-sets/{set_id}/mcps` | MCP Membership |
+| GET | `/skill-sets/{set_id}/mcps` | MCP Membership；Default Set 同时投影 Engine/Template 默认 MCP，并扣除当前 Bot 排除项 |
 | PUT | `/skill-sets/{set_id}/mcps/{server_code}` | 权限校验后添加 MCP |
 | DELETE | `/skill-sets/{set_id}/mcps/{server_code}` | 移除 MCP |
 | GET | `/skill-sets/{set_id}/mcp-permissions` | 聚合显式 MCP 与 Skill 依赖的权限状态 |
