@@ -1,0 +1,14 @@
+# claude_code.path — keys merge-config takes from the image catalogue into
+# the NAS copy of ~/.claude/models.json (applied by start_claude_code.sh on
+# every startup; merge-config reads this via --keys).
+#
+# One key or dot-path per line; '#' comments and blank lines are ignored.
+# models.json's top level is an ARRAY of providers, so there are no
+# dot-path keys to select — '*' merges the whole tree. Entry-level
+# protection comes from the array merge itself: providers and models merge
+# by id, image entries update/append, and the deployment's own
+# providers/models (e.g. a private-model provider) survive untouched.
+#
+# To stop the image catalogue from reaching a deployment entirely, replace
+# '*' with the empty allowlist (delete the line) — merges become no-ops.
+*
