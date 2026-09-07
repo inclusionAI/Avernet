@@ -199,6 +199,7 @@ def test_explicit_friend_connection_is_session_scoped(
     assert connections.calls == []
     connect = next(call for call in expert.calls if call[0] == "connect_chat_session")
     assert connect[2]["user_id"] == "friend-1"
+    assert connect[2]["bcn_friend_authorized"] is True
 
 
 def test_explicit_friend_connection_requires_session_id(client, friendships, expert):

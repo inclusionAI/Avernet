@@ -174,3 +174,58 @@ class TestExpertChatPermissionCheck:
 
         # 关键守护: resolver 不应被调
         resolver.resolve_for_binding.assert_not_called()
+
+    def test_bcn_authorized_scope_skips_only_the_legacy_access_check(self):
+        repository = MagicMock()
+        repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        bot_repo = MagicMock()
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "status": "ACTIVE",
+        }
+        bot_repo.get_by_id_and_owner.return_value = bot
+        collab = _collab_service_returning(False)
+        svc = _make_service(
+            repository=repository,
+            bot_repo=bot_repo,
+            collaborator_service=collab,
+        )
+
+        with pytest.raises(ChatPermissionError):
+            svc._get_authorized_chat_bot("friend1", "bot1", "owner1")
+
+        assert svc._get_authorized_chat_bot(
+            "friend1",
+            "bot1",
+            "owner1",
+            bcn_friend_authorized=True,
+        ) == bot
+        bot_repo.get_by_id_and_owner.assert_called_with("bot1", "owner1")
+        repository.list_chat_bots.assert_called_with("friend1")
+
+    def test_bcn_authorized_scope_reaches_connection_without_legacy_recheck(self):
+        resolver = _resolver_returning_ctx()
+        collab = _collab_service_returning(False)
+        svc = _make_service(resolver=resolver, collaborator_service=collab)
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "binding_id": 123,
+        }
+
+        connection = svc._get_connection(
+            bot,
+            user_id="friend1",
+            bcn_friend_authorized=True,
+        )
+
+        assert connection["url"] == "http://localhost:8080"
+        collab.check_collaborator_permission.assert_not_called()
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "friend1", bot_id="bot1"
+        )

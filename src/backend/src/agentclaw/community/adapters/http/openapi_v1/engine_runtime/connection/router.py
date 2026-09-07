@@ -186,6 +186,7 @@ async def get_connection(
                 owner_id=owner_id,
                 session_key=session_id,
                 iam_token=request.cookies.get("IAM_TOKEN") or None,
+                bcn_friend_authorized=True,
             )
         except ExpertBotNotFoundError as error:
             raise EngineResourceNotFoundError("friend session not found") from error
