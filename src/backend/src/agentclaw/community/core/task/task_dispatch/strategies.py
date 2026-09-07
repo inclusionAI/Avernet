@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Any, Protocol
@@ -274,14 +275,17 @@ class SearchBasedDispatchStrategy:
                 and self._task_settings.is_enabled("mode_coverage")
             )
             covered = set(graph.extend_props.get("mode_coverage") or [])
-            if mode_coverage_on and not _MODE_COVERAGE_ALL.issubset(covered):
-                # on-path 覆盖路由:force 未覆盖模式(single→group→bbs);全覆盖后回落 off-path
+            if not mode_coverage_on:
+                # off-path 正常:join+candidate-count,无随机/无兜底(命中啥就是啥)
+                sr = _offpath_normal(joined)
+            elif _MODE_COVERAGE_ALL.issubset(covered):
+                # on-path 全覆盖后:兜底保证命中 + single/group 平均随机分配(不回落纯 off-path)
+                sr = _coverage_post_dispatch(joined, bot_pool)
+            else:
+                # on-path 未全覆盖:有序强制 single→group→bbs(+ pool 兜底)
                 sr = _coverage_route(joined, bot_pool, covered)
                 if sr is None:  # 全覆盖兜底(预判已挡,防御)
-                    sr = _offpath_normal(joined)
-            else:
-                # off-path 正常:join+candidate-count,无随机/无回退;mode_coverage 关或已全覆盖
-                sr = _offpath_normal(joined)
+                    sr = _coverage_post_dispatch(joined, bot_pool)
             logger.info(
                 "[task][search] task=%s node=%s rule outcome=%s bot_id=%s bot_ids=%s "
                 "joined=%d pool_size=%d mode_coverage=%s covered=%s",
@@ -704,6 +708,33 @@ def _coverage_route(
     if "bbs" not in covered:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason=_MODE_COVERAGE_BBS)
     return None
+
+
+def _coverage_post_dispatch(joined: list[str], pool: list[str]) -> SearchResult:
+    """on-path 全覆盖后兜底派发:保证有 bot 命中(避免 join 命中率低→多 MISS)+ single/group 平均随机分配。
+
+    bots 优先 ``joined``(关键词命中 ∩ claim+public),空则 ``pool``(claim+public 名单)兜底;
+    二者均空 → ``MISS(no_candidates)``(无任何可派 bot,交现有 MISS→HUNG→BBS)。
+    否则 ``random<0.5`` 或 bots 不足 2 → ``HIT_SINGLE(bots[0])``;否则 ``HIT_MULTI_BOTS``(前
+    ``_RULE_TEST_MAX_GROUP_MEMBERS`` 个,manager_worker)。覆盖已 full,仅 single/group 随机轮替。
+    """
+    bots = joined if joined else pool
+    if not bots:
+        return SearchResult(outcome=SearchOutcome.MISS, miss_reason="no_candidates")
+    bot_id = bots[0]
+    _, _, owner_id = bot_id.partition(":")
+    if random.random() < 0.5 or len(bots) < 2:
+        return SearchResult(
+            outcome=SearchOutcome.HIT_SINGLE,
+            bot_id=bot_id,
+            owner_id=owner_id or None,
+        )
+    return SearchResult(
+        outcome=SearchOutcome.HIT_MULTI_BOTS,
+        group_formation=_build_manager_worker_group(
+            bots[: min(_RULE_TEST_MAX_GROUP_MEMBERS, len(bots))]
+        ),
+    )
 
 
 # ===== END 候选漏斗 + 派发模式常量 =====

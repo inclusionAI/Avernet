@@ -298,8 +298,8 @@ class _ModeCoverageSettings:
         return self._mc if setting_type == "mode_coverage" else False
 
 
-def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal():
-    """on-path(mode_coverage ON):同 run 连续派发 → single→group→bbs 依次覆盖,全覆盖后回落 off-path。
+def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal(monkeypatch):
+    """on-path(mode_coverage ON):同 run 连续派发 → single→group→bbs 依次覆盖,全覆盖后兜底+随机(single/group 平均分配)。
     engine 负责写 graph 标记;此处手动推进 extend_props["mode_coverage"] 模拟 engine 写回。"""
 
     class _Discover:
@@ -339,10 +339,21 @@ def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal(
     assert r3.miss_reason == "mode_coverage_bbs"
     graph.extend_props["mode_coverage"] = ["bbs", "group", "single"]  # 全覆盖
 
+    # 全覆盖后:兜底+随机(single/group 平均分配),不回落 off-path
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.6,
+    )
     r4 = _run(strat.apply(node, graph))
-    # 全覆盖 → off-path 正常:3 joined → group
     assert r4.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert r4.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.3,
+    )
+    r5 = _run(strat.apply(node, graph))
+    assert r5.outcome == SearchOutcome.HIT_SINGLE
+    assert r5.bot_id == "rule-a:1"
 
 
 def test_search_strategy_rule_mode_coverage_pool_fallback_when_join_empty():

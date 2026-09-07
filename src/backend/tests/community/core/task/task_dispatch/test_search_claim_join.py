@@ -16,6 +16,7 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchOutcome,
     SearchResult,
     _coverage_route,
+    _coverage_post_dispatch,
     _join_candidates_pool,
     _offpath_normal,
 )
@@ -351,6 +352,69 @@ def test_coverage_route_bbs_when_joined_and_pool_both_empty():
 def test_coverage_route_returns_none_when_all_covered():
     """全覆盖 → None(调用方兜底走 off-path 正常派发)。"""
     assert _coverage_route(["rule-a:1", "rule-b:2"], [], {"single", "group", "bbs"}) is None
+
+
+# ===== on-path 全覆盖后兜底派发(_coverage_post_dispatch): joined/pool 兜底 + single/group 平均随机 =====
+
+
+def test_coverage_post_dispatch_single_when_random_below_half(monkeypatch):
+    """random<0.5 → HIT_SINGLE(joined[0],owner 解析);不走 group。"""
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.3,
+    )
+    result = _coverage_post_dispatch(["rule-a:1", "rule-b:2", "rule-c:3"], [])
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "rule-a:1"
+    assert result.owner_id == "1"
+
+
+def test_coverage_post_dispatch_group_when_random_at_or_above_half(monkeypatch):
+    """random≥0.5 & len(bots)≥2 → HIT_MULTI_BOTS(前 3,manager_worker)。"""
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.6,
+    )
+    result = _coverage_post_dispatch(["rule-a:1", "rule-b:2", "rule-c:3"], [])
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
+
+
+def test_coverage_post_dispatch_pool_fallback_when_joined_empty(monkeypatch):
+    """joined 空 → pool 兜底;random≥0.5 & len(pool)≥2 → group(pool 前 3)。"""
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.6,
+    )
+    result = _coverage_post_dispatch([], ["pool-a:1", "pool-b:2", "pool-c:3"])
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert result.group_formation.bot_ids == ["pool-a:1", "pool-b:2", "pool-c:3"]
+
+
+def test_coverage_post_dispatch_single_demote_when_fewer_than_two_bots(monkeypatch):
+    """random≥0.5 但 len(bots)<2 → 降级 HIT_SINGLE(bots[0])。"""
+    monkeypatch.setattr(
+        "agentclaw.community.core.task.task_dispatch.strategies.random.random",
+        lambda: 0.9,
+    )
+    result = _coverage_post_dispatch(["only:1"], [])
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "only:1"
+    assert result.owner_id == "1"
+
+
+def test_coverage_post_dispatch_miss_when_joined_and_pool_both_empty():
+    """joined 与 pool 均空 → MISS(no_candidates)(交现有 MISS→HUNG→BBS)。"""
+    result = _coverage_post_dispatch([], [])
+
+    assert result.outcome == SearchOutcome.MISS
+    assert result.miss_reason == "no_candidates"
+
+
 
 
 def test_load_rule_test_pool_returns_claim_enabled_bot_ids():
