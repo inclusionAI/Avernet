@@ -523,3 +523,89 @@ class TestMaybeRefreshPrepareFailure:
                 cookie="c",
             )
             mock_thread.assert_not_called()
+
+
+class TestRefreshCodefuseServiceBotFanOut:
+    """service bot：异步刷新发到所有在运行行时；单 runtime 写入失败不中断其它。"""
+
+    def test_one_runtime_failure_does_not_abort_others(self):
+        service = _make_bot_service()
+        service._baas_service_provider = lambda: MagicMock(name="baas_service")
+        service._device_service_provider = lambda: MagicMock()
+
+        # service bot：draft binding=100；发布记录 VALIDATING → verify binding=200
+        service._repository.get_by_id_and_owner.return_value = _bot_record(
+            bot_type="service", binding_id=100,
+        )
+        rec = MagicMock()
+        rec.status = "validating"
+        rec.ext = {"binding": {"verify": 200}}
+        service._bot_publish_repo.list_by_source_bot.return_value = [rec]
+
+        draft_binding = MagicMock()
+        draft_binding.device_provider = "baas"
+        draft_binding.device_props = {"bot_uuid": "BOT-DRAFT"}
+        draft_binding.id = 100
+        verify_binding = MagicMock()
+        verify_binding.device_provider = "baas"
+        verify_binding.device_props = {"bot_uuid": "BOT-VERIFY"}
+        verify_binding.id = 200
+        service._device_binding_repo.get_by_id.side_effect = lambda bid: (
+            {100: draft_binding, 200: verify_binding}.get(int(bid))
+        )
+
+        with patch(
+            "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
+            side_effect=[RuntimeError("draft write boom"), None],
+        ) as mock_write:
+            # 不应抛出：draft 失败被隔离，verify 仍写入
+            service._refresh_codefuse_token_on_device(
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok",
+            )
+            # 两条 runtime 都被尝试写入
+            assert mock_write.call_count == 2
+            written = [c.args[1] for c in mock_write.call_args_list]
+            assert written == ["BOT-DRAFT", "BOT-VERIFY"]
+
+    def test_arca_runtime_failure_does_not_abort_baas_runtime(self):
+        """draft(arca) exec_shell 抛异常 → 隔离跳过；verify(baas) 仍写入。"""
+        service = _make_bot_service()
+        service._baas_service_provider = lambda: MagicMock(name="baas_service")
+        exec_device_service = MagicMock()
+        service._device_service_provider = lambda: exec_device_service
+
+        # service bot：draft binding=100(arca) ；verify binding=200(baas)
+        service._repository.get_by_id_and_owner.return_value = _bot_record(
+            bot_type="service", binding_id=100,
+        )
+        rec = MagicMock()
+        rec.status = "validating"
+        rec.ext = {"binding": {"verify": 200}}
+        service._bot_publish_repo.list_by_source_bot.return_value = [rec]
+
+        draft_binding = MagicMock()
+        draft_binding.device_provider = "arca"
+        draft_binding.device_id = "dev-draft"
+        draft_binding.id = 100
+        verify_binding = MagicMock()
+        verify_binding.device_provider = "baas"
+        verify_binding.device_props = {"bot_uuid": "BOT-VERIFY"}
+        verify_binding.id = 200
+        service._device_binding_repo.get_by_id.side_effect = lambda bid: (
+            {100: draft_binding, 200: verify_binding}.get(int(bid))
+        )
+
+        # arca exec_shell 抛异常
+        exec_device_service.exec_shell.side_effect = RuntimeError("arca exec boom")
+
+        with patch(
+            "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
+        ) as mock_write:
+            # 不应抛出：arca 失败被隔离，baas 仍写入
+            service._refresh_codefuse_token_on_device(
+                bot_id="bot-1", user_id="user1", plaintext_token="plain-tok",
+            )
+            baas_cmd_uuids = [c.args[1] for c in mock_write.call_args_list]
+            assert baas_cmd_uuids == ["BOT-VERIFY"]
+        # arca exec_shell 被尝试过（失败）
+        exec_device_service.exec_shell.assert_called_once()

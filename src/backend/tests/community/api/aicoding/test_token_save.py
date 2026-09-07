@@ -24,6 +24,7 @@ from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import BotPublishRepositoryProtocol
 from agentclaw.community.core.devices.repository.record import DeviceBindingRecord
 
 
@@ -62,11 +63,13 @@ def _make_client(
     device_repo=None,
     baas_service=None,
     device_service=None,
+    publish_repo=None,
 ) -> TestClient:
     _bot_repo = bot_repo or MagicMock()
     _device_repo = device_repo or MagicMock()
     _baas = baas_service or MagicMock()
     _device_svc = device_service or MagicMock()
+    _publish_repo = publish_repo or MagicMock()
 
     class _TestModule(Module):
         @provider
@@ -88,6 +91,11 @@ def _make_client(
         @singleton
         def provide_device_service(self) -> DeviceServiceProtocol:
             return _device_svc
+
+        @provider
+        @singleton
+        def provide_publish_repo(self) -> BotPublishRepositoryProtocol:
+            return _publish_repo
 
     app = FastAPI()
     app.include_router(router)
@@ -451,3 +459,195 @@ class TestCodefuseTokenCommon:
 
         assert resp.status_code == 400
         assert "auth_code" in resp.json()["detail"].lower()
+
+# ── Service bot: multi-binding fan-out (draft + verify + online) ────────
+
+
+def _pub_record(status, ext_binding, publish_id=1):
+    rec = MagicMock()
+    rec.id = publish_id
+    rec.status = status
+    rec.ext = {"binding": ext_binding}
+    return rec
+
+
+def _publish_repo_with_records(*records):
+    """publish_repo whose list_by_source_bot returns the given records
+    (newest-first), matching resolve_stage_bind_id's contract."""
+    publish_repo = MagicMock()
+    publish_repo.list_by_source_bot.return_value = list(records)
+    return publish_repo
+
+
+class TestCodefuseTokenServiceBot:
+    """PUT .../codefuse/auth — service bot must fan out to every live runtime."""
+
+    def test_fan_out_writes_draft_verify_online(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100,
+            "bot_id": "svc1",
+            "owner_id": "u001",
+            "binding_id": 1,
+            "bot_type": "service",
+        }
+
+        draft = dataclass_replace(_binding_record("baas", "BOT-DRAFT"), id=1)
+        verify = dataclass_replace(_binding_record("baas", "BOT-VERIFY"), id=2)
+        online = dataclass_replace(_binding_record("baas", "BOT-ONLINE"), id=3)
+        device_repo = MagicMock()
+        device_repo.get_by_id.side_effect = lambda bid: {1: draft, 2: verify, 3: online}.get(int(bid))
+
+        baas = MagicMock()
+        baas.exec_command_on_bot.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        publish_repo = _publish_repo_with_records(
+            _pub_record("validating", {"verify": 2}),
+            _pub_record("success", {"online": 3}),
+        )
+
+        client = _make_client(
+            bot_repo=bot_repo, device_repo=device_repo, baas_service=baas,
+            publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc1/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["bot_id"] == "svc1"
+        assert data["targets"] == 3
+        # every live runtime container received the write
+        assert baas.exec_command_on_bot.call_count == 3
+        written = {c.kwargs["bot_uuid"] for c in baas.exec_command_on_bot.call_args_list}
+        assert written == {"BOT-DRAFT", "BOT-VERIFY", "BOT-ONLINE"}
+
+    def test_partial_success_still_200(self):
+        """draft exec fails but verify succeeds → 200 (serving runtime covered)."""
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100, "bot_id": "svc2", "owner_id": "u001",
+            "binding_id": 1, "bot_type": "service",
+        }
+        draft = dataclass_replace(_binding_record("baas", "BOT-DRAFT"), id=1)
+        verify = dataclass_replace(_binding_record("baas", "BOT-VERIFY"), id=2)
+        device_repo = MagicMock()
+        device_repo.get_by_id.side_effect = lambda bid: {1: draft, 2: verify}.get(int(bid))
+
+        baas = MagicMock()
+        baas.exec_command_on_bot.side_effect = [
+            {"exit_code": 1, "stderr": "err"},
+            {"exit_code": 0, "stdout": "", "stderr": ""},
+        ]
+
+        publish_repo = _publish_repo_with_records(_pub_record("validating", {"verify": 2}))
+
+        client = _make_client(
+            bot_repo=bot_repo, device_repo=device_repo, baas_service=baas,
+            publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc2/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        assert baas.exec_command_on_bot.call_count == 2
+
+    def test_all_fail_returns_502(self):
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100, "bot_id": "svc3", "owner_id": "u001",
+            "binding_id": 1, "bot_type": "service",
+        }
+        draft = dataclass_replace(_binding_record("baas", "BOT-DRAFT"), id=1)
+        verify = dataclass_replace(_binding_record("baas", "BOT-VERIFY"), id=2)
+        device_repo = MagicMock()
+        device_repo.get_by_id.side_effect = lambda bid: {1: draft, 2: verify}.get(int(bid))
+
+        baas = MagicMock()
+        baas.exec_command_on_bot.return_value = {"exit_code": 1, "stderr": "err"}
+
+        publish_repo = _publish_repo_with_records(_pub_record("validating", {"verify": 2}))
+
+        client = _make_client(
+            bot_repo=bot_repo, device_repo=device_repo, baas_service=baas,
+            publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc3/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+        assert resp.status_code == 502
+
+    def test_service_no_runtime_bindings_returns_400(self):
+        """service bot 但 draft/verify/online 全空 → 400。"""
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100, "bot_id": "svc4", "owner_id": "u001",
+            "binding_id": None, "bot_type": "service",
+        }
+        publish_repo = _publish_repo_with_records()  # 空发布记录
+        client = _make_client(
+            bot_repo=bot_repo, publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc4/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+        assert resp.status_code == 400
+
+    def test_service_missing_binding_skipped_but_succeeds(self):
+        """service bot：某 binding_id 在 device_repo 查不到 → 跳过；其余成功仍 200。"""
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100, "bot_id": "svc5", "owner_id": "u001",
+            "binding_id": 1, "bot_type": "service",
+        }
+        draft = dataclass_replace(_binding_record("baas", "BOT-DRAFT"), id=1)
+        device_repo = MagicMock()
+        # draft binding=1 找到；verify binding=2 查不到返回 None
+        device_repo.get_by_id.side_effect = lambda bid: {1: draft}.get(int(bid))
+
+        baas = MagicMock()
+        baas.exec_command_on_bot.return_value = {"exit_code": 0, "stdout": "", "stderr": ""}
+
+        publish_repo = _publish_repo_with_records(_pub_record("validating", {"verify": 2}))
+
+        client = _make_client(
+            bot_repo=bot_repo, device_repo=device_repo, baas_service=baas,
+            publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc5/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+        # draft 成功即 200（verify binding 查不到被 skip）
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        assert baas.exec_command_on_bot.call_count == 1
+
+    def test_service_all_bindings_not_found_returns_404(self):
+        """service bot：解析出的 binding 全部在 device_repo 缺失 → 404。"""
+        bot_repo = MagicMock()
+        bot_repo.get_by_id_and_owner.return_value = {
+            "id": 100, "bot_id": "svc6", "owner_id": "u001",
+            "binding_id": 1, "bot_type": "service",
+        }
+        device_repo = MagicMock()
+        device_repo.get_by_id.return_value = None  # 全查不到
+
+        publish_repo = _publish_repo_with_records(_pub_record("validating", {"verify": 2}))
+
+        client = _make_client(
+            bot_repo=bot_repo, device_repo=device_repo,
+            publish_repo=publish_repo,
+        )
+        resp = client.put(
+            "/api/aicoding/bots/svc6/codefuse/auth",
+            json={"token": _encode_auth_code("a" * 32, "u001")},
+        )
+        assert resp.status_code == 404

@@ -43,6 +43,13 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management import codefuse_token as _codefuse_token
 from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.repository.protocols.publishing import (
+    BotPublishRepositoryProtocol,
+)
+from agentclaw.community.core.bot_management.codefuse_runtime_targets import (
+    resolve_codefuse_runtime_binding_ids,
+    SERVICE_BOT_TYPE,
+)
 from agentclaw.community.core.services.identity import VALID_ENTITY_TYPES
 from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -408,6 +415,50 @@ def _build_codefuse_write_cmd(token: str, workid: str, owner_id: str = "") -> st
     return _codefuse_token.build_codefuse_write_cmd(token, workid)
 
 
+def _exec_codefuse_write_to_binding(
+    binding,
+    cmd: str,
+    baas_service: BaasServiceProtocol,
+    device_service: DeviceServiceProtocol,
+    *,
+    log_prefix: str = "save_codefuse_token",
+) -> tuple:
+    """Exec the codefuse.json write command into a single binding's container.
+
+    Returns ``(ok, status_code, detail, provider)``. ``ok`` 为 True 时 status
+    恒为 200。失败沿用原 single-binding 语义返回 400（缺 bot_uuid）/ 502（exec
+    异常或非零退出码）：personal 路径据此直接转 HTTPException，service 路径
+    聚合后择首个失败上报。
+    """
+    provider = getattr(binding, "device_provider", None) or ""
+    if provider == "baas":
+        # BaaS / poolab: use bot-level exec API
+        bot_uuid = (getattr(binding, "device_props", None) or {}).get("bot_uuid")
+        if not bot_uuid:
+            return False, 400, "Bot has no BaaS bot_uuid in device_props", provider
+        try:
+            result = baas_service.exec_command_on_bot(
+                bot_uuid=bot_uuid, cmd=cmd, timeout_seconds=30
+            )
+        except Exception as e:
+            log.error("[%s] exec_command_on_bot failed: bot_uuid=%s error=%s", log_prefix, bot_uuid, e)
+            return False, 502, f"Failed to write token to container: {e}", provider
+        exit_code = result.get("exit_code", -1) if isinstance(result, dict) else -1
+        if exit_code != 0:
+            log.warning("[%s] non-zero exit: bot_uuid=%s result=%s", log_prefix, bot_uuid, result)
+            return False, 502, f"Command exited with code {exit_code}", provider
+        return True, 200, "", provider
+
+    # Arca / local: use DeviceService.exec_shell (routed by device_id)
+    device_id = getattr(binding, "device_id", None)
+    try:
+        device_service.exec_shell(device_id=device_id, shell_cmd=cmd)
+    except Exception as e:
+        log.error("[%s] exec_shell failed: device_id=%s error=%s", log_prefix, device_id, e)
+        return False, 502, f"Failed to write token to container: {e}", provider
+    return True, 200, "", provider
+
+
 @router.put("/bots/{bot_id}/codefuse/auth")
 async def save_codefuse_token(
     bot_id: str,
@@ -417,6 +468,7 @@ async def save_codefuse_token(
     device_repo: DeviceBindingRepository = Injected(DeviceBindingRepository),
     baas_service: BaasServiceProtocol = Injected(BaasServiceProtocol),
     device_service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
+    publish_repo: BotPublishRepositoryProtocol = Injected(BotPublishRepositoryProtocol),
 ) -> dict:
     """Write CodeFuse token into the bot's container.
 
@@ -428,8 +480,16 @@ async def save_codefuse_token(
     1. Decodes auth_code → extracts token + workid
     2. Validates token is non-empty, ≥16 chars, hex format
     3. Writes into ``/home/admin/.codefuse/fuse/codefuse.json`` (merges with
-       existing file, forces token/workid/authType update)
+       existing file, forces token/workid/authType update) of every live
+       runtime of the bot
     4. Verifies the file is readable
+
+    Bot 拓扑：
+    - personal：仅草稿 binding（``ac_bots.binding_id``），行为与历史一致。
+    - service：草稿 + 预发(verify) + 线上(online) 全部在运行的 runtime 都写一遍，
+      拓扑与 ``engine_runtime.stage.resolve_stage_bind_id`` /
+      ``_hot_update_service_bot_passport_token`` 一致，避免"写到草稿、对话却在
+      预发/线上容器"导致 codefuse.json 缺失。
     """
     owner_id = user.staffId
 
@@ -450,36 +510,67 @@ async def save_codefuse_token(
     token, workid = _decode_auth_code(request.token)
     cmd = _build_codefuse_write_cmd(token, workid, owner_id)
 
-    # ── Execute command via the correct provider ──
-    provider = binding.device_provider
-    device_id = binding.device_id
+    bot_type = (bot.get("bot_type") or "personal") if isinstance(bot, dict) else "personal"
 
-    if provider == "baas":
-        # BaaS / poolab: use bot-level exec API
-        bot_uuid = (binding.device_props or {}).get("bot_uuid")
-        if not bot_uuid:
-            raise HTTPException(
-                status_code=400, detail="Bot has no BaaS bot_uuid in device_props"
-            )
-        try:
-            result = baas_service.exec_command_on_bot(
-                bot_uuid=bot_uuid, cmd=cmd, timeout_seconds=30
-            )
-        except Exception as e:
-            log.error("[save_codefuse_token] exec_command_on_bot failed: bot_uuid=%s error=%s", bot_uuid, e)
-            raise HTTPException(status_code=502, detail=f"Failed to write token to container: {e}")
+    # ── personal：单 binding，行为与历史完全一致 ──
+    if bot_type != SERVICE_BOT_TYPE:
+        ok, status_code, detail, provider = _exec_codefuse_write_to_binding(
+            binding, cmd, baas_service, device_service,
+        )
+        if not ok:
+            raise HTTPException(status_code=status_code, detail=detail)
+        log.info("[save_codefuse_token] token written: bot_id=%s provider=%s", bot_id, provider)
+        return {"success": True, "bot_id": bot_id, "provider": provider}
 
-        exit_code = result.get("exit_code", -1) if isinstance(result, dict) else -1
-        if exit_code != 0:
-            log.warning("[save_codefuse_token] non-zero exit: bot_uuid=%s result=%s", bot_uuid, result)
-            raise HTTPException(status_code=502, detail=f"Command exited with code {exit_code}")
-    else:
-        # Arca / local: use DeviceService.exec_shell (routed by device_id)
-        try:
-            device_service.exec_shell(device_id=device_id, shell_cmd=cmd)
-        except Exception as e:
-            log.error("[save_codefuse_token] exec_shell failed: device_id=%s error=%s", device_id, e)
-            raise HTTPException(status_code=502, detail=f"Failed to write token to container: {e}")
+    # ── service：把 codefuse.json 写进所有在运行的 runtime（草稿/预发/线上） ──
+    runtime_binding_ids = resolve_codefuse_runtime_binding_ids(
+        bot=bot, publish_repo=publish_repo, binding_repo=device_repo,
+    )
+    if not runtime_binding_ids:
+        raise HTTPException(status_code=400, detail="Bot has no device binding")
 
-    log.info("[save_codefuse_token] token written: bot_id=%s provider=%s", bot_id, provider)
-    return {"success": True, "bot_id": bot_id, "provider": provider}
+    targets = []
+    for bid in runtime_binding_ids:
+        rt_binding = device_repo.get_by_id(int(bid))
+        if rt_binding is None:
+            log.warning("[save_codefuse_token] binding not found, skip: bot_id=%s binding_id=%s", bot_id, bid)
+            continue
+        targets.append(rt_binding)
+
+    if not targets:
+        raise HTTPException(status_code=404, detail="No live device binding found")
+
+    results = []
+    wrote_any = False
+    first_failure = None
+    for rt_binding in targets:
+        ok, status_code, detail, provider = _exec_codefuse_write_to_binding(
+            rt_binding, cmd, baas_service, device_service,
+            log_prefix="save_codefuse_token[service]",
+        )
+        results.append({
+            "binding_id": getattr(rt_binding, "id", None),
+            "provider": provider,
+            "ok": ok,
+        })
+        if ok:
+            wrote_any = True
+        elif first_failure is None:
+            first_failure = (status_code, detail)
+
+    log.info(
+        "[save_codefuse_token] service bot token written: bot_id=%s targets=%s wrote_any=%s results=%s",
+        bot_id, len(results), wrote_any, results,
+    )
+    if not wrote_any:
+        status_code, detail = first_failure or (502, "No live runtime accepted the codefuse token")
+        raise HTTPException(status_code=status_code, detail=detail)
+
+    ok_providers = [r["provider"] for r in results if r["ok"]]
+    return {
+        "success": True,
+        "bot_id": bot_id,
+        "provider": ok_providers[0] if ok_providers else "",
+        "providers": ok_providers,
+        "targets": len(results),
+    }

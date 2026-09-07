@@ -3187,12 +3187,17 @@ class BotService(BotServiceProtocol):
     def _refresh_codefuse_token_on_device(
         self, *, bot_id: str, user_id: str, plaintext_token: str
     ) -> None:
-        """把明文 codefuse auth_code 写入 bot 当前绑定设备的 codefuse.json。
+        """把明文 codefuse auth_code 写入 bot 所有在运行行时的 codefuse.json。
+
+        personal：仅草稿 binding；service：草稿 + 预发(verify) + 线上(online)，
+        拓扑与 ``aicoding/router.save_codefuse_token`` 及
+        ``engine_runtime.stage.resolve_stage_bind_id`` 一致——避免 token 只写
+        草稿、而对话实际承接在预发/线上容器导致 codefuse.json 缺失。
 
         baas 设备走 ``write_codefuse_token_baas``（exec_command_on_bot），
-        arca / local 设备走 ``DeviceService.exec_shell``，与
-        ``aicoding/router.save_codefuse_token`` 的双分支对称。设备未 ACTIVE /
-        无 binding / exec 失败均只告警，不抛出（异步线程上下文，无法回传错误）。
+        arca / local 设备走 ``DeviceService.exec_shell``。任一 runtime 缺
+        bot_uuid / device_id / binding / exec 失败均只告警跳过，不抛出（异步
+        线程上下文，无法回传错误）；只要有一条 runtime 写入成功即视为刷新完成。
         """
         try:
             bot = self._repository.get_by_id_and_owner(bot_id, user_id)
@@ -3202,8 +3207,16 @@ class BotService(BotServiceProtocol):
                     bot_id,
                 )
                 return
-            binding_id = bot.get("binding_id")
-            if not binding_id:
+
+            from agentclaw.community.core.bot_management.codefuse_runtime_targets import (
+                resolve_codefuse_runtime_binding_ids,
+            )
+
+            binding_ids = resolve_codefuse_runtime_binding_ids(
+                bot=bot, publish_repo=self._bot_publish_repo,
+                binding_repo=self._device_binding_repo,
+            )
+            if not binding_ids:
                 logger.warning(
                     "[bot_service._refresh_codefuse_token_on_device] no binding for bot %s",
                     bot_id,
@@ -3211,48 +3224,70 @@ class BotService(BotServiceProtocol):
                 return
 
             device_service = self._device_service_provider()
-            binding = self._device_binding_repo.get_by_id(binding_id)
-            if not binding:
+            baas_service = self._baas_service_provider()
+            wrote_any = False
+            for binding_id in binding_ids:
+                binding = self._device_binding_repo.get_by_id(binding_id)
+                if not binding:
+                    logger.warning(
+                        "[bot_service._refresh_codefuse_token_on_device] binding %s not found",
+                        binding_id,
+                    )
+                    continue
+
+                provider = getattr(binding, "device_provider", None) or ""
+                if provider == "baas":
+                    bot_uuid = (getattr(binding, "device_props", None) or {}).get("bot_uuid")
+                    if not bot_uuid:
+                        logger.warning(
+                            "[bot_service._refresh_codefuse_token_on_device] no bot_uuid for "
+                            "bot %s binding %s", bot_id, binding_id,
+                        )
+                        continue
+                    from agentclaw.community.core.devices.services.baas_codefuse_writer import (
+                        write_codefuse_token_baas,
+                    )
+                    # 单 runtime 写入失败只告警跳过，不中断其它 runtime（异步 best-effort）。
+                    try:
+                        write_codefuse_token_baas(baas_service, bot_uuid, plaintext_token)
+                    except Exception as exc:
+                        logger.warning(
+                            "[bot_service._refresh_codefuse_token_on_device] write failed (baas) "
+                            "for bot %s binding %s: %s", bot_id, binding_id, exc, exc_info=True,
+                        )
+                        continue
+                else:
+                    device_id = getattr(binding, "device_id", None)
+                    if not device_id:
+                        logger.warning(
+                            "[bot_service._refresh_codefuse_token_on_device] no device_id for "
+                            "bot %s binding %s", bot_id, binding_id,
+                        )
+                        continue
+                    from agentclaw.community.core.bot_management.codefuse_token import (
+                        build_codefuse_write_cmd_from_auth_code,
+                    )
+                    try:
+                        cmd = build_codefuse_write_cmd_from_auth_code(plaintext_token)
+                        device_service.exec_shell(device_id=device_id, shell_cmd=cmd)
+                    except Exception as exc:
+                        logger.warning(
+                            "[bot_service._refresh_codefuse_token_on_device] write failed (%s) "
+                            "for bot %s binding %s: %s", provider, bot_id, binding_id, exc, exc_info=True,
+                        )
+                        continue
+
+                wrote_any = True
+                logger.info(
+                    "[bot_service._refresh_codefuse_token_on_device] codefuse.json refreshed: "
+                    "bot_id=%s binding_id=%s provider=%s", bot_id, binding_id, provider,
+                )
+
+            if not wrote_any:
                 logger.warning(
-                    "[bot_service._refresh_codefuse_token_on_device] binding %s not found",
-                    binding_id,
+                    "[bot_service._refresh_codefuse_token_on_device] codefuse.json not written "
+                    "to any runtime: bot_id=%s", bot_id,
                 )
-                return
-
-            from agentclaw.community.core.bot_management.codefuse_token import (
-                build_codefuse_write_cmd_from_auth_code,
-            )
-
-            provider = getattr(binding, "device_provider", None) or ""
-            if provider == "baas":
-                bot_uuid = (getattr(binding, "device_props", None) or {}).get("bot_uuid")
-                if not bot_uuid:
-                    logger.warning(
-                        "[bot_service._refresh_codefuse_token_on_device] no bot_uuid for "
-                        "bot %s", bot_id,
-                    )
-                    return
-                from agentclaw.community.core.devices.services.baas_codefuse_writer import (
-                    write_codefuse_token_baas,
-                )
-                write_codefuse_token_baas(
-                    self._baas_service_provider(), bot_uuid, plaintext_token
-                )
-            else:
-                device_id = getattr(binding, "device_id", None)
-                if not device_id:
-                    logger.warning(
-                        "[bot_service._refresh_codefuse_token_on_device] no device_id for "
-                        "bot %s", bot_id,
-                    )
-                    return
-                cmd = build_codefuse_write_cmd_from_auth_code(plaintext_token)
-                device_service.exec_shell(device_id=device_id, shell_cmd=cmd)
-
-            logger.info(
-                "[bot_service._refresh_codefuse_token_on_device] codefuse.json refreshed: "
-                "bot_id=%s provider=%s", bot_id, provider,
-            )
         except Exception as e:
             logger.warning(
                 "[bot_service._refresh_codefuse_token_on_device] failed for bot %s: %s",
