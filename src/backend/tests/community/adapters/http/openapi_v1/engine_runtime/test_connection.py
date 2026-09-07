@@ -28,6 +28,7 @@ from agentclaw.community.core.engine_runtime.models import (
     EngineResult,
     SocketInfo,
 )
+from agentclaw.community.di.config import GatewayEndpoint
 
 from .conftest import BOT, OWNER, fails, ok
 
@@ -86,6 +87,10 @@ def client(relay, connections, friendships, expert):
             binder.bind(EngineConnectionServiceProtocol, to=connections)
             binder.bind(HumanBotFriendshipServiceProtocol, to=friendships)
             binder.bind(ExpertChatServiceProtocol, to=expert)
+            binder.bind(
+                GatewayEndpoint,
+                to=GatewayEndpoint(base_url="https://gw.example"),
+            )
 
     app = FastAPI()
     app.include_router(router)
@@ -173,8 +178,24 @@ def test_explicit_friend_connection_is_session_scoped(
         )
     )
 
-    assert data["session_id"] == "friend-session"
-    assert data["connection"]["ws_url"].startswith("wss://")
+    assert data == {
+        "engine": "openclaw",
+        "expires_at": "2026-09-07T08:09:09+00:00",
+        "sockets": [
+            {
+                "kind": "chat",
+                "url": (
+                    "wss://gw.example/openapi/v1/bots/messages/ws/"
+                    "ARCA_SANDBOX-test@0:20003/api/openclaw/ws"
+                    "?x-proxypass-token="
+                    "header.eyJleHAiOjE3ODg3Njg1NDl9.signature"
+                ),
+            }
+        ],
+    }
+    serialized = str(data)
+    assert "internal.invalid" not in serialized
+    assert "bind_id" not in serialized
     assert connections.calls == []
     connect = next(call for call in expert.calls if call[0] == "connect_chat_session")
     assert connect[2]["user_id"] == "friend-1"
@@ -185,3 +206,66 @@ def test_explicit_friend_connection_requires_session_id(client, friendships, exp
     response = client.get(URL, params={"f_user_id": "friend-1"})
     assert fails(response, 404)["message"] == "Not found"
     assert expert.calls == []
+
+
+def test_friend_connection_preserves_not_ready_polling_contract(
+    client, friendships, expert
+):
+    friendships.allowed = True
+    expert.connection_result = {"connection": None, "need_poll": True}
+
+    data = ok(
+        client.get(
+            URL,
+            params={"f_user_id": "friend-1", "session_id": "friend-session"},
+        )
+    )
+
+    assert data == {
+        "session_id": "friend-session",
+        "need_poll": True,
+        "connection": None,
+    }
+
+
+def test_friend_connection_keeps_the_existing_poll_response(
+    client, friendships, expert
+):
+    friendships.allowed = True
+    expert.connection_result = {"connection": None, "need_poll": True}
+
+    data = ok(
+        client.get(
+            URL,
+            params={"f_user_id": "friend-1", "session_id": "friend-session"},
+        )
+    )
+
+    assert data == {
+        "session_id": "friend-session",
+        "need_poll": True,
+        "connection": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "connection",
+    [
+        None,
+        {"engine_type": "openclaw", "token": "header.payload.signature"},
+        {"engine_type": "openclaw", "target": "target"},
+        {"engine_type": "openclaw", "target": "target", "token": "opaque"},
+    ],
+)
+def test_ready_friend_connection_refuses_incomplete_upstream_material(
+    client, friendships, expert, connection
+):
+    friendships.allowed = True
+    expert.connection_result = {"connection": connection}
+
+    response = client.get(
+        URL,
+        params={"f_user_id": "friend-1", "session_id": "friend-session"},
+    )
+
+    assert fails(response, 502)["message"] == "Engine service error"

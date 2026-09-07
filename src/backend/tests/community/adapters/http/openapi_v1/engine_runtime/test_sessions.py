@@ -43,6 +43,7 @@ ENGINE_MESSAGE = {
     "role": "assistant",
     "content": "Done.",
     "metadata": {"internal_trace": "sandbox-7f3a"},
+    "history_meta": {"summary": "earlier context"},
     "gmt_created": "2026-07-30T09:12:04+00:00",
 }
 
@@ -405,12 +406,12 @@ def test_delete_session(client, relay):
     assert relay.calls[0]["method"] == "DELETE"
 
 
-def test_list_messages_drops_engine_metadata(client, relay):
+def test_list_messages_preserves_legacy_engine_metadata(client, relay):
     relay.results = [EngineResult(data=[ENGINE_MESSAGE])]
     data = ok(client.get(f"{_base()}/{SESSION_ID}/messages"))
     assert data["items"][0]["role"] == "assistant"
-    assert "metadata" not in data["items"][0]
-    assert "sandbox-7f3a" not in str(data)
+    assert data["items"][0]["metadata"] == {"internal_trace": "sandbox-7f3a"}
+    assert data["items"][0]["history_meta"] == {"summary": "earlier context"}
 
 
 def test_unknown_message_role_does_not_500(client, relay):
@@ -984,6 +985,23 @@ def test_each_friend_session_operation_reuses_expert_chat(
     assert response.status_code in (200, 201), response.json()
     assert expert_method in [call[0] for call in expert.calls]
     assert relay.calls == []
+
+
+def test_friend_messages_preserve_legacy_metadata(
+    make_client, friendships, expert
+):
+    friendships.allowed = True
+    client = make_client(router, caller="friend-1")
+
+    data = ok(
+        client.get(
+            f"{_base()}/friend-session/messages",
+            params={"owner_id": OWNER, "f_user_id": "friend-1"},
+        )
+    )
+
+    assert data["items"][0]["metadata"] == {"source": "legacy"}
+    assert data["items"][0]["history_meta"] == {"summary": "context"}
 
 
 def test_friend_access_is_draft_only(make_client, friendships, expert):
