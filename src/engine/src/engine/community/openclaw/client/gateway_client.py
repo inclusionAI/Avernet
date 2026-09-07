@@ -717,7 +717,11 @@ class OpenClawGatewayClient:
                     return announce_matches_parent_session(payload)
                 if pending_early_final is not None and payload.get("state") not in ("final", "error", "aborted"):
                     payload_session_key = payload.get("sessionKey")
-                    return payload_session_key == session_key
+                    # COSEC: Fold only the default-agent alias, preserving other agents' isolation.
+                    return isinstance(payload_session_key, str) and (
+                        payload_session_key.strip().lower().removeprefix("agent:main:")
+                        == session_key.strip().lower().removeprefix("agent:main:")
+                    )
                 return False
 
             payload_session_key = payload.get("sessionKey")
