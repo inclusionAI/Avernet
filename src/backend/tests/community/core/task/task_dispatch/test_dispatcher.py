@@ -345,6 +345,34 @@ def test_search_strategy_rule_mode_coverage_forces_single_group_bbs_then_normal(
     assert r4.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
 
 
+def test_search_strategy_rule_mode_coverage_pool_fallback_when_join_empty():
+    """on-path:关键词候选与 claim 池无交集(join 空)→ 覆盖路由用 claim 池兜底命中 single。"""
+
+    class _Discover:
+        def search_by_keyword(self, **kwargs):
+            return {"items": [{"bot_id": "stranger"}]}  # 不在 claim 池 → join 空
+
+    class _Bot:
+        async def send_and_wait_async(self, **kwargs):
+            raise AssertionError("rule path must not call search skill")
+
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    graph = TaskExecutionGraph(
+        run_id=1, loop_round=0, status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner", "mode_coverage": []},
+    )
+    strat = SearchBasedDispatchStrategy(
+        _Bot(), _Discover(), bcn=_ClaimBcn(),
+        task_settings=_ModeCoverageSettings(True),
+    )
+    result = _run(strat.apply(_node("c1"), graph))
+
+    # join 空 → claim 池兜底 single(_ClaimBcn 首条 rule-a:1)
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "rule-a:1"
+
+
 def test_search_strategy_rule_mode_coverage_off_falls_back_to_offpath():
     """mode_coverage OFF(task_settings False)→ 走 off-path 正常 join+candidate-count。"""
 
@@ -429,8 +457,11 @@ class TestTokenize:
 
     def test_two_char_stopwords_filtered(self):
         # 2 字功能词/语气词 + 泛义动词 + 模糊量词 被 _STOPWORDS 滤掉
-        for w in ["进行", "可以", "需要", "产出", "提供", "给出", "不少", "梳理", "分析", "研究"]:
+        for w in ["进行", "可以", "需要", "产出", "提供", "给出", "不少", "梳理"]:
             assert _tokenize(w) == [], f"{w} 应为停用词被滤掉"
+        # 偏业务词带业务语义(覆盖率/构建工具/数据整合/综合平台/数据分析/技术调研/风险评估),保留不滤
+        for w in ["分析", "研究", "调研", "评估", "考察", "论证", "覆盖", "构建", "搭建", "整合", "综合"]:
+            assert _tokenize(w) != [], f"{w} 带业务语义应保留,不应被停用词滤掉"
         # 业务名词保留(不被误滤)
         assert "存储" in _tokenize("存储行业")
 

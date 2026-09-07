@@ -301,8 +301,8 @@ def test_join_candidates_pool_empty_when_no_intersection():
 
 
 def test_coverage_route_forces_single_first():
-    """covered={} & joined 非空 → 强制 single(joined[0])。"""
-    result = _coverage_route(["rule-a:1", "rule-b:2"], set())
+    """covered={} & joined 非空 → 强制 single(joined[0]);pool 不参与。"""
+    result = _coverage_route(["rule-a:1", "rule-b:2"], [], set())
 
     assert result.outcome == SearchOutcome.HIT_SINGLE
     assert result.bot_id == "rule-a:1"
@@ -310,7 +310,7 @@ def test_coverage_route_forces_single_first():
 
 def test_coverage_route_forces_group_when_single_covered():
     """covered={single} & len(joined)≥2 → 强制 group(前 3)。"""
-    result = _coverage_route(["rule-a:1", "rule-b:2", "rule-c:3"], {"single"})
+    result = _coverage_route(["rule-a:1", "rule-b:2", "rule-c:3"], [], {"single"})
 
     assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
     assert result.group_formation.bot_ids == ["rule-a:1", "rule-b:2", "rule-c:3"]
@@ -318,15 +318,31 @@ def test_coverage_route_forces_group_when_single_covered():
 
 def test_coverage_route_forces_bbs_miss_when_single_and_group_covered():
     """covered={single,group} → 强制 MISS(mode_coverage_bbs) 升根级 BBS。"""
-    result = _coverage_route(["rule-a:1"], {"single", "group"})
+    result = _coverage_route(["rule-a:1"], [], {"single", "group"})
 
     assert result.outcome == SearchOutcome.MISS
     assert result.miss_reason == "mode_coverage_bbs"
 
 
-def test_coverage_route_bbs_feasible_even_when_joined_empty():
-    """joined 空挡不住 single/group → 直接 bbs MISS(恒可行)。"""
-    result = _coverage_route([], set())
+def test_coverage_route_single_falls_back_to_pool_when_joined_empty():
+    """join 为空 → claim+public 池兜底命中 single(保证模式可覆盖,不卡死)。"""
+    result = _coverage_route([], ["pool-a:1", "pool-b:2"], set())
+
+    assert result.outcome == SearchOutcome.HIT_SINGLE
+    assert result.bot_id == "pool-a:1"
+
+
+def test_coverage_route_group_falls_back_to_pool_when_joined_insufficient():
+    """joined 仅 1 不足 group → pool 兜底命中 group(前 3)。"""
+    result = _coverage_route(["only:1"], ["pool-a:1", "pool-b:2", "pool-c:3"], {"single"})
+
+    assert result.outcome == SearchOutcome.HIT_MULTI_BOTS
+    assert result.group_formation.bot_ids == ["pool-a:1", "pool-b:2", "pool-c:3"]
+
+
+def test_coverage_route_bbs_when_joined_and_pool_both_empty():
+    """joined 与 pool 均空 → single/group 跳过 → bbs MISS(恒可行)。"""
+    result = _coverage_route([], [], set())
 
     assert result.outcome == SearchOutcome.MISS
     assert result.miss_reason == "mode_coverage_bbs"
@@ -334,7 +350,7 @@ def test_coverage_route_bbs_feasible_even_when_joined_empty():
 
 def test_coverage_route_returns_none_when_all_covered():
     """全覆盖 → None(调用方兜底走 off-path 正常派发)。"""
-    assert _coverage_route(["rule-a:1", "rule-b:2"], {"single", "group", "bbs"}) is None
+    assert _coverage_route(["rule-a:1", "rule-b:2"], [], {"single", "group", "bbs"}) is None
 
 
 def test_load_rule_test_pool_returns_claim_enabled_bot_ids():

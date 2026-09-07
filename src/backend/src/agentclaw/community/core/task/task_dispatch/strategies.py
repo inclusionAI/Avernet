@@ -44,16 +44,16 @@ _STOPWORDS: frozenset[str] = frozenset({
     "之前", "之后", "现在", "目前", "之间", "以上", "以下",
     "一些", "某种", "只是", "还是", "就是", "不是", "不能", "不要",
     "成为", "作为", "其中", "其它", "另外", "比如", "例如",
+    # 偏业务词保留不滤(覆盖率/构建工具/数据整合/综合平台/数据分析/技术调研/风险评估 等需可命中):
+    # 覆盖/构建/搭建/整合/综合/分析/研究/调研/评估/考察/论证 不入停用词。
     # 泛义动词(产出/给予/具备类,无业务区分度;业务名词如 存储/架构/数据/市场 不滤):
     "产出", "提供", "给出", "做出", "得到", "形成", "构成", "具备", "包含", "包括",
-    "涉及", "覆盖", "带来", "产生",
+    "涉及", "带来", "产生",
     # 叙述/整理类动词:
     "梳理", "整理", "归纳", "总结", "概述", "阐述", "说明", "描述", "列举",
-    "呈现", "展示", "列出", "写出", "拟定", "制定", "建立", "构建", "搭建",
-    # 分析/研究类(动词泛义;业务名词另存,如 数据分析Bot 由「数据」命中):
-    "分析", "研究", "调研", "评估", "考察", "论证",
+    "呈现", "展示", "列出", "写出", "拟定", "制定", "建立",
     # 模糊量词/框架词:
-    "不少", "若干", "针对", "围绕", "结合", "整合", "综合",
+    "不少", "若干", "针对", "围绕", "结合",
 })
 
 # Rule 模式候选池不再写死:由 ``SearchBasedDispatchStrategy._load_rule_test_pool``
@@ -276,7 +276,7 @@ class SearchBasedDispatchStrategy:
             covered = set(graph.extend_props.get("mode_coverage") or [])
             if mode_coverage_on and not _MODE_COVERAGE_ALL.issubset(covered):
                 # on-path 覆盖路由:force 未覆盖模式(single→group→bbs);全覆盖后回落 off-path
-                sr = _coverage_route(joined, covered)
+                sr = _coverage_route(joined, bot_pool, covered)
                 if sr is None:  # 全覆盖兜底(预判已挡,防御)
                     sr = _offpath_normal(joined)
             else:
@@ -659,30 +659,48 @@ def _offpath_normal(joined: list[str]) -> SearchResult:
     )
 
 
-def _coverage_route(joined: list[str], covered: set[str]) -> SearchResult | None:
+def _force_pick(joined: list[str], pool: list[str], min_needed: int) -> list[str] | None:
+    """覆盖路由兜底取 bot:优先 ``joined``(关键词命中 ∩ claim+public,语义最相关),
+    ``joined`` 不足时用 ``pool``(claim+public 名单)兜底,保证模式可命中。
+    二者均不足 → ``None``(该档跳过)。"""
+    if len(joined) >= min_needed:
+        return joined
+    if len(pool) >= min_needed:
+        return pool
+    return None
+
+
+def _coverage_route(
+    joined: list[str], pool: list[str], covered: set[str]
+) -> SearchResult | None:
     """on-path 模式覆盖路由:按 ``single→group→bbs`` 取首个未覆盖模式强制覆盖。
 
-    - single 未覆盖 & ``joined`` 非空 → ``HIT_SINGLE(joined[0])``;
-    - group 未覆盖 & ``len(joined)≥2`` → ``HIT_MULTI_BOTS``(前 ``_RULE_TEST_MAX_GROUP_MEMBERS`` 个);
+    兜底保证三模式可命中(关键词候选 ∩ claim 池为空时不再卡死):
+    - single 未覆盖 → 优先 ``joined[0]``,空则 ``pool[0]`` 兜底 → ``HIT_SINGLE``;
+    - group 未覆盖 → 优先 ``joined``(≥2),不足则 ``pool``(≥2)兜底 → ``HIT_MULTI_BOTS``(前
+      ``_RULE_TEST_MAX_GROUP_MEMBERS`` 个,manager_worker);
     - bbs 未覆盖 → ``MISS(mode_coverage_bbs)``,交现有 miss→HUNG→根级 BBS 升级链路(恒可行)。
-    某档不可行(如 joined 空挡不住 single/group)→ 跳下一档;返回 ``None``=已全覆盖
-    (调用方预判,兜底由 :func:`_offpath_normal` 走正常派发)。
+    某档 joined 与 pool 均不足 → 跳下一档;返回 ``None``=已全覆盖(调用方预判,兜底走 off-path)。
     """
-    if "single" not in covered and joined:
-        bot_id = joined[0]
-        _, _, owner_id = bot_id.partition(":")
-        return SearchResult(
-            outcome=SearchOutcome.HIT_SINGLE,
-            bot_id=bot_id,
-            owner_id=owner_id or None,
-        )
-    if "group" not in covered and len(joined) >= 2:
-        return SearchResult(
-            outcome=SearchOutcome.HIT_MULTI_BOTS,
-            group_formation=_build_manager_worker_group(
-                joined[: min(_RULE_TEST_MAX_GROUP_MEMBERS, len(joined))]
-            ),
-        )
+    if "single" not in covered:
+        bots = _force_pick(joined, pool, 1)
+        if bots:
+            bot_id = bots[0]
+            _, _, owner_id = bot_id.partition(":")
+            return SearchResult(
+                outcome=SearchOutcome.HIT_SINGLE,
+                bot_id=bot_id,
+                owner_id=owner_id or None,
+            )
+    if "group" not in covered:
+        bots = _force_pick(joined, pool, 2)
+        if bots:
+            return SearchResult(
+                outcome=SearchOutcome.HIT_MULTI_BOTS,
+                group_formation=_build_manager_worker_group(
+                    bots[: min(_RULE_TEST_MAX_GROUP_MEMBERS, len(bots))]
+                ),
+            )
     if "bbs" not in covered:
         return SearchResult(outcome=SearchOutcome.MISS, miss_reason=_MODE_COVERAGE_BBS)
     return None
