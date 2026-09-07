@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 
 class NotifyRequest(BaseModel):
@@ -19,14 +19,18 @@ class NotifyRequest(BaseModel):
 
 
 class EngineProperties(BaseModel):
-    """引擎专属属性 bag。
+    """引擎特有参数配置。
 
-    各引擎只读取自己关心的字段；未声明的字段经 ``extra="allow"`` 原样保留，
-    这样 aicoding 后续新增引擎级开关时无需再改本层 schema。当前唯一使用者是
-    aicoding 引擎的 agentTurn 任务：``reuse_session`` 控制「是否复用已有会话」
-    （默认 True 复用已有会话；False=每次触发新开一个会话）。其它引擎忽略本对象。
+    每个引擎级开关都必须在此声明为显式具名字段（非开放 bag），确保契约有版本、
+    有校验、随变更一并评审。当前唯一字段：
+
+    - ``reuse_session``（aicoding agentTurn）是否复用已有会话：默认 True 复用；
+      False=每次触发新开一个会话。
+
+    消费方：corp aicoding 引擎（``corp/engines/aicoding``，仅在内部全量 checkout，
+    不在 GitHub 社区版内）。社区版引擎（openclaw / claude_code）不读取本对象——
+    这是显式 no-op-by-design，而非静默丢弃（详见 ``plugin_api/cron/README.md``）。
     """
-    model_config = ConfigDict(extra="allow")
     reuse_session: Optional[bool] = Field(
         default=None,
         description="（aicoding agentTurn）是否复用已有会话：默认 True 复用；False=每次触发新开会话",
