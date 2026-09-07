@@ -8,7 +8,7 @@
 - **协程化(CR 反馈:任务执行是耗时任务)**:`on_execute`/`on_report`/`on_miss`/`on_harness`/`start_run`/`form_coop_group`/`report_result`/`DeliveryPort.deliver`/**`plan`/`dispatch`/策略 `matches`/`apply`** 全链路 `async def`;`plan`/`dispatch`(corp LLM/catalog 耗时 IO)在 per-task `threading.RLock` 锁内 `await`(同 task 串行,设计意图;不同 task 锁隔离);锁内不 `await` 的是高并发外部投递 IO(`start_run`/拉群/`deliver`),这些 `await` 在锁外;`on_*` 锁内 async collect(`await plan/dispatch`+同步 add/patch)→ 锁外 `_drain` await run/group/miss/finish;多节点投递 gather+Semaphore(`_DELIVER_CONCURRENCY=8`)下沉 `TaskRunner.start_run` 内部;`threading.RLock` 适用本仓一次性事件循环/跨线程回调模型(corp 单持久 loop 并发同 task 需切 `asyncio.Lock`);单测经 `asyncio.new_event_loop().run_until_complete` 驱动(不用 `@pytest.mark.asyncio`)。
 - **类型契约**:必填端到端非可选;`T|None` 仅当 `None` 是合法域态或外部输入边界。
 - **TDD / 主 seam 优先**:P8 singlebox E2E 最高 seam;P1–P7 契约单测补 E2E 覆盖不到的分支。
-- **写网关收口**:图谱原子变更只走 `TaskGraphService` 8 API(5 核心写/读 + 3 派生只读);旁路同写口。
+- **图谱网关收口**:图谱原子变更与查询统一走 `TaskGraphService`(5 核心写/读 + 3 关系派生查询 + 4 状态查询);旁路同写口。
 - **框架零 case 知识**:任何具体节点名(`N_overview`/`N_market` 等)只允许出现在 case 的策略 stub 产出或测试 stub,**禁止出现在框架代码**。
 - **不并存两套**:合并为单一实现,删除并行包与旧模型失效代码。
 
@@ -16,10 +16,10 @@
 
 ```
 M0  领域模型(Relation/6态/瘦身后字段) + 中间类型(patch/criteria/op_result/callback_data)
- → M1  TaskGraphService 独立(8 API:5 核心写/读+3 派生只读;relations 依赖派生)
+ → M1  TaskGraphService 独立(5 核心写/读+3 关系派生查询+4 状态查询)
  → M2  编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件;串行锁)
  → M3  TaskPlanner 编排壳 + 内置策略池(零参,去硬编码)
- → M4  TaskDispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用)
+ → M4  TaskDispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/TaskLoopCallback;BCS复用)
  → M5  TaskHarness 旁路 + TaskService facade 2 API
  → M6  singlebox E2E(gwqie46v7hzr1w6h 三阶段三模态)
 ```
@@ -35,7 +35,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 - T0.5 派生规则注释(分解树统一):① 结构子(`get_child_tasks`)与结构父(`get_parent_task`)均从 `relations` 分解树(src→dst 单入)派生;② `depth` 从 relations 递归;③ 传播读结构子(`get_child_tasks`),就绪=被 add 即就绪(无 `dependencies_satisfied` 闸门);④ 数据流由步进式批规划+结构父聚合上下文承载,无跨兄弟数据边。
 - ✅ 验收:模型与最新 classDiagram 1:1;`grep` 无 `depends_on`/`decomposed_by`/`collab_mode`/`SLA`/`Scope`/`RunMode`/`CollabMode`/`verifier`/`NodeRuntimePatch`/`TaskGraphInfo` 残留;TaskNode 无 `decomposed_by` 字段(结构归属由 relations 分解树派生)。
 
-## M1 — TaskGraphService(独立图谱 SSOT,8 API:5 核心写/读+3 派生只读)
+## M1 — TaskGraphService(独立图谱 SSOT:5 核心写/读+3 关系派生查询+4 状态查询)
 - T1.1 `TaskGraphService.initialize_graph(task_info) -> TaskExecutionGraph`:建图(run_id 分配,根 PENDING);幂等冲突。
 - T1.2 `add_task_nodes(tasks, parent_node_id) -> TaskExecutionGraph`:并子图(**显式传父** `parent_node_id`,方案 C);DEPENDENCY 关系写入 `graph.relations`(src=parent_node_id,dst=新子,单入);父节点进 PLANNING(`_DELEGATABLE_PARENT={PENDING,FAILED,PLANNING}`);单层同构硬约束(本批前序依赖仅指向已存节点,本批内不互依);触发条件 a/b/c 校验(编排核调前判,store 双检)。
 - T1.3 `update_task_node_info(patch) -> NodeOpResult`:节点级原子写;两张状态机——`_ACCEPTANCE_TRANSITIONS`(`RUNNING→{DONE,FAILED}`、`PLANNING→{DONE,FAILED}` 根终验)与 `_DIRECT_TRANSITIONS`(`PENDING→RUNNING` 派发、`RUNNING→PENDING` Harness 复位、`PLANNING→DONE` 传播);acceptance 驱动 PASS→DONE / FAIL+gaps→FAILED(验收 skill 强制要求给 gaps,不存在 FAIL 无 gaps);status 直驱派发写 run_mode/assignee+RUNNING;幂等。
@@ -71,7 +71,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
   - T4a.x 单测:四态填 TaskNode.run_info(HIT_SINGLE/HIT_GROUP/HIT_MULTI_BOTS 填 run_mode/assignee、MISS 不填标 miss_events)、collab_mode 来自 search(内部)、dispatcher 不写图不起 run、编排核落库后 DISPATCHED 必 RUNNING、前序依赖双检、start_run 由编排核触发(批量)、MISS 节点 status 仍 PENDING。
 - **M4b TaskRunner + TaskLoopCallback**
   - T4.4 `async TaskRunner.start_run(toDoTaskList)->list[bool]`:批量;协程化——真实投递(单 bot workflow/BCS/BBS 广场)是网络 IO,内部 `asyncio.gather`+`_DELIVER_CONCURRENCY`(Semaphore=8)并发投递(对齐 backend lifecycle),`await` 不阻塞编排核;按 run_mode(str)自适应投递 single_bot/coop_group/bbs(BBS bot 认领任务→自算 gap+规划子任务→自执行);返回每派发是否成功。`form_coop_group` 同 async(BCS 建群 IO),并在 BCS integration 边界经 `BcsBotIdentityResolver` 将产品 Bot ID 转成权威 `{bot_id}:{owner_id}` UUID。
-  - T4.5 `TaskRunner.query_status(task_id)->Status` / `query_detail(TaskNode)->TaskNode` / `query_result(TaskNode)->TaskNode` / `query_bot_tasks(bot_id)->list[TaskNode]`。
+  - T4.5 `TaskGraphService.query_status(task_id)->Status` / `query_detail(TaskNode)->TaskNode` / `query_result(TaskNode)->TaskNode` / `query_bot_tasks(bot_id)->list[TaskNode]`；`TaskRunner` 不暴露状态查询。
   - T4.6 `TaskRunner.form_coop_group(GroupFormation)->group_id`:(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS(`group_strategy=collab_mode`;state_machine 注入 workflow yaml);driver/participants/manager/worker/binding bot_ids 使用 BCS UUID,state-machine binding key 使用 workflow 逻辑名;群自闭环持 `SubDagRef(bcs_run_id)`。Avernet BCS local/mock;prod wiring 属 corp。
   - T4.7 `TaskLoopCallback`:PUSH 回投;`TaskCallbackData{loop_task_id,workflow_type,workflow_id,instance_id,result}`;`async start_run(data)`(进度)/`async report_result(data)`(完成/失败;协程化——`await` 编排核 `on_report` 不阻塞回投调用方);合法终态严格为 `success:bool/data/gaps:list[str]`,FAIL gaps 非空;适配层组装 TaskNodePatch(PASS/FAIL/output),执行/回收异常或非法终态用 `exec_error` 进入 Harness。Poller 统一拥有 worker 执行业务 SLA,超时/poll_exhausted best-effort cancel 后按 exec_error 回投。
   - T4.8 上下文组装:`start_run` 内部 `_build_context(task_id,node)` 用 `get_child_tasks`/`get_parent_task` 组合自动判定——有结构子(`get_child_tasks` 非空)→验收模式聚合结构子(子树)DONE output+node.goal;无结构子→执行模式取结构父 P=`get_parent_task`,聚合 P 的聚合上下文={P.task_spec/goal + P 已DONE结构子(本节点兄弟)output}+本节点 task_spec。无 NODE/SUBTREE/TASK scope 入参,验收只按 (task_id,node_id) 上报节点;数据流经结构父中转,无跨兄弟数据边。
@@ -88,7 +88,7 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 - T6.1 singlebox 编排:模型+六模块全接;in-memory `TaskGraphService`;`StubDecomposer`(注入 case 节点);`StubBotDiscover`(本地 catalog 关键词 cover);`form_coop_group` BCS local/mock。
 - T6.2 用权威案例剧本 `gwqie46v7hzr1w6h` 存储行业尽调(三阶段三模态)端到端跑完:`execute→initialize_graph→on_execute(条件a)→plan(decompose(graph) 按三阶段 AC 拆 N_overview/四专题/N_practice_bbs/N_report)→add_task_nodes(根→PLANNING,relations 登记)→dispatch(决定谁来做:single_bot/coop_group 动态拉群 manager_worker;MISS+depth≥MAX→升 BBS)→start_run→TaskLoopCallback.report_result 回投→任一专题 FAIL+gaps→on_report(条件b)→plan(补救挂该节点下,该节点→PLANNING)→二次 PASS→传播治愈→图 status=DONE`。注入一次 MISS+depth 达 MAX→自动升 BBS(remove_subtree)+loop_round+++BBS bot 认领执行+上报;再注入 BBS loop_round≥BBS_MAX_DEPTH→STUCK→HUNG(人介入)。
    - 节点级重规划闸:在 N_report(或中间父)处反复回投 PASS 但根 gap 不闭,经多轮重 plan 产子,断言 plan_round 达 MAX_PLAN_ROUND→该父 HUNG(plan_round_exhausted)+ 不再产子。
-- T6.3 断言面:`get_task_dashboard` 终态(`TaskExecutionGraph`:status/loop_round/tasks[].status/acceptance_result/relations)+ 事件日志可重放 + `query_result`/`query_detail`。
+- T6.3 断言面:`get_task_dashboard` 终态(`TaskExecutionGraph`:status/loop_round/tasks[].status/acceptance_result/relations)+ 事件日志可重放 + `TaskGraphService.query_result`/`query_detail`。
 - T6.4 singlebox 覆盖脚本对齐仓库 ci(`scripts/ci/singlebox_coverage*`),与 PR CI 同一基线。
 
 ## Cross-cutting
@@ -107,10 +107,10 @@ M2 依赖 M1/M3/M4 接口(可 seam/double);M5 集成;M6 验证。
 
 ## 里程碑(M0–M6 已实现并 push;分支 `feat/task-goal-driven-collab-dev`)
 - ✅ **M0** 领域模型(先落模型)。
-- ✅ **M1** TaskGraphService 独立(8 API:5 核心写/读+3 派生只读+relations 派生)。
+- ✅ **M1** TaskGraphService 独立(5 核心写/读+3 关系派生查询+4 状态查询)。
 - ✅ **M2** 编排核 on_*(事件驱动 + 状态条件 a/b/c + plan 三条件)。
 - ✅ **M3** TaskPlanner 编排壳 + 内置策略池(零参,去硬编码)。
-- ✅ **M4** Dispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/query_*/TaskLoopCallback;BCS复用),singlebox double。
+- ✅ **M4** Dispatcher(搜推4态+form_coop_group)+ TaskRunner(start_run/TaskLoopCallback;BCS复用),状态查询归 TaskGraphService,singlebox double。
 - ✅ **M5** Harness + TaskService facade 2 API 集成。
 - ✅ **M6** singlebox E2E,行为基线对齐 `gwqie46v7hzr1w6h`(机制不变,内容来自 stub decomposer)。
 

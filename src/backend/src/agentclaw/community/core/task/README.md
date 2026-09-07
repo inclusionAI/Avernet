@@ -25,14 +25,14 @@ core/task/
 ├── task_center/                   # TaskService facade + ExecutionEngine 编排核(非独立模块)
 │   ├── task_service.py            #   facade API(execute / get_task_dashboard / list_tasks)
 │   └── engine.py                  #   ExecutionEngine:on_* 事件驱动 + 状态条件(a/b/c)推进
-├── task_context/                    # TaskGraphService 图谱 SSOT(7+2 API,独立模块)
-│   └── task_graph_service.py      #   原子变更唯一网关 + relations 分解树派生查询
+├── task_context/                  # TaskGraphService 图谱 SSOT + 状态/详情/结果查询
+│   └── task_graph_service.py      #   原子变更唯一网关 + relations 派生查询 + query_*
 ├── task_plan/                     # TaskPlanner 规划编排壳 + DecomposerPort seam(可插拔)
 │   └── planner.py                 #   plan(graph) → 委托 decompose(零 case 知识);protocols.py 延后
 ├── task_dispatch/                 # TaskDispatcher 搜推分发 + BotDiscoverPort seam(可插拔)
 │   └── dispatcher.py              #   dispatch(toDoList) → 填 run_mode/assignee 返 list[TaskNode];protocols.py 延后
 ├── task_runner/                   # TaskRunner 三模态执行 + 回投适配
-│   ├── runner.py                  #   start_run(批量)三模态自适应 + form_coop_group/get_group_session
+│   ├── task_runner.py             #   start_run(批量)三模态自适应 + form_coop_group/get_group_session；不承载状态查询
 │   └── callback_adapter.py        #   TaskCallbackData → TaskNodePatch → engine.on_report
 ├── task_harness/                  # TaskHarness 旁路常驻巡检
 │   └── harness.py                 #   周期巡检超时/崩溃 → 复位 PENDING 重投(不抢正向)

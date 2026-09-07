@@ -15,7 +15,7 @@
 
 需要一个**以目标(Goal + Acceptance)为唯一收敛判据、能跨 单 Bot / 协作群 / BBS 三种执行模态自驱跑完「理解 → 规划 → 派发 → 执行 → 验收 → 重规划」闭环**的任务动态规划执行框架,且必须**严格按最新设计的领域模型与六模块架构实现**。
 
-领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 含 `task_id`/`node_run_graph`、`TaskExecutionGraph` 含 `run_id`/`relations`(分解树,承载结构归属;数据流由批规划+结构父聚合上下文承载)、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(8 API:5 核心写/读+3 派生只读)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
+领域模型收敛为:**`Relation` 一等公民(`TaskNode` 不持 `depends_on`)**、**6 态 `Status`(含 `PLANNING`)**、`TaskNode` 含 `task_id`/`node_run_graph`、`TaskExecutionGraph` 含 `run_id`/`relations`(分解树,承载结构归属;数据流由批规划+结构父聚合上下文承载)、`RuntimeInfo.run_mode` 为 str(无 `collab_mode`)、无 `SLA`/`Scope`/`CollabMode` 枚举、`AcceptanceResult` 无 `verifier`;5 个模块文档进一步明确:`TaskService` 2 facade(`execute`/`get_task_dashboard`)、`TaskGraphService` 独立图谱模块(5 核心写/读+3 关系派生查询+4 状态查询)、`TaskPlanner.plan` 与 `TaskGraphService.add_task_nodes` 有显式状态触发条件(a/b/c)、`TaskDispatcher.dispatch` 决定"谁来做"写 `assignee`、`TaskRunner.start_run` 一个入口三模态自适应、`TaskLoopCallback` PUSH 回投。代码库按此从零重新实现。
 
 ## Solution
 
@@ -29,10 +29,11 @@
    - **`PLANNING` 新态**:承担"待规划/委托中"语义(节点已被/将被分解委托子执行)。
 2. **六模块 = 流程架构图 + 5 模块文档**:
    - **任务中心 `TaskService`**(对外 facade,2 API):`execute(task_info)→TaskOpResult` / `get_task_dashboard(task_id,node_id?)→TaskExecutionGraph`。内部由编排核协调其余模块。
-   - **任务图谱 `TaskGraphService`**(内部 SSOT,8 API:5 核心写/读+3 派生只读):`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`update_task_graph_info`/`query_task_dashboard`。图谱原子变更唯一网关。
+   - **任务图谱 `TaskGraphService`**(内部 SSOT):5 个核心写/读 API + 3 个关系派生查询 + 4 个状态查询。图谱原子变更唯一网关与查询统一入口。
    - **任务规划 `TaskPlanner`**(零参,内置策略池):`plan(TaskExecutionGraph)→list[TaskNode]`,按状态触发条件 first-match-wins 选内置 `PlanningStrategy` 产逻辑子节点(不含物理执行信息)。引擎自带,不开放自定义。
    - **任务派发 `TaskDispatcher`**(零参,内置策略池):`dispatch(toDoTaskList)→list[TaskNode]`,first-match-wins 选内置 `DispatchStrategy`(config 有 `bot`→direct 跳搜推;否则 search 搜推)决定"谁来做",填 `run_info.run_mode`/`assignee`;HIT_MULTI_BOTS 标 `pending_group_formation`(拉群归编排核+runner)。引擎自带,不开放自定义。
-   - **任务执行 `TaskRunner`**:`start_run(list[TaskNode])→list[Boolean]` 三模态自适应 + `query_status`/`query_detail`/`query_result`/`query_bot_tasks`;`TaskLoopCallback` PUSH 回投。
+   - **任务执行 `TaskRunner`**:`start_run(list[TaskNode])→list[Boolean]` 三模态自适应；不承载状态查询；`TaskLoopCallback` PUSH 回投。
+   - **任务上下文 `TaskGraphService`**:图谱 SSOT，并统一提供 `query_status`/`query_detail`/`query_result`/`query_bot_tasks` 只读查询。
    - **任务Harness**(旁路常驻):周期巡检 SLA 超时/崩溃,写同网关,不抢正向驱动。
 3. **事件驱动 + 状态条件触发**:
    - `TaskPlanner.plan` 显式触发条件(规划文档):图谱有更新(新增失败节点/PLANNING 节点)AND 没有派发(RUNNING)或执行中节点 AND 状态图谱有处于 PLANNING 状态的节点。
@@ -57,7 +58,7 @@
 - **reroute 局部化**:补救挂该 FAIL/PLANNING 节点本体下,子全 PASS 传播顶回该节点 DONE;未触下游在依赖满足前不入图,无复位;自动 reroute 不调级联回滚。
 - **深度闸门是引擎决策**:MISS 拆解前查核内派生深度(从 `relations` 递归),达内层 `MAX_DEPTH` → **自动升 BBS**(非 HUNG);BBS 链路 `loop_round` 达 `BBS_MAX_DEPTH` → STUCK → HUNG;规划器保持纯读图。
 - **派发只决定"谁来做"**:`dispatch` 经搜推匹配单 bot / 已有协作群 / 多 bot 动态拉协作群 / MISS;写 `run_info.run_mode`(str)/`assignee`;协作群协作模式(chat/manager_worker/state_machine)作 `form_coop_group` 内部参数(对齐 BCS `GroupStrategy`),**不进 `RuntimeInfo` 持久字段**(模型无 `collab_mode`)。
-- **执行三模态一个入口**:`TaskRunner.start_run(批量)` 按 `run_mode` 自适应分发单 bot/协作群/BBS;BBS = bot 认领任务后自算 gap+自规划子任务(落图 `run_mode="bbs"`,`assignee=bot_id`)→ 自执行 → 上报结果+验收;完成结果经 PUSH `TaskLoopCallback.report_result` 或 PULL `query_status`/`query_detail`/`query_result` 回收。
+- **执行三模态一个入口**:`TaskRunner.start_run(批量)` 按 `run_mode` 自适应分发单 bot/协作群/BBS;BBS = bot 认领任务后自算 gap+自规划子任务(落图 `run_mode="bbs"`,`assignee=bot_id`)→ 自执行 → 上报结果+验收;完成结果经 PUSH `TaskLoopCallback.report_result` 或从 `TaskGraphService` PULL 查询回收。
 - **执行主体只发 `task_loop_id`**:回调数据协议 `TaskCallbackData` 承载 `loop_task_id`/`workflow_type`/`workflow_id`/`instance_id`/`result`;合法终态严格为 `success:bool + data + gaps:list[str]`(FAIL 的 gaps 必须非空),执行/回收异常为 `exec_error`;框架适配层做 `loop_task_id↔(task_id,node_id)`、`success/gaps→verdict`、`data→output` 映射,再走图谱写口。空/非法终态不得默认 PASS,统一进入 Harness。
 - **BCS 身份边界**:任务领域、搜推结果和 `GroupFormation` 只保存产品 Bot ID;动态拉群时框架通过 BotService 权威 owner_id 在 BCS integration 边界转换为 `{product_bot_id}:{owner_id}`。BCS 请求中的 driver/originator/participant/manager/worker/binding bot_ids 使用 BCS UUID;state-machine binding key 是 workflow 逻辑名,不得使用 Bot ID,且 workflow binding 与 BCS ParticipantRole 分离。
 - **执行 SLA 单一所有者**:worker fire-and-poll 执行由结果 Poller 统一判定业务 SLA;Singlebox Adapter 只判传输错误,不得以更短 adapter timeout 提前截断仍在生成的 Bot。SLA/poll_exhausted 属执行异常(`exec_error→Harness`),不属于验收 FAIL。
@@ -91,7 +92,7 @@
 19. 作为 TaskDispatcher,我想 `dispatch(toDoTaskList)`(无 graph 入参)做搜推:单 bot / 已有协作群 / 多 bot 动态拉协作群 / MISS;写 `run_mode`/`assignee`,这样派发职责纯净。
 20. 作为 TaskDispatcher,我想多 bot 合 cover 时经 `TaskRunner.form_coop_group` 动态拉协作群(3 模式 chat/manager_worker/state_machine 经 BCS),协作模式不进 RuntimeInfo 持久字段,这样拉群不外泄为对外 API。
 21. 作为 TaskRunner,我想 `start_run(list[TaskNode])→list[Boolean]` 一个入口按 `run_mode` 自适应分发 SINGLE_BOT/COOP_GROUP/BBS(BBS bot 认领任务→自算 gap+规划子任务→自执行→上报),这样三模态收敛。
-22. 作为 TaskRunner,我想 `query_status(task_id)`/`query_detail(TaskNode)`/`query_result(TaskNode)`/`query_bot_tasks(bot_id)` 查状态/详情/产出/bot 任务列表,这样产品与系统可探活。
+22. 作为任务上下文消费者,我想通过 `TaskGraphService.query_status(task_id)`/`query_detail(TaskNode)`/`query_result(TaskNode)`/`query_bot_tasks(bot_id)` 查状态/详情/产出/bot 任务列表,使只读查询与图谱 SSOT 保持同一模块。
 23. 作为执行实体(bot workflow/bcn 协作群),我想调 `TaskLoopCallback.start_run(TaskCallbackData)` 上报开始、`report_result(TaskCallbackData)` 上报完成/失败,这样 PUSH 回投有统一协议。
 24. 作为框架适配层,我想把 `TaskCallbackData`(loop_task_id/workflow_type/workflow_id/instance_id/result)映射成 `(task_id,node_id)`+`verdict`+`output` 走 `update_task_node_info`,这样回投驱动图谱状态。
 25. 作为 TaskHarness,我想旁路常驻周期检测 SLA 超时/崩溃并自愈(经 `update_task_node_info` 复位 `RUNNING→PENDING` 重投,不直接写 HUNG),这样主链不卡死且旁路与主链同写口。
@@ -105,7 +106,7 @@
 30b. 作为系统,我想每个**父节点**的重规划产子次数计入其 extend_props.plan_round,达 MAX_PLAN_ROUND(默认 10)→该父 HUNG(不再产子),这样单节点 gap 反复读不闭时不会无限产子撑爆图;loop_round 收敛到只数升 BBS 的总次数(MAX_LOOP)。
 31. 作为系统,我想崩溃堆栈/超时标记/miss 事件进 `extend_props`,这样非业务异常态增量合并不污染主字段。
 32. 作为开发者,我想对外服务集中在"任务中心"`TaskService` facade(2 API),图谱/规划/派发/执行/Harness 各管各的内部 API,这样模块边界清晰、调用方只认一处入口。
-33. 作为开发者,我想图谱原子变更收口在"任务图谱"`TaskGraphService`(8 API:5 核心写/读+3 派生只读),这样状态流转有单一写网关、不散在各执行器。
+33. 作为开发者,我想图谱原子变更和只读查询收口在"任务图谱"`TaskGraphService`(5 核心写/读+3 关系派生查询+4 状态查询),这样状态流转有单一网关、不散在各执行器。
 34. 作为开发者,我想规划(`plan` 产逻辑 Node)与派发(`dispatch` 决定谁做)与执行(`start_run` 真投递)三层分开,这样职责不混。
 35. 作为测试,我想以六模块对外契约为断言面,这样行为可回归。
 36. 作为迁移,我想 2026-08-04 的 case 推演(存储行业尽调全链路)在新模型上等价跑通,这样行为不丢。
@@ -116,7 +117,7 @@
 
 ### 什么是好测试
 
-只测外部可观测行为。断言面:**任务中心 facade 契约**(`get_task_dashboard` 返回的 `TaskExecutionGraph`:`status`/`loop_round`/`tasks[].status`/`tasks[].run_info.acceptance_result`/`relations`)、**事件日志重放**、**执行主体侧 `query_result`/`query_detail`**。不断言内部 `update_task_node_info` 实现或内存结构。
+只测外部可观测行为。断言面:**任务中心 facade 契约**(`get_task_dashboard` 返回的 `TaskExecutionGraph`:`status`/`loop_round`/`tasks[].status`/`tasks[].run_info.acceptance_result`/`relations`)、**事件日志重放**、**任务上下文侧 `query_result`/`query_detail`**。不断言内部 `update_task_node_info` 实现或内存结构。
 
 ### 测试 seams(最高 seam 为先)
 

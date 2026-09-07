@@ -2,7 +2,7 @@
 
 真实 TaskGraphService 构图场景;Runner 内聚(无额外 stub)。覆盖:
 start_run 三 run_mode 分发(记投递日志/loop_task_id 格式/非法模式 False)、form_coop_group 生成 group_id+记 GroupFormation、
-_build_context 验收/执行双模式自动切换。
+TaskRunner 不暴露状态查询接口、_build_context 验收/执行双模式自动切换。
 """
 from __future__ import annotations
 
@@ -94,6 +94,11 @@ class TestStartRun:
 
         assert _run(runner.start_run([])) == []
         assert runner._run_log == []
+
+    def test_runner_does_not_expose_state_queries(self, svc):
+        runner = TaskRunner(svc)
+        for name in ("query_status", "query_detail", "query_result", "query_bot_tasks"):
+            assert not hasattr(runner, name)
 
     def test_single_bot_dispatched(self, svc, graph):
         runner = TaskRunner(svc)

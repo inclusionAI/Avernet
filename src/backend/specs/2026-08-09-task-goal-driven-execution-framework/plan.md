@@ -11,11 +11,11 @@
 | 模块 | 性质 | 职责一句话 | 对外有 API? |
 |---|---|---|---|
 | **TaskService** | 对外 facade | 系统唯一对外入口(2 API);内部含编排核协调其余模块 | ✅ 2 个 |
-| **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关(增删改查);`relations` 依赖派生 | ❌ 内部(8 API:5 核心写/读+3 派生只读) |
+| **TaskGraphService** | 内部图谱 SSOT | 图谱原子变更唯一网关；统一承载状态/详情/结果/Bot 任务查询；`relations` 依赖派生 | ❌ 内部 |
 | **TaskPlanner**(零参,内置策略池) | 读图按状态条件 first-match-wins 选内置 `PlanningStrategy` 产逻辑子节点(不含执行信息) | ❌ 内部 |
 | **PlanningStrategy** | 规划优化策略(引擎内置) | 真正的分解智能:产哪些节点。默认 GapBased/Workflow;corp 覆写 `_build_planner` | ❌ 内部策略 |
 | **TaskDispatcher** | 分发策略(可插拔) | 搜推决定"谁来做",把 `run_mode`/`assignee` 填到 `TaskNode.run_info` 后返回 `list[TaskNode]`,多 bot 动态拉协作群;**不写图、不起 run**(编排核落库+起 run) | ❌ 内部 |
-| **TaskRunner** | 执行承载 | `start_run(批量)` 三模态自适应 + `query_status/detail/result/bot_tasks`;`TaskLoopCallback` 回投;`form_coop_group` 复用 BCS | ❌ 内部 |
+| **TaskRunner** | 执行承载 | `start_run(批量)` 三模态自适应；`TaskLoopCallback` 回投；`form_coop_group` 复用 BCS；不承载状态查询 | ❌ 内部 |
 | **TaskHarness** | 旁路常驻 | 周期巡检超时/崩溃,写同网关,不抢正向驱动 | ❌ 内部 |
 | **(编排核)** | TaskService 内部 | 事件驱动 + 状态条件触发协调 plan/graph/dispatch/execution | ❌ 非独立模块 |
 
@@ -25,7 +25,7 @@
 - **单一实现**:规范位置 `core/task`;继承旧 seam 命名、DI 接线(`CommunityTaskModule`)、开源边界纪律。
 - **开源边界**:Avernet 发**契约 seam + Noop/singlebox double**(本地关键词 cover 的 bot catalog、BCS local/mock 拉群、stub decomposer);真实搜推/真实执行/LLM 规划/验收 SKILL 在 corp `ocb` adapter。
 
-对外只有 `TaskService` facade 2 个 API:`execute`/`get_task_dashboard`;图谱内部 5 核心写/读 API(`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`update_task_graph_info`/`query_task_dashboard`)+ 3 派生只读查询(`query_task_nodes`/`get_child_tasks`/`get_parent_task`)由 `TaskGraphService` 独立持有(不合并进 facade)。
+对外只有 `TaskService` facade 2 个 API:`execute`/`get_task_dashboard`;图谱内部 5 核心写/读 API(`initialize_graph`/`add_task_nodes`/`update_task_node_info`/`update_task_graph_info`/`query_task_dashboard`)+ 3 关系派生查询(`query_task_nodes`/`get_child_tasks`/`get_parent_task`)+ 4 状态查询(`query_status`/`query_detail`/`query_result`/`query_bot_tasks`)由 `TaskGraphService` 独立持有(不合并进 facade)。
 
 ---
 
@@ -202,7 +202,7 @@ class ExecutionEngine:   # TaskService 内部编排核(不对外)
 
 > 每个事件 on_* 分段推进,由状态条件(a/b/c + plan 三条件)把关是否进入下一阶段。同 task_id 仍串行(per-task `threading.RLock`,仅保护锁内同步编排写;投递/拉群 IO 锁外 await 不受锁约束)。协程化:`on_*` 锁内 collect(同步)→ 锁外 `_drain` await run/group/miss/finish(投递 gather+Semaphore 在 runner)。
 
-### 3.1 `TaskGraphService`(内部图谱 SSOT,8 API:5 核心写/读+3 派生只读,独立模块)
+### 3.1 `TaskGraphService`(内部图谱 SSOT:5 核心写/读+3 关系派生查询+4 状态查询,独立模块)
 
 > `TaskGraphService` 为独立模块(对齐任务图谱文档 `lunk1txfuv6gtwk2`),`TaskService` facade 持有其引用。图谱原子变更唯一网关。
 
@@ -361,13 +361,13 @@ class DispatchStrategy(Protocol):
 
 ### 3.5 `TaskRunner` 任务执行模块(对齐执行文档 `lxg2mwgmtfqg6d95`)
 
-> 功能:把已派发任务按派发目标发送给**单 bot / 协作群 / BBS**执行,并回收状态/详情/结果。一个 `start_run(批量)` 入口三模态自适应;`form_coop_group`(动态拉群)内部辅助;BBS 认领执行由 bot 自主,**不在此接口内**。
+> 功能:把已派发任务按派发目标发送给**单 bot / 协作群 / BBS**执行。一个 `start_run(批量)` 入口三模态自适应;`form_coop_group`(动态拉群)内部辅助;BBS 认领执行由 bot 自主,**不在此接口内**。状态/详情/结果查询统一由 `TaskGraphService` 提供。
 
 #### 3.5.1 供任务 Loop 内部和产品使用的 API(`TaskRunner`)
 
 ```python
 class TaskRunner:
-    """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行,并回收状态/详情/结果。
+    """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行。
     调用方:编排核(经 TaskService facade 驱动)。"""
 
     async def start_run(self, toDoTaskList: list[TaskNode]) -> list[bool]:
@@ -379,18 +379,6 @@ class TaskRunner:
                           → 自己执行 → 不管验收通过与否都上报结果+验收(经 on_report 正常驱动)
         派发成功仅表示"已投递给执行主体",不等于完成;完成结果经回调(下)回收。"""
 
-    def query_status(self, task_id: str) -> "Status":
-        """产品/系统触发:查询某任务及其所有子任务的状态。"""
-
-    def query_detail(self, node: TaskNode) -> TaskNode:
-        """产品触发:查询任务最新详情(回填 node.run_info)。"""
-
-    def query_result(self, node: TaskNode) -> TaskNode:
-        """产品/系统触发:查询某任务及其所有子任务的产出结果(回填 node.run_info.output)。"""
-
-    def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
-        """获取某个 Bot 下的所有任务实例列表。"""
-
     async def form_coop_group(self, gf: "GroupFormation") -> str:
         """(内部)HIT_MULTI_BOTS 动态拉协作群,复用 BCS 建群 → group_id。协程化:BCS 建群是网络 IO,`await`(由 engine 锁外 await 调用,不阻塞编排核)。
         CHAT/MANAGER_WORKER/STATE_MACHINE 三模式(group_strategy=collab_mode;state_machine 注入 workflow yaml)。
@@ -400,6 +388,16 @@ class TaskRunner:
         participants[].bot_uuid、manager/worker、participant_bindings[*].bot_ids 均使用 BCS UUID;
         state-machine participant_bindings 的 key 必须是 workflow 逻辑 binding 名,不得使用 Bot ID;
         workflow binding 与 BCS ParticipantRole 分离,participants[].role 只使用 BCS 合法角色。"""
+```
+
+状态查询接口归属于任务上下文：
+
+```python
+class TaskGraphService:
+    def query_status(self, task_id: str) -> "Status": ...
+    def query_detail(self, node: TaskNode) -> TaskNode: ...
+    def query_result(self, node: TaskNode) -> TaskNode: ...
+    def query_bot_tasks(self, bot_id: str) -> list[TaskNode]: ...
 ```
 
 #### 3.5.2 回调服务(供单 bot workflow / bcn 协作群,PUSH 回投)`TaskLoopCallback`
@@ -422,7 +420,7 @@ class TaskLoopCallback:
 
 | 模式 | start_run 内部动作 | 结果回收 | Avernet 实现 | prod 实现 |
 |---|---|---|---|---|
-| 单 Bot | 调单 bot workflow(workflow_type=single_bot) | `TaskLoopCallback.report_result`(PUSH)或 `query_result`(PULL) | seam + singlebox double(本地 bot stub) | corp adapter |
+| 单 Bot | 调单 bot workflow(workflow_type=single_bot) | `TaskLoopCallback.report_result`(PUSH)或 `TaskGraphService.query_result`(PULL) | seam + singlebox double(本地 bot stub) | corp adapter |
 | 协作群 | 触发 bcn 协作群(群可能刚 `form_coop_group` 拉的) | `TaskLoopCallback`(群终态回投) | seam + BCS local/mock 拉群 | corp BCS wiring |
 | BBS | BBS bot 认领任务后自算 gap+规划子任务(落图 `run_mode="bbs"`,`assignee=bot_id`)→ 自执行 | 认领 bot 自主 `report_result` 回投(PASS→触发根 plan / FAIL+gaps→触发该子任务节点 plan) | seam + stub(任务广场) | corp 任务广场 + BBS bot 自能力规划 |
 
@@ -672,7 +670,7 @@ sequenceDiagram
         ORC->>D: dispatch→list[TaskNode]填执行者→(ORC)update(RUNNING)+start_run
     end
     opt 产品/系统探活
-        TS->>R: query_status(task_id) / query_detail(node) / query_result(node)
+        TS->>G: query_status(task_id) / query_detail(node) / query_result(node)
     end
     H-->>G: (旁路) SLA超时→update_task_node_info(HUNG/FAILED)
     ORC->>ORC: plan(root)==[] ∧ 全非根DONE → 触发 owner bot 终验 skill(经 source_channel)
@@ -684,7 +682,7 @@ sequenceDiagram
     G-->>U: TaskExecutionGraph{status=DONE,loop_round,看板}
 ```
 
-> **分层要点**:facade 2 API(execute/get_task_dashboard);编排核 on_* 事件驱动 + 状态条件(a/b/c + plan 三条件)分段推进;Dispatcher 只搜推把 run_mode/assignee 填到 TaskNode 上返回 list[TaskNode](不写图不起 run);编排核落 update_task_node_info + 置 RUNNING + 立即 start_run;执行结果 PUSH `TaskLoopCallback.report_result` 为主,可选 PULL `query_status/detail/result`;`TaskCallbackData.loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 由适配层完成,再走 `on_report`→`update_task_node_info`。
+> **分层要点**:facade 2 API(execute/get_task_dashboard);编排核 on_* 事件驱动 + 状态条件(a/b/c + plan 三条件)分段推进;Dispatcher 只搜推把 run_mode/assignee 填到 TaskNode 上返回 list[TaskNode](不写图不起 run);编排核落 update_task_node_info + 置 RUNNING + 立即 start_run;执行结果 PUSH `TaskLoopCallback.report_result` 为主,可选从 `TaskGraphService` PULL `query_status/detail/result`;`TaskCallbackData.loop_task_id↔(task_id,node_id)`、`result.success→verdict`、`result.data→output` 由适配层完成,再走 `on_report`→`update_task_node_info`。
 
 ## 7. Case 端到端推演:存储行业尽调(权威剧本 `gwqie46v7hzr1w6h`;从任务输入到任务执行完成按 API 流程串联)
 

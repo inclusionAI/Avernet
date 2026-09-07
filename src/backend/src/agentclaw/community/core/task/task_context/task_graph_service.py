@@ -1,4 +1,4 @@
-"""TaskGraphService:任务图谱 SSOT + 原子变更唯一网关(7+2 API)。
+"""TaskGraphService:任务图谱 SSOT + 原子变更唯一网关 + 状态查询接口。
 
 对齐 plan.md §3.1 + 任务图谱文档 lunk1txfuv6gtwk2。
 in-memory store(M1);ORM 适配按需后续。查询返回引用(D3-A:调用方不应 mutate)。
@@ -757,6 +757,42 @@ class TaskGraphService:
         with self._lock_for(task_id):
             graph = self._require_graph(task_id)
             return graph.effective_status
+
+    def query_status(self, task_id: str) -> Status:
+        """查询任务图当前持久状态。
+
+        保持原 TaskRunner 查询语义，返回图本身的 ``status``；需要以根节点为准的
+        观测口径时使用 ``effective_graph_status``。
+        """
+        return self.query_task_dashboard(task_id).status
+
+    def query_detail(self, node: TaskNode) -> TaskNode:
+        """按 ``task_id/node_id`` 返回图中的最新节点；节点不存在时原样返回输入。"""
+        graph = self.query_task_dashboard(node.task_id)
+        return self._get_node(graph, node.node_id) or node
+
+    def query_result(self, node: TaskNode) -> TaskNode:
+        """返回包含最新 ``run_info.output`` 的节点投影。"""
+        return self.query_detail(node)
+
+    def query_bot_tasks(self, bot_id: str) -> list[TaskNode]:
+        """查询当前进程已加载图中由 ``bot_id`` 承接的任务节点。
+
+        ``TaskGraphRepositoryProtocol`` 当前不提供跨任务枚举接口，因此持久化环境下
+        本方法只覆盖已加载/已 hydrate 的图；后续若要求全库查询，应由持久化读模型承接。
+        """
+        with self._registry_lock:
+            task_ids = list(self._graphs)
+        result: list[TaskNode] = []
+        for task_id in task_ids:
+            with self._lock_for(task_id):
+                graph = self._graphs.get(task_id)
+                if graph is not None:
+                    result.extend(
+                        node for node in graph.tasks
+                        if node.run_info.assignee == bot_id
+                    )
+        return result
 
     # ===== 派生只读查询(均从 relations 分解树派生)=====
     def query_task_nodes(self, task_id: str, criteria: TaskNodeQueryCriteria) -> list[TaskNode]:

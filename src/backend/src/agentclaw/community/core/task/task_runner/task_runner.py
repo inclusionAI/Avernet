@@ -1,4 +1,4 @@
-"""TaskRunner 任务执行模块:三模态投递 + 回投。对齐 plan.md §3.5 + tasks.md T4b。
+"""TaskRunner 任务执行模块:三模态投递。对齐 plan.md §3.5 + tasks.md T4b。
 
 Avernet 阶段:form_coop_group stub(不真实 BCS)、start_run stub 投递(记日志,不真实 bot workflow/群/BBS)。
 三类投递后端经 ``set_delivery`` 注入(corp ocb 仓:真实 workflow engine/BCS/BBS 广场);缺省 stub fallback。
@@ -29,7 +29,7 @@ class DeliveryPort(Protocol):
 
 
 class TaskRunner:
-    """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行,并回收状态/详情/结果。
+    """将已派发 TaskNode 发送给单 bot/协作群/BBS 执行。
 
     调用方:编排核(经 TaskService facade 驱动)。一个 start_run(批量)入口三模态自适应。
     三类投递后端经 ``set_delivery(mode, port)`` 注入(corp);缺省 stub 记投递日志返回 True。

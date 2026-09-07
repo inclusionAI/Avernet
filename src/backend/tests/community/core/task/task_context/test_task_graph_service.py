@@ -94,6 +94,48 @@ def graph(svc: TaskGraphService):
     return svc.initialize_graph(_task_info())
 
 
+# ===== 状态/详情/结果查询 =====
+class TestStateQueries:
+    def test_query_status_returns_graph_status(self, svc: TaskGraphService, graph):
+        assert svc.query_status("t1") == Status.RUNNING
+        graph.status = Status.DONE
+        assert svc.query_status("t1") == Status.DONE
+
+    def test_query_detail_returns_latest_node(self, svc: TaskGraphService, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(
+            _patch("t1", "c1", status=Status.RUNNING, run_mode="single_bot", assignee="bot1")
+        )
+        shell = _node("c1")
+        detail = svc.query_detail(shell)
+        assert detail.status == Status.RUNNING
+        assert detail.run_info.run_mode == "single_bot"
+        assert detail.run_info.assignee == "bot1"
+
+    def test_query_detail_unknown_node_returns_input(self, svc: TaskGraphService, graph):
+        shell = _node("unknown")
+        assert svc.query_detail(shell) is shell
+
+    def test_query_result_returns_latest_output(self, svc: TaskGraphService, graph):
+        svc.add_task_nodes([_node("c1")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", output_patch={"data": "行业全貌"}))
+        assert svc.query_result(_node("c1")).run_info.output == {"data": "行业全貌"}
+
+    def test_query_bot_tasks_matches_loaded_graphs(self, svc: TaskGraphService, graph):
+        svc.add_task_nodes([_node("c1"), _node("c2")], parent_node_id="t1")
+        svc.update_task_node_info(_patch("t1", "c1", run_mode="single_bot", assignee="bot1"))
+        svc.update_task_node_info(_patch("t1", "c2", run_mode="single_bot", assignee="bot2"))
+        svc.initialize_graph(_task_info("t2"))
+        svc.add_task_nodes([_node("c3", "t2")], parent_node_id="t2")
+        svc.update_task_node_info(_patch("t2", "c3", run_mode="single_bot", assignee="bot1"))
+
+        assert {(node.task_id, node.node_id) for node in svc.query_bot_tasks("bot1")} == {
+            ("t1", "c1"),
+            ("t2", "c3"),
+        }
+        assert svc.query_bot_tasks("missing") == []
+
+
 # ===== initialize_graph =====
 class TestInitializeGraph:
     def test_basic(self, svc: TaskGraphService):
