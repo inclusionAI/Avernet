@@ -14,7 +14,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { AlertCircle, Info } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { AlertCircle, CircleHelp, Info } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import type { MessageViewScope } from '../../types';
 
@@ -69,46 +75,43 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                 </li>
               </ul>
             </div>
-            <div>
-              <h4 className="text-sm font-medium text-slate-800 mb-2">
-                消息视角
-              </h4>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  {
-                    value: 'full' as const,
-                    title: '完整视角',
-                    description: '显示主消息流内的全部协作消息',
-                  },
-                  {
-                    value: 'participant' as const,
-                    title: '参与者视角',
-                    description: '仅显示公共消息和与您直接相关的流程消息',
-                  },
-                ].map((option) => (
-                  <Button
-                    key={option.value}
-                    ghost
-                    aria-pressed={messageViewScope === option.value}
-                    onClick={() => setMessageViewScope(option.value)}
-                    className={
-                      messageViewScope === option.value
-                        ? 'rounded-lg border border-blue-500 bg-blue-50 p-3 text-left'
-                        : 'rounded-lg border border-slate-200 bg-white p-3 text-left hover:border-slate-300'
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <label className="flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={messageViewScope === 'participant'}
+                    onChange={(event) =>
+                      setMessageViewScope(
+                        event.target.checked ? 'participant' : 'full',
+                      )
                     }
-                  >
-                    <span className="block text-sm font-medium text-slate-800">
-                      {option.title}
-                    </span>
-                    <span className="mt-1 block text-xs leading-5 text-slate-500">
-                      {option.description}
-                    </span>
-                  </Button>
-                ))}
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700">
+                    只看公开及与我相关的消息
+                  </span>
+                </label>
+                <TooltipProvider delayDuration={100}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        ghost
+                        type="button"
+                        aria-label="了解参与者视角"
+                        className="h-auto min-h-0 p-0 text-slate-400 hover:text-slate-600 focus-visible:ring-2 focus-visible:ring-blue-400"
+                      >
+                        <CircleHelp className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-72 text-xs">
+                      这是“参与者视角”：勾选后会隐藏部分其他参与者的消息，适合需要独立参与的评审、访谈、分组协作或游戏场景。
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </div>
-              <p className="mt-2 text-xs text-slate-500">
-                此视角仅影响主消息流；状态机副屏仍按原有成员和操作权限展示流程信息。
-                群主可查看当前选择并据此判断游戏准入。
+              <p className="mt-1 pl-6 text-xs text-slate-500">
+                未勾选时，可看到群内的全部消息。
               </p>
             </div>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
@@ -122,8 +125,8 @@ const CollabAlertDialogs: React.FC<CollabAlertDialogsProps> = ({
                     您可与主节点Bot进行对话，由主节点Bot负责任务分发、状态推进、质量核验
                   </li>
                   <li className="relative pl-2 before:content-['·'] before:absolute before:left-0 before:text-amber-500">
-                    用户视角将按照上方选择隔离协作内部消息；切换到您拥有的 Bot
-                    视角不受此设置影响
+                    勾选参与者视角后将过滤协作内部消息；切换到您拥有的 Bot
+                    视角不受影响
                   </li>
                 </ul>
               ) : (
