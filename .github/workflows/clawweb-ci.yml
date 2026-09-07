@@ -42,7 +42,31 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Build packages
-        run: npm run build
+        run: npm run ci:build
 
       - name: Check packages
-        run: npm run check
+        run: npm run ci:check
+
+      - name: Verify test runner
+        run: node --test scripts/ci/run-tests.test.mjs
+
+      - name: Test packages with coverage (observation period)
+        continue-on-error: true
+        run: npm run test:ci
+
+      - name: Publish test summary
+        if: always()
+        run: |
+          if [ -f test-results/summary.md ]; then
+            cat test-results/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Tests NOT_RUN or interrupted: no summary generated; inspect preceding steps.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawweb-test-results
+          path: src/evolverun/clawweb/test-results/
+          if-no-files-found: warn

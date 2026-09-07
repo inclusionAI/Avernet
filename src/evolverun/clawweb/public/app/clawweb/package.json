@@ -50,7 +50,8 @@
     "tailwindcss": "^4.3.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.12",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7",
+    "@vitest/coverage-v8": "3.2.7"
   },
   "engines": {
     "node": ">=20"
