@@ -90,7 +90,7 @@ from secbaas.community.core.service.tenant_manage import DefaultTenantManageServ
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.sandbox import PaasSandboxPlugins
 
-logger = get_logger("bootstrap-core-services")
+logger = get_logger("bootstrap")
 
 
 class _EngineAbortNotifier:
