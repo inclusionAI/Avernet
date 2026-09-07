@@ -104,3 +104,5 @@ src/bcs/target
 .codegraph
 .opencode
 openspec
+
+scripts/undercover-game.sh

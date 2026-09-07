@@ -108,9 +108,10 @@ and a stable, non-closable tab across speech, voting, retries and later rounds.
 The default `bcsPanel.StateMachineRunView` remains available. See
 [game parameters, interactions and preview](UNDERCOVER_GAME.md).
 
-Build and deploy `assets/panel/dist/index.umd.js` alongside the BCS configuration;
-the checked-in manifests serve this single local bundle. CDN deployments must
-publish version 1.4.0 or later of this package before switching the manifest URL
-and referee together. Previously stored messages using the retired component
-name need a new panel submission from the referee. Game state and HTTP contracts
-are unchanged.
+The local and example manifests serve `assets/panel/dist/index.umd.js`; build
+this bundle before starting BCS locally. The production manifest retains its
+existing CDN version 1.2.0, which does not include the game panel. To enable the
+game in a CDN deployment, publish version 1.4.0 or later of this package before
+switching the manifest URL and referee together. Previously stored messages using
+the retired component name need a new panel submission from the referee. Game
+state and HTTP contracts are unchanged.

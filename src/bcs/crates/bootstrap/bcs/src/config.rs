@@ -2348,17 +2348,22 @@ file = "assets/panel/dist/index.umd.js"
 
     #[test]
     fn test_shipped_manifests_use_the_shared_panel_bundle() {
-        for source in [
-            include_str!("../../../../configs/bcs-config-example.toml"),
-            include_str!("../../../../configs/bcs-config-local.toml"),
-            include_str!("../../../../configs/bcs-config-prod.toml"),
+        for (source, uses_cdn) in [
+            (include_str!("../../../../configs/bcs-config-example.toml"), false),
+            (include_str!("../../../../configs/bcs-config-local.toml"), false),
+            (include_str!("../../../../configs/bcs-config-prod.toml"), true),
         ] {
             let config: BcsConfig = toml::from_str(source).unwrap();
             assert_eq!(config.manifest.bundles.len(), 1);
             let bundle = &config.manifest.bundles[0];
             assert_eq!(bundle.name, "bcsPanel");
-            assert_eq!(bundle.url, None);
-            assert_eq!(bundle.file.as_deref(), Some("assets/panel/dist/index.umd.js"));
+            if uses_cdn {
+                assert!(bundle.url.is_some());
+                assert_eq!(bundle.file, None);
+            } else {
+                assert_eq!(bundle.url, None);
+                assert_eq!(bundle.file.as_deref(), Some("assets/panel/dist/index.umd.js"));
+            }
         }
     }
 
