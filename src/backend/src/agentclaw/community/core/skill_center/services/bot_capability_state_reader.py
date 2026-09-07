@@ -21,7 +21,7 @@ from agentclaw.community.core.skill_center.bot_engine_scope import (
     bot_default_engine_types,
     bot_engine_type,
 )
-from agentclaw.community.core.skill_center.feature_flags import get_skill_center_flags
+from agentclaw.community.core.skill_center.installation_read_config import InstallationReadConfig
 from agentclaw.community.core.skill_center.errors import LocalSkillNotFoundError
 from agentclaw.community.core.skill_center.version_resolution_contract import (
     SkillVersionResolverProtocol,
@@ -47,11 +47,13 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         bot_repo: BotRepository,
         pool_skills: SkillsPoolSkillRepositoryProtocol,
         version_resolver: SkillVersionResolverProtocol,
+        read_config: InstallationReadConfig = InstallationReadConfig(),
     ) -> None:
         self._repository = repository
         self._bot_repo = bot_repo
         self._pool_skills = pool_skills
         self._version_resolver = version_resolver
+        self._read_config = read_config
 
     def member_skill_ids(self, *, bot: Mapping[str, Any]) -> frozenset[int]:
         return self._repository.list_member_skill_ids(
@@ -152,7 +154,7 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     ) -> InstallationFlushPlan:
         sync = (
             self._repository.sync_default_installations
-            if get_skill_center_flags().installation_default_sync_only
+            if self._read_config.default_sync_only
             else self._repository.flush_installations
         )
         return sync(
