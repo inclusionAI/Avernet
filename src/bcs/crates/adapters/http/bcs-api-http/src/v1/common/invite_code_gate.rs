@@ -244,9 +244,16 @@ mod tests {
 
         let dummy_state = DummyState { verifier: Arc::new(DummyVerifier) };
         assert!(dummy_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
+        assert!(dummy_state.invite_code_service().is_none());
+        assert!(InviteCodeGateState::invite_code_gate_enabled(&dummy_state));
+
+        let default_state = DefaultGateState { verifier: Arc::new(DummyVerifier) };
+        assert!(InviteCodeGateState::invite_code_service(&default_state).is_none());
 
         let disabled_state = DisabledGateState { verifier: Arc::new(DummyVerifier) };
         assert!(disabled_state.principal_verifier().clone().verify(&HeaderMap::new()).await.is_ok());
+        assert!(disabled_state.invite_code_service().is_none());
+        assert!(!InviteCodeGateState::invite_code_gate_enabled(&disabled_state));
 
         let runtime_state = RuntimeState {
             verifier: Arc::new(DummyVerifier),
