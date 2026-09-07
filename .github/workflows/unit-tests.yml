@@ -239,6 +239,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: bash scripts/ci/legacy_skill_compatibility.sh
 
+      - name: Verify Claude Code local file lifecycle
+        if: steps.changes.outputs.skip != 'true'
+        working-directory: ${{ github.workspace }}
+        run: bash scripts/ci/claude_code_file_lifecycle.sh
+
       - name: Upload backend test results
         if: always() && steps.changes.outputs.skip != 'true'
         uses: actions/upload-artifact@v4

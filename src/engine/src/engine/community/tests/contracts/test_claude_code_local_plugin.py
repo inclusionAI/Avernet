@@ -8,6 +8,8 @@ local plugin, no ``world`` fixture.
 """
 from __future__ import annotations
 
+import pytest
+
 from engine.community.core.adapters.claude_code.session import ClaudeCodeSessionAdapter
 from engine.community.core.session.models import SessionListRequest
 from engine.community.kernel.frames import EventFrame
@@ -60,7 +62,7 @@ async def test_local_claude_code_plugin_contract_smoke():
 
     # file: upload -> read -> list_dir
     await plugin.file_upload("/tmp/a.txt", b"hello")
-    assert (await plugin.file_read("/tmp/a.txt"))["content"] == "hello"
+    assert (await plugin.file_read("/tmp/a.txt"))["content"] == b"hello"
     assert (await plugin.file_list_dir("/tmp"))[0]["name"] == "a.txt"
 
     # commands: list -> get (None)
@@ -247,12 +249,14 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     # file CRUD + rmtree + list_dir.
     await plugin.file_upload("/tmp/a.txt", b"a")
     await plugin.file_upload("/tmp/dir/b.txt", b"b")
-    assert (await plugin.file_read("/tmp/a.txt"))["content"] == "a"
+    assert (await plugin.file_read("/tmp/a.txt"))["content"] == b"a"
     assert len(await plugin.file_list_dir("/tmp")) == 2
-    assert await plugin.file_remove("/tmp/a.txt") is True
-    assert await plugin.file_remove("/tmp/a.txt") is False
+    assert (await plugin.file_remove("/tmp/a.txt"))["path_type"] == "file"
+    with pytest.raises(FileNotFoundError):
+        await plugin.file_remove("/tmp/a.txt")
     assert await plugin.file_rmtree("/tmp/dir") is True
-    assert await plugin.file_rmtree("/tmp/dir") is False
+    with pytest.raises(FileNotFoundError):
+        await plugin.file_rmtree("/tmp/dir")
     assert (await plugin.file_list_dir("/tmp")) == []
 
     # commands + relay never raise and return uniform shapes.

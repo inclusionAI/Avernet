@@ -351,8 +351,9 @@ class WorkspacePathFactory:
     """
 
     @inject
-    def __init__(self, skill_repo_sync: SkillRepoSyncPlugin) -> None:
+    def __init__(self, skill_repo_sync: SkillRepoSyncPlugin, *, container_engine_paths: bool = False) -> None:
         self._skill_repo_sync = skill_repo_sync
+        self._container_engine_paths = container_engine_paths
 
     def get_entity_identity_dir(
         self, entity_id: str, entity_type: str = "staff", engine_type: str = "openclaw"
@@ -485,7 +486,7 @@ class WorkspacePathFactory:
                 entity_id, bot_id, result,
             )
             return result
-        if is_desktop:
+        if is_desktop or (self._container_engine_paths and engine_type == "claude_code"):
             result = Path(pool_paths_for_engine(engine_type).legacy_local)
             logger.info(
                 "[path_factory.get_bot_skills_local_dir] entity=%s bot=%s "

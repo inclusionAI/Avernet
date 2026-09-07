@@ -80,6 +80,8 @@ while [[ $# -gt 0 ]]; do
         --stage)
             [ $# -ge 2 ] || { warn "--stage value missing"; shift; continue; }
             STAGE="$2"; shift 2 ;;
+        --claude-initial-cwd)
+            export CLAUDE_CODE_INITIAL_CWD="$2"; shift 2 ;;
         --engine)
             [ $# -ge 2 ] || { warn "--engine value missing"; shift; continue; }
             ENGINE="$2"; shift 2 ;;

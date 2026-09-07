@@ -8,8 +8,8 @@ connection).
 
 Domain methods are split into per-domain mixin files under
 ``plugins/claude_code/``; each mixin is a plain class (no base, no
-Protocol) that assumes ``self`` provides the ``_relay`` plumbing from
-``ClaudeCodePortBase``.
+Protocol) Relay-backed mixins use ``ClaudeCodePortBase``; file I/O and runtime layout
+operations execute locally in the Engine filesystem.
 
 ``ClaudeCodePluginImpl`` explicitly inherits ``ClaudeCodePlugin`` so static
 type-checkers verify full facade conformance. Importing ``plugin_api`` from
@@ -17,8 +17,10 @@ type-checkers verify full facade conformance. Importing ``plugin_api`` from
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
-from engine.community.plugins.claude_code._base import ClaudeCodePortBase
+from engine.community.plugins.claude_code._base import ClaudeCodePortBase, ClaudeCodeRelayClient
 from engine.community.plugins.claude_code._chat import _ChatPortMixin
 from engine.community.plugins.claude_code._commands import _CommandsPortMixin
 from engine.community.plugins.claude_code._cron import _CronPortMixin
@@ -43,11 +45,16 @@ class ClaudeCodePluginImpl(
     ClaudeCodePortBase,
     ClaudeCodePlugin,
 ):
-    """Concrete ``ClaudeCodePlugin`` over the vendored claude_code relay.
+    """Claude Code capabilities: local files/layout, relay-backed chat.
 
     ``client`` is optional — tests inject a fake; production lazily connects a
     fresh ``ClaudeCodeRelayClient`` on first use.
     """
+
+    def __init__(self, client: ClaudeCodeRelayClient | None = None, *, file_roots: tuple[Path, ...] = (), workspace: Path | None = None) -> None:
+        super().__init__(client=client)
+        self._file_roots = tuple(root.resolve() for root in file_roots)
+        self._file_workspace = workspace
 
 
 __all__ = ["ClaudeCodePluginImpl"]

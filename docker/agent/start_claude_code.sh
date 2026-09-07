@@ -81,6 +81,21 @@ section "start_claude_code.sh - claude_code engine startup"
 
 section "Step 1: Configuring engine + relay environment..."
 
+# Validate all cwd sources before overwriting env files. A missing legacy
+# config is not evidence of a newly created Bot.
+workspace_args=(--home /home/admin)
+for program in engine claude_relay; do
+    pid=$(sudo /usr/local/bin/supervisorctl pid "$program" 2>/dev/null || true)
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+        workspace_args+=(--running-pid "$pid")
+    fi
+done
+CLAUDE_WORKSPACE=$(python3 "$SCRIPT_DIR/resolve_claude_workspace.py" "${workspace_args[@]}") || {
+    fail "Cannot determine Claude Code cwd; saved configuration and running services were not changed"
+    exit 1
+}
+mkdir -p "$CLAUDE_WORKSPACE"
+
 ADAPTOR_ENV_FILE="/home/admin/.adaptorEnv"
 cat > "$ADAPTOR_ENV_FILE" <<EOF
 export ENGINE=$ENGINE
@@ -95,13 +110,13 @@ EOF
 # scripts/run_bcs_mixed_provider.sh).
 cat >> "$ADAPTOR_ENV_FILE" <<EOF
 export CLAUDE_CODE_RELAY_URL=ws://127.0.0.1:$CLAUDE_RELAY_PORT
-export CLAUDE_CODE_DEFAULT_CWD=/home/admin/.openclaw/workspace
-export RELAY_DEFAULT_CWD=/home/admin/.openclaw/workspace
 EOF
+printf 'export CLAUDE_CODE_DEFAULT_CWD=%q\nexport RELAY_DEFAULT_CWD=%q\nexport OPENCLAW_WORKSPACE_DIR=%q\n' \
+    "$CLAUDE_WORKSPACE" "$CLAUDE_WORKSPACE" "$CLAUDE_WORKSPACE" >> "$ADAPTOR_ENV_FILE"
 success "Engine env file written to $ADAPTOR_ENV_FILE"
 
 mkdir -p "$RELAY_STATE_DIR/data" "$RELAY_STATE_DIR/logs" \
-         /home/admin/.claude /home/admin/.openclaw/workspace
+         /home/admin/.claude/skills "$CLAUDE_WORKSPACE"
 chown -R admin:admin "$RELAY_STATE_DIR" /home/admin/.claude 2>/dev/null || true
 
 RELAY_ENV_FILE="/home/admin/.relayEnv"
@@ -111,9 +126,9 @@ export CLAUDE_CODE_PATH=${CLAUDE_CODE_PATH:-/usr/local/bin/claude}
 export RELAY_DATA_DIR=$RELAY_STATE_DIR/data
 export RELAY_LOG_DIR=$RELAY_STATE_DIR/logs
 export RELAY_CLAUDE_CONFIG_DIR=/home/admin/.claude
-export RELAY_DEFAULT_CWD=/home/admin/.openclaw/workspace
 export RELAY_DEFAULT_PERMISSION_MODE=$CLAUDE_RELAY_PERMISSION_MODE
 EOF
+printf 'export RELAY_DEFAULT_CWD=%q\n' "$CLAUDE_WORKSPACE" >> "$RELAY_ENV_FILE"
 chown admin:admin "$RELAY_ENV_FILE" 2>/dev/null || true
 chmod 600 "$RELAY_ENV_FILE"
 success "Relay env file written to $RELAY_ENV_FILE (mode 600)"

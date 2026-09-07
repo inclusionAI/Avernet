@@ -259,3 +259,15 @@ class TestAckComposer:
         assert storage.storage_id == "b1"
         assert storage.quota == "1Gi"
         assert storage.permission == "0777"
+
+
+def test_ack_claude_initial_cwd_is_explicit_and_shell_quoted():
+    import dataclasses
+    import shlex
+    ctx = dataclasses.replace(_CTX, engine='claude_code', claude_code_default_cwd="/home/admin/project's files")
+    command = AckDeployConfigComposer().build_start_command(ctx)
+    inner = shlex.split(command)[3]
+    tokens = shlex.split(inner)
+    assert tokens[tokens.index('--claude-initial-cwd') + 1] == "/home/admin/project's files"
+    legacy = AckDeployConfigComposer().build_start_command(dataclasses.replace(_CTX, engine='claude_code'))
+    assert '--claude-initial-cwd' not in legacy

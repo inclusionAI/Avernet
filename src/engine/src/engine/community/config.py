@@ -470,3 +470,22 @@ def load_engine_config() -> EngineConfig:
         mcporter_config_path=load_mcporter_config_path(),
         dingtalk=load_dingtalk_settings(),
     )
+
+
+def load_claude_code_file_roots() -> tuple[Path, ...]:
+    """Local file access roots for a co-located Claude Code runtime."""
+    home = Path.home()
+    roots = [home / ".claude_code"]
+    cwd = os.getenv("CLAUDE_CODE_DEFAULT_CWD") or os.getenv("RELAY_DEFAULT_CWD")
+    if cwd:
+        root = Path(cwd)
+        if not root.is_absolute() or ".." in root.parts:
+            raise ValueError("Claude Code working directory must be absolute")
+        roots.append(root)
+    return tuple(roots)
+
+
+def load_claude_code_workspace() -> Path:
+    """Effective workspace shared with the colocated Claude runtime."""
+    configured = os.getenv("CLAUDE_CODE_DEFAULT_CWD") or os.getenv("RELAY_DEFAULT_CWD")
+    return Path(configured) if configured else Path.home() / ".claude_code" / "workspace"
