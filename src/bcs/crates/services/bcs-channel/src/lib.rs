@@ -46,6 +46,7 @@ pub use visibility::visibility_allows;
 
 const DEFAULT_INBOUND_DEDUP_LIMIT: usize = 4096;
 const CHANNEL_START_STALE_MS: u64 = 30_000;
+const GROUP_CHAT_NEW_SESSION_CONFIG: &str = "group_chat_new_session_per_message";
 const FORWARD_SENDER_IDENTITY_CONFIG: &str = "forward_sender_identity";
 
 /// Channel application service implementation.
@@ -79,6 +80,7 @@ struct ResolvedInboundContext {
     caller_principal: String,
     context_projection: &'static str,
     state_machine_trigger: bool,
+    new_session_per_message: bool,
 }
 
 impl BcsChannelService {
@@ -208,6 +210,9 @@ impl BcsChannelService {
             im_user_id,
             caller_principal,
             context_projection: if is_bot_target { "direct_bot" } else { "group" },
+            new_session_per_message: msg.conversation_type == "2"
+                && binding.config.get(GROUP_CHAT_NEW_SESSION_CONFIG)
+                    .and_then(serde_json::Value::as_bool) == Some(true),
             state_machine_trigger: !is_bot_target
                 && group.group_strategy == GroupStrategy::StateMachine,
         })
@@ -282,6 +287,9 @@ impl BcsChannelService {
         ctx: &ResolvedInboundContext,
         msg: &InboundMessage,
     ) -> Result<(String, bool), ChannelUseCaseError> {
+        if ctx.new_session_per_message {
+            return Ok((self.create_chat_session(ctx, msg).await?, false));
+        }
         let current = self
             .conversations
             .get(
@@ -401,7 +409,7 @@ impl BcsChannelService {
                 ctx.im_user_id.as_deref(),
             )
             .await?;
-        if let Some(mapping) = current.as_ref() {
+        if let Some(mapping) = current.as_ref().filter(|_| !ctx.new_session_per_message) {
             if let Some(view) = self
                 .collaboration_runtime
                 .get_state_machine_run_by_session_id(&mapping.bcs_session_id)
@@ -1422,6 +1430,7 @@ impl ChannelService for BcsChannelService {
         provider
             .validate_config(&cmd.config)
             .map_err(provider_error)?;
+        validate_group_chat_session_config(&cmd.config)?;
         validate_forward_sender_identity_config(&target, &cmd.config)?;
         let binding_id = (self.new_id)();
         if matches!(&target, BindingTarget::Bot { .. }) {
@@ -1533,6 +1542,7 @@ impl ChannelService for BcsChannelService {
         };
         let provider = self.provider_for(&binding.channel_type)?;
         provider.validate_config(&config).map_err(provider_error)?;
+        validate_group_chat_session_config(&config)?;
         validate_forward_sender_identity_config(&binding.target, &config)?;
         self.bindings.set_config(id, config).await?;
         Ok(())
@@ -2145,6 +2155,15 @@ fn binding_target_kind(target: &BindingTarget) -> &'static str {
     }
 }
 
+fn validate_group_chat_session_config(config: &serde_json::Value) -> Result<(), ChannelUseCaseError> {
+    if config.get(GROUP_CHAT_NEW_SESSION_CONFIG).is_some_and(|value| !value.is_boolean()) {
+        return Err(ChannelUseCaseError::InvalidParams(format!(
+            "{GROUP_CHAT_NEW_SESSION_CONFIG} must be a boolean"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_forward_sender_identity_config(
     target: &BindingTarget,
     config: &serde_json::Value,
@@ -2315,6 +2334,7 @@ impl InboundDedupGuard {
 
 #[cfg(test)]
 mod tests {
+    use super::GROUP_CHAT_NEW_SESSION_CONFIG;
     use std::collections::HashMap;
     use std::future::Future;
     use std::io::{self, Write};
@@ -5337,6 +5357,13 @@ mod tests {
 
     #[tokio::test]
     async fn human_input_ready_uses_existing_channel_conversation_mapping() -> TestResult {
+        human_input_ready_uses_channel_mapping(false).await?;
+        human_input_ready_uses_channel_mapping(true).await
+    }
+
+    async fn human_input_ready_uses_channel_mapping(new_session_per_message: bool) -> TestResult {
+        let mut config = dingtalk_config("robot_1");
+        config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(new_session_per_message);
         let harness = TestHarness::new(state_machine_group("group_sm")).await?;
         harness
             .service
@@ -5350,7 +5377,7 @@ mod tests {
                 outbound_visibility: Visibility::FullTranscript,
                 env: "dev".to_string(),
                 created_by: Some("creator".to_string()),
-                config: dingtalk_config("robot_1"),
+                config,
             })
             .await?;
         harness
@@ -5411,6 +5438,12 @@ mod tests {
         assert_eq!(events[0].purpose, ChannelOutboundPurpose::HumanInputRequest);
         assert_eq!(events[0].raw_payload["request_id"], "event-1");
 
+        drop(events);
+        harness.service.handle_inbound(group_inbound(
+            "conv_sm", "u1", Some("张三"), "msg_reply", true,
+        )).await?;
+        assert_eq!(harness.collaboration_runtime.starts.lock().await.len(), 1);
+        assert_eq!(harness.collaboration_runtime.human_responses.lock().await.len(), 1);
         Ok(())
     }
 
@@ -5570,6 +5603,7 @@ mod tests {
                 caller_principal: "test-im:conv_meta".to_string(),
                 context_projection: "group",
                 state_machine_trigger: false,
+                new_session_per_message: false,
             },
             &msg,
         );
@@ -7071,6 +7105,121 @@ mod tests {
             message: format!("{name} is not configured"),
             request_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn group_new_session_per_message_respects_scope_target_and_direct_chats() -> TestResult {
+        for target in [
+            BindingTarget::Group { group_id: "group_1".to_string() },
+            BindingTarget::Bot { bot_id: "target_bot".to_string() },
+        ] {
+            for scope in [GroupChatScope::ConversationShared, GroupChatScope::PerSender] {
+                for enabled in [None, Some(false), Some(true)] {
+                    for is_group in [false, true] {
+                        let harness = TestHarness::new(manager_group("group_1")).await?;
+                        let mut binding = active_binding("binding_1", "robot_1", target.clone(), Visibility::FullTranscript);
+                        binding.group_chat_scope = Some(scope);
+                        if let Some(enabled) = enabled {
+                            binding.config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(enabled);
+                        }
+                        harness.binding_repo.create(binding).await?;
+                        for msg_id in ["msg_1", "msg_2", "msg_2"] {
+                            let msg = if is_group {
+                                group_inbound("conv_1", "u1", Some("张三"), msg_id, true)
+                            } else {
+                                inbound("conv_1", "u1", Some("张三"), msg_id)
+                            };
+                            harness.service.handle_inbound(msg).await?;
+                        }
+                        let sends = harness.message_flow.web_sends.lock().await;
+                        assert_eq!(sends.len(), 2, "duplicate messages must be ignored");
+                        assert_eq!(sends[0].session_id != sends[1].session_id, is_group && enabled == Some(true));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn group_new_session_per_message_preserves_concurrent_reply_routes() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut binding = active_binding("binding_1", "robot_1", BindingTarget::Group {
+            group_id: "group_1".to_string(),
+        }, Visibility::FullTranscript);
+        binding.config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(true);
+        harness.binding_repo.create(binding).await?;
+        let (first, second) = tokio::join!(
+            harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), "msg_1", true)),
+            harness.service.handle_inbound(group_inbound("conv_1", "u2", Some("李四"), "msg_2", true)),
+        );
+        first?;
+        second?;
+        let sends = harness.message_flow.web_sends.lock().await;
+        assert_eq!(sends.len(), 2);
+        assert_ne!(sends[0].session_id, sends[1].session_id);
+        for send in sends.iter() {
+            let session_id = send.session_id.as_deref().expect("session id");
+            assert_eq!(harness.session_repo.get(session_id).await.expect("session").status, SessionStatus::Running);
+            harness.service.try_outbound(outbound(session_id, ParticipantRole::Worker, false)).await?;
+        }
+        let events = harness.delivery.events.lock().await;
+        for send in sends.iter() {
+            assert!(events.iter().any(|event| Some(&event.bcs_session_id) == send.session_id.as_ref()
+                && event.im_conversation_id == "conv_1"));
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn group_new_session_per_message_starts_independent_workflows() -> TestResult {
+        let harness = TestHarness::new(state_machine_group("group_sm")).await?;
+        let mut binding = active_binding("binding_1", "robot_1", BindingTarget::Group {
+            group_id: "group_sm".to_string(),
+        }, Visibility::FullTranscript);
+        binding.config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(true);
+        harness.binding_repo.create(binding).await?;
+        for msg_id in ["msg_1", "msg_2", "msg_2"] {
+            harness.service.handle_inbound(group_inbound("conv_1", "u1", Some("张三"), msg_id, true)).await?;
+        }
+        let starts = harness.collaboration_runtime.starts.lock().await;
+        assert_eq!(starts.len(), 2);
+        assert_ne!(starts[0].session_id, starts[1].session_id);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn group_new_session_per_message_validates_create_and_update() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let mut config = dingtalk_config("robot_1");
+        config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!("true");
+        let mut command = CreateBindingCommand {
+            channel_type: channel_type(),
+            account_ref: "robot_1".to_string(),
+            target: BindingTarget::Group { group_id: "group_1".to_string() },
+            group_chat_scope: Some(GroupChatScope::ConversationShared),
+            outbound_visibility: Visibility::FullTranscript,
+            env: "dev".to_string(),
+            created_by: Some("creator".to_string()),
+            config,
+        };
+        assert!(matches!(harness.service.create_binding(command.clone()).await, Err(ChannelUseCaseError::InvalidParams(_))));
+        assert!(harness.binding_repo.list().await?.is_empty());
+        command.config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(true);
+        let binding = harness.service.create_binding(command).await?;
+        assert_eq!(binding.config[GROUP_CHAT_NEW_SESSION_CONFIG], true);
+        for invalid in [serde_json::Value::Null, serde_json::json!(1), serde_json::json!("false")] {
+            let mut config = dingtalk_config("robot_1");
+            config[GROUP_CHAT_NEW_SESSION_CONFIG] = invalid;
+            assert!(matches!(harness.service.update_binding_config(&binding.id, config).await, Err(ChannelUseCaseError::InvalidParams(_))));
+        }
+        let stored = harness.binding_repo.get(&binding.id).await?.expect("binding");
+        assert_eq!(stored.config[GROUP_CHAT_NEW_SESSION_CONFIG], true);
+        let mut config = dingtalk_config("robot_1");
+        config[GROUP_CHAT_NEW_SESSION_CONFIG] = serde_json::json!(false);
+        harness.service.update_binding_config(&binding.id, config).await?;
+        assert_eq!(harness.binding_repo.get(&binding.id).await?.expect("binding").config[GROUP_CHAT_NEW_SESSION_CONFIG], false);
+        Ok(())
     }
 
     // ── /new slash 命令 ─────────────────────────────────────────
