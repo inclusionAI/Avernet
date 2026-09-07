@@ -455,67 +455,64 @@ class BotRunRequestExecutor:
         200ms 批量窗口合并 delta / agent chunks，并由 ``stream_flush_max_content_bytes``
         字节阈值提前 flush，避免单条 chunk content 在 ZDAS tracer 等非参数化内联
         SQL 路径下过大触发 1064：
-        - delta chunks 先缓冲，200ms / 字节阈值 / 非 delta/agent 事件触发 flush
-        - agent chunks 先缓冲到独立 buffer，200ms / 字节阈值 / 非 delta/agent 事件触发 flush（JSON array 合并）
-        - 非 delta/agent（final/error）先 flush 两个缓冲，再立即写入
+        - delta / agent chunks 统一进入一个有序 buffer，200ms / 字节阈值 / 非 delta/agent 事件触发 flush
+        - flush 时按到达顺序写出，相邻同类型事件合并（delta 拼接文本，agent 合并为 JSON array）
+        - 非 delta/agent（final/error）先 flush 缓冲，再立即写入
         - ZCache watermark: cache.set(f"run:{run_id}:seq", f"{seq}:{chunk_type}", ttl=120)
         """
 
         seq = 0
-        delta_buffer: list[str] = []
-        delta_engine_type: str | None = None
-        delta_buffer_bytes: int = 0
-        agent_buffer: list[dict[str, Any]] = []
-        agent_engine_type: str | None = None
-        agent_buffer_bytes: int = 0
+        # 统一有序 buffer，元素为 (chunk_type, payload, engine_type)
+        # payload: delta → str; agent → dict
+        pending: list[tuple[str, Any, str | None]] = []
+        pending_bytes: int = 0
         cache_key = f"run:{run.run_id}:seq"
 
-        def _flush_delta() -> None:
-            """将缓冲的 delta 合并为一条 chunk 写入。"""
-            nonlocal seq, delta_buffer, delta_engine_type, delta_buffer_bytes
-            if not delta_buffer:
-                return
-            merged = "".join(delta_buffer)
-            delta_buffer.clear()
-            delta_buffer_bytes = 0
-            metadata_json = None
-            if delta_engine_type:
-                metadata_json = json.dumps({"engine_type": delta_engine_type})
-            seq += 1
-            self._chunk_repository.insert_chunk(
-                run_id=run.run_id,
-                seq=seq,
-                chunk_type="delta",
-                content=merged,
-                metadata=metadata_json,
-            )
-            self._cache_plugin.set(cache_key, f"{seq}:delta", ttl_seconds=120)
-
-        def _flush_agent() -> None:
-            """将缓冲的 agent 事件合并为一条 chunk（JSON array）写入。"""
-            nonlocal seq, agent_buffer, agent_engine_type, agent_buffer_bytes
-            if not agent_buffer:
-                return
-            merged = json.dumps(agent_buffer, ensure_ascii=False)
-            agent_buffer.clear()
-            agent_buffer_bytes = 0
-            metadata_json = None
-            if agent_engine_type:
-                metadata_json = json.dumps({"engine_type": agent_engine_type})
-            seq += 1
-            self._chunk_repository.insert_chunk(
-                run_id=run.run_id,
-                seq=seq,
-                chunk_type="agent",
-                content=merged,
-                metadata=metadata_json,
-            )
-            self._cache_plugin.set(cache_key, f"{seq}:agent", ttl_seconds=120)
-
         def _flush_buffers() -> None:
-            """flush delta 和 agent 两个缓冲。"""
-            _flush_delta()
-            _flush_agent()
+            """按到达顺序 flush 缓冲，相邻同类型事件合并写入。"""
+            nonlocal seq, pending, pending_bytes
+            if not pending:
+                return
+            # 当前正在累积的同类型段
+            cur_type: str = pending[0][0]
+            cur_payloads: list[Any] = []
+            cur_engine_type: str | None = None
+
+            def _emit() -> None:
+                nonlocal seq, cur_payloads, cur_engine_type
+                metadata_json = (
+                    json.dumps({"engine_type": cur_engine_type})
+                    if cur_engine_type
+                    else None
+                )
+                if cur_type == "delta":
+                    content = "".join(cur_payloads)
+                else:  # agent
+                    content = json.dumps(cur_payloads, ensure_ascii=False)
+                seq += 1
+                self._chunk_repository.insert_chunk(
+                    run_id=run.run_id,
+                    seq=seq,
+                    chunk_type=cur_type,
+                    content=content,
+                    metadata=metadata_json,
+                )
+                self._cache_plugin.set(
+                    cache_key, f"{seq}:{cur_type}", ttl_seconds=120
+                )
+                cur_payloads = []
+                cur_engine_type = None
+
+            for chunk_type, payload, engine_type in pending:
+                if chunk_type != cur_type:
+                    _emit()
+                    cur_type = chunk_type
+                cur_payloads.append(payload)
+                if engine_type:
+                    cur_engine_type = engine_type
+            _emit()
+            pending = []
+            pending_bytes = 0
 
         def _write_chunk(stream_chunk: StreamChunk) -> None:
             """写入非 delta/agent chunk（先 flush 缓冲）。"""
@@ -550,26 +547,23 @@ class BotRunRequestExecutor:
                 attachments=attachments,
             ):
                 if chunk.type == "delta":
-                    delta_buffer.append(chunk.content)
-                    delta_buffer_bytes += len(chunk.content or "")
-                    if chunk.engine_type:
-                        delta_engine_type = chunk.engine_type
+                    pending.append(("delta", chunk.content, chunk.engine_type))
+                    pending_bytes += len(chunk.content or "")
                     if (
                         time.monotonic() - last_flush_ts >= self._stream_flush_interval
-                        or delta_buffer_bytes >= self._stream_flush_max_content_bytes
+                        or pending_bytes >= self._stream_flush_max_content_bytes
                     ):
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
                 elif chunk.type == "agent":
-                    agent_buffer.append(chunk.metadata or {})
-                    agent_buffer_bytes += len(
-                        json.dumps(chunk.metadata or {}, ensure_ascii=False)
+                    agent_payload = chunk.metadata or {}
+                    pending.append(("agent", agent_payload, chunk.engine_type))
+                    pending_bytes += len(
+                        json.dumps(agent_payload, ensure_ascii=False)
                     )
-                    if chunk.engine_type:
-                        agent_engine_type = chunk.engine_type
                     if (
                         time.monotonic() - last_flush_ts >= self._stream_flush_interval
-                        or agent_buffer_bytes >= self._stream_flush_max_content_bytes
+                        or pending_bytes >= self._stream_flush_max_content_bytes
                     ):
                         _flush_buffers()
                         last_flush_ts = time.monotonic()
