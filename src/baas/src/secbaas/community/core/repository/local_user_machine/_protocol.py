@@ -87,3 +87,15 @@ class LocalUserMachineRepository(Protocol):
         Returns None if route_info is NULL or machine not found.
         """
         ...
+
+    def update_user_id(
+        self, machine_id: str, env: str, old_user_id: str, new_user_id: str
+    ) -> int:
+        """Conditional ownership migration for a local user machine.
+
+        Updates user_id to new_user_id only when the row currently has
+        user_id == old_user_id (the guard lives in the WHERE clause).
+        Returns the affected rowcount; 0 rows means the guard lost a race
+        with a concurrent migration and the caller must decide per D-02.
+        """
+        ...

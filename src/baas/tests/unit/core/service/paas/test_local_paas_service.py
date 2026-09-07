@@ -2080,6 +2080,9 @@ class TestHandleMngRegister:
         """Existing machine update doesn't query template ID (only new machines need it)."""
         # Existing machine
         mock_record = MagicMock()
+        # Pin the owner to the registering user so the D-01 drift gate does not
+        # treat the MagicMock's bare .user_id as a spurious ownership migration.
+        mock_record.user_id = "user-001"
         mock_repository.get_by_machine_id.return_value = mock_record
 
         service = LocalPaasService(
