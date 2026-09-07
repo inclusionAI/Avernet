@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
     ResolvedCapabilityPlan,
+)
+from agentclaw.community.core.skill_center.runtime_resolver import (
+    RuntimeProjectionResolver,
 )
 from agentclaw.community.core.skill_center.services.bot_runtime_projector import (
     BotRuntimeProjector,
@@ -63,8 +68,8 @@ class _IdentityRepository:
         return {}
 
 
-def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
-    projector = BotRuntimeProjector(
+def _projector() -> BotRuntimeProjector:
+    return BotRuntimeProjector(
         factory=_Factory(),
         bot_repo=_Bots(),
         repository=_Repository(),
@@ -73,6 +78,10 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
         passport=_Passport(),
         caller_identity_repo=_IdentityRepository(),
     )
+
+
+def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
+    projector = _projector()
     caplog.set_level(logging.INFO)
 
     plan = projector._resolve_plan(
@@ -83,11 +92,61 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
 
     assert isinstance(plan, ResolvedCapabilityPlan)
     messages = [record.getMessage() for record in caplog.records]
-    for stage in ("build_skill_plan", "build_mcp_plan"):
+    for stage in (
+        "build_skill_plan",
+        "build_mcp_plan",
+        "resolve_mcp_identity_modes",
+        "collect_effective_mcps",
+        "query_passport_clis",
+        "read_installed_mcps",
+        "resolve_effective_capabilities",
+    ):
         assert any(
             "[BotRuntimeProjector] timing" in message
             and f"stage={stage}" in message
             and "bot_id=bot-1" in message
             and "duration_ms=" in message
+            and "outcome=success" in message
             for message in messages
         )
+
+
+@pytest.mark.parametrize(
+    "stage",
+    (
+        "resolve_mcp_identity_modes",
+        "read_installed_mcps",
+        "resolve_effective_capabilities",
+    ),
+)
+def test_runtime_projector_logs_substage_errors(
+    caplog, monkeypatch, stage: str
+) -> None:
+    projector = _projector()
+    failure = RuntimeError(stage)
+
+    def fail(*_args, **_kwargs):
+        raise failure
+
+    if stage == "resolve_mcp_identity_modes":
+        monkeypatch.setattr(projector, "_resolve_mcp_identity_modes", fail)
+    elif stage == "read_installed_mcps":
+        monkeypatch.setattr(projector._repository, "list_installed_mcps", fail)
+    else:
+        monkeypatch.setattr(RuntimeProjectionResolver, "resolve", fail)
+
+    caplog.set_level(logging.INFO)
+    with pytest.raises(RuntimeError, match=stage):
+        projector._resolve_plan(
+            bot_id="bot-1",
+            owner_id="owner-1",
+            scope=ProjectionScope(skills=True, mcp=True),
+        )
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "[BotRuntimeProjector] timing" in message
+        and f"stage={stage}" in message
+        and "outcome=error" in message
+        for message in messages
+    )
