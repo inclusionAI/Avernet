@@ -601,7 +601,11 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             raise BotNotFoundError("Session不存在或不属于当前用户")
 
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
+            bcn_friend_authorized=bcn_friend_authorized,
         )
         if not need_poll:
             self._repo.save_session(user_id, bot_id, owner_id, session_key)

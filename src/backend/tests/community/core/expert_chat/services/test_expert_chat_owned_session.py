@@ -94,3 +94,38 @@ async def test_empty_or_invalid_runtime_session_payload_is_rejected():
     service._transport.invoke.return_value = {"data": None}
     with pytest.raises(BotNotFoundError):
         await service.update_owned_chat_session("u", "b", "o", "s/1", {})
+
+
+@pytest.mark.asyncio
+async def test_all_owned_session_operations_propagate_bcn_authorization():
+    service = Harness()
+
+    await service.get_owned_chat_session(
+        "u", "b", "o", "s/1", bcn_friend_authorized=True
+    )
+
+    service._transport.invoke.return_value = {"data": [], "total": 0}
+    await service.list_owned_chat_session_messages(
+        "u", "b", "o", "s/1", 20, bcn_friend_authorized=True
+    )
+
+    service._transport.invoke.return_value = {"data": {"id": "s/1"}}
+    await service.update_owned_chat_session(
+        "u", "b", "o", "s/1", {}, bcn_friend_authorized=True
+    )
+    await service.clear_owned_chat_session_messages(
+        "u", "b", "o", "s/1", bcn_friend_authorized=True
+    )
+    await service.set_owned_chat_session_favorite(
+        "u", "b", "o", "s/1", True, bcn_friend_authorized=True
+    )
+
+    assert service.list_chat_sessions.await_args.kwargs["bcn_friend_authorized"] is True
+    assert all(
+        call.kwargs["bcn_friend_authorized"] is True
+        for call in service._get_authorized_chat_bot.call_args_list
+    )
+    assert all(
+        call.kwargs["bcn_friend_authorized"] is True
+        for call in service._prepare_chat_connection.await_args_list
+    )
