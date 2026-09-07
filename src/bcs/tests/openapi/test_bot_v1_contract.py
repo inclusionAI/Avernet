@@ -87,6 +87,9 @@ def test_bot_domain_model_is_a_strict_bot_human_union() -> None:
         "visibility",
         "status",
         "env",
+        "user_visibility",
+        "friend_ext",
+        "friend_check_in_strategy",
         "created_at",
         "updated_at",
     }
@@ -185,6 +188,24 @@ def test_candidates_contract_matches_legacy_list_semantics() -> None:
     candidate = _success_data(operation)["properties"]["items"]["items"]
     assert set(candidate["required"]) == {"bot", "is_friend"}
     assert candidate["properties"]["bot"]["properties"]["kind"]["const"] == "bot"
+
+
+def test_eligible_candidates_contract_uses_the_new_route_name() -> None:
+    operation = _public_operation(
+        "get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"
+    )
+    parameters = _parameters(operation)
+
+    assert operation["operationId"] == "list_eligible_bot_candidates"
+    assert set(parameters) == {"bot_id", "purpose", "name", "offset", "limit"}
+    assert operation["x-avernet-security"] == {
+        "user": "required",
+        "app": "required",
+    }
+    assert "edge-permission" in operation["summary"]
+    assert operation["responses"]["403"]["x-error-codes"] == ["forbidden"]
+    candidate = _success_data(operation)["properties"]["items"]["items"]
+    assert set(candidate["required"]) == {"bot", "is_friend"}
 
 
 def test_candidate_search_contract_matches_legacy_search_semantics() -> None:
@@ -330,6 +351,9 @@ def test_bot_patch_exposes_only_the_approved_mutable_fields() -> None:
         "descriptor",
         "task_claim_mode",
         "task_dream_mode",
+        "user_visibility",
+        "friend_ext",
+        "friend_check_in_strategy",
     }
     descriptor = request["properties"]["descriptor"]
     assert descriptor["minProperties"] == 1

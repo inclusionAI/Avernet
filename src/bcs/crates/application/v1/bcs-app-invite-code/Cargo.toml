@@ -1,0 +1,23 @@
+[package]
+name = "bcs-app-invite-code"
+description = "Versioned invite-code application facade for the BCN V1 API"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+rust-version = { workspace = true }
+version = { workspace = true }
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+bcs-service-api = { workspace = true }
+hex = { workspace = true }
+hmac = { workspace = true }
+rand = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

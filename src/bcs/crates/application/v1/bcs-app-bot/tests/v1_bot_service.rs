@@ -11,6 +11,7 @@ use bcs_app_bot::{BotServiceConfig, BotServiceImpl};
 use bcs_bot::{BotControlPlaneCore, BotCore};
 use bcs_bot_store::{MemoryBotRepo, MemoryProviderStore};
 use bcs_friend::FriendCore;
+use bcs_service_api::application::{ConnectService, RequestDirection, RequestsPage};
 use bcs_service_api::application::v1::{
     ApplicationError, Bot, BotCandidatePurpose, BotCandidateSearchMode, BotDescriptorPatch,
     BotKind, BotPatch, BotReachability, BotService, BotStatus, BotVisibility,
@@ -21,12 +22,13 @@ use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateSearchCoreResult, BotCandidateSearchCoreService,
     BotCandidateSearchHit, BotCandidateSearchMode as CoreCandidateSearchMode,
     BotCandidateSearchQuery, BotCapabilities, BotControlPlaneCoreService,
-    BotControlPlaneDescriptor, BotControlPlaneRecord, BotRegistryCoreService, BotRepoPort,
-    FriendCoreService, LegacyBotCandidateSearchCoreResult, ProviderBotBinding,
+    BotControlPlaneDescriptor, BotControlPlaneRecord, BotControlPlaneView, BotRegistryCoreService,
+    BotRepoPort, FriendCoreService, LegacyBotCandidateSearchCoreResult, ProviderBotBinding,
     ProviderBotBindingRepoPort, ProviderRecord, ProviderRepoPort, RegisteredBot, ServiceError,
     ServiceResult, Skill,
 };
-use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+use bcs_domain::edge_permission::{FriendListEntry, PermissionRequest, RequestStatus};
+use bcs_test_support::{NoopBotRegistryCoreService, NoopConnectService, NoopFriendCoreService};
 
 #[test]
 fn v1_bot_commands_expose_the_approved_control_plane_surface() {
@@ -110,6 +112,7 @@ impl Fixture {
             control_plane,
             registry,
             friends.clone(),
+            Arc::new(NoopConnectService),
             Arc::new(RecordingCandidateSearch::empty()),
             BotServiceConfig { env: env.clone() },
         );
@@ -151,6 +154,150 @@ impl Fixture {
 struct RecordingCandidateSearch {
     queries: Mutex<Vec<BotCandidateSearchQuery>>,
     result: BotCandidateSearchCoreResult,
+}
+
+struct RecordingConnectService {
+    friends: Mutex<Vec<FriendListEntry>>,
+}
+
+impl RecordingConnectService {
+    fn new(friends: Vec<FriendListEntry>) -> Self {
+        Self {
+            friends: Mutex::new(friends),
+        }
+    }
+}
+
+#[async_trait]
+impl ConnectService for RecordingConnectService {
+    async fn create_connect(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<String>,
+        _: Option<bcs_service_api::RequestAuthHeaders>,
+    ) -> ServiceResult<bcs_service_api::application::ConnectResult> {
+        unreachable!("not used")
+    }
+
+    async fn approve(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ServiceResult<Vec<u64>> {
+        unreachable!("not used")
+    }
+
+    async fn reject(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<String>,
+    ) -> ServiceResult<()> {
+        unreachable!("not used")
+    }
+
+    async fn cancel(&self, _: &str) -> ServiceResult<()> {
+        unreachable!("not used")
+    }
+
+    async fn get_request(
+        &self,
+        _: &str,
+    ) -> ServiceResult<PermissionRequest> {
+        unreachable!("not used")
+    }
+
+    async fn revoke_friend(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> ServiceResult<Vec<u64>> {
+        unreachable!("not used")
+    }
+
+    async fn list_friends(
+        &self,
+        _: &str,
+    ) -> ServiceResult<Vec<FriendListEntry>> {
+        Ok(self.friends.lock().expect("friends lock").clone())
+    }
+
+    async fn list_requests(
+        &self,
+        _: &str,
+        _: RequestDirection,
+        _: Option<RequestStatus>,
+        _page: u32,
+        _page_size: u32,
+    ) -> ServiceResult<RequestsPage> {
+        unreachable!("not used")
+    }
+}
+
+struct RecordingBotControlPlane {
+    record: BotControlPlaneRecord,
+    queries: Mutex<Vec<bcs_service_api::BotCandidateReadQuery>>,
+}
+
+impl RecordingBotControlPlane {
+    fn new(record: BotControlPlaneRecord) -> Self {
+        Self {
+            record,
+            queries: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+#[async_trait]
+impl BotControlPlaneCoreService for RecordingBotControlPlane {
+    async fn get_record(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneRecord>> {
+        Ok(Some(self.record.clone()))
+    }
+
+    async fn get(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unreachable!("not used")
+    }
+
+    async fn get_by_ids(
+        &self,
+        _bot_ids: &[String],
+        _env: &str,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unreachable!("not used")
+    }
+
+    async fn list_candidates(
+        &self,
+        query: bcs_service_api::BotCandidateReadQuery,
+    ) -> ServiceResult<(Vec<bcs_service_api::BotControlPlaneCandidate>, u64)> {
+        self.queries.lock().expect("queries lock").push(query);
+        Ok((Vec::new(), 0))
+    }
+
+    async fn list_by_creator(
+        &self,
+        _query: bcs_service_api::BotControlPlaneOwnedQuery,
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
+        unreachable!("not used")
+    }
+
+    async fn patch(
+        &self,
+        _bot_id: &str,
+        _env: &str,
+        _patch: bcs_service_api::BotControlPlanePatch,
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
+        unreachable!("not used")
+    }
 }
 
 impl RecordingCandidateSearch {
@@ -239,7 +386,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
         &self,
         _bot_id: &str,
         _env: &str,
-    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
         Err(ServiceError::InternalError(
             "Provider hydration must happen after authorization".to_string(),
         ))
@@ -249,7 +396,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
         &self,
         _bot_ids: &[String],
         _env: &str,
-    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
         unreachable!("not used by authorization-priority test")
     }
 
@@ -263,7 +410,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
     async fn list_by_creator(
         &self,
         _query: bcs_service_api::BotControlPlaneOwnedQuery,
-    ) -> ServiceResult<Vec<bcs_service_api::BotControlPlaneView>> {
+    ) -> ServiceResult<Vec<BotControlPlaneView>> {
         unreachable!("not used by authorization-priority test")
     }
 
@@ -272,7 +419,7 @@ impl BotControlPlaneCoreService for AuthorizationProbeCore {
         _bot_id: &str,
         _env: &str,
         _patch: bcs_service_api::BotControlPlanePatch,
-    ) -> ServiceResult<Option<bcs_service_api::BotControlPlaneView>> {
+    ) -> ServiceResult<Option<BotControlPlaneView>> {
         unreachable!("not used by authorization-priority test")
     }
 }
@@ -309,6 +456,7 @@ async fn ownership_denial_precedes_provider_hydration() {
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
+        Arc::new(NoopConnectService),
         Arc::new(RecordingCandidateSearch::empty()),
         BotServiceConfig { env },
     );
@@ -354,6 +502,7 @@ async fn search_candidates_calls_core_once_and_preserves_ranked_enrichment() {
         control_plane,
         registry,
         friends,
+        Arc::new(NoopConnectService),
         candidate_search.clone(),
         BotServiceConfig { env },
     );
@@ -484,6 +633,7 @@ async fn search_candidates_normalizes_missing_empty_and_whitespace_queries() {
         control_plane,
         registry,
         Arc::new(FriendCore::memory()),
+        Arc::new(NoopConnectService),
         candidate_search.clone(),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
@@ -559,6 +709,7 @@ async fn search_candidates_preserves_name_fallback_order_and_omits_semantic_enri
         control_plane,
         registry,
         Arc::new(FriendCore::memory()),
+        Arc::new(NoopConnectService),
         candidate_search,
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
@@ -636,6 +787,7 @@ async fn search_candidates_omits_enrichment_for_empty_query_mode() {
         control_plane,
         registry,
         Arc::new(FriendCore::memory()),
+        Arc::new(NoopConnectService),
         candidate_search,
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
@@ -703,6 +855,7 @@ async fn search_candidates_never_projects_human_hits_as_physical_bots() {
         control_plane,
         registry,
         Arc::new(FriendCore::memory()),
+        Arc::new(NoopConnectService),
         candidate_search,
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
@@ -753,6 +906,7 @@ async fn search_candidates_denies_unauthorized_perspective_before_core_search() 
         control_plane,
         registry,
         Arc::new(FriendCore::memory()),
+        Arc::new(NoopConnectService),
         candidate_search.clone(),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),
@@ -926,6 +1080,78 @@ async fn collaboration_candidates_include_private_friends_without_status_filteri
     assert_eq!(page.items[0].bot.status, BotStatus::Hidden);
     assert_eq!(page.items[0].bot.reachability, BotReachability::Unreachable);
     assert!(page.items[0].is_friend);
+}
+
+#[tokio::test]
+async fn eligible_candidates_use_edge_permission_but_keep_the_same_projection() {
+    let env = bcs_config::resolve_env_str();
+    let record = BotControlPlaneRecord {
+        bot_id: "acting".to_string(),
+        kind: ActorKind::Bot,
+        name: "Acting".to_string(),
+        visibility: "private".to_string(),
+        status: ActorStatus::Online,
+        env: env.clone(),
+        created_by: Some("staff-1".to_string()),
+        descriptor: BotControlPlaneDescriptor {
+            summary: String::new(),
+            domains: Vec::new(),
+            skills: Vec::new(),
+            scopes: Vec::new(),
+        },
+        agent_code: None,
+        task_claim_mode: false,
+        task_dream_mode: false,
+        created_at: 1,
+        updated_at: 1,
+        user_visibility: Default::default(),
+        friend_ext: Default::default(),
+        friend_check_in_strategy: Default::default(),
+    };
+    let control_plane = Arc::new(RecordingBotControlPlane::new(record));
+    let connect = Arc::new(RecordingConnectService::new(vec![
+        FriendListEntry {
+            actor_id: "bot-friend".to_string(),
+            name: Some("Bot Friend".to_string()),
+            summary: Some("bot summary".to_string()),
+            is_online: true,
+            kind: ActorKind::Bot,
+        },
+        FriendListEntry {
+            actor_id: "human-friend".to_string(),
+            name: Some("Human Friend".to_string()),
+            summary: Some("human summary".to_string()),
+            is_online: true,
+            kind: ActorKind::Human,
+        },
+    ]));
+    let service = BotServiceImpl::new(
+        control_plane.clone(),
+        Arc::new(NoopBotRegistryCoreService),
+        Arc::new(NoopFriendCoreService),
+        connect,
+        Arc::new(RecordingCandidateSearch::empty()),
+        BotServiceConfig { env: env.clone() },
+    );
+
+    let page = service
+        .list_eligible_candidates(ListBotCandidates {
+            caller: human_caller("staff-1"),
+            bot_id: "acting".to_string(),
+            purpose: BotCandidatePurpose::Collaboration,
+            name: Some(" FRIEND ".to_string()),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .expect("eligible candidates");
+
+    assert_eq!(page.total, 0);
+    let queries = control_plane.queries.lock().expect("queries lock");
+    let query = queries.first().expect("recorded query");
+    assert!(query.friend_ids.contains("bot-friend"));
+    assert!(!query.friend_ids.contains("human-friend"));
+    assert_eq!(query.name.as_deref(), Some("FRIEND"));
 }
 
 #[tokio::test]

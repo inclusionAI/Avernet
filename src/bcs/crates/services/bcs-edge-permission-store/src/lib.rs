@@ -1189,15 +1189,34 @@ fn row_to_bot_actor_config(row: &DbRow) -> ServiceResult<BotActorConfig> {
 }
 
 fn required_string(row: &DbRow, column: &'static str) -> ServiceResult<String> {
-    row.get_string(column)
-        .map_err(|err| service_db_error(column, err))?
-        .ok_or_else(|| {
-            ServiceError::InternalError(format!("missing edge_grants column {}", column))
-        })
+    optional_string(row, column)?.ok_or_else(|| {
+        ServiceError::InternalError(format!("missing edge_grants column {}", column))
+    })
 }
 
 fn optional_string(row: &DbRow, column: &'static str) -> ServiceResult<Option<String>> {
-    row.get_string(column).map_err(|err| service_db_error(column, err))
+    match row.get(column) {
+        None | Some(DbValue::Null) => Ok(None),
+        Some(DbValue::String(value)) => Ok(Some(value.clone())),
+        Some(DbValue::Bytes(value)) => String::from_utf8(value.clone())
+            .map(Some)
+            .map_err(|err| {
+                service_db_error(
+                    column,
+                    DbError::Conversion(format!(
+                        "column '{}' is not valid UTF-8: {}",
+                        column, err
+                    )),
+                )
+            }),
+        Some(other) => Err(service_db_error(
+            column,
+            DbError::Conversion(format!(
+                "column '{}' is not a string: {:?}",
+                column, other
+            )),
+        )),
+    }
 }
 
 fn optional_timestamp_text(row: &DbRow, column: &'static str) -> ServiceResult<Option<String>> {
@@ -1985,6 +2004,34 @@ mod tests {
             .expect("bot exists");
         assert_eq!(cfg.friend_check_in_strategy, "OPEN");
         assert_eq!(cfg.friend_ext["scope"], "column");
+    }
+
+    #[test]
+    fn bot_actor_config_accepts_utf8_bytes_for_json_text_columns() {
+        let mut row = std::collections::BTreeMap::new();
+        row.insert("bot_uuid".to_string(), DbValue::String("bytes-json-bot".to_string()));
+        row.insert("env".to_string(), DbValue::String("prod".to_string()));
+        row.insert("name".to_string(), DbValue::String("bytes-json-bot".to_string()));
+        row.insert("visibility".to_string(), DbValue::String("protected".to_string()));
+        row.insert("user_visibility".to_string(), DbValue::String("public".to_string()));
+        row.insert("friend_check_in_strategy".to_string(), DbValue::String("OPEN".to_string()));
+        row.insert(
+            "bot_info".to_string(),
+            DbValue::Bytes(br#"{"friend_ext":{"scope":"bot_info"}}"#.to_vec()),
+        );
+        row.insert(
+            "friend_ext".to_string(),
+            DbValue::Bytes(br#"{"scope":"column"}"#.to_vec()),
+        );
+        row.insert("status".to_string(), DbValue::String("online".to_string()));
+        row.insert("created_by".to_string(), DbValue::String("owner-1".to_string()));
+
+        let cfg = row_to_bot_actor_config(&DbRow::new(row)).expect("bytes JSON columns parse");
+
+        assert_eq!(cfg.bot_id, "bytes-json-bot");
+        assert_eq!(cfg.env, "prod");
+        assert_eq!(cfg.friend_ext["scope"], "column");
+        assert_eq!(cfg.created_by.as_deref(), Some("owner-1"));
     }
 
     #[tokio::test]

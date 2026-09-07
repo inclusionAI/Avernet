@@ -31,6 +31,11 @@ pub struct InviteConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    /// Whether the invite-code access gate is enabled.
+    /// When false or unset, protected routes do not enforce invite-code binding.
+    #[serde(default)]
+    pub invite_code_gate_enabled: bool,
+
     #[serde(default = "default_invite_ttl_seconds")]
     pub default_ttl_seconds: u64,
 

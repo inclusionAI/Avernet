@@ -12,6 +12,7 @@ use bcs_service_api::application::v1::{
     PatchBotInternalAttributes, PhysicalBot, QueryBots, SearchBotCandidates, UpdateBot,
     require_authenticated_user,
 };
+use bcs_service_api::application::ConnectService;
 use bcs_service_api::{
     ActorKind, ActorStatus, BotCandidateReadQuery, BotCandidateSearchCoreService,
     BotCandidateSearchMode as CoreCandidateSearchMode, BotCandidateSearchQuery,
@@ -29,6 +30,7 @@ pub struct BotServiceImpl {
     control_plane: Arc<dyn BotControlPlaneCoreService>,
     registry: Arc<dyn BotRegistryCoreService>,
     friends: Arc<dyn FriendCoreService>,
+    connect_service: Arc<dyn ConnectService>,
     candidate_search: Arc<dyn BotCandidateSearchCoreService>,
     config: BotServiceConfig,
 }
@@ -137,6 +139,7 @@ impl BotServiceImpl {
         control_plane: Arc<dyn BotControlPlaneCoreService>,
         registry: Arc<dyn BotRegistryCoreService>,
         friends: Arc<dyn FriendCoreService>,
+        connect_service: Arc<dyn ConnectService>,
         candidate_search: Arc<dyn BotCandidateSearchCoreService>,
         config: BotServiceConfig,
     ) -> Self {
@@ -144,6 +147,7 @@ impl BotServiceImpl {
             control_plane,
             registry,
             friends,
+            connect_service,
             candidate_search,
             config,
         }
@@ -334,27 +338,13 @@ impl BotServiceImpl {
             ))),
         }
     }
-}
 
-#[async_trait]
-impl BotService for BotServiceImpl {
-    async fn list_candidates(
+    async fn list_candidates_with_friend_ids(
         &self,
         command: ListBotCandidates,
+        acting: BotControlPlaneRecord,
+        friend_ids: HashSet<String>,
     ) -> Result<Page<BotCandidate>, ApplicationError> {
-        let staff_no = Self::human_staff_no(&command.caller)?;
-        Self::validate_bot_id(&command.bot_id)?;
-        Self::validate_pagination(command.offset, command.limit)?;
-        let acting = self
-            .authorize_candidate_perspective(&staff_no, &command.bot_id)
-            .await?;
-
-        let friend_ids = self
-            .friends
-            .list_friends(&command.bot_id)
-            .await
-            .into_iter()
-            .collect();
         let (records, total) = self
             .control_plane
             .list_candidates(BotCandidateReadQuery {
@@ -393,6 +383,54 @@ impl BotService for BotServiceImpl {
             offset: command.offset,
             limit: command.limit,
         })
+    }
+}
+
+#[async_trait]
+impl BotService for BotServiceImpl {
+    async fn list_candidates(
+        &self,
+        command: ListBotCandidates,
+    ) -> Result<Page<BotCandidate>, ApplicationError> {
+        let staff_no = Self::human_staff_no(&command.caller)?;
+        Self::validate_bot_id(&command.bot_id)?;
+        Self::validate_pagination(command.offset, command.limit)?;
+        let acting = self
+            .authorize_candidate_perspective(&staff_no, &command.bot_id)
+            .await?;
+
+        let friend_ids = self
+            .friends
+            .list_friends(&command.bot_id)
+            .await
+            .into_iter()
+            .collect();
+        self.list_candidates_with_friend_ids(command, acting, friend_ids)
+            .await
+    }
+
+    async fn list_eligible_candidates(
+        &self,
+        command: ListBotCandidates,
+    ) -> Result<Page<BotCandidate>, ApplicationError> {
+        let staff_no = Self::human_staff_no(&command.caller)?;
+        Self::validate_bot_id(&command.bot_id)?;
+        Self::validate_pagination(command.offset, command.limit)?;
+        let acting = self
+            .authorize_candidate_perspective(&staff_no, &command.bot_id)
+            .await?;
+
+        let friend_ids = self
+            .connect_service
+            .list_friends(&command.bot_id)
+            .await
+            .map_err(map_service_error)?
+            .into_iter()
+            .filter(|entry| entry.kind == ActorKind::Bot)
+            .map(|entry| entry.actor_id)
+            .collect();
+        self.list_candidates_with_friend_ids(command, acting, friend_ids)
+            .await
     }
 
     async fn search_candidates(

@@ -9,6 +9,7 @@ pub mod edge_grant;
 pub mod event;
 pub mod friend;
 pub mod group;
+pub mod invite_code;
 pub mod message;
 pub mod organization;
 pub mod permission_profile;
@@ -42,6 +43,9 @@ pub use event::*;
 pub use friend::{FriendRepoPort, FriendRequestRepoPort};
 pub use group::{
     CommitGroupEventfulMutation, FinalizeGroupProvisioning, GroupEventfulMutation, GroupRepoPort,
+};
+pub use invite_code::{
+    InviteCodeBindOutcome, InviteCodeRecord, InviteCodeRepoPort, InviteCodeStatus,
 };
 pub use message::{AppendMessageWithEvent, MessageRepoError, MessageRepoPort};
 pub use organization::{
