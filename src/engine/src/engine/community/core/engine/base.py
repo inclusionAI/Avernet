@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from engine.community.core.approval.protocol import ApprovalService
     from engine.community.core.bash.protocol import BashService
     from engine.community.core.chat.protocol import ChatService
+    from engine.community.core.cli_tools.protocol import CliToolsService
     from engine.community.core.cron.protocol import CronService
     from engine.community.core.default_config.protocol import DefaultConfigService
     from engine.community.core.file.protocol import FileService
@@ -155,6 +156,16 @@ _PLUGIN_CAPABILITY_DOMAINS: tuple[tuple[str, tuple[Capability, ...]], ...] = (
         ),
     ),
     (
+        "_cli_tools",
+        (
+            Capability.CLI_INSTALL,
+            Capability.CLI_DELETE,
+            Capability.CLI_LIST,
+            Capability.CLI_REPLACE,
+            Capability.CLI_DOWNLOAD,
+        ),
+    ),
+    (
         "_mcp",
         (
             Capability.MCP_LIST,
@@ -195,6 +206,7 @@ class BaseEngine(ABC):
         self._chat: ChatService | None = None
         self._mcp: MCPService | None = None
         self._skills: SkillsService | None = None
+        self._cli_tools: CliToolsService | None = None
         self._cron: CronService | None = None
         self._models: ModelsService | None = None
         self._node: NodeService | None = None
@@ -243,6 +255,10 @@ class BaseEngine(ABC):
     @property
     def skills(self) -> SkillsService | None:
         return self._skills
+
+    @property
+    def cli_tools(self) -> CliToolsService | None:
+        return self._cli_tools
 
     @property
     def cron(self) -> CronService | None:

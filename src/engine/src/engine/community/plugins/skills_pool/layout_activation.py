@@ -886,7 +886,13 @@ def _active_entry_inventory(
     external: list[Path] = []
     occupied: list[Path] = []
     reserved = {layout.local_bridge, layout.repo_bridge}
-    for entry in sorted(layout.active_root.iterdir(), key=lambda path: path.name):
+    try:
+        entries = sorted(layout.active_root.iterdir(), key=lambda path: path.name)
+    except FileNotFoundError:
+        if layout.active_root.is_symlink():
+            raise
+        return managed, tuple(external), tuple(occupied)
+    for entry in entries:
         if entry in reserved or entry.name.startswith(".skills-local.pool-cutover-"):
             continue
         if not entry.is_symlink():
@@ -1437,6 +1443,7 @@ def _best_effort_mapping_results(
                 )
             continue
         try:
+            target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 if _lexical_target(target) == source:
                     kept.append(str(target))
@@ -3023,6 +3030,7 @@ def publish_pool_mappings(
             target.unlink()
             removed.append(str(target))
         for target, source in plan.managed.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
             if target.is_symlink():
                 if _lexical_target(target) == Path(os.path.abspath(source)):
                     kept.append(str(target))

@@ -33,6 +33,7 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+bcs-test-support = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tracing-subscriber = { workspace = true }

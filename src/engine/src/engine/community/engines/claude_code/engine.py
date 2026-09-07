@@ -23,7 +23,9 @@ Capability matrix is declared here (community-side), mirroring the corp
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
 from engine.community.core.adapters.claude_code.cron import ClaudeCodeCronAdapter
 from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
@@ -35,6 +37,10 @@ from engine.community.core.adapters.claude_code.skills import ClaudeCodeSkillsAd
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
+from engine.community.config import (
+    load_claude_code_file_roots,
+    load_claude_code_skills_root,
+)
 from engine.community.plugins.claude_code._base import ClaudeCodeRelayClient
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 
@@ -73,6 +79,12 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
         Capability.SKILLS_SYNC_BINDPATHS,
         Capability.SKILLS_CLEAN_SYMLINKS,
         Capability.SKILLS_CENTER_ENSURE,
+        # CLI tools (W9) — model-callable binaries placed by a manifest.
+        Capability.CLI_INSTALL,
+        Capability.CLI_DELETE,
+        Capability.CLI_LIST,
+        Capability.CLI_REPLACE,
+        Capability.CLI_DOWNLOAD,
         # ── Cron ──
         Capability.CRON_LIST,
         Capability.CRON_CREATE,
@@ -107,6 +119,11 @@ CLAUDE_CODE_COMMUNITY_CAPABILITIES: EngineCapabilities = EngineCapabilities(
 )
 
 
+#: Where this engine keeps a bot's command-line tools, as the deployment
+#: defines it. A literal on purpose: the location is a property of the
+#: image, not something to derive at runtime.
+CLAUDE_CODE_CLI_DIR = Path("/home/admin/.aicoding/cli")
+
 class ClaudeCodeCommunityEngine(BaseEngine):
     """claude_code community engine — assembled from the ACL over one relay port impl."""
 
@@ -130,13 +147,17 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._injected_client = client  # None in production; set only by tests
 
         # The single community transport impl shared by every adapter.
-        self._port = ClaudeCodePluginImpl(client=client)
+        self._port = ClaudeCodePluginImpl(client=client, file_roots=load_claude_code_file_roots(), skills_root=load_claude_code_skills_root())
 
         # ACL adapters implementing the core *Service protocols.
         self._chat = ClaudeCodeChatAdapter(self._port)
         self._session = ClaudeCodeSessionAdapter(self._port)
         self._mcp = ClaudeCodeMcpAdapter(self._port)
         self._skills = ClaudeCodeSkillsAdapter(self._port)
+        # Confirmed with the deployment owners: this engine's tools live under
+        # .aicoding — not .claude_code, and not OpenClaw's tree. **This is the
+        # line to change if that moves.**
+        self._cli_tools = LocalCliToolsService(CLAUDE_CODE_CLI_DIR)
         self._cron = ClaudeCodeCronAdapter(self._port)
         self._models = ClaudeCodeModelsAdapter(self._port)
         self._file = ClaudeCodeFileAdapter(self._port)

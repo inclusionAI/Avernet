@@ -388,6 +388,17 @@ class BotPublicService(BotPublicServiceProtocol):
         self, bot_id: str, owner_id: str, public: str
     ) -> None:
         """Best-effort sync bot visibility to BCSFuse runtime state."""
+        worker_id = (
+            f"{bot_id}:{owner_id}"
+            if self._bcsfuse_config.worker_id_with_owner is True
+            else bot_id
+        )
+        self._sync_bcsfuse_worker_runtime_state(bot_id, worker_id, public)
+
+    def _sync_bcsfuse_worker_runtime_state(
+        self, bot_id: str, worker_id: str, public: str
+    ) -> None:
+        """Sync an exact worker identity; BCS UUIDs must not be qualified again."""
         base_url = self._resolve_bcsfuse_base_url()
         if not base_url:
             logger.info(
@@ -399,11 +410,6 @@ class BotPublicService(BotPublicServiceProtocol):
             return
 
         runtime_state = "online" if public == "1" else "offline"
-        worker_id = (
-            f"{bot_id}:{owner_id}"
-            if self._bcsfuse_config.worker_id_with_owner is True
-            else bot_id
-        )
         url = f"{base_url}/v1/workers/{worker_id}/{runtime_state}"
         request = Request(url, data=b"", method="PUT")
         request.add_header("Content-Type", "application/json")
@@ -929,6 +935,8 @@ class BotPublicService(BotPublicServiceProtocol):
         # provider creds (non prod/pre); report that truthfully as SKIPPED
         # instead of faking COMPLETED.
         skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
+        if public_scope == "user" and not skipped:
+            self._sync_bcsfuse_worker_runtime_state(bot_uid, bot_uid, "0")
         return {
             "success": True,
             "state": "SKIPPED" if skipped else "COMPLETED",
@@ -948,11 +956,9 @@ class BotPublicService(BotPublicServiceProtocol):
           (public_user_approval/public_agent_approval) 的 status 写成 last_operate
           (AGREE/DISAGREE/CANCEL)。
         - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
-            - public_scope=user → user_visibility = block.visibility (block 存的请求值,
-              缺省 protected);
-            - public_scope=agent → visibility = "public" if
-              BCS friend_check_in_strategy=="OPEN" else "protected" (BCS top-level
-              friend_check_in_strategy; agent 要考虑它, user 不考虑)。
+            - user → user_visibility, agent → visibility, 都取 block.visibility
+              (审批时存的请求值, 缺省 protected) —— 一律以请求值为准, 不再同步查询
+              BCS top-level friend_check_in_strategy 来推导 agent 的目标可见性。
         所有变更合一 PATCH (friend_ext + 可见性字段) 回。BCS 跳过 (非 prod/pre 或
         凭据空) 时静默返回。
         """
@@ -976,19 +982,22 @@ class BotPublicService(BotPublicServiceProtocol):
         if block["status"] == "AGREE":
             field = _BCS_VISIBILITY_FIELD_BY_SCOPE.get(public_scope)
             if field:
-                if public_scope == "user":
-                    # user: user_visibility 直接取 block 里存的 visibility 字段
-                    body[field] = block.get("visibility") or "protected"
-                else:  # agent: 由 BCS friend_check_in_strategy 决断
-                    strategy = str(attrs.get("friend_check_in_strategy") or "").upper()
-                    body[field] = "public" if strategy == "OPEN" else "protected"
+                # user 与 agent 都直接按审批时存的用户请求 visibility 值更新 BCS 可见性
+                # 字段 (user→user_visibility, agent→visibility), 缺省 protected。不再同步
+                # 查询 BCS top-level friend_check_in_strategy 推导 agent 的目标可见性
+                # (agent 与 user 一致, 一律以请求值为准)。
+                body[field] = block.get("visibility") or "protected"
             # AGREE 还把 block.view_friend_deps 从 public_*_approval 子块提升到
             # friend_ext 顶层(scope-联动 key: user→view_scope_user_friend_deps;
             # agent→view_scope_agent_friend_deps)。
             friend_ext[_BCS_VIEW_SCOPE_DEPS_KEY_BY_SCOPE[public_scope]] = (
                 block.get("view_friend_deps") or []
             )
-        self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
+        patched = self._bcn_service.patch_attributes(bot_uuid=bot_uid, body=body)
+        skipped = isinstance(patched, dict) and bool(patched.get("skipped"))
+        if public_scope == "user" and block["status"] == "AGREE" and not skipped:
+            public = "0" if body["user_visibility"] == "private" else "1"
+            self._sync_bcsfuse_worker_runtime_state(bot_uid, bot_uid, public)
         return {
             "success": True, "public": None,
             "message": f"public_scope={public_scope} callback status={block['status']}",
@@ -1012,10 +1021,8 @@ class BotPublicService(BotPublicServiceProtocol):
         # New-version publish (public_scope non-empty, e.g. "user"/"agent"): the
         # bot's visibility is delegated to BCS, so this callback must NOT flip
         # ac_bots.public or run the passport / auth-relationship / device-sync
-        # side effects of the legacy path. For now we only LOG the would-be BCS
-        # status update; the real call is wired once BCS exposes its internal
-        # (no-auth) API, invoked via httpclient — no end-user cookie is involved
-        # on this callback path. public_scope's value is preserved for that call.
+        # side effects of the legacy path. Persist BCS attributes first, then
+        # sync user publication to BCSFuse using the exact BCS identity.
         if public_scope:
             # New-version callback (public_scope 非空 → bot_id 即 bot_uid):
             # GET friend_ext → 按 public_scope 子块 (public_user_approval/

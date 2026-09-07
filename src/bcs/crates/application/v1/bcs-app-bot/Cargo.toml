@@ -17,6 +17,7 @@ bcs-service-api = { workspace = true }
 [dev-dependencies]
 bcs-bot = { workspace = true }
 bcs-bot-store = { workspace = true }
+bcs-domain = { workspace = true }
 bcs-config = { workspace = true }
 bcs-friend = { workspace = true }
 bcs-test-support = { workspace = true }

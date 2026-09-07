@@ -10,10 +10,13 @@
 #
 # Flow:
 #   1. Create runtime directories (system dirs as root, /home/admin as admin)
-#   2. Verify build artifacts
-#   3. Generate ~/.openclaw/openclaw.json from template + env vars (as admin)
-#   4. Allow private-network model provider endpoints (openclaw config set)
-#   5. exec supervisord (becomes PID 1)
+#   2. Verify build artifacts and expose the bcs-coordination skill
+#   3. exec supervisord (becomes PID 1)
+#
+# Engine-agnostic bootstrap only. Per-engine provider config lives in the
+# per-engine startup scripts: openclaw.json rendering + the
+# allowPrivateNetwork patch in start_openclaw.sh, claude settings.json /
+# models.json staging in start_claude_code.sh.
 #
 # The platform invokes start_service.sh externally (docker exec) with
 # --token/--client_id to save credentials and start the engine.
@@ -22,10 +25,8 @@ set -euo pipefail
 
 export HOME="${HOME:-/home/admin}"
 CONFIG_DIR="${HOME}/.openclaw"
-CONFIG_FILE="${CONFIG_DIR}/openclaw.json"
 WORKSPACE_DIR="${CONFIG_DIR}/workspace"
 LOG_DIR="${HOME}/logs"
-TEMPLATE_FILE="/opt/openclaw.json.template"
 BCS_SKILL_SOURCE="/usr/local/lib/node_modules/openclaw/skills/bcs-coordination"
 BCS_SKILL_TARGET="${WORKSPACE_DIR}/skills/bcs-coordination"
 
@@ -77,74 +78,7 @@ echo "     Engine:   /opt/engine (port 20003)"
 echo "     OpenClaw: ${CONFIG_DIR} (port ${OPENCLAW_PORT:-18789})"
 echo "     Logs:     ${LOG_DIR}"
 
-# --- 3. Generate openclaw.json from template if none mounted
-
-if [ ! -f "${CONFIG_FILE}" ]; then
-    echo "===> generating ${CONFIG_FILE} from template"
-
-    # Run config generation as admin so all files are admin-owned.
-    _gen_config() {
-        cp "${TEMPLATE_FILE}" "${CONFIG_FILE}"
-
-        _sub() {
-            local val
-            val="${!1:-UNSET}"
-            val="${val//\//\\/}"
-            sed -i "s/${2}/${val}/g" "${CONFIG_FILE}"
-        }
-
-        _sub OPENCLAW_OPENAI_BASE_URL  OPENCLAW_OPENAI_BASE_URL
-        _sub MODEL_PROVIDER_HOST       MODEL_PROVIDER_HOST
-        _sub OPENCLAW_OPENAI_API_KEY   OPENCLAW_OPENAI_API_KEY
-        _sub OPENCLAW_OPENAI_MODEL_ID  OPENCLAW_OPENAI_MODEL_ID
-        _sub OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_OPENAI_MODEL_NAME
-        _sub OPENCLAW_GATEWAY_TOKEN    OPENCLAW_GATEWAY_TOKEN
-        _sub BCS_URL                   BCS_URL
-        _sub BCS_BOT_ID                BCS_BOT_ID
-        _sub BCS_BOT_NAME              BCS_BOT_NAME
-
-        if [ "${OPENCLAW_GATEWAY_TOKEN:-UNSET}" = "UNSET" ]; then
-            sed -i '/"auth": {/{N;s/"mode": "token", "token": "UNSET"//' "${CONFIG_FILE}" 2>/dev/null || true
-        fi
-    }
-    export -f _gen_config
-    # MODEL_PROVIDER_HOST: model provider host (bare host, no scheme or path —
-    # the template carries the https:// prefix and the provider-specific path
-    # suffix). Shared contract with start_claude_code.sh, which substitutes
-    # the same placeholder into the claude_code settings.json. The default
-    # keeps the shipped dashscope scenario when the pod env does not inject
-    # it and must NOT fall through to _sub's UNSET literal (https://UNSET/...).
-    export MODEL_PROVIDER_HOST="${MODEL_PROVIDER_HOST:-dashscope.aliyuncs.com}"
-    export TEMPLATE_FILE CONFIG_FILE OPENCLAW_OPENAI_BASE_URL OPENCLAW_OPENAI_API_KEY \
-           OPENCLAW_OPENAI_MODEL_ID OPENCLAW_OPENAI_MODEL_NAME OPENCLAW_GATEWAY_TOKEN \
-           BCS_URL BCS_BOT_ID BCS_BOT_NAME
-    su admin -s /bin/bash -c '_gen_config'
-
-    echo "    config written"
-else
-    echo "===> using existing ${CONFIG_FILE} (mounted or pre-built)"
-fi
-
-# --- 4. Allow private-network model provider endpoints ---
-# MODEL_PROVIDER_HOST can point at internal hosts (e.g. *.inner.avernet.com).
-# openclaw blocks requests to private networks on a provider unless
-# request.allowPrivateNetwork is true, so lift the restriction for the
-# openai-compatible provider. Deliberate: the provider URL is
-# operator-controlled (image template + pod env), not bot-controlled, so the
-# SSRF guard is not needed here. Runs on EVERY boot, not only at first-boot
-# rendering, so NAS-persisted configs from older images are patched too.
-# Best-effort — a CLI failure must not block pod start (the restriction then
-# surfaces as per-request model errors instead of a dead entrypoint).
-if [ -x /usr/local/bin/openclaw ] && [ -f "${CONFIG_FILE}" ]; then
-    if su admin -s /bin/bash -c \
-        'openclaw config set models.providers.openai-compatible.request.allowPrivateNetwork true'; then
-        echo "===> openclaw: private-network model endpoints allowed (allowPrivateNetwork=true)"
-    else
-        echo "WARNING: openclaw config set allowPrivateNetwork failed — private model hosts will be blocked" >&2
-    fi
-fi
-
-# --- 5. exec supervisord — becomes PID 1
+# --- 3. exec supervisord — becomes PID 1
 # Engine and openclaw are both autostart=false.
 # The platform invokes start_service.sh externally (e.g. docker exec)
 # with --token/--client_id to orchestrate pod startup.

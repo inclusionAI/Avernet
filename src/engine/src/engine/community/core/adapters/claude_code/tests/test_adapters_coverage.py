@@ -1466,13 +1466,13 @@ class _SkillsPort:
     async def skills_discover(self, source, token=None) -> list[dict]:
         return [{"skillId": "new", "name": "New", "description": ""}]
 
-    async def skills_sync_symlinks(self, token=None) -> dict:
+    async def skills_sync_symlinks(self, params, token=None) -> dict:
         return {"total": 2, "created": ["a"], "kept": ["b"]}
 
-    async def skills_sync_bindpaths(self, token=None) -> dict:
+    async def skills_sync_bindpaths(self, params, token=None) -> dict:
         return {"total": 1, "created": ["c"]}
 
-    async def skills_clean_symlinks(self, token=None) -> dict:
+    async def skills_clean_symlinks(self, params, token=None) -> dict:
         return {"directories_scanned": 2, "removed": ["x"]}
 
     async def skills_ensure_center(self, token=None) -> dict:
@@ -1560,7 +1560,7 @@ class TestSkillsAdapterCoverage:
     async def test_sync_symlinks_with_all_fields(self):
         port = _SkillsPort()
 
-        async def sync(token=None):
+        async def sync(params, token=None):
             return {"total": 5, "created": ["a"], "updated": ["b"],
                     "kept": ["c"], "removed": ["d"], "base_dir": "/base"}
         port.skills_sync_symlinks = sync  # type: ignore[assignment]
@@ -1574,7 +1574,7 @@ class TestSkillsAdapterCoverage:
     async def test_clean_symlinks_with_defaults(self):
         port = _SkillsPort()
 
-        async def clean(token=None):
+        async def clean(params, token=None):
             return {}  # empty → defaults
         port.skills_clean_symlinks = clean  # type: ignore[assignment]
         adapter = ClaudeCodeSkillsAdapter(port)
@@ -1872,10 +1872,12 @@ class TestFileHelpers:
         assert _extract_bytes({"content": "dict-str"}) == b"dict-str"
 
     def test_extract_bytes_from_dict_without_content(self):
-        assert _extract_bytes({"other": "x"}) == b""
+        with pytest.raises(ValueError, match="invalid content"):
+            _extract_bytes({"other": "x"})
 
     def test_extract_bytes_from_other_type(self):
-        assert _extract_bytes(123) == b""
+        with pytest.raises(ValueError, match="invalid content"):
+            _extract_bytes(123)
 
 
 class _FilePort:
@@ -1893,12 +1895,14 @@ class _FilePort:
         return self._read_response
 
     async def file_remove(self, path, token=None) -> bool:
-        return self._remove_ok
+        if not self._remove_ok:
+            raise FileNotFoundError("remove failed")
+        return {"target_path": path, "path_type": "file"}
 
     async def file_rmtree(self, path, token=None) -> bool:
         return self._rmtree_ok
 
-    async def file_list_dir(self, path, token=None) -> list[dict]:
+    async def file_list_dir(self, path, token=None, *, recursive=False, exclude_dirs=None) -> list[dict]:
         return self._list_response
 
 
@@ -1933,8 +1937,8 @@ class TestFileAdapterCoverage:
         port = _FilePort()
         port._read_response = {"other": "x"}
         adapter = ClaudeCodeFileAdapter(port)
-        body = await adapter.read("/d/f.txt")
-        assert body == b""
+        with pytest.raises(ValueError, match="invalid content"):
+            await adapter.read("/d/f.txt")
 
     async def test_remove_raises_file_not_found_on_failure(self):
         port = _FilePort()

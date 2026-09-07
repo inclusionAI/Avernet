@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentclaw.community.adapters.http.openapi_v1.contracts import Page
@@ -42,6 +44,8 @@ class Message(BaseModel):
                 "session_id": "session:2d20edc1:user:165137",
                 "role": "assistant",
                 "content": "Done — the report is in reports/q3.md.",
+                "metadata": {"model": "openai/gpt-5.3"},
+                "history_meta": None,
                 "gmt_create": "2026-07-30T09:12:04+00:00",
             }
         }
@@ -51,6 +55,16 @@ class Message(BaseModel):
     session_id: str = Field(description="Session this message belongs to.")
     role: MessageRole = Field(description="Who or what produced the message.")
     content: str = Field(description="Message body.")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Engine-provided message metadata, preserved verbatim from the "
+        "legacy session history response. Keys and values depend on the active engine.",
+    )
+    history_meta: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional engine-provided history metadata, preserved verbatim "
+        "from the legacy session history response.",
+    )
     gmt_create: str = Field(
         description="When the message was created (ISO 8601); empty if the "
         "engine did not report a timestamp."

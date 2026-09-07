@@ -25,11 +25,9 @@ from agentclaw.community.adapters.http.dependencies import get_request_context, 
 from agentclaw.community.adapters.http.auth.models import AuthenticatedUser
 from agentclaw.community.adapters.http.auth.dependencies import get_current_user
 from agentclaw.community.api.bot_service import BotServiceProtocol
-from agentclaw.community.api.baas_service import BaasServiceProtocol
 from agentclaw.community.core.aicoding.protocols import (
     AicodingBotResolutionServiceProtocol,
 )
-from agentclaw.community.api.device_service import DeviceServiceProtocol
 from agentclaw.community.api.workflow_catalog_service import WorkflowCatalogServiceProtocol
 from agentclaw.community.core.bot_collaborator.interceptor import (
     CollaboratorPermissionInterceptor,
@@ -42,7 +40,7 @@ from agentclaw.community.core.bot_management.services.bot_service import (
 )
 from agentclaw.community.utils.env_utils import get_current_env
 from agentclaw.community.core.bot_management import codefuse_token as _codefuse_token
-from agentclaw.community.core.repository.protocols.devices import DeviceBindingRepository
+from agentclaw.community.core.bot_management.codefuse_write import CodefuseWriteOutcome
 from agentclaw.community.core.services.identity import VALID_ENTITY_TYPES
 from agentclaw.community.api.workspace_service import WorkspaceServiceProtocol
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -414,72 +412,55 @@ async def save_codefuse_token(
     request: CodefuseTokenRequest,
     user: AuthenticatedUser = Depends(get_current_user),
     bot_repo: BotRepository = Injected(BotRepository),
-    device_repo: DeviceBindingRepository = Injected(DeviceBindingRepository),
-    baas_service: BaasServiceProtocol = Injected(BaasServiceProtocol),
-    device_service: DeviceServiceProtocol = Injected(DeviceServiceProtocol),
+    bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
 ) -> dict:
-    """Write CodeFuse token into the bot's container.
+    """Write CodeFuse token into the bot's container (every live runtime).
 
-    Only the bot owner can call this endpoint.
+    Only the bot owner can call this. ``token`` is a base64 CodeFuse SSO auth_code;
+    decoded it yields ``{"t":"<token>","w":"<workid>"}``. This endpoint keeps to
+    transport-layer responsibility (ownership / decode validation) and delegates the
+    multi-runtime fan-out to ``BotService.write_codefuse_token_to_runtimes``; the
+    returned ``CodefuseWriteResult`` is translated here to HTTP status / shape only
+    (arch.rules.md Rule 7 — core owns domain policy, delivery is a thin adapter).
 
-    The ``token`` field is a base64-encoded auth_code from CodeFuse SSO callback.
-    Decoded it yields ``{"t":"<token>","w":"<workid>"}``.  The endpoint:
-
-    1. Decodes auth_code → extracts token + workid
-    2. Validates token is non-empty, ≥16 chars, hex format
-    3. Writes into ``/home/admin/.codefuse/fuse/codefuse.json`` (merges with
-       existing file, forces token/workid/authType update)
-    4. Verifies the file is readable
+    Bot 拓扑（由 core 解析，见 ``resolve_codefuse_runtime_binding_ids``）：
+    - personal：仅草稿 binding（``ac_bots.binding_id``）。
+    - service：草稿 + 预发(verify) + 线上(online) 在运行的 runtime 全写。
     """
     owner_id = user.staffId
 
-    # ── Ownership check ──
+    # ── Ownership / preconditions（transport 翻译层职责） ──
     bot = bot_repo.get_by_id_and_owner(bot_id, owner_id)
     if not bot:
         raise HTTPException(status_code=404, detail=f"Bot not found or no permission: {bot_id}")
-
-    binding_id = bot.get("binding_id")
-    if not binding_id:
+    if not bot.get("binding_id"):
         raise HTTPException(status_code=400, detail="Bot has no device binding")
 
-    binding = device_repo.get_by_id(int(binding_id))
-    if not binding:
-        raise HTTPException(status_code=404, detail="Device binding not found")
+    # ── Decode & validate auth_code → 400 ──
+    _decode_auth_code(request.token)
 
-    # ── Decode & validate auth_code ──
-    token, workid = _decode_auth_code(request.token)
-    cmd = _build_codefuse_write_cmd(token, workid, owner_id)
+    # ── 写入编排由 core 负责；这里只翻译结果 ──
+    env = get_current_env()
+    result = bot_service.write_codefuse_token_to_runtimes(
+        bot=bot, plaintext_token=request.token, env=env,
+    )
 
-    # ── Execute command via the correct provider ──
-    provider = binding.device_provider
-    device_id = binding.device_id
+    if result.wrote_any:
+        ps = result.ok_providers
+        return {
+            "success": True,
+            "bot_id": bot_id,
+            "provider": ps[0] if ps else "",
+            "providers": ps,
+            "targets": result.attempted,
+        }
 
-    if provider == "baas":
-        # BaaS / poolab: use bot-level exec API
-        bot_uuid = (binding.device_props or {}).get("bot_uuid")
-        if not bot_uuid:
-            raise HTTPException(
-                status_code=400, detail="Bot has no BaaS bot_uuid in device_props"
-            )
-        try:
-            result = baas_service.exec_command_on_bot(
-                bot_uuid=bot_uuid, cmd=cmd, timeout_seconds=30
-            )
-        except Exception as e:
-            log.error("[save_codefuse_token] exec_command_on_bot failed: bot_uuid=%s error=%s", bot_uuid, e)
-            raise HTTPException(status_code=502, detail=f"Failed to write token to container: {e}")
-
-        exit_code = result.get("exit_code", -1) if isinstance(result, dict) else -1
-        if exit_code != 0:
-            log.warning("[save_codefuse_token] non-zero exit: bot_uuid=%s result=%s", bot_uuid, result)
-            raise HTTPException(status_code=502, detail=f"Command exited with code {exit_code}")
-    else:
-        # Arca / local: use DeviceService.exec_shell (routed by device_id)
-        try:
-            device_service.exec_shell(device_id=device_id, shell_cmd=cmd)
-        except Exception as e:
-            log.error("[save_codefuse_token] exec_shell failed: device_id=%s error=%s", device_id, e)
-            raise HTTPException(status_code=502, detail=f"Failed to write token to container: {e}")
-
-    log.info("[save_codefuse_token] token written: bot_id=%s provider=%s", bot_id, provider)
-    return {"success": True, "bot_id": bot_id, "provider": provider}
+    # 未写入：按 outcome 翻译为 HTTP
+    if result.outcome is CodefuseWriteOutcome.NO_BINDING:
+        raise HTTPException(status_code=400, detail="Bot has no device binding")
+    if result.outcome is CodefuseWriteOutcome.NO_TARGET:
+        raise HTTPException(status_code=404, detail="No live device binding found")
+    status_code, detail = result.first_failure or (
+        502, "No live runtime accepted the codefuse token",
+    )
+    raise HTTPException(status_code=status_code, detail=detail)

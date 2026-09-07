@@ -88,6 +88,9 @@ class BotServiceProtocol(Protocol):
     def release_bot_for_others(self, *args: Any, **kwargs: Any) -> Any: ...
 
     def hot_update_passport_token_to_device(self, *args: Any, **kwargs: Any) -> Any: ...
+    # Write CodeFuse token into every live runtime of a bot (fan-out + aggregate);
+    # the HTTP save_codefuse_token endpoint and the async on-device refresher both call it.
+    def write_codefuse_token_to_runtimes(self, *args: Any, **kwargs: Any) -> Any: ...
 
     # ── Bot lifecycle (called by other services / not the router) ──────
     # ``BotService`` exposes ``stop_bot`` / ``start_bot`` which are used by

@@ -89,10 +89,21 @@ engine is functionally correct without them:
 - `session create`: corp sends `permissionMode=bypassPermissions` and falls back
   `cwd = request.cwd or default_cwd`; the community port has no `permission_mode`
   and passes `cwd` verbatim.
-- `file remove` reports `path_type="file"` even for directories; `file list_dir`
-  ignores `recursive` / `exclude_dirs`.
 - HITL `resolve_*` do not validate `decision` / `action` against a whitelist
   (invalid values reach the relay, which rejects them).
 
 Implement any of these as a separate ACL round (extend port → community impl →
 local mock → adapter), following the openclaw reference.
+
+## Local files (community)
+
+The file port performs local Python I/O in the shared Engine/Claude filesystem;
+chat continues over the Node relay. File operations require no relay connection.
+The composition root supplies permitted Engine file roots from the existing
+layout and configured workspace. Absolute addresses retain their identity.
+Recursive listing and binary content are supported.
+
+This requires Engine and Claude to share the relevant filesystem. The file
+implementation does not change startup cwd, move historical files, or initialize
+Skill activation directories. A configurable relay URL alone does not establish
+remote filesystem support.

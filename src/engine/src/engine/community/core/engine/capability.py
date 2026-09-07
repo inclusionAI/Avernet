@@ -72,6 +72,16 @@ class Capability(Enum):
     SKILLS_CLEAN_SYMLINKS = "skills.clean_symlinks"
     SKILLS_CENTER_ENSURE = "skills.center_ensure"
 
+    # ── CLI tools ──
+    # Model-callable command-line binaries placed into the bot by a config
+    # manifest (W9). See docs/bot-config-manifest/engine-requirements.zh-CN.md
+    # §4 A2 for the endpoint contract these gate.
+    CLI_INSTALL = "cli.install"
+    CLI_DELETE = "cli.delete"
+    CLI_LIST = "cli.list"
+    CLI_REPLACE = "cli.replace"
+    CLI_DOWNLOAD = "cli.download"
+
     # ── Default config ──
     DEFAULT_CONFIG_GET = "default_config.get"
 

@@ -435,3 +435,23 @@ async def test_claude_code_port_forwards_best_effort_apply_mode(
         "BEST_EFFORT",
         "BEST_EFFORT",
     ]
+
+
+@pytest.mark.parametrize("apply_mode", ["STRICT", "BEST_EFFORT"])
+def test_first_legacy_mapping_without_active_directory(tmp_path, apply_mode):
+    from engine.community.plugins.skills_pool.layout_activation import MappingApplyMode
+    source = tmp_path / ".claude_code/workspace/skills/skills-local/retro"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_text("---\nname: retro\n---\nretrospective")
+    target = tmp_path / ".claude/skills/retro"
+    mappings = [SkillMapping(source=str(source), target=str(target))]
+    options = dict(home=tmp_path, mappings=mappings,
+                   source_layout=MappingSourceLayout.LEGACY,
+                   apply_mode=MappingApplyMode(apply_mode))
+    verification = verify_claude_code_pool_mappings(**options)
+    assert not verification.valid
+    assert not target.parent.exists(), "verification must remain read-only"
+    result = publish_claude_code_pool_mappings(**options)
+    assert result.published, result
+    assert target.resolve() == source
+    assert verify_claude_code_pool_mappings(**options).valid

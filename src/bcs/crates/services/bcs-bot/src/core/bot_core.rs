@@ -630,17 +630,17 @@ impl BotRegistryCoreService for BotCore {
     }
 
     async fn is_effectively_online(&self, bot_id: &str) -> bool {
-        let Some(bot) = self.repo.get(bot_id).await else {
+        let Some(bot) = bcs_observability::observe_value("bot.online.load", self.repo.get(bot_id)).await else {
             return false;
         };
         if bot.status != ActorStatus::Online {
             return false;
         }
-        if self.repo.is_connected(bot_id).await {
+        if bcs_observability::observe_value("bot.online.connection", self.repo.is_connected(bot_id)).await {
             return true;
         }
         matches!(
-            self.resolve_delivery_target(bot_id).await,
+            bcs_observability::observe_result("bot.online.delivery_target", self.resolve_delivery_target(bot_id)).await,
             Ok(BotDeliveryTarget::HttpProvider { .. })
         )
     }

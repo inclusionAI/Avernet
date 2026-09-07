@@ -37,6 +37,11 @@ use bcs_service_api::{
     is_mock_token,
 };
 
+fn log_bot_cache_source(source: &'static str) {
+    bcs_observability::count("bot.memory", source);
+    debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), source, "bot.load.source");
+}
+
 pub mod memory;
 pub mod provider;
 
@@ -652,69 +657,80 @@ impl PersistentBotRepo {
     async fn save_status_to_cache(&self, bot_uuid: &str, status: &BotDynamicStatus) {
         let key = self.configured_status_cache_key(bot_uuid);
         let now = Self::current_timestamp();
-
-        info!(
-            bot_uuid = %bot_uuid,
-            status_cache_key = %key,
-            status = %status.status,
-            dynamic_summary = ?status.dynamic_summary,
-            load = ?status.load,
-            "Saving bot status to cache"
-        );
+        let started = Instant::now();
+        let mut failed_commands = 0u64;
 
         // HSET multiple fields
-        if let Err(e) = self
+        if let Err(..) = self
             .cache
             .hash_set(&key, "status", status.status.as_bytes().to_vec())
             .await
         {
-            warn!(bot_uuid = %bot_uuid, error = %e, "Failed to save status to cache");
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands = 1, outcome = "error", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
             return;
         }
 
         if let Some(ref summary) = status.dynamic_summary {
-            let _ = self
+            let result = self
                 .cache
                 .hash_set(&key, "dynamic_summary", summary.as_bytes().to_vec())
                 .await;
+            failed_commands += u64::from(result.is_err());
         }
         if let Some(load) = status.load {
-            let _ = self
+            let result = self
                 .cache
                 .hash_set(&key, "load", load.to_string().into_bytes())
                 .await;
+            failed_commands += u64::from(result.is_err());
         }
-        let _ = self
+        let result = self
             .cache
             .hash_set(&key, "updated_at", now.to_string().into_bytes())
             .await;
+        failed_commands += u64::from(result.is_err());
 
         // Set TTL
-        let _ = self
+        let result = self
             .cache
             .expire(&key, Duration::from_secs(STATUS_CACHE_TTL_SECONDS as u64))
             .await;
+        failed_commands += u64::from(result.is_err());
 
-        info!(bot_uuid = %bot_uuid, status_cache_key = %key, "Bot status saved to cache successfully");
+        if failed_commands > 0 {
+            warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "partial_failure", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+        } else {
+            debug!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), failed_commands, outcome = "success", duration_ms = started.elapsed().as_secs_f64() * 1000.0, "bot_status.save.finished");
+        }
     }
 
     /// Load dynamic status from the configured cache.
     async fn load_status_from_cache(&self, bot_uuid: &str) -> BotDynamicStatus {
         let key = self.configured_status_cache_key(bot_uuid);
 
-        match self
-            .cache
-            .hash_get_all(&key)
-            .await
-            .and_then(Self::cache_hash_to_strings)
-        {
-            Ok(map) => BotDynamicStatus {
-                status: map.get("status").cloned().unwrap_or_default(),
-                dynamic_summary: map.get("dynamic_summary").cloned(),
-                load: map.get("load").and_then(|s| s.parse().ok()),
-                updated_at: map.get("updated_at").and_then(|s| s.parse().ok()),
-            },
-            Err(_) => BotDynamicStatus::default(),
+        let raw = match bcs_observability::observe_result("bot_status.cache_read", self.cache.hash_get_all(&key)).await {
+            Ok(raw) => raw,
+            Err(_) => {
+                bcs_observability::count("bot_status.fallback", "cache_error");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "cache_error", fallback = "default_status", "bot_status.load.fallback");
+                return BotDynamicStatus::default();
+            }
+        };
+        match bcs_observability::observe_result("bot_status.decode", async { Self::cache_hash_to_strings(raw) }).await {
+            Ok(map) => {
+                bcs_observability::count("bot_status.cache", if map.is_empty() { "empty" } else { "hit" });
+                BotDynamicStatus {
+                    status: map.get("status").cloned().unwrap_or_default(),
+                    dynamic_summary: map.get("dynamic_summary").cloned(),
+                    load: map.get("load").and_then(|s| s.parse().ok()),
+                    updated_at: map.get("updated_at").and_then(|s| s.parse().ok()),
+                }
+            }
+            Err(_) => {
+                bcs_observability::count("bot_status.fallback", "decode_error");
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "decode_error", fallback = "default_status", "bot_status.load.fallback");
+                BotDynamicStatus::default()
+            }
         }
     }
 
@@ -1532,26 +1548,34 @@ impl BotRepoPort for PersistentBotRepo {
     }
 
     async fn get(&self, bot_id: &str) -> Option<RegisteredBot> {
-        self.try_get(bot_id).await.ok().flatten()
+        match bcs_observability::observe_result("bot.load", self.try_get(bot_id)).await {
+            Ok(value) => value,
+            Err(_) => {
+                warn!(target: "bcs_observation", request_id = %bcs_observability::current_request_id(), outcome = "load_error", fallback = "omitted", "bot.load.fallback");
+                None
+            }
+        }
     }
 
     async fn try_get(&self, bot_id: &str) -> ServiceResult<Option<RegisteredBot>> {
-        let bots = self.bots.read().await;
+        let bots = bcs_observability::observe_value("bot.memory_lock.wait", self.bots.read()).await;
 
         if let Some(bot) = bots.get(bot_id) {
             if !bot.is_expired() {
+                log_bot_cache_source("memory_hit");
                 return Ok(Some(bot.to_registered_bot()));
             }
         }
 
         // Fallback: load from database + cache
         drop(bots);
+        log_bot_cache_source("memory_miss");
 
         // Code-Review fix #1: take actor_kind/status from the database instead of
         // returning defaults; otherwise O.5/P.3/F.3 will misclassify any actor
         // whose row is no longer cached in process memory.
         let Some((mut capabilities, env, _hidden, created_by, actor_kind, status)) =
-            self.try_load_from_db(bot_id, false).await?
+            bcs_observability::observe_result("bot.db_load", self.try_load_from_db(bot_id, false)).await?
         else {
             return Ok(None);
         };

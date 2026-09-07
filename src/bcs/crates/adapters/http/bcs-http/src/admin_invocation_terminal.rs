@@ -56,7 +56,7 @@ impl AdminInvocationTerminalObserver {
         let provider_id = run.provider_id;
         let run_id = run_id.to_string();
         let outbound_url_guard = self.outbound_url_guard.clone();
-        tokio::spawn(async move {
+        tokio::spawn(bcs_observability::in_current_context(async move {
             let callback_url = callback_url_for_log(&callback.url);
             let guarded_url = match outbound_url_guard
                 .resolve_request_http_url(&callback.url)
@@ -94,14 +94,13 @@ impl AdminInvocationTerminalObserver {
                     return;
                 }
             };
-            let response = client
+            let response = bcs_observability::observe_result("callback.admin_terminal.http", client
                 .post(guarded_url.as_str())
                 .header("content-type", "application/json")
                 .header(BCN_PROVIDER_ID_HEADER, provider_id)
                 .bearer_auth(callback.bearer_token)
                 .json(&body)
-                .send()
-                .await;
+                .send()).await;
             match response {
                 Ok(response) if response.status().is_success() => {
                     info!(run_id = %run_id, "organization admin terminal callback acknowledged")
@@ -113,7 +112,7 @@ impl AdminInvocationTerminalObserver {
                     warn!(run_id = %run_id, error = %error, "organization admin terminal callback failed")
                 }
             }
-        });
+        }));
     }
 }
 

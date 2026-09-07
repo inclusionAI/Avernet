@@ -26,20 +26,21 @@ uv run --with pytest --with pyyaml --with jsonschema \
 collaboration API. Domain models and resource path items live in separate YAML
 fragments so a domain can evolve without creating one monolithic file.
 
-The current public OpenAPI contract contains 44 approved operations across Bot,
+The current public OpenAPI contract contains 65 approved operations: 60
+collaboration operations below `/openapi/v1/collaboration/**` and 5 auth
+operations below `/openapi/v1/auth/**`. Collaboration operations span Bot,
 Group, GroupParticipant, Session, SessionParticipant, Invitation, Friendship,
 FriendRequest, Event Subscription, Event Delivery, and session-bound WebSocket
-resources. Every public operation is published below the single BCN ownership
-prefix `/openapi/v1/collaboration/**`. These are the exact endpoints served
-externally by BCN.
+resources. These are the exact endpoints served externally by BCN.
 
-The Human control-plane Bot batch contains exactly five public operations:
+The Human control-plane Bot batch contains exactly six public operations:
 
 - `POST /openapi/v1/collaboration/bots/query`
 - `GET /openapi/v1/collaboration/bots/{bot_id}`
 - `PATCH /openapi/v1/collaboration/bots/{bot_id}`
 - `GET /openapi/v1/collaboration/bots/mine`
 - `GET /openapi/v1/collaboration/bots/{bot_id}/candidates`
+- `GET /openapi/v1/collaboration/bots/{bot_id}/eligible-candidates`
 
 Bot candidate search moved to the internal contract:
 
@@ -51,11 +52,14 @@ requires a usable Human identity and verifies that the selected physical Bot
 is managed by that Human, or that the Human Actor perspective represents the
 same Human. App and Bot identities do not replace the Human requirement.
 
-The candidates operation accepts either a physical Bot managed by the current
-Human or that Human's own `human_{subject.id}` record (including Human Actor).
+The legacy candidates operation accepts either a physical Bot managed by the
+current Human or that Human's own `human_{subject.id}` record (including Human
+Actor).
 Both perspectives use the same discovery and collaboration filters, and the
-response still contains physical Bot candidates only. The candidate-search
-operation is the versioned projection of legacy `/actors/search`: it uses
+response still contains physical Bot candidates only. `eligible-candidates`
+keeps the same request and response model while sourcing friendship eligibility
+from the edge-permission friend graph. The candidate-search operation is the
+versioned projection of legacy `/actors/search`: it uses
 semantic worker recommendation first, preserves its score/profile/tag
 enrichment, then falls back to a Bot-name substring search when no usable
 recommendation is available. An omitted `q`, `q=`, and a whitespace-only `q`

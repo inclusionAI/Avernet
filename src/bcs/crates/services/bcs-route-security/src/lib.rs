@@ -141,6 +141,7 @@ impl OutboundUrlGuard {
         &self,
         url: &Url,
     ) -> Result<(Option<String>, Vec<SocketAddr>), OutboundUrlError> {
+        bcs_observability::observe_result("http.dns_and_policy", async {
         let Some(Host::Domain(domain)) = url.host() else {
             return Ok((None, Vec::new()));
         };
@@ -169,6 +170,7 @@ impl OutboundUrlGuard {
         } else {
             Ok((Some(domain.to_string()), addrs))
         }
+            }).await
     }
 
     fn is_allowlisted_private_address(&self, host: &str, port: u16, ip: IpAddr) -> bool {

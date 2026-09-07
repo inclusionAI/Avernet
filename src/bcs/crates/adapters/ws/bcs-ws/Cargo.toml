@@ -31,6 +31,7 @@ bcs-domain      = { workspace = true }
 bcs-service-api = { workspace = true }
 bcs-protocol    = { workspace = true }
 bcs-telemetry   = { workspace = true }
+bcs-observability = { workspace = true }
 bcs-callback    = { workspace = true }
 bcs-route-security = { workspace = true }
 

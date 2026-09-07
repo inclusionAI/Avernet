@@ -49,6 +49,7 @@ test-bots/
 .env.*
 !.env.example
 src/bcs/configs/bcs-config.toml
+src/bcs/configs/bcs-config-prod.toml
 *.pem
 *.key
 

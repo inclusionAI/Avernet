@@ -660,3 +660,30 @@ class TestBuildChatMetadataEval:
         assert "eval_id" not in result
         assert "default_tag" not in result
         assert result["biz_scene"] == "default"
+
+    def test_eval_id_passthrough_to_chat_metadata(self):
+        """eval_id 从原始 metadata 透传到 chat_metadata（引擎 chat.send 需要）。"""
+        metadata = {"eval_id": "eval-abc123", "default_tag": "eval"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["eval_id"] == "eval-abc123"
+        assert result["default_tag"] == "eval"
+
+    def test_default_tag_only_passthrough(self):
+        """仅 default_tag 无 eval_id 时，eval_id 不注入，default_tag 透传。"""
+        metadata = {"default_tag": "staging"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert "eval_id" not in result
+        assert result["default_tag"] == "staging"
+
+    def test_eval_id_only_no_default_tag_passthrough(self):
+        """eval_id 存在但 default_tag 不存在时，eval_id 透传，default_tag 不注入。"""
+        metadata = {"eval_id": "eval-xyz789"}
+        result = build_chat_metadata(
+            metadata, run_id="run-1", eval_session_log=NoopEvalSessionLog()
+        )
+        assert result["eval_id"] == "eval-xyz789"
+        assert "default_tag" not in result

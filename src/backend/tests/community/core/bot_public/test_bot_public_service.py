@@ -561,10 +561,12 @@ class TestPublicBcsBot:
         )
         assert bcn.patch_attributes.call_args.kwargs["body"]["user_visibility"] == "protected"
 
-    def test_callback_agree_agent_public_when_friend_check_open(self):
+    def test_callback_agree_agent_writes_block_visibility_to_visibility(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "public"}},
+            # friend_check_in_strategy intentionally OPEN to prove the agent callback
+            # no longer consults it; visibility comes from the approval block.
             "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
@@ -574,20 +576,35 @@ class TestPublicBcsBot:
         )
         body = bcn.patch_attributes.call_args.kwargs["body"]
         assert body["friend_ext"]["public_agent_approval"]["status"] == "AGREE"
-        # agent: visibility 由 friend_check_in_strategy=OPEN → public
+        # agent: visibility 直接取 block.visibility, 不再读 friend_check_in_strategy
         assert body["visibility"] == "public"
 
-    def test_callback_agree_agent_protected_when_friend_check_not_open(self):
+    def test_callback_agree_agent_uses_protected_from_block(self):
         bcn = MagicMock()
         bcn.get_attributes.return_value = {
-            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
-            "friend_check_in_strategy": "APPROVAL",
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING", "visibility": "protected"}},
+            "friend_check_in_strategy": "OPEN",
         }
         svc = _make_service(bcn_service=bcn)
         svc.handle_public_approval_callback(
             bot_id="b", owner_id="u", puid="p1",
             last_operate="AGREE", public_scope="agent",
         )
+        assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
+
+    def test_callback_agree_agent_defaults_protected_without_block_visibility(self):
+        bcn = MagicMock()
+        bcn.get_attributes.return_value = {
+            "friend_ext": {"public_agent_approval": {"puid": "p1", "status": "PROCESSING"}},
+            # friend_check_in_strategy=OPEN no longer lifts agent visibility to public
+            "friend_check_in_strategy": "OPEN",
+        }
+        svc = _make_service(bcn_service=bcn)
+        svc.handle_public_approval_callback(
+            bot_id="b", owner_id="u", puid="p1",
+            last_operate="AGREE", public_scope="agent",
+        )
+        # block 无 visibility → 缺省 protected; strategy=OPEN 不再抬升为 public
         assert bcn.patch_attributes.call_args.kwargs["body"]["visibility"] == "protected"
 
     def test_callback_agree_lifts_view_friend_deps_for_user(self):

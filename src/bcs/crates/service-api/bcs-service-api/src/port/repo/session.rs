@@ -107,6 +107,12 @@ pub trait SessionRepoPort: Send + Sync {
         self.create(group_id, params).await
     }
     async fn get(&self, session_id: &str) -> Option<Session>;
+    /// Return `None` only for a missing session; storage/decoding failures are errors.
+    /// Fallible stores must override this default, which is for infallible repositories.
+    async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> {
+        Ok(self.get(session_id).await)
+    }
+
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool;
     async fn list_by_group(
         &self,

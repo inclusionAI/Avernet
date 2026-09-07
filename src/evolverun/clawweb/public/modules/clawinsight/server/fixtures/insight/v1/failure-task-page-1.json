@@ -27,7 +27,7 @@
       "sessionDurationSeconds": 7415,
       "isCron": false,
       "payloadRef": "oss://antsys-agentclaw-prod/evolution/pre/evidence/dev_local/20260603_fp6to0gv/20260726/7e82d8f2-a7f9-40ab-b0ac-7a6142ce3ca0.json",
-      "payloadEtag": "64495193b78d870cd42016e765c5db9a9fbd2eb3f8f7b3cff7e0cf2d38ec4b1d",
+      "payloadEtag": "15f349c7e6fb56c481a841afa33e3ce429262bd089d13a87e371e6697fd78dab",
       "payloadVersionId": null,
       "payloadSchemaVersion": "session-evidence/v1",
       "judgeVersion": {

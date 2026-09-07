@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from agentclaw.community.adapters.http.openapi_v1.engine_runtime.enums import MessageRole
 from agentclaw.community.adapters.http.openapi_v1.engine_runtime.sessions.schemas import Message, Session
 from agentclaw.community.core.engine_runtime.errors import EngineHistoryDepthExceededError
 from agentclaw.community.log import get_logger
@@ -66,8 +65,9 @@ def _map_session(
 def _map_message(data: dict[str, Any], session_id: str) -> Message:
     """Engine message dict → public :class:`Message`.
 
-    ``metadata`` is dropped: a free-form engine bag with no public contract,
-    and therefore a leak risk on a surface whose messages are otherwise fixed.
+    ``metadata`` and ``history_meta`` preserve the legacy Engine history
+    response verbatim. Their nested shape remains engine-defined; this adapter
+    neither interprets nor invents extension values.
     An unrecognised ``role`` falls back to ``system`` rather than raising —
     ``MessageRole`` mirrors a Literal in the engine's model, but a stub or a
     newer engine returning something else must not 500 a read.
@@ -87,6 +87,12 @@ def _map_message(data: dict[str, Any], session_id: str) -> Message:
         session_id=str(data.get("session_id") or session_id),
         role=role,
         content=str(data.get("content") or ""),
+        metadata=data.get("metadata") if isinstance(data.get("metadata"), dict) else {},
+        history_meta=(
+            data.get("history_meta")
+            if isinstance(data.get("history_meta"), dict)
+            else None
+        ),
         gmt_create=str(data.get("gmt_created") or ""),
     )
 

@@ -1214,8 +1214,18 @@ class BaasBotService(BotService):
             return f"agent:main:session:{session_key}:user:{user_id}"
         elif engine_type == "claude_code":
             return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
+        elif engine_type == "teclaw":
+            # 仅评测流量（eval_id 存在）时构造结构化 key，
+            # 生产流量返回 None，保持 TeClaw adapter 原有 sessionKey 生成逻辑
+            if eval_id:
+                return f"agent:{tc_bot_id}:session:{session_key}:user:{user_id}"
+            return None
         else:
-            # TODO
+            logger.warning(
+                "[_create_session_consistency_key] unsupported engine_type=%s, "
+                "returning None",
+                engine_type,
+            )
             return None
 
 

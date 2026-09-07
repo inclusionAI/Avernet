@@ -15,6 +15,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION, LayoutIdentity, RuntimeLayoutContext,
+    ResolvedFilesystemLayoutPlan, resolve_filesystem_skill_layout,
+)
+
 # 默认连接超时时间（秒）
 DEFAULT_CONNECTION_TIMEOUT = 10
 AGENTBOX_ENV_VAR = "MAC_CONTAINER"
@@ -470,3 +475,39 @@ def load_engine_config() -> EngineConfig:
         mcporter_config_path=load_mcporter_config_path(),
         dingtalk=load_dingtalk_settings(),
     )
+
+
+def _claude_code_file_layout(home: Path) -> ResolvedFilesystemLayoutPlan:
+    return resolve_filesystem_skill_layout(
+        LayoutIdentity("claude_code", LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=home),
+    )
+
+
+def default_claude_code_workspace(home: Path) -> Path:
+    """Default workspace from Engine's authoritative filesystem layout."""
+    return _claude_code_file_layout(home).pool_root.parent
+
+
+def load_claude_code_workspace() -> Path:
+    """Effective workspace shared with the colocated Claude runtime."""
+    configured = os.getenv("CLAUDE_CODE_DEFAULT_CWD") or os.getenv("RELAY_DEFAULT_CWD")
+    root = Path(configured) if configured else default_claude_code_workspace(Path.home())
+    if not root.is_absolute() or root == Path("/") or ".." in root.parts:
+        raise ValueError("Claude Code working directory must be an absolute non-root path")
+    return root
+
+
+def load_claude_code_file_roots() -> tuple[Path, ...]:
+    """Source/config engine root plus the retained or explicit workspace."""
+    layout = _claude_code_file_layout(Path.home())
+    return (
+        layout.pool_root.parent.parent,
+        layout.active_root,
+        load_claude_code_workspace(),
+    )
+
+
+def load_claude_code_skills_root() -> Path:
+    """Active Skill discovery directory from the existing Engine layout."""
+    return _claude_code_file_layout(Path.home()).active_root

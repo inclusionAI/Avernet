@@ -12,11 +12,6 @@ from agentclaw.community.log import get_logger
 
 logger = get_logger()
 
-# 重试配置
-MAX_RETRY_ATTEMPTS = 3  # 最大重试次数
-RETRY_BACKOFF_BASE = 1  # 退避基数（1s, 2s, 4s）
-
-
 class DeviceMCPConfig:
     """MCP Server 配置（符合远端设备接口）"""
 

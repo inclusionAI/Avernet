@@ -24,6 +24,7 @@ bcs-services-container = { workspace = true }
 bcs-protocol    = { workspace = true }
 bcs-storage-api = { workspace = true }
 bcs-telemetry   = { workspace = true }
+bcs-observability = { workspace = true }
 axum            = { workspace = true }
 async-trait     = { workspace = true }
 bytes           = { workspace = true }

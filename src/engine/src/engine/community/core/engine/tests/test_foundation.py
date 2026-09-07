@@ -293,6 +293,7 @@ class TestEngineProtocol:
             chat = object()
             mcp = None
             skills = None
+            cli_tools = None
             cron = None
             models = None
             node = None

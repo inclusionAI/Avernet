@@ -44,6 +44,7 @@ use bcs_api_http::{ApiState, PrincipalVerifier};
 use bcs_app_bot::{BotServiceConfig, BotServiceImpl, InternalBotAttributesServiceImpl};
 use bcs_app_group::{GroupServiceConfig, GroupServiceImpl};
 use bcs_app_invitation::{InvitationFriendshipServiceConfig, InvitationFriendshipServiceImpl};
+use bcs_app_invite_code::InviteCodeServiceImpl;
 use bcs_app_register;
 use bcs_app_collaboration_definition::CollaborationDefinitionServiceImpl as V1CollaborationDefinitionServiceImpl;
 use bcs_app_collaboration_template::CollaborationTemplateServiceImpl as V1CollaborationTemplateServiceImpl;
@@ -74,6 +75,7 @@ use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_friend_store::{
     DbFriendRequestStore, DbFriendStore, MemoryFriendRepo, MemoryFriendRequestRepo,
 };
+use bcs_invite_code_store::{DbInviteCodeStore, MemoryInviteCodeRepo};
 use bcs_fuse_client::FuseClient;
 use bcs_fusion::{FuseClientService, FuseWorkerProfileService, LocalFusionService};
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, GroupManagementWithRuntimeCleanup};
@@ -311,7 +313,6 @@ fn build_eventing_runtime_blocking(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
-    outbound_url_guard: OutboundUrlGuard,
     allow_local_test_endpoints: bool,
 ) -> crate::Result<crate::eventing_wiring::EventingRuntime> {
     std::thread::scope(|scope| {
@@ -326,7 +327,6 @@ fn build_eventing_runtime_blocking(
                         sessions,
                         collaboration_runtime,
                         registry,
-                        outbound_url_guard,
                         allow_local_test_endpoints,
                     ))
             })
@@ -1467,6 +1467,28 @@ async fn build_group_session_connection_service(
     )))
 }
 
+fn build_invite_code_service(
+    config: &BcsConfig,
+    db_plugin: Option<Arc<dyn bcs_db_api::DbPlugin>>,
+    db_kind: Option<&DbPluginKind>,
+    invite_token_secret: Vec<u8>,
+) -> Arc<dyn bcs_service_api::application::v1::InviteCodeService> {
+    let repo: Arc<dyn bcs_service_api::port::repo::InviteCodeRepoPort> = match (db_plugin, db_kind) {
+        (Some(db_plugin), Some(db_kind)) => match db_kind {
+            DbPluginKind::LocalSqlite => Arc::new(DbInviteCodeStore::sqlite(db_plugin)),
+            DbPluginKind::Mysql => Arc::new(DbInviteCodeStore::mysql(db_plugin)),
+            DbPluginKind::External(provider) => {
+                panic!(
+                    "external database plugin '{}' has no invite-code store wiring",
+                    provider
+                )
+            }
+        },
+        _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
+    };
+    Arc::new(InviteCodeServiceImpl::new(repo, invite_token_secret))
+}
+
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
     config
         .invite
@@ -1537,6 +1559,8 @@ fn build_openapi_v1_state(
     bot_management: Arc<dyn bcs_service_api::BotManagementService>,
     bot_onboarding: Arc<dyn bcs_service_api::BotOnboardingService>,
     collaboration_templates: Arc<dyn CollaborationTemplateService>,
+    invite_code_service: Arc<dyn bcs_service_api::application::v1::InviteCodeService>,
+    invite_code_gate_enabled: bool,
     principal_verifier: Arc<dyn PrincipalVerifier>,
     connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
@@ -1557,6 +1581,7 @@ fn build_openapi_v1_state(
         control_plane.clone(),
         registry.clone(),
         friends.clone(),
+        connect_service.clone(),
         candidate_search,
         BotServiceConfig {
             env: relation_env.clone(),
@@ -1669,6 +1694,8 @@ let invitation_service = Arc::new(
             principal_verifier,
         )
         .with_bot_service(bot_service)
+        .with_invite_code_service(invite_code_service)
+        .with_invite_code_gate_enabled(invite_code_gate_enabled)
         .with_friend_connection_service(invitation_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service)
@@ -2205,6 +2232,7 @@ impl Default for BcsServerState {
             ),
         );
 let collaboration_templates = build_standalone_collaboration_template_service(&config);
+        let invite_code_service = build_invite_code_service(&config, None, None, invite_token_secret.clone());
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -2212,7 +2240,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            outbound_url_guard.clone(),
             false,
         )
         .expect("default Eventing configuration must initialize");
@@ -2246,6 +2273,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             bot_use_cases.clone() as Arc<dyn bcs_service_api::BotManagementService>,
             default_bot_onboarding,
             collaboration_templates.clone(),
+            invite_code_service.clone(),
+            config.invite.invite_code_gate_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
@@ -3746,6 +3775,7 @@ impl BcsServer {
             )),
         );
 let collaboration_templates = build_standalone_collaboration_template_service(&config);
+        let invite_code_service = build_invite_code_service(&config, None, None, invite_token_secret.clone());
         let eventing_runtime = build_eventing_runtime_blocking(
             &config,
             event_repo,
@@ -3753,7 +3783,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            callback_url_guard.clone(),
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
@@ -3780,6 +3809,8 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             use_cases.bot_management.clone(),
             use_cases.bot_onboarding.clone(),
             collaboration_templates.clone(),
+            invite_code_service.clone(),
+            config.invite.invite_code_gate_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
@@ -4598,6 +4629,12 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             &infrastructure_plugins,
             config.llm.is_enabled() || extensions.llm_provider.is_some(),
         )?;
+        let invite_code_service = build_invite_code_service(
+            &config,
+            Some(db_plugin.clone()),
+            Some(&db_kind),
+            invite_token_secret.clone(),
+        );
         let eventing_runtime = crate::eventing_wiring::build_eventing_runtime(
             &config,
             event_repo,
@@ -4605,7 +4642,6 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            outbound_url_guard.clone(),
             local_eventing_endpoints_allowed(),
         )
         .await?;
@@ -4637,6 +4673,8 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             use_cases.bot_management.clone(),
             use_cases.bot_onboarding.clone(),
             collaboration_templates.clone(),
+            invite_code_service.clone(),
+            config.invite.invite_code_gate_enabled,
             gateway_principal_verifier.clone(),
             connect_service.clone(),
             eventing_runtime.service,
@@ -4998,6 +5036,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
                 Arc::clone(&self.state),
                 http_metrics_middleware,
             ))
+            .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request))
             .layer(
                 TraceLayer::new_for_http()
                     .make_span_with(bcs_http::gateway_trace::BcnMakeSpan)

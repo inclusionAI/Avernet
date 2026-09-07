@@ -87,3 +87,12 @@ a stable `SkillCenterGatewayError`, with no cleanup callback or hidden retry.
 This PR intentionally does not predeclare Catalog, Publication, Public
 Reference, or Track Latest application modules; each is introduced only with
 its real consumer workflow.
+
+`LocalSkillStorageResolver` selects only a Legacy Local Skill package root.
+It separates Bot-owned uploaded packages from the shared repository source owned
+by `SkillRepoSyncPlugin`. Pool state and paths are resolved before this seam;
+the resolver never changes layout state, locators, files, or symlink mappings.
+The default implementation preserves configured addresses; the community runtime
+implementation selects the existing Claude Code Engine source layout. The
+factory's existing locator/device-I/O adapters remain responsible for address
+translation, including enterprise host addresses and Teclaw namespaces.

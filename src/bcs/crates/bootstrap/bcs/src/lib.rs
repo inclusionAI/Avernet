@@ -188,7 +188,7 @@ pub async fn run_from_env_with_config_dir(config_dir: Option<&std::path::PathBuf
         .map_err(BcsError::InvalidConfig)?;
 
     let telemetry = telemetry::Telemetry::init(&config.telemetry);
-    logging::init(&config.logging, telemetry.tracer());
+    let _logging_guard = logging::init(&config.logging, telemetry.tracer());
     logging::spawn_cleanup_task(config.logging.outputs.clone());
 
     tracing::info!(

@@ -174,3 +174,140 @@ class TestExpertChatPermissionCheck:
 
         # 关键守护: resolver 不应被调
         resolver.resolve_for_binding.assert_not_called()
+
+    def test_bcn_authorized_scope_skips_only_the_legacy_access_check(self):
+        repository = MagicMock()
+        repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        bot_repo = MagicMock()
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "status": "ACTIVE",
+        }
+        bot_repo.get_by_id_and_owner.return_value = bot
+        collab = _collab_service_returning(False)
+        svc = _make_service(
+            repository=repository,
+            bot_repo=bot_repo,
+            collaborator_service=collab,
+        )
+
+        with pytest.raises(ChatPermissionError):
+            svc._get_authorized_chat_bot("friend1", "bot1", "owner1")
+
+        assert svc._get_authorized_chat_bot(
+            "friend1",
+            "bot1",
+            "owner1",
+            bcn_friend_authorized=True,
+        ) == bot
+        bot_repo.get_by_id_and_owner.assert_called_with("bot1", "owner1")
+        repository.list_chat_bots.assert_called_with("friend1")
+
+    def test_bcn_authorized_scope_reaches_connection_without_legacy_recheck(self):
+        resolver = _resolver_returning_ctx()
+        collab = _collab_service_returning(False)
+        svc = _make_service(resolver=resolver, collaborator_service=collab)
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "binding_id": 123,
+        }
+
+        connection = svc._get_connection(
+            bot,
+            user_id="friend1",
+            bcn_friend_authorized=True,
+        )
+
+        assert connection["url"] == "http://localhost:8080"
+        collab.check_collaborator_permission.assert_not_called()
+        resolver.resolve_for_binding.assert_called_once_with(
+            123, "friend1", bot_id="bot1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_connect_session_propagates_bcn_authorization_to_connection(self):
+        repository = MagicMock()
+        repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        repository.get_owned_session.return_value = {"session_key": "session-1"}
+        bot_repo = MagicMock()
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "status": "ACTIVE",
+        }
+        bot_repo.get_by_id_and_owner.return_value = bot
+        service = _make_service(repository=repository, bot_repo=bot_repo)
+        service._prepare_chat_connection = AsyncMock(return_value=({"url": "ws://bot"}, False))
+
+        result = await service.connect_chat_session(
+            "friend1",
+            "bot1",
+            "owner1",
+            "session-1",
+            bcn_friend_authorized=True,
+        )
+
+        assert result["connection"] == {"url": "ws://bot"}
+        service._prepare_chat_connection.assert_awaited_once_with(
+            bot,
+            "friend1",
+            "owner1",
+            None,
+            bcn_friend_authorized=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_session_lifecycle_propagates_bcn_authorization_to_connection(self):
+        repository = MagicMock()
+        repository.list_chat_bots.return_value = [
+            {"bot_id": "bot1", "owner_id": "owner1"}
+        ]
+        repository.list_owned_sessions.return_value = [
+            {
+                "session_key": "session-1",
+                "user_id": "friend1",
+                "bot_id": "bot1",
+                "gmt_create": "2026-09-07T00:00:00Z",
+            }
+        ]
+        repository.get_owned_session.return_value = {"session_key": "session-1"}
+        bot_repo = MagicMock()
+        bot = {
+            "bot_id": "bot1",
+            "owner_id": "owner1",
+            "public": "0",
+            "status": "ACTIVE",
+        }
+        bot_repo.get_by_id_and_owner.return_value = bot
+        service = _make_service(repository=repository, bot_repo=bot_repo)
+        service._prepare_chat_connection = AsyncMock(return_value=({"url": "ws://bot"}, False))
+        service._list_owned_adapter_sessions = AsyncMock(return_value={})
+        service._create_session = AsyncMock(return_value="session-2")
+        service._delete_adapter_session = AsyncMock()
+        service._remove_session_favorite = AsyncMock()
+
+        await service.list_chat_sessions(
+            "friend1", "bot1", "owner1", bcn_friend_authorized=True
+        )
+        await service.create_chat_session(
+            "friend1", "bot1", "owner1", bcn_friend_authorized=True
+        )
+        await service.delete_owned_chat_session(
+            "friend1", "bot1", "owner1", "session-1",
+            bcn_friend_authorized=True,
+        )
+
+        assert len(service._prepare_chat_connection.await_args_list) == 3
+        assert all(
+            call.kwargs["bcn_friend_authorized"] is True
+            for call in service._prepare_chat_connection.await_args_list
+        )

@@ -32,7 +32,11 @@ class ExpertChatSessionRuntimeMixin:
     """Connection authorization and Adapter session lifecycle operations."""
 
     def _get_connection(
-        self, bot: Dict[str, Any], user_id: Optional[str] = None
+        self,
+        bot: Dict[str, Any],
+        user_id: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """获取 Bot 的连接信息
 
@@ -74,7 +78,8 @@ class ExpertChatSessionRuntimeMixin:
 
         # Defense in depth: every path resolving a runtime connection must
         # enforce the same owner/public/collaborator authorization boundary.
-        self._check_chat_access(bot, user_id)
+        if not bcn_friend_authorized:
+            self._check_chat_access(bot, user_id)
 
         if not binding_id:
             raise ConnectionError(

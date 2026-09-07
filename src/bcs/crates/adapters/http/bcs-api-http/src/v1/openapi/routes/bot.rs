@@ -23,6 +23,10 @@ pub fn router() -> Router<ApiState> {
         .route("/bots/query", post(query_bots))
         .route("/bots/mine", get(list_mine))
         .route("/bots/{bot_id}/candidates", get(list_candidates))
+        .route(
+            "/bots/{bot_id}/eligible-candidates",
+            get(list_eligible_candidates),
+        )
         .route("/bots/{bot_id}", get(get_bot).patch(update_bot))
 }
 
@@ -72,6 +76,33 @@ async fn list_candidates(
     let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
     let result = service(&state, &request_id)?
         .list_candidates(ListBotCandidates {
+            caller,
+            bot_id,
+            purpose: query.purpose.into(),
+            name: query.name,
+            offset: query.offset,
+            limit: query.limit,
+        })
+        .await
+        .map_err(|error| application_error_response(&request_id, error))?;
+    Ok((
+        StatusCode::OK,
+        Json(Envelope::success(20_000, "OK", result, request_id.0)),
+    )
+        .into_response())
+}
+
+async fn list_eligible_candidates(
+    State(state): State<ApiState>,
+    Extension(caller): Extension<AuthenticatedCaller>,
+    Extension(request_id): Extension<RequestId>,
+    path: Result<Path<String>, PathRejection>,
+    query: Result<Query<ListBotCandidatesQuery>, QueryRejection>,
+) -> Result<Response, ErrorResponse> {
+    let Path(bot_id) = path.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let Query(query) = query.map_err(|error| invalid_request(&request_id, error.body_text()))?;
+    let result = service(&state, &request_id)?
+        .list_eligible_candidates(ListBotCandidates {
             caller,
             bot_id,
             purpose: query.purpose.into(),

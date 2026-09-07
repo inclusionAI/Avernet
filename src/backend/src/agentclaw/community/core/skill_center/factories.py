@@ -50,10 +50,12 @@ from agentclaw.community.core.skill_center.services.skill_parameter_service impo
 from agentclaw.community.core.skill_center.services.skill_service import SkillService
 from agentclaw.community.core.skill_center.services.skill_set_service import (
     SkillSetService,
+    SKILLS_LOCAL_DIR,
 )
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
+from agentclaw.community.plugin_api.local_skill_storage import LocalSkillStorageResolver
 from agentclaw.community.core.skill_center.skill_parameter_service_factory_protocol import SkillParameterServiceFactoryProtocol
 from agentclaw.community.core.skill_center.skill_service_factory_protocol import SkillServiceFactoryProtocol
 from agentclaw.community.core.skill_center.skill_set_service_factory_protocol import SkillSetServiceFactoryProtocol
@@ -387,6 +389,7 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
         market_cache: MarketCache,
         git_sync_service_factory: Callable[[], GitSyncService],
         path_factory: "WorkspacePathFactory",
+        local_skill_storage: LocalSkillStorageResolver,
         pool_layout_paths: Callable[
             [str, str, str],
             tuple[str, str, str] | None,
@@ -400,7 +403,14 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
         self._market_cache = market_cache
         self._git_sync_service_factory = git_sync_service_factory
         self._path_factory = path_factory
+        self._local_skill_storage = local_skill_storage
         self._pool_layout_paths = pool_layout_paths
+
+    def resolve_local_skill_root(
+        self, runtime_engine: str, configured_root: Path
+    ) -> Path:
+        """Resolve only Legacy package storage; callers retain Pool authority."""
+        return self._local_skill_storage.resolve_root(runtime_engine, configured_root)
 
     def resolve_pool_paths(
         self,
@@ -454,6 +464,11 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 pool_local_adapter = build_pool_local_path_adapter(local_dir)
                 local_skill_path_adapter = pool_local_adapter
                 local_skill_locator_adapter = pool_local_adapter
+            elif not uses_pool_paths:
+                configured_local = Path(local_dir) if local_dir is not None else SKILLS_LOCAL_DIR
+                local_dir = self.resolve_local_skill_root(
+                    runtime_engine or "openclaw", configured_local
+                )
 
 
         return SkillService(
@@ -515,6 +530,7 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
             )
+            local_dir = self.resolve_local_skill_root(runtime_engine or "openclaw", local_dir)
         directory = str(local_dir / (directory_name or name))
         local_skill_path_adapter = service._local_skill_path_adapter
         if is_teclaw and not service.runtime_uses_pool_paths:
@@ -559,6 +575,7 @@ class SkillServiceFactory(SkillServiceFactoryProtocol):
                 is_desktop=is_desktop,
                 is_teclaw=is_teclaw,
             )
+            local_dir = self.resolve_local_skill_root(runtime_engine or "openclaw", local_dir)
         resolved_locator = Path(locator)
         if not resolved_locator.is_absolute():
             if resolved_locator.parts[:1] == (local_dir.name,):
@@ -733,6 +750,10 @@ class SkillSetServiceFactory(SkillSetServiceFactoryProtocol):
                 resolved_local = Path(local_path)
                 resolved_repo = Path(repo_path)
                 local_skill_path_adapter = build_pool_local_path_adapter(resolved_local)
+            else:
+                resolved_local = self._skill_service_factory.resolve_local_skill_root(
+                    effective_runtime_engine or engine_type or "", resolved_local
+                )
 
         skill_service = self._skill_service_factory.create(
             active_dir=resolved_skills,

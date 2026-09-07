@@ -294,6 +294,48 @@ class TestSessionRoutingAffinityPrefix:
             == "existing-session"
         )
 
+    def test_teclaw_eval_id_replaces_run_id_in_key(self, service):
+        """teclaw 引擎评测流量（eval_id 存在）时构造结构化 key。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="teclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id="eval-abc123",
+            )
+            == f"agent:{BOT_UUID}:session:eval-abc123:user:u-1"
+        )
+
+    def test_teclaw_no_eval_id_returns_none(self, service):
+        """teclaw 引擎生产流量（无 eval_id）返回 None，保持原有 sessionKey 生成逻辑。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="teclaw",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id=None,
+            )
+            is None
+        )
+
+    def test_unsupported_engine_type_returns_none_with_warning(self, service):
+        """未知引擎类型返回 None 并记录 WARNING。"""
+        assert (
+            service._create_session_consistency_key(
+                engine_type="unknown_engine",
+                tc_bot_id=BOT_UUID,
+                user_id="u-1",
+                run_id="run-1",
+                session_id=None,
+                eval_id=None,
+            )
+            is None
+        )
+
     @pytest.mark.asyncio
     async def test_create_session_path_strips_prefix_before_resolve(
         self, service, wss_resolver

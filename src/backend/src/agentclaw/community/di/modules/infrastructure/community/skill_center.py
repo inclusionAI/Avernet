@@ -14,6 +14,7 @@ from injector import Module, provider, singleton
 from agentclaw.community.plugin_api.skill_center_client import SkillCenterClient
 from agentclaw.community.plugin_api.skill_center_gateway import SkillCenterGateway
 from agentclaw.community.plugin_api.skill_repo_sync import SkillRepoSyncPlugin
+from agentclaw.community.plugin_api.local_skill_storage import LocalSkillStorageResolver
 from agentclaw.community.plugin_api.skill_scanner import SkillScannerPlugin
 from agentclaw.community.plugin_api.space_skill_source import SpaceSkillSourcePlugin
 
@@ -66,3 +67,9 @@ class CommunitySkillCenterClientModule(Module):
         )
 
         return CommunitySpaceSkillSource()
+
+    @singleton
+    @provider
+    def local_skill_storage(self) -> LocalSkillStorageResolver:
+        from agentclaw.community.plugins.community.local_skill_storage import EngineLocalSkillStorage
+        return EngineLocalSkillStorage()

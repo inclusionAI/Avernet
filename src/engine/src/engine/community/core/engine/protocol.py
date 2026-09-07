@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from engine.community.core.approval.protocol import ApprovalService
     from engine.community.core.bash.protocol import BashService
     from engine.community.core.chat.protocol import ChatService
+    from engine.community.core.cli_tools.protocol import CliToolsService
     from engine.community.core.cron.protocol import CronService
     from engine.community.core.default_config.protocol import DefaultConfigService
     from engine.community.core.file.protocol import FileService
@@ -80,6 +81,11 @@ class Engine(Protocol):
     @property
     def skills(self) -> SkillsService | None:
         """Skills plugin, or None if unsupported."""
+        ...
+
+    @property
+    def cli_tools(self) -> CliToolsService | None:
+        """CLI tools plugin, or None if unsupported."""
         ...
 
     @property

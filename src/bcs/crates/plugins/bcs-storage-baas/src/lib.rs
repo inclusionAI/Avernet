@@ -137,6 +137,7 @@ fn bad(msg: &str) -> StorageError {
 
 /// Parse an HTTP response, assert `code == 0`, return the `data` object.
 async fn baas_data(resp: reqwest::Response) -> Result<serde_json::Value, StorageError> {
+    bcs_observability::observe_result("storage.baas.baas_data", async {
     let status = resp.status();
     if !status.is_success() {
         let body: serde_json::Value =
@@ -153,12 +154,14 @@ async fn baas_data(resp: reqwest::Response) -> Result<serde_json::Value, Storage
         return Err(bad(&format!("non-zero code: {}", body)));
     }
     Ok(body["data"].clone())
+    }).await
 }
 
 /// Idempotent abort helper: 2xx responses and 409 TRANSFER_STATE_CONFLICT
 /// (already terminal) are both treated as success. All other errors go
 /// through the standard `map_baas_error`.
 async fn baas_data_or_conflict_ok(resp: reqwest::Response) -> Result<serde_json::Value, StorageError> {
+    bcs_observability::observe_result("storage.baas.baas_data_or_conflict_ok", async {
     let status = resp.status();
     if status.is_success() {
         return Ok(serde_json::Value::Null); // abort idempotent success, no data needed
@@ -169,6 +172,7 @@ async fn baas_data_or_conflict_ok(resp: reqwest::Response) -> Result<serde_json:
         return Ok(serde_json::Value::Null); // already terminal — idempotent ok
     }
     Err(crate::error::map_baas_error(code, status.as_u16(), body["detail"]["message"].as_str().unwrap_or("")))
+    }).await
 }
 
 /// ISO 8601 -> unix seconds via chrono `DateTime::parse_from_rfc3339`.
@@ -209,6 +213,7 @@ impl StoragePlugin for BaasStoragePlugin {
     fn capabilities(&self) -> StorageCapabilities { self.caps }
 
     async fn prepare_upload(&self, req: UploadPrepareRequest, caller: Option<&ActorRef>) -> Result<PreparedUpload, StorageError> {
+        bcs_observability::observe_result("storage.baas.prepare_upload", async {
         let session_id = session_id_from_key(&req.key);
         let base = self.base_for_session(session_id);
         let body = serde_json::json!({
@@ -274,11 +279,13 @@ impl StoragePlugin for BaasStoragePlugin {
             client_target,
             expires_at,
         })
+            }).await
     }
     async fn stream_upload(&self, _h: &UploadHandle, _p: Option<u16>, _b: ByteStream) -> Result<(), StorageError> {
         Err(StorageError::Unsupported("baas")) // presign_put backend: never called by BCS
     }
     async fn complete_upload(&self, handle: &UploadHandle) -> Result<StorageObjectMeta, StorageError> {
+        bcs_observability::observe_result("storage.baas.complete_upload", async {
         let pending: handle::BaasPendingHandle = serde_json::from_value(handle.backend_handle.clone())
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
@@ -288,9 +295,11 @@ impl StoragePlugin for BaasStoragePlugin {
             .send().await.map_err(|e| StorageError::Backend(e.into()))?;
         let _data = baas_data(resp).await?; // sync DONE; data has status
         Ok(StorageObjectMeta { key: handle.key.clone(), size: 0, sha256: None })
+            }).await
     }
 
     async fn abort_upload(&self, handle: &UploadHandle) -> Result<(), StorageError> {
+        bcs_observability::observe_result("storage.baas.abort_upload", async {
         let pending: handle::BaasPendingHandle = serde_json::from_value(handle.backend_handle.clone())
             .map_err(|e| StorageError::Backend(e.into()))?;
         let session_id = session_id_from_key(&handle.key);
@@ -301,11 +310,13 @@ impl StoragePlugin for BaasStoragePlugin {
         // CANCELLED (or already terminal) — treat 2xx + TRANSFER_STATE_CONFLICT as Ok.
         let _ = baas_data_or_conflict_ok(resp).await?;
         Ok(())
+            }).await
     }
     async fn get_stream(&self, _h: &StorageHandle) -> Result<ByteStream, StorageError> {
         Err(StorageError::Unsupported("baas")) // presign_download backend: 302 path used instead
     }
     async fn presign_get(&self, handle: &StorageHandle, opts: PresignGetOptions, caller: Option<&ActorRef>) -> Result<PresignGetTicket, StorageError> {
+        bcs_observability::observe_result("storage.baas.presign_get", async {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
@@ -326,8 +337,10 @@ impl StoragePlugin for BaasStoragePlugin {
         let share_url = data["share_url"].as_str().ok_or_else(|| bad("missing share_url"))?.to_string();
         let expires_at = parse_iso_to_unix(data["expires_at"].as_str().unwrap_or("")).unwrap_or_else(|| now_unix_secs().saturating_add(opts.ttl_secs));
         Ok(PresignGetTicket { download_url: share_url, expires_at })
+            }).await
     }
     async fn delete(&self, handle: &StorageHandle) -> Result<(), StorageError> {
+        bcs_observability::observe_result("storage.baas.delete", async {
         let ready: BaasReadyHandle = serde_json::from_value(handle.backend_handle.clone())
             .or_else(|_| serde_json::from_value::<BaasPendingHandle>(handle.backend_handle.clone())
                         .map(|p| BaasReadyHandle { transfer_id: p.transfer_id }))
@@ -347,9 +360,11 @@ impl StoragePlugin for BaasStoragePlugin {
             return Ok(());
         }
         Err(crate::error::map_baas_error(code, status.as_u16(), body["detail"]["message"].as_str().unwrap_or("")))
+            }).await
     }
 
     async fn health_check(&self) -> Result<StorageHealth, StorageError> {
+        bcs_observability::observe_result("storage.baas.health_check", async {
         // Probe endpoint (or health_probe_path) without any real transfer_id.
         // Accept 2xx as ok; 401/404/405 means "reachable". 5xx/conn-error = not ok.
         let url = if self.cfg.health_probe_path.is_empty() {
@@ -366,6 +381,7 @@ impl StoragePlugin for BaasStoragePlugin {
             }
             Err(e) => Ok(StorageHealth { ok: false, detail: Some(format!("baas unreachable: {e}")) }),
         }
+            }).await
     }
 }
 

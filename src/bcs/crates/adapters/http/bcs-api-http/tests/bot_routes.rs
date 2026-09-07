@@ -8,8 +8,10 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode};
+use bcs_config_api::ManifestConfig;
 use bcs_api_http::{ApiState, PrincipalVerificationError, PrincipalVerifier, router};
 use bcs_service_api::application::v1::*;
+use bcs_test_support::{NoopChannelService, NoopCollaborationRuntimeService};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -45,13 +47,132 @@ impl PrincipalVerifier for HeaderVerifier {
 }
 
 #[derive(Default)]
+struct NoopAuthService;
+
+#[async_trait]
+impl AuthService for NoopAuthService {
+    async fn login_urls(
+        &self,
+        _request: BuildLoginUrls,
+    ) -> Result<AuthProviderUrlList, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn complete_login(
+        &self,
+        _request: CompleteOAuthLogin,
+    ) -> Result<AuthRedirect, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn current_user(
+        &self,
+        _request: ReadCurrentUser,
+    ) -> Result<AuthUserInfo, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn refresh_session(
+        &self,
+        _request: RefreshSession,
+    ) -> Result<SessionRenewal, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn logout(&self, _request: LogoutSession) -> Result<LogoutResult, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+}
+
+#[derive(Default)]
+struct NoopCollaborationTemplateService;
+
+#[async_trait]
+impl CollaborationTemplateService for NoopCollaborationTemplateService {
+    async fn list_templates(
+        &self,
+        _command: ListCollaborationTemplates,
+    ) -> Result<CollaborationTemplateListResponse, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+
+    async fn get_template(
+        &self,
+        _query: GetCollaborationTemplate,
+    ) -> Result<CollaborationTemplateDetail, ApplicationError> {
+        Err(ApplicationError::internal("not configured"))
+    }
+}
+
+#[derive(Default)]
 struct FakeBotService {
     candidates: Mutex<Option<ListBotCandidates>>,
+    eligible_candidates: Mutex<Option<ListBotCandidates>>,
     candidate_searches: Mutex<Vec<SearchBotCandidates>>,
     query: Mutex<Option<QueryBots>>,
     get: Mutex<Option<GetBot>>,
     update: Mutex<Option<UpdateBot>>,
     mine: Mutex<Option<ListMyBots>>,
+}
+
+#[derive(Default)]
+struct FakeInviteCodeService {
+    allow_access: bool,
+    ensure_access_calls: Mutex<Vec<AuthenticatedCaller>>,
+    init_invite_codes_calls: Mutex<Vec<InitInviteCodes>>,
+    bind_invite_code_calls: Mutex<Vec<BindInviteCode>>,
+    get_my_invite_code_binding_calls: Mutex<Vec<GetMyInviteCodeBinding>>,
+}
+
+#[async_trait]
+impl InviteCodeService for FakeInviteCodeService {
+    async fn init_invite_codes(
+        &self,
+        command: InitInviteCodes,
+    ) -> Result<InitInviteCodesResult, ApplicationError> {
+        self.init_invite_codes_calls
+            .lock()
+            .expect("init invite codes lock")
+            .push(command);
+        Ok(InitInviteCodesResult { codes: vec!["ABC123".to_string()] })
+    }
+
+    async fn bind_invite_code(
+        &self,
+        command: BindInviteCode,
+    ) -> Result<BindInviteCodeResult, ApplicationError> {
+        self.bind_invite_code_calls
+            .lock()
+            .expect("bind invite code lock")
+            .push(command);
+        Ok(BindInviteCodeResult { bound: true, bound_at: 123 })
+    }
+
+    async fn get_my_invite_code_binding(
+        &self,
+        command: GetMyInviteCodeBinding,
+    ) -> Result<InviteCodeBindingView, ApplicationError> {
+        self.get_my_invite_code_binding_calls
+            .lock()
+            .expect("get my invite code binding lock")
+            .push(command);
+        Ok(InviteCodeBindingView { bound: true, bound_at: Some(456) })
+    }
+
+    async fn ensure_invite_code_access(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<(), ApplicationError> {
+        self.ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .push(caller.clone());
+        if self.allow_access {
+            Ok(())
+        } else {
+            Err(ApplicationError::invite_code_required("invite code required"))
+        }
+    }
 }
 
 #[async_trait]
@@ -65,6 +186,25 @@ impl BotService for FakeBotService {
             items: vec![BotCandidate {
                 bot: physical_bot(),
                 is_friend: true,
+            }],
+            total: 1,
+            offset: 5,
+            limit: 10,
+        })
+    }
+
+    async fn list_eligible_candidates(
+        &self,
+        command: ListBotCandidates,
+    ) -> Result<Page<BotCandidate>, ApplicationError> {
+        *self
+            .eligible_candidates
+            .lock()
+            .expect("eligible candidates lock") = Some(command);
+        Ok(Page {
+            items: vec![BotCandidate {
+                bot: physical_bot(),
+                is_friend: false,
             }],
             total: 1,
             offset: 5,
@@ -334,6 +474,14 @@ impl RegisterService for NoopRegisterService {
 }
 
 fn test_router(service: Arc<FakeBotService>) -> axum::Router {
+    invite_code_test_router(service, Arc::new(FakeInviteCodeService::default()), false)
+}
+
+fn invite_code_test_router(
+    service: Arc<FakeBotService>,
+    invite_code_service: Arc<FakeInviteCodeService>,
+    gate_enabled: bool,
+) -> axum::Router {
     router(
         ApiState::new(
             Arc::new(NoopGroupService),
@@ -344,12 +492,40 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )
+        .with_invite_code_service(invite_code_service)
+        .with_invite_code_gate_enabled(gate_enabled)
         .with_bot_service(service),
     )
 }
 
+#[test]
+fn api_state_builder_methods_attach_optional_services() {
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(HeaderVerifier),
+    )
+    .with_auth_service(Arc::new(NoopAuthService), "http://127.0.0.1/openapi/v1/auth".to_string())
+    .with_channel_service(Arc::new(NoopChannelService))
+    .with_collaboration_runtime_service(Arc::new(NoopCollaborationRuntimeService))
+    .with_collaboration_template_service(Arc::new(NoopCollaborationTemplateService))
+    .with_manifest_config("test".to_string(), ManifestConfig::default());
+
+    assert!(state.auth_service.is_some());
+    assert_eq!(state.auth_public_base_url, "http://127.0.0.1/openapi/v1/auth");
+    assert!(state.channel_service.is_some());
+    assert!(state.collaboration_runtime_service.is_some());
+    assert!(state.collaboration_template_service.is_some());
+    assert_eq!(state.manifest_env, "test");
+    assert_eq!(state.manifest, ManifestConfig::default());
+}
+
 #[tokio::test]
-async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
+async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     let service = Arc::new(FakeBotService::default());
     let app = test_router(service.clone());
 
@@ -362,11 +538,32 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
         ))
         .await
         .expect("candidates response");
-    assert_eq!(candidates.status(), StatusCode::OK);
+    let candidates_status = candidates.status();
+    if candidates_status != StatusCode::OK {
+        let body = to_bytes(candidates.into_body(), usize::MAX)
+            .await
+            .expect("candidates body");
+        panic!(
+            "candidates route returned {candidates_status}: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
+    assert_eq!(candidates_status, StatusCode::OK);
     assert_eq!(
         response_json(candidates).await["data"]["items"][0]["bot"]["kind"],
         "bot"
     );
+
+    let eligible_candidates = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/eligible-candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("eligible candidates response");
+    assert_eq!(eligible_candidates.status(), StatusCode::OK);
 
     let searched = app
         .clone()
@@ -464,6 +661,21 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(candidates.purpose, BotCandidatePurpose::Collaboration);
     assert_eq!(candidates.name.as_deref(), Some("planner"));
     assert_eq!((candidates.offset, candidates.limit), (5, 10));
+    let eligible_candidates = service
+        .eligible_candidates
+        .lock()
+        .expect("eligible candidates lock");
+    let eligible_candidates = eligible_candidates
+        .as_ref()
+        .expect("eligible candidates command");
+    assert_eq!(
+        eligible_candidates.caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("staff-1")
+    );
+    assert_eq!(eligible_candidates.bot_id, "human_staff-1");
+    assert_eq!(eligible_candidates.purpose, BotCandidatePurpose::Collaboration);
+    assert_eq!(eligible_candidates.name.as_deref(), Some("planner"));
+    assert_eq!((eligible_candidates.offset, eligible_candidates.limit), (5, 10));
     let searches = service
         .candidate_searches
         .lock()
@@ -512,6 +724,212 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     let mine = mine.as_ref().expect("mine command");
     assert_eq!(mine.kind, Some(BotKind::Human));
     assert_eq!(mine.reachability, Some(BotReachability::Unreachable));
+}
+
+#[tokio::test]
+async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
+    let bot_service = Arc::new(FakeBotService::default());
+    let invite_code_service = Arc::new(FakeInviteCodeService { allow_access: true, ..Default::default() });
+    let app = invite_code_test_router(bot_service.clone(), invite_code_service.clone(), true);
+
+    let bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "ABC123"}),
+        ))
+        .await
+        .expect("bind response");
+    assert_eq!(bind.status(), StatusCode::OK);
+    assert_eq!(response_json(bind).await["data"], json!({"bound": true, "bound_at": 123}));
+
+    let me = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/invite-codes/me",
+            Value::Null,
+        ))
+        .await
+        .expect("my binding response");
+    assert_eq!(me.status(), StatusCode::OK);
+    assert_eq!(response_json(me).await["data"], json!({"bound": true, "bound_at": 456}));
+
+    let init = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 3}),
+        ))
+        .await
+        .expect("init response");
+    assert_eq!(init.status(), StatusCode::OK);
+    assert_eq!(response_json(init).await["data"], json!({"codes": ["ABC123"]}));
+
+    let gated_candidates = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("gated candidates response");
+    assert_eq!(gated_candidates.status(), StatusCode::OK);
+    assert_eq!(response_json(gated_candidates).await["data"]["items"][0]["bot"]["bot_id"], "bot-1");
+
+    let empty_bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "   "}),
+        ))
+        .await
+        .expect("empty bind response");
+    assert_eq!(empty_bind.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(empty_bind).await["data"]["error_code"], "invalid_request");
+
+    let zero_init = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 0}),
+        ))
+        .await
+        .expect("zero init response");
+    assert_eq!(zero_init.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(zero_init).await["data"]["error_code"], "invalid_request");
+
+    assert_eq!(
+        invite_code_service
+            .ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .len(),
+        1,
+        "protected routes should run the invite-code gate exactly once"
+    );
+    assert_eq!(
+        invite_code_service
+            .bind_invite_code_calls
+            .lock()
+            .expect("bind invite code lock")
+            .len(),
+        1
+    );
+    assert_eq!(
+        invite_code_service
+            .get_my_invite_code_binding_calls
+            .lock()
+            .expect("get my invite code binding lock")
+            .len(),
+        1
+    );
+    assert_eq!(
+        invite_code_service
+            .init_invite_codes_calls
+            .lock()
+            .expect("init invite codes lock")
+            .len(),
+        1
+    );
+    assert!(
+        bot_service
+            .candidates
+            .lock()
+            .expect("candidates lock")
+            .is_some(),
+        "protected routes should flow through the invite-code gate when access is granted"
+    );
+}
+
+#[tokio::test]
+async fn invite_code_routes_return_internal_when_the_service_is_missing() {
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(HeaderVerifier),
+    )
+    .with_invite_code_gate_enabled(true);
+
+    let app = router(state);
+
+    let bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "ABC123"}),
+        ))
+        .await
+        .expect("bind without invite-code service");
+    assert_eq!(bind.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(bind).await["data"]["error_code"], "internal_error");
+
+    let me = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/invite-codes/me",
+            Value::Null,
+        ))
+        .await
+        .expect("get binding without invite-code service");
+    assert_eq!(me.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(me).await["data"]["error_code"], "internal_error");
+
+    let init = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 3}),
+        ))
+        .await
+        .expect("init without invite-code service");
+    assert_eq!(init.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(init).await["data"]["error_code"], "internal_error");
+}
+
+#[tokio::test]
+async fn invite_code_gate_rejects_protected_routes_when_access_is_not_granted() {
+    let bot_service = Arc::new(FakeBotService::default());
+    let invite_code_service = Arc::new(FakeInviteCodeService { allow_access: false, ..Default::default() });
+    let app = invite_code_test_router(bot_service.clone(), invite_code_service.clone(), true);
+
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("protected route response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response_json(response).await["data"]["error_code"], "invite_code_required");
+    assert_eq!(
+        invite_code_service
+            .ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .len(),
+        1
+    );
+    assert!(
+        bot_service
+            .candidates
+            .lock()
+            .expect("candidates lock")
+            .is_none(),
+        "gate rejection must short-circuit the bot service"
+    );
 }
 
 #[tokio::test]
@@ -624,6 +1042,54 @@ async fn bot_routes_reject_unknown_request_fields_and_missing_principal() {
         .await
         .expect("missing principal response");
     assert_eq!(missing.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn bot_routes_reject_invalid_queries_and_missing_service() {
+    let service = Arc::new(FakeBotService::default());
+    let app = test_router(service.clone());
+
+    for uri in [
+        "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10&unexpected=1",
+        "/openapi/v1/collaboration/bots/human_staff-1/eligible-candidates?purpose=collaboration&name=planner&offset=5&limit=10&unexpected=1",
+        "/openapi/v1/collaboration/bots/mine?kind=human&name=vin&status=online&reachability=unreachable&offset=2&limit=3&unexpected=1",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(request("GET", uri, Value::Null))
+            .await
+            .expect("invalid query response");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{uri}");
+        assert_eq!(response_json(response).await["data"]["error_code"], "invalid_request", "{uri}");
+    }
+
+    assert!(service.candidates.lock().expect("candidates lock").is_none());
+    assert!(service.eligible_candidates.lock().expect("eligible candidates lock").is_none());
+    assert!(service.mine.lock().expect("mine lock").is_none());
+
+    let missing_service_app = router(
+        ApiState::new(
+            Arc::new(NoopGroupService),
+            Arc::new(NoopSessionService),
+            Arc::new(NoopMessageService),
+            Arc::new(NoopInvitationService),
+            Arc::new(NoopRegisterService),
+            Arc::new(NoopFriendshipService),
+            Arc::new(HeaderVerifier),
+        )
+        .with_invite_code_gate_enabled(false),
+    );
+
+    let missing_service = missing_service_app
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/bot-1",
+            Value::Null,
+        ))
+        .await
+        .expect("missing bot service response");
+    assert_eq!(missing_service.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(missing_service).await["data"]["error_code"], "internal_error");
 }
 
 #[tokio::test]

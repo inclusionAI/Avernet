@@ -13,7 +13,7 @@ use bcs_service_api::{
     BotCandidateSearchCoreResult, BotCandidateSearchCoreService, BotCandidateSearchMode,
     BotCandidateSearchQuery, BotControlPlaneCoreService, LegacyBotCandidateSearchCoreResult,
 };
-use bcs_test_support::{NoopBotRegistryCoreService, NoopFriendCoreService};
+use bcs_test_support::{NoopBotRegistryCoreService, NoopConnectService, NoopFriendCoreService};
 
 struct EmptyCandidateSearch;
 
@@ -48,6 +48,7 @@ async fn bot_service_impl_passes_the_v1_bot_service_contract() {
         control_plane,
         Arc::new(NoopBotRegistryCoreService),
         Arc::new(NoopFriendCoreService),
+        Arc::new(NoopConnectService),
         Arc::new(EmptyCandidateSearch),
         BotServiceConfig {
             env: bcs_config::resolve_env_str(),

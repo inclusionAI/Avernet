@@ -29,6 +29,7 @@ EXPECTED_OPERATIONS = {
     ("post", "/openapi/v1/collaboration/bots/query"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/{bot_id}/candidates"),
+    ("get", "/openapi/v1/collaboration/bots/{bot_id}/eligible-candidates"),
     ("patch", "/openapi/v1/collaboration/bots/{bot_id}"),
     ("get", "/openapi/v1/collaboration/bots/mine"),
     ("get", "/openapi/v1/collaboration/groups"),
@@ -95,7 +96,7 @@ def _actual_operations():
     }
 
 
-def test_contract_contains_exactly_the_64_approved_operations() -> None:
+def test_contract_contains_exactly_the_65_approved_operations() -> None:
     assert _actual_operations() == EXPECTED_OPERATIONS
 
 

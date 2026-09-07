@@ -31,6 +31,11 @@ pub struct InviteConfig {
     #[serde(default)]
     pub token_secret: Option<String>,
 
+    /// Whether the invite-code access gate is enabled.
+    /// When false or unset, protected routes do not enforce invite-code binding.
+    #[serde(default)]
+    pub invite_code_gate_enabled: bool,
+
     #[serde(default = "default_invite_ttl_seconds")]
     pub default_ttl_seconds: u64,
 
@@ -3114,6 +3119,8 @@ base_url = "https://directory.example.com"
     /// Regression guard for the `issuer` → `issuers` field rename: the
     /// checked-in configs must parse under `deny_unknown_fields`, and the old
     /// scalar `issuer` key must not reappear. See PR #1799 follow-up.
+    /// `bcs-config-prod.toml` is deployment-local and untracked, so only the
+    /// example and local configs are covered.
     #[test]
     fn checked_in_configs_parse_with_array_issuers_and_reject_legacy_scalar() {
         let targets: &[(&str, &str)] = &[
@@ -3124,10 +3131,6 @@ base_url = "https://directory.example.com"
             ("local", concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../../configs/bcs-config-local.toml"
-            )),
-            ("prod", concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../../configs/bcs-config-prod.toml"
             )),
         ];
         for (label, path) in targets {

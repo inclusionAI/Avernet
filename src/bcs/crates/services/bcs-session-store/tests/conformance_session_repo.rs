@@ -254,3 +254,23 @@ async fn memory_session_metrics_snapshot_port_contract() {
     bcs_test_support::contract::port::group_session_metrics_snapshot_port_contract_tests(&repo)
         .await;
 }
+
+#[tokio::test]
+async fn fallible_session_lookup_distinguishes_missing_rows_and_failures() {
+    let db = sqlite_db().await;
+    let sql_repo = MySqlSessionStore::sqlite(db, "dev".to_string());
+    let memory_repo = MemorySessionRepo::new();
+    for repo in [&sql_repo as &dyn SessionRepoPort, &memory_repo] {
+        assert!(repo.try_get("missing").await.expect("missing lookup").is_none());
+        let session = repo.create("group_1", NewSessionParams::default())
+            .await.expect("create session");
+        let stored = repo.try_get(&session.id).await.expect("successful lookup")
+            .expect("stored session");
+        assert_eq!(stored.id, session.id);
+    }
+    let failing = MySqlSessionStore::sqlite(Arc::new(AlwaysFailDb), "dev".to_string());
+    let error = failing.try_get("group_1:session").await.expect_err("query failure");
+    assert!(error.to_string().contains("forced session query failure"));
+    let malformed = MySqlSessionStore::sqlite(Arc::new(MalformedMembershipRowDb), "dev".to_string());
+    assert!(malformed.try_get("group_1:session").await.is_err());
+}

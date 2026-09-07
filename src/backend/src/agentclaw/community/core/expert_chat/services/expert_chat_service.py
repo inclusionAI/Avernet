@@ -375,7 +375,10 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         """
         bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
         )
         if need_poll:
             return {
@@ -433,13 +436,20 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         limit: int = 20,
         offset: int = 0,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """List one user's sessions for one expert Bot.
 
         The Backend-owned index is authoritative for ownership. Adapter data is
         only used to enrich those already-authorized keys with live metadata.
         """
-        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        bot = self._get_authorized_chat_bot(
+            user_id,
+            bot_id,
+            owner_id,
+            bcn_friend_authorized=bcn_friend_authorized,
+        )
         legacy_session_key = self._repo.get_session(user_id, bot_id, owner_id)
         if legacy_session_key:
             self._repo.add_owned_session(user_id, bot_id, owner_id, legacy_session_key)
@@ -454,7 +464,11 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
             return {"total": 0, "items": []}
 
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
+            bcn_friend_authorized=bcn_friend_authorized,
         )
         if favorite_only and need_poll:
             return {"total": 0, "items": [], "need_poll": True}
@@ -525,11 +539,22 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         bot_id: str,
         owner_id: str,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """Always create a new session and make it the legacy default."""
-        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        bot = self._get_authorized_chat_bot(
+            user_id,
+            bot_id,
+            owner_id,
+            bcn_friend_authorized=bcn_friend_authorized,
+        )
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
+            bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll:
             return {
@@ -560,16 +585,27 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         owner_id: str,
         session_key: str,
         iam_token: Optional[str] = None,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """Return connection data for one session owned by the caller."""
-        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        bot = self._get_authorized_chat_bot(
+            user_id,
+            bot_id,
+            owner_id,
+            bcn_friend_authorized=bcn_friend_authorized,
+        )
         # 以下为安全注释COSEC：会话归属必须在建立容器连接前由登录用户维度校验。
         owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
         if not owned:
             raise BotNotFoundError("Session不存在或不属于当前用户")
 
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, iam_token
+            bot,
+            user_id,
+            owner_id,
+            iam_token,
+            bcn_friend_authorized=bcn_friend_authorized,
         )
         if not need_poll:
             self._repo.save_session(user_id, bot_id, owner_id, session_key)
@@ -586,16 +622,27 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         bot_id: str,
         owner_id: str,
         session_key: str,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> bool:
         """Delete one authorized multi-session entry and its favorite marker."""
-        bot = self._get_authorized_chat_bot(user_id, bot_id, owner_id)
+        bot = self._get_authorized_chat_bot(
+            user_id,
+            bot_id,
+            owner_id,
+            bcn_friend_authorized=bcn_friend_authorized,
+        )
         # 以下为安全注释COSEC：禁止仅凭前端提供的 session_key 删除会话。
         owned = self._repo.get_owned_session(user_id, bot_id, owner_id, session_key)
         if not owned:
             raise BotNotFoundError("Session不存在或不属于当前用户")
 
         connection, need_poll = await self._prepare_chat_connection(
-            bot, user_id, owner_id, None
+            bot,
+            user_id,
+            owner_id,
+            None,
+            bcn_friend_authorized=bcn_friend_authorized,
         )
         if need_poll or connection is None:
             raise ConnectionError(
@@ -676,7 +723,12 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
     # ============ Private Methods ============
 
     def _get_authorized_chat_bot(
-        self, user_id: str, bot_id: str, owner_id: str
+        self,
+        user_id: str,
+        bot_id: str,
+        owner_id: str,
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> Dict[str, Any]:
         """Resolve and authorize a Bot before any container-side operation."""
         bot = self._bot_repo.get_by_id_and_owner(bot_id, owner_id)
@@ -692,7 +744,8 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         )
         if not bot_in_list:
             raise BotNotFoundError(f"Bot不在对话列表中: {bot_id}")
-        self._check_chat_access(bot, user_id)
+        if not bcn_friend_authorized:
+            self._check_chat_access(bot, user_id)
         return bot
 
     async def _prepare_chat_connection(
@@ -701,6 +754,8 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
         user_id: str,
         owner_id: str,
         iam_token: Optional[str],
+        *,
+        bcn_friend_authorized: bool = False,
     ) -> tuple[Optional[Dict[str, Any]], bool]:
         """Resolve caller/owner binding and return Adapter connection data."""
         bot_id = bot["bot_id"]
@@ -740,7 +795,11 @@ class ExpertChatService(ExpertChatOwnedSessionMixin, ExpertChatSessionRuntimeMix
                 publish_status=PublishStatus.SUCCESS.value,
             )
 
-        return self._get_connection(bot, user_id), False
+        return self._get_connection(
+            bot,
+            user_id,
+            bcn_friend_authorized=bcn_friend_authorized,
+        ), False
 
     async def _list_owned_adapter_sessions(
         self,

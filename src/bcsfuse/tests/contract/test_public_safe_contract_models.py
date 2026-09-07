@@ -138,7 +138,7 @@ class TestMinimalValidPayloads:
         """Test minimal WorkerSyncRequest instantiation."""
         from src.interfaces.api.schemas.worker_management_schemas import WorkerSyncRequest
 
-        req = WorkerSyncRequest(name="Test Worker")
+        req = WorkerSyncRequest(name="Test Worker", profile={"profile_id": "default"})
         assert req.name == "Test Worker"
         assert req.description is None
 
@@ -269,11 +269,11 @@ class TestOptionalFieldsPayloads:
         req = WorkerSyncRequest(
             name="Test Worker",
             description="A test worker",
-            profile_content="Profile content",
+            profile={"profile_id": "default", "contents": {"profile": "Profile content"}},
             identity_handle="test_worker",
             identity_title="Test Title",
             domains=["domain1", "domain2"],
-            capabilities=["cap1"],
+            capabilities=[{"name": "cap1"}],
             external_id="ext_001",
             metadata={"key": "value"},
         )

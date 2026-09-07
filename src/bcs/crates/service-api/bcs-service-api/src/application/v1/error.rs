@@ -9,6 +9,11 @@ pub const ERROR_EVENT_SUBSCRIPTION_FORBIDDEN: &str = "event_subscription_forbidd
 pub const ERROR_EVENT_DELIVERY_NOT_REPLAYABLE: &str = "event_delivery_not_replayable";
 pub const ERROR_EVENT_DELIVERY_LANE_BLOCKED: &str = "event_delivery_lane_blocked";
 
+pub const ERROR_INVITE_CODE_REQUIRED: &str = "invite_code_required";
+pub const ERROR_INVITE_CODE_ALREADY_BOUND: &str = "invite_code_already_bound";
+pub const ERROR_INVITE_CODE_UNAVAILABLE: &str = "invite_code_unavailable";
+pub const ERROR_INVITE_CODE_NOT_APPLICABLE: &str = "invite_code_not_applicable";
+
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
 pub enum ApplicationError {
@@ -134,6 +139,22 @@ impl ApplicationError {
 
     pub fn event_delivery_lane_blocked(message: impl Into<String>) -> Self {
         Self::conflict(ERROR_EVENT_DELIVERY_LANE_BLOCKED, message)
+    }
+
+    pub fn invite_code_required(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_INVITE_CODE_REQUIRED, message)
+    }
+
+    pub fn invite_code_already_bound(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_INVITE_CODE_ALREADY_BOUND, message)
+    }
+
+    pub fn invite_code_unavailable(message: impl Into<String>) -> Self {
+        Self::conflict(ERROR_INVITE_CODE_UNAVAILABLE, message)
+    }
+
+    pub fn invite_code_not_applicable(message: impl Into<String>) -> Self {
+        Self::forbidden_code(ERROR_INVITE_CODE_NOT_APPLICABLE, message)
     }
 
     pub fn code(&self) -> &str {

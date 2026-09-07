@@ -97,7 +97,9 @@ jobs:
           set -e
           echo "Checking for forbidden imports in community code..."
 
-          # Forbidden patterns in community source (only in import/from statements)
+          # Forbidden patterns in community source (only in import/from statements).
+          # Only match external package imports — relative paths (./ or ../)
+          # are internal modules and must not be flagged.
           FORBIDDEN_PATTERNS=(
             "@ocb/"
             "@alipay/"
@@ -115,7 +117,13 @@ jobs:
 
           FOUND=0
           for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-            matches=$(grep -rn "^\s*import.*${pattern}\|^\s*from.*${pattern}" src/ --include="*.ts" | grep -v node_modules | grep -v "\.test\." || true)
+            # Match import/from lines containing the pattern, then exclude
+            # relative imports (./ or ../) which are internal modules.
+            matches=$(grep -rn "^\s*import.*${pattern}\|^\s*from.*${pattern}" src/ --include="*.ts" \
+                      | grep -v node_modules | grep -v "\.test\." \
+                      | grep -v 'from "\.\/' | grep -v 'from "\.\.\/' \
+                      | grep -v "from '\.\/" | grep -v "from '\.\.\/" \
+                      || true)
             if [ -n "$matches" ]; then
               echo "ERROR: Found forbidden import: $pattern"
               echo "$matches"
