@@ -267,6 +267,11 @@ pub trait BotService: Send + Sync {
         command: ListBotCandidates,
     ) -> Result<Page<BotCandidate>, ApplicationError>;
 
+    async fn list_eligible_candidates(
+        &self,
+        command: ListBotCandidates,
+    ) -> Result<Page<BotCandidate>, ApplicationError>;
+
     async fn search_candidates(
         &self,
         command: SearchBotCandidates,

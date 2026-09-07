@@ -454,6 +454,7 @@ dependencies = [
  "bcs-bot",
  "bcs-bot-store",
  "bcs-config",
+ "bcs-domain",
  "bcs-friend",
  "bcs-service-api",
  "bcs-test-support",

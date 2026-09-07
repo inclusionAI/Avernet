@@ -111,6 +111,121 @@ BotCandidatesPath:
       "500":
         $ref: ../shared.yaml#/InternalErrorResponse
 
+EligibleBotCandidatesPath:
+  get:
+    operationId: list_eligible_bot_candidates
+    tags: ["Collaboration / Bots"]
+    summary: >-
+      List candidate physical Bots from a managed Bot's edge-permission friend graph.
+    description: >-
+      Human control-plane operation. The path bot_id must identify either a
+      physical Bot managed by the current Human or that Human's own Human Actor,
+      identified as human_{subject.id}. Results remain physical Bots, stay in
+      the selected Bot record's environment, and exclude the selected Bot,
+      Humans, deleted rows, and unonboarded rows. Eligibility is sourced from
+      the edge-permission friend graph and filtered to physical Bot peers only.
+      An empty or whitespace-only name is treated as absent; otherwise matching
+      is a trimmed case-insensitive substring. Status and reachability do not
+      remove candidates.
+    x-avernet-security:
+      user: required
+      app: required
+    x-avernet-behavior:
+      acting_bot:
+        - managed_physical_bot
+        - current_human_actor
+      result_kind: bot
+      environment: same_as_acting_bot
+      exclude_self: true
+      purpose_visibility:
+        discovery:
+          - public
+          - protected
+        collaboration:
+          - public
+          - friend
+      status_filter: none
+      reachability_filter: none
+      ordering:
+        - created_at_desc
+        - bot_id_asc
+    parameters:
+      - $ref: ../shared.yaml#/BotIdPath
+      - name: purpose
+        in: query
+        description: >-
+          discovery returns public and protected Bots. collaboration returns
+          public Bots plus accepted friends regardless of non-public visibility.
+        schema:
+          type: string
+          enum:
+            - discovery
+            - collaboration
+          default: discovery
+      - name: name
+        in: query
+        description: Optional trimmed, case-insensitive name substring.
+        schema:
+          type: string
+      - name: offset
+        in: query
+        schema:
+          type: integer
+          minimum: 0
+          default: 0
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    responses:
+      "200":
+        description: >-
+          Candidate Bots ordered by created_at descending with bot_id ascending
+          as the deterministic tie-breaker, then paginated.
+        content:
+          application/json:
+            schema:
+              $ref: ../domain-models.yaml#/BotCandidatePageEnvelope
+      "400":
+        description: Invalid candidate filter.
+        x-error-codes:
+          - invalid_request
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "401":
+        description: Gateway Human Principal is missing or invalid.
+        x-error-codes:
+          - unauthenticated
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "403":
+        description: >-
+          Current Human does not manage the selected physical Bot, or the
+          selected Human Actor does not represent the current Human.
+        x-error-codes:
+          - forbidden
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "404":
+        description: Acting Bot is missing, deleted, or unonboarded.
+        x-error-codes:
+          - bot_not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse
+
 BotCandidateSearchPath:
   get:
     operationId: search_bot_candidates

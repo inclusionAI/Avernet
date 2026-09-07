@@ -47,6 +47,7 @@ impl PrincipalVerifier for HeaderVerifier {
 #[derive(Default)]
 struct FakeBotService {
     candidates: Mutex<Option<ListBotCandidates>>,
+    eligible_candidates: Mutex<Option<ListBotCandidates>>,
     candidate_searches: Mutex<Vec<SearchBotCandidates>>,
     query: Mutex<Option<QueryBots>>,
     get: Mutex<Option<GetBot>>,
@@ -65,6 +66,25 @@ impl BotService for FakeBotService {
             items: vec![BotCandidate {
                 bot: physical_bot(),
                 is_friend: true,
+            }],
+            total: 1,
+            offset: 5,
+            limit: 10,
+        })
+    }
+
+    async fn list_eligible_candidates(
+        &self,
+        command: ListBotCandidates,
+    ) -> Result<Page<BotCandidate>, ApplicationError> {
+        *self
+            .eligible_candidates
+            .lock()
+            .expect("eligible candidates lock") = Some(command);
+        Ok(Page {
+            items: vec![BotCandidate {
+                bot: physical_bot(),
+                is_friend: false,
             }],
             total: 1,
             offset: 5,
@@ -344,12 +364,13 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )
+        .with_invite_code_gate_enabled(false)
         .with_bot_service(service),
     )
 }
 
 #[tokio::test]
-async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
+async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     let service = Arc::new(FakeBotService::default());
     let app = test_router(service.clone());
 
@@ -362,11 +383,32 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
         ))
         .await
         .expect("candidates response");
-    assert_eq!(candidates.status(), StatusCode::OK);
+    let candidates_status = candidates.status();
+    if candidates_status != StatusCode::OK {
+        let body = to_bytes(candidates.into_body(), usize::MAX)
+            .await
+            .expect("candidates body");
+        panic!(
+            "candidates route returned {candidates_status}: {}",
+            String::from_utf8_lossy(&body)
+        );
+    }
+    assert_eq!(candidates_status, StatusCode::OK);
     assert_eq!(
         response_json(candidates).await["data"]["items"][0]["bot"]["kind"],
         "bot"
     );
+
+    let eligible_candidates = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/eligible-candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("eligible candidates response");
+    assert_eq!(eligible_candidates.status(), StatusCode::OK);
 
     let searched = app
         .clone()
@@ -464,6 +506,21 @@ async fn all_six_bot_routes_forward_verified_human_and_contract_inputs() {
     assert_eq!(candidates.purpose, BotCandidatePurpose::Collaboration);
     assert_eq!(candidates.name.as_deref(), Some("planner"));
     assert_eq!((candidates.offset, candidates.limit), (5, 10));
+    let eligible_candidates = service
+        .eligible_candidates
+        .lock()
+        .expect("eligible candidates lock");
+    let eligible_candidates = eligible_candidates
+        .as_ref()
+        .expect("eligible candidates command");
+    assert_eq!(
+        eligible_candidates.caller.user.as_ref().map(|user| user.id.as_str()),
+        Some("staff-1")
+    );
+    assert_eq!(eligible_candidates.bot_id, "human_staff-1");
+    assert_eq!(eligible_candidates.purpose, BotCandidatePurpose::Collaboration);
+    assert_eq!(eligible_candidates.name.as_deref(), Some("planner"));
+    assert_eq!((eligible_candidates.offset, eligible_candidates.limit), (5, 10));
     let searches = service
         .candidate_searches
         .lock()

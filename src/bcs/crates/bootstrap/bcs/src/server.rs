@@ -1583,6 +1583,7 @@ fn build_openapi_v1_state(
         control_plane.clone(),
         registry.clone(),
         friends.clone(),
+        connect_service.clone(),
         candidate_search,
         BotServiceConfig {
             env: relation_env.clone(),
