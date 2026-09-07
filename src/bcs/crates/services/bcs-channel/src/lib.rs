@@ -1487,6 +1487,30 @@ impl ChannelService for BcsChannelService {
             .conversations
             .list_by_bcs_session(bcs_session_id)
             .await?;
+        // Rollover replaces the live mapping, but the old session retains its source.
+        if mappings.is_empty() {
+            let Some(session) = self.sessions.get(bcs_session_id).await else {
+                return Ok(Vec::new());
+            };
+            let source = session.meta.as_ref()
+                .and_then(|meta| meta.get("channel"))
+                .and_then(|channel| channel.get("source"))
+                .and_then(|value| value.as_str())
+                .filter(|source| !source.trim().is_empty());
+            let Some(source) = source else {
+                return Ok(Vec::new());
+            };
+            if channel_type.is_some_and(|expected| source != expected) {
+                return Ok(Vec::new());
+            }
+            return Ok(self.channel_route_from_session_meta(&session)
+                .filter(|mapping| {
+                    !mapping.binding_id.trim().is_empty()
+                        && !mapping.im_conversation_id.trim().is_empty()
+                })
+                .into_iter()
+                .collect());
+        }
         let mut filtered = Vec::with_capacity(mappings.len());
         for mapping in mappings {
             let Some(binding) = self.bindings.get(&mapping.binding_id).await? else {
@@ -3647,6 +3671,20 @@ mod tests {
                 .await?;
         }
 
+        harness.session_repo.create("group_1", NewSessionParams {
+            id: Some("group_1:session_1".to_string()),
+            meta: Some(serde_json::json!({"channel": {
+                "source": "metadata_only",
+                "binding_id": "old_binding",
+                "conversation_id": "old_conversation"
+            }})),
+            ..Default::default()
+        }).await?;
+        // Existing mappings win even when the requested type only matches metadata.
+        assert!(harness.service.list_conversations_by_session(
+            "group_1:session_1", Some("metadata_only".to_string())
+        ).await?.is_empty());
+
         let mappings = harness
             .service
             .list_conversations_by_session(" group_1:session_1 ", Some(" dingtalk ".to_string()))
@@ -3656,6 +3694,59 @@ mod tests {
         assert_eq!(mappings[0].binding_id, "binding_dingtalk");
         assert_eq!(mappings[0].im_conversation_id, "ding_conversation");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_conversations_by_session_reads_historical_metadata_without_binding() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        let session_id = "group_1:historical";
+        let channel = serde_json::json!({
+            "source": "dingtalk",
+            "binding_id": "deleted_binding",
+            "conversation_id": "historical_conversation",
+            "conversation_type": "2",
+            "session_scope": "per_sender",
+            "im_user_id": "u1"
+        });
+        let session = harness.session_repo.create("group_1", NewSessionParams {
+            id: Some(session_id.to_string()),
+            meta: Some(serde_json::json!({"channel": channel})),
+            ..Default::default()
+        }).await?;
+
+        for filter in [None, Some(" dingtalk ".to_string())] {
+            let mappings = harness.service
+                .list_conversations_by_session(session_id, filter).await?;
+            assert_eq!(mappings.len(), 1);
+            assert_eq!(mappings[0].binding_id, "deleted_binding");
+            assert_eq!(mappings[0].im_conversation_id, "historical_conversation");
+            assert_eq!(mappings[0].bcs_session_id, session_id);
+            assert_eq!(mappings[0].session_scope, SessionScope::PerSender);
+            assert_eq!(mappings[0].im_user_id.as_deref(), Some("u1"));
+            assert_eq!(mappings[0].last_active_at, session.updated_at);
+        }
+        assert!(harness.service.list_conversations_by_session(
+            session_id, Some("other".to_string())
+        ).await?.is_empty());
+        assert!(harness.conversation_repo.list_by_bcs_session(session_id).await?.is_empty());
+        assert!(harness.service.list_conversations_by_session(
+            "group_1:missing", None
+        ).await?.is_empty());
+
+        for invalid in [
+            serde_json::Value::Null,
+            serde_json::json!({}),
+            serde_json::json!({"channel": {"source": "dingtalk"}}),
+            serde_json::json!({"channel": {"source": "dingtalk", "binding_id": "b", "conversation_id": " "}}),
+            serde_json::json!({"channel": {"binding_id": "b", "conversation_id": "c"}}),
+        ] {
+            harness.session_repo.sessions.lock().await
+                .get_mut(session_id).expect("session").meta = Some(invalid);
+            assert!(harness.service.list_conversations_by_session(
+                session_id, Some("dingtalk".to_string())
+            ).await?.is_empty());
+        }
         Ok(())
     }
 
@@ -7270,6 +7361,19 @@ mod tests {
             .await?
             .expect("mapping rolled over");
         assert_ne!(mapping_new.bcs_session_id, old_session_id);
+        // Historical lookup survives /new without changing the current mapping.
+        let historical = harness.service.list_conversations_by_session(
+            &old_session_id, Some("dingtalk".to_string())
+        ).await?;
+        assert_eq!(historical.len(), 1);
+        assert_eq!(historical[0].im_conversation_id, "conv_1");
+        assert_eq!(historical[0].bcs_session_id, old_session_id);
+        assert!(harness.conversation_repo.list_by_bcs_session(&old_session_id).await?.is_empty());
+        let current = harness.service.list_conversations_by_session(
+            &mapping_new.bcs_session_id, Some("dingtalk".to_string())
+        ).await?;
+        assert_eq!(current.len(), 1);
+        assert_eq!(current[0].bcs_session_id, mapping_new.bcs_session_id);
         let new_session = harness
             .session_repo
             .get(&mapping_new.bcs_session_id)

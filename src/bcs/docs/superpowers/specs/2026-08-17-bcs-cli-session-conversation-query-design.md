@@ -26,6 +26,19 @@ BCS 已持久化 `bcs_session_id` 到 IM conversation 的映射，出站投递�
 5. 响应使用列表而不是单值。同一 BCS session 可能存在多个 binding 或 per-sender 映射，
    调用方不能假设 conversation ID 唯一。
 
+## 历史会话查询（2026-09-07）
+
+`/new` 后下一条消息会覆盖 live mapping 的 `bcs_session_id`。当目标 session
+在映射表中没有任何记录时，应用服务回查 session 的 `meta.channel`，返回历史
+conversation ID；不要求原 binding 仍存在。`channel_type` 按元数据的 `source`
+过滤，缺少有效 source、binding ID 或 conversation ID 时仍返回空列表。
+元数据路线沿用现有解析规则：缺省 conversation type 为 `2`，缺省 scope 为
+conversation；`last_active_at` 使用 session 的更新时间。
+
+已有映射保持优先，即使经 channel 类型过滤后为空，也不使用元数据覆盖结果。
+回查是只读操作，不重建映射、不改变出站路由。HTTP 权限校验、响应结构和 CLI
+参数保持不变；部署服务端更新后，支持该命令的现有 CLI 即可查询历史 session。
+
 ## Contract 传播范围
 
 - Service API：`ChannelService::list_conversations_by_session`，additive change。
@@ -41,6 +54,8 @@ BCS 已持久化 `bcs_session_id` 到 IM conversation 的映射，出站投递�
 - 空白 `bcs_session_id` 返回参数错误。
 - CLI 查询只返回 `dingtalk` binding 对应的映射。
 - 同一 session 的多条映射全部返回且顺序沿用 repository 的稳定顺序。
+- `/new` 完结并切换映射后，旧 session 可通过元数据查出原 conversation ID。
+- 元数据回查支持 channel 类型过滤；缺失、不完整元数据返回空列表。
 - session ID 通过 HTTP query 编码传输，不拼接到 URL 或 SQL。
 
 ## 用法
