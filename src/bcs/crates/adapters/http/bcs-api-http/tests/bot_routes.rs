@@ -55,6 +55,66 @@ struct FakeBotService {
     mine: Mutex<Option<ListMyBots>>,
 }
 
+#[derive(Default)]
+struct FakeInviteCodeService {
+    allow_access: bool,
+    ensure_access_calls: Mutex<Vec<AuthenticatedCaller>>,
+    init_invite_codes_calls: Mutex<Vec<InitInviteCodes>>,
+    bind_invite_code_calls: Mutex<Vec<BindInviteCode>>,
+    get_my_invite_code_binding_calls: Mutex<Vec<GetMyInviteCodeBinding>>,
+}
+
+#[async_trait]
+impl InviteCodeService for FakeInviteCodeService {
+    async fn init_invite_codes(
+        &self,
+        command: InitInviteCodes,
+    ) -> Result<InitInviteCodesResult, ApplicationError> {
+        self.init_invite_codes_calls
+            .lock()
+            .expect("init invite codes lock")
+            .push(command);
+        Ok(InitInviteCodesResult { codes: vec!["ABC123".to_string()] })
+    }
+
+    async fn bind_invite_code(
+        &self,
+        command: BindInviteCode,
+    ) -> Result<BindInviteCodeResult, ApplicationError> {
+        self.bind_invite_code_calls
+            .lock()
+            .expect("bind invite code lock")
+            .push(command);
+        Ok(BindInviteCodeResult { bound: true, bound_at: 123 })
+    }
+
+    async fn get_my_invite_code_binding(
+        &self,
+        command: GetMyInviteCodeBinding,
+    ) -> Result<InviteCodeBindingView, ApplicationError> {
+        self.get_my_invite_code_binding_calls
+            .lock()
+            .expect("get my invite code binding lock")
+            .push(command);
+        Ok(InviteCodeBindingView { bound: true, bound_at: Some(456) })
+    }
+
+    async fn ensure_invite_code_access(
+        &self,
+        caller: &AuthenticatedCaller,
+    ) -> Result<(), ApplicationError> {
+        self.ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .push(caller.clone());
+        if self.allow_access {
+            Ok(())
+        } else {
+            Err(ApplicationError::invite_code_required("invite code required"))
+        }
+    }
+}
+
 #[async_trait]
 impl BotService for FakeBotService {
     async fn list_candidates(
@@ -354,6 +414,14 @@ impl RegisterService for NoopRegisterService {
 }
 
 fn test_router(service: Arc<FakeBotService>) -> axum::Router {
+    invite_code_test_router(service, Arc::new(FakeInviteCodeService::default()), false)
+}
+
+fn invite_code_test_router(
+    service: Arc<FakeBotService>,
+    invite_code_service: Arc<FakeInviteCodeService>,
+    gate_enabled: bool,
+) -> axum::Router {
     router(
         ApiState::new(
             Arc::new(NoopGroupService),
@@ -364,7 +432,8 @@ fn test_router(service: Arc<FakeBotService>) -> axum::Router {
             Arc::new(NoopFriendshipService),
             Arc::new(HeaderVerifier),
         )
-        .with_invite_code_gate_enabled(false)
+        .with_invite_code_service(invite_code_service)
+        .with_invite_code_gate_enabled(gate_enabled)
         .with_bot_service(service),
     )
 }
@@ -569,6 +638,212 @@ async fn all_seven_bot_routes_forward_verified_human_and_contract_inputs() {
     let mine = mine.as_ref().expect("mine command");
     assert_eq!(mine.kind, Some(BotKind::Human));
     assert_eq!(mine.reachability, Some(BotReachability::Unreachable));
+}
+
+#[tokio::test]
+async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
+    let bot_service = Arc::new(FakeBotService::default());
+    let invite_code_service = Arc::new(FakeInviteCodeService { allow_access: true, ..Default::default() });
+    let app = invite_code_test_router(bot_service.clone(), invite_code_service.clone(), true);
+
+    let bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "ABC123"}),
+        ))
+        .await
+        .expect("bind response");
+    assert_eq!(bind.status(), StatusCode::OK);
+    assert_eq!(response_json(bind).await["data"], json!({"bound": true, "bound_at": 123}));
+
+    let me = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/invite-codes/me",
+            Value::Null,
+        ))
+        .await
+        .expect("my binding response");
+    assert_eq!(me.status(), StatusCode::OK);
+    assert_eq!(response_json(me).await["data"], json!({"bound": true, "bound_at": 456}));
+
+    let init = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 3}),
+        ))
+        .await
+        .expect("init response");
+    assert_eq!(init.status(), StatusCode::OK);
+    assert_eq!(response_json(init).await["data"], json!({"codes": ["ABC123"]}));
+
+    let gated_candidates = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("gated candidates response");
+    assert_eq!(gated_candidates.status(), StatusCode::OK);
+    assert_eq!(response_json(gated_candidates).await["data"]["items"][0]["bot"]["bot_id"], "bot-1");
+
+    let empty_bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "   "}),
+        ))
+        .await
+        .expect("empty bind response");
+    assert_eq!(empty_bind.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(empty_bind).await["data"]["error_code"], "invalid_request");
+
+    let zero_init = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 0}),
+        ))
+        .await
+        .expect("zero init response");
+    assert_eq!(zero_init.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response_json(zero_init).await["data"]["error_code"], "invalid_request");
+
+    assert_eq!(
+        invite_code_service
+            .ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .len(),
+        1,
+        "protected routes should run the invite-code gate exactly once"
+    );
+    assert_eq!(
+        invite_code_service
+            .bind_invite_code_calls
+            .lock()
+            .expect("bind invite code lock")
+            .len(),
+        1
+    );
+    assert_eq!(
+        invite_code_service
+            .get_my_invite_code_binding_calls
+            .lock()
+            .expect("get my invite code binding lock")
+            .len(),
+        1
+    );
+    assert_eq!(
+        invite_code_service
+            .init_invite_codes_calls
+            .lock()
+            .expect("init invite codes lock")
+            .len(),
+        1
+    );
+    assert!(
+        bot_service
+            .candidates
+            .lock()
+            .expect("candidates lock")
+            .is_some(),
+        "protected routes should flow through the invite-code gate when access is granted"
+    );
+}
+
+#[tokio::test]
+async fn invite_code_routes_return_internal_when_the_service_is_missing() {
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(HeaderVerifier),
+    )
+    .with_invite_code_gate_enabled(true);
+
+    let app = router(state);
+
+    let bind = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/bind",
+            json!({"code": "ABC123"}),
+        ))
+        .await
+        .expect("bind without invite-code service");
+    assert_eq!(bind.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(bind).await["data"]["error_code"], "internal_error");
+
+    let me = app
+        .clone()
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/invite-codes/me",
+            Value::Null,
+        ))
+        .await
+        .expect("get binding without invite-code service");
+    assert_eq!(me.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(me).await["data"]["error_code"], "internal_error");
+
+    let init = app
+        .oneshot(request(
+            "POST",
+            "/api/v1/collaboration/invite-codes/init",
+            json!({"count": 3}),
+        ))
+        .await
+        .expect("init without invite-code service");
+    assert_eq!(init.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(response_json(init).await["data"]["error_code"], "internal_error");
+}
+
+#[tokio::test]
+async fn invite_code_gate_rejects_protected_routes_when_access_is_not_granted() {
+    let bot_service = Arc::new(FakeBotService::default());
+    let invite_code_service = Arc::new(FakeInviteCodeService { allow_access: false, ..Default::default() });
+    let app = invite_code_test_router(bot_service.clone(), invite_code_service.clone(), true);
+
+    let response = app
+        .oneshot(request(
+            "GET",
+            "/openapi/v1/collaboration/bots/human_staff-1/candidates?purpose=collaboration&name=planner&offset=5&limit=10",
+            Value::Null,
+        ))
+        .await
+        .expect("protected route response");
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response_json(response).await["data"]["error_code"], "invite_code_required");
+    assert_eq!(
+        invite_code_service
+            .ensure_access_calls
+            .lock()
+            .expect("ensure access lock")
+            .len(),
+        1
+    );
+    assert!(
+        bot_service
+            .candidates
+            .lock()
+            .expect("candidates lock")
+            .is_none(),
+        "gate rejection must short-circuit the bot service"
+    );
 }
 
 #[tokio::test]
