@@ -1,4 +1,5 @@
 """Tests for agentclaw.community.core.services.skill_set_service.SkillSetService."""
+import logging
 from unittest.mock import patch, MagicMock, AsyncMock
 
 import pytest
@@ -293,7 +294,7 @@ class TestGetSetMcpServers:
 class TestCollectBotActiveMcps:
     """collect_bot_active_mcps filters out user-excluded default MCPs."""
 
-    def test_collect_excludes_user_excluded_default_mcps(self):
+    def test_collect_excludes_user_excluded_default_mcps(self, caplog):
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()
         mock_repo.get_all_active_skill_sets.return_value = [
@@ -321,12 +322,118 @@ class TestCollectBotActiveMcps:
         svc.skill_set_repo = mock_repo
         svc.bot_id = "default"
 
+        caplog.set_level(logging.INFO)
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
             result = svc.collect_bot_active_mcps("entity1", "default", "user1", "staff")
 
         codes = {r["server_code"] for r in result}
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
+        messages = [record.getMessage() for record in caplog.records]
+        for stage in (
+            "default_ext_info",
+            "active_skill_sets",
+            "default_mcp_exclusions",
+            "active_skill_assets",
+            "installed_mcp_codes",
+            "resolve_non_default_codes",
+        ):
+            assert any(
+                "[collect_bot_active_mcps] timing" in message
+                and f"stage={stage}" in message
+                and "duration_ms=" in message
+                and "outcome=success" in message
+                for message in messages
+            )
+
+    def test_collect_logs_stage_error_before_reraising(self, caplog):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_all_active_skill_sets.return_value = []
+        mock_repo.get_all_excluded_mcps.return_value = []
+        svc = SkillSetService(
+            skill_repo=MagicMock(),
+            skill_set_repo=mock_repo,
+            mcp_center=MagicMock(),
+            mcp_config_service=MagicMock(),
+            skill_service=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            reader=MagicMock(),
+        )
+        failure = RuntimeError("active skill read failed")
+
+        caplog.set_level(logging.INFO)
+        with (
+            patch.object(svc, "_active_skill_assets", side_effect=failure),
+            pytest.raises(RuntimeError, match="active skill read failed"),
+        ):
+            svc.collect_bot_active_mcps("entity1", "bot-1", "user1", "staff")
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any(
+            "[collect_bot_active_mcps] timing" in message
+            and "stage=active_skill_assets" in message
+            and "outcome=error" in message
+            for message in messages
+        )
+
+    def test_collect_logs_each_enrichment_cardinality(self, caplog):
+        from agentclaw.community.core.skill_center.services.skill_set_service import (
+            SkillSetService,
+        )
+
+        svc = SkillSetService(
+            skill_repo=MagicMock(),
+            skill_set_repo=MagicMock(),
+            mcp_center=MagicMock(),
+            mcp_config_service=MagicMock(),
+            skill_service=MagicMock(),
+            bot_repo=MagicMock(),
+            path_factory=MagicMock(),
+            reader=MagicMock(),
+        )
+        caplog.set_level(logging.INFO)
+        with (
+            patch.object(
+                svc,
+                "_get_all_active_skill_sets_with_default_fallback",
+                return_value=[],
+            ),
+            patch.object(svc.skill_set_repo, "get_all_excluded_mcps", return_value=[]),
+            patch.object(
+                svc,
+                "_default_set_mcp_rows",
+                return_value=[{"server_code": "default-row"}],
+            ),
+            patch.object(
+                svc,
+                "_default_policy_mcp_entries",
+                return_value=[{"server_code": "default-policy"}],
+            ),
+            patch.object(svc, "_active_skill_assets", return_value=[]),
+            patch.object(svc, "_installed_mcp_codes", return_value={"direct"}),
+            patch.object(
+                svc,
+                "_non_default_effective_mcp_entries",
+                return_value=[{"server_code": "direct"}],
+            ),
+        ):
+            svc.collect_bot_active_mcps("entity1", "bot-1", "user1", "staff")
+
+        messages = [record.getMessage() for record in caplog.records]
+        for stage in (
+            "default_set_mcp_rows",
+            "default_policy_mcp_entries",
+            "non_default_mcp_entries",
+        ):
+            assert any(
+                f"stage={stage}" in message and "item_count=1" in message
+                for message in messages
+            )
 
     def test_get_bot_mcp_codes_for_env_uses_only_explicit_env_repository_reads(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import (
