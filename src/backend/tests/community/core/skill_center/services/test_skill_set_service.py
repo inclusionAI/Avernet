@@ -227,6 +227,40 @@ class TestGetSetMcpServers:
         codes = {r["server_code"] for r in result}
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
 
+    def test_default_skillset_excludes_persisted_mcp_membership(self):
+        from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = {"id": "1", "is_default": True}
+        mock_repo.get_mcp_servers_in_set.return_value = [
+            {
+                "id": 10,
+                "server_code": "mcp.persisted.default",
+                "name": "persisted",
+                "description": "desc",
+                "icon": None,
+            }
+        ]
+        mock_repo.get_excluded_mcps.return_value = ["mcp.persisted.default"]
+
+        with patch("agentclaw.community.core.skill_center.services.skill_set_service.WorkspacePathFactory"):
+            svc = SkillSetService(
+                skill_repo=MagicMock(),
+                skill_set_repo=MagicMock(),
+                mcp_center=MagicMock(),
+                mcp_config_service=MagicMock(),
+                skill_service=MagicMock(),
+                bot_repo=MagicMock(),
+                path_factory=MagicMock(),
+            )
+        svc.skill_set_repo = mock_repo
+        svc.bot_id = "default"
+
+        result = svc.get_set_mcp_servers("1", user_id="user1")
+
+        assert "mcp.persisted.default" not in {
+            item["server_code"] for item in result
+        }
+
     def test_normal_skillset_returns_db_mcps_only(self):
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()

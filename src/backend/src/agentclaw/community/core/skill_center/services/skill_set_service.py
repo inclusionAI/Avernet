@@ -1621,6 +1621,11 @@ class SkillSetService:
                     self.skill_set_repo.get_excluded_mcps(user_id, effective_bot_id, int(skill_set_id))
                 )
 
+            associations = [
+                association
+                for association in associations
+                if association.get("server_code") not in excluded_codes
+            ]
             db_codes = {a.get("server_code") for a in associations}
             logger.info(
                 f"[get_set_mcp_servers] skill_set_id={skill_set_id}, is_default=True, "
