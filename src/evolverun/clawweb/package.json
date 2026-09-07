@@ -11,6 +11,16 @@
   "scripts": {
     "check": "npm run check --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:ci": "node scripts/ci/run-tests.mjs test",
+    "ci:build": "node scripts/ci/run-tests.mjs build",
+    "ci:check": "node scripts/ci/run-tests.mjs check",
+    "test:local": "node scripts/ci/test-local.mjs"
+  },
+  "devDependencies": {
+    "fast-xml-parser": "5.5.6",
+    "istanbul-lib-coverage": "3.2.2",
+    "istanbul-lib-report": "3.0.1",
+    "istanbul-reports": "3.2.0"
   }
 }

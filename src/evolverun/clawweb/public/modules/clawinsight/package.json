@@ -61,6 +61,7 @@
     "react": "^19.2.6",
     "react-router-dom": "^7.15.1",
     "typescript": "~6.0.2",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7",
+    "@vitest/coverage-v8": "3.2.7"
   }
 }
