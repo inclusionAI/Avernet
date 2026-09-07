@@ -948,11 +948,9 @@ class BotPublicService(BotPublicServiceProtocol):
           (public_user_approval/public_agent_approval) 的 status 写成 last_operate
           (AGREE/DISAGREE/CANCEL)。
         - AGREE 时同时翻 BCS 可见性字段 (_BCS_VISIBILITY_FIELD_BY_SCOPE):
-            - public_scope=user → user_visibility = block.visibility (block 存的请求值,
-              缺省 protected);
-            - public_scope=agent → visibility = "public" if
-              BCS friend_check_in_strategy=="OPEN" else "protected" (BCS top-level
-              friend_check_in_strategy; agent 要考虑它, user 不考虑)。
+            - user → user_visibility, agent → visibility, 都取 block.visibility
+              (审批时存的请求值, 缺省 protected) —— 一律以请求值为准, 不再同步查询
+              BCS top-level friend_check_in_strategy 来推导 agent 的目标可见性。
         所有变更合一 PATCH (friend_ext + 可见性字段) 回。BCS 跳过 (非 prod/pre 或
         凭据空) 时静默返回。
         """
@@ -976,12 +974,11 @@ class BotPublicService(BotPublicServiceProtocol):
         if block["status"] == "AGREE":
             field = _BCS_VISIBILITY_FIELD_BY_SCOPE.get(public_scope)
             if field:
-                if public_scope == "user":
-                    # user: user_visibility 直接取 block 里存的 visibility 字段
-                    body[field] = block.get("visibility") or "protected"
-                else:  # agent: 由 BCS friend_check_in_strategy 决断
-                    strategy = str(attrs.get("friend_check_in_strategy") or "").upper()
-                    body[field] = "public" if strategy == "OPEN" else "protected"
+                # user 与 agent 都直接按审批时存的用户请求 visibility 值更新 BCS 可见性
+                # 字段 (user→user_visibility, agent→visibility), 缺省 protected。不再同步
+                # 查询 BCS top-level friend_check_in_strategy 推导 agent 的目标可见性
+                # (agent 与 user 一致, 一律以请求值为准)。
+                body[field] = block.get("visibility") or "protected"
             # AGREE 还把 block.view_friend_deps 从 public_*_approval 子块提升到
             # friend_ext 顶层(scope-联动 key: user→view_scope_user_friend_deps;
             # agent→view_scope_agent_friend_deps)。
