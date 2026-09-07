@@ -110,6 +110,8 @@ request_timeout_ms = 10000
 max_request_timeout_ms = 30000
 max_event_body_bytes = 262144
 max_response_body_bytes = 4096
+# Set false only when local Eventing must reach non-loopback private targets.
+block_private_networks = true
 allow_http_loopback = true
 allow_non_standard_ports = true
 

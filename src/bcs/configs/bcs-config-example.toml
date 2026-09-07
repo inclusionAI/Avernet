@@ -128,6 +128,8 @@ request_timeout_ms = 10000
 max_request_timeout_ms = 30000
 max_event_body_bytes = 262144
 max_response_body_bytes = 4096
+# Eventing owns this policy independently from [security.outbound_url].
+block_private_networks = true
 allow_http_loopback = false
 allow_non_standard_ports = false
 

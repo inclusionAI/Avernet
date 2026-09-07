@@ -22,7 +22,8 @@ BCS 需要在群、会话、任务、消息和状态机等业务状态发生变�
 5. 事件使用稳定 `event_id` 去重，并在确定的事件流中使用单调递增 `sequence` 表达顺序。
 6. 状态机事件默认并强制按 `run_id` 严格有序投递；前一个事件未成功时，后续事件不得越过。
 7. 聊天消息只有在逻辑消息成功持久化后才产生 `message.created`。当前静默吞掉消息写失败的行为必须改造。
-8. Webhook 投递复用现有出站 URL 安全能力，每次尝试都重新执行 SSRF 防护且不跟随重定向。MVP 面向内部服务，
+8. Webhook 投递复用现有 Outbound URL Guard 实现，但使用 Eventing 自己的安全策略配置；每次尝试都重新执行
+   SSRF 防护且不跟随重定向。MVP 面向内部服务，
    不提供 Subscription 级鉴权或签名字段。
 9. 现有 ManagerWorker Task Ledger 是否持久化不属于本设计范围；事件 Contract 不依赖其未来存储形态。
 
@@ -1515,6 +1516,7 @@ request_timeout_ms = 10000
 max_request_timeout_ms = 30000
 max_event_body_bytes = 262144
 max_response_body_bytes = 4096
+block_private_networks = true
 allow_http_loopback = false
 allow_non_standard_ports = false
 
@@ -1542,6 +1544,7 @@ max_filters_per_subscription = 64
   接受后丢 Event；
 - `enabled = false` 时普通业务 use case 仍可执行，Event Recorder 必须显式返回 `Disabled` 而不是伪装成
   `Recorded`；只有 `Recorded` 模式适用本文的 Event 完整性承诺；
+- Eventing 的 SSRF 策略只读取 `eventing.webhook`，不继承 `security.outbound_url`；
 - production 禁止通过配置关闭 SSRF guard 或 TLS 校验。
 
 Singlebox/local 模式使用 Memory Event Store 和 Recording/Localhost Webhook adapter，不需要访问外部网络。
