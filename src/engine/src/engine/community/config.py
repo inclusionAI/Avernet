@@ -15,6 +15,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from engine.community.core.skills.layout_planner import (
+    LAYOUT_CONTRACT_VERSION, LayoutIdentity, RuntimeLayoutContext,
+    ResolvedFilesystemLayoutPlan, resolve_filesystem_skill_layout,
+)
+
 # 默认连接超时时间（秒）
 DEFAULT_CONNECTION_TIMEOUT = 10
 AGENTBOX_ENV_VAR = "MAC_CONTAINER"
@@ -472,15 +477,16 @@ def load_engine_config() -> EngineConfig:
     )
 
 
+def _claude_code_file_layout(home: Path) -> ResolvedFilesystemLayoutPlan:
+    return resolve_filesystem_skill_layout(
+        LayoutIdentity("claude_code", LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=home),
+    )
+
+
 def default_claude_code_workspace(home: Path) -> Path:
     """Default workspace from Engine's authoritative filesystem layout."""
-    from engine.community.core.skills.layout_planner import (
-        LAYOUT_CONTRACT_VERSION, LayoutIdentity, RuntimeLayoutContext,
-        resolve_filesystem_skill_layout,
-    )
-    plan = resolve_filesystem_skill_layout(
-        LayoutIdentity("claude_code", LAYOUT_CONTRACT_VERSION), RuntimeLayoutContext(home=home))
-    return plan.pool_root.parent
+    return _claude_code_file_layout(home).pool_root.parent
 
 
 def load_claude_code_workspace() -> Path:
@@ -494,4 +500,9 @@ def load_claude_code_workspace() -> Path:
 
 def load_claude_code_file_roots() -> tuple[Path, ...]:
     """Source/config engine root plus the retained or explicit workspace."""
-    return (default_claude_code_workspace(Path.home()).parent, load_claude_code_workspace())
+    layout = _claude_code_file_layout(Path.home())
+    return (
+        layout.pool_root.parent.parent,
+        layout.active_root,
+        load_claude_code_workspace(),
+    )

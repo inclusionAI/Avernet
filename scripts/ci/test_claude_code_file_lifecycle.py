@@ -130,3 +130,16 @@ async def test_create_activate_replace_and_failed_replace_restore_nested_bytes(
         for path, content in second.items():
             assert (target / path).read_bytes() == content
         assert {p.name for p in local_dir.iterdir()} == {"upload-skill"}
+
+        # Cleanup the published active entry through the same HTTP file port.
+        # Unlinking discovery must retain the package source and its bytes.
+        removed = client.post("/api/file/remove", json={"target_path": str(target)})
+        assert removed.status_code == 200, removed.text
+        assert not target.is_symlink()
+        assert (source / "SKILL.md").read_bytes() == second["SKILL.md"]
+        assert (
+            client.post(
+                "/api/file/rmtree", json={"target_path": str(target.parent)}
+            ).status_code
+            == 403
+        )

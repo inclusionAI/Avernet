@@ -11,17 +11,21 @@ from engine.community.engines.claude_code.engine import ClaudeCodeCommunityEngin
 from engine.community.manager import EngineManager
 
 
-@pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("CLAUDE_CODE_DEFAULT_CWD", str(tmp_path))
+def file_client(monkeypatch):
     engine = ClaudeCodeCommunityEngine()
     manager = EngineManager("claude_code")
     manager._active_engine = engine
     monkeypatch.setattr(EngineManager, "_instance", manager)
     app = FastAPI()
     app.include_router(router)
-    with TestClient(app) as client:
+    return TestClient(app)
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CLAUDE_CODE_DEFAULT_CWD", str(tmp_path))
+    with file_client(monkeypatch) as client:
         yield client
 
 
@@ -148,3 +152,36 @@ def test_file_type_and_overwrite_errors(client, tmp_path):
         client.post("/api/file/read", json={"file_path": str(directory)}).status_code
         == 404
     )
+
+
+def test_active_link_cleanup_preserves_source_and_sdk_config(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CLAUDE_CODE_DEFAULT_CWD", str(home / ".openclaw/workspace"))
+    source = home / ".claude_code/workspace/skills/skills-local/sample"
+    source.mkdir(parents=True)
+    (source / "SKILL.md").write_bytes(b"package")
+    active_root = home / ".claude/skills"
+    active_root.mkdir(parents=True)
+    target = active_root / "sample"
+    target.symlink_to(source, target_is_directory=True)
+    sdk_config = home / ".claude/settings.json"
+    sdk_config.write_bytes(b"private")
+    with file_client(monkeypatch) as client:
+        response = client.post("/api/file/remove", json={"target_path": str(target)})
+        assert response.status_code == 200, response.text
+        assert not target.is_symlink()
+        assert (source / "SKILL.md").read_bytes() == b"package"
+        assert (
+            client.post(
+                "/api/file/rmtree", json={"target_path": str(active_root)}
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/file/read", json={"file_path": str(sdk_config)}
+            ).status_code
+            == 403
+        )
+        assert sdk_config.read_bytes() == b"private"

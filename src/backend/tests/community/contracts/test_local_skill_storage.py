@@ -148,3 +148,60 @@ def test_explicit_pool_owned_request_keeps_its_selected_root():
     )
     assert service.local_dir == Path("/selected/pool/local")
     assert service.runtime_uses_pool_paths is True
+
+
+@pytest.mark.parametrize("world_name", ["world", "community_world"])
+def test_real_factory_consumes_profile_binding_for_create_and_rejection(
+    request, world_name, monkeypatch, tmp_path
+):
+    from agentclaw.community.plugin_api.local_skill_storage import (
+        LocalSkillStorageResolver,
+    )
+
+    current_world = request.getfixturevalue(world_name)
+    consumer = current_world.get(SkillServiceFactory)
+    resolver = current_world.get(LocalSkillStorageResolver)
+    assert consumer._local_skill_storage is resolver
+    configured = tmp_path / "configured/skills-local"
+    bot = {
+        "bot_id": "b",
+        "entity_id": "u",
+        "entity_type": "staff",
+        "active_engine": "claude_code",
+        "bot_type": "personal",
+    }
+    monkeypatch.setattr(consumer, "_pool_layout_paths", lambda *_: None)
+    monkeypatch.setattr(consumer._bot_repo, "get_by_id_and_owner", lambda *_: bot)
+    monkeypatch.setattr(consumer._bot_repo, "get_by_id", lambda *_: bot)
+    monkeypatch.setattr(
+        consumer._path_factory, "get_bot_skills_local_dir", lambda *_, **__: configured
+    )
+    device_factory = MagicMock()
+    monkeypatch.setattr(consumer._device_fs_dispatcher, "for_bot", device_factory)
+    resolve = MagicMock(wraps=resolver.resolve_root)
+    monkeypatch.setattr(resolver, "resolve_root", resolve)
+    expected = (
+        Path("/home/admin/.claude_code/workspace/skills/skills-local")
+        if world_name == "community_world"
+        else configured
+    )
+
+    locator, storage = package(consumer)
+    assert locator == str(expected / "sample")
+    assert storage.directory == locator
+    resolve.assert_any_call("claude_code", configured)
+    resolve.reset_mock()
+    device_factory.reset_mock()
+    with pytest.raises(ValueError, match="escapes skills-local"):
+        consumer.local_skill_package_storage_for_locator(
+            entity_id="u",
+            owner_id="u",
+            bot_id="b",
+            engine_type="claude_code",
+            entity_type="staff",
+            is_desktop=False,
+            is_teclaw=False,
+            locator=str(tmp_path / "outside/sample"),
+        )
+    resolve.assert_any_call("claude_code", configured)
+    device_factory.assert_not_called()
