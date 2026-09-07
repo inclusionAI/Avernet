@@ -24,8 +24,11 @@
 --      operator decides when to DROP the quarantined copy.
 --   3. Create ac_bot_config_manifest_apply with the canonical DDL, verbatim
 --      from 2026_08_31_bot_config_manifest_apply.sql (see that file for why
---      every index is GLOBAL, why AUTO_INCREMENT_MODE is pinned to ORDER, and
---      why started_at/finished_at are DATETIME).
+--      every index is GLOBAL, why AUTO_INCREMENT_MODE is pinned to ORDER, why
+--      the column is apply_trigger and not `trigger`, and why
+--      started_at/finished_at are TIMESTAMP -- the DDL review standard that
+--      most likely caused the mis-provisioning refuses keyword column names
+--      and DATETIME).
 --   4. Verify. Save the results with the deployment record.
 --
 -- Conditional DDL goes through PREPARE/EXECUTE, the pattern
@@ -75,12 +78,12 @@ CREATE TABLE IF NOT EXISTS `ac_bot_config_manifest_apply` (
   `env`            varchar(20)   NOT NULL COMMENT 'Environment: prod/pre/dev',
   `entity_id`      varchar(256)  NOT NULL COMMENT 'Entity id: the bot entity_id',
   `bot_id`         varchar(256)  NOT NULL COMMENT 'Bot ID',
-  `trigger`        varchar(32)   NOT NULL COMMENT 'What started it: explicit/create/republish/restart',
+  `apply_trigger`  varchar(32)   NOT NULL COMMENT 'What started it: explicit/create/republish/restart',
   `status`         varchar(16)   NOT NULL COMMENT 'RUNNING, or SUCCEEDED/PARTIAL/FAILED',
   `report`         mediumtext    NOT NULL COMMENT 'The per-entry report (JSON)',
   `actor`          varchar(1024) NOT NULL COMMENT 'Audit: who started it',
-  `started_at`     datetime      NOT NULL COMMENT 'When the apply began',
-  `finished_at`    datetime      NULL     COMMENT 'When it ended; NULL while RUNNING',
+  `started_at`     timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the apply began',
+  `finished_at`    timestamp     NULL     DEFAULT NULL COMMENT 'When it ended; NULL while RUNNING',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
   `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
   `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',
