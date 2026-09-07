@@ -21,6 +21,8 @@ user_config:
     bot_service: "stub"     # real | local | stub
     engine_adapter: "stub"  # stub | real (aicoding/hermes/claude_code engine adapter)
     file_transfer: "stub"  # stub | real
+    # Session file URL projection selector: stub (identity) | aliyun_ack (proxy to BaaS domain)
+    session_file_url_projector: "stub"
     eval_env: "stub"      # stub（社区默认）| real（由企业层注入）
 
     database: "sqlite"
@@ -200,6 +202,9 @@ user_config:
   # 部署环境探测配置（单机模式使用通用环境变量名称）
   env:
     deploy_env_var: "DEPLOY_ENV"
+    # Deploy tenant selector (D-01): BAAS_DEPLOY_TENANT=ALIYUN_ACK enables
+    # cloud OSS + session URL proxy projection; unset/other = main site
+    deploy_tenant: "${BAAS_DEPLOY_TENANT:-}"
 
   # SecBaaS 回调服务器 URL（按环境）
   # 设备 start hook 完成后通过此 URL 回调状态。
@@ -217,6 +222,17 @@ user_config:
     bucket_name: ""
     staging_root_path: "baas-file-transfer"
     secret_name: ""
+  # ALIYUN_ACK cloud OSS section (D-07): values injected by deploy team;
+  # empty values fail fast at startup when plugins.file_transfer is 'real'
+  file_transfer_oss_aliyun:
+    endpoint: ""
+    external_endpoint: ""
+    bucket_name: ""
+    staging_root_path: ""
+    secret_name: ""
+  # Session file URL proxy base (D-06): BaaS-domain base for ALIYUN_ACK projection
+  session_file_url_proxy:
+    proxy_base_url: ""
   # Poolab API 端点（按环境，单机模式）
   poolab:
     endpoint:
