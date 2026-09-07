@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { selectWorkspacePackages } from './run-tests.mjs';
 import { classifyResult, writeReports } from './test-reports.mjs';
 
 const json = { numTotalTests: 1, numPassedTests: 1, numFailedTests: 0,
@@ -46,4 +47,15 @@ test('collection errors are tracked separately from assertion failures', () => {
 test('signals and timeouts cannot produce success', () => {
   assert.equal(classifyResult(json, { status: null, signal: 'SIGKILL' }).status, 'FAIL');
   assert.equal(classifyResult(json, { status: 0, error: new Error('timeout') }).status, 'FAIL');
+});
+test('package scope selects only OCB-owned internal packages', () => {
+  const packages = [
+    { name: '@avernet/example', path: '.build/avernet/src/evolverun/clawweb/public/modules/example' },
+    { name: '@ocb/example', path: 'internal/modules/example' },
+    { name: '@ocb/host', path: 'internal/bootstrap/clawweb' },
+  ];
+  assert.deepEqual(selectWorkspacePackages(packages, 'internal').map(pkg => pkg.name),
+    ['@ocb/example', '@ocb/host']);
+  assert.deepEqual(selectWorkspacePackages(packages, 'public').map(pkg => pkg.name),
+    ['@avernet/example']);
 });

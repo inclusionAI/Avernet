@@ -27,6 +27,17 @@ export function workspacePackages(root) {
   });
 }
 
+export function selectWorkspacePackages(packages, scope = 'all') {
+  if (!['all', 'public', 'internal'].includes(scope)) {
+    throw new Error(`Unsupported package scope: ${scope}`);
+  }
+  if (scope === 'all') return packages;
+  return packages.filter(pkg => {
+    const internal = pkg.path === 'internal' || pkg.path.startsWith('internal/');
+    return scope === 'internal' ? internal : !internal;
+  });
+}
+
 function gitSha(root) {
   const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
   return result.status === 0 ? result.stdout.trim() : null;
@@ -34,12 +45,24 @@ function gitSha(root) {
 
 export function main(args = process.argv.slice(2)) {
   const mode = args[0] || 'test';
-  if (!['test', 'build', 'check'].includes(mode) || args.length > 2) {
-    throw new Error('usage: run-tests.mjs [test|build|check] [workspace-root]');
+  if (!['test', 'build', 'check'].includes(mode)) {
+    throw new Error('usage: run-tests.mjs [test|build|check] [workspace-root] [--scope public|internal]');
   }
-  const root = realpathSync(resolve(args[1] || process.cwd()));
-  const packages = workspacePackages(root);
-  if (!packages.length) throw new Error('No workspace packages found');
+  let rootArg;
+  let scope = 'all';
+  for (let index = 1; index < args.length; index += 1) {
+    if (args[index] === '--scope') {
+      scope = args[index + 1];
+      index += 1;
+    } else if (!rootArg) {
+      rootArg = args[index];
+    } else {
+      throw new Error('usage: run-tests.mjs [test|build|check] [workspace-root] [--scope public|internal]');
+    }
+  }
+  const root = realpathSync(resolve(rootArg || process.cwd()));
+  const packages = selectWorkspacePackages(workspacePackages(root), scope);
+  if (!packages.length) throw new Error(`No ${scope} workspace packages found`);
   const npm = process.env.npm_execpath;
   if (mode !== 'test') {
     if (!npm) throw new Error('Run build/check through npm run ci:build or ci:check');
