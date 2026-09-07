@@ -2446,9 +2446,9 @@ class ExecutionEngine:
             [n.node_id for n in pending],
             dispatch_started_at,
         )
-        dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []
-        for node in dispatched:
+
+        def _handle_node(node: TaskNode) -> None:
             miss = node.run_info.extend_props.get("miss_events")
             gf = node.run_info.extend_props.pop("pending_group_formation", None)
             if gf is not None:
@@ -2483,7 +2483,7 @@ class ExecutionEngine:
                     )
                 )
                 side.append(("group", node, gf))
-                continue
+                return
             if node.run_info.run_mode and node.run_info.assignee:
                 logger.info(
                     "[task][prepare] task=%s node=%s → run(mode=%s assignee=%s)",
@@ -2503,7 +2503,8 @@ class ExecutionEngine:
                     )
                 )
                 to_run.append(node)
-            elif miss:
+                return
+            if miss:
                 logger.info(
                     "[task][prepare] task=%s node=%s → miss(%s)",
                     task_id,
@@ -2520,30 +2521,48 @@ class ExecutionEngine:
                         ),
                     )
                 )
-            else:
-                # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
-                derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
-                logger.warning(
-                    "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
-                    task_id,
-                    node.node_id,
-                    derr,
+                return
+            # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
+            derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
+            logger.warning(
+                "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
+                task_id,
+                node.node_id,
+                derr,
+            )
+            side.append(
+                (
+                    "dispatch_fail",
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        extend_props_patch={"dispatch_error": derr},
+                    ),
                 )
-                side.append(
-                    (
-                        "dispatch_fail",
-                        TaskNodePatch(
-                            task_id=task_id,
-                            node_id=node.node_id,
-                            extend_props_patch={"dispatch_error": derr},
-                        ),
-                    )
-                )
+            )
+
+        mode_coverage_on = (
+            self._task_settings is not None
+            and self._task_settings.is_enabled("mode_coverage")
+        )
+        if mode_coverage_on:
+            # on-path 模式覆盖:per-node 串行派发 + 每节点后即时 _record_mode_coverage 写回 covered,
+            # 下节点 apply 读到更新后的 covered → 批次内 single→group→bbs 依次轮替,保证全模态覆盖。
+            # 并发 gather 会共享派发前 covered 快照,同批多节点全命中同一档,轮替失效;故 ON 时串行。
+            for node in pending:
+                d = await self._dispatcher.dispatch([node])
+                for dn in d:
+                    _handle_node(dn)
+                if d:
+                    self._record_mode_coverage(task_id, d)
+        else:
+            dispatched = await self._dispatcher.dispatch(pending)
+            for node in dispatched:
+                _handle_node(node)
+            # 批后一次性写回 covered(并发模式无批次内轮替;OFF 链路仅累计,不下轮依赖)
+            self._record_mode_coverage(task_id, dispatched)
         if to_run:
             side.append(("run", to_run))
-        # 模式覆盖路由(动态规划链路):mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式
-        # 并 union 写回 graph.extend_props["mode_coverage"](框架内部态,跨 dispatch 持久;strategy 下轮读)。
-        self._record_mode_coverage(task_id, dispatched)
 
     def _record_mode_coverage(self, task_id: str, dispatched: list) -> None:
         """mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式(single/group/bbs)并 union 写回

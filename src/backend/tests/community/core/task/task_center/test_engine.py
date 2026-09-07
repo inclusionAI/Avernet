@@ -31,6 +31,7 @@ from agentclaw.community.core.task.domain.models import (
 )
 from agentclaw.community.core.task.task_center.engine import ExecutionEngine
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService, TaskGraphPatch
+from agentclaw.community.core.task.task_dispatch.strategies import GroupFormation
 
 
 # ===== domain helpers =====
@@ -987,3 +988,101 @@ class TestRecordModeCoverage:
         eng._record_mode_coverage("t1", [node])
         after = svc.query_task_dashboard("t1").extend_props
         assert after.get("mode_coverage") == before.get("mode_coverage") == ["single", "group"]
+
+# ===== 模式覆盖:_prepare_into ON 串行派发 vs OFF 批量并发 =====
+class _CoverAwareDispatcher:
+    """读 svc graph 的 mode_coverage 标记决定 outcome(模拟 strategy._coverage_route):
+    缺 single→single_bot,缺 group→coop_group(pending_group_formation),否则→single 兜底。
+    记录每次 dispatch batch size + 调用时读到的 covered 快照,验证 engine ON per-node 串行
+    + 即时 record 让下节点读到递增 covered vs OFF 并发共享初始快照。"""
+
+    def __init__(self, svc):
+        self.svc = svc
+        self.batch_sizes: list[int] = []
+        self.covered_snapshots: list[list[str]] = []
+
+    async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+        self.batch_sizes.append(len(toDoTaskList))
+        out = []
+        for n in toDoTaskList:
+            covered = set(
+                self.svc.query_task_dashboard(n.task_id).extend_props.get("mode_coverage") or []
+            )
+            self.covered_snapshots.append(sorted(covered))
+            if "single" not in covered:
+                n.run_info.run_mode = "single_bot"
+                n.run_info.assignee = "bot-s:1"
+            elif "group" not in covered:
+                n.run_info.run_mode = "coop_group"
+                n.run_info.extend_props["pending_group_formation"] = GroupFormation(
+                    bot_ids=["bot-s:1", "bot-g:1"],
+                    collab_mode="manager_worker",
+                    group_name="g",
+                    members_info=[
+                        {"bot_id": "bot-s:1", "role": "manager", "responsibility": "m"},
+                        {"bot_id": "bot-g:1", "role": "worker", "responsibility": "w"},
+                    ],
+                )
+            else:
+                # 缺 bbs 或全覆盖 → single 兜底(避免 bbs MISS 触发 _drain 升级,聚焦串行机制验证)
+                n.run_info.run_mode = "single_bot"
+                n.run_info.assignee = "bot-s:1"
+            out.append(n)
+        return out
+
+
+class TestPrepareModeCoverageSerial:
+    """_prepare_into:mode_coverage ON → per-node 串行派发 + 即时 record(批次内轮替);
+    OFF → 批量并发(gather,共享派发前 covered 快照,无轮替)。"""
+
+    def test_on_serial_dispatch_records_covered_between_nodes(self, svc, graph):
+        """ON:3 子节点 → dispatch 调 3 次(每次 1 节点),每次读到递增 covered → single→group→兜底。"""
+        planner = StubPlanner(lambda g: [_child("c1"), _child("c2"), _child("c3")])
+        dispatcher = _CoverAwareDispatcher(svc)
+        runner = StubRunner()
+        eng = _engine(svc, planner=planner, dispatcher=dispatcher, runner=runner)
+        eng._task_settings = _McSettings(True)
+        _run(eng.on_execute("t1"))
+
+        # ON:per-node 串行 → 3 次调用,每次 1 节点
+        assert dispatcher.batch_sizes == [1, 1, 1]
+        # 每节点派发时读到的 covered 递增(即时 record 让下节点读到新 covered → 批次内轮替)
+        assert dispatcher.covered_snapshots == [[], ["single"], ["group", "single"]]
+        # 最终 covered 含 single+group(c3 single 兜底已 covered 不新增;bbs 由 strategy MISS 触发,此 stub 不模拟)
+        assert set(svc.query_task_dashboard("t1").extend_props.get("mode_coverage") or []) == {
+            "single", "group"
+        }
+
+    def test_off_batch_dispatch_shares_initial_covered_snapshot(self, svc, graph):
+        """OFF:3 子节点 → dispatch 调 1 次(3 节点一批),共享派发前空 covered → 全 single,无轮替。"""
+        planner = StubPlanner(lambda g: [_child("c1"), _child("c2"), _child("c3")])
+        dispatcher = _CoverAwareDispatcher(svc)
+        runner = StubRunner()
+        eng = _engine(svc, planner=planner, dispatcher=dispatcher, runner=runner)
+        # task_settings 默认 None(mode_coverage OFF)
+        _run(eng.on_execute("t1"))
+
+        # OFF:批量并发 → 1 次调用,3 节点一批
+        assert dispatcher.batch_sizes == [3]
+        # 并发共享派发前 covered 快照(均空),无批次内轮替;OFF 不写 covered
+        assert dispatcher.covered_snapshots == [[], [], []]
+        assert "mode_coverage" not in svc.query_task_dashboard("t1").extend_props
+
+    def test_handle_node_dispatch_fail_branch_marks_error_and_keeps_pending(self, svc, graph):
+        """dispatcher 容错吞异常(空 run_mode/assignee + dispatch_error)→ _handle_node dispatch_fail 分支:
+        落 dispatch_error 留 PENDING(harness 按超时重试搜推),覆盖派发未产出兜底。"""
+
+        class _ErrDispatcher:
+            async def dispatch(self, toDoTaskList: list[TaskNode]) -> list[TaskNode]:
+                out = []
+                for n in toDoTaskList:
+                    n.run_info.extend_props["dispatch_error"] = "dispatch_exception:ValueError"
+                    out.append(n)
+                return out
+
+        planner = StubPlanner(lambda g: [_child("c1")])
+        eng = _engine(svc, planner=planner, dispatcher=_ErrDispatcher())
+        _run(eng.on_execute("t1"))
+        node = svc._get_node(graph, "c1")
+        assert node.run_info.extend_props.get("dispatch_error") is not None
+        assert node.status == Status.PENDING
