@@ -1986,7 +1986,8 @@ mod tests {
                     19,
                     "one_shot_opening_message_override".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (20, "invite_code_id".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
@@ -1998,7 +1999,7 @@ mod tests {
 
         let report = check_sqlite_migrations(&db).await?;
 
-        assert_eq!(report.pending_versions.len(), 19);
+        assert_eq!(report.pending_versions.len(), 20);
         assert_eq!(report.pending_versions[0].version, 1);
         assert_eq!(report.pending_versions[0].name, "init_schema");
         assert!(report.pending_versions[0].statements.is_empty());
@@ -2063,6 +2064,8 @@ assert_eq!(report.pending_versions[10].version, 11);
             report.pending_versions[18].name,
             "one_shot_opening_message_override"
         );
+        assert_eq!(report.pending_versions[19].version, 20);
+        assert_eq!(report.pending_versions[19].name, "invite_code_id");
         Ok(())
     }
 
@@ -2287,7 +2290,8 @@ assert_eq!(report.pending_versions[10].version, 11);
                     19,
                     "one_shot_opening_message_override".to_string(),
                     "sqlite".to_string()
-                )
+                ),
+                (20, "invite_code_id".to_string(), "sqlite".to_string())
             ]
         );
         Ok(())
