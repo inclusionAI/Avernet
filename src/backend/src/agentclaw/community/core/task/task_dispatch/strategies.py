@@ -29,6 +29,20 @@ logger = logging.getLogger("task.dispatcher")
 # without touching the generic dispatch strategy below.
 _SINGLE_CANDIDATE_MISS_PROBABILITY = 0.4
 _RULE_TEST_MAX_GROUP_MEMBERS = 3
+_PREFETCH_MAX_TOKENS = 5
+_PREFETCH_TOP_K_PER_TOKEN = 3
+_STOPWORDS: frozenset[str] = frozenset({
+    # 2 字功能词/语气词(jieba 不带停用词,自建;≥2 字过滤已挡单字虚词 的/了/是/在…)。
+    "可以", "需要", "能够", "应该", "应当", "必须", "可能", "想要",
+    "以及", "并且", "或者", "但是", "然而", "如果", "由于", "虽然",
+    "而且", "不仅", "只要", "只有", "因此", "所以", "然后", "接着", "此外",
+    "这种", "这样", "那种", "那些", "这些", "我们", "他们", "你们", "它们",
+    "一个", "没有", "已经",
+    "进行", "通过", "对于", "关于", "根据", "按照", "基于", "同时",
+    "之前", "之后", "现在", "目前", "之间", "以上", "以下",
+    "一些", "某种", "只是", "还是", "就是", "不是", "不能", "不要",
+    "成为", "作为", "其中", "其它", "另外", "比如", "例如",
+})
 
 # Rule 模式候选池不再写死:由 ``SearchBasedDispatchStrategy._load_rule_test_pool``
 # 在派发时动态查询 ``task_claim_mode=true & visibility=public`` 的 bot_id(``product:owner``),
@@ -473,48 +487,40 @@ def _find_candidate(candidates: list[dict], bot_id: str | None) -> dict | None:
     return None
 
 
-def _query_text(node: TaskNode) -> dict:
-    """提取 node 三字段(title/objective/background)供分字段语义预查。"""
-    spec = node.task_spec
-    return {
-        "title": spec.metadata.title or "",
-        "objective": spec.goal.objective or "",
-        "background": spec.context.background if spec.context else "",
-    }
-
-
 def _tokenize(text: str) -> list[str]:
-    """中文分词(jieba)取 ≥2 字语义词供 LIKE 预查;jieba 未装→退回整串(可跑但精度降级)。
-    拆词避免整串 ``LIKE '%长句%'`` 命中 0 → fallback 塞全量噪音 bot 的问题(决策非查找)。"""
+    """中文分词(jieba)取 ≥2 字语义词供 LIKE 预查;jieba 未装→退回整串(仍受 ≥2 字 + 停用词过滤)。
+    拆词避免整串 ``LIKE '%长句%'`` 命中 0 → fallback 塞全量噪音 bot 的问题(决策非查找)。
+    过滤:① ≥2 字(挡单字虚词 的/了/是…);② ``_STOPWORDS`` 2 字功能词(挡 可以/需要/进行/这种…)。"""
     if not text:
         return []
     try:
         import jieba  # type: ignore[import-untyped]
     except ImportError:
-        return [text]
-    return [w for w in jieba.cut(text) if len(w.strip()) >= 2]
+        words = [text]
+    else:
+        words = jieba.cut(text)
+    return [w for w in words if len(w.strip()) >= 2 and w not in _STOPWORDS]
 
 
 async def _prefetch_candidates(
     discover, node: TaskNode, graph: TaskExecutionGraph
 ) -> list[dict]:
-    """框架候选预查:对 node 的 title/objective/background 各 jieba 分词,每 token 调 name/owner LIKE
-    ``search_by_keyword``
+    """框架候选预查:仅对 node 的 ``goal.objective`` jieba 分词(字段裁剪降噪;title/background 不参与),
+    token 去重保序取 top ``_PREFETCH_MAX_TOKENS``,每 token 调 name/owner LIKE ``search_by_keyword``
     (命中 0→空,不 fallback 全量),合并去重按 recommend.score 降序。discover.search_by_keyword 是同步
     requests,经 asyncio.to_thread 包;多 token 用 asyncio.gather 并发。user_id 取 graph 派生
-    owner_bot_id;filters={"runtime_state":["online"]},top_k=10,min_score=0.01。"""
+    owner_bot_id;filters={"runtime_state":["online"]},top_k=_PREFETCH_TOP_K_PER_TOKEN,min_score=0.01。"""
     import asyncio
 
-    texts = _query_text(node)
     user_id = str(graph.extend_props.get("owner_bot_id") or "")
-    # 三字段分词 → tokens 去重保序
+    # 仅 goal.objective 分词 → token 去重保序,取 top _PREFETCH_MAX_TOKENS(字段裁剪 + token 上限降噪)
     tokens: list[str] = []
     seen_tok: set[str] = set()
-    for fld in ("title", "objective", "background"):
-        for t in _tokenize(texts.get(fld) or ""):
-            if t not in seen_tok:
-                seen_tok.add(t)
-                tokens.append(t)
+    for t in _tokenize(node.task_spec.goal.objective or ""):
+        if t not in seen_tok:
+            seen_tok.add(t)
+            tokens.append(t)
+    tokens = tokens[:_PREFETCH_MAX_TOKENS]
     if not tokens:
         return []
     logger.info("[task][search] task=%s node=%s 分词 tokens=%s", node.task_id, node.node_id, tokens)
@@ -525,7 +531,7 @@ async def _prefetch_candidates(
                 discover.search_by_keyword,
                 keyword=kw,
                 user_id=user_id,
-                top_k=10,
+                top_k=_PREFETCH_TOP_K_PER_TOKEN,
                 min_score=0.01,
                 filters={"runtime_state": ["online"]},
             )

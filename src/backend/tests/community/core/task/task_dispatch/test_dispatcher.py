@@ -7,6 +7,8 @@ BBS 退化、不写图不起 run。零参 TaskDispatcher(graph);corp 注入策�
 from __future__ import annotations
 
 import asyncio
+import sys
+
 import pytest
 
 from agentclaw.community.core.task.domain.models import (
@@ -26,6 +28,9 @@ from agentclaw.community.core.task.task_dispatch.strategies import (
     SearchBasedDispatchStrategy,
     SearchOutcome,
     SearchResult,
+    _PREFETCH_MAX_TOKENS,
+    _prefetch_candidates,
+    _tokenize,
 )
 from agentclaw.community.core.task.task_context.task_graph_service import TaskGraphService
 
@@ -51,7 +56,7 @@ def _task_info(task_id: str = "t1") -> TaskInfo:
         task_spec=TaskSpec(
             metadata=Metadata(task_id=task_id, title="T", instruction="do"),
             context=Context(background="bg"),
-            goal=Goal(objective="o", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
+            goal=Goal(objective="目标任务", acceptances=[AcceptanceCriteria(id="ac1", description="d")]),
         ),
         source_type="bot",
         owner_bot_id="b1",
@@ -307,3 +312,64 @@ def test_search_strategy_composes_owner_identity_for_openapi_call():
 
     assert result.outcome == SearchOutcome.MISS
     assert bot.calls[0]["bot_id"] == "default:146836"
+
+class TestTokenize:
+    """_tokenize 约束:≥2 字 + 停用词过滤(jieba/fallback 双路径统一)。"""
+
+    def test_empty_returns_empty(self):
+        assert _tokenize("") == []
+
+    def test_single_char_filtered_by_min_length(self):
+        # ≥2 字过滤挡单字虚词(的/了/是/o)
+        assert _tokenize("o") == []
+        assert _tokenize("的") == []
+
+    def test_business_words_kept(self):
+        assert "存储" in _tokenize("存储行业分析")
+
+    def test_two_char_stopwords_filtered(self):
+        # 2 字功能词 进行/可以 被 _STOPWORDS 滤掉,业务词保留
+        toks = _tokenize("进行存储")
+        assert "进行" not in toks
+        assert "存储" in toks
+        assert "可以" not in _tokenize("可以分析")
+
+    def test_fallback_without_jieba_still_filters_min_length_and_stopwords(self, monkeypatch):
+        # jieba 未装 → 退回整串,但仍受 ≥2 字 + 停用词过滤(双路径统一)
+        monkeypatch.setitem(sys.modules, "jieba", None)
+        # 整串 ≥2 且非停用词 → 保留整串
+        assert _tokenize("存储行业") == ["存储行业"]
+        # 整串为单字 → ≥2 滤掉
+        assert _tokenize("o") == []
+        # 整串恰为 2 字停用词 → 滤掉
+        assert _tokenize("进行") == []
+
+
+def test_prefetch_caps_tokens_to_max():
+    """_prefetch_candidates 仅用 goal.objective 分词,token 去重后取 top _PREFETCH_MAX_TOKENS。"""
+    from agentclaw.community.core.task.domain.models import TaskExecutionGraph
+
+    class _CountingDiscover:
+        def __init__(self) -> None:
+            self.keywords: list[str] = []
+
+        def search_by_keyword(self, **kwargs):
+            self.keywords.append(kwargs.get("keyword"))
+            idx = len(self.keywords)
+            return {"items": [{"bot_id": f"b{idx}", "recommend": {"score": float(idx)}}]}
+
+    graph = TaskExecutionGraph(
+        run_id=1,
+        loop_round=0,
+        status=Status.PENDING,
+        extend_props={"owner_bot_id": "owner"},
+    )
+    # objective 分词后 9 个 ≥2 非停用词 token(>5)→ 触发 top-5 截断
+    node = _node("c1")
+    node.task_spec.goal.objective = "存储系统网络架构计算资源安全策略数据备份监控运维容量"
+    discover = _CountingDiscover()
+    cands = _run(_prefetch_candidates(discover, node, graph))
+    # token 上限:search_by_keyword 调用次数恰为 _PREFETCH_MAX_TOKENS(9→5)
+    assert len(discover.keywords) == _PREFETCH_MAX_TOKENS
+    # 每 token 返回独立 bot_id → 候选数 == 调用数
+    assert len(cands) == _PREFETCH_MAX_TOKENS
