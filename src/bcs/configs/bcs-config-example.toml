@@ -359,4 +359,4 @@ schema_version = 1
 [[manifest.bundles]]
 name = "bcsPanel"
 type = "url"
-url = "https://gw.alipayobjects.com/render/p/hitu_npm/@avernet-assets/bcs-panel/1.3.0/dist/index.umd.js"
+url = "https://cdn.jsdelivr.net/npm/@avernet-assets/bcs-panel@1.3.0/dist/index.umd.js"
