@@ -598,7 +598,12 @@ class TestRefreshCodefuseServiceBotFanOut:
         # arca exec_shell 抛异常
         exec_device_service.exec_shell.side_effect = RuntimeError("arca exec boom")
 
+        # build_codefuse_write_cmd_from_auth_code 会对非法 auth_code 抛 ValueError，
+        # 这里只需隔离 arca exec_shell 失败，故把命令构建 stub 掉，确保 exec_shell 真正被调到。
         with patch(
+            "agentclaw.community.core.bot_management.codefuse_token.build_codefuse_write_cmd_from_auth_code",
+            return_value="echo write codefuse",
+        ), patch(
             "agentclaw.community.core.devices.services.baas_codefuse_writer.write_codefuse_token_baas",
         ) as mock_write:
             # 不应抛出：arca 失败被隔离，baas 仍写入
