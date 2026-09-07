@@ -163,10 +163,16 @@ async def test_interaction_resolve_sends_complete_normalized_frame(client) -> No
         selected_options=(("staging",),),
     )
 
-    exchange = await client.interaction_resolve(
-        interaction_id="int-1",
-        resolution=resolution,
-    )
+    tracer_plugin = MagicMock()
+    tracer_plugin.get_trace_id.return_value = "a" * 32
+    with patch(
+        "secbaas.community.core.service.bot_run._bot_websocket_client.get_tracer_plugin",
+        return_value=tracer_plugin,
+    ):
+        exchange = await client.interaction_resolve(
+            interaction_id="int-1",
+            resolution=resolution,
+        )
 
     assert exchange.accepted is True
     client._send_request_frame.assert_awaited_once_with(
@@ -182,6 +188,7 @@ async def test_interaction_resolve_sends_complete_normalized_frame(client) -> No
                 "values": {"target": "staging"},
                 "answers": {"Where?": "staging"},
                 "selectedOptions": [["staging"]],
+                "traceId": "a" * 32,
             },
         },
         timeout=30.0,
@@ -1112,3 +1119,151 @@ class TestGetDefaultHeaders:
         headers = client._get_default_headers()
         assert headers["X-Custom"] == "value"
         assert headers["User-Agent"] == "custom-agent"
+
+
+# ==================== Tests: traceId injection on downstream RPC ====================
+
+
+class TestTraceIdInjection:
+    """Tests for `traceId` injection on the four downstream RPC methods.
+
+    Covers both the active-span path (`get_trace_id()` returns a 32-char hex
+    trace id) and the no-span path (`get_trace_id()` returns ``"-"``) per the
+    `BareTracerPlugin` contract.
+    """
+
+    _TRACER_PATH = (
+        "secbaas.community.core.service.bot_run._bot_websocket_client.get_tracer_plugin"
+    )
+
+    async def _setup_mock_ws(self, client):
+        """Helper: set up a mock ws that auto-responds with ok=True."""
+        mock_ws = AsyncMock()
+        client._ws = mock_ws
+        client._connected = True
+        sent_frames = []
+
+        async def mock_send(data):
+            sent = json.loads(data)
+            sent_frames.append(sent)
+            req_id = sent["id"]
+            entry = client._pending_requests.get(req_id)
+            if entry:
+                if not entry.done():
+                    entry.set_result(
+                        {
+                            "type": "res",
+                            "id": req_id,
+                            "ok": True,
+                            "payload": {},
+                        }
+                    )
+
+        mock_ws.send = mock_send
+        return sent_frames
+
+    def _tracer_mock(self, trace_id: str) -> MagicMock:
+        plugin = MagicMock()
+        plugin.get_trace_id.return_value = trace_id
+        return plugin
+
+    # ----- chat_send -----
+
+    @pytest.mark.asyncio
+    async def test_chat_send_injects_trace_id_with_active_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("a" * 32)):
+            await client.chat_send(session_key="sk-1", message="hi")
+
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == "a" * 32
+        assert params["sessionKey"] == "sk-1"
+
+    @pytest.mark.asyncio
+    async def test_chat_send_injects_trace_id_without_active_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("-")):
+            await client.chat_send(session_key="sk-1", message="hi")
+
+        assert sent_frames[0]["params"]["traceId"] == "-"
+
+    # ----- chat_inject -----
+
+    @pytest.mark.asyncio
+    async def test_chat_inject_injects_trace_id_with_active_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("b" * 32)):
+            await client.chat_inject(session_key="sk-2", message="inject")
+
+        assert sent_frames[0]["params"]["traceId"] == "b" * 32
+        assert sent_frames[0]["method"] == "chat.inject"
+
+    @pytest.mark.asyncio
+    async def test_chat_inject_injects_trace_id_without_active_span(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("-")):
+            await client.chat_inject(session_key="sk-2", message="inject")
+
+        assert sent_frames[0]["params"]["traceId"] == "-"
+
+    # ----- chat_abort -----
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_injects_trace_id_with_run_id(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("c" * 32)):
+            await client.chat_abort(session_key="sk-3", run_id="run-1")
+
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == "c" * 32
+        assert params["runId"] == "run-1"
+
+    @pytest.mark.asyncio
+    async def test_chat_abort_injects_trace_id_without_run_id(self, client):
+        sent_frames = await self._setup_mock_ws(client)
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("-")):
+            await client.chat_abort(session_key="sk-3")
+
+        params = sent_frames[0]["params"]
+        assert params["traceId"] == "-"
+        assert "runId" not in params
+
+    # ----- interaction_resolve -----
+
+    @pytest.mark.asyncio
+    async def test_interaction_resolve_injects_trace_id_with_active_span(self, client):
+        client._send_request_frame = AsyncMock(
+            return_value={"type": "res", "id": "1", "ok": True}
+        )
+        resolution = InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="yes",
+            message="yes",
+        )
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("d" * 32)):
+            await client.interaction_resolve(
+                interaction_id="int-2", resolution=resolution
+            )
+
+        sent_request = client._send_request_frame.await_args.args[0]
+        assert sent_request["params"]["traceId"] == "d" * 32
+        assert sent_request["params"]["interactionId"] == "int-2"
+
+    @pytest.mark.asyncio
+    async def test_interaction_resolve_injects_trace_id_without_active_span(self, client):
+        client._send_request_frame = AsyncMock(
+            return_value={"type": "res", "id": "1", "ok": True}
+        )
+        resolution = InteractionResolution(
+            kind="ask_user",
+            decision="submit",
+            answer="yes",
+            message="yes",
+        )
+        with patch(self._TRACER_PATH, return_value=self._tracer_mock("-")):
+            await client.interaction_resolve(
+                interaction_id="int-2", resolution=resolution
+            )
+
+        assert client._send_request_frame.await_args.args[0]["params"]["traceId"] == "-"
