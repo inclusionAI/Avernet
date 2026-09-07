@@ -2240,6 +2240,49 @@ class TestHandleMngRegisterOwnershipMigration:
         mock_repository.clear_route_info.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_critical_step_db_error_raises_structured_device_creation_error(
+        self, service_with_device_repo, caplog
+    ):
+        """WR-02: a raw DB exception from the critical update_user_id /
+        re-query region is wrapped into DeviceCreationError with
+        MACHINE_OWNERSHIP_MIGRATION_FAILED, machine/ownership context, and
+        `from e` cause chaining — fail-closed with zero side-effect writes."""
+        service, mock_repository, mock_device_repo = service_with_device_repo
+
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
+        mock_repository.update_user_id.side_effect = RuntimeError("db down")
+
+        with caplog.at_level(logging.ERROR):
+            with pytest.raises(DeviceCreationError) as exc_info:
+                await service.handle_mng_register(
+                    machine_id="machine-001",
+                    user_id="user-new",
+                )
+
+        assert exc_info.value.error_code == "MACHINE_OWNERSHIP_MIGRATION_FAILED"
+        assert "machine-001" in exc_info.value.message
+        assert exc_info.value.context["machine_id"] == "machine-001"
+        assert exc_info.value.context["old_user_id"] == "user-old"
+        assert exc_info.value.context["new_user_id"] == "user-new"
+        assert exc_info.value.context["env"] == "test"
+        # Exception chaining preserved via `from e`
+        assert exc_info.value.__cause__ is not None
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        # WR-02 log tag records the DB failure with ownership context
+        db_error_logs = [
+            r
+            for r in caplog.records
+            if "[MACHINE_OWNERSHIP_MIGRATION_DB_ERROR]" in r.getMessage()
+        ]
+        assert len(db_error_logs) == 1
+        # Fail-closed: no ONLINE write, no device OFFLINE, no route clear
+        mock_repository.update_status.assert_not_called()
+        mock_repository.update_machine_info.assert_not_called()
+        mock_device_repo.list_active_local_devices_by_machine_user.assert_not_called()
+        mock_device_repo.batch_update_status_to_offline.assert_not_called()
+        mock_repository.clear_route_info.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_same_user_registration_skips_migration(
         self, service_with_device_repo
     ):
