@@ -2155,9 +2155,7 @@ class TestHandleMngRegisterOwnershipMigration:
         the normal ONLINE path continues."""
         service, mock_repository, mock_device_repo = service_with_device_repo
 
-        mock_repository.get_by_machine_id.return_value = self._stale_record(
-            "user-old"
-        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-old")
         device1 = MagicMock()
         device1.id = 101
         device2 = MagicMock()
@@ -2186,9 +2184,7 @@ class TestHandleMngRegisterOwnershipMigration:
             env="test",
         )
         # D-06 step 2: best-effort route clear
-        mock_repository.clear_route_info.assert_called_once_with(
-            "machine-001", "test"
-        )
+        mock_repository.clear_route_info.assert_called_once_with("machine-001", "test")
         # D-06 step 3: critical conditional ownership update
         mock_repository.update_user_id.assert_called_once_with(
             "machine-001", "test", "user-old", "user-new"
@@ -2200,9 +2196,7 @@ class TestHandleMngRegisterOwnershipMigration:
         )
         # D-07: one WARNING audit record with all five fields
         audit = [
-            r
-            for r in caplog.records
-            if "MACHINE_OWNERSHIP_MIGRATED" in r.getMessage()
+            r for r in caplog.records if "MACHINE_OWNERSHIP_MIGRATED" in r.getMessage()
         ]
         assert len(audit) == 1
         msg = audit[0].getMessage()
@@ -2247,9 +2241,7 @@ class TestHandleMngRegisterOwnershipMigration:
         path only (regression pin against a spurious drift migration)."""
         service, mock_repository, mock_device_repo = service_with_device_repo
 
-        mock_repository.get_by_machine_id.return_value = self._stale_record(
-            "user-001"
-        )
+        mock_repository.get_by_machine_id.return_value = self._stale_record("user-001")
 
         await service.handle_mng_register(
             machine_id="machine-001",

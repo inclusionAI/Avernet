@@ -313,9 +313,7 @@ class TestUpdateUserId:
         """Conditional ownership UPDATE returns int 1 when one row matched."""
         mock_session.query.return_value.filter.return_value.update.return_value = 1
 
-        result = repository.update_user_id(
-            "machine-001", "dev", "user-old", "user-new"
-        )
+        result = repository.update_user_id("machine-001", "dev", "user-old", "user-new")
 
         assert result == 1
         mock_session.query.assert_called_once()
@@ -341,9 +339,7 @@ class TestUpdateUserId:
         """Rowcount 0 (lost race) is passed through — fail-closed lives in service."""
         mock_session.query.return_value.filter.return_value.update.return_value = 0
 
-        result = repository.update_user_id(
-            "machine-001", "dev", "user-old", "user-new"
-        )
+        result = repository.update_user_id("machine-001", "dev", "user-old", "user-new")
 
         assert result == 0
 
