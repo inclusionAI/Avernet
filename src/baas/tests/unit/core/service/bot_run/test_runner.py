@@ -1555,7 +1555,8 @@ class TestSelectDispatcherConfig:
 
         assert runner._select_dispatcher("bot-1", "openclaw", metadata={}) is queue_d
         assert (
-            runner._select_dispatcher("bot-1", "openclaw", method="stream", metadata={}) is task_d
+            runner._select_dispatcher("bot-1", "openclaw", method="stream", metadata={})
+            is task_d
         )
 
     def test_config_fallback_to_default(
@@ -1694,7 +1695,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is queue_d
 
     def test_bcn_switch_off_keeps_task(
@@ -1720,7 +1723,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_bcn_switch_get_config_exception_falls_through(
@@ -1746,7 +1751,9 @@ class TestSelectDispatcherBcnSwitch:
             config_service,
             [queue_d, task_d],
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_bcn_metadata_unconfigured_switch_keeps_task(
@@ -1765,7 +1772,9 @@ class TestSelectDispatcherBcnSwitch:
             system_config_service=_make_config_service(),
             eval_session_log=MagicMock(),
         )
-        result = runner._select_dispatcher("bot-1", "openclaw", metadata=_bcn_metadata())
+        result = runner._select_dispatcher(
+            "bot-1", "openclaw", metadata=_bcn_metadata()
+        )
         assert result is task_d
 
     def test_non_bcn_metadata_ignores_switch(

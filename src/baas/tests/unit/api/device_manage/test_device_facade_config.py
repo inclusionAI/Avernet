@@ -6,6 +6,7 @@ from secbaas.community.api.device_manage import (
     ArcaCreateConfig,
     ArcaDeviceConfig,
     BaseDeviceConfig,
+    DeviceCallbackContext,
     DeviceCredentials,
     EncryptableHeaderRule,
     EncryptableOutBoundRule,
@@ -17,6 +18,14 @@ from secbaas.community.api.device_manage import (
     SigmaDeviceConfig,
     TeClawCreateConfig,
     TeClawDeviceConfig,
+)
+
+_DEFAULT_CTX = DeviceCallbackContext(
+    callback_url="http://cb",
+    publish_id="p1",
+    device_uuid="d1",
+    tenant="t1",
+    operator="op1",
 )
 
 
@@ -456,6 +465,7 @@ class TestTeClawDeviceConfig:
             name="teclaw-device",
             description="test device",
             teclaw_bot_config={"cpu": 2, "mem": "4Gi"},
+            callback_context=_DEFAULT_CTX,
         )
         cc = cfg.to_create_config()
         assert isinstance(cc, TeClawCreateConfig)
@@ -465,7 +475,7 @@ class TestTeClawDeviceConfig:
 
     def test_to_create_config_with_none_values(self):
         """to_create_config with default None values."""
-        cfg = TeClawDeviceConfig()
+        cfg = TeClawDeviceConfig(callback_context=_DEFAULT_CTX)
         cc = cfg.to_create_config()
         assert isinstance(cc, TeClawCreateConfig)
         assert cc.name is None
@@ -474,6 +484,6 @@ class TestTeClawDeviceConfig:
 
     def test_to_create_config_returns_teclaw_create_config(self):
         """返回类型正确 -- TeClawCreateConfig."""
-        cfg = TeClawDeviceConfig(name="test")
+        cfg = TeClawDeviceConfig(name="test", callback_context=_DEFAULT_CTX)
         cc = cfg.to_create_config()
         assert isinstance(cc, TeClawCreateConfig)

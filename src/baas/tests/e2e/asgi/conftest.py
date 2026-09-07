@@ -128,9 +128,11 @@ def created_publish_ids() -> list[int]:
 # We reuse the same class to avoid duplicating 100+ URL builders.
 
 from tests.e2e.conftest import (  # noqa: E402
+    TECLAW_CALLBACK_URL,
     APITestHelper,
     activate_test_bot,
     call_device_callback,
+    call_teclaw_callback,
     cleanup_bot,
     create_paas_device,
     create_test_bot,

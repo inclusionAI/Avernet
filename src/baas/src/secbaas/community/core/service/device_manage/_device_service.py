@@ -13,6 +13,7 @@ from typing import Any
 
 from secbaas.community.api.device_manage import (
     DestroyDeviceResponse,
+    DeviceCallbackContext,
     DeviceConfig,
     DeviceCreate,
     DeviceCreateConfig,  # noqa: F401 used in _native_update_device signature
@@ -46,6 +47,7 @@ from secbaas.community.core.service.paas import (
     PaasServiceFacade,
     dispatch_start_hook,
 )
+from secbaas.community.config import ConfigPath, get_config, get_config_by_path
 from secbaas.community.core.utils.env_utils import get_current_env
 from secbaas.community.core.utils.secret_utils import (
     common_sm4_decrypt,
@@ -55,6 +57,25 @@ from secbaas.community.logger import get_logger
 from secbaas.community.spi.secret import SecretStorePlugin
 
 logger = get_logger("core-service")
+
+
+def _resolve_teclaw_callback_url() -> str:
+    """Resolve TeClaw callback URL from ``user_config.secbaas.callback.host.{env}``."""
+    env = get_current_env()
+    path = (
+        ConfigPath.SECBAAS_CALLBACK_HOST_PROD
+        if env == "prod"
+        else ConfigPath.SECBAAS_CALLBACK_HOST_PRE
+        if env == "pre"
+        else ConfigPath.SECBAAS_CALLBACK_HOST_DEV
+    )
+    base = get_config_by_path(get_config(), path)
+    if not base:
+        raise ValueError(
+            f"secbaas.callback.host.{env} is not configured; cannot build "
+            f"TeClaw callback URL. Set it in the application config overlay."
+        )
+    return f"{base.rstrip('/')}/api/v1/publish/teclaw-callback"
 
 
 def _safe_format_hook(script: str, **kwargs) -> str:
@@ -935,12 +956,32 @@ class DefaultDeviceService(DeviceService):
                 teclaw_bot_config = (
                     deploy_config.teclaw_bot_config if deploy_config else None
                 )
+                # Build the async callback context so TeClaw can POST the
+                # result back to /api/v1/publish/teclaw-callback. This
+                # triggers async mode in the PaaS service and the plugin
+                # (Section 3 + Section 4 of teclaw-emergency-online-async-callback).
+                callback_url = _resolve_teclaw_callback_url()
+                if not publish_id:
+                    raise ValueError(
+                        f"publish_id is required for TeClaw async callback "
+                        f"(device {device_uuid}); got {publish_id!r}."
+                    )
+                callback_context = DeviceCallbackContext(
+                    callback_url=callback_url,
+                    publish_id=str(publish_id),
+                    device_uuid=device_uuid,
+                    tenant=tenant,
+                    operator=modifier,
+                )
                 detail_config = TeClawDeviceConfig(
                     teclaw_bot_config=teclaw_bot_config,
+                    callback_context=callback_context,
                 )
                 logger.info(
                     f"Built TeClawDeviceConfig for device {device_uuid}: "
-                    f"teclaw_bot_config={'<set>' if teclaw_bot_config is not None else '<not set>'}"
+                    f"teclaw_bot_config={'<set>' if teclaw_bot_config is not None else '<not set>'}, "
+                    f"has_callback_context={bool(callback_context)}, "
+                    f"callback_url={callback_url}"
                 )
 
             elif provider_type == "K8S":
@@ -1077,7 +1118,25 @@ class DefaultDeviceService(DeviceService):
                 )
             return device_record_to_response(updated_record)
 
-        # Step 8: Check for after_create_cmd_hook
+        # Step 8: TeClaw async — device stays PENDING until external callback.
+        # Sync TeClawCreateConfig (callback_context None) falls through.
+        if (
+            provider_type == "TECLAW"
+            and detail_config is not None
+            and getattr(detail_config, "callback_context", None) is not None
+        ):
+            logger.info(
+                f"TeClaw async mode engaged for device {device_uuid}; "
+                f"awaiting external callback (device stays PENDING)"
+            )
+            updated_record = repo.get_by_id(record.id, tenant, env)
+            if not updated_record:
+                raise ValueError(
+                    f"Device record not found after TeClaw async submit: id={record.id}"
+                )
+            return device_record_to_response(updated_record)
+
+        # Step 9: Check for after_create_cmd_hook
         if deploy_config and deploy_config.after_create_cmd_hook and provider_device_id:
             hook_timeout = (
                 deploy_config.after_create_hook_wait_seconds if deploy_config else 300

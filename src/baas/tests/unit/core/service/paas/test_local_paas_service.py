@@ -5420,9 +5420,7 @@ class TestDestroyOrphanWithLogging:
         assert result is None
 
         failed_records = [
-            r
-            for r in caplog.records
-            if "[HEARTBEAT_ORPHAN_DELETE_FAILED]" in r.message
+            r for r in caplog.records if "[HEARTBEAT_ORPHAN_DELETE_FAILED]" in r.message
         ]
         assert len(failed_records) == 1
         assert failed_records[0].levelno == logging.WARNING

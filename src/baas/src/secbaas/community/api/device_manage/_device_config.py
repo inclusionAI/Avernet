@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ._callback import DeviceCallbackContext
 from ._deploy_config import DeviceCredentials
 from ._models import MountPoint, ResourceSpecification, Storage
 from ._outbound_rule import OutBoundOperationRule
@@ -114,6 +115,10 @@ class TeClawCreateConfig(DeviceCreateConfig):
     teclaw_bot_config: dict[str, Any] | None = Field(
         default=None,
         description="TeClaw bot 透传配置",
+    )
+    callback_context: DeviceCallbackContext = Field(
+        description="Callback correlation context for async-mode (teclaw-emergency-online-async-callback). "
+        "Carries device_uuid/publish_id/tenant/callback_url so TeClaw can route the completion callback.",
     )
 
 
