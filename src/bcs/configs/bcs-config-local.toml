@@ -229,7 +229,7 @@ max_page_limit = 100000000
 provider = "noop"
 
 [security.outbound_url]
-block_private_networks = true
+block_private_networks = false
 allow_loopback = false
 
 [invite]

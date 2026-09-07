@@ -583,8 +583,9 @@ fn default_max_filters_per_subscription() -> u32 {
 #[serde(deny_unknown_fields)]
 pub struct OutboundUrlSecurityConfig {
     /// Reject RFC1918, link-local, loopback, unspecified, multicast,
-    /// documentation, and otherwise non-public addresses.
-    #[serde(default = "default_true")]
+    /// documentation, and otherwise non-public addresses. Disabled by default
+    /// to support providers on private networks.
+    #[serde(default)]
     pub block_private_networks: bool,
 
     /// Allow loopback hosts and loopback-resolved addresses.
@@ -595,7 +596,7 @@ pub struct OutboundUrlSecurityConfig {
 impl Default for OutboundUrlSecurityConfig {
     fn default() -> Self {
         Self {
-            block_private_networks: true,
+            block_private_networks: false,
             allow_loopback: false,
         }
     }
@@ -1586,6 +1587,23 @@ impl Default for SqliteConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outbound_url_security_defaults_allow_private_networks() {
+        let default = OutboundUrlSecurityConfig::default();
+        assert!(!default.block_private_networks);
+        assert!(!default.allow_loopback);
+
+        for input in ["", "allow_loopback = true"] {
+            let parsed: OutboundUrlSecurityConfig = toml::from_str(input).unwrap();
+            assert!(!parsed.block_private_networks);
+        }
+
+        let strict: OutboundUrlSecurityConfig =
+            toml::from_str("block_private_networks = true").unwrap();
+        assert!(strict.block_private_networks);
+        assert!(!strict.allow_loopback);
+    }
 
     #[test]
     fn channel_config_accepts_nested_dingtalk_switch() {

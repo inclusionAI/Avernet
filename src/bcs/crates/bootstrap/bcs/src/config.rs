@@ -1782,7 +1782,7 @@ botchat_url = "${BCS_TEST_FROM_FILE_MISSING}"
         assert_eq!(config.max_history_per_session, 1000);
         assert_eq!(config.provider_chat_run_timeout_ms, 10_800_000);
         assert_eq!(config.async_chat_run_timeout_ms, 7_500_000);
-        assert!(config.security.outbound_url.block_private_networks);
+        assert!(!config.security.outbound_url.block_private_networks);
         assert!(!config.security.outbound_url.allow_loopback);
         assert_eq!(
             config.group_session_ws.signing_key_secret,

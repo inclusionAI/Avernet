@@ -317,7 +317,7 @@ provider = "noop"
 dry_run = true
 
 [security.outbound_url]
-block_private_networks = true
+block_private_networks = false
 allow_loopback = false
 
 [invite]

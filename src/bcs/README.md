@@ -298,6 +298,16 @@ Anthropic supports `json_schema` and `tool_call` for judge output.
 does not send `temperature`, because current Messages API models may reject
 non-default sampling parameters.
 
+### Outbound URL policy
+
+`security.outbound_url.block_private_networks` defaults to `false`, allowing
+Provider webhooks on private networks. Explicitly set it to `true` to reject
+non-public targets. `allow_loopback` still defaults to `false`.
+Existing configurations that explicitly set `block_private_networks = true`
+retain that policy; change the loaded configuration and restart BCS to allow
+private targets. Deployments enabling production Eventing must explicitly set
+this option to `true` because it requires strict outbound protection.
+
 ### Test organization admin-run callbacks locally
 
 Start the dependency-free callback receiver:
