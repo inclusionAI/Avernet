@@ -135,7 +135,7 @@ async fn long_lived_work_keeps_only_request_identity_after_handshake_finishes() 
                 assert_eq!(bcs_observability::current_request_id(), "ws-handshake-42");
                 bcs_observability::observe_value("test.ws_frame", async {}).await;
                 tokio::spawn(bcs_observability::in_current_context(async {
-                    tracing::warn!(request_id = %bcs_observability::current_request_id(), "old WS business error");
+                    tracing::warn!(request_id = %bcs_observability::CurrentRequestId, "old WS business error");
                 })).await.unwrap();
             }).with_current_subscriber())
         }).await;
@@ -219,4 +219,52 @@ async fn concurrent_request_scopes_do_not_leak() {
     };
     tokio::join!(request("request-a"), request("request-b"));
     assert_eq!(bcs_observability::current_request_id(), "");
+}
+
+#[tokio::test]
+async fn request_id_log_value_formats_the_emitting_context_without_leaking_between_requests() {
+    let logs = capture(async {
+        // The value is reusable: it reads the emitting context, not the context
+        // where it was constructed. Owned IDs remain necessary across tasks.
+        let field = bcs_observability::CurrentRequestId;
+        let barrier = tokio::sync::Barrier::new(2);
+        let emit = |id: &'static str| bcs_observability::with_request_id(id.into(), async {
+            barrier.wait().await;
+            tracing::warn!(request_id = %field, "request context error");
+        });
+        tokio::join!(emit("request-a"), emit("request-b"));
+        tracing::warn!(request_id = %field, "outside request context");
+    }).await;
+    let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+    let mut ids: Vec<_> = events.iter().filter(|event| event["fields"]["message"] == "request context error")
+        .map(|event| event["fields"]["request_id"].as_str().unwrap()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["request-a", "request-b"]);
+    let outside = events.iter().find(|event| event["fields"]["message"] == "outside request context").unwrap();
+    assert_eq!(outside["fields"]["request_id"], "");
+    assert!(events.iter().all(|event| event.get("span").is_none() && event.get("spans").is_none()));
+}
+
+#[test]
+fn process_identity_is_shared_by_threads_and_changes_in_a_new_process() {
+    let id = bcs_observability::process_instance_id();
+    uuid::Uuid::parse_str(id).expect("process identity is a UUID");
+    if std::env::var_os("BCS_OBSERVABILITY_PROCESS_PROBE").is_some() {
+        println!("PROCESS_INSTANCE_ID={id}");
+        return;
+    }
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..8).map(|_| scope.spawn(bcs_observability::process_instance_id)).collect();
+        for thread in threads { assert_eq!(thread.join().unwrap(), id); }
+    });
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "process_identity_is_shared_by_threads_and_changes_in_a_new_process", "--nocapture"])
+        .env("BCS_OBSERVABILITY_PROCESS_PROBE", "1")
+        .output().expect("start a fresh process to verify restart identity");
+    assert!(child.status.success(), "child process failed ({}): stdout={} stderr={}",
+        child.status, String::from_utf8_lossy(&child.stdout), String::from_utf8_lossy(&child.stderr));
+    let output = String::from_utf8(child.stdout).unwrap();
+    let child_id = output.lines().find_map(|line| line.strip_prefix("PROCESS_INSTANCE_ID=")).expect("child identity");
+    uuid::Uuid::parse_str(child_id).expect("child process identity is a UUID");
+    assert_ne!(child_id, id);
 }

@@ -160,7 +160,7 @@ fn actor_service_error_response(error: ServiceError) -> Response {
         ServiceError::Forbidden(message) => (StatusCode::FORBIDDEN, message),
         other => {
             tracing::warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 error = %other,
                 "actor route service error"
             );

@@ -143,7 +143,7 @@ impl WorkbenchConnectionRegistry {
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => disconnected.push(conn.conn_id),
                 Err(mpsc::error::TrySendError::Full(_)) => {
-                    warn!(request_id = %bcs_observability::current_request_id(), session_id = %session_id, conn_id = conn.conn_id, "frontend channel full");
+                    warn!(request_id = %bcs_observability::CurrentRequestId, session_id = %session_id, conn_id = conn.conn_id, "frontend channel full");
                 }
             }
         }
@@ -175,7 +175,7 @@ impl WorkbenchConnectionRegistry {
             Ok(actor) => actor.status == ActorStatus::Hidden,
             Err(error) => {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     user_id = %user_id,
                     %error,
                     "silent-status get_bot failed at subscribe; defaulting to not-silent"

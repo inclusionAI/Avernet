@@ -114,7 +114,7 @@ pub async fn handle_client_connection(
                                 }
                             }
                             Err(e) => {
-                                warn!(request_id = %bcs_observability::current_request_id(), client_id = client_id, error = %e, "Frame dispatch error");
+                                warn!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, error = %e, "Frame dispatch error");
                                 let error_kind = if matches!(&e, WebWsDispatchError::ClientConnectError(_)) {
                                     WsErrorKind::RegisterRejected
                                 } else {
@@ -142,7 +142,7 @@ pub async fn handle_client_connection(
                         }
                     }
                     Ok(Message::Binary(data)) => {
-                        warn!(request_id = %bcs_observability::current_request_id(), client_id = client_id, len = data.len(), "Received unexpected binary frame");
+                        warn!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, len = data.len(), "Received unexpected binary frame");
                     }
                     Ok(Message::Ping(_data)) => {
                         debug!(client_id = client_id, "Received WebSocket ping");
@@ -162,7 +162,7 @@ pub async fn handle_client_connection(
                     }
                     Err(e) => {
                         close_reason = WsCloseReason::ProtocolError;
-                        error!(request_id = %bcs_observability::current_request_id(), client_id = client_id, error = %e, "WebSocket error");
+                        error!(request_id = %bcs_observability::CurrentRequestId, client_id = client_id, error = %e, "WebSocket error");
                         metrics_hook
                             .error(
                                 WsPeer::Frontend,

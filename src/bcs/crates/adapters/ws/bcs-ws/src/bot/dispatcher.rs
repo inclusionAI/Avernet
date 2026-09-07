@@ -438,7 +438,7 @@ async fn reject_provider_delivery_websocket(
         Ok(false) | Err(ServiceError::BotNotFound(_)) => Ok(false),
         Err(err) => {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 bot_id = %bot_id,
                 error = %err,
                 "provider delivery guard failed; allowing WebSocket connect"
@@ -514,7 +514,7 @@ async fn handle_bot_status(
         .map_err(map_bot_use_case_error)?;
 
     if !outcome.updated {
-        warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Failed to update status - bot not found in registry");
+        warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Failed to update status - bot not found in registry");
         send_error(tx, req_id, "not_registered", "Bot not found in registry").await?;
         return Ok(());
     }
@@ -621,7 +621,7 @@ async fn handle_response_frame(
         if is_known_run {
             // Forward error to client and clean up
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 run_id = %run_id,
                 error = %error,
                 "Bot rejected request, cleaning up run channel"
@@ -650,7 +650,7 @@ async fn handle_response_frame(
             state.run_channels.unregister(run_id).await;
         } else {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 run_id = %run_id,
                 error = %error,
                 "Received error ResponseFrame for unknown run"
@@ -791,7 +791,7 @@ async fn log_bot_response_frame(
     } else {
         warn!(
             target: MSG_LOG_TARGET,
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             schema_version = MESSAGE_LOG_SCHEMA_VERSION,
             event_type = event_type.as_str(),
             status = status.as_str(),
@@ -833,7 +833,7 @@ async fn handle_event_frame(
         Some(id) => id.clone(),
         None => {
             log_bot_event("unknown", event);
-            warn!(request_id = %bcs_observability::current_request_id(), event = %event.event, "Received EventFrame from unregistered bot");
+            warn!(request_id = %bcs_observability::CurrentRequestId, event = %event.event, "Received EventFrame from unregistered bot");
             return Ok(());
         }
     };
@@ -848,7 +848,7 @@ async fn handle_event_frame(
                 (run_id, group_id, is_final)
             }
             None => {
-                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Failed to parse agent event payload");
+                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Failed to parse agent event payload");
                 return Ok(());
             }
         },
@@ -861,12 +861,12 @@ async fn handle_event_frame(
                 (run_id, group_id, is_final)
             }
             None => {
-                warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, "Failed to parse chat event payload");
+                warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, "Failed to parse chat event payload");
                 return Ok(());
             }
         },
         _ => {
-            warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, event = %event.event, "Unknown event type");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, event = %event.event, "Unknown event type");
             return Ok(());
         }
     };
@@ -1241,7 +1241,7 @@ async fn handle_accepted_run_id_response(
                 .await
             {
                 warn!(
-                    request_id = %bcs_observability::current_request_id(),
+                    request_id = %bcs_observability::CurrentRequestId,
                     canonical_run_id = %run_id,
                     downstream_run_id = %sub_run_id,
                     error = %error,
@@ -1256,7 +1256,7 @@ async fn handle_accepted_run_id_response(
                 Ok(rebound) => rebound,
                 Err(error) => {
                     warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         source_run_id = %run_id,
                         accepted_run_id = %sub_run_id,
                         error = %error,
@@ -1274,7 +1274,7 @@ async fn handle_accepted_run_id_response(
                     Ok(registration) => registration,
                     Err(error) => {
                         warn!(
-                            request_id = %bcs_observability::current_request_id(),
+                            request_id = %bcs_observability::CurrentRequestId,
                             task_id = %run_id,
                             sub_bot_run_id = %sub_run_id,
                             bot_id = %bot_id,
@@ -1395,7 +1395,7 @@ async fn handle_state_machine_response(
         Ok(None) => return,
         Err(error) => {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 run_id = %run_id,
                 error = %error,
                 "state_machine: failed to lookup delivery correlation for response"
@@ -1422,7 +1422,7 @@ async fn handle_state_machine_response(
         .await
     {
         warn!(
-            request_id = %bcs_observability::current_request_id(),
+            request_id = %bcs_observability::CurrentRequestId,
             delivery_request_id = %correlation.delivery_request_id,
             bot_delivery_run_id = %bot_delivery_run_id,
             error = %error,

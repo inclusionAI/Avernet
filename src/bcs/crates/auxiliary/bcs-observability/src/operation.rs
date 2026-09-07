@@ -27,6 +27,16 @@ pub fn current_request_id() -> String {
     REQUEST_CONTEXT.try_with(|context| context.id.clone()).unwrap_or_default()
 }
 
+/// Displays the request ID at synchronous log emission without cloning it.
+/// Use `current_request_id()` instead when capturing identity for another task.
+pub struct CurrentRequestId;
+
+impl std::fmt::Display for CurrentRequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        REQUEST_CONTEXT.try_with(|context| f.write_str(&context.id)).unwrap_or(Ok(()))
+    }
+}
+
 fn accumulate(context: &RequestContext, name: &'static str, outcome: &'static str, duration_ms: f64) {
     let Some(totals) = &context.totals else { return; };
     let mut totals = totals.lock().unwrap_or_else(|error| error.into_inner());

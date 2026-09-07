@@ -391,7 +391,7 @@ impl ProviderBotEvents {
                 tokio::spawn(bcs_observability::with_request_id(bcs_observability::current_request_id(), async move {
                     let _inflight_guard = inflight_guard;
                     if let Err(error) = runtime.handle_bot_terminal_event(runtime_command).await {
-                        error!(request_id = %bcs_observability::current_request_id(), %error, "provider ingest: async state-machine final failed");
+                        error!(request_id = %bcs_observability::CurrentRequestId, %error, "provider ingest: async state-machine final failed");
                     }
                 }).with_current_subscriber());
             }
@@ -584,7 +584,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                 let identity = self.authenticate_event(&command).await?;
                 if identity.bot_uuid != correlation.assignee_bot_id {
                     warn!(
-                        request_id = %bcs_observability::current_request_id(),
+                        request_id = %bcs_observability::CurrentRequestId,
                         provider_id = %command.provider_id,
                         run_id = %command.run_id,
                         provider_bot_id = %identity.bot_uuid,
@@ -677,7 +677,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 "provider callback: async state-machine final processing completed"
                             ),
                             Ok(Err(processing_error)) => error!(
-                                request_id = %bcs_observability::current_request_id(),
+                                request_id = %bcs_observability::CurrentRequestId,
                                 provider_id = %provider_id,
                                 run_id = %provider_run_id,
                                 bot_id = %bot_id,
@@ -688,7 +688,7 @@ impl ProviderBotEventService for ProviderBotEvents {
                                 "provider callback: async state-machine final processing failed"
                             ),
                             Err(join_error) => error!(
-                                request_id = %bcs_observability::current_request_id(),
+                                request_id = %bcs_observability::CurrentRequestId,
                                 provider_id = %provider_id,
                                 run_id = %provider_run_id,
                                 bot_id = %bot_id,
@@ -758,7 +758,7 @@ impl ProviderBotEventService for ProviderBotEvents {
 
         if identity.bot_uuid != context_bot_id {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 provider_id = %command.provider_id,
                 run_id = %command.run_id,
                 provider_bot_id = %identity.bot_uuid,
@@ -870,7 +870,7 @@ impl ProviderBotEventService for ProviderBotEvents {
         let identity = self.authenticate_coordination(&command).await?;
         if identity.bot_uuid != context.bot_id {
             warn!(
-                request_id = %bcs_observability::current_request_id(),
+                request_id = %bcs_observability::CurrentRequestId,
                 provider_id = %command.provider_id,
                 run_id = %command.run_id,
                 provider_bot_id = %identity.bot_uuid,

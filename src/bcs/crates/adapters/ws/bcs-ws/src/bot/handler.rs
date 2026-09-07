@@ -118,7 +118,7 @@ pub async fn handle_connection(
                         }
                     }
                     Err(e) => {
-                        warn!(request_id = %bcs_observability::current_request_id(), error = %e, "Frame dispatch error");
+                        warn!(request_id = %bcs_observability::CurrentRequestId, error = %e, "Frame dispatch error");
                         let error_kind =
                             if let BotWsDispatchError::BotConnectError { bot_uuid, .. } = &e {
                                 if observed_bot_uuid.is_none() {
@@ -150,7 +150,7 @@ pub async fn handle_connection(
                 }
             }
             Ok(Message::Binary(data)) => {
-                warn!(request_id = %bcs_observability::current_request_id(), len = data.len(), "Received unexpected binary frame");
+                warn!(request_id = %bcs_observability::CurrentRequestId, len = data.len(), "Received unexpected binary frame");
             }
             Ok(Message::Ping(_data)) => {
                 debug!("Received ping, sending pong");
@@ -218,7 +218,7 @@ pub async fn handle_connection(
             })
             .await
         {
-            warn!(request_id = %bcs_observability::current_request_id(), bot_id = %bot_id, error = %err, "Failed to record bot streaming disconnect");
+            warn!(request_id = %bcs_observability::CurrentRequestId, bot_id = %bot_id, error = %err, "Failed to record bot streaming disconnect");
         }
         state.bot_connections.disconnect(bot_id).await;
 
@@ -250,7 +250,7 @@ pub async fn handle_connection(
 
 fn log_websocket_error(error: &impl std::fmt::Display, bot_uuid: Option<&str>, registered: bool) {
     error!(
-        request_id = %bcs_observability::current_request_id(),
+        request_id = %bcs_observability::CurrentRequestId,
         bot_uuid = bot_uuid.unwrap_or("unknown"),
         registered,
         error = %error,
