@@ -25,6 +25,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const target = id ? state.identities.find((i) => i.id === id) ?? null : null;
     const views = getAvailableViews(target ? { id: target.id, kind: target.kind } : null);
     const currentExpandedBotId = Object.keys(state.expandedBotIds)[0] ?? null;
+    const currentExpandedBotSection = currentExpandedBotId
+      ? state.expandedBotSectionKey[currentExpandedBotId] ?? null
+      : null;
     const currentExpandedGroupId = Object.keys(state.expandedGroupIds)[0] ?? null;
     const updatedMemo = state.activeIdentityId
       ? rememberLastSession(state.lastSessionByIdentity, state.activeIdentityId, {
@@ -35,6 +38,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           membership: state.membership,
           selectedBotSessionId: state.selectedBotSessionId,
           expandedBotId: currentExpandedBotId,
+          expandedBotSection: currentExpandedBotSection,
         })
       : state.lastSessionByIdentity;
     const {

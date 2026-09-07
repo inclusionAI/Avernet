@@ -1,27 +1,37 @@
 /** @jest-environment node */
 import { adminService } from '@/services/admin/adminService';
+import { getCapabilities } from '@/capabilities';
 import * as spaceController from '@/services/backendApi/admin/spaceController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { identityService } from '@/services/workspace/identityService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/admin/spaceController');
-// ensureUserId 在 activeIdentityId 未就绪时补拉 identityService.loadIdentities；
-// stub @tc-chat/adapters ESM transitive（identityService→testUser→supportProvider）。
+// ensureUserId 数据源 = getCapabilities().getHumanIdentity()；auto-mock 出可控能力访问器（避免在 hoisted factory 内引用 jest）。
+// capability 未就绪时 ensureUserId 仍走 identityService.loadIdentities 兜底（默认失败降级为 error）。
+jest.mock('@/capabilities');
 jest.mock('@/services/workspace/identityService');
 jest.mock('@tc-chat/adapters', () => ({}));
 
 const sc = spaceController as unknown as Record<string, jest.Mock<any>>;
+const getCapabilitiesMock = getCapabilities as unknown as jest.Mock;
+
+/** 固定能力：恒返回给定操作者身份（null = 未就绪）。默认 userId-only（不落 user_name）。 */
+function setUserIdentity(value: { userId: string; displayName?: string | null } | null): void {
+  const capVal = value ? { userId: value.userId, displayName: value.displayName ?? null } : null;
+  getCapabilitiesMock.mockReturnValue({
+    getHumanIdentity: () => ({ status: 'available', value: capVal }),
+  });
+}
 
 beforeEach(() => {
   jest.resetAllMocks();
-  useWorkspaceStore.setState({ activeIdentityId: 'human_327325', identities: [] });
-  // 命中缓存用例不调 loadIdentities；未就绪用例走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
+  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
+  setUserIdentity({ userId: '327325', displayName: null });
 });
 
 describe('adminService 网络参数对齐 clawweb=Avernet', () => {
@@ -56,11 +66,8 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
   });
 
   it('createTeamSpace 传 user_id + user_name(花名) query + body space_name', async () => {
-    // 注入 identities 使 ensureUserName 经 getHumanIdentity 命中花名缓存（不调 loadIdentities）。
-    useWorkspaceStore.setState({
-      activeIdentityId: 'human_327325',
-      identities: [{ id: 'human_327325', kind: 'user', displayName: '风太', online: true }],
-    });
+    // 能力命中花名缓存（不调 loadIdentities）。
+    setUserIdentity({ userId: '327325', displayName: '风太' });
     sc.createSpace.mockResolvedValue({
       success: true,
       data: { space_id: 1, space_name: '新团队', space_type: 'TEAM' },
@@ -70,8 +77,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
   });
 
   it('createTeamSpace 取不到花名时不传 user_name（仅 user_id）', async () => {
-    // identities 为空且 loadIdentities 默认失败 → ensureUserName 返回 null。
-    useWorkspaceStore.setState({ activeIdentityId: 'human_327325', identities: [] });
+    // 默认 displayName=null → ensureUserName 返回 null，仅 user_id。
     sc.createSpace.mockResolvedValue({
       success: true,
       data: { space_id: 1, space_name: '新团队', space_type: 'TEAM' },
@@ -113,11 +119,8 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
   });
 
   it('requestJoin 传 user_id + user_name(花名) query + body reason', async () => {
-    // 注入 identities 使 ensureUserName 经 getHumanIdentity 命中花名缓存（不调 loadIdentities）。
-    useWorkspaceStore.setState({
-      activeIdentityId: 'human_327325',
-      identities: [{ id: 'human_327325', kind: 'user', displayName: '风太', online: true }],
-    });
+    // 能力命中花名缓存（不调 loadIdentities）。
+    setUserIdentity({ userId: '327325', displayName: '风太' });
     sc.requestJoinSpace.mockResolvedValue({ success: true, data: {} });
     await adminService.requestJoin(10001, '希望加入');
     expect(sc.requestJoinSpace).toHaveBeenCalledWith(
@@ -128,8 +131,7 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
   });
 
   it('requestJoin 取不到花名时不传 user_name（仅 user_id）', async () => {
-    // identities 为空且 loadIdentities 默认失败 → ensureUserName 返回 null。
-    useWorkspaceStore.setState({ activeIdentityId: 'human_327325', identities: [] });
+    // 默认 displayName=null → ensureUserName 返回 null，仅 user_id。
     sc.requestJoinSpace.mockResolvedValue({ success: true, data: {} });
     await adminService.requestJoin(10001, '希望加入');
     expect(sc.requestJoinSpace).toHaveBeenCalledWith(10001, { reason: '希望加入' }, { user_id: '327325' });
@@ -144,8 +146,8 @@ describe('adminService 网络参数对齐 clawweb=Avernet', () => {
     );
   });
 
-  it('activeIdentityId 未就绪时返回 error 不发请求', async () => {
-    useWorkspaceStore.setState({ activeIdentityId: null });
+  it('能力未就绪时返回 error 不发请求', async () => {
+    setUserIdentity(null);
     const r = await adminService.listSpaces();
     expect(r.error).toBeDefined();
     expect(sc.listSpaces).not.toHaveBeenCalled();

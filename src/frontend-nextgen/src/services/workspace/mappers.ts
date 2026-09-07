@@ -53,7 +53,7 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   driver: 'driver',
   manager: 'manager',
   consultant: 'member',
-  worker: 'member',
+  worker: 'worker',
   observer: 'member',
 };
 
@@ -68,6 +68,7 @@ export function mapGroupListItem(dto: GroupListItemDto): GroupView {
     lastMessageAt: dto.updated_at,
     createdAt: dto.created_at,
     participantCount: dto.participant_count,
+    driverBotUuid: dto.driver_bot_uuid,
     ...(dto.membership ? { membership: dto.membership } : {}),
     isPublic: dto.visibility === 'public',
     deliveryPolicy: 'send_to_driver',

@@ -6,7 +6,7 @@ export type IdentityView = {
   displayName: string;
   avatarUrl?: string;
   online: boolean;
-  /** Bot 实例运行状态：online→在线，hidden→不在线。human 项无此字段。 */
+  /** Bot 实例运行状态：online→在线，hidden→离线。human 项无此字段。 */
   status?: IdentityStatus;
   /** Bot 所使用的引擎类型；后端未返回时保持缺省。 */
   engine?: string;
@@ -20,7 +20,7 @@ export type SessionKind = 'chat' | 'service_invocation';
 export type GroupStatus = 'active' | 'dissolved';
 export type SessionStatus = 'running' | 'completed';
 export type SenderKind = 'human' | 'bot' | 'system';
-export type ParticipantRole = 'owner' | 'driver' | 'manager' | 'member';
+export type ParticipantRole = 'owner' | 'driver' | 'manager' | 'worker' | 'member';
 export type ParticipantMode = 'auto' | 'muted' | 'present' | 'absent';
 export type DeliveryPolicy = 'send_to_driver' | 'inject_observers';
 
@@ -58,6 +58,8 @@ export interface GroupView {
   createdAt: number;
   participantCount: number;
   ownerUserId?: string;
+  /** Driver / Manager Bot ID；群列表无 participants 时用于权限判定。 */
+  driverBotUuid?: string;
   /** 创建群时后端同步生成的初始会话 ID；仅在创建响应链路保留。 */
   initialSessionId?: string;
   joinedRole?: ParticipantRole;

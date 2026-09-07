@@ -1,5 +1,5 @@
 import type { GroupSessionPage, SessionView } from '@/domain/collaboration';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState, type MutableRefObject } from 'react';
 import { useSessionMapRequests } from './useSessionMapRequests';
 
 interface SessionPageMeta {
@@ -43,6 +43,8 @@ export interface UseSessionMapResult {
   totalByGroupId: Record<string, number>;
   /** 按 10 条追加指定群的下一页会话。 */
   loadMoreSessions: (gid: string) => Promise<void>;
+  /** 身份代际：切换身份时递增，供外部丢弃在途旧身份响应。 */
+  identityEpochRef: MutableRefObject<number>;
 }
 
 /**
@@ -70,18 +72,22 @@ export function useSessionMap(
   pageMetaByGroupIdRef.current = pageMetaByGroupId;
 
   // 身份切换 → 清空缓存，避免跨身份串会话数据；旧身份请求不得回填当前列表。
-  useEffect(() => {
+  // 在渲染期同步重置（React「状态随输入调整」模式）而非 useEffect：effect 在 commit
+  // 之后才执行，会让身份切换后的首帧先绘制旧身份的会话数据再清空，产生闪烁。
+  const [lastIdentityId, setLastIdentityId] = useState(activeIdentityId);
+  if (lastIdentityId !== activeIdentityId) {
+    setLastIdentityId(activeIdentityId);
     identityEpochRef.current += 1;
     requestVersionRef.current.clear();
+    inFlightRef.current.clear();
+    loadingMoreRef.current.clear();
+    rawByGroupIdRef.current = {};
+    pageMetaByGroupIdRef.current = {};
     setRawByGroupId({});
     setPageMetaByGroupId({});
     setErrorByGroupId({});
     setLoadMoreErrorByGroupId({});
-    rawByGroupIdRef.current = {};
-    pageMetaByGroupIdRef.current = {};
-    inFlightRef.current.clear();
-    loadingMoreRef.current.clear();
-  }, [activeIdentityId]);
+  }
 
   const beginGroupRequest = useCallback((gid: string): number => {
     const version = (requestVersionRef.current.get(gid) ?? 0) + 1;
@@ -201,5 +207,6 @@ export function useSessionMap(
     errorByGroupId,
     loadMoreErrorByGroupId,
     loadMoreSessions,
+    identityEpochRef,
   };
 }

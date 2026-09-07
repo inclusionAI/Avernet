@@ -1,8 +1,9 @@
+import type { BotManagementVerb } from '@/domain/botWorkshop';
 import type { BotDomain } from '@/services/botWorkshop';
-import { Power, RefreshCw, Server, Trash2 } from 'lucide-react';
+import { Power, RefreshCw, RotateCw, Server, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-export type BotCardManagementAction = 'delete' | 'restart' | 'engine_restart' | 'upgrade';
+export type BotCardManagementAction = BotManagementVerb;
 
 export const lifecycleLabel: Record<BotDomain['lifecycle'], string> = {
   draft: '草稿',
@@ -19,6 +20,7 @@ export const actionLabel: Record<BotCardManagementAction, string> = {
   restart: '重启 Bot',
   engine_restart: '重启引擎',
   upgrade: '开启服务化',
+  restart_publish: '重启发布',
 };
 
 export const actionIcon: Record<BotCardManagementAction, ReactNode> = {
@@ -26,4 +28,5 @@ export const actionIcon: Record<BotCardManagementAction, ReactNode> = {
   restart: <RefreshCw className="size-4" />,
   engine_restart: <Power className="size-4" />,
   upgrade: <Server className="size-4" />,
+  restart_publish: <RotateCw className="size-4" />,
 };

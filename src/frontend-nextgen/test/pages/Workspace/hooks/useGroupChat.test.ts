@@ -244,15 +244,48 @@ it('send calls chat.onRequest with sessionId and trimmed text', () => {
 
 it('send forwards mention bot ids into chat.onRequest', () => {
   const { result } = renderHook(() => useGroupChat(session));
-  result.current.send(' @ALL 你们呢 ', ['bot-a', 'bot-b']);
+  result.current.send(' @ALL-Bots 你们呢 ', ['bot-a', 'bot-b']);
   expect(mockChat.onRequest).toHaveBeenCalledWith(
     expect.objectContaining({
-      content: '@ALL 你们呢',
+      content: '@ALL-Bots 你们呢',
       sessionId: 's1',
       mentions: ['bot-a', 'bot-b'],
-      userMessage: expect.objectContaining({ content: '@ALL 你们呢' }),
+      userMessage: expect.objectContaining({ content: '@ALL-Bots 你们呢' }),
     }),
   );
+});
+
+it('allows follow-up sends while a human-only request is in flight', () => {
+  const humanSession: SessionView = {
+    ...session,
+    participants: [{ actorId: 'human_2', kind: 'human', name: '李四', role: 'member', mode: 'present' }],
+  };
+  const { result } = renderHook(() => useGroupChat(humanSession));
+  result.current.send('@李四 出个主意', ['human_2']);
+  mockChat.isRequesting = true;
+  result.current.send('补充一下');
+
+  expect(mockChat.onRequest).toHaveBeenCalledTimes(2);
+  expect(mockChat.onRequest).toHaveBeenLastCalledWith(
+    expect.objectContaining({ content: '补充一下', sessionId: 's1' }),
+  );
+});
+
+it('blocks ordinary sends after a bot request starts during human-only processing', () => {
+  const mixedSession: SessionView = {
+    ...session,
+    participants: [
+      { actorId: 'human_2', kind: 'human', name: '李四', role: 'member', mode: 'present' },
+      { actorId: 'bot-a', kind: 'bot', name: '甲', role: 'member', mode: 'auto' },
+    ],
+  };
+  const { result } = renderHook(() => useGroupChat(mixedSession));
+  result.current.send('@李四 出个主意', ['human_2']);
+  mockChat.isRequesting = true;
+  result.current.send('@甲 回答', ['bot-a']);
+  result.current.send('普通消息');
+
+  expect(mockChat.onRequest).toHaveBeenCalledTimes(2);
 });
 
 it('send forwards image attachments into chat.onRequest and userMessage extra for local echo', () => {

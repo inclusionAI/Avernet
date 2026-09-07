@@ -96,18 +96,26 @@ export function useCollabPanel(
   );
   const setActiveIdentity = useWorkspaceStore((s) => s.setActiveIdentity);
 
+  // 切到用户身份并落到当前群会话。setActiveIdentity 会恢复该身份上次记忆的
+  // 视图/选中态（可能停留在某个单聊页），若不显式覆盖 view 与选中态，
+  // URL 同步 effect 会按恢复结果回填旧单聊，导致跳转落错页面且视图来回闪烁。
+  const openGroupSessionAsHuman = useCallback((target: SessionView) => {
+    const store = useWorkspaceStore.getState();
+    store.setView('group');
+    // 恢复的展开态可能不含目标群，侧栏需展开目标群（与 useWorkspacePage.ensureGroupExpanded 对齐）。
+    if (!store.expandedGroupIds[target.groupId]) store.toggleGroupExpanded(target.groupId);
+    store.selectGroup(target.groupId);
+    store.selectSession(target.sessionId);
+  }, []);
+
   const switchToHuman = useCallback(() => {
     if (!humanIdentityId) {
       toast.error('未找到用户身份，请稍后重试');
       return;
     }
     setActiveIdentity(humanIdentityId);
-    if (session) {
-      const store = useWorkspaceStore.getState();
-      store.selectGroup(session.groupId);
-      store.selectSession(session.sessionId);
-    }
-  }, [humanIdentityId, session, setActiveIdentity]);
+    if (session) openGroupSessionAsHuman(session);
+  }, [humanIdentityId, openGroupSessionAsHuman, session, setActiveIdentity]);
 
   const setBotMode = useCallback(
     async (mode: 'auto' | 'muted') => {
@@ -134,15 +142,13 @@ export function useCollabPanel(
       const ok = await updateMemberMode(session.sessionId, actorId, 'present');
       if (ok) {
         if (humanIdentityId) setActiveIdentity(humanIdentityId);
-        const store = useWorkspaceStore.getState();
-        store.selectGroup(session.groupId);
-        store.selectSession(session.sessionId);
+        openGroupSessionAsHuman(session);
       }
       return ok;
     } finally {
       setJoining(false);
     }
-  }, [human, humanIdentityId, session, setActiveIdentity, updateMemberMode]);
+  }, [human, humanIdentityId, openGroupSessionAsHuman, session, setActiveIdentity, updateMemberMode]);
 
   const leaveSession = useCallback(async (): Promise<boolean> => {
     if (!session) return false;

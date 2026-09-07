@@ -137,6 +137,24 @@ describe('botChatProvider', () => {
     expect(mockedGetConnection).toHaveBeenCalledWith('b', { user_id: '327325', owner_id: '2088' });
   });
 
+  it('好友 Bot 的 connection 携带 f_user_id', async () => {
+    mockedGetConnection.mockResolvedValue({
+      code: 200000,
+      data: { engine: 'openclaw', expires_at: 'x', sockets: [{ kind: 'chat', url: 'wss://gw/ws' }] },
+      message: 'OK',
+      request_id: 'r',
+    });
+    const friendBot = { ...bot, isFriendBot: true };
+    const provider = createBotChatProvider({ bot: friendBot, userId: 'human_327325', sessionId: 'sid-1' });
+    await provider.connect();
+    expect(mockedGetConnection).toHaveBeenCalledWith('b', {
+      user_id: '327325',
+      owner_id: '2088',
+      f_user_id: '327325',
+      session_id: 'sid-1',
+    });
+  });
+
   it('request 透传 query + sessionKey,并按需 connect', async () => {
     mockedGetConnection.mockResolvedValue({
       code: 200000,

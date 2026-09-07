@@ -25,7 +25,7 @@ describe('invitationService', () => {
       },
     });
     const res = await invitationService.createGroupShare('g1');
-    expect(res.ok && res.data.invitationUrl).toBe('http://localhost:8000/workspace/invite/tk?type=group');
+    expect(res.ok && res.data.invitationUrl).toBe('http://localhost:8000/workspace/invite/groups/tk');
   });
 
   it('createSessionShare uses session invitation and returns a token-only url', async () => {
@@ -43,7 +43,7 @@ describe('invitationService', () => {
     });
     const res = await invitationService.createSessionShare('s9');
     expect(ic.createSessionInvitation).toHaveBeenCalledWith('s9', { expires_in_seconds: 86400 });
-    expect(res.ok && res.data.invitationUrl).toBe('http://localhost:8000/workspace/invite/tk?type=session');
+    expect(res.ok && res.data.invitationUrl).toBe('http://localhost:8000/workspace/invite/sessions/tk');
   });
 
   it('acceptInvitation success → ok true, 410 → invalid friendlyMessage', async () => {

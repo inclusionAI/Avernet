@@ -3,7 +3,7 @@
 import BotCard from '@/components/BotWorkshop/BotCard';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const noop = () => undefined;
 
@@ -357,5 +357,151 @@ describe('Agent Coding Bot card actions', () => {
     expect(screen.queryByText('重启引擎')).not.toBeInTheDocument();
     expect(screen.queryByText('发布与阶段推进')).not.toBeInTheDocument();
     expect(screen.queryByText('授权')).not.toBeInTheDocument();
+  });
+});
+
+describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
+  const servicePrestableBot = () =>
+    mapBotDto({
+      bot_id: 'service-prestable-card',
+      bot_name: '预发服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: 'service_prestable',
+      actions: ['view', 'publish_online', 'restart_publish', 'cancel_staging'],
+    }).item;
+
+  test('服务预发卡仅提供重启发布入口，不再提供容器/引擎重启', () => {
+    const bot = servicePrestableBot();
+    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启发布/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /重启 Bot/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
+  });
+
+  test('服务预发卡点击重启发布后经确认弹窗分发 restart_publish 动作', async () => {
+    const bot = servicePrestableBot();
+    const onAction = jest.fn().mockResolvedValue(undefined);
+    render(<BotCard bot={bot} onView={noop} onAction={onAction} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
+    fireEvent.click(screen.getByRole('button', { name: /重启发布/ }));
+
+    const dialog = within(screen.getByRole('alertdialog'));
+    expect(dialog.getByText('重启发布')).toBeInTheDocument();
+    expect(dialog.getByText(/草稿机器与草稿数据不受影响/)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart_publish', bot));
+  });
+
+  test('服务上线卡提供重启发布并经确认分发', async () => {
+    const bot = mapBotDto({
+      bot_id: 'service-online-card',
+      bot_name: '上线服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: 'service_online',
+      actions: ['view', 'chat', 'restart_publish', 'upgrade', 'offline'],
+    }).item;
+    const onAction = jest.fn().mockResolvedValue(undefined);
+    render(<BotCard bot={bot} onView={noop} onAction={onAction} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 上线服务 Bot' }));
+    expect(screen.getByRole('button', { name: /重启发布/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /重启发布/ }));
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart_publish', bot));
+  });
+
+  test('服务草稿卡保留重启 Bot，不提供重启发布与重启引擎', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-draft-card',
+      bot_name: '草稿服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: 'service_draft',
+      actions: ['view', 'edit', 'publish_staging', 'restart', 'delete'],
+    }).item;
+    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 草稿服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /重启发布/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
+  });
+
+  test('服务卡仅 disabled_actions.restart 声明时保留禁用入口（死灰按钮可展示服务端原因）', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-restart-reason-card',
+      bot_name: '禁用原因服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: 'service_draft',
+      actions: ['view'],
+      disabled_actions: { restart: '草稿机未初始化，无法重启' },
+    }).item;
+    render(<BotCard bot={bot} onAction={jest.fn().mockResolvedValue(undefined)} onView={noop} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 禁用原因服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeDisabled();
+  });
+
+  test('仅 disabled_actions 声明重启发布时按钮禁用', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-restart-publish-blocked',
+      bot_name: '审批中服务 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: 'service_online',
+      actions: ['view'],
+      disabled_actions: { restart_publish: '等待发布人授权' },
+    }).item;
+    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 审批中服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启发布/ })).toBeDisabled();
+  });
+
+  test('编辑锁被他人持有时重启发布禁用', () => {
+    const bot = {
+      ...servicePrestableBot(),
+      lock: { status: 'other' as const, holderName: '王五', lockedAt: '2026-09-07 09:30' },
+    };
+    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启发布/ })).toBeDisabled();
+  });
+
+  test('个人云卡的重启 Bot 与重启引擎不受词表分裂影响', () => {
+    const bot = mapBotDto({
+      bot_id: 'personal-cloud-card',
+      bot_name: '个人云 Bot',
+      engine: 'openclaw',
+      bot_type: 'personal',
+      display_state: 'running',
+      actions: ['chat', 'view', 'restart', 'engine_restart'],
+    }).item;
+    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '管理 个人云 Bot' }));
+
+    expect(screen.getByRole('button', { name: /重启 Bot/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /重启引擎/ })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /重启发布/ })).not.toBeInTheDocument();
   });
 });

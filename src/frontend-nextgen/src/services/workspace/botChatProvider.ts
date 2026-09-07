@@ -3,7 +3,7 @@ import { getBotIamToken } from '@/services/backendApi/privateChat/iamTokenContro
 import { OpenClawProvider, type ConnectionStatusEvent, type OpenClawProviderConfig } from '@tc-chat/adapters';
 import type { ChatMessage, ChatProvider, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { installCompleteFallback } from './botChatCompleteFallback';
-import { botSessionService, resolveUserId, type ChatBotView } from './botSessionService';
+import { botSessionService, resolveUserId, withFriendBotRequestParams, type ChatBotView } from './botSessionService';
 
 export interface BotChatRequest {
   content: string;
@@ -90,10 +90,14 @@ export class BotChatProvider implements ChatProvider<BotChatRequest> {
   }
 
   private async getChatUrl(): Promise<string> {
-    const resp = await getBotConnection(this.options.bot.realBotId, {
-      user_id: resolveUserId(this.options.userId),
-      owner_id: this.options.bot.ownerId,
-    });
+    const resp = await getBotConnection(
+      this.options.bot.realBotId,
+      withFriendBotRequestParams(this.options.bot, this.options.userId, {
+        user_id: resolveUserId(this.options.userId),
+        owner_id: this.options.bot.ownerId,
+        ...(this.options.bot.isFriendBot ? { session_id: this.options.sessionId } : {}),
+      }),
+    );
     const socket = resp.data?.sockets?.find((s) => s.kind === 'chat');
     if (!socket?.url) throw new Error('Bot 连接信息为空,请稍后重试');
     return socket.url;

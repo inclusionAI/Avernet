@@ -1,6 +1,7 @@
 import { defaultCapabilities, extendCapabilities } from '@/capabilities';
 import { createBot, listBotInventory, pollBotAuthStatus } from '@/services/backendApi/bots/botController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
+import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import { botWorkshopService } from '@/services/botWorkshop/botWorkshopService';
 import { afterEach, describe, expect, test } from '@jest/globals';
@@ -10,14 +11,21 @@ jest.mock('@/services/backendApi/bots/botController', () => ({
   listBotInventory: jest.fn(),
   pollBotAuthStatus: jest.fn(),
 }));
+jest.mock('@/services/botWorkshop/botEditorService', () => ({
+  botEditorService: { restartLifecycle: jest.fn() },
+}));
 
 const mockedCreateBot = createBot as jest.MockedFunction<typeof createBot>;
 const mockedListBotInventory = listBotInventory as jest.MockedFunction<typeof listBotInventory>;
 const mockedPollBotAuthStatus = pollBotAuthStatus as jest.MockedFunction<typeof pollBotAuthStatus>;
+const mockedRestartLifecycle = botEditorService.restartLifecycle as jest.MockedFunction<
+  typeof botEditorService.restartLifecycle
+>;
 
 afterEach(() => {
   // 覆盖过引擎清单的用例退出时还原 Open 默认，避免污染同文件后续用例。
   extendCapabilities({ getBotEngineOptions: defaultCapabilities.getBotEngineOptions });
+  jest.clearAllMocks();
 });
 
 describe('botWorkshopService', () => {
@@ -402,5 +410,45 @@ describe('botWorkshopService', () => {
         initialize: false,
       }),
     ).toThrow('Hermes 暂不支持服务化');
+  });
+});
+
+describe('botWorkshopService.restartPublish（服务卡 restarting 词表分裂）', () => {
+  test.each([
+    ['service prestable 映射为 prestable 阶段重启', 'service_prestable', 'prestable'],
+    ['service online 映射为 online 阶段重启', 'service_online', 'online'],
+  ] as const)('%s', async (_name, displayState, stage) => {
+    const bot = mapBotDto({
+      bot_id: 'service-publish-bot',
+      bot_name: '知识检索服务',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: displayState,
+      actions: ['view', 'restart_publish'],
+    }).item;
+
+    await botWorkshopService.restartPublish(bot);
+
+    expect(mockedRestartLifecycle).toHaveBeenCalledTimes(1);
+    expect(mockedRestartLifecycle).toHaveBeenCalledWith('service-publish-bot', stage);
+  });
+
+  test.each([
+    ['服务草稿卡（draft）没有发布阶段，拒绝重启发布', 'service_draft'],
+    ['部署中的服务卡拒绝重启发布', 'service_deploying'],
+  ] as const)('%s', async (_name, displayState) => {
+    const bot = mapBotDto({
+      bot_id: 'service-no-stage-bot',
+      bot_name: '无阶段服务',
+      engine: 'openclaw',
+      kind: 'service',
+      bot_type: 'service',
+      display_state: displayState,
+      actions: ['view', 'restart'],
+    }).item;
+
+    await expect(botWorkshopService.restartPublish(bot)).rejects.toThrow('当前发布状态不支持重启发布');
+    expect(mockedRestartLifecycle).not.toHaveBeenCalled();
   });
 });

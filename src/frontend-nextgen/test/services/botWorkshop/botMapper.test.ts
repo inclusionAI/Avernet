@@ -15,6 +15,20 @@ describe('botMapper', () => {
     expect(result.item.lifecycle).toBe('draft');
   });
 
+  test('bot_type 大小写不敏感地推导 serviceMode（与 lifecycle 口径一致）', () => {
+    const result = mapBotDto({
+      bot_id: 'service-case-1',
+      bot_name: '大写类型服务 Bot',
+      engine: 'openclaw',
+      bot_type: 'SERVICE',
+      status: 'ACTIVE',
+      owner_entity_id: 'owner-1',
+    });
+
+    expect(result.item.serviceMode).toBe('service');
+    expect(result.item.lifecycle).toBe('draft');
+  });
+
   test('将接口字段映射为稳定领域模型', () => {
     const result = mapBotDto({
       bot_id: 'b-1',

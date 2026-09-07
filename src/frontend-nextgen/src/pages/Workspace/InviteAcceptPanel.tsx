@@ -2,7 +2,7 @@ import { Button, Empty, Spin } from '@/components/ui';
 import { useInviteAccept } from '@/pages/Workspace/hooks/useInviteAccept';
 import { Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 /**
@@ -13,12 +13,11 @@ import { toast } from 'sonner';
  * 已加入 / 成功加入后跳转到 `/workspace?tab=group[&group=#groupId]`。
  */
 export function InviteAcceptPanel() {
-  const params = useParams<{ token?: string }>();
+  const params = useParams<{ token?: string; type?: string }>();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const token = params.token ?? '';
-  const typeParam = searchParams.get('type');
-  const inviteType = typeParam === 'group' || typeParam === 'session' ? typeParam : undefined;
+  // 邀请类型来自路径段：/workspace/invite/groups/:token | /workspace/invite/sessions/:token
+  const inviteType = params.type === 'groups' ? 'group' : params.type === 'sessions' ? 'session' : undefined;
   const { status, friendlyMessage, targetType, targetId, groupId, alreadyJoined, accept, resetToConfirm } =
     useInviteAccept(token);
   const targetLabel = inviteType === 'session' ? '该会话' : '该协作群';

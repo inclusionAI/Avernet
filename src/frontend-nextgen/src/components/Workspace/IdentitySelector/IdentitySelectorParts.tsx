@@ -34,15 +34,15 @@ export function IdentityAvatar({
 }
 
 function BotRuntimeStatus({ identity }: { identity: Identity }) {
-  const isOnline = identity.chatStatus === 'online';
+  const isOnline = identity.reachability ? identity.reachability !== 'unreachable' : identity.chatStatus === 'online';
   const runtimeStatus = (
     <span
-      aria-label={`Bot ${isOnline ? '在线' : '不在线'}`}
+      aria-label={`Bot ${isOnline ? '在线' : '离线'}`}
       className="inline-flex items-center gap-1"
       tabIndex={isOnline ? undefined : 0}
     >
       <span className={cn('h-1.5 w-1.5 rounded-full', isOnline ? 'bg-success' : 'bg-muted-foreground')} aria-hidden />
-      {isOnline ? '在线' : '不在线'}
+      {isOnline ? '在线' : '离线'}
     </span>
   );
 

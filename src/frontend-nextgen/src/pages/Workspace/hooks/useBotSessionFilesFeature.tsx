@@ -81,6 +81,7 @@ export function useBotSessionFilesFeature(
   }, []);
 
   const enabled = !!botId && !!sessionId && !!userId;
+  const canUseSkills = !bot?.isFriendBot;
 
   const fileChip = useMemo<FileChipConfig>(
     () => ({
@@ -121,72 +122,77 @@ export function useBotSessionFilesFeature(
     [skillsState.skills],
   );
 
+  const commandItems = useMemo<CommandItem[]>(() => {
+    const skillCommand: CommandItem = {
+      id: '__skill_entry__',
+      name: 'skill',
+      description: '唤起技能面板',
+      icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
+      preventInsert: true,
+      subConfig: {
+        label: '技能',
+        categories: [
+          {
+            key: '__skill_list__',
+            label: '技能',
+            icon: <Zap className="h-3.5 w-3.5" />,
+            items: skillItems,
+            emptyText: skillsState.isLoading ? '加载中…' : '暂无可用技能',
+          },
+        ],
+        onSelect: (item) => {
+          if (item.name) handleSelectSkill(item.name);
+        },
+        format: (item) => `/${item.name}`,
+      },
+    };
+    return [
+      ...(canUseSkills ? [skillCommand] : []),
+      {
+        id: '__file_entry__',
+        name: 'file',
+        description: '引用本会话已上传的文件',
+        icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
+        preventInsert: true,
+        subConfig: {
+          label: '文件',
+          categories: [
+            {
+              key: '__session_file__',
+              label: '文件',
+              icon: <FileIcon className="h-3.5 w-3.5" />,
+              items: fileSubItems,
+              emptyText: files.isLoadingList ? '加载中…' : '暂无可引用文件,请先上传',
+            },
+          ],
+          onSelect: () => {},
+          format: () => '',
+        },
+      },
+      {
+        id: '__clear__',
+        name: 'clear',
+        description: '清空当前会话上下文',
+        icon: <Eraser className="h-3.5 w-3.5 text-muted-foreground" />,
+        preventInsert: true,
+        onSelect: () => void onClear(),
+      },
+    ];
+  }, [canUseSkills, skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill]);
+
   const command = useMemo<CommandConfig>(
     () => ({
       categories: [
         {
           key: '__bot_commands__',
           label: '命令',
-          items: [
-            {
-              id: '__skill_entry__',
-              name: 'skill',
-              description: '唤起技能面板',
-              icon: <Zap className="h-3.5 w-3.5 text-muted-foreground" />,
-              preventInsert: true,
-              subConfig: {
-                label: '技能',
-                categories: [
-                  {
-                    key: '__skill_list__',
-                    label: '技能',
-                    icon: <Zap className="h-3.5 w-3.5" />,
-                    items: skillItems,
-                    emptyText: skillsState.isLoading ? '加载中…' : '暂无可用技能',
-                  },
-                ],
-                onSelect: (item) => {
-                  if (item.name) handleSelectSkill(item.name);
-                },
-                format: (item) => `/${item.name}`,
-              },
-            },
-            {
-              id: '__file_entry__',
-              name: 'file',
-              description: '引用本会话已上传的文件',
-              icon: <FileIcon className="h-3.5 w-3.5 text-muted-foreground" />,
-              preventInsert: true,
-              subConfig: {
-                label: '文件',
-                categories: [
-                  {
-                    key: '__session_file__',
-                    label: '文件',
-                    icon: <FileIcon className="h-3.5 w-3.5" />,
-                    items: fileSubItems,
-                    emptyText: files.isLoadingList ? '加载中…' : '暂无可引用文件,请先上传',
-                  },
-                ],
-                onSelect: () => {},
-                format: () => '',
-              },
-            },
-            {
-              id: '__clear__',
-              name: 'clear',
-              description: '清空当前会话上下文',
-              icon: <Eraser className="h-3.5 w-3.5 text-muted-foreground" />,
-              preventInsert: true,
-              onSelect: () => void onClear(),
-            },
-          ],
+          items: commandItems,
         },
       ],
       onSelect: () => {},
       format: () => '',
     }),
-    [skillItems, fileSubItems, skillsState.isLoading, files.isLoadingList, onClear, handleSelectSkill],
+    [commandItems],
   );
 
   // 上传文件/文件管理已移入 ComposerCapabilitiesMenu（onUpload/onManageFiles），

@@ -1,5 +1,6 @@
 import { extendCapabilities, getCapabilities, sealExtensions } from '@/capabilities';
 import { ExternalLoginPromptModal } from '@/components/ExternalLoginPromptModal';
+import { InviteCodeBindingModal } from '@/components/InviteCodeBindingModal';
 import { Toaster } from '@/components/ui/sonner';
 import { appExtension, registerSidePanelWiring } from '@/extensions';
 import { useErrorNotifyObserver } from '@/hooks/useErrorNotifyObserver';
@@ -46,6 +47,7 @@ export function rootContainer(container: React.ReactNode) {
     React.createElement(GatewayLoginRedirector),
     React.createElement(ErrorNotifyObserver),
     React.createElement(ExternalLoginPromptModal),
+    React.createElement(InviteCodeBindingModal),
     React.createElement(Toaster),
   );
 }

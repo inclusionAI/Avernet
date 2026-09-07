@@ -37,25 +37,26 @@ export function useSessionMemberSync(
    * 此值变化触发 effect 重新拉取详情，避免竞态丢失详情。
    */
   participantsCount: number,
+  sessionMap: Record<string, SessionView[]>,
 ): UseSessionMemberSyncResult {
   const pendingDetailRef = useRef<SessionView | null>(null);
 
   const applyDetail = useCallback(
     (detail: SessionView) => {
+      if (detail.participants.length === 0) return;
       applyMapUpdate((cur) => {
         const next = { ...cur };
-        for (const gid of Object.keys(next)) {
-          const idx = next[gid].findIndex((s) => s.sessionId === detail.sessionId);
-          if (idx < 0) continue;
-          const existing = next[gid][idx];
+        const list = next[detail.groupId] ? [...next[detail.groupId]] : [];
+        const idx = list.findIndex((s) => s.sessionId === detail.sessionId);
+        if (idx >= 0) {
+          const existing = list[idx];
           if (existing.participants.length > 0) return cur;
-          const merged: SessionView = { ...existing, participants: detail.participants };
-          const list = [...next[gid]];
-          list[idx] = merged;
-          next[gid] = list;
-          return next;
+          list[idx] = { ...existing, participants: detail.participants };
+        } else {
+          list.push(detail);
         }
-        return cur;
+        next[detail.groupId] = list;
+        return next;
       });
     },
     [applyMapUpdate],
@@ -64,8 +65,8 @@ export function useSessionMemberSync(
   // 选中会话变化或 participants 归零时拉详情。
   // participantsCount 作为依赖：身份切换后列表刷新 participants 归零，effect 重新触发。
   useEffect(() => {
+    pendingDetailRef.current = null;
     if (!selectedSessionId) {
-      pendingDetailRef.current = null;
       return;
     }
     let cancelled = false;
@@ -78,6 +79,12 @@ export function useSessionMemberSync(
       cancelled = true;
     };
   }, [selectedSessionId, participantsCount, applyDetail]);
+
+  useEffect(() => {
+    const detail = pendingDetailRef.current;
+    if (!detail || detail.sessionId !== selectedSessionId) return;
+    applyDetail(detail);
+  }, [applyDetail, selectedSessionId, sessionMap]);
 
   const updateMemberMode = useCallback(
     async (sessionId: string, actorId: string, mode: ParticipantMode): Promise<boolean> => {

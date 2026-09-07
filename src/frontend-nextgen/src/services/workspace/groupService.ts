@@ -46,7 +46,7 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   driver: 'driver',
   manager: 'manager',
   consultant: 'member',
-  worker: 'member',
+  worker: 'worker',
   observer: 'member',
 };
 
@@ -155,6 +155,7 @@ export const groupService = {
         createdAt: d.created_at,
         participantCount: d.participants.length,
         ownerUserId: d.originator_actor_id,
+        driverBotUuid: d.driver_bot_uuid,
         ...(d.initial_session_id ? { initialSessionId: d.initial_session_id } : {}),
         ...(d.membership ? { membership: d.membership } : {}),
         isPublic: d.visibility === 'public',
@@ -213,8 +214,9 @@ export const groupService = {
     const isDriverOrManager = group.participants.some(
       (p) => p.actorId === identityId && (p.role === 'driver' || p.role === 'manager'),
     );
-    if (isOwner || isDriverOrManager) return { allowed: true };
-    return { allowed: false, disabledReason: '仅群主/主节点或驾驶位可管理该协作群' };
+    const isDriverBot = group.driverBotUuid === identityId;
+    if (isOwner || isDriverOrManager || isDriverBot) return { allowed: true };
+    return { allowed: false, disabledReason: '仅群主/主节点可管理该协作群' };
   },
 
   canDissolveGroup(group: GroupView | null, identityId: string | null): PolicyResult {

@@ -747,7 +747,11 @@ describe('CollaborationSquareApiAdapter', () => {
     await expect(new CollaborationSquareApiAdapter().openBotConversation('bot-1:2088', humanContext)).resolves.toEqual({
       sessionId: 'session-1',
     });
-    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '327325', owner_id: '2088' }, {});
+    expect(mockedCreateBotSession).toHaveBeenCalledWith(
+      'bot-1',
+      { user_id: '327325', owner_id: '2088', f_user_id: '327325' },
+      {},
+    );
   });
 
   it('rejects a session response without session_id as a protocol error', async () => {

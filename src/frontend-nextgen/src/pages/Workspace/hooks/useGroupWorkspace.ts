@@ -51,7 +51,6 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   );
 
   const [sessionGroups, setSessionGroups] = useState<GroupView[]>([]);
-  const [selectedGroupFallback, setSelectedGroupFallback] = useState<GroupView | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
 
@@ -121,22 +120,12 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   );
 
   const selectedGroup = useMemo(
-    () =>
-      sessionGroups.find((g) => g.groupId === selectedGroupId) ??
-      (selectedGroupFallback?.groupId === selectedGroupId ? selectedGroupFallback : null),
-    [selectedGroupFallback, selectedGroupId, sessionGroups],
+    () => sessionGroups.find((g) => g.groupId === selectedGroupId) ?? null,
+    [selectedGroupId, sessionGroups],
   );
 
-  // 选中群详情兜底与 membership 反推已拆到 useSelectedGroupDetail（控 Hook 体积）。
-  useSelectedGroupDetail(
-    selectedGroupId,
-    activeIdentityId,
-    selectedGroup,
-    sessionGroups,
-    isGroupsLoading,
-    setSelectedGroupFallback,
-    setSessionGroups,
-  );
+  // 深链选中群的成员视角兜底已拆到 useSelectedGroupDetail（控 Hook 体积）。
+  useSelectedGroupDetail(selectedGroupId, sessionGroups, isGroupsLoading);
 
   const canManageGroup = useMemo<PolicyResult>(
     () => groupService.canManageGroup(selectedGroup, activeIdentityId),

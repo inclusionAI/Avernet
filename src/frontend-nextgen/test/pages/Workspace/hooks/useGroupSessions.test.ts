@@ -364,3 +364,106 @@ it('clears the load-more state when a concurrent reload fails', async () => {
   });
   expect(result.current.isLoadingMoreSessionsByGroupId.g1).toBe(false);
 });
+
+it('记忆的选中会话已不存在：反查失败后回落到首条', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
+    ok: true,
+    data: [session('s1', 'g1', '一号'), session('s2', 'g1', '二号')],
+  });
+  useWorkspaceStore.getState().selectGroup('g1');
+  useWorkspaceStore.getState().selectSession('gone');
+  renderHook(() => useGroupSessions('g1'));
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
+  await waitFor(() => expect(ss.getSessionDetail).toHaveBeenCalledWith('gone'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('s1'));
+});
+
+it('记忆的选中会话超出已加载分页：反查成功则前置补入并保持选中', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  ss.getSessionDetail.mockResolvedValue({ ok: true, data: session('s-deep', 'g1', '深处会话') });
+  useWorkspaceStore.getState().selectGroup('g1');
+  useWorkspaceStore.getState().selectSession('s-deep');
+  const { result } = renderHook(() => useGroupSessions('g1'));
+  await waitFor(() => expect(ss.getSessionDetail).toHaveBeenCalledWith('s-deep'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('s-deep'));
+  await waitFor(() => expect(result.current.sessions.map((s) => s.sessionId)).toContain('s-deep'));
+});
+
+it('兜底反查在途时用户已切换选中：失败回调不得劫持新选中', async () => {
+  const detailResolvers: Array<
+    (value: { ok: false; error: { code: string; friendlyMessage: string; canRetry: boolean } }) => void
+  > = [];
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({
+    ok: true,
+    data: [session('s1', 'g1', '一号'), session('s2', 'g1', '二号')],
+  });
+  ss.getSessionDetail.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        detailResolvers.push(resolve);
+      }),
+  );
+  useWorkspaceStore.getState().selectGroup('g1');
+  useWorkspaceStore.getState().selectSession('gone');
+  renderHook(() => useGroupSessions('g1'));
+  await waitFor(() => expect(ss.getSessionDetail).toHaveBeenCalledWith('gone'));
+
+  // 反查在途期间用户点选了 s2（useSessionMemberSync 也会对 s2 发起 detail 反查，一并入队）。
+  act(() => {
+    useWorkspaceStore.getState().selectSession('s2');
+  });
+  await act(async () => {
+    // 排空所有在途 detail 请求：memberSync 的失败回调是 no-op，兜底的失败回调触发劫持路径。
+    detailResolvers
+      .splice(0)
+      .forEach((resolve) => resolve({ ok: false, error: { code: 'X', friendlyMessage: 'fail', canRetry: false } }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(useWorkspaceStore.getState().selectedSessionId).toBe('s2');
+});
+
+it('身份切换后过期的兜底反查响应不得回填新身份列表', async () => {
+  const detailResolvers: Array<(value: { ok: true; data: SessionView }) => void> = [];
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  ss.getSessionDetail.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        detailResolvers.push(resolve);
+      }),
+  );
+  useWorkspaceStore.getState().selectGroup('g1');
+  useWorkspaceStore.getState().selectSession('gone');
+  const { result } = renderHook(() => useGroupSessions('g1'));
+  await waitFor(() => expect(ss.getSessionDetail).toHaveBeenCalledWith('gone'));
+
+  // 反查在途时切换身份：useSessionMap 同步清缓存并递增 epoch。
+  act(() => {
+    useWorkspaceStore.setState({ activeIdentityId: 'other' });
+  });
+  await act(async () => {
+    // 排空所有在途 detail 请求（memberSync 的成功回调因 participants 为空是 no-op）。
+    detailResolvers
+      .splice(0)
+      .forEach((resolve) => resolve({ ok: true, data: session('gone', 'g1', '旧身份深处会话') }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  // 旧身份的会话不得出现在新身份的缓存里。
+  expect(result.current.sessionsByGroupId.g1 ?? []).not.toEqual(
+    expect.arrayContaining([expect.objectContaining({ sessionId: 'gone' })]),
+  );
+});
+
+it('选中归属其他群（参数群滞后）时兜底不得误清选中', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  ss.createNewSession.mockResolvedValue({ ok: true, data: session('g2-s9', 'g2', '新会话') });
+  const { result } = renderHook(() => useGroupSessions('g1'));
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalled());
+  // 跨群新建过渡帧（同 multiGroup 回归场景）：createSessionIn 更新 map 触发兜底 effect 重跑，
+  // store 已选中 g2/g2-s9，但 hook 参数群仍是 g1 —— 兜底不得反查/回落清掉他群选中。
+  await act(async () => {
+    await result.current.createSessionIn('g2', '新会话');
+  });
+  expect(useWorkspaceStore.getState().selectedSessionId).toBe('g2-s9');
+});

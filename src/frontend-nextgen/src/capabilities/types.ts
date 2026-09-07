@@ -121,6 +121,16 @@ export interface MetricsDashboardSpec {
 export type LoginStrategy = 'ace-gateway' | 'oauth-provider';
 
 /**
+ * 邀请码门禁策略（仅外部 `oauth-provider` 形态生效，配合 `getLoginStrategy` 双门控）：
+ * - `enabled`：对接后端邀请码准入门禁——登录建身份后未绑码则弹不可关闭输入弹窗，提交有效码后解锁。
+ *   Open Core 默认（=阿里云外部生产形态，gate 为产品对外准入控制，对齐既有「Open Core 默认即外部形态」约定）。
+ * - `disabled`：不激活门禁（不主动查 `/me`、不弹窗）。internal overlay（员工形态，ACE 后端无邀请码端点）。
+ * 反应式识别后端 `invite_code_required` 403 仍无条件于 `oauth-provider` 下生效（不受本 capability 约束，作安全网）。
+ * 同步签名，不发请求。
+ */
+export type InviteCodeGatePolicy = 'enabled' | 'disabled';
+
+/**
  * 任务认领授权策略：决定「任务认领」开关的 grant/revoke 是否经 secbaas 做 per-bot api-key 授权。
  * - `secbaas-relay`：内部部署，api-key 须经 secbaas `allowed-bots/grant` 授权才能调某 bot；grant/revoke 透传人类 Cookie(spanner) 到 secbaas。
  * - `skip`：Open Core / 开源部署，api-key 直发消息无需 per-bot 授权（secbaas 链路不通且无必要）；grant/revoke 短路 no-op，开关只写 BCS `task_claim_mode`。
@@ -272,6 +282,12 @@ export interface AppCapabilities {
    * `status==='unsupported'` 时调用方按 `ace-gateway` 兜底。同步签名，不发请求。
    */
   getLoginStrategy: () => CapabilityResult<LoginStrategy>;
+  /**
+   * 邀请码门禁策略（见 `InviteCodeGatePolicy`）：Open Core 默认 `enabled`（=阿里云外部形态）；
+   * internal overlay 覆盖为 `disabled`（员工形态）。`ace-gateway` 策略下门禁完全不激活（与 capability 双门控）。
+   * 同步签名，不发请求；门禁生效性经 `getLoginStrategy()` + 本 capability 双门控，禁止散落 `if(isInternal)`。
+   */
+  getInviteCodeGatePolicy: () => CapabilityResult<InviteCodeGatePolicy>;
   /**
    * 任务模块 API 路径前缀（execute/dashboard/list/grant/revoke 共用；bbs/list 暂不纳入，后端 openapi 面未开放）。
    * Open Core 默认 `/openapi/v1/collaboration/tasks`（后端 openapi_v1/task 公开面，经 gateway spanner 鉴权；admission 已 OPEN execute/dashboard/list/grant/revoke）；

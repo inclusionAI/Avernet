@@ -385,15 +385,15 @@ describe('identityService.loadIdentities', () => {
     expect(listBots).toHaveBeenCalledWith({ page: 1, page_size: 100, user_id: '447147' });
   });
 
-  it('maps bot runtime status and group-chat reachability independently', async () => {
+  it('maps bot runtime status from mine reachability', async () => {
     listMyBots.mockResolvedValue({
       code: 20000,
       message: '',
       request_id: 'r',
       data: {
         items: [
-          { kind: 'bot', bot_id: 'b-online', name: '在线Bot', status: 'online', reachability: 'reachable' },
-          { kind: 'bot', bot_id: 'b-hidden', name: '隐身Bot', status: 'hidden', reachability: 'unreachable' },
+          { kind: 'bot', bot_id: 'b-online', name: '在线Bot', status: 'hidden', reachability: 'reachable' },
+          { kind: 'bot', bot_id: 'b-hidden', name: '隐身Bot', status: 'online', reachability: 'unreachable' },
         ],
         total: 2,
         offset: 0,

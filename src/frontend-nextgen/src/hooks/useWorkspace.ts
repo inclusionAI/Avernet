@@ -78,7 +78,12 @@ export function useWorkspace(options: UseWorkspaceOptions = {}) {
     [chatBots, friendBots],
   );
   const expandedBotIdList = useMemo(() => Object.keys(expandedBotIds), [expandedBotIds]);
-  const botSessions = useBotSessions(allChatBots, expandedBotIdList, activeIdentityId);
+  const botSessions = useBotSessions(
+    allChatBots,
+    expandedBotIdList,
+    activeIdentityId,
+    isMyBotsLoading || isFriendBotsLoading,
+  );
   const selectedChatBot = useMemo(
     () => allChatBots.find((b) => b.botId === botSessions.selectedSession?.botId) ?? null,
     [allChatBots, botSessions.selectedSession],

@@ -29,6 +29,7 @@ describe('mappers', () => {
       lastMessageAt: 1700000100000,
       createdAt: 1700000000000,
       participantCount: 3,
+      driverBotUuid: 'bot-uuid-1',
       deliveryPolicy: 'send_to_driver',
       // dto.membership 存在时 mapper 原样透传（mappers.ts:67）
       membership: 'direct',

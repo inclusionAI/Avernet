@@ -1,4 +1,4 @@
-import type { GroupView } from '@/domain/collaboration';
+import type { GroupView, SessionView } from '@/domain/collaboration';
 import { bcsfuseService, type FusionBotInfo } from '@/services/workspace/bcsfuseService';
 import { useFuseStore, type FuseMessage, type FuseParticipant } from '@/stores/fuseStore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -10,7 +10,11 @@ export type { FusionBotInfo };
  * useFuse —— 融合模式问答 + Worker 画像公开配置。
  * 对齐 open-claw useFuse，接口改为 /openapi/v1/bcsfuse/* 且响应经 BackendApiEnvelope 包裹。
  */
-export function useFuse(group: GroupView | null, sessionId: string | null) {
+export function useFuse(
+  group: GroupView | null,
+  sessionId: string | null,
+  sessionParticipants: SessionView['participants'],
+) {
   const messagesMap = useFuseStore((s) => s.messagesMap);
   const fusingSessionIds = useFuseStore((s) => s.fusingSessionIds);
   const addMessage = useFuseStore((s) => s.addMessage);
@@ -26,12 +30,12 @@ export function useFuse(group: GroupView | null, sessionId: string | null) {
   const [isLoadingFusionBots, setIsLoadingFusionBots] = useState(false);
 
   const fetchFusionBots = useCallback(async () => {
-    if (!group?.participants) return;
+    if (!group || sessionParticipants.length === 0) return;
     setIsLoadingFusionBots(true);
-    const res = await bcsfuseService.getFusionBots(group.participants);
+    const res = await bcsfuseService.getFusionBots(sessionParticipants);
     setFusionBots(res.ok ? res.data : []);
     setIsLoadingFusionBots(false);
-  }, [group]);
+  }, [group, sessionParticipants]);
 
   useEffect(() => {
     if (group) void fetchFusionBots();
@@ -40,13 +44,13 @@ export function useFuse(group: GroupView | null, sessionId: string | null) {
   const submitQuestion = useCallback(
     async (question: string, selectedBotIds?: string[]) => {
       if (!group?.groupId || !sessionId || !question.trim() || isFusing) return;
-      const participants = selectedBotIds?.length
+      const selectedParticipants = selectedBotIds?.length
         ? selectedBotIds
         : fusionBots.filter((b) => b.fusionEnable).map((b) => b.botUuid);
-      if (participants.length === 0) return;
+      if (selectedParticipants.length === 0) return;
       const driverBotId =
-        group.participants.find((p) => p.role === 'driver')?.actorId || group.participants[0]?.actorId || '';
-      const participantInfos: FuseParticipant[] = participants
+        sessionParticipants.find((p) => p.role === 'driver')?.actorId || sessionParticipants[0]?.actorId || '';
+      const participantInfos: FuseParticipant[] = selectedParticipants
         .map((id) => {
           const bot = fusionBots.find((b) => b.botUuid === id);
           return bot ? { id: bot.botUuid, name: bot.name, avatar: bot.avatar } : null;
@@ -73,7 +77,7 @@ export function useFuse(group: GroupView | null, sessionId: string | null) {
         session_id: sessionId,
         question: question.trim(),
         driver_bot_id: driverBotId,
-        participants,
+        participants: selectedParticipants,
         fusion_mode: 'bot_profile_fuse',
         options: { timeout_ms: 180000 },
       });
@@ -86,7 +90,17 @@ export function useFuse(group: GroupView | null, sessionId: string | null) {
       setSessionFusing(sessionId, false);
       setUnreadSession(sessionId, true);
     },
-    [group, sessionId, isFusing, fusionBots, addMessage, updateMessage, setSessionFusing, setUnreadSession],
+    [
+      group,
+      sessionParticipants,
+      sessionId,
+      isFusing,
+      fusionBots,
+      addMessage,
+      updateMessage,
+      setSessionFusing,
+      setUnreadSession,
+    ],
   );
 
   return { messages, isFusing, submitQuestion, clearSessionMessages, fusionBots, isLoadingFusionBots };

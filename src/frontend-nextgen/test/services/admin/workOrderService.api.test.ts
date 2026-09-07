@@ -2,29 +2,39 @@
 import { workOrderService } from '@/services/admin/workOrderService';
 import * as notificationController from '@/services/backendApi/admin/notificationController';
 import * as workOrderController from '@/services/backendApi/admin/workOrderController';
+import { getCapabilities } from '@/capabilities';
 import { identityService } from '@/services/workspace/identityService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 jest.mock('@/services/backendApi/admin/workOrderController');
 jest.mock('@/services/backendApi/admin/notificationController');
-// ensureUserId 在 activeIdentityId 未就绪时补拉 identityService.loadIdentities；
-// stub @tc-chat/adapters ESM transitive（identityService→testUser→supportProvider）。
+// ensureUserId 数据源 = getCapabilities().getHumanIdentity()；auto-mock 出可控能力访问器（避免在 hoisted factory 内引用 jest）。
+// capability 未就绪时 ensureUserId 仍走 identityService.loadIdentities 兜底（默认失败降级为 error）。
+jest.mock('@/capabilities');
 jest.mock('@/services/workspace/identityService');
 jest.mock('@tc-chat/adapters', () => ({}));
 
 const wc = workOrderController as unknown as Record<string, jest.Mock<any>>;
+const getCapabilitiesMock = getCapabilities as unknown as jest.Mock;
 // notificationController 被 mock 以隔离 markNotificationRead（本文件不测它）。
 void (notificationController as unknown as Record<string, jest.Mock<any>>);
 
+/** 固定能力：恒返回给定操作者身份（null = 未就绪）。默认 userId-only（不落 user_name）。 */
+function setUserIdentity(value: { userId: string; displayName?: string | null } | null): void {
+  const capVal = value ? { userId: value.userId, displayName: value.displayName ?? null } : null;
+  getCapabilitiesMock.mockReturnValue({
+    getHumanIdentity: () => ({ status: 'available', value: capVal }),
+  });
+}
+
 beforeEach(() => {
   jest.resetAllMocks();
-  useWorkspaceStore.setState({ activeIdentityId: 'human_327325' });
-  // 命中缓存用例不调 loadIdentities；未就绪用例走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
+  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 error（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
+  setUserIdentity({ userId: '327325', displayName: null });
 });
 
 describe('workOrderService.list 参数对齐 clawweb=Avernet', () => {
@@ -62,8 +72,8 @@ describe('workOrderService.list 参数对齐 clawweb=Avernet', () => {
     );
   });
 
-  it('activeIdentityId 未就绪时返回 error 不发请求', async () => {
-    useWorkspaceStore.setState({ activeIdentityId: null });
+  it('能力未就绪时返回 error 不发请求', async () => {
+    setUserIdentity(null);
     const r = await workOrderService.list({ view: 'pending_mine', category: 'ALL' });
     expect(r.error).toBeDefined();
     expect(wc.listWorkOrders).not.toHaveBeenCalled();
@@ -102,11 +112,8 @@ describe('workOrderService.approve / reject → 统一审批入口', () => {
   });
 
   it('approve 传 user_name(花名) query（同 requestJoin 契约，审批人随 user_id 写入工单）', async () => {
-    // 注入 identities 使 ensureUserName 经 getHumanIdentity 命中花名缓存（不调 loadIdentities）。
-    useWorkspaceStore.setState({
-      activeIdentityId: 'human_327325',
-      identities: [{ id: 'human_327325', kind: 'user', displayName: '风太', online: true }],
-    });
+    // 能力命中花名缓存（不调 loadIdentities）。
+    setUserIdentity({ userId: '327325', displayName: '风太' });
     wc.submitWorkOrderApproval.mockResolvedValue({ success: true, data: {} });
     await workOrderService.approve(30001);
     expect(wc.submitWorkOrderApproval).toHaveBeenCalledWith(

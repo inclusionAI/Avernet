@@ -19,7 +19,7 @@ import { FuseSlot } from './FuseSlot';
 import { GroupChatComposer } from './GroupChatComposer';
 import { GroupChatMessageList } from './GroupChatMessageList';
 import type { GroupChatPaneProps } from './GroupChatPane.types';
-import { buildGroupMentionConfig } from './mentionHelpers';
+import { buildGroupMentionConfig, isHumanOnlyMention } from './mentionHelpers';
 import { resolveSender } from './messageHelpers';
 export { resolveSender };
 export function GroupChatPane(props: GroupChatPaneProps) {
@@ -76,8 +76,13 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     onStop: stop,
   });
   const mentionConfig: MentionConfig | undefined = useMemo(
-    () => (activeIdentity?.kind === 'user' ? buildGroupMentionConfig(session?.participants ?? []) : undefined),
-    [activeIdentity?.kind, session?.participants],
+    () =>
+      activeIdentity?.kind === 'user'
+        ? buildGroupMentionConfig(session?.participants ?? [], {
+            excludedActorIds: activeIdentity.id ? [activeIdentity.id] : [],
+          })
+        : undefined,
+    [activeIdentity?.id, activeIdentity?.kind, session?.participants],
   );
 
   const taskComposerContext = useMemo<TaskComposerContext | null>(() => {
@@ -106,6 +111,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   });
 
   const [draft, setDraft] = useState('');
+  const [lastSentMentions, setLastSentMentions] = useState<string[]>([]);
   const { editingMessageId, editMessage, cancelEdit, finishEdit } = useMessageEdit({
     sessionId: session?.sessionId,
     isRequesting,
@@ -114,6 +120,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   });
   useEffect(() => {
     setDraft('');
+    setLastSentMentions([]);
     panelRef.current?.closePanelForce();
   }, [session?.sessionId, panelRef]);
   const handlePanelAction = (action: PanelAction) => {
@@ -144,6 +151,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     messageInteractions.markRead();
     messageInteractions.clearQuote();
     finishEdit();
+    setLastSentMentions(mentions ?? []);
     send(content, mentions, attachments);
   };
   if (!group) {
@@ -159,6 +167,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   }
 
   const showError = supportState.phase === 'error';
+  const isWaitingForBot = !isHumanOnlyMention(lastSentMentions, session?.participants ?? []);
   const showReconnectToolbar =
     connectionStatus === 'error' || connectionStatus === 'disconnected' || connectionStatus === 'reconnecting';
 
@@ -220,7 +229,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 messages={messages}
                 group={group}
                 session={session}
-                isRequesting={isRequesting}
+                isRequesting={isRequesting && isWaitingForBot}
                 groupBootstrapProcessing={groupBootstrapProcessing}
                 hasMoreHistory={hasMoreHistory}
                 isLoadingMoreHistory={isLoadingMoreHistory}
@@ -241,7 +250,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         {session && activeIdentity?.kind !== 'bot' && !collabPanel.humanAbsentOnly ? (
           <GroupChatComposer
             session={session}
-            isRequesting={isRequesting}
+            isRequesting={isRequesting && isWaitingForBot}
             connectionStatus={connectionStatus}
             mentionConfig={mentionConfig}
             showReconnectToolbar={showReconnectToolbar}
@@ -262,7 +271,14 @@ export function GroupChatPane(props: GroupChatPaneProps) {
         ) : null}
         <ChatLayout.Panel ref={panelRef} onAction={handlePanelAction} bridge={chatBridge} />
       </ChatLayout>
-      {session && <FuseSlot group={group} sessionId={session.sessionId} viewerName={activeIdentity?.displayName} />}
+      {session && (
+        <FuseSlot
+          group={group}
+          session={session}
+          sessionId={session.sessionId}
+          viewerName={activeIdentity?.displayName}
+        />
+      )}
     </section>
   );
 }
