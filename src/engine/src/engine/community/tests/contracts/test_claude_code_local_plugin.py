@@ -8,6 +8,8 @@ local plugin, no ``world`` fixture.
 """
 from __future__ import annotations
 
+import pytest
+
 from engine.community.core.adapters.claude_code.session import ClaudeCodeSessionAdapter
 from engine.community.core.session.models import SessionListRequest
 from engine.community.kernel.frames import EventFrame
@@ -60,7 +62,7 @@ async def test_local_claude_code_plugin_contract_smoke():
 
     # file: upload -> read -> list_dir
     await plugin.file_upload("/tmp/a.txt", b"hello")
-    assert (await plugin.file_read("/tmp/a.txt"))["content"] == "hello"
+    assert (await plugin.file_read("/tmp/a.txt"))["content"] == b"hello"
     assert (await plugin.file_list_dir("/tmp"))[0]["name"] == "a.txt"
 
     # commands: list -> get (None)
@@ -247,12 +249,14 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     # file CRUD + rmtree + list_dir.
     await plugin.file_upload("/tmp/a.txt", b"a")
     await plugin.file_upload("/tmp/dir/b.txt", b"b")
-    assert (await plugin.file_read("/tmp/a.txt"))["content"] == "a"
+    assert (await plugin.file_read("/tmp/a.txt"))["content"] == b"a"
     assert len(await plugin.file_list_dir("/tmp")) == 2
-    assert await plugin.file_remove("/tmp/a.txt") is True
-    assert await plugin.file_remove("/tmp/a.txt") is False
+    assert (await plugin.file_remove("/tmp/a.txt"))["path_type"] == "file"
+    with pytest.raises(FileNotFoundError):
+        await plugin.file_remove("/tmp/a.txt")
     assert await plugin.file_rmtree("/tmp/dir") is True
-    assert await plugin.file_rmtree("/tmp/dir") is False
+    with pytest.raises(FileNotFoundError):
+        await plugin.file_rmtree("/tmp/dir")
     assert (await plugin.file_list_dir("/tmp")) == []
 
     # commands + relay never raise and return uniform shapes.
@@ -267,3 +271,21 @@ async def test_local_claude_code_plugin_stateful_ports_and_error_branches():
     assert (await plugin.resolve_exec_approval("s", "r1", "allow"))["payload"]["decision"] == "allow"
     assert (await plugin.resolve_interaction("s", "r1", "yes"))["payload"]["response"] == "yes"
     assert (await plugin.resolve_mode_transition("s", "r1", "accept"))["payload"]["decision"] == "accept"
+
+
+@pytest.mark.parametrize("implementation", ["memory", "filesystem"])
+async def test_file_adapter_distinguishes_missing_and_empty_directories(tmp_path, implementation):
+    from engine.community.core.adapters.claude_code.file import ClaudeCodeFileAdapter
+    from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
+    port = LocalClaudeCodePluginImpl() if implementation == "memory" else ClaudeCodePluginImpl(file_roots=(tmp_path,))
+    adapter = ClaudeCodeFileAdapter(port)
+    project = str(tmp_path / 'project')
+    with pytest.raises(FileNotFoundError):
+        await adapter.list_dir(project)
+    await adapter.upload(project + '/last.bin', b'\xff\x00')
+    assert await adapter.read(project + '/last.bin') == b'\xff\x00'
+    await adapter.remove(project + '/last.bin')
+    assert (await adapter.list_dir(project)).files == []
+    await adapter.rmtree(project)
+    with pytest.raises(FileNotFoundError):
+        await adapter.list_dir(project)

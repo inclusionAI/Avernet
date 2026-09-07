@@ -22,9 +22,8 @@ Capability matrix is declared here (community-side), mirroring the corp
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import logging
+from pathlib import Path
 
 from engine.community.core.cli_tools.service import LocalCliToolsService
 from engine.community.core.adapters.claude_code.chat import ClaudeCodeChatAdapter
@@ -38,6 +37,9 @@ from engine.community.core.adapters.claude_code.skills import ClaudeCodeSkillsAd
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
 from engine.community.core.engine.capability import Capability, EngineCapabilities
+from engine.community.config import (
+    load_claude_code_file_roots,
+)
 from engine.community.plugins.claude_code._base import ClaudeCodeRelayClient
 from engine.community.plugins.claude_code.plugin_impl import ClaudeCodePluginImpl
 
@@ -144,7 +146,7 @@ class ClaudeCodeCommunityEngine(BaseEngine):
         self._injected_client = client  # None in production; set only by tests
 
         # The single community transport impl shared by every adapter.
-        self._port = ClaudeCodePluginImpl(client=client)
+        self._port = ClaudeCodePluginImpl(client=client, file_roots=load_claude_code_file_roots())
 
         # ACL adapters implementing the core *Service protocols.
         self._chat = ClaudeCodeChatAdapter(self._port)

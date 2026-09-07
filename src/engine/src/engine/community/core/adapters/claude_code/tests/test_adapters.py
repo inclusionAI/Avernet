@@ -938,13 +938,13 @@ class _FakeFilePort:
     async def file_read(self, path, token=None) -> dict:
         return {"content": "hello body"}
 
-    async def file_remove(self, path, token=None) -> bool:
-        return True
+    async def file_remove(self, path, token=None) -> dict:
+        return {"target_path": path, "path_type": "file"}
 
     async def file_rmtree(self, path, token=None) -> bool:
         return True
 
-    async def file_list_dir(self, path, token=None) -> list[dict]:
+    async def file_list_dir(self, path, token=None, *, recursive=False, exclude_dirs=None) -> list[dict]:
         return [{"name": "f.txt", "path": "/d/f.txt", "relative_path": "f.txt",
                  "is_dir": False, "size": 10}]
 
