@@ -119,8 +119,15 @@ class BotConfigManifestApplyModel(Base):
     # The vocabulary is ``apply/triggers.py``: ``explicit`` (W4), W13's two
     # ``create:*`` phases, and ``put`` (W8). Restart and republish were deferred
     # (W8 spec D-1). None of them needed a migration; every value fits.
+    #
+    # The COLUMN is ``apply_trigger``: TRIGGER is a SQL keyword, and the DDL
+    # review standard that gates provisioning refuses keyword column names. The
+    # attribute, the record field and the API field all stay ``trigger``.
     trigger = Column(
-        String(32), nullable=False, comment="What started it: explicit/put/create:pre_container/create:on_container"
+        "apply_trigger",
+        String(32),
+        nullable=False,
+        comment="What started it: explicit/put/create:pre_container/create:on_container",
     )
     # RUNNING on insert, terminal on completion — the two-write lifecycle apply's
     # async shape requires. Denormalised out of ``report`` so "show me failed
@@ -141,6 +148,9 @@ class BotConfigManifestApplyModel(Base):
     # narrower width without anything being malformed.
     actor = Column(String(1024), nullable=False, comment="Audit: who started it")
 
+    # TIMESTAMP on OceanBase (the DDL standard refuses DATETIME); ``DateTime``
+    # here as for gmt_* below. Filled from ``datetime.now()`` and read back
+    # through the same session, so the value written is the value read.
     started_at = Column(DateTime, nullable=False, comment="When the apply began")
     # Null exactly while ``status`` is RUNNING. The two move together.
     finished_at = Column(DateTime, nullable=True, comment="When it ended; null while RUNNING")
