@@ -46,7 +46,10 @@ _APPLICATION_SUPPLIED = {
 #: column named `trigger`, and DATETIME started_at/finished_at -- which is why
 #: the record table never existed in production while its lock table did.
 _DDL_STANDARD_FORBIDDEN_TYPES = {"bit", "float", "double", "datetime", "enum", "set"}
-_DDL_STANDARD_FILES = ("2026_08_31_bot_config_manifest_apply.sql",)
+_DDL_STANDARD_FILES = (
+    "2026_08_31_bot_config_manifest_apply.sql",
+    "2026_09_07_repair_misprovisioned_bot_config_manifest_apply.sql",
+)
 
 #: Filled by the database itself, so TIMESTAMP's conversion is a no-op round
 #: trip and matches ac_bots. Every table here has both.
