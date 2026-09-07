@@ -3356,3 +3356,61 @@ class TestSendMessageStreamEvalConsistencyCheck:
                 chat_metadata={"eval_id": "eval-789"},
             ):
                 chunks.append(chunk)
+
+
+class TestCreateSessionClientEvalIdHeader:
+    """_create_session_client 中 metadata 注入评测 Header 的测试。"""
+
+    def test_eval_id_injects_x_eval_id_header(self, service):
+        """metadata 中 eval_id 非空时，headers 包含 X-Eval-Id。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata={"eval_id": "eval-abc123"}
+        )
+        assert client.headers["X-Eval-Id"] == "eval-abc123"
+        assert client.headers["x-proxypass-token"] == conn_info.token
+
+    def test_default_tag_injects_header(self, service):
+        """metadata 中 default_tag 非空时，headers 包含 X-Agentclaw-Default-Tag。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata={"default_tag": "eval"}
+        )
+        assert client.headers["X-Agentclaw-Default-Tag"] == "eval"
+        assert "X-Eval-Id" not in client.headers
+
+    def test_eval_id_and_default_tag_both_inject(self, service):
+        """metadata 中 eval_id 和 default_tag 同时存在时，两个 Header 都注入。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info,
+            engine_type="teclaw",
+            metadata={"eval_id": "eval-abc", "default_tag": "eval"},
+        )
+        assert client.headers["X-Eval-Id"] == "eval-abc"
+        assert client.headers["X-Agentclaw-Default-Tag"] == "eval"
+
+    def test_no_metadata_no_eval_headers(self, service):
+        """metadata 为 None 时，headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="teclaw", metadata=None
+        )
+        assert "X-Eval-Id" not in client.headers
+        assert "X-Agentclaw-Default-Tag" not in client.headers
+        assert client.headers["x-proxypass-token"] == conn_info.token
+
+    def test_empty_metadata_no_eval_headers(self, service):
+        """metadata 为空 dict 时，headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(
+            conn_info, engine_type="openclaw", metadata={}
+        )
+        assert "X-Eval-Id" not in client.headers
+        assert "X-Agentclaw-Default-Tag" not in client.headers
+
+    def test_default_metadata_no_eval_headers(self, service):
+        """未传 metadata 参数（默认 None），headers 不含评测 Header。"""
+        conn_info = _make_conn_info()
+        client = service._create_session_client(conn_info, engine_type="openclaw")
+        assert "X-Eval-Id" not in client.headers
