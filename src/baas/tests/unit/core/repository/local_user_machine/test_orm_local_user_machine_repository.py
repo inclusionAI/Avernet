@@ -11,7 +11,7 @@ update_route_info, clear_route_info, get_route_info, update_user_id.
 
 import json
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -342,6 +342,44 @@ class TestUpdateUserId:
         result = repository.update_user_id("machine-001", "dev", "user-old", "user-new")
 
         assert result == 0
+
+    def test_filter_receives_old_user_id_guard(self, repository, mock_session):
+        """D-05 concurrency gate: the conditional UPDATE filter receives
+        machine_id, env, and user_id == old_user_id as positional expressions
+        (no kwargs marshalling), pinning the WHERE-guard shape."""
+        repository.update_user_id("machine-001", "dev", "user-old", "user-new")
+
+        mock_session.query.return_value.filter.assert_called_once()
+        filter_call = mock_session.query.return_value.filter.call_args
+        # The implementation passes the guard positionally — assert the shape
+        # via call_args.args; the 3rd expression is user_id == "user-old".
+        assert filter_call.kwargs == {}
+        assert len(filter_call.args) == 3
+        machine_expr, env_expr, guard_expr = filter_call.args
+        assert "machine_id" in str(machine_expr.left)
+        assert machine_expr.right.value == "machine-001"
+        assert "env" in str(env_expr.left)
+        assert env_expr.right.value == "dev"
+        # The D-05 guard: the WHERE must include user_id == old_user_id
+        assert "user_id" in str(guard_expr.left)
+        assert guard_expr.right.value == "user-old"
+
+    def test_logs_rowcount_message(self, repository, mock_session):
+        """The rowcount log call keeps its byte-for-byte format string and
+        carries the actual affected-row count."""
+        mock_session.query.return_value.filter.return_value.update.return_value = 2
+
+        with patch(
+            "secbaas.community.core.repository.local_user_machine._orm_repository.log"
+        ) as mock_log:
+            result = repository.update_user_id(
+                "machine-001", "dev", "user-old", "user-new"
+            )
+
+        assert result == 2
+        mock_log.info.assert_any_call(
+            "[local-user-machine:update_user_id] result: %s rows", 2
+        )
 
 
 # ==================== update_route_info ====================
