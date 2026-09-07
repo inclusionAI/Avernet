@@ -395,11 +395,21 @@ describe("suggestion batch application", () => {
   });
 
   it("keeps an edited application spec on the new attempt and does not mutate the suggestion", async () => {
+    const workflowSpec = {
+      id: "wf-1",
+      version: "1",
+      title: "Workflow",
+      nodes: [{ id: "report", title: "Report", executor: { type: "embedded-agent", prompt: "old" } }],
+    };
     const proposal = {
-      schemaVersion: "workflow-patch/v1", workflowId: "wf-1", baseSpecDigest: "a".repeat(64),
+      schemaVersion: "workflow-patch/v1", workflowId: "wf-1", baseSpecDigest: digestCanonicalJson(workflowSpec),
       summary: "原始修复说明",
       operations: [{ op: "replace", nodeId: "report", path: "/executor/prompt", value: "new" }],
     };
+    await db.exec(
+      "INSERT INTO workflow_specs (workflow_id, spec_json, title) VALUES (?, ?, ?)",
+      ["wf-1", JSON.stringify(workflowSpec), "Workflow"],
+    );
     const suggestion = await repo.createSuggestion({
       workflowId: "wf-1",
       nodeId: "report",
@@ -500,10 +510,25 @@ describe("suggestion batch application", () => {
       expect.objectContaining({ suggestionId: String(second.id), taskId: body.taskId, botId: "bot-1", botEnv: "dev", status: "dispatched" }),
     ]));
 
-    const report = await fetch(`${baseUrl}/api/evolve/internal/tasks/${body.taskId}/steps/${body.stepId}/report`, {
+    const commandEnvelope = JSON.parse(command.slice(command.indexOf("{"))) as {
+      taskContext: { claimToken: string };
+    };
+    const claim = await fetch(
+      `${baseUrl}/api/internal/task-guard/suggestion-applications/${body.taskId}/steps/${body.stepId}/claim`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botId: "bot-1", claimToken: commandEnvelope.taskContext.claimToken }),
+      },
+    );
+    expect(claim.status).toBe(200);
+
+    const report = await fetch(`${baseUrl}/api/internal/task-guard/suggestion-applications/${body.taskId}/steps/${body.stepId}/report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        botId: "bot-1",
+        claimToken: commandEnvelope.taskContext.claimToken,
         status: "succeeded",
         summary: "两条建议已合并修改并部署",
         output: { deployResult: { deployed: true, workflowId: "wf-1" } },
