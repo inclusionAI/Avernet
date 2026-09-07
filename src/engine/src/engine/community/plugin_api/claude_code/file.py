@@ -10,6 +10,10 @@ not disguise missing files, permission failures or invalid responses. No relay
 connection is required. Other Claude Code capabilities may still use a relay.
 """
 
+# Directory listings retain dangling/out-of-root symlinks as link metadata;
+# reads still enforce target containment and existence. Recursion never follows
+# directory symlinks.
+
 from __future__ import annotations
 from typing import Protocol
 

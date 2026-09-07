@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import shutil
+import stat
 from pathlib import Path
 
 
@@ -91,8 +92,22 @@ class _FilePortMixin:
 
             def visit(directory: Path) -> None:
                 for child in sorted(directory.iterdir()):
-                    checked = self._file_path(str(child))
-                    is_dir = checked.is_dir()
+                    link_info = child.lstat()
+                    is_link = stat.S_ISLNK(link_info.st_mode)
+                    try:
+                        checked = self._file_path(str(child))
+                        info = checked.stat()
+                        is_dir = stat.S_ISDIR(info.st_mode)
+                        size = 0 if is_dir else info.st_size
+                    except (FileNotFoundError, PermissionError):
+                        if not is_link:
+                            raise
+                        # The link itself is inside the listed directory. Keep
+                        # its own metadata visible for cleanup without probing
+                        # an inaccessible target. A later read still fails, so
+                        # package backups cannot silently omit unreadable data.
+                        is_dir = False
+                        size = link_info.st_size
                     if is_dir and child.name in excluded:
                         continue
                     entries.append(
@@ -101,10 +116,10 @@ class _FilePortMixin:
                             "path": str(child),
                             "relative_path": child.relative_to(root).as_posix(),
                             "is_dir": is_dir,
-                            "size": 0 if is_dir else checked.stat().st_size,
+                            "size": size,
                         }
                     )
-                    if recursive and is_dir and not child.is_symlink():
+                    if recursive and is_dir and not is_link:
                         visit(child)
 
             visit(root)

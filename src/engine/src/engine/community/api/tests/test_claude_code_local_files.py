@@ -185,3 +185,47 @@ def test_active_link_cleanup_preserves_source_and_sdk_config(monkeypatch, tmp_pa
             == 403
         )
         assert sdk_config.read_bytes() == b"private"
+
+
+def test_listing_keeps_dangling_and_outside_links_without_following_targets(
+    client, tmp_path
+):
+    root = tmp_path / "listing"
+    root.mkdir()
+    (root / "normal.txt").write_bytes(b"normal")
+    (root / "dangling").symlink_to(root / "missing")
+    outside = tmp_path.parent / (tmp_path.name + "-external")
+    outside.mkdir()
+    (outside / "private.txt").write_bytes(b"private")
+    (root / "external").symlink_to(outside, target_is_directory=True)
+    for recursive in (False, True):
+        response = client.post(
+            "/api/file/list", json={"dir_path": str(root), "recursive": recursive}
+        )
+        assert response.status_code == 200, response.text
+        entries = response.json()["data"]["files"]
+        assert {entry["relative_path"] for entry in entries} == {
+            "normal.txt",
+            "dangling",
+            "external",
+        }
+        assert all(not entry["is_dir"] for entry in entries)
+    assert (
+        client.post(
+            "/api/file/read", json={"file_path": str(root / "external/private.txt")}
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/api/file/read", json={"file_path": str(root / "dangling")}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/api/file/remove", json={"target_path": str(root / "external")}
+        ).status_code
+        == 200
+    )
+    assert (outside / "private.txt").read_bytes() == b"private"
