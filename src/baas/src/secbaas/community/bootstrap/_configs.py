@@ -201,7 +201,9 @@ class PluginConfig(ConfigSchema):
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
-    session_file_url_projector: str = Field(default="stub", pattern=r"^(stub|aliyun_ack)$")
+    session_file_url_projector: str = Field(
+        default="stub", pattern=r"^(stub|aliyun_ack)$"
+    )
     database: str = Field(default="sqlite", pattern=r"^(sqlite|mariadb)$")
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
     bot: BotPluginConfig = Field(default_factory=BotPluginConfig)

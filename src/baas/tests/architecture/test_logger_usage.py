@@ -91,6 +91,8 @@ ALLOWED_LOGGER_NAMES = frozenset(
         "plugin-sandbox",
         "plugin-bot-service",
         "plugin-auth",
+        # plugins/file_transfer (session file URL projection, D-01)
+        "plugin-file-transfer",
         "bootstrap",
         "config",
         "webserver",

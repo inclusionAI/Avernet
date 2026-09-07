@@ -69,8 +69,7 @@ class TestAliyunAckProjectionFidelity:
         assert p.scheme == "https"
         assert p.netloc == "bff.example.com"
         assert p.path == (
-            "/api/v1/file-transfer-proxy"
-            "/baas-file-transfer/dev/t/sess/abc/file.txt"
+            "/api/v1/file-transfer-proxy/baas-file-transfer/dev/t/sess/abc/file.txt"
         )
         assert p.query == urlsplit(original).query
         assert "OSSAccessKeyId=AK" in p.query
@@ -99,9 +98,10 @@ class TestAliyunAckProjectionFidelity:
 
         p = urlsplit(projected)
         assert p.netloc == "bff.example.com"
-        assert p.path == "/api/v1/file-transfer-proxy" + urlsplit(
-            _ORIGINAL_UPLOAD_URL
-        ).path
+        assert (
+            p.path
+            == "/api/v1/file-transfer-proxy" + urlsplit(_ORIGINAL_UPLOAD_URL).path
+        )
 
     def test_projection_implements_protocol(self, aliyun_projector):
         assert isinstance(aliyun_projector, SessionFileUrlProjector)
@@ -141,9 +141,7 @@ class TestProxyUnavailableGuard:
         with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
             projector.project(_ORIGINAL_UPLOAD_URL)
 
-        assert (
-            exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
-        )
+        assert exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
         assert exc_info.value.http_status == 503
         assert "proxy_base_url" in exc_info.value.reason
         assert "deploy_tenant=ALIYUN_ACK" in exc_info.value.reason
@@ -176,9 +174,7 @@ class TestNoopSessionFileUrlProjector:
         with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
             projector.project(_ORIGINAL_UPLOAD_URL)
 
-        assert (
-            exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
-        )
+        assert exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
         assert exc_info.value.http_status == 503
         assert "'stub'" in exc_info.value.reason
         assert "aliyun_ack" in exc_info.value.reason

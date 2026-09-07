@@ -975,7 +975,9 @@ class TestSessionFileUrlProjection:
         )
 
     @pytest.mark.asyncio
-    async def test_single_upload_url_projected(self, projected_dispatcher, file_backend):
+    async def test_single_upload_url_projected(
+        self, projected_dispatcher, file_backend
+    ):
         original = (
             "https://bucket.internal-oss.example.com"
             "/baas-file-transfer/dev/t/sess-001/tf-single/data.csv"
@@ -1004,7 +1006,9 @@ class TestSessionFileUrlProjection:
         assert projected.query == urlsplit(original).query
 
     @pytest.mark.asyncio
-    async def test_multipart_part_urls_projected(self, projected_dispatcher, file_backend):
+    async def test_multipart_part_urls_projected(
+        self, projected_dispatcher, file_backend
+    ):
         part_count = 3  # ceil(100MB / 40MB) — part_size drives the count
         mock_parts = [
             MagicMock(

@@ -19,7 +19,7 @@ from secbaas.community.api.session_file_sharing import (
 from secbaas.community.logger import get_logger
 from secbaas.community.spi.file_transfer import SessionFileUrlProjector
 
-logger = get_logger("file_transfer")
+logger = get_logger("plugin-file-transfer")
 
 _ALIYUN_ACK_TENANT = "ALIYUN_ACK"
 
