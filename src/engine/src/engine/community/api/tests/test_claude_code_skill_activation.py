@@ -178,12 +178,16 @@ def test_replace_existing_mapping_and_cleanup_paths(runtime):
     assert client.post("/api/skills/symlink", json={"symlinks": [{"source": "../escape", "target": "retro"}]}).status_code == 400
 
 
-def test_nested_batch_targets_do_not_write_into_uploaded_source(runtime):
+@pytest.mark.parametrize("existing", [False, True])
+def test_nested_batch_targets_do_not_write_into_uploaded_source(runtime, existing):
     client, source, target = runtime
+    if existing:
+        target.parent.mkdir(parents=True)
+        target.symlink_to(source)
     response = client.post("/api/skills/symlink/bindpath", json={"symlinks": [
         {"source": str(source), "target": str(target)},
         {"source": str(source), "target": str(target / "nested")},
     ]})
     assert response.status_code == 400
-    assert not target.exists()
+    assert target.exists() is existing
     assert not (source / "nested").exists()

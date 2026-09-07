@@ -20,6 +20,10 @@ class LocalSkillSymlinks:
 
     def sync(self, params: dict) -> dict:
         desired: dict[Path, Path] = {}
+        # Check lexical targets before resolving existing parent symlinks.
+        requested_targets = [Path(item["target"]) for item in params.get("symlinks", [])]
+        if any(other in target.parents for target in requested_targets for other in requested_targets):
+            raise ValueError("Skill targets cannot contain another requested target")
         # Validate the whole request before changing any existing links.
         for item in params.get("symlinks", []):
             source = self._path(item["source"])
