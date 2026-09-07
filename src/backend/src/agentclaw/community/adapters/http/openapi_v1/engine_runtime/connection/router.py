@@ -8,7 +8,12 @@ this API, so the engine's frame format never becomes a public contract.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
+from datetime import datetime, timezone
+import json
 from typing import Annotated
+from urllib.parse import quote, urlsplit
 
 from fastapi import APIRouter, Query, Request
 
@@ -47,12 +52,14 @@ from agentclaw.community.api.human_bot_friendship_service import (
 from agentclaw.community.core.engine_runtime.errors import (
     EngineDeviceNotReadyError,
     EngineResourceNotFoundError,
+    EngineUpstreamError,
 )
 from agentclaw.community.core.expert_chat.errors import (
     BotNotFoundError as ExpertBotNotFoundError,
     ConnectionError as ExpertConnectionError,
 )
 from agentclaw.community.di import Injected
+from agentclaw.community.di.config import GatewayEndpoint
 from agentclaw.community.adapters.http.openapi_v1.authorization import PublicAPIRoute
 
 router = APIRouter(
@@ -60,6 +67,79 @@ router = APIRouter(
     tags=["connection"],
     route_class=PublicAPIRoute,
 )
+
+_ENGINE_WS_PREFIX = "/openapi/v1/bots/messages/ws"
+
+
+def _friend_token(connection: dict[str, object]) -> str:
+    headers = connection.get("headers")
+    header_token = (
+        headers.get("x-proxypass-token") if isinstance(headers, dict) else None
+    )
+    token = str(header_token or connection.get("token") or "")
+    if not token:
+        raise EngineUpstreamError("friend connection carries no proxy credential")
+    return token
+
+
+def _token_expiry(token: str) -> str:
+    """Read the issuer-stamped JWT expiry without treating it as authorization."""
+    try:
+        encoded_payload = token.split(".", 2)[1]
+        padding = "=" * (-len(encoded_payload) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(encoded_payload + padding))
+        expires_at = int(payload["exp"])
+    except (
+        IndexError,
+        KeyError,
+        TypeError,
+        ValueError,
+        OverflowError,
+        OSError,
+        binascii.Error,
+        json.JSONDecodeError,
+    ) as error:
+        raise EngineUpstreamError(
+            "friend connection credential carries no usable expiry"
+        ) from error
+    return datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+
+
+def _gateway_ws_origin(gateway: GatewayEndpoint) -> str:
+    base = gateway.base_url.strip().rstrip("/")
+    try:
+        parts = urlsplit(base)
+    except ValueError as error:
+        raise EngineUpstreamError("gateway endpoint is invalid") from error
+    schemes = {"http": "ws", "https": "wss", "ws": "ws", "wss": "wss"}
+    ws_scheme = schemes.get(parts.scheme.lower())
+    if not ws_scheme or not parts.netloc or parts.path or parts.query or parts.fragment:
+        raise EngineUpstreamError("gateway endpoint is not a bare origin")
+    return f"{ws_scheme}://{parts.netloc}"
+
+
+def _ready_friend_connection(
+    raw: dict[str, object], gateway: GatewayEndpoint
+) -> Connection:
+    """Publish ExpertChat connection material through the OpenAPI gateway."""
+    engine = str(raw.get("engine_type") or "")
+    target = str(raw.get("target") or "")
+    if not engine or not target:
+        raise EngineUpstreamError(
+            "friend connection carries no engine or routing target"
+        )
+    token = _friend_token(raw)
+    engine_path = f"/api/{quote(engine, safe='')}/ws"
+    url = (
+        f"{_gateway_ws_origin(gateway)}{_ENGINE_WS_PREFIX}/"
+        f"{quote(target, safe='@:[]')}{engine_path}"
+        f"?x-proxypass-token={quote(token, safe='')}"
+    )
+    return Connection(
+        engine=engine,
+        expires_at=_token_expiry(token),
+        sockets=[Socket(kind="chat", url=url)],
+    )
 
 
 @router.get("", response_model=Envelope[Connection | FriendConnection])
@@ -82,6 +162,7 @@ async def get_connection(
         HumanBotFriendshipServiceProtocol
     ),
     expert: ExpertChatServiceProtocol = Injected(ExpertChatServiceProtocol),
+    gateway: GatewayEndpoint = Injected(GatewayEndpoint),
 ) -> Envelope[Connection | FriendConnection]:
     """Get usable socket connections for a bot."""
     if f_user_id is not None:
@@ -110,14 +191,22 @@ async def get_connection(
             raise EngineResourceNotFoundError("friend session not found") from error
         except ExpertConnectionError as error:
             raise EngineDeviceNotReadyError("friend runtime is not ready") from error
-        return envelope(
-            FriendConnection(
-                session_id=session_id,
-                need_poll=bool(result.get("need_poll")),
-                connection=result.get("connection"),
-            ),
-            request,
-        )
+        need_poll = bool(result.get("need_poll"))
+        raw_connection = result.get("connection")
+        if need_poll:
+            return envelope(
+                FriendConnection(
+                    session_id=session_id,
+                    need_poll=need_poll,
+                    connection=None,
+                ),
+                request,
+            )
+        if not isinstance(raw_connection, dict):
+            raise EngineUpstreamError(
+                "ready friend connection carries no connection material"
+            )
+        return envelope(_ready_friend_connection(raw_connection, gateway), request)
     # No capability probe: the only socket offered is chat, derived from the
     # bot's active engine, which is a backend fact. The terminal socket that
     # once needed one was removed — the spec excludes an interactive shell from

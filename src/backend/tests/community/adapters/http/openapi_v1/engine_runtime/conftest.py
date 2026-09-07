@@ -222,6 +222,16 @@ class FakeExpertChat:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.sessions: dict[str, Any] = {"items": [], "total": 0}
         self.session: dict[str, Any] = {"id": "friend-session", "title": "Friend"}
+        self.connection_result: dict[str, Any] = {
+            "session_key": self.session["id"],
+            "connection": {
+                "engine_type": "openclaw",
+                "target": "ARCA_SANDBOX-test@0:20003",
+                "url": "https://internal.invalid/proxypass/ARCA_SANDBOX-test@0:20003",
+                "token": "header.eyJleHAiOjE3ODg3Njg1NDl9.signature",
+                "bind_id": 123,
+            },
+        }
 
     def add_chat_bot(self, *args, **kwargs):
         self.calls.append(("add_chat_bot", args, kwargs))
@@ -237,10 +247,7 @@ class FakeExpertChat:
 
     async def connect_chat_session(self, *args, **kwargs):
         self.calls.append(("connect_chat_session", args, kwargs))
-        return {
-            "session_key": self.session["id"],
-            "connection": {"ws_url": "wss://example.invalid/chat", "token": "opaque"},
-        }
+        return self.connection_result
 
     async def get_owned_chat_session(self, *args, **kwargs):
         self.calls.append(("get_owned_chat_session", args, kwargs))
@@ -258,7 +265,15 @@ class FakeExpertChat:
     async def list_owned_chat_session_messages(self, *args, **kwargs):
         self.calls.append(("list_owned_chat_session_messages", args, kwargs))
         return {
-            "items": [{"id": "m1", "role": "user", "content": "hello"}],
+            "items": [
+                {
+                    "id": "m1",
+                    "role": "user",
+                    "content": "hello",
+                    "metadata": {"source": "legacy"},
+                    "history_meta": {"summary": "context"},
+                }
+            ],
             "total": 1,
         }
 
