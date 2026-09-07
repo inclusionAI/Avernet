@@ -7,6 +7,7 @@ behavior without making the service profile-aware.
 """
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from agentclaw.community.core.devices.services.baas_invoke_transport import BaasTransport
@@ -20,6 +21,9 @@ from agentclaw.community.plugin_api.http_client import (
 from agentclaw.community.core.devices.services import mcp_device_transport as mcp_transport
 
 logger = get_logger()
+
+_SYMLINK_RETRY_DELAYS_SECONDS = (1, 2, 4)
+_RETRYABLE_SYMLINK_STATUS_CODES = frozenset({502, 503, 504})
 
 
 class BaasDeviceSyncService(DeviceSync):
@@ -65,30 +69,20 @@ class BaasDeviceSyncService(DeviceSync):
 
         try:
             if symlinks_count == 0:
+                path = "/api/skills/symlink/clean"
                 body = {"directories": ["/home/admin/.openclaw/workspace/skills"]}
-                response = self._transport.post(
-                    "/api/skills/symlink/clean", json=body
-                )
-                response.raise_for_status()
-                return {
-                    "success": True,
-                    "message": "同步成功",
-                    "data": response.json(),
+            else:
+                valid_symlinks = self._ensure_center_skills(symlinks)
+                path = "/api/skills/symlink/bindpath"
+                body = {
+                    "symlinks": [
+                        {"source": s["source"], "target": s["target"]}
+                        for s in valid_symlinks
+                    ],
+                    "clean_target_dir": True,
                 }
 
-            valid_symlinks = self._ensure_center_skills(symlinks)
-
-            body = {
-                "symlinks": [
-                    {"source": s["source"], "target": s["target"]}
-                    for s in valid_symlinks
-                ],
-                "clean_target_dir": True,
-            }
-            response = self._transport.post(
-                "/api/skills/symlink/bindpath", json=body
-            )
-            response.raise_for_status()
+            response = self._post_symlink_request(path, body)
             return {
                 "success": True,
                 "message": "同步成功",
@@ -106,6 +100,40 @@ class BaasDeviceSyncService(DeviceSync):
         except Exception as e:
             logger.exception("[BaasDeviceSyncService.sync_symlinks] error: %s", e)
             return {"success": False, "message": f"同步失败: {e}"}
+
+    def _post_symlink_request(self, path: str, body: dict[str, Any]) -> Any:
+        """Post a symlink mutation, retrying only engine-startup failures."""
+        for attempt, delay_seconds in enumerate(
+            (*_SYMLINK_RETRY_DELAYS_SECONDS, None), start=1
+        ):
+            try:
+                response = self._transport.post(path, json=body)
+                response.raise_for_status()
+                return response
+            except HttpClientStatusError as error:
+                if (
+                    error.response.status_code not in _RETRYABLE_SYMLINK_STATUS_CODES
+                    or delay_seconds is None
+                ):
+                    raise
+                error_detail = f"HTTP {error.response.status_code}"
+            except HttpClientRequestError as error:
+                if delay_seconds is None:
+                    raise
+                error_detail = str(error)
+
+            logger.warning(
+                "[BaasDeviceSyncService.sync_symlinks] transient failure; "
+                "retrying bot_uuid=%s path=%s attempt=%d delay_seconds=%d error=%s",
+                self._bot_uuid,
+                path,
+                attempt,
+                delay_seconds,
+                error_detail,
+            )
+            time.sleep(delay_seconds)
+
+        raise AssertionError("symlink retry loop must return or raise")
 
     def sync_bot_config(
         self,

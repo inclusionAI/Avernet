@@ -8,7 +8,7 @@ docs/superpowers/specs/2026-06-17-baas-transport-bot-type-strategy-design.md)。
 sync_symlinks 必须是 sync — 11 个 call site 不 await(见
 docs/superpowers/plans/2026-05-18-fix-baas-device-sync-async-mismatch.md)。
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import httpx
 
@@ -112,6 +112,79 @@ def test_sync_symlinks_returns_failure_on_request_error():
 
     assert result["success"] is False
     assert "请求失败" in result["message"] or "connection" in result["message"]
+
+
+def test_sync_symlinks_retries_transient_http_status_until_success():
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    unavailable = httpx.Response(
+        status_code=502,
+        content=b"engine starting",
+        request=httpx.Request("POST", "http://fake/"),
+    )
+    transport = _make_transport()
+    transport.post.side_effect = [unavailable, _ok_response()]
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch("agentclaw.community.core.devices.services.baas_device_sync.time.sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is True
+    assert transport.post.call_count == 2
+    sleep.assert_called_once_with(1)
+
+
+def test_sync_symlinks_does_not_retry_non_transient_http_status():
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    bad_request = httpx.Response(
+        status_code=400,
+        content=b"invalid request",
+        request=httpx.Request("POST", "http://fake/"),
+    )
+    transport = _make_transport(response=bad_request)
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch("agentclaw.community.core.devices.services.baas_device_sync.time.sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is False
+    transport.post.assert_called_once()
+    sleep.assert_not_called()
+
+
+def test_sync_symlinks_retries_request_error_until_success():
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    transport = _make_transport()
+    transport.post.side_effect = [httpx.RequestError("connection refused"), _ok_response()]
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch("agentclaw.community.core.devices.services.baas_device_sync.time.sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is True
+    assert transport.post.call_count == 2
+    sleep.assert_called_once_with(1)
+
+
+def test_sync_symlinks_stops_after_bounded_transient_retries():
+    from agentclaw.community.core.devices.services.baas_device_sync import BaasDeviceSyncService
+
+    unavailable = httpx.Response(
+        status_code=503,
+        content=b"engine starting",
+        request=httpx.Request("POST", "http://fake/"),
+    )
+    transport = _make_transport(response=unavailable)
+    plugin = BaasDeviceSyncService(transport=transport, conn_info=_conn_info())
+
+    with patch("agentclaw.community.core.devices.services.baas_device_sync.time.sleep") as sleep:
+        result = plugin.sync_symlinks([])
+
+    assert result["success"] is False
+    assert transport.post.call_count == 4
+    assert sleep.call_args_list == [call(1), call(2), call(4)]
 
 
 def test_sync_symlinks_is_not_async():
