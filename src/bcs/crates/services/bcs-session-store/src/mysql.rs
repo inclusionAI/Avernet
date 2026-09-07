@@ -607,6 +607,10 @@ impl SessionRepoPort for MySqlSessionStore {
     }
 
     async fn get(&self, session_id: &str) -> Option<Session> {
+        self.try_get(session_id).await.ok().flatten()
+    }
+
+    async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> {
         let select_cols = self.select_cols();
         let sql = format!(
             "SELECT {select_cols} FROM bcs_group_sessions \
@@ -622,9 +626,8 @@ impl SessionRepoPort for MySqlSessionStore {
                 ],
             ))
             .await
-            .ok()?;
-        let row = rows.into_iter().next()?;
-        row_to_session(&row).ok()
+            .map_err(|e| ServiceError::InternalError(format!("session db: {e}")))?;
+        rows.into_iter().next().map(|row| row_to_session(&row)).transpose()
     }
 
     async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {

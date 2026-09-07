@@ -1489,7 +1489,7 @@ impl ChannelService for BcsChannelService {
             .await?;
         // Rollover replaces the live mapping, but the old session retains its source.
         if mappings.is_empty() {
-            let Some(session) = self.sessions.get(bcs_session_id).await else {
+            let Some(session) = self.sessions.try_get(bcs_session_id).await? else {
                 return Ok(Vec::new());
             };
             let source = session.meta.as_ref()
@@ -3747,6 +3747,19 @@ mod tests {
                 session_id, Some("dingtalk".to_string())
             ).await?.is_empty());
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_conversations_by_session_propagates_historical_read_failure() -> TestResult {
+        let harness = TestHarness::new(manager_group("group_1")).await?;
+        *harness.session_repo.fail_get.lock().await = Some("session read failed".to_string());
+        let error = harness.service.list_conversations_by_session(
+            "group_1:historical", Some("dingtalk".to_string())
+        ).await.expect_err("storage failure must not become an empty result");
+        assert!(matches!(error, ChannelUseCaseError::Internal(
+            ServiceError::InternalError(message)
+        ) if message == "session read failed"));
         Ok(())
     }
 
@@ -6334,6 +6347,7 @@ mod tests {
         sessions: Mutex<HashMap<String, Session>>,
         added_participants: Mutex<Vec<(String, Participant)>>,
         fail_create: Mutex<Option<String>>,
+        fail_get: Mutex<Option<String>>,
         fail_add_participant: Mutex<Option<String>>,
     }
 
@@ -6379,6 +6393,13 @@ mod tests {
 
         async fn get(&self, session_id: &str) -> Option<Session> {
             self.sessions.lock().await.get(session_id).cloned()
+        }
+
+        async fn try_get(&self, session_id: &str) -> ServiceResult<Option<Session>> {
+            if let Some(error) = self.fail_get.lock().await.clone() {
+                return Err(ServiceError::InternalError(error));
+            }
+            Ok(self.get(session_id).await)
         }
 
         async fn belongs_to_group(&self, session_id: &str, group_id: &str) -> bool {

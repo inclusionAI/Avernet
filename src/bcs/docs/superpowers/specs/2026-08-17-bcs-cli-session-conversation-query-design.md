@@ -32,6 +32,9 @@ BCS 已持久化 `bcs_session_id` 到 IM conversation 的映射，出站投递�
 在映射表中没有任何记录时，应用服务回查 session 的 `meta.channel`，返回历史
 conversation ID；不要求原 binding 仍存在。`channel_type` 按元数据的 `source`
 过滤，缺少有效 source、binding ID 或 conversation ID 时仍返回空列表。
+回查使用 `SessionRepoPort::try_get`，数据库查询或行解析失败向调用方返回错误，
+只有 session 不存在或元数据缺失才返回空列表。内存实现复用无失败的读取，SQL
+实现显式传播错误；原 `get` 接口保留兼容行为。
 元数据路线沿用现有解析规则：缺省 conversation type 为 `2`，缺省 scope 为
 conversation；`last_active_at` 使用 session 的更新时间。
 
