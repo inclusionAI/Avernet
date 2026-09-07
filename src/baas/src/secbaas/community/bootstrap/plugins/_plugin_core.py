@@ -35,7 +35,13 @@ from secbaas.community.plugins.eval_env import (
     NoopEvalConsistencyCheck,
     NoopEvalSessionLog,
 )
-from secbaas.community.plugins.file_transfer import NoopFileTransferBackend
+from secbaas.community.plugins.file_transfer import (
+    NoopFileTransferBackend,
+    NoopSessionFileUrlProjector,
+)
+from secbaas.community.plugins.file_transfer.aliyun_ack import (
+    AliyunAckSessionFileUrlProjector,
+)
 from secbaas.community.plugins.sandbox.arca import (
     StubArcaSandboxPlugin,
 )
@@ -172,6 +178,19 @@ class PluginContainer(containers.DeclarativeContainer):
     file_transfer_backend = providers.Selector(
         config.plugins.file_transfer,
         stub=providers.Singleton(NoopFileTransferBackend),
+    )
+
+    session_file_url_projector = providers.Selector(
+        config.plugins.session_file_url_projector,
+        stub=providers.Singleton(
+            NoopSessionFileUrlProjector,
+            deploy_tenant=config.env.deploy_tenant,
+        ),
+        aliyun_ack=providers.Singleton(
+            AliyunAckSessionFileUrlProjector,
+            proxy_base_url=config.session_file_url_proxy.proxy_base_url,
+            deploy_tenant=config.env.deploy_tenant,
+        ),
     )
 
     eval_binding_resolver = providers.Selector(

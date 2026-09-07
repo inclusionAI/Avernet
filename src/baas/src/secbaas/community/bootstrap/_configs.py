@@ -201,6 +201,7 @@ class PluginConfig(ConfigSchema):
 
     engine_adapter: str = Field(default="stub", pattern=r"^(real|stub)$")
     file_transfer: str = Field(default="stub", pattern=r"^(real|stub)$")
+    session_file_url_projector: str = Field(default="stub", pattern=r"^(stub|aliyun_ack)$")
     database: str = Field(default="sqlite", pattern=r"^(sqlite|mariadb)$")
     sandbox: SandboxPluginConfig = Field(default_factory=SandboxPluginConfig)
     bot: BotPluginConfig = Field(default_factory=BotPluginConfig)
@@ -261,6 +262,46 @@ class FileTransferOssConfigSchema(ConfigSchema):
     bucket_name: str = Field(default="")
     staging_root_path: str = Field(default="baas-file-transfer")
     secret_name: str = Field(default="")
+
+
+class FileTransferOssAliyunConfigSchema(FileTransferOssConfigSchema):
+    """Cloud OSS section for the ALIYUN_ACK tenant (D-07).
+
+    Fields are inherited verbatim from FileTransferOssConfigSchema — only
+    the config section differs, so the two sections never collide and
+    keep independent staging roots. Registering via the subclass keeps
+    ConfigSchema.__init_subclass__ happy: ``_schema_defaults()`` seeds
+    all five inherited keys, so a missing section still resolves through
+    the DI proxy instead of erroring (Pitfall 7 protection).
+    """
+
+    config_section = "file_transfer_oss_aliyun"
+
+
+class SessionFileUrlProxyConfigSchema(ConfigSchema):
+    """Session file URL proxy base (D-06) — independent section (A4).
+
+    ``proxy_base_url`` is the BaaS-domain base the ALIYUN_ACK projector
+    rewrites client-visible URLs onto. Empty in main-site deployments
+    (the Noop projector never reads it).
+    """
+
+    config_section = "session_file_url_proxy"
+    proxy_base_url: str = Field(default="")
+
+
+class DeployEnvConfig(ConfigSchema):
+    """Deployment environment selection for tenant-aware behavior (D-01).
+
+    ``deploy_tenant`` resolves from the BAAS_DEPLOY_TENANT environment
+    variable via the ConfigLoader placeholder. Empty means the main
+    site; ``"ALIYUN_ACK"`` selects the Aliyun ACK tenant (cloud OSS
+    section + session URL projection). Extra keys already present in
+    the section (e.g. ``deploy_env_var``) pass through unchanged.
+    """
+
+    config_section = "env"
+    deploy_tenant: str = Field(default="")
 
 
 class BotServiceConfig(ConfigSchema):

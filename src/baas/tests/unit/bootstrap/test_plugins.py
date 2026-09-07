@@ -153,3 +153,46 @@ class TestRedisCacheSelector:
         container = self._container(cache="stub")
         selector = container.cache_plugin
         assert "stub" in selector.providers
+
+
+class TestSessionFileUrlProjectorSelector:
+    """session_file_url_projector Selector: stub -> Noop, aliyun_ack -> AliyunAck.
+
+    Mirrors TestAliyunAckSelector — the env section must be present in the
+    dict because both Selector branches read config.env.deploy_tenant.
+    """
+
+    def _container(self, projector: str = "stub"):
+        container = PluginContainer()
+        cfg = {
+            "plugins": {
+                "secret": "stub",
+                "session_file_url_projector": projector,
+            },
+            "env": {"deploy_tenant": ""},
+        }
+        if projector == "aliyun_ack":
+            cfg["env"]["deploy_tenant"] = "ALIYUN_ACK"
+            cfg["session_file_url_proxy"] = {
+                "proxy_base_url": "https://bff.example.com",
+            }
+        container.config.from_dict(cfg)
+        return container
+
+    def test_stub_selector_resolves_noop(self):
+        from secbaas.community.plugins.file_transfer import (
+            NoopSessionFileUrlProjector,
+        )
+
+        projector = self._container("stub").session_file_url_projector()
+        assert isinstance(projector, NoopSessionFileUrlProjector)
+
+    def test_aliyun_ack_selector_config_wired(self):
+        from secbaas.community.plugins.file_transfer.aliyun_ack import (
+            AliyunAckSessionFileUrlProjector,
+        )
+
+        projector = self._container("aliyun_ack").session_file_url_projector()
+        assert isinstance(projector, AliyunAckSessionFileUrlProjector)
+        assert projector._proxy_base_url == "https://bff.example.com"
+        assert projector._deploy_tenant == "ALIYUN_ACK"

@@ -162,6 +162,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         distributed_lock_repository=repository.distributed_lock_repository,
         cache_plugin=plugins.cache_plugin,
         file_transfer_backend=plugins.file_transfer_backend,
+        session_file_url_projector=plugins.session_file_url_projector,
         ws_relay_session_repo=repository.ws_relay_session_repository,
         ticket_repository=repository.ticket_repository,
         session_ticket_repository=repository.session_ticket_repository,
