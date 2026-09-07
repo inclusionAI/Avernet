@@ -337,6 +337,19 @@ activation, read
   prefix alone is not evidence that publication, distribution, and activation
   have completed.
 
+## Agent skills
+
+### Issue tracker
+
+Work items live in GitHub Issues for `inclusionAI/Avernet`. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Avernet uses a multi-context domain-document layout. Start at
+`CONTEXT-MAP.md`; it identifies the relevant glossary, ADRs, and module-local
+context for the work. See `docs/agents/domain.md`.
+
 # Code Review
 
 1. **Code Review Standards Integration**:
