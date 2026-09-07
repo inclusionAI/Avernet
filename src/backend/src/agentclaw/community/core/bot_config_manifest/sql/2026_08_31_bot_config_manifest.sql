@@ -43,6 +43,41 @@
 --
 -- entity_id is a storage key only: it is resolved server-side from the bot
 -- record and is never a request parameter or a response field on the public API.
+-- DIALECT: OCEANBASE, MYSQL MODE. What this file writes follows the deployed
+-- tables there rather than portable MySQL -- compare ``SHOW CREATE TABLE
+-- ac_bots``, and the sibling DDL in core/caller_identity/sql/.
+--
+--   * EVERY INDEX IS DECLARED ``GLOBAL``. On a partitioned table an index
+--     without it is partition-local, and a partition-local UNIQUE enforces
+--     uniqueness only *within* a partition. These tables are not
+--     partitioned today, so it is a no-op now and cheap insurance later: what
+--     it prevents surfaces as duplicate rows, silently, never as an error.
+--     SQLAlchemy cannot render the modifier, so this file is the only place it
+--     can live.
+--   * ``TIMESTAMP`` FOR THE DB-CLOCK COLUMNS, ``DATETIME`` FOR THE REST, and
+--     which one a column gets is decided by who fills it, not by taste.
+--     gmt_create and gmt_modified are written by the database itself
+--     (``DEFAULT CURRENT_TIMESTAMP``, and ``func.now()`` from the ORM), so
+--     TIMESTAMP's session-time-zone conversion is a no-op round trip and they
+--     match ac_bots and every table added since --
+--     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql is
+--     the repair that convention exists to avoid repeating.
+--
+--     A column the APPLICATION fills stays DATETIME. TIMESTAMP reads the naive
+--     value being bound as session-local wall time and converts it to UTC for
+--     storage, so a Python-supplied instant is stored shifted by the session
+--     offset -- eight hours under the Asia/Shanghai session assumed here. This
+--     was got wrong in the first draft of this change and caught in review; this table has no
+--     application-supplied time column today, so the rule only matters to
+--     whoever adds one.
+--
+--     The ORM keeps ``DateTime`` for both kinds -- ac_skill_version's
+--     published_at is the precedent for ``DateTime`` over a TIMESTAMP column.
+--   * NO ``ENGINE`` CLAUSE, and no BLOCK_SIZE / REPLICA_NUM / COMPRESSION /
+--     TABLET_SIZE / PCTFREE / ROW_FORMAT. OceanBase applies its own defaults
+--     and echoes them back from SHOW CREATE TABLE; writing them here would be
+--     copying its own output back at it.
+
 CREATE TABLE `ac_bot_config_manifest` (
   `id`             bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `env`            varchar(20)   NOT NULL COMMENT '环境标识: prod/pre/dev',
@@ -65,11 +100,12 @@ CREATE TABLE `ac_bot_config_manifest` (
   `schema_version` int(11)       NOT NULL COMMENT 'schema 版本（当前仅 1）',
   `modifier`       varchar(1024) NOT NULL COMMENT '审计：最后写入者',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT '数据隔离租户',
-  `gmt_create`     datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `gmt_modified`   datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
+  `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
   -- The only index, and every read uses it: the repository filters on env,
   -- entity_id and bot_id, which are exactly this key's columns after the tenant
   -- the guard supplies. No second lookup key to drift out of step with it.
-  UNIQUE KEY `uk_tenant_env_entity_bot` (`avernet_tenant`, `env`, `entity_id`, `bot_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 配置清单';
+  UNIQUE KEY `uk_tenant_env_entity_bot`
+    (`avernet_tenant`, `env`, `entity_id`, `bot_id`) GLOBAL
+) DEFAULT CHARSET = utf8mb4 COMMENT = 'Bot 配置清单';

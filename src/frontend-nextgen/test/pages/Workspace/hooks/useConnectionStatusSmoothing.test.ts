@@ -1,11 +1,15 @@
 /** @jest-environment jsdom */
-import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import { DEFAULT_GRACE_MS, useConnectionStatusSmoothing } from '@/pages/Workspace/hooks/useConnectionStatusSmoothing';
 import { afterEach, beforeEach, expect, it, jest } from '@jest/globals';
+import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import { act, renderHook } from '@testing-library/react';
 
-beforeEach(() => { jest.useFakeTimers(); });
-afterEach(() => { jest.useRealTimers(); });
+beforeEach(() => {
+  jest.useFakeTimers();
+});
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 const render = (initial: ProviderConnectionStatus) =>
   renderHook((props: { v: ProviderConnectionStatus }) => useConnectionStatusSmoothing(props.v), {
@@ -35,7 +39,9 @@ it('会话切换：connected→disconnected→connecting→connected 全程连�
 it('真实连不上：disconnected 持续超过宽限期才降级为离线', () => {
   const { result, rerender } = render('disconnected');
   expect(result.current).toBe('connecting'); // 宽限期内仍连接中
-  act(() => { jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100); });
+  act(() => {
+    jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100);
+  });
   expect(result.current).toBe('disconnected'); // 超宽限仍未连上 → 离线
   // 之后恢复 connected 立即展示在线
   rerender({ v: 'connected' });
@@ -46,7 +52,9 @@ it('会话切换中连不上超过宽限，也降级离线后再恢复', () => {
   const { result, rerender } = render('connected');
   rerender({ v: 'disconnected' });
   expect(result.current).toBe('connecting');
-  act(() => { jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100); });
+  act(() => {
+    jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100);
+  });
   expect(result.current).toBe('disconnected');
   rerender({ v: 'connecting' });
   expect(result.current).toBe('connecting');
@@ -80,7 +88,9 @@ it('连接中瞬态 disconnected 超宽限期才降级离线', () => {
   const { result, rerender } = render('connecting');
   rerender({ v: 'disconnected' });
   expect(result.current).toBe('connecting'); // 宽限期内仍连接中
-  act(() => { jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100); });
+  act(() => {
+    jest.advanceTimersByTime(DEFAULT_GRACE_MS + 100);
+  });
   expect(result.current).toBe('disconnected'); // 超宽限无后续 connecting -> 离线
   rerender({ v: 'connecting' });
   expect(result.current).toBe('connecting');
@@ -92,7 +102,9 @@ it('中间断连 ~4s（覆盖 SDK reconnectDelay=3s 重连等待）不显离线'
   const { result, rerender } = render('connecting');
   rerender({ v: 'disconnected' });
   expect(result.current).toBe('connecting');
-  act(() => { jest.advanceTimersByTime(4000); }); // 仍 < 5000ms 宽限
+  act(() => {
+    jest.advanceTimersByTime(4000);
+  }); // 仍 < 5000ms 宽限
   expect(result.current).toBe('connecting'); // 不闪离线
   rerender({ v: 'reconnecting' });
   expect(result.current).toBe('reconnecting');

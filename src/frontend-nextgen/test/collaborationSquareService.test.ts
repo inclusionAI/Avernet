@@ -1,5 +1,5 @@
-import type { CollaborationSquareGateway } from '../src/services/collaborationSquare/collaborationSquareGateway';
 import type { PublicBot } from '../src/domain/collaborationSquare/types';
+import type { CollaborationSquareGateway } from '../src/services/collaborationSquare/collaborationSquareGateway';
 import {
   CollaborationSquareError,
   CollaborationSquareService,
@@ -83,6 +83,43 @@ describe('collaboration square service', () => {
     await expect(service.requestBotFriendship('b1', humanContext)).rejects.toMatchObject({ code: 'duplicate_action' });
     resolveRequest?.({ status: 'applying' });
     await expect(first).resolves.toEqual({ status: 'applying' });
+  });
+
+  test('好友申请按 actor + target 隔离并阻止 Bot 添加自身', async () => {
+    let resolveHuman: ((value: { status: 'applying' }) => void) | undefined;
+    let resolveBot: ((value: { status: 'applying' }) => void) | undefined;
+    const gateway = createGateway({
+      requestBotFriendship: jest
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveHuman = resolve;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveBot = resolve;
+            }),
+        ),
+    });
+    const service = new CollaborationSquareService(gateway);
+    const humanRequest = service.requestBotFriendship('b1', humanContext, undefined, {
+      type: 'human',
+      id: '327325',
+    });
+    const botRequest = service.requestBotFriendship('b1', humanContext, undefined, { type: 'bot', id: 'bot-viewer' });
+
+    await expect(
+      service.requestBotFriendship('bot-viewer', humanContext, undefined, { type: 'bot', id: 'bot-viewer' }),
+    ).rejects.toMatchObject({ code: 'forbidden', message: '不能添加当前工作 Bot 自身为好友' });
+
+    resolveHuman?.({ status: 'applying' });
+    resolveBot?.({ status: 'applying' });
+    await expect(humanRequest).resolves.toEqual({ status: 'applying' });
+    await expect(botRequest).resolves.toEqual({ status: 'applying' });
+    expect(gateway.requestBotFriendship).toHaveBeenCalledTimes(2);
   });
 
   test('重复原始 Bot ID 时按好友申请目标分别加锁', async () => {

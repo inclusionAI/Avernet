@@ -1,0 +1,5 @@
+syntax = "proto3";
+package mosn.proto.runtime.v1;
+service MosnRuntime { rpc Init(InitRequest) returns (Empty); }
+message Empty {}
+message InitRequest { string app = 1; map<string, string> metadata = 2; }

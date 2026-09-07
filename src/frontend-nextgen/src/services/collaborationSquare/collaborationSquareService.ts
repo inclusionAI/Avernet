@@ -58,9 +58,7 @@ export class CollaborationSquareService {
           search,
           page,
           pageSize,
-          ...(viewer
-            ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId }
-            : {}),
+          ...(viewer ? { viewerActorType: viewer.viewerActorType, viewerActorId: viewer.viewerActorId } : {}),
         },
         context,
         signal,
@@ -111,8 +109,12 @@ export class CollaborationSquareService {
     fromActor?: FriendRequestActor,
   ) {
     const targetId = friendRequestBotId?.trim() || botId;
-    return this.runTargetAction(`friend:${targetId}`, () =>
-      this.gateway.requestBotFriendship(botId, context, friendRequestBotId, fromActor),
+    const actor = fromActor ?? { type: 'human' as const, id: context.userId };
+    if (actor.type === 'bot' && actor.id.trim() === targetId) {
+      return Promise.reject(new CollaborationSquareError('forbidden', '不能添加当前工作 Bot 自身为好友'));
+    }
+    return this.runTargetAction(`friend:${actor.type}:${actor.id}:${targetId}`, () =>
+      this.gateway.requestBotFriendship(botId, context, friendRequestBotId, actor),
     );
   }
 

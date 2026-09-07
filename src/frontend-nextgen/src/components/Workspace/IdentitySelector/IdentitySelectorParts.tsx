@@ -67,7 +67,13 @@ export function IdentityDetails({
   compact?: boolean;
   summaryOnly?: boolean;
 }) {
-  const identityLabel = identity.kind === 'user' ? '用户' : getBotTypeLabel(identity.botType);
+  const identityLabel = summaryOnly
+    ? identity.kind === 'user'
+      ? '用户'
+      : 'BOT'
+    : identity.kind === 'user'
+    ? '用户'
+    : getBotTypeLabel(identity.botType);
   const engineLabel = identity.kind === 'bot' ? getBotEngineLabel(identity.engine) : undefined;
   return (
     <span className="min-w-0 flex-1 text-left">
@@ -75,7 +81,7 @@ export function IdentityDetails({
         <span className={cn('truncate font-medium text-foreground', compact ? 'text-xs' : 'text-sm')}>
           {identity.name}
         </span>
-        {identityLabel && !summaryOnly ? (
+        {identityLabel ? (
           <Badge
             tone={identity.kind === 'user' ? 'primary' : 'neutral'}
             className="shrink-0 whitespace-nowrap rounded-sm px-1 py-0 text-[10px] font-normal leading-4"

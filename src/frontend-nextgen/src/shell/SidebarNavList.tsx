@@ -64,11 +64,11 @@ export function SidebarNavList({ area, activePath, items, onNavigate, collapsed 
                 key={item.id}
                 variant="ghost"
                 className={cn(
-                  'h-11 w-full justify-start px-3 text-sm',
+                  'h-11 w-full justify-start px-3 text-sm font-normal hover:text-[var(--color-primary)] hover:font-medium',
                   active &&
                     'bg-[var(--color-primary-soft)] text-[var(--color-primary)] hover:bg-[var(--color-primary-soft)]',
                 )}
-                leftIcon={<Icon className="h-[18px] w-[18px]" />}
+                leftIcon={<Icon className="h-4 w-4" />}
                 onClick={() => onNavigate(item.path)}
               >
                 {item.label}

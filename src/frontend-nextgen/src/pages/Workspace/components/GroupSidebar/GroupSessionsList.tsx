@@ -1,8 +1,8 @@
 import { Button, Skeleton } from '@/components/ui';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
 import { ListErrorState } from '../ListErrorState';
-import { SessionItem } from './SessionItem';
 import type { SessionTab } from './GroupItem.types';
+import { SessionItem } from './SessionItem';
 
 interface GroupSessionsListProps {
   group: GroupView;

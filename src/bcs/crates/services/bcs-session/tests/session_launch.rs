@@ -15,6 +15,7 @@ use bcs_service_api::{
     SessionLaunchService, SessionManagementService, StartStateMachineRunCommand,
     StartStateMachineRunOutcome, StateMachineDeliveryCorrelation, StateMachineRun,
     StateMachineRunStatus, StateMachineRunView, SystemMessageEvent, SystemMessageService,
+    SystemMessageDispatchOutcome, SystemMessageRecipientResult,
 };
 use bcs_session::{SessionLaunchApplication, SessionManagementServiceImpl};
 use bcs_session_store::MemorySessionRepo;
@@ -150,6 +151,46 @@ impl SystemMessageService for RecordingSystemMessage {
         ));
         Ok(participants.len())
     }
+
+    async fn notify_with_outcome(
+        &self,
+        group_id: &str,
+        event: SystemMessageEvent,
+        session_id: &str,
+        participants: &[Participant],
+    ) -> ServiceResult<SystemMessageDispatchOutcome> {
+        let driver_delivery = match &event {
+            SystemMessageEvent::SessionContext {
+                driver_delivery, ..
+            } => *driver_delivery,
+            _ => None,
+        };
+        self.notify(group_id, event, session_id, participants).await?;
+        let recipient_results = participants
+            .iter()
+            .filter(|participant| participant.is_bot())
+            .map(|participant| {
+                let delivery_type = match participant.role {
+                    ParticipantRole::Manager => DeliveryType::Send,
+                    ParticipantRole::Driver => driver_delivery.unwrap_or(DeliveryType::Send),
+                    _ => DeliveryType::Inject,
+                };
+                SystemMessageRecipientResult {
+                    recipient_id: participant.bot_uuid.clone(),
+                    run_id: format!("context-run-{}", participant.bot_uuid),
+                    delivery_type,
+                    delivered: true,
+                    error: None,
+                }
+            })
+            .collect::<Vec<_>>();
+        Ok(SystemMessageDispatchOutcome {
+            total_recipients: recipient_results.len(),
+            successful_deliveries: recipient_results.len(),
+            failed_deliveries: 0,
+            recipient_results,
+        })
+    }
 }
 
 struct Fixture {
@@ -270,6 +311,50 @@ async fn human_creates_as_owned_bot() {
         outcome.session.caller_principal.as_deref(),
         Some("human_alice")
     );
+    let initial_run = outcome.initial_run.expect("Driver context run");
+    assert_eq!(initial_run.run_id, "context-run-driver");
+    assert_eq!(initial_run.bot_uuid, "driver");
+    assert_eq!(
+        initial_run.activity_kind,
+        bcs_service_api::InitialSessionRunActivityKind::SessionContext
+    );
+    assert_eq!(
+        initial_run.state,
+        bcs_service_api::InitialSessionRunState::Running
+    );
+}
+
+#[tokio::test]
+async fn manager_worker_session_returns_manager_context_run() {
+    let fixture = Fixture::new();
+    fixture.add_bot("manager", "alice").await;
+    fixture.add_bot("worker", "bob").await;
+    let mut group = Group::new(
+        "group-manager-worker",
+        "manager",
+        vec![
+            Participant::bot("manager", ParticipantRole::Manager),
+            Participant::bot("worker", ParticipantRole::Worker),
+        ],
+    );
+    group.group_strategy = GroupStrategy::ManagerWorker;
+    fixture.add_group(group).await;
+
+    let outcome = fixture
+        .service
+        .create(CreateSessionLaunch {
+            request: request(
+                human("alice"),
+                "group-manager-worker",
+                Some("manager"),
+            ),
+        })
+        .await
+        .expect("manager-worker Session launch succeeds");
+
+    let initial_run = outcome.initial_run.expect("Manager context run");
+    assert_eq!(initial_run.run_id, "context-run-manager");
+    assert_eq!(initial_run.bot_uuid, "manager");
 }
 
 #[tokio::test]
@@ -593,6 +678,7 @@ async fn launch_matrix_routes_only_state_machine_service_to_runtime() {
         tokio::task::yield_now().await;
 
         assert_eq!(outcome.state_machine_run.is_some(), expects_runtime);
+        assert_eq!(outcome.initial_run.is_none(), expects_runtime);
         assert_eq!(
             fixture
                 .runtime
@@ -648,6 +734,10 @@ async fn raw_input_metadata_and_context_delivery_reach_session_context() {
 
     assert_eq!(outcome.session.input, Some(input.clone()));
     assert_eq!(outcome.session.meta, Some(meta));
+    assert!(
+        outcome.initial_run.is_none(),
+        "an inject-only context must not be reported as a responding run"
+    );
     let events = fixture
         .system_message
         .events

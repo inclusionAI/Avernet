@@ -129,7 +129,7 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
                 BotAction.VIEW,
                 BotAction.EDIT,
                 BotAction.PUBLISH_STAGING,
-                BotAction.ENGINE_RESTART,
+                BotAction.RESTART,
                 BotAction.DELETE,
             ),
         ),
@@ -139,8 +139,7 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
             (
                 BotAction.VIEW,
                 BotAction.PUBLISH_ONLINE,
-                BotAction.RESTART,
-                BotAction.ENGINE_RESTART,
+                BotAction.RESTART_PUBLISH,
                 BotAction.CANCEL_STAGING,
             ),
         ),
@@ -149,7 +148,7 @@ def test_missing_publish_rows_keep_a_safe_read_only_card(monkeypatch) -> None:
             (
                 BotAction.VIEW,
                 BotAction.CHAT,
-                BotAction.RESTART,
+                BotAction.RESTART_PUBLISH,
                 BotAction.UPGRADE,
                 BotAction.OFFLINE,
             ),

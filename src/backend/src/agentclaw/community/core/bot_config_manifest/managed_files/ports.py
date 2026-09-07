@@ -1,7 +1,7 @@
 """Store-backed write targets for the teclaw strategy (W8).
 
 The identity and resources materialisers write through two narrow ports
-(``apply/identity_port.py``, ``apply/resource_port.py``) that the ARCA
+(``core/ports/identity_file_port.py``, ``core/ports/resource_file_port.py``) that the ARCA
 strategy binds to the real device-backed services. The teclaw strategy, with
 the platform-managed switch on, binds them to these: the same method
 signatures, but every read and write goes to the managed-files store — the
@@ -16,7 +16,7 @@ device-backed ports make the materialisers behave.
 **Paths.** Identity files live under the ``identity`` namespace by their
 file type (``identity/RULES.md``); resources under ``workspace`` by their
 declared path (``workspace/kb/faq.md``); a local skill package's files under
-``workspace/skills-local/<name>/`` (``StoreSkillPackagePort``, the ``skills``
+``workspace/skills-local/<name>/`` (``PlatformSkillPackageUpload``, the ``skills``
 materialiser's upload road). A resource "directory" is the set of files under
 its prefix — there is no directory object — so a tree delete is a prefix
 delete over the store's listing.
@@ -43,6 +43,11 @@ from agentclaw.community.core.bot_config_manifest.managed_files.store import (
     ManagedFileScope,
     ManagedFilesStore,
 )
+from agentclaw.community.core.ports.identity_file_port import IdentityFilePort
+from agentclaw.community.core.ports.resource_file_port import ResourceFilePort
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    SkillPackageUploadPort,
+)
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
@@ -53,7 +58,7 @@ from agentclaw.community.core.skill_center.skill_package import (
 
 class _StorePort:
     """Every method below has the signature of the port protocol it fills
-    (``ManifestIdentityPort``, ``ManifestResourcePort``, the skills upload
+    (``IdentityFilePort``, ``ResourceFilePort``, the skills upload
     road) — the device-backed services' own signatures, which the
     materialisers call by keyword. The parameters a store-backed port does
     not need (``owner_id``, ``engine_type``, ``stage``, ``operator_id``) are
@@ -68,8 +73,8 @@ class _StorePort:
         return ManagedFileScope(entity_type=entity_type, entity_id=entity_id, bot_id=bot_id)
 
 
-class StoreIdentityPort(_StorePort):
-    """``ManifestIdentityPort`` over the store: one object per identity file."""
+class PlatformIdentity(_StorePort, IdentityFilePort):
+    """``IdentityFilePort`` over the store: one object per identity file."""
 
     async def list_bot_files(
         self,
@@ -135,8 +140,8 @@ class StoreIdentityPort(_StorePort):
         return {"file_type": file_type, "digest": file.digest}
 
 
-class StoreResourcePort(_StorePort):
-    """``ManifestResourcePort`` over the store: objects under ``workspace/``."""
+class PlatformResource(_StorePort, ResourceFilePort):
+    """``ResourceFilePort`` over the store: objects under ``workspace/``."""
 
     async def upload_file(
         self,
@@ -206,7 +211,7 @@ class StoreResourcePort(_StorePort):
         return any(row.rel_path == rel or row.rel_path.startswith(rel + "/") for row in rows)
 
 
-class StoreSkillPackagePort(_StorePort):
+class PlatformSkillPackageUpload(_StorePort, SkillPackageUploadPort):
     """The ``skills`` materialiser's upload road, over the store.
 
     The real road (``LocalSkillUploadService``) validates the zip, writes the
@@ -371,7 +376,7 @@ def _workspace_path(declared: str) -> str:
 
 __all__ = [
     "ManagedSkillOwnerConflict",
-    "StoreIdentityPort",
-    "StoreResourcePort",
-    "StoreSkillPackagePort",
+    "PlatformIdentity",
+    "PlatformResource",
+    "PlatformSkillPackageUpload",
 ]

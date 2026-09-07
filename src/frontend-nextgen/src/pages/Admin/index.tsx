@@ -3,8 +3,8 @@
 // 视觉对齐 PRD：主 tab 为下划线式，位于白色 header 条上；内容区灰底带内边距。
 // 形态级 Tab 可见性经 `getAdminSections` capability 解析：Open Core（阿里云部署）隐藏【空间管理】、
 // 仅留【工单中心】；internal overlay 两 Tab 均在。隐藏 Tab 的深链（?tab=spaces）回落首个可见 Tab。
-import { UnderlineTabs } from '@/components/Admin/Tabs';
 import { getCapabilities } from '@/capabilities';
+import { UnderlineTabs } from '@/components/Admin/Tabs';
 import { useSearchParams } from '@umijs/max';
 import { useEffect } from 'react';
 import { AdminSpacesView } from './Spaces';

@@ -73,7 +73,7 @@ logger = get_logger()
 class BotDeviceContextPort(Protocol):
     """``DeviceContextResolver.resolve_for_bot``, as a type key.
 
-    The move ``apply/resource_port.py`` records, for the same reason: importing
+    The move ``core/ports/resource_file_port.py`` records, for the same reason: importing
     the real resolver here pulls ``core.devices.services.__init__``, which
     reaches the DI container at import time and closes a cycle back into this
     package. So this names the one method the port calls and nothing else; the

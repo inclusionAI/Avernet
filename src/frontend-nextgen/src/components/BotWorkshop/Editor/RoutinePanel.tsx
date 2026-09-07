@@ -1,6 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Card, CardContent } from '@/components/ui/Card';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Empty } from '@/components/ui/Empty';
 import { Input } from '@/components/ui/Input';
@@ -66,31 +65,26 @@ export function RoutinePanel({
     setOpen(true);
   };
   return (
-    <div className="space-y-4 p-5 sm:p-6">
-      <div className="flex items-center justify-between">
+    <div className="flex min-h-full flex-col bg-card">
+      <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4">
         <div>
-          <h2 className="m-0 text-base font-semibold">定时任务</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <h2 className="m-0 text-sm font-semibold">定时任务</h2>
+          <p className="m-0 mt-1 text-xs text-muted-foreground">
             设置常用执行频率，每次触发时会创建新会话并向 Bot 发送指令。
           </p>
         </div>
-        <Button disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => edit()}>
+        <Button size="sm" disabled={!editable} leftIcon={<Plus className="size-4" />} onClick={() => edit()}>
           新建任务
         </Button>
       </div>
-      {routines.length ? (
-        routines.map((item) => (
-          <Card key={item.id}>
-            <CardContent>
+      <div className="space-y-3 px-5 py-4">
+        {routines.length ? (
+          routines.map((item) => (
+            <div key={item.id} className="rounded-lg border border-border p-3">
               <div className="flex flex-wrap items-start gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="font-medium text-[var(--color-primary)]"
-                      onClick={() => edit(item)}
-                    >
+                    <Button variant="ghost" size="sm" className="font-medium text-primary" onClick={() => edit(item)}>
                       {item.name}
                     </Button>
                     <Badge tone={item.enabled ? 'success' : 'neutral'}>{item.enabled ? '已启用' : '已停用'}</Badge>
@@ -129,12 +123,12 @@ export function RoutinePanel({
                   <Button variant="ghost" size="icon" aria-label="删除任务" leftIcon={<Trash2 className="size-4" />} />
                 </ConfirmDialog>
               </div>
-            </CardContent>
-          </Card>
-        ))
-      ) : (
-        <Empty title="暂无定时任务" description="创建一个 Cron 任务，让 Bot 自动执行周期性工作。" />
-      )}
+            </div>
+          ))
+        ) : (
+          <Empty title="暂无定时任务" description="创建一个 Cron 任务，让 Bot 自动执行周期性工作。" />
+        )}
+      </div>
       <Modal open={open} onOpenChange={setOpen}>
         <ModalContent size="lg">
           <ModalHeader>

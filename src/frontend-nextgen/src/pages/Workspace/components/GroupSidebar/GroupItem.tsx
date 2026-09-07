@@ -17,9 +17,9 @@ import React, { useState } from 'react';
 import { AvatarTile } from '../AvatarTile';
 import { ShareDialog } from '../ManagePanel/ShareDialog';
 import { SessionScopeFilter } from '../SessionScopeFilter';
-import { GroupSessionsList } from './GroupSessionsList';
 import type { GroupItemProps, SessionTab } from './GroupItem.types';
 import { KIND_LABEL, MEMBERSHIP_LABEL } from './GroupItem.types';
+import { GroupSessionsList } from './GroupSessionsList';
 
 export type { SessionTab } from './GroupItem.types';
 
@@ -116,7 +116,7 @@ export const GroupItem = React.memo(function GroupItem({
               <TooltipProvider delayDuration={300}>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{group.name}</span>
+                    <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">{group.name}</span>
                   </TooltipTrigger>
                   <TooltipContent>{group.name}</TooltipContent>
                 </Tooltip>

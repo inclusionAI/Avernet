@@ -29,16 +29,20 @@ describe('resolveAuthFailureDisposition', () => {
   });
 
   it('HTTP 401(任意响应体)→ single-flight 弹窗信号 + login-prompt-silent', () => {
-    expect(resolveAuthFailureDisposition({ status: 401, data: { message: 'unauthorized' } })).toBe('login-prompt-silent');
+    expect(resolveAuthFailureDisposition({ status: 401, data: { message: 'unauthorized' } })).toBe(
+      'login-prompt-silent',
+    );
     expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
   });
 
   it('信封双方言 401 段体(HTTP 200 网关误包)→ 弹窗信号 + login-prompt-silent', () => {
-    expect(resolveAuthFailureDisposition({ status: 200, data: { code: 40100, message: 'x' } })).toBe('login-prompt-silent');
+    expect(resolveAuthFailureDisposition({ status: 200, data: { code: 40100, message: 'x' } })).toBe(
+      'login-prompt-silent',
+    );
     expect(resolveAuthFailureDisposition({ data: { code: 401000, message: '未登录' } })).toBe('login-prompt-silent');
-    expect(
-      resolveAuthFailureDisposition({ status: 401, data: { data: { error_code: 'unauthenticated' } } }),
-    ).toBe('login-prompt-silent');
+    expect(resolveAuthFailureDisposition({ status: 401, data: { data: { error_code: 'unauthenticated' } } })).toBe(
+      'login-prompt-silent',
+    );
     expect(useLoginRedirectStore.getState().pendingLogin).toEqual({ mode: 'prompt' });
   });
 

@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
-import { fireEvent, render, screen } from '@testing-library/react';
 import { TaskLoopCard } from '@/components/TaskCards/TaskLoopCard';
 import { submitTaskCardAction } from '@/services/tasks/taskCardBridge';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 jest.mock('@/services/tasks/taskCardBridge', () => ({
   submitTaskCardAction: jest.fn(),
@@ -10,7 +10,13 @@ jest.mock('@/services/tasks/taskCardBridge', () => ({
 const mockedSubmit = submitTaskCardAction as jest.MockedFunction<typeof submitTaskCardAction>;
 
 function cardProps(content: Record<string, unknown>) {
-  return { params: { content }, payload: {}, onAction: jest.fn(), onInteraction: jest.fn(), tab: { id: 'task-card', type: 'taskCard.TaskLoopCard', title: 'task' } };
+  return {
+    params: { content },
+    payload: {},
+    onAction: jest.fn(),
+    onInteraction: jest.fn(),
+    tab: { id: 'task-card', type: 'taskCard.TaskLoopCard', title: 'task' },
+  };
 }
 
 describe('TaskLoopCard', () => {

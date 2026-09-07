@@ -1,6 +1,9 @@
+import type { HumanIdentity, UserProfilePresentation } from '@/capabilities';
+import { getCapabilities } from '@/capabilities';
 import type {
   CollaborationBot,
   CollaborationPrivacyOverview,
+  CurrentUserIdentity,
   OrganizationSearchEntry,
   PendingPublication,
   PublicConfig,
@@ -49,6 +52,29 @@ export interface CollaborationPrivacyRuntimeDependencies {
   };
   getWorkerConfig: typeof fetchWorkerConfig;
   updateWorkerConfig: typeof saveWorkerConfig;
+  getUserProfilePresentation?: () => UserProfilePresentation;
+  getHumanIdentity?: () => HumanIdentity | null;
+}
+
+const internalUserProfilePresentation: UserProfilePresentation = {
+  preferAuthenticatedUserProfile: false,
+  showDepartment: true,
+};
+
+function resolveUserProfilePresentation(
+  dependencies: CollaborationPrivacyRuntimeDependencies,
+): UserProfilePresentation {
+  return dependencies.getUserProfilePresentation?.() ?? internalUserProfilePresentation;
+}
+
+function buildAuthenticatedCurrentUser(userId: string, identity?: HumanIdentity | null): CurrentUserIdentity {
+  const employeeNumber = normalizeEmployeeNumber(identity?.userId || userId);
+  return {
+    displayName: identity?.displayName.trim() || employeeNumber,
+    employeeNumber,
+    departmentPath: [],
+    lastSyncedAt: new Date().toISOString(),
+  };
 }
 
 function assertWorkerConfigResponse(response: BcsfuseWorkerConfigDto, botId: string): boolean {
@@ -332,6 +358,8 @@ export function createCollaborationPrivacyRuntimeAdapter(
     taskGrant: { grantTaskClaim, revokeTaskClaim },
     getWorkerConfig: fetchWorkerConfig,
     updateWorkerConfig: saveWorkerConfig,
+    getUserProfilePresentation: () => getCapabilities().getUserProfilePresentation().value,
+    getHumanIdentity: () => getCapabilities().getHumanIdentity().value,
   },
 ): CollaborationPrivacyGateway {
   let overview: CollaborationPrivacyOverview | undefined;
@@ -339,10 +367,16 @@ export function createCollaborationPrivacyRuntimeAdapter(
 
   return {
     async loadOverview(userId, signal) {
-      const userResponse = await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal);
-      const currentUser = normalizeOrgUser(assertOrgUserResponse(userResponse));
+      const userProfilePresentation = resolveUserProfilePresentation(dependencies);
+      const currentUser = userProfilePresentation.preferAuthenticatedUserProfile
+        ? buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.())
+        : mapOrgUserToIdentity(
+            normalizeOrgUser(
+              assertOrgUserResponse(await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal)),
+            ),
+          );
       const managedBots = await dependencies.apiAdapter.listManagedBots(
-        { kind: 'bot', user_id: currentUser.user_id },
+        { kind: 'bot', user_id: currentUser.employeeNumber },
         signal,
       );
       const physicalBots = managedBots.items.filter((item) => item.kind === 'bot');
@@ -354,7 +388,7 @@ export function createCollaborationPrivacyRuntimeAdapter(
       ]);
       const profileByBotId = new Map(botsWithProfile.map((bot) => [bot.id, bot]));
       const nextOverview: CollaborationPrivacyOverview = {
-        currentUser: mapOrgUserToIdentity(currentUser),
+        currentUser,
         organizationOptions: [],
         bots: botsWithDepartments.map((bot) => {
           const profile = profileByBotId.get(bot.id);
@@ -388,6 +422,10 @@ export function createCollaborationPrivacyRuntimeAdapter(
     },
 
     async syncDepartment(userId, signal) {
+      const userProfilePresentation = resolveUserProfilePresentation(dependencies);
+      if (!userProfilePresentation.showDepartment) {
+        return buildAuthenticatedCurrentUser(userId, dependencies.getHumanIdentity?.());
+      }
       const userResponse = await dependencies.getOrgUser(normalizeEmployeeNumber(userId), signal);
       return mapOrgUserToIdentity(normalizeOrgUser(assertOrgUserResponse(userResponse)));
     },

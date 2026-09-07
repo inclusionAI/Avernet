@@ -14,6 +14,7 @@ dict so round-trip assertions work.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -159,7 +160,15 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
         limit: int = 50,
         agent_id: str | None = None,
         session_key: str | None = None,
+        source: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict]:
+        if source not in (None, "all_but_others"):
+            return []
+        actor_user_id = user_id.strip() if isinstance(user_id, str) else ""
+        if source == "all_but_others" and not actor_user_id:
+            return []
+
         items = list(self._sessions.values())
         if agent_id is not None:
             before_count = len(items)
@@ -181,6 +190,13 @@ class LocalClaudeCodePluginImpl(ClaudeCodePlugin):
                 before_count,
                 len(items),
             )
+        if source == "all_but_others":
+            items = [
+                item for item in items
+                if not isinstance(item.get("key"), str)
+                or not (match := re.search(r":user:([^:]+)$", item["key"]))
+                or match.group(1) == actor_user_id
+            ]
         return items[offset: offset + limit]
 
     async def session_create(

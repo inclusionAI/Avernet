@@ -9,14 +9,14 @@ import { useChat, useChatBridge, type ProviderConnectionStatus } from '@tc-chat/
 import type { BridgeInputRef, ChatMessage, PanelHandle } from '@tc-chat/core';
 import type { SenderRef } from '@tc-chat/ui/es/Sender/types';
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { toast } from 'sonner';
+import { prependUniqueMessages } from './groupChatHistoryUtils';
 import {
   buildEchoAttachments,
   buildGroupChatBridgeRequest,
   buildGroupUserMessageExtra,
 } from './groupChatRequestBuilder';
-import { prependUniqueMessages } from './groupChatHistoryUtils';
+import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { useGroupBootstrapProcessing } from './useGroupBootstrapProcessing';
 import { useManifestHistoryLoader } from './useManifestHistoryLoader';
 

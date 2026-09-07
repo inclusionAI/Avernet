@@ -266,8 +266,6 @@ it('选中首页外会话时直接拉取详情并补入列表（外链直达旧�
 
   // 兜底 effect 直接拉取该会话详情并补入列表
   await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 's-old'));
-  await waitFor(() =>
-    expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's-old')).toBeDefined(),
-  );
+  await waitFor(() => expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's-old')).toBeDefined());
   await waitFor(() => expect(result.current.selectedSession?.sessionId).toBe('s-old'));
 });

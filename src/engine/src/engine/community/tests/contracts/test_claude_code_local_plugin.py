@@ -8,6 +8,8 @@ local plugin, no ``world`` fixture.
 """
 from __future__ import annotations
 
+from engine.community.core.adapters.claude_code.session import ClaudeCodeSessionAdapter
+from engine.community.core.session.models import SessionListRequest
 from engine.community.kernel.frames import EventFrame
 from engine.community.plugin_api.claude_code.plugin import ClaudeCodePlugin
 from engine.community.local.claude_code import LocalClaudeCodePluginImpl
@@ -84,6 +86,34 @@ async def test_local_claude_code_session_key_lookup_is_exact_and_pre_paginated()
     assert await plugin.sessions_list(session_key="get") == []
     assert await plugin.sessions_list(session_key="missing", offset=0, limit=1) == []
     assert await plugin.sessions_list(session_key="  ", offset=0, limit=1) == [first]
+
+
+async def test_local_claude_code_source_filter_via_adapter_before_pagination():
+    plugin = LocalClaudeCodePluginImpl()
+    await plugin.session_create("session:other:user:u2")
+    current = await plugin.session_create("session:current:user:u1")
+    userless = await plugin.session_create("session:legacy")
+    adapter = ClaudeCodeSessionAdapter(plugin)
+
+    sessions = await adapter.list(SessionListRequest(
+        source="all_but_others", user_id="u1", limit=10,
+    ))
+    assert [session.key for session in sessions] == [current["key"], userless["key"]]
+
+    padded = await adapter.list(SessionListRequest(
+        source="all_but_others", user_id=" u1 ", limit=10,
+    ))
+    assert [session.key for session in padded] == [current["key"], userless["key"]]
+
+    blank = await adapter.list(SessionListRequest(
+        source="all_but_others", user_id="   ", limit=10,
+    ))
+    assert blank == []
+
+    page = await adapter.list(SessionListRequest(
+        source="all_but_others", user_id="u1", offset=1, limit=1,
+    ))
+    assert [session.key for session in page] == [userless["key"]]
 
 
 async def test_local_claude_code_agent_lookup_uses_canonical_key_without_agent_id():

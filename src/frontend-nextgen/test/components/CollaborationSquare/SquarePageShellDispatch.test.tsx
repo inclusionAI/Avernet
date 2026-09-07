@@ -1,9 +1,10 @@
 /** @jest-environment jsdom */
 import { SquarePageShell } from '@/components/CollaborationSquare/SquarePageShell';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
-import { history } from '@umijs/max';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import '@testing-library/jest-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { history } from '@umijs/max';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AnchorHTMLAttributes, ReactNode } from 'react';
@@ -74,6 +75,7 @@ describe('SquarePageShell three-way dispatch', () => {
   beforeEach(() => {
     mockedUseCollaborationSquare.mockReturnValue(makeSquare());
     (history.push as jest.Mock).mockClear();
+    useWorkspaceStore.getState().reset();
   });
 
   test('resource=task 渲染任务面板、第三导航高亮、任务描述', () => {
@@ -142,12 +144,22 @@ describe('SquarePageShell three-way dispatch', () => {
     render(<SquarePageShell resource="bot" />);
     const navigation = screen.getByRole('navigation', { name: '协作广场资源导航' });
     expect(screen.getByRole('link', { name: /公开 Bot/ })).toHaveAttribute('href', '/collaboration-square/bots');
-    expect(screen.getByRole('link', { name: /公开协作群/ })).toHaveAttribute(
-      'href',
-      '/collaboration-square/groups',
-    );
+    expect(screen.getByRole('link', { name: /公开协作群/ })).toHaveAttribute('href', '/collaboration-square/groups');
     expect(screen.getByRole('link', { name: /任务广场/ })).toHaveAttribute('href', '/collaboration-square/tasks');
     expect(navigation).toContainElement(screen.getByRole('link', { name: /公开 Bot/ }));
+  });
+
+  test('Bot 工作身份隐藏公开协作群入口，保留公开 Bot 与任务广场', () => {
+    useWorkspaceStore.setState({
+      activeIdentityId: 'bot-1:447147',
+      identities: [{ id: 'bot-1:447147', kind: 'bot', displayName: 'Bot A', online: true }],
+    });
+
+    render(<SquarePageShell resource="bot" />);
+
+    expect(screen.getByRole('link', { name: /公开 Bot/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /公开协作群/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /任务广场/ })).toBeInTheDocument();
   });
 
   test('Shell 源码保持 UI 与分层约束且含任务描述', () => {

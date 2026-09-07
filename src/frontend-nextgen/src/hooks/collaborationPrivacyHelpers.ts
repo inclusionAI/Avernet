@@ -40,7 +40,7 @@ export function directSettingLabel(setting: DirectSetting, value: Confirmation['
     case 'taskClaimingEnabled':
       return value ? '已开启任务认领' : '已关闭任务认领';
     case 'dreamModelEnabled':
-      return value ? '已开启 Dream Model' : '已关闭 Dream Model';
+      return value ? '已开启 Dream Mode' : '已关闭 Dream Mode';
   }
 }
 
@@ -56,8 +56,8 @@ export function buildDirectConfirmation(
         ? '允许参与协作群聊'
         : '停止参与协作群聊'
       : value
-        ? '公开 Bot 画像'
-        : '关闭 Bot 画像公开';
+      ? '公开 Bot 画像'
+      : '关闭 Bot 画像公开';
   const description =
     setting === 'collaborationStatus'
       ? value === 'online'

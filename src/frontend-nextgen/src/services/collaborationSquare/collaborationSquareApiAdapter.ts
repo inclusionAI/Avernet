@@ -58,7 +58,7 @@ async function enrichPendingRelationships(bots: PublicBot[], actor?: FriendReque
   return bots.map((bot) => ({
     ...bot,
     relationshipStatus:
-      bot.isOwnedByViewer || bot.relationshipStatus === 'friend'
+      bot.isOwnedByLoggedInUser || bot.relationshipStatus === 'friend'
         ? bot.relationshipStatus
         : applyingIds.has(getPublicBotTargetId(bot))
         ? ('applying' as const)
@@ -66,13 +66,12 @@ async function enrichPendingRelationships(bots: PublicBot[], actor?: FriendReque
   }));
 }
 
-/** 关系回填的 viewer userId：仅 human viewer 返回其 id，bot viewer 回退登录人类。 */
-function resolveViewerUserId(
+/** 目标 Bot 所有者判断始终使用登录用户；viewer 只决定关系与可见范围。 */
+function resolveLoggedInUserId(
   query: { viewerActorType?: 'human' | 'bot'; viewerActorId?: string },
   context?: HumanBotActionContext,
 ): string | undefined {
-  if (query.viewerActorType) return query.viewerActorType === 'human' ? query.viewerActorId : undefined;
-  return context?.userId;
+  return context?.userId ?? (query.viewerActorType === 'human' ? query.viewerActorId : undefined);
 }
 
 function resolveEnrichActor(
@@ -103,7 +102,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         },
         signal,
       );
-      const viewerUserId = resolveViewerUserId(query, context);
+      const viewerUserId = resolveLoggedInUserId(query, context);
       const bots = response.data.items.flatMap((item) => {
         const bot = mapPublicBotCatalogDto(item, viewerUserId);
         return bot ? [bot] : [];
@@ -144,7 +143,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         },
         signal,
       );
-      const viewerUserId = resolveViewerUserId(query, context);
+      const viewerUserId = resolveLoggedInUserId(query, context);
       const bots = response.data.items.flatMap((item) => {
         const bot = mapPublicBotCatalogDto(item, viewerUserId);
         return bot ? [bot] : [];

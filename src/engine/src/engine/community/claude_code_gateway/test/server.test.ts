@@ -264,6 +264,75 @@ describe('Gateway server (E2E)', () => {
     }
   });
 
+  it('sessions.list filters only other user-scoped keys without pagination', async () => {
+    const { server, store, storePath } = await bootServer([{ kind: 'done' }]);
+
+    try {
+      const client = await connectedClient(server.port);
+      for (const sessionKey of [
+        'session:mine:user:u1',
+        'agent:bot:session:mine-agent:user:u1',
+        'session:other:user:u2',
+        'agent:bot:session:other-agent:user:u2',
+        'session:legacy',
+        'custom:format:userless',
+      ]) {
+        await client.request('session.new', { sessionKey });
+      }
+
+      const list = await client.request('sessions.list', {
+        source: 'all_but_others',
+        userId: 'u1',
+        offset: 1,
+        limit: 1,
+      });
+      const keys = (list.payload as { sessions: Array<{ key: string }> }).sessions
+        .map(session => session.key);
+
+      assert(keys.includes('session:mine:user:u1'));
+      assert(keys.includes('agent:bot:session:mine-agent:user:u1'));
+      assert(!keys.includes('session:other:user:u2'));
+      assert(!keys.includes('agent:bot:session:other-agent:user:u2'));
+      assert(keys.includes('session:legacy'));
+      assert(keys.includes('custom:format:userless'));
+      assert.equal(keys.length, 4, 'gateway must not apply offset/limit pagination');
+
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
+  it('sessions.list rejects an unknown source', async () => {
+    const { server, store, storePath } = await bootServer([{ kind: 'done' }]);
+
+    try {
+      const client = await connectedClient(server.port);
+      const res = await client.request('sessions.list', { source: 'unknown', userId: 'u1' });
+
+      assert.equal(res.ok, false);
+      assert.equal(res.error?.code, 'INVALID_REQUEST');
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
+  it('sessions.list requires userId for all_but_others', async () => {
+    const { server, store, storePath } = await bootServer([{ kind: 'done' }]);
+
+    try {
+      const client = await connectedClient(server.port);
+      const res = await client.request('sessions.list', { source: 'all_but_others' });
+
+      assert.equal(res.ok, false);
+      assert.equal(res.error?.code, 'INVALID_REQUEST');
+      await client.close();
+    } finally {
+      await teardown(server, store, storePath);
+    }
+  });
+
   it('sessions.list exposes cwd and model from binding', async () => {
     // 让 OCB engine adaptor 能在 sessions.list 直接拿到 cwd / model，
     // 不必再读 binding 内部状态。

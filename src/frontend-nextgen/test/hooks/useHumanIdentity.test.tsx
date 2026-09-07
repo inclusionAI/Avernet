@@ -1,9 +1,9 @@
 /** @jest-environment jsdom */
+import type { ExternalAuthUser } from '@/stores/externalAuthStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
 import '@testing-library/jest-dom/jest-globals';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import type { ExternalAuthUser } from '@/stores/externalAuthStore';
 
 jest.mock('@/services/workspace/identityService', () => ({
   identityService: {
@@ -15,7 +15,8 @@ jest.mock('@/services/workspace/identityService', () => ({
 
 // require 动态取模块：确保取到 mock 后的 identityService 与真实 store（对齐 shell 测试风格）
 const { useHumanIdentity } = require('@/hooks/useHumanIdentity') as typeof import('@/hooks/useHumanIdentity');
-const { identityService } = require('@/services/workspace/identityService') as typeof import('@/services/workspace/identityService');
+const { identityService } =
+  require('@/services/workspace/identityService') as typeof import('@/services/workspace/identityService');
 const { useExternalAuthStore } = require('@/stores/externalAuthStore') as typeof import('@/stores/externalAuthStore');
 const { useWorkspaceStore } = require('@/stores/workspaceStore') as typeof import('@/stores/workspaceStore');
 

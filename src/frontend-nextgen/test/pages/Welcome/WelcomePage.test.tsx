@@ -3,6 +3,8 @@ import { extendCapabilities } from '@/capabilities';
 import Welcome from '@/pages/Welcome';
 import { useExternalAuthStore } from '@/stores/externalAuthStore';
 import { navigateToUrl } from '@/utils/redirectCurrentTab';
+import '@testing-library/jest-dom';
+import '@testing-library/jest-dom/jest-globals';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 
 // 欢迎页依赖面:@umijs/max(history.push 导航 + request 兜底)、authApiController(探活/登录地址)、
@@ -32,6 +34,20 @@ afterEach(() => {
 });
 
 describe('Welcome 欢迎页(Open 形态默认入口)', () => {
+  it('体验提示与 WelcomeHeader 组成统一 sticky 顶部区域', async () => {
+    mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });
+    await act(async () => {
+      render(<Welcome />);
+    });
+
+    const notice = screen.getByRole('status', { name: '开源体验环境提示' });
+    const header = document.querySelector('header');
+    expect(header).not.toBeNull();
+    expect(notice.compareDocumentPosition(header!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.parentElement).toHaveClass('sticky', 'top-0', 'z-40');
+    expect(header).not.toHaveClass('sticky');
+  });
+
   it('Hero 渲染品牌名大标题与 tagline(产品名经 getProductBrand 插值)', async () => {
     // 挂载探活 401 → 稳定保持未登录态;render flush 进 act 以消化探活的异步 setState
     mockedGetCurrentAuthUser.mockRejectedValueOnce({ response: { status: 401 } });

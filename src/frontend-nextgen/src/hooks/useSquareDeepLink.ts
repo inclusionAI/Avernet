@@ -1,5 +1,5 @@
-import { parseSquareDeepLink } from '@/domain/collaborationSquare/mapper';
 import { notifyError } from '@/components/ui/notify';
+import { parseSquareDeepLink } from '@/domain/collaborationSquare/mapper';
 import type {
   BotCatalogViewer,
   HumanBotActionContext,
@@ -81,15 +81,5 @@ export function useSquareDeepLink({
     handledTarget.current = targetKey;
     if (group) void openGroupMembers(group);
     else handleTargetInvalid('group', deepLink.id);
-  }, [
-    bots,
-    groups,
-    handleTargetInvalid,
-    humanBotContext,
-    loading,
-    openGroupMembers,
-    openSharedBot,
-    resource,
-    viewer,
-  ]);
+  }, [bots, groups, handleTargetInvalid, humanBotContext, loading, openGroupMembers, openSharedBot, resource, viewer]);
 }

@@ -19,6 +19,18 @@ describe('Pagination', () => {
     expect(getByLabelText('下一页')).toBeEnabled();
   });
 
+  it('翻页按钮带手型，禁用态退回 not-allowed', () => {
+    const { getByLabelText } = render(<Pagination current={1} pageSize={10} total={100} onChange={() => {}} />);
+    const prev = getByLabelText('上一页');
+    expect(prev).toHaveClass('cursor-pointer');
+    expect(prev).toBeDisabled();
+    expect(prev).toHaveClass('disabled:cursor-not-allowed');
+
+    const next = getByLabelText('下一页');
+    expect(next).toHaveClass('cursor-pointer');
+    expect(next).toBeEnabled();
+  });
+
   it('showQuickJumper 渲染跳页输入框和 Go 按钮', () => {
     const { getByLabelText, getByText } = render(
       <Pagination current={1} pageSize={10} total={100} onChange={() => {}} showQuickJumper />,

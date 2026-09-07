@@ -116,24 +116,32 @@ class ServiceLifecycleView(ServiceLifecyclePort):
 
         if record.status == PublishStatus.DRAFT.value:
             add(BotAction.EDIT, BotAction.PUBLISH_STAGING)
-            # The draft / validating runtimes are the owner's own dev-stage
-            # machines: an engine-process restart (POST …/engine/restart,
-            # stage defaults to draft; the verify card must send ?stage=verify)
-            # is a self-service recovery, granted with the card.
-            add(BotAction.ENGINE_RESTART)
+            # The draft machine restarts through the bot-level container
+            # restart (``POST /openapi/v1/bots/{bot_id}/restart``) — the
+            # legacy surface's bot restart. It re-provisions the sandbox
+            # (dropping sessions), which also makes it the only recovery once
+            # the sandbox is gone: an engine restart needs a live daemon to
+            # relay through.
+            add(BotAction.RESTART)
             if not any(
                 item.status == PublishStatus.SUCCESS.value for item in all_records
             ):
                 add(BotAction.DELETE)
         elif record.status == PublishStatus.VALIDATING.value:
+            # RESTART_PUBLISH — not RESTART: the published runtimes restart
+            # through ``POST /openapi/v1/bots/{bot_id}/lifecycle/restart``
+            # (stage prestable/online), a different endpoint from the
+            # bot-level container restart, so the action name is itself the
+            # routing key. The verb matches the legacy publish restart and
+            # the ``ServicePublicationOperation.action`` value the 202
+            # reply reports.
             add(
                 BotAction.PUBLISH_ONLINE,
-                BotAction.RESTART,
-                BotAction.ENGINE_RESTART,
+                BotAction.RESTART_PUBLISH,
                 BotAction.CANCEL_STAGING,
             )
         elif record.status == PublishStatus.SUCCESS.value:
-            add(BotAction.CHAT, BotAction.RESTART)
+            add(BotAction.CHAT, BotAction.RESTART_PUBLISH)
             if can_upgrade_publication_from_records(record, all_records):
                 add(BotAction.UPGRADE)
             add(BotAction.OFFLINE)

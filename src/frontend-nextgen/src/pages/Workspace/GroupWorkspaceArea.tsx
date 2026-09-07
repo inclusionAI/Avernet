@@ -25,7 +25,6 @@ export function GroupWorkspaceArea({
   availableViews,
   userAvatarUrl,
   userIdentityId,
-  onAddFriend,
   mobileListOpen,
   onCloseMobileList,
 }: {
@@ -34,7 +33,6 @@ export function GroupWorkspaceArea({
   availableViews: WorkspaceView[];
   userAvatarUrl?: string;
   userIdentityId?: string | null;
-  onAddFriend: () => void;
   /** <lg 二级协作群列表抽屉开关（由 Workspace 持有，聊天/协作群视图共用同一开关）。 */
   mobileListOpen: boolean;
   onCloseMobileList: () => void;
@@ -175,7 +173,6 @@ export function GroupWorkspaceArea({
     onToggleFavorite: sessions.toggleFavorite,
     onClearSessionFilter: () => sessions.setSessionSearchText(''),
     onCreateGroup: handleCreateGroup,
-    onAddFriend,
     onManageGroup: handleManageGroup,
     onManageSession: handleManageSession,
     onShareGroup: handleShareGroupFromSidebar,

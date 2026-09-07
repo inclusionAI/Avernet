@@ -73,7 +73,7 @@ FAMILY_ARCA = "arca"
 class BotLookupPort(Protocol):
     """``BotServiceProtocol.get_bot``, as a type key.
 
-    Named rather than imported for the reason ``apply/resource_port.py``
+    Named rather than imported for the reason ``core/ports/resource_file_port.py``
     records: the concrete bot service reaches the device graph at import time,
     and this package is imported by the DI graph that builds it.
     """

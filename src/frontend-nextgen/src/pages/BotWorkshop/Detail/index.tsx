@@ -11,15 +11,14 @@ import TaskEscort from '@/components/BotWorkshop/TaskEscort';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Empty } from '@/components/ui/Empty';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover';
 import { Spin } from '@/components/ui/Spin';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { BotRuntimeStage } from '@/domain/botWorkshop';
 import { useBotAdvancedConfig } from '@/hooks/useBotAdvancedConfig';
 import { useBotEditor } from '@/hooks/useBotEditor';
 import { useBotWorkshopDetail } from '@/hooks/useBotWorkshopDetail';
 import { useBotWorkshopEditorIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { cn } from '@/utils/cn';
 import { useLocation } from '@umijs/max';
 import {
   ArrowLeft,
@@ -37,18 +36,18 @@ import React, { useState } from 'react';
 
 type MainTab = 'capability' | 'resource' | 'routine' | 'escort';
 const mainTabs: Array<{ key: MainTab; label: string; icon: React.ReactNode }> = [
-  { key: 'capability', label: '能力集', icon: <LayoutGrid className="size-5" /> },
-  { key: 'resource', label: '资源', icon: <Database className="size-5" /> },
-  { key: 'routine', label: '定时任务', icon: <Clock className="size-5" /> },
-  { key: 'escort', label: '任务护航', icon: <ShieldCheck className="size-5" /> },
+  { key: 'capability', label: '能力集', icon: <LayoutGrid className="size-3.5 shrink-0" /> },
+  { key: 'resource', label: '资源', icon: <Database className="size-3.5 shrink-0" /> },
+  { key: 'routine', label: '定时任务', icon: <Clock className="size-3.5 shrink-0" /> },
+  { key: 'escort', label: '任务护航', icon: <ShieldCheck className="size-3.5 shrink-0" /> },
 ];
 const moreTabs: Array<{ key: MoreConfigTab; label: string; icon: React.ReactNode }> = [
-  { key: 'engine', label: '引擎配置', icon: <Settings className="size-4" /> },
-  { key: 'md', label: 'MD 文档', icon: <FileText className="size-4" /> },
-  { key: 'node', label: '节点', icon: <Database className="size-4" /> },
-  { key: 'channel', label: '渠道', icon: <Network className="size-4" /> },
-  { key: 'approval', label: '发布审批', icon: <ShieldCheck className="size-4" /> },
-  { key: 'screen', label: '副屏', icon: <Smartphone className="size-4" /> },
+  { key: 'engine', label: '引擎配置', icon: <Settings className="size-3.5 shrink-0" /> },
+  { key: 'md', label: 'MD 文档', icon: <FileText className="size-3.5 shrink-0" /> },
+  { key: 'node', label: '节点', icon: <Database className="size-3.5 shrink-0" /> },
+  { key: 'channel', label: '渠道', icon: <Network className="size-3.5 shrink-0" /> },
+  { key: 'approval', label: '发布审批', icon: <ShieldCheck className="size-3.5 shrink-0" /> },
+  { key: 'screen', label: '副屏', icon: <Smartphone className="size-3.5 shrink-0" /> },
 ];
 
 const BotWorkshopDetailPage: React.FC = () => {
@@ -73,7 +72,6 @@ const BotWorkshopDetailPage: React.FC = () => {
   const advanced = useBotAdvancedConfig(id, requestIdentity.ready);
   const [tab, setTab] = useState<MainTab>('capability');
   const [more, setMore] = useState<MoreConfigTab>();
-  const [moreOpen, setMoreOpen] = useState(false);
   if (!id)
     return (
       <Empty
@@ -124,57 +122,46 @@ const BotWorkshopDetailPage: React.FC = () => {
         </Button>
       </header>
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <TooltipProvider delayDuration={300}>
-          <nav
-            aria-label="Bot 编辑模块"
-            className="flex w-16 shrink-0 flex-col items-center gap-3 border-r border-border bg-muted/30 py-4"
-          >
-            {mainTabs.map((item) => (
-              <Tooltip key={item.key}>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant={tab === item.key && !more ? 'primary' : 'ghost'}
-                    size="icon"
-                    aria-label={item.label}
-                    leftIcon={item.icon}
-                    onClick={() => {
-                      setTab(item.key);
-                      setMore(undefined);
-                    }}
-                  />
-                </TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
-              </Tooltip>
-            ))}
-            <Popover open={moreOpen} onOpenChange={setMoreOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant={more ? 'secondary' : 'ghost'}
-                  size="icon"
-                  aria-label="更多配置"
-                  leftIcon={<Settings className="size-5" />}
-                />
-              </PopoverTrigger>
-              <PopoverContent side="right" align="end" className="w-48 space-y-1 p-2">
-                {moreTabs.map((item) => (
-                  <Button
-                    key={item.key}
-                    variant="ghost"
-                    size="sm"
-                    className="w-full justify-start"
-                    leftIcon={item.icon}
-                    onClick={() => {
-                      setMore(item.key);
-                      setMoreOpen(false);
-                    }}
-                  >
-                    {item.label}
-                  </Button>
-                ))}
-              </PopoverContent>
-            </Popover>
-          </nav>
-        </TooltipProvider>
+        <nav
+          aria-label="Bot 编辑模块"
+          className="app-scrollbar flex w-16 shrink-0 flex-col items-center gap-2 overflow-y-auto border-r border-border bg-muted/30 py-4"
+        >
+          {mainTabs.map((item) => (
+            <Button
+              key={item.key}
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'h-11 w-full flex-col gap-1 text-xs font-normal',
+                tab === item.key && !more && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+              )}
+              aria-label={item.label}
+              onClick={() => {
+                setTab(item.key);
+                setMore(undefined);
+              }}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </Button>
+          ))}
+          {moreTabs.map((item) => (
+            <Button
+              key={item.key}
+              variant="ghost"
+              size="icon"
+              className={cn(
+                'h-11 w-full flex-col gap-1 text-xs font-normal',
+                more === item.key && 'bg-primary/10 text-primary hover:bg-primary/10 hover:text-primary',
+              )}
+              aria-label={item.label}
+              onClick={() => setMore(item.key)}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </Button>
+          ))}
+        </nav>
         <section className="app-scrollbar min-w-0 flex-1 border-r border-border bg-background overflow-y-auto lg:w-[42%] lg:max-w-[720px] lg:flex-none">
           {editor.loading ? (
             <Spin tip="加载编辑配置…" />
@@ -259,9 +246,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               onLoadRuns={editor.loadRoutineRuns}
             />
           ) : (
-            <div className="p-5 sm:p-6">
-              <TaskEscort bot={bot} />
-            </div>
+            <TaskEscort bot={bot} />
           )}
         </section>
         <div className="hidden min-w-0 flex-1 lg:flex">

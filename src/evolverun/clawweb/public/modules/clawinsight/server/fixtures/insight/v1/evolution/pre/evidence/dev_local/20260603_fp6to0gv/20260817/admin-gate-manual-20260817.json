@@ -1,0 +1,159 @@
+{
+  "schema_version": "session-evidence/v1",
+  "batch_id": "20260817_admin_gate_v2",
+  "dt": "20260817",
+  "user_id": "dev_local",
+  "bot_id": "20260603_fp6to0gv",
+  "session_id": "admin-gate-manual-20260817",
+  "session": {
+    "bot_name": "Admin Gate 测试 Bot",
+    "start_time": "2026-08-17T17:45:00+08:00",
+    "end_time": "2026-08-17T17:47:20+08:00",
+    "duration_seconds": 140,
+    "is_cron": false,
+    "message_count": 6
+  },
+  "messages": [
+    {
+      "message_index": 0,
+      "role": "user",
+      "timestamp": "2026-08-17T17:45:00+08:00",
+      "visibility": "visible",
+      "content": "请检索最近一周公开发布的行业政策，并汇总三条关键变化。",
+      "raw": {
+        "role": "user",
+        "content": "请检索最近一周公开发布的行业政策，并汇总三条关键变化。",
+        "timestamp": "2026-08-17T17:45:00+08:00"
+      }
+    },
+    {
+      "message_index": 1,
+      "role": "assistant",
+      "timestamp": "2026-08-17T17:45:10+08:00",
+      "visibility": "visible",
+      "content": [
+        {
+          "text": "我会搜索公开来源并交叉核对发布时间。"
+        },
+        {
+          "name": "web_search",
+          "arguments": {
+            "query": "最近一周 行业政策 发布"
+          },
+          "partialArgs": "{\"query\":\"最近一周 行业政策 发布\"}"
+        }
+      ],
+      "raw": {
+        "role": "assistant",
+        "model": "GLM-5",
+        "stopReason": "toolUse",
+        "content": "调用 Web Search",
+        "timestamp": "2026-08-17T17:45:10+08:00"
+      }
+    },
+    {
+      "message_index": 2,
+      "role": "toolResult",
+      "timestamp": "2026-08-17T17:45:11+08:00",
+      "visibility": "internal",
+      "content": "PERMISSION_DENIED: outbound_network=false；WEB_SEARCH_API_TOKEN 未配置。",
+      "raw": {
+        "role": "toolResult",
+        "toolName": "web_search",
+        "status": "error",
+        "result": "PERMISSION_DENIED",
+        "timestamp": "2026-08-17T17:45:11+08:00"
+      }
+    },
+    {
+      "message_index": 3,
+      "role": "assistant",
+      "timestamp": "2026-08-17T17:45:30+08:00",
+      "visibility": "visible",
+      "content": [
+        {
+          "text": "我检查一下当前测试 Bot 的权限配置。"
+        },
+        {
+          "name": "config.inspect",
+          "arguments": {
+            "keys": [
+              "outbound_network",
+              "WEB_SEARCH_API_TOKEN"
+            ]
+          },
+          "partialArgs": "{\"keys\":[\"outbound_network\",\"WEB_SEARCH_API_TOKEN\"]}"
+        }
+      ],
+      "raw": {
+        "role": "assistant",
+        "model": "GLM-5",
+        "stopReason": "toolUse",
+        "content": "检查权限配置",
+        "timestamp": "2026-08-17T17:45:30+08:00"
+      }
+    },
+    {
+      "message_index": 4,
+      "role": "toolResult",
+      "timestamp": "2026-08-17T17:45:31+08:00",
+      "visibility": "internal",
+      "content": "配置检查结果：outbound_network=false；WEB_SEARCH_API_TOKEN=NOT_CONFIGURED。Agent 无权修改这两项。",
+      "raw": {
+        "role": "toolResult",
+        "toolName": "config.inspect",
+        "status": "error",
+        "result": {
+          "outbound_network": false,
+          "credential_status": "NOT_CONFIGURED",
+          "mutable_by_agent": false
+        },
+        "timestamp": "2026-08-17T17:45:31+08:00"
+      }
+    },
+    {
+      "message_index": 5,
+      "role": "assistant",
+      "timestamp": "2026-08-17T17:47:20+08:00",
+      "visibility": "visible",
+      "content": "当前测试 Bot 未配置外网搜索权限和服务凭据，需要你在 Bot 配置中完成授权后再重试。",
+      "raw": {
+        "role": "assistant",
+        "content": "需要 Bot Owner 手动配置权限后重试。",
+        "timestamp": "2026-08-17T17:47:20+08:00"
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "task_index": 0,
+      "task_description": "检索最近一周公开政策并汇总关键变化",
+      "message_range": [
+        0,
+        6
+      ],
+      "is_complete": 0,
+      "reasoning": "Web Search 所需的网络权限和服务凭据尚未在测试 Bot 中配置。Agent 无法安全扩大权限或代替用户注入凭据，需要 Bot Owner 手动完成配置后再验证。",
+      "task_failure_class": "PERMISSION_NETWORK",
+      "human_intervention_level": "none",
+      "human_intervention_reasoning": "用户提出目标后由 Agent 独立执行；失败后未发生人工代操作。",
+      "human_intervention_evidence_message_indices": [],
+      "human_turn_count": 1,
+      "system_user_message_count": 0,
+      "skills": [],
+      "mcps": [
+        {
+          "name": "web_search",
+          "status": "failure"
+        }
+      ]
+    }
+  ],
+  "judge_meta": {
+    "model": "GLM-5",
+    "version": "admin-gate-demo-v2",
+    "judged_at": "2026-08-17T17:47:20+08:00",
+    "is_sampled": true
+  },
+  "generated_at": "2026-08-17T17:55:00+08:00"
+}

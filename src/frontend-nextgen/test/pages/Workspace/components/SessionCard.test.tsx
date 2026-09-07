@@ -90,9 +90,7 @@ describe('SessionCard', () => {
   });
 
   it('选中会话输出当前态，但不复用对象行左侧指示线', () => {
-    const { container } = render(
-      <SessionCard title="当前会话" selected onSelect={jest.fn()} />,
-    );
+    const { container } = render(<SessionCard title="当前会话" selected onSelect={jest.fn()} />);
     expect(screen.getByRole('button', { name: /当前会话/ })).toHaveAttribute('aria-current', 'page');
     expect(container.querySelector('[class~="w-0.5"][class~="bg-primary"]')).not.toBeInTheDocument();
   });

@@ -105,11 +105,11 @@ from agentclaw.community.core.bot_config_manifest.services.config_manifest_apply
 )
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import CliToolPurger, CliToolServiceFactory
-from agentclaw.community.core.bot_config_manifest.apply.identity_port import (
-    ManifestIdentityPort,
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.apply.resource_port import (
-    ManifestResourcePort,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceClient,
@@ -731,14 +731,14 @@ class BotManagementModule(Module):
         # What W5's two fetch-consuming materialisers need, all supplied by
         # manifest_fetch_module as lazy factories for the same cycle reason the
         # three above are.
-        identity_service_provider: Callable[[], ManifestIdentityPort],
+        identity_service_provider: Callable[[], IdentityFilePort],
         upload_service_provider: Callable[[], LocalSkillUploadServiceProtocol],
         capability_reader_provider: Callable[[], BotCapabilityStateReaderProtocol],
         package_validator_provider: Callable[[], SkillPackageValidator],
         entry_fetcher_provider: Callable[[], EntryFetcher],
         # W6's resources materialiser and W7's git transport, from the same
         # module and lazy for the same reason.
-        resource_service_provider: Callable[[], ManifestResourcePort],
+        resource_service_provider: Callable[[], ResourceFilePort],
         cli_tool_service_factory: CliToolServiceFactory,  # W9, keyed by family
         git_client_provider: Callable[[], GitSourceClient],
         task_queue_provider: Callable[[], TaskQueueService],

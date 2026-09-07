@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session-evidence-v1.schema.json",
+  "title": "ClawWeb Insight Session Evidence V1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "batch_id",
+    "dt",
+    "user_id",
+    "bot_id",
+    "session_id",
+    "session",
+    "messages",
+    "tasks",
+    "judge_meta",
+    "generated_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "session-evidence/v1" },
+    "batch_id": { "type": "string", "minLength": 1 },
+    "dt": { "type": "string", "pattern": "^[0-9]{8}$" },
+    "user_id": { "type": "string", "minLength": 1 },
+    "bot_id": { "type": "string", "minLength": 1 },
+    "session_id": { "type": "string", "minLength": 1 },
+    "session": { "type": "object" },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["message_index", "role", "timestamp", "visibility", "content", "raw"],
+        "properties": {
+          "message_index": { "type": "integer", "minimum": 0 },
+          "role": { "type": "string" },
+          "visibility": { "enum": ["visible", "internal"] },
+          "raw": { "type": "object" }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task_index", "task_description", "message_range", "is_complete"],
+        "properties": {
+          "task_index": { "type": "integer", "minimum": 0 },
+          "task_description": { "type": "string" },
+          "message_range": {
+            "type": "array",
+            "prefixItems": [
+              { "type": "integer", "minimum": 0 },
+              { "type": "integer", "minimum": 0 }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "is_complete": { "enum": [0, 1, 2, 3] }
+        }
+      }
+    },
+    "judge_meta": { "type": "object" },
+    "generated_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}

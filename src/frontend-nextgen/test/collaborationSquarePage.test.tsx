@@ -49,11 +49,18 @@ function renderWithPortals(element: React.ReactElement) {
 describe('collaboration square accessible UI', () => {
   test('Bot 卡片使用单一关系主操作、隐藏画像入口并保留分享操作', () => {
     const html = renderToStaticMarkup(
-      <SquareBotCard bot={bot} busy={false} onShare={jest.fn()} onPrimaryAction={jest.fn()} />,
+      <SquareBotCard
+        bot={bot}
+        activeActor={{ type: 'human', id: '327325' }}
+        busy={false}
+        onShare={jest.fn()}
+        onPrimaryAction={jest.fn()}
+      />,
     );
     const friendHtml = renderToStaticMarkup(
       <SquareBotCard
         bot={{ ...bot, relationshipStatus: 'friend' }}
+        activeActor={{ type: 'human', id: '327325' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -75,7 +82,13 @@ describe('collaboration square accessible UI', () => {
     expect(friendHtml).not.toContain('申请好友权限');
 
     const uuidHtml = renderToStaticMarkup(
-      <SquareBotCard bot={botWithUuid} busy={false} onShare={jest.fn()} onPrimaryAction={jest.fn()} />,
+      <SquareBotCard
+        bot={botWithUuid}
+        activeActor={{ type: 'human', id: '327325' }}
+        busy={false}
+        onShare={jest.fn()}
+        onPrimaryAction={jest.fn()}
+      />,
     );
     expect(uuidHtml).toContain('Bot UUID');
     expect(uuidHtml).not.toContain('Bot ID');
@@ -83,6 +96,7 @@ describe('collaboration square accessible UI', () => {
     const profileHtml = renderToStaticMarkup(
       <SquareBotCard
         bot={{ ...bot, shortProfile: '用于测试的专用 Bot' }}
+        activeActor={{ type: 'human', id: '327325' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -95,7 +109,8 @@ describe('collaboration square accessible UI', () => {
   test('自有公开 Bot 显示直接会话操作且不显示好友申请', () => {
     const html = renderToStaticMarkup(
       <SquareBotCard
-        bot={{ ...bot, isOwnedByViewer: true, relationshipStatus: 'none' }}
+        bot={{ ...bot, isOwnedByLoggedInUser: true, relationshipStatus: 'none' }}
+        activeActor={{ type: 'human', id: '327325' }}
         busy={false}
         onShare={jest.fn()}
         onPrimaryAction={jest.fn()}
@@ -195,9 +210,11 @@ describe('collaboration square accessible UI', () => {
     expect(source).not.toContain('src/internal');
     expect(source).not.toContain('queryCollaborationBots');
     expect(source).not.toContain('当前以 Human 身份');
+    expect(source).not.toContain('当前用户身份不可用');
     expect(source).toContain(
-      '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能发现，并以当前用户身份发起好友申请。',
+      '可按 Bot 名称或 Owner 用户名称搜索公开 Bot，也可通过能力描述进行智能搜索，并以当前工作身份发起好友申请。',
     );
+    expect(source).toContain('输入能力或职责描述后，将智能搜索匹配的公开 Bot。');
     expect(source).toContain('onModeChange={vm.setMode}');
     expect(source).toContain('COLLABORATION_SQUARE_PAGE_SIZE = 24');
     expect(source).toContain('new IntersectionObserver');

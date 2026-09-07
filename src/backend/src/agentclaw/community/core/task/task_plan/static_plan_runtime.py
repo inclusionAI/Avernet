@@ -105,6 +105,14 @@ class StaticPlanRuntime:
         else:
             node.task_spec.metadata.instruction = f"{node.task_spec.metadata.instruction}\n输入: {resolved}"
         node.run_info.extend_props["static_bot_id"] = definition.bot_id
+        # 透传 owner_user_id 到 static 子节点: DirectDispatchStrategy 对 static 只设 static_bot_id、不设
+        # owner_id,而 _dispatch_single_bot 经 compose_bot_identity 需 owner_id 才能拼出 BaaS 接受的复合
+        # bot_id:owner(公网 secbaas 拒裸 bot_id → start_run_failed)。owner_id 取自 graph.extend_props(提交
+        # 请求注入),与 root 一致;dispatcher 对 static result.owner_id=None 不覆盖,故此处设值保留到派发。
+        _graph_props = getattr(graph, "extend_props", None) or {}
+        _owner_user_id = _graph_props.get("owner_user_id")
+        if _owner_user_id:
+            node.run_info.extend_props["assignee_owner_id"] = str(_owner_user_id)
         logger.info(
             "[task][static-plan-runtime] node ready task=%s node=%s type=%s depends_on=%s bot_id=%s bot_ids=%s input_keys=%s",
             graph.task_id, node.node_id, definition.node_type, list(definition.depends_on),

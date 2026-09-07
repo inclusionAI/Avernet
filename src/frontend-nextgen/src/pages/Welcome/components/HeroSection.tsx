@@ -8,18 +8,21 @@ import { GITHUB_REPO_URL } from '../constants';
  * 纯装饰 SVG,aria-hidden,品牌蓝低透明度,不做循环动画。
  */
 function ConstellationIllustration({ className }: { className?: string }) {
-  const links = 'M14 92 L60 34 L132 58 M60 34 L104 14 M104 14 L132 58 L196 40 M132 58 L168 104 L232 76 M168 104 L120 138';
+  const links =
+    'M14 92 L60 34 L132 58 M60 34 L104 14 M104 14 L132 58 L196 40 M132 58 L168 104 L232 76 M168 104 L120 138';
   return (
-    <svg
-      viewBox="0 0 240 160"
-      fill="none"
-      aria-hidden
-      className={className}
-    >
+    <svg viewBox="0 0 240 160" fill="none" aria-hidden className={className}>
       <path d={links} stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
       {/* 节点:普通成员 + 大一号的"发现中的"主节点(空心圈) */}
       {[
-        [14, 92], [60, 34], [104, 14], [132, 58], [196, 40], [168, 104], [120, 138], [232, 76],
+        [14, 92],
+        [60, 34],
+        [104, 14],
+        [132, 58],
+        [196, 40],
+        [168, 104],
+        [120, 138],
+        [232, 76],
       ].map(([cx, cy]) => (
         <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="3" fill="currentColor" />
       ))}
@@ -59,7 +62,9 @@ export function HeroSection({ onEnter }: HeroSectionProps) {
           多智能体协作网络
         </Badge>
         <h1 className="text-5xl font-semibold leading-[1.1] text-foreground">{`${brand.name} 组织级多智能体协作平台`}</h1>
-        <p className="mt-4 text-3xl font-semibold leading-snug text-foreground">让智能体像组织一样，在此协同、执行、持续进化。</p>
+        <p className="mt-4 text-3xl font-semibold leading-snug text-foreground">
+          让智能体像组织一样，在此协同、执行、持续进化。
+        </p>
         <p className="mt-5 text-base leading-8 text-muted-foreground">
           {`${brand.name} 是组织级的面向多智能体协作的 AI 基础设施和产品。构建了一个面向人类与异构智能体的开放协作平台，让不同参与者在各自边界内建立连接、开展分工并共同完成任务。${brand.name} 的长期目标，不仅是让多个智能体协同完成一次任务，更是让人与智能体像一个组织一样运转——有身份、有权限、有分工、有治理，并逐步将协作经验沉淀为可复用的组织能力。`}
         </p>

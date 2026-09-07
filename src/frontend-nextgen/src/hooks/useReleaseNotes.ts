@@ -16,6 +16,7 @@ export interface UseReleaseNotesResult {
   /** 菜单「版本发布说明」项是否显示红点（有未读新版本）。 */
   hasNew: boolean;
   modalOpen: boolean;
+  /** 打开 Modal；当前发布日期存在时立即标记已读并清红点。 */
   open: () => void;
   closeModal: () => void;
   /** 标记已读并关闭 Modal（写 localStorage 记录日期，清红点）。 */
@@ -24,7 +25,8 @@ export interface UseReleaseNotesResult {
 
 /**
  * 版本发布说明状态收口。mount 时若 supported 则单飞 load，比对 readSeenDate 判 hasNew。
- * open() 开 Modal；markSeenAndClose() 写已读日期 + 关 Modal + 清红点。
+ * 新发布日期首次加载时自动开 Modal 并标记已读；open() 手动打开时走相同已读逻辑。
+ * markSeenAndClose() 保留关闭时兜底写入。
  */
 export function useReleaseNotes(): UseReleaseNotesResult {
   const capResult = getCapabilities().getReleaseNotesCapability();
@@ -44,9 +46,15 @@ export function useReleaseNotes(): UseReleaseNotesResult {
       if (res) {
         setData(res);
         setStatus('ready');
-        // 有发布日期且与已读记录不同 → 红点
+        // 新发布日期首次加载 → 自动展示一次；Modal 打开即标记已读并清红点。
         const seen = cap.getSeenDate();
-        setHasNew(!!res.date && seen !== res.date);
+        if (res.date && seen !== res.date) {
+          cap.markSeen(res.date);
+          setHasNew(false);
+          setModalOpen(true);
+        } else {
+          setHasNew(false);
+        }
       } else {
         setStatus('error');
       }
@@ -56,7 +64,11 @@ export function useReleaseNotes(): UseReleaseNotesResult {
     };
   }, [cap]);
 
-  const open = () => setModalOpen(true);
+  const open = () => {
+    if (cap && data?.date) cap.markSeen(data.date);
+    setHasNew(false);
+    setModalOpen(true);
+  };
   const closeModal = () => setModalOpen(false);
   const markSeenAndClose = () => {
     if (cap && data?.date) cap.markSeen(data.date);

@@ -1,0 +1,65 @@
+{
+  "name": "@avernet/workflow",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./server/*": {
+      "types": "./dist/server/*.d.ts",
+      "import": "./dist/server/*.js"
+    },
+    "./web": {
+      "types": "./dist/web/index.d.ts",
+      "import": "./dist/web/index.js"
+    },
+    "./web/*": {
+      "types": "./dist/web/*.d.ts",
+      "import": "./dist/web/*.js"
+    }
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@avernet/clawevolve": "0.2.0",
+    "@avernet/clawweb-shared": "0.1.0",
+    "@tanstack/react-query": "^5.100.10",
+    "@xyflow/react": "^12.10.2",
+    "better-sqlite3": "^11.9.1",
+    "echarts-for-react": "^3.0.6",
+    "express": "^5.2.1",
+    "yaml": "^2.9.0",
+    "zustand": "^5.0.13"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@vitejs/plugin-react": "^6.0.1",
+    "jsdom": "^27.0.1",
+    "react": "^19.2.6",
+    "react-router-dom": "^7.15.1",
+    "typescript": "~6.0.2",
+    "vitest": "^3.2.4"
+  }
+}

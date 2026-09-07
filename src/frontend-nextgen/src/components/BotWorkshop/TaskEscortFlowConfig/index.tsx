@@ -7,10 +7,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/u
 import { Spin } from '@/components/ui/Spin';
 import { useTaskEscortFlowConfig } from '@/hooks/useTaskEscortFlowConfig';
 import { dump as yamlDump } from 'js-yaml';
-import { Plus, RefreshCw } from 'lucide-react';
-import React, { useMemo, useState } from 'react';
+import { Plus, RefreshCw, Save } from 'lucide-react';
+import React, { useCallback, useMemo, useState } from 'react';
 
 import CreateWorkflowFromYamlModal from './CreateWorkflowFromYamlModal';
+import { NodeEditorPanel } from './node-editor/NodeEditorPanel';
 import WorkflowDagView from './WorkflowDagView';
 
 interface FlowConfigProps {
@@ -44,14 +45,29 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
     isLoadingList,
     isLoadingSpec,
     isCreatingWorkflow,
+    isSaving,
     error,
     selectWorkflow,
     refreshList,
     createWorkflowFromYaml,
+    updateSpec,
+    saveSpec,
   } = useTaskEscortFlowConfig({ botOwnerId, botId, enabled });
 
   const [viewMode, setViewMode] = useState<ViewMode>('dag');
   const [createOpen, setCreateOpen] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const handleNodeClick = useCallback((nodeId: string) => {
+    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
+  }, []);
+
+  const handleSpecChange = useCallback(
+    (nextSpec: TaskEscortWorkflowSpec) => {
+      updateSpec(nextSpec);
+    },
+    [updateSpec],
+  );
 
   const yamlText = useMemo(() => {
     if (!spec) return '';
@@ -138,12 +154,31 @@ const TaskEscortFlowConfig: React.FC<FlowConfigProps> = ({ botOwnerId, botId, en
                 <span className="text-sm font-semibold">{toText(spec.title)}</span>
                 <Badge tone="neutral">v{toText(spec.version, '?')}</Badge>
               </div>
-              <div className="text-[10px] text-[var(--color-muted)]">{toText(spec.id)}</div>
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] text-[var(--color-muted)]">{toText(spec.id)}</div>
+                <Button size="sm" loading={isSaving} onClick={saveSpec} leftIcon={<Save className="h-3.5 w-3.5" />}>
+                  保存
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
           {/* DAG view */}
-          {viewMode === 'dag' && <WorkflowDagView spec={spec} />}
+          {viewMode === 'dag' && (
+            <div className="flex gap-3">
+              <div className="min-w-0 flex-1">
+                <WorkflowDagView spec={spec} selectedNodeId={selectedNodeId} onNodeClick={handleNodeClick} />
+              </div>
+              {selectedNodeId && (
+                <NodeEditorPanel
+                  spec={spec}
+                  selectedNodeId={selectedNodeId}
+                  onChange={handleSpecChange}
+                  onClose={() => setSelectedNodeId(null)}
+                />
+              )}
+            </div>
+          )}
 
           {/* YAML view */}
           {viewMode === 'yaml' && (

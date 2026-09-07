@@ -1061,12 +1061,30 @@ class TestSessionMixin:
         assert await impl.sessions_list(session_key="tar") == []
         assert await impl.sessions_list(session_key="get") == []
 
+    async def test_list_forwards_source_and_user_id_before_local_pagination(self):
+        c = _FakeRelayClient()
+        c.set_response("sessions.list", _ok({"sessions": [
+            {"key": "first"}, {"key": "second"}, {"key": "third"},
+        ]}))
+        impl, _ = _impl(c)
+
+        out = await impl.sessions_list(
+            source="all_but_others", user_id="u1", offset=1, limit=1,
+        )
+
+        assert out == [{"key": "second"}]
+        _, args, kw = _last_call(c)
+        assert args[0] == "sessions.list"
+        assert kw["params"] == {"source": "all_but_others", "userId": "u1"}
+
     async def test_list_offset_limit(self):
         c = _FakeRelayClient()
         c.set_response("sessions.list", _ok({"sessions": [{"key": str(i)} for i in range(10)]}))
         impl, _ = _impl(c)
         out = await impl.sessions_list(offset=2, limit=3)
         assert [s["key"] for s in out] == ["2", "3", "4"]
+        _, _, kw = _last_call(c)
+        assert kw["params"] == {}
 
     async def test_create_success_full_params(self):
         c = _FakeRelayClient()

@@ -7,11 +7,12 @@ use bcs_service_api::port::repo::NewSessionParams;
 use bcs_service_api::{
     ActorKind, AuthenticatedHumanCaller, BotRegistryCoreService, CollaborationRuntimeService,
     CreateOrReactivateCommand, CreateSessionLaunch, DeliveryType, Group, GroupCoreService,
-    GroupStrategy, Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch,
-    RequestedSessionRole, Session, SessionCaller, SessionKind, SessionLaunchError,
-    SessionLaunchOutcome, SessionLaunchRequest, SessionLaunchService, SessionManagementService,
-    SessionUseCaseError, StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService,
-    backfill_bot_names, resolve_session_topic,
+    GroupStrategy, InitialSessionRun, InitialSessionRunActivityKind, InitialSessionRunState,
+    Participant, ParticipantMode, ParticipantRole, ReactivateSessionLaunch, RequestedSessionRole,
+    Session, SessionCaller, SessionKind, SessionLaunchError, SessionLaunchOutcome,
+    SessionLaunchRequest, SessionLaunchService, SessionManagementService, SessionUseCaseError,
+    StartStateMachineRunCommand, SystemMessageEvent, SystemMessageService, backfill_bot_names,
+    resolve_session_topic,
 };
 
 pub struct SessionLaunchApplication {
@@ -402,11 +403,11 @@ impl SessionLaunchApplication {
                 session,
                 created,
                 state_machine_run: Some(run.view),
+                initial_run: None,
             });
         }
 
-        if emit_session_context {
-            let notify = self.system_message.clone();
+        let initial_run = if emit_session_context {
             let group_id = prepared.group.id.clone();
             let session_id = session.id.clone();
             let session_input = session.input.clone();
@@ -417,29 +418,57 @@ impl SessionLaunchApplication {
                 prepared.group.label.as_deref(),
             )
             .unwrap_or_default();
-            tokio::spawn(async move {
-                let _ = notify
-                    .notify(
-                        &group_id,
-                        SystemMessageEvent::SessionContext {
-                            group_id: group_id.clone(),
-                            session_id: session_id.clone(),
-                            reason,
-                            session_input,
-                            task_ledger: None,
-                            driver_delivery: prepared.context_delivery,
+            match self
+                .system_message
+                .notify_with_outcome(
+                    &group_id,
+                    SystemMessageEvent::SessionContext {
+                        group_id: group_id.clone(),
+                        session_id: session_id.clone(),
+                        reason,
+                        session_input,
+                        task_ledger: None,
+                        driver_delivery: prepared.context_delivery,
+                    },
+                    &session_id,
+                    &participants,
+                )
+                .await
+            {
+                Ok(dispatch) => dispatch
+                    .recipient_results
+                    .iter()
+                    .find(|result| result.delivery_type == DeliveryType::Send)
+                    .map(|result| InitialSessionRun {
+                        run_id: result.run_id.clone(),
+                        bot_uuid: result.recipient_id.clone(),
+                        activity_kind: InitialSessionRunActivityKind::SessionContext,
+                        state: if result.delivered {
+                            InitialSessionRunState::Running
+                        } else {
+                            InitialSessionRunState::Failed
                         },
-                        &session_id,
-                        &participants,
-                    )
-                    .await;
-            });
-        }
+                        started_at: chrono::Utc::now().to_rfc3339(),
+                    }),
+                Err(error) => {
+                    tracing::warn!(
+                        group_id = %group_id,
+                        session_id = %session_id,
+                        error = %error,
+                        "failed to deliver new Session context"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         Ok(SessionLaunchOutcome {
             session,
             created,
             state_machine_run: None,
+            initial_run,
         })
     }
 }

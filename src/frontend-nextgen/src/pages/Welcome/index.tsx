@@ -1,3 +1,4 @@
+import { OpenSourceExperienceNotice } from '@/shell/OpenSourceExperienceNotice';
 import { history } from '@umijs/max';
 import { HeroSection } from './components/HeroSection';
 import { ScenariosSection } from './components/ScenariosSection';
@@ -17,7 +18,10 @@ export default function Welcome() {
     // 根节点即滚动容器:全局 body overflow:hidden(global.css),页面需自建 overflow-y-auto
     // (对齐 Avernet BcnHome 模式);h-full 沿 #root 100% 高度链,短内容时 footer 仍钉在底部。
     <div className="flex h-full w-full flex-col overflow-y-auto scroll-smooth bg-gradient-to-b from-primary/5 via-background to-background text-foreground">
-      <WelcomeHeader />
+      <div className="sticky top-0 z-40">
+        <OpenSourceExperienceNotice />
+        <WelcomeHeader />
+      </div>
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-8 pb-20 pt-12">
         {/* 待补挂载位:接入方式 <section id="access"> */}
         <HeroSection onEnter={() => history.push('/workspace')} />

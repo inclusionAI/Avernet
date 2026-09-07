@@ -26,10 +26,13 @@ test('opens the YAML creation dialog and submits the form', async () => {
     isLoadingList: false,
     isLoadingSpec: false,
     isCreatingWorkflow: false,
+    isSaving: false,
     error: null,
     selectWorkflow: jest.fn(),
     refreshList: jest.fn().mockResolvedValue(undefined),
     createWorkflowFromYaml,
+    updateSpec: jest.fn(),
+    saveSpec: jest.fn().mockResolvedValue({ ok: true }),
   });
 
   render(<TaskEscortFlowConfig botOwnerId="space-1" botId="bot-1" enabled />);

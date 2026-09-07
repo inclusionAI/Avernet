@@ -4,12 +4,13 @@
  * 从 WorkflowSpec.nodes + dependsOn 构建节点和边，
  * 自动分层布局，按执行器类型着色。
  */
-import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react';
+import { Background, Controls, Handle, Position, ReactFlow, type Edge, type Node } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useMemo } from 'react';
 
-import type { TaskEscortWorkflowSpec } from '@/components/BotWorkshop/TaskEscort/types';
+import type { TaskEscortWorkflowNode, TaskEscortWorkflowSpec } from '@/components/BotWorkshop/TaskEscort/types';
 import { Card } from '@/components/ui/Card';
+import { cn } from '@/utils/cn';
 
 /** 安全提取字符串 */
 function toText(value: unknown, fallback = ''): string {
@@ -52,16 +53,26 @@ interface DagNodeData {
   label: string;
   executorType: string;
   executorDetail?: string;
-  [key: string]: unknown;
+  node: TaskEscortWorkflowNode;
 }
 
 type DagNode = Node<DagNodeData>;
 
-function DagNodeComponent({ data }: NodeProps<DagNode>) {
+interface DagNodeComponentProps {
+  id: string;
+  data: DagNodeData;
+  selected?: boolean;
+}
+
+function DagNodeComponent({ id, data, selected }: DagNodeComponentProps) {
   const colors = EXECUTOR_COLORS[data.executorType] ?? DEFAULT_COLOR;
   return (
     <Card
-      className="min-w-[120px] max-w-[180px] rounded-lg border-2 px-2.5 py-1.5 shadow-sm"
+      data-node-id={id}
+      className={cn(
+        'min-w-[120px] max-w-[180px] rounded-lg border-2 px-2.5 py-1.5 shadow-sm cursor-pointer transition-shadow',
+        selected ? 'ring-2 ring-primary ring-offset-2' : 'hover:shadow-md',
+      )}
       style={{ borderColor: colors.border, backgroundColor: colors.bg }}
     >
       <Handle type="target" position={Position.Top} className="!h-2 !w-2 !bg-muted-foreground !border-white" />
@@ -85,9 +96,11 @@ const nodeTypes = { dagNode: DagNodeComponent };
 
 interface WorkflowDagViewProps {
   spec: TaskEscortWorkflowSpec;
+  selectedNodeId?: string | null;
+  onNodeClick?: (nodeId: string) => void;
 }
 
-export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
+export default function WorkflowDagView({ spec, selectedNodeId, onNodeClick }: WorkflowDagViewProps) {
   const { flowNodes, edges } = useMemo(() => {
     const specNodes = toArray<Record<string, unknown>>(spec.nodes);
 
@@ -177,6 +190,7 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
           label: toText(node.title) || id,
           executorType,
           executorDetail,
+          node: node as TaskEscortWorkflowNode,
         },
       };
     });
@@ -195,9 +209,16 @@ export default function WorkflowDagView({ spec }: WorkflowDagViewProps) {
   return (
     <Card className="h-96 overflow-hidden">
       <ReactFlow
-        nodes={flowNodes}
+        nodes={flowNodes.map((n) => ({ ...n, selected: n.id === selectedNodeId }))}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodeClick={
+          onNodeClick
+            ? (_event: React.MouseEvent, node: Node) => {
+                onNodeClick(node.id);
+              }
+            : undefined
+        }
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.1}

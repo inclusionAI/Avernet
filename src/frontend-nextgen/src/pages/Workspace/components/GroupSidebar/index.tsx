@@ -3,12 +3,12 @@ import type { WorkspaceView } from '@/domain/collaboration/availableViews';
 import type { GroupView, SessionView } from '@/domain/collaboration/types';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { Search } from 'lucide-react';
-import { WorkspaceActionButton } from '../WorkspaceActionButton';
+import { ListErrorState } from '../ListErrorState';
 import { ResizableWorkspaceSidebar } from '../ResizableWorkspaceSidebar';
 import { WorkspacePrimaryTabs } from '../WorkspacePrimaryTabs';
+import { WorkspaceSidebarCollapsedRail } from '../WorkspaceSidebarCollapsedRail';
 import { GroupItem } from './GroupItem';
 import { GroupSidebarFilters, type KindFilter, type Membership } from './GroupSidebarFilters';
-import { ListErrorState } from '../ListErrorState';
 
 export type SortMode = 'lastActivity' | 'createdAt';
 export type SessionTab = 'all' | 'favorite';
@@ -53,7 +53,6 @@ export interface GroupSidebarProps {
   onToggleFavorite: (sessionId: string) => void;
   onClearSessionFilter: () => void;
   onCreateGroup: () => void;
-  onAddFriend: () => void;
   /** 群管理：打开管理面板。 */
   onManageGroup: (groupId: string) => void;
   /** 会话管理：打开管理面板。 */
@@ -103,7 +102,6 @@ export function GroupSidebarList(props: GroupSidebarProps) {
     onToggleFavorite,
     onClearSessionFilter,
     onCreateGroup,
-    onAddFriend,
     onManageGroup,
     onManageSession,
     onShareGroup,
@@ -117,7 +115,6 @@ export function GroupSidebarList(props: GroupSidebarProps) {
         <div className="sticky top-0 z-20 border-b border-border/70 bg-muted/20 pt-1 backdrop-blur-sm">
           <div className="flex h-10 items-center gap-2 px-[18px]">
             <WorkspacePrimaryTabs value={view} options={availableViews} onChange={onViewChange} />
-            <WorkspaceActionButton onAddFriend={onAddFriend} onCreateGroup={onCreateGroup} />
           </div>
           <GroupSidebarFilters
             groupSearchText={groupSearchText}
@@ -126,6 +123,7 @@ export function GroupSidebarList(props: GroupSidebarProps) {
             onKindFilterChange={onKindFilterChange}
             membership={membership}
             onMembershipChange={onMembershipChange}
+            onCreateGroup={onCreateGroup}
           />
         </div>
 
@@ -226,7 +224,16 @@ export function GroupSidebarList(props: GroupSidebarProps) {
 /** 内流协作群列表外壳。≥lg 在流内；<lg hidden，由 Workspace 抽屉呈现同一 GroupSidebarList。 */
 export function GroupSidebar(props: GroupSidebarProps) {
   return (
-    <ResizableWorkspaceSidebar ariaLabel="协作群会话侧栏">
+    <ResizableWorkspaceSidebar
+      ariaLabel="协作群会话侧栏"
+      collapsedContent={
+        <WorkspaceSidebarCollapsedRail
+          value={props.view}
+          options={props.availableViews ?? ['chat', 'group']}
+          onChange={props.onViewChange}
+        />
+      }
+    >
       <GroupSidebarList {...props} />
     </ResizableWorkspaceSidebar>
   );

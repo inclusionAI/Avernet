@@ -28,7 +28,7 @@ from agentclaw.community.core.bot_config_manifest.managed_files import (
     ManagedFilesStore,
 )
 from agentclaw.community.core.bot_config_manifest.managed_files.ports import (
-    StoreIdentityPort,
+    PlatformIdentity,
 )
 from agentclaw.community.core.bot_config_manifest.repository.apply_models import (  # noqa: F401
     BotConfigManifestApplyLockModel,
@@ -129,7 +129,7 @@ def _build(db):
             script_service=scripts,
             activation_service=FakeActivationService(),
             mcp_auth_service=FakeMcpAuth(),
-            identity_service=StoreIdentityPort(store),
+            identity_service=PlatformIdentity(store),
             upload_service=FakeSkillUploadService(),
             capability_reader=FakeCapabilityReader(),
             package_validator=real_validator(),

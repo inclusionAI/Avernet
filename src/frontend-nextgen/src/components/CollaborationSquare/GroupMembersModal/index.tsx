@@ -35,9 +35,7 @@ export function GroupMembersModal({ open, group, members, loading, onClose }: Gr
               >
                 <div className="min-w-0">
                   <p className="m-0 truncate text-sm font-medium text-foreground">{member.displayName}</p>
-                  <p className="m-0 mt-1 text-xs text-muted-foreground">
-                    {member.type === 'human' ? '用户' : 'Bot'}
-                  </p>
+                  <p className="m-0 mt-1 text-xs text-muted-foreground">{member.type === 'human' ? '用户' : 'Bot'}</p>
                 </div>
                 <Badge>{member.role}</Badge>
               </div>

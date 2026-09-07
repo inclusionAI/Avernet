@@ -7,7 +7,7 @@ import {
   type ScheduledRoutineRunRecord,
   triggerScheduledRoutine,
 } from '@/services/scheduledTasks';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ALL_ROUTINE_BOT_VALUE,
   buildErrorMessage,
@@ -34,17 +34,15 @@ export function useRoutineTasks(
   const [routines, setRoutines] = useState<ScheduledRoutineRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [selectedRoutineDetail, setSelectedRoutineDetail] = useState<ScheduledRoutineRecord | null>(null);
   const [selectedRoutineRuns, setSelectedRoutineRuns] = useState<ScheduledRoutineRunRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedRoutineRunsLoading, setSelectedRoutineRunsLoading] = useState(false);
   const [selectedRoutineRunsError, setSelectedRoutineRunsError] = useState<string | null>(null);
-
   const [historyRuns, setHistoryRuns] = useState<ScheduledRoutineRunRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-
+  const routinesRequestIdRef = useRef(0);
   const normalizedSelectedBotId = useMemo(() => selectedBotId.trim(), [selectedBotId]);
   const routineTargets = useMemo(
     () => getSelectedTargets(normalizedSelectedBotId, routineBots),
@@ -53,19 +51,21 @@ export function useRoutineTasks(
   // 「全部」走 owner 聚合接口（含协作 Bot、跨 runtime stage、服务端全局分页）；
   // 单个 Bot 保留 per-bot 精确查询。
   const isAllBotsMode = !normalizedSelectedBotId || normalizedSelectedBotId === ALL_ROUTINE_BOT_VALUE;
-
   const refreshRoutines = useCallback(async () => {
+    const requestId = ++routinesRequestIdRef.current;
     setLoading(true);
     setError(null);
     try {
       if (isAllBotsMode) {
         const result = await fetchOwnerScheduledRoutines({ page, page_size: pageSize });
         const items = result.items.slice().sort((a, b) => getRoutineSortKey(a).localeCompare(getRoutineSortKey(b)));
+        if (requestId !== routinesRequestIdRef.current) return;
         setRoutines(items);
         setTotal(result.total);
         return;
       }
       if (!routineTargets.length) {
+        if (requestId !== routinesRequestIdRef.current) return;
         setRoutines([]);
         setTotal(0);
         return;
@@ -86,20 +86,21 @@ export function useRoutineTasks(
         }
       });
       items.sort((a, b) => getRoutineSortKey(a).localeCompare(getRoutineSortKey(b)));
+      if (requestId !== routinesRequestIdRef.current) return;
       setRoutines(items);
       setTotal(total);
       setError(buildErrorMessage(errors));
     } catch (err) {
+      if (requestId !== routinesRequestIdRef.current) return;
       const targetName = isAllBotsMode ? '全部 Bot' : normalizedSelectedBotId;
       const message = err instanceof Error ? err.message : `${targetName} 定时任务列表加载失败`;
       setError(message);
       setRoutines([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (requestId === routinesRequestIdRef.current) setLoading(false);
     }
   }, [isAllBotsMode, normalizedSelectedBotId, page, pageSize, routineTargets]);
-
   const refreshSelectedRoutineRuns = useCallback(async (routine: ScheduledRoutineRecord | null) => {
     if (!routine) {
       setSelectedRoutineDetail(null);
@@ -123,7 +124,6 @@ export function useRoutineTasks(
       setSelectedRoutineRunsLoading(false);
     }
   }, []);
-
   const refreshHistoryRuns = useCallback(async (routineList: ScheduledRoutineRecord[]) => {
     if (!routineList.length) {
       setHistoryRuns([]);
@@ -156,9 +156,15 @@ export function useRoutineTasks(
       setHistoryLoading(false);
     }
   }, []);
-
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      routinesRequestIdRef.current += 1;
+      setRoutines([]);
+      setTotal(0);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     setSelectedRoutineDetail(null);
     setSelectedRoutineRuns([]);
     setSelectedRoutineRunsLoading(false);
@@ -167,26 +173,21 @@ export function useRoutineTasks(
     setHistoryLoading(false);
     setHistoryError(null);
   }, [normalizedSelectedBotId, enabled]);
-
   useEffect(() => {
-    if (!enabled) {
-      setLoading(false);
-      setError(null);
-      return;
-    }
+    if (!enabled) return;
     void refreshRoutines();
+    return () => {
+      routinesRequestIdRef.current += 1;
+    };
   }, [enabled, refreshRoutines]);
-
   const selectedRoutineFromList = useMemo(
     () => routines.find((item) => isSameRoutineKey(item, selectedRoutineKey)) ?? null,
     [routines, selectedRoutineKey],
   );
-
   useEffect(() => {
     if (!enabled) return;
     void refreshSelectedRoutineRuns(selectedRoutineFromList);
   }, [enabled, refreshSelectedRoutineRuns, selectedRoutineFromList]);
-
   useEffect(() => {
     if (!enabled || !historyOpen) {
       setHistoryRuns([]);
@@ -196,7 +197,6 @@ export function useRoutineTasks(
     }
     void refreshHistoryRuns(routines);
   }, [enabled, historyOpen, refreshHistoryRuns, routines]);
-
   const selectedRoutine = useMemo(
     () =>
       selectedRoutineDetail && isSameRoutineKey(selectedRoutineDetail, selectedRoutineKey)
@@ -204,7 +204,6 @@ export function useRoutineTasks(
         : selectedRoutineFromList,
     [selectedRoutineDetail, selectedRoutineFromList, selectedRoutineKey],
   );
-
   const historyRunsWithRoutineName = useMemo(
     () =>
       historyRuns.map((item) => ({
@@ -220,12 +219,10 @@ export function useRoutineTasks(
       })),
     [historyRuns, routines],
   );
-
   const runRoutine = useCallback(
     (routine: ScheduledRoutineRecord) => triggerScheduledRoutine(routine.botId, routine.id),
     [],
   );
-
   return {
     routines,
     loading,

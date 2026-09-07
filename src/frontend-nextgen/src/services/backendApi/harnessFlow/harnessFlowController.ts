@@ -48,7 +48,8 @@ export interface WorkflowNode {
   id: string;
   title?: string;
   type?: string;
-  executor?: string;
+  executor?: string | Record<string, unknown>;
+  phase?: string;
   input?: Record<string, unknown>;
   output?: Record<string, unknown>;
   retry?: { maxAttempts?: number; delayMs?: number; backoff?: string };
@@ -59,10 +60,27 @@ export interface WorkflowNode {
     args?: Record<string, unknown>;
     saveAs?: Record<string, string>;
   }>;
+  onSuccess?: Array<{
+    id?: string;
+    action?: string;
+    required?: boolean;
+    args?: Record<string, unknown>;
+    saveAs?: Record<string, string>;
+  }>;
+  onFailure?: Array<{
+    id?: string;
+    action?: string;
+    required?: boolean;
+    args?: Record<string, unknown>;
+    saveAs?: Record<string, string>;
+  }>;
   onResult?: Array<{ value: string; target: string }>;
   config?: Record<string, unknown>;
   description?: string;
   timeoutMs?: number;
+  dependsOn?: string[];
+  branchId?: string;
+  alerting?: Record<string, unknown>;
   [key: string]: unknown;
 }
 

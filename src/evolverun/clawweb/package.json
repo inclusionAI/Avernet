@@ -1,0 +1,16 @@
+{
+  "name": "@avernet/clawweb-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "public/shared",
+    "public/modules/*",
+    "public/app/*"
+  ],
+  "scripts": {
+    "check": "npm run check --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  }
+}

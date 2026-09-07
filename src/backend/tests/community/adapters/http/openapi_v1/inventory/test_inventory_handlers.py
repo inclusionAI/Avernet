@@ -157,6 +157,12 @@ def test_inventory_openapi_declares_upgrade_action(client):
     assert "upgrade" in schema["properties"]["actions"]["items"]["enum"]
 
 
+def test_inventory_openapi_declares_restart_publish_action(client):
+    schema = client.app.openapi()["components"]["schemas"]["BotInventoryItem"]
+
+    assert "restart_publish" in schema["properties"]["actions"]["items"]["enum"]
+
+
 def test_inventory_openapi_reuses_edit_lock_contract(client):
     schemas = client.app.openapi()["components"]["schemas"]
 

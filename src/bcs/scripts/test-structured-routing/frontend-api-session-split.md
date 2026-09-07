@@ -105,7 +105,22 @@ GET /groups/{id}
 | `session_kind` | `"chat"` | 否 | 默认 chat |
 | `session_title` | `string` \| `null` | 否 | 前端展示用 |
 
-响应 201，返回 session 对象，`session_id` 格式 `{group_id}:{8_hex}`。
+响应 201，返回 session 对象，`session_id` 格式 `{group_id}:{8_hex}`。当创建非结构化协同 Session 且上下文以 `chat.send` 分发给 Driver / Manager 时，响应额外包含可选的 `initial_run`：
+
+```json
+{
+  "session_id": "bcs_grp_xxx:1234abcd",
+  "initial_run": {
+    "run_id": "run_xxx",
+    "bot_uuid": "driver_or_manager_uuid",
+    "activity_kind": "session_context",
+    "state": "running",
+    "started_at": "2026-09-04T11:00:00Z"
+  }
+}
+```
+
+`initial_run` 只描述创建 Session 时由 BCS 主动触发的 context run；仅 `chat.inject`、结构化协同、复用已有 Session 或没有可识别 send recipient 时不返回。已有响应字段和请求语义保持不变。
 
 ### `GET /groups/{id}/sessions` — Session 列表 / 搜索
 

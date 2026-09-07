@@ -2,11 +2,13 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useMinWidth } from '@/hooks/useMediaQuery';
 import { ensurePersonalSpaceOnAppEntry, initSpaceContext } from '@/hooks/useSpaceContext';
+import { getWorkIdentityRedirect, useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
 import { identityService } from '@/services/workspace/identityService';
 import { history, useLocation } from '@umijs/max';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AppHeader } from './AppHeader';
 import { AppSidebar } from './AppSidebar';
+import { OpenSourceExperienceNotice } from './OpenSourceExperienceNotice';
 import { SidebarNavList } from './SidebarNavList';
 import { getMergedNavigationItems, getNavigationItem, type NavigationArea } from './navigation';
 
@@ -19,10 +21,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isDesktop = useMinWidth(1024);
+  const workIdentityAccess = useWorkIdentityAccess();
+  const workIdentityRedirect = useMemo(
+    () => getWorkIdentityRedirect(location.pathname, workIdentityAccess),
+    [location.pathname, workIdentityAccess],
+  );
 
   useEffect(() => {
     if (activeItem) setArea(activeItem.area);
   }, [activeItem]);
+  useEffect(() => {
+    if (workIdentityRedirect) history.replace(workIdentityRedirect);
+  }, [workIdentityRedirect]);
   // 视口回到桌面（≥lg）时收起一级导航抽屉，避免抽屉压住重新出现的内流侧栏。
   useEffect(() => {
     if (isDesktop) setMobileNavOpen(false);
@@ -65,6 +75,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-bg)]">
+      <OpenSourceExperienceNotice />
       <AppHeader
         area={area}
         sidebarCollapsed={sidebarCollapsed}
@@ -81,7 +92,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           items={mergedItems}
           onNavigate={(path) => history.push(path)}
         />
-        <main className="relative min-w-0 flex-1 overflow-hidden">{children}</main>
+        <main className="relative min-w-0 flex-1 overflow-hidden">{workIdentityRedirect ? null : children}</main>
       </div>
       {/* <lg 一级导航抽屉：≥lg 内流侧栏可见；<lg 由 AppHeader 汉堡触发本抽屉。 */}
       <Drawer open={mobileNavOpen} onOpenChange={setMobileNavOpen}>

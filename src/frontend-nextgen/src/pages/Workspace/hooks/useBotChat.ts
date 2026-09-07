@@ -6,8 +6,8 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useChat, type ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatMessage, PanelHandle, PromptFileRef, ResourceReference } from '@tc-chat/core';
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 import { toast } from 'sonner';
+import { useConnectionStatusSmoothing } from './useConnectionStatusSmoothing';
 
 export interface SendFileRefs {
   resourceReferences?: ResourceReference[];

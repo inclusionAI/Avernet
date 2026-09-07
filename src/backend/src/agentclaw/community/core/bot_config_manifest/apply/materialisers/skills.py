@@ -71,6 +71,13 @@ from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
     UnpackError,
     unpack_archive,
 )
+from agentclaw.community.core.ports.activation_port import ActivationPort
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    SkillPackageUploadPort,
+)
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
 from agentclaw.community.core.skill_center.skill_package import (
     SkillPackageInvalidError,
     SkillPackageTooLargeError,
@@ -147,9 +154,9 @@ class SkillsMaterialiser(Materialiser):
 
     def __init__(
         self,
-        upload_service: Any,
-        activation_service: Any,
-        capability_reader: Any,
+        upload_service: SkillPackageUploadPort,
+        activation_service: ActivationPort,
+        capability_reader: BotCapabilityStateReaderProtocol,
         validator: SkillPackageValidator,
         fetcher: EntryFetcher,
     ) -> None:

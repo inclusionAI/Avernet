@@ -4,9 +4,9 @@ import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
+import type { UseGroupSessionsResult } from './useGroupSessions.types';
 import { useSessionMutations } from './useSessionLeave';
 import { useSessionMap } from './useSessionMap';
-import type { UseGroupSessionsResult } from './useGroupSessions.types';
 import { useSessionMemberSync } from './useSessionMemberSync';
 
 export type { UseGroupSessionsResult } from './useGroupSessions.types';
