@@ -313,7 +313,6 @@ fn build_eventing_runtime_blocking(
     sessions: Arc<dyn SessionManagementService>,
     collaboration_runtime: Arc<dyn bcs_service_api::CollaborationRuntimeService>,
     registry: Arc<dyn BotRegistryCoreService>,
-    outbound_url_guard: OutboundUrlGuard,
     allow_local_test_endpoints: bool,
 ) -> crate::Result<crate::eventing_wiring::EventingRuntime> {
     std::thread::scope(|scope| {
@@ -328,7 +327,6 @@ fn build_eventing_runtime_blocking(
                         sessions,
                         collaboration_runtime,
                         registry,
-                        outbound_url_guard,
                         allow_local_test_endpoints,
                     ))
             })
@@ -2242,7 +2240,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            outbound_url_guard.clone(),
             false,
         )
         .expect("default Eventing configuration must initialize");
@@ -3786,7 +3783,6 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            callback_url_guard.clone(),
             allow_local_eventing_endpoints,
         )
         .expect("Eventing configuration must initialize");
@@ -4646,7 +4642,6 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             session_management.clone(),
             collaboration_runtime.clone(),
             bot_registry.clone(),
-            outbound_url_guard.clone(),
             local_eventing_endpoints_allowed(),
         )
         .await?;

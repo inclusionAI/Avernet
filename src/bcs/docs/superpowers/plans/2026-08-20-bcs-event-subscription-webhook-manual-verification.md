@@ -134,6 +134,7 @@ request_timeout_ms = 2000
 max_request_timeout_ms = 30000
 max_event_body_bytes = 262144
 max_response_body_bytes = 4096
+block_private_networks = true
 allow_http_loopback = true
 allow_non_standard_ports = true
 ```
@@ -585,7 +586,8 @@ loopback/private/link-local/metadata/组播/保留 IPv4 与 IPv6。
 - local 只有显式开启时才接受 loopback HTTP 和非标准端口；
 - query、fragment、userinfo 始终拒绝；
 - 拒绝返回 400 `invalid_webhook_url`，不向目标发请求；
-- production 配置若试图弱化私网阻断、loopback 或端口策略，进程启动失败。
+- production 配置若试图通过 `eventing.webhook` 弱化私网阻断、loopback 或端口策略，进程启动失败；
+- `security.outbound_url` 的取值不改变 Eventing 的 SSRF 策略。
 
 ### MV-24 每次 Attempt 的 DNS/SSRF 校验（P0，Staging）
 

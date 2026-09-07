@@ -251,6 +251,10 @@ pub struct EventingWebhookConfig {
     pub max_event_body_bytes: usize,
     #[serde(default = "default_eventing_max_response_body_bytes")]
     pub max_response_body_bytes: usize,
+    /// Reject private and otherwise non-public webhook target addresses.
+    /// Eventing owns this policy independently from the shared outbound URL policy.
+    #[serde(default = "default_true")]
+    pub block_private_networks: bool,
     #[serde(default)]
     pub allow_http_loopback: bool,
     #[serde(default)]
@@ -267,6 +271,7 @@ impl Default for EventingWebhookConfig {
             max_request_timeout_ms: default_eventing_max_request_timeout_ms(),
             max_event_body_bytes: default_eventing_max_event_body_bytes(),
             max_response_body_bytes: default_eventing_max_response_body_bytes(),
+            block_private_networks: true,
             allow_http_loopback: false,
             allow_non_standard_ports: false,
             private_endpoint_allowlist: Vec::new(),
@@ -1849,6 +1854,7 @@ mod tests {
         assert!(!config.dispatcher_enabled);
         assert_eq!(config.worker_concurrency, 64);
         assert_eq!(config.webhook.request_timeout_ms, 10_000);
+        assert!(config.webhook.block_private_networks);
         assert_eq!(config.limits.max_filters_per_subscription, 64);
         config.validate().expect("default Eventing config is valid");
     }
@@ -1880,6 +1886,21 @@ mod tests {
         let unknown = toml::from_str::<EventingConfig>("unknown_field = true")
             .expect_err("unknown Eventing field rejected");
         assert!(unknown.to_string().contains("unknown_field"));
+    }
+
+    #[test]
+    fn eventing_webhook_private_network_policy_defaults_strict_and_can_be_configured() {
+        let default = EventingConfig::default();
+        assert!(default.webhook.block_private_networks);
+
+        let configured = toml::from_str::<EventingConfig>(
+            r#"
+            [webhook]
+            block_private_networks = false
+            "#,
+        )
+        .expect("Eventing webhook private network policy should deserialize");
+        assert!(!configured.webhook.block_private_networks);
     }
 
     #[test]
