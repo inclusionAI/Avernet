@@ -135,7 +135,8 @@ class WorkerSyncRequest(BaseModel):
     """
     Worker sync request.
 
-    Atomic sync operation: create/update worker + set online + upsert profile.
+    Sync worker and profile; preserve existing runtime state when omitted.
+    New workers default to online unless an explicit runtime state is supplied.
     Sent by BCS during bot onboard. Idempotent — safe to call repeatedly.
 
     Aligned with original root contract (worker_routes.py::SyncWorkerRequest).
@@ -163,7 +164,7 @@ class WorkerSyncRequest(BaseModel):
     )
     runtime_state: Optional[str] = Field(
         default=None,
-        description="Runtime state (online/offline). None means no change",
+        description="Runtime state (online/offline). Omitted/null preserves existing state; new workers default online.",
     )
     capabilities: list[dict[str, Any]] = Field(
         default_factory=list,
