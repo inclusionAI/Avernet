@@ -176,6 +176,25 @@ class SkillsPoolRuntime:
 
     @staticmethod
     def _logical_mapping_item(raw: dict[str, Any]) -> MappingItemResult | None:
+        required_fields = {"target", "status", "retryable", "action"}
+        allowed_fields = required_fields | {"source", "code", "mapping"}
+        if (
+            not required_fields.issubset(raw)
+            or not set(raw).issubset(allowed_fields)
+            or not isinstance(raw["target"], str)
+            or not isinstance(raw["status"], str)
+            or not isinstance(raw["retryable"], bool)
+            or not isinstance(raw["action"], str)
+            or (
+                raw.get("source") is not None
+                and not isinstance(raw["source"], str)
+            )
+            or (
+                raw.get("code") is not None
+                and not isinstance(raw["code"], str)
+            )
+        ):
+            return None
         raw_mapping = raw.get("mapping")
         mapping: PoolSkillMapping | None = None
         if raw_mapping is not None:
@@ -226,15 +245,15 @@ class SkillsPoolRuntime:
             status = MappingProjectionStatus(str(raw["status"]))
         except (KeyError, ValueError):
             return None
-        action = str(raw.get("action") or "")
+        action = raw["action"]
         if action not in {"APPLY", "RETIRE", "RUNTIME"}:
             return None
         return MappingItemResult(
-            target=str(raw.get("target") or ""),
-            source=str(raw["source"]) if raw.get("source") is not None else None,
+            target=raw["target"],
+            source=raw.get("source"),
             status=status,
-            code=str(raw["code"]) if raw.get("code") is not None else None,
-            retryable=bool(raw.get("retryable")),
+            code=raw.get("code"),
+            retryable=raw["retryable"],
             action=action,
             mapping=mapping,
         )

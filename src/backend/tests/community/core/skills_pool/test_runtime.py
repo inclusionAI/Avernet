@@ -19,6 +19,7 @@ from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequire
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
     DeviceAdapterTimeoutError,
 )
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
@@ -136,9 +137,15 @@ class QuarantineTransport(FakeTransport):
 
 
 class ApplyTransport(FakeTransport):
-    def __init__(self, failure: Exception | None = None) -> None:
+    def __init__(
+        self,
+        failure: Exception | None = None,
+        *,
+        health_engine: str = "openclaw",
+    ) -> None:
         super().__init__()
         self.failure = failure
+        self.health_engine = health_engine
 
     async def invoke(
         self, conn_info, method, path, *, body=None, timeout=None
@@ -162,6 +169,7 @@ class ApplyTransport(FakeTransport):
                     "items": [
                         {
                             "mapping": body["mappings"][0],
+                            "target": "",
                             "action": "APPLY",
                             "status": "CONVERGED",
                             "retryable": False,
@@ -172,7 +180,7 @@ class ApplyTransport(FakeTransport):
                 },
             }
         if path == "/health":
-            return {"status": "ok", "engine": "openclaw"}
+            return {"status": "ok", "engine": self.health_engine}
         raise AssertionError(path)
 
 
@@ -257,6 +265,93 @@ async def test_unknown_apply_failure_never_switches_write_protocol(
     assert [call["path"] for call in transport.calls] == [
         "/api/skills/mappings/apply"
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 401, 403, 500])
+async def test_http_failure_never_switches_write_protocol(status_code: int) -> None:
+    transport = ApplyTransport(
+        DeviceAdapterHTTPStatusError(status_code, "rejected")
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_mismatch_does_not_enable_legacy_write_fallback() -> None:
+    transport = ApplyTransport(
+        DeviceAdapterEndpointNotFoundError(
+            '{"detail":"Not Found"}', standard_route_missing=True
+        ),
+        health_engine="hermes",
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply",
+        "/health",
+    ]
+
+
+def test_malformed_item_types_are_rejected() -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=ApplyTransport(),
+        probe_service=FakeProbe(),
+    )
+
+    result = runtime._mapping_apply_result(
+        {
+            "success": True,
+            "data": {
+                "status": "CONVERGED",
+                "items": [
+                    {
+                        "mapping": {
+                            "corpus": "local",
+                            "relative_path": "package",
+                            "link_name": "runtime-name",
+                        },
+                        "target": "",
+                        "action": "APPLY",
+                        "status": "CONVERGED",
+                        "retryable": "false",
+                    }
+                ],
+                "issues": [],
+            },
+        }
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence["reason"] == "invalid_runtime_items"
 
 
 @pytest.mark.asyncio

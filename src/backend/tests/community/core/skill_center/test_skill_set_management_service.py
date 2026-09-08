@@ -2641,12 +2641,13 @@ async def test_a_release_no_longer_supplied_is_deleted():
 async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be_read():
     factory = _RuntimeFactory()
     passport = _FailingRuntimePassport()
+    pool = _RuntimePool()
     runtime = BotRuntimeProjector(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2659,6 +2660,9 @@ async def test_runtime_reconcile_fails_closed_when_effective_cli_scope_cannot_be
         )
 
     assert passport.calls == []
+    assert pool.apply_calls == []
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio
