@@ -11,9 +11,11 @@ The router stays thin (Rule 7): it slices the raw scope, delegates to the
 proxy, and maps failures onto the structured error ladder.
 """
 
+import anyio
 import httpx
 from dependency_injector.wiring import Provide, inject
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.requests import ClientDisconnect
 from starlette.responses import StreamingResponse
 
 from secbaas.community.api.session_file_sharing import (
@@ -77,6 +79,19 @@ async def proxy_oss(
                 "error_code": e.error_code,
                 "message": str(e),
                 "reason": e.reason,
+            },
+        )
+    except (ClientDisconnect, anyio.ClosedResourceError) as e:
+        # A client aborting mid-upload (mobile clients, flaky networks in the
+        # aliyun deployment where PUT is the primary path) is not a server
+        # fault: log at info instead of letting the generic handler record a
+        # critical 500 for a client that is already gone.
+        logger.info("file-transfer proxy: client aborted mid-upload: %s", e)
+        raise HTTPException(
+            status_code=499,
+            detail={
+                "error_code": "FILE_PROXY_CLIENT_ABORT",
+                "message": "client closed the upload connection",
             },
         )
     except httpx.HTTPError:
