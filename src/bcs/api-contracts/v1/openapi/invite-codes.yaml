@@ -1,0 +1,77 @@
+ClaimPublicInviteCodeResult:
+  type: object
+  additionalProperties: false
+  required:
+    - invite_code
+  properties:
+    invite_code:
+      type: string
+      pattern: '^[0-9A-Z]{6}$'
+      description: Newly generated one-time invite code. This plaintext value is returned only in this response.
+
+ClaimPublicInviteCodeEnvelope:
+  type: object
+  additionalProperties: false
+  required:
+    - code
+    - message
+    - data
+    - request_id
+  properties:
+    code:
+      const: 20000
+    message:
+      type: string
+    data:
+      $ref: '#/ClaimPublicInviteCodeResult'
+    request_id:
+      $ref: ../shared.yaml#/RequestId
+
+PublicInviteCodeClaimPath:
+  post:
+    operationId: claim_public_invite_code
+    tags: ["Collaboration / Invite Codes"]
+    summary: Generate and claim one invite code without login.
+    description: >-
+      Anonymous endpoint intended for a public QR-code landing page. Each successful
+      request generates and persists one new active invite code. The endpoint is
+      available only when `invite.public_claim_enabled` is true and rejects claims
+      after `invite.public_claim_max_count` codes have been issued. Clients must not
+      cache the response because it contains the only plaintext copy of the code.
+    x-avernet-security: {}
+    responses:
+      "201":
+        description: A new invite code was generated and persisted.
+        headers:
+          Cache-Control:
+            description: Prevents storage of the plaintext invite code.
+            schema:
+              type: string
+              const: no-store
+          Pragma:
+            description: Legacy cache prevention for HTTP/1.0 intermediaries.
+            schema:
+              type: string
+              const: no-cache
+        content:
+          application/json:
+            schema:
+              $ref: '#/ClaimPublicInviteCodeEnvelope'
+      "404":
+        description: Public invite-code claiming is disabled.
+        x-error-codes:
+          - not_found
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "429":
+        description: The maximum number of public invite-code claims has been reached.
+        x-error-codes:
+          - invite_code_claim_limit_reached
+        content:
+          application/json:
+            schema:
+              $ref: ../shared.yaml#/ErrorEnvelope
+      "500":
+        $ref: ../shared.yaml#/InternalErrorResponse

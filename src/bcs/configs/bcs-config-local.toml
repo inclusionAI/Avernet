@@ -236,6 +236,8 @@ allow_loopback = false
 
 [invite]
 token_secret = "local-development-only-token-secret"
+public_claim_enabled = false
+public_claim_max_count = 1000
 default_ttl_seconds = 86400
 base_url = "http://127.0.0.1:21000"
 group_link_url = "http://localhost:8000/groups/{group_id}"

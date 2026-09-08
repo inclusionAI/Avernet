@@ -18,6 +18,8 @@ tags:
     description: Bot registration token issuance and anonymous bot registration.
   - name: Collaboration / Invitations
     description: Invitations for joining collaboration groups and sessions.
+  - name: Collaboration / Invite Codes
+    description: Invite-code claiming and access-gate operations.
   - name: Collaboration / Channels
     description: Channel bindings between IM accounts and BCS bots/groups.
   - name: Collaboration / Event Subscriptions
@@ -93,6 +95,8 @@ paths:
     $ref: ./openapi/invitations.yaml#/CreateSessionInvitationPath
   /openapi/v1/collaboration/invitations/{token}/accept:
     $ref: ./openapi/invitations.yaml#/AcceptInvitationPath
+  /openapi/v1/collaboration/invite-codes/claim:
+    $ref: ./openapi/invite-codes.yaml#/PublicInviteCodeClaimPath
   /openapi/v1/collaboration/register/token:
     $ref: ./openapi/register.yaml#/RegisterTokenPath
   /openapi/v1/collaboration/register:

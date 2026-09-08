@@ -35,6 +35,8 @@ pub enum InviteCodeBindOutcome {
 pub trait InviteCodeRepoPort: Send + Sync {
     async fn insert_code(&self, record: InviteCodeRecord) -> ServiceResult<bool>;
 
+    async fn count_by_created_by(&self, created_by: &str) -> ServiceResult<u64>;
+
     async fn bind_code(
         &self,
         code_hash: &str,

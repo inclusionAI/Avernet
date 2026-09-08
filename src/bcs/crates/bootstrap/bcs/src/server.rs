@@ -1486,7 +1486,11 @@ fn build_invite_code_service(
         },
         _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
     };
-    Arc::new(InviteCodeServiceImpl::new(repo, invite_token_secret))
+    Arc::new(InviteCodeServiceImpl::new(
+        repo,
+        invite_token_secret,
+        config.invite.public_claim_max_count,
+    ))
 }
 
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
@@ -1561,6 +1565,7 @@ fn build_openapi_v1_state(
     collaboration_templates: Arc<dyn CollaborationTemplateService>,
     invite_code_service: Arc<dyn bcs_service_api::application::v1::InviteCodeService>,
     invite_code_gate_enabled: bool,
+    public_invite_code_claim_enabled: bool,
     principal_verifier: Arc<dyn PrincipalVerifier>,
     connect_service: Arc<dyn bcs_service_api::application::ConnectService>,
     event_subscription_service: Arc<dyn bcs_service_api::application::v1::EventSubscriptionService>,
@@ -1696,6 +1701,7 @@ let invitation_service = Arc::new(
         .with_bot_service(bot_service)
         .with_invite_code_service(invite_code_service)
         .with_invite_code_gate_enabled(invite_code_gate_enabled)
+        .with_public_invite_code_claim_enabled(public_invite_code_claim_enabled)
         .with_friend_connection_service(invitation_service)
         .with_session_file_service(session_file_service, session_file_url_projector)
         .with_event_subscription_service(event_subscription_service)
@@ -2275,6 +2281,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             collaboration_templates.clone(),
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
+            config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
@@ -3811,6 +3818,7 @@ let collaboration_templates = build_standalone_collaboration_template_service(&c
             collaboration_templates.clone(),
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
+            config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             Arc::new(bcs_test_support::NoopConnectService),
             eventing_runtime.service.clone(),
@@ -4675,6 +4683,7 @@ let collaboration_templates = build_collaboration_template_service_with_storage(
             collaboration_templates.clone(),
             invite_code_service.clone(),
             config.invite.invite_code_gate_enabled,
+            config.invite.public_claim_enabled,
             gateway_principal_verifier.clone(),
             connect_service.clone(),
             eventing_runtime.service,

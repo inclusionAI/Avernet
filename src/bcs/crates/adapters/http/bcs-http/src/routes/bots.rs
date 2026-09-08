@@ -625,6 +625,7 @@ pub async fn search_bots(
             actor_kind: actor_kind_to_wire(bot.actor_kind).to_string(),
             is_online: bot.dynamic_status.status == "active",
             is_friend: bot.is_friend,
+            created_by: bot.created_by,
         })
         .collect();
 

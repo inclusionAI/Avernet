@@ -28,6 +28,7 @@ pub struct ApiState {
     pub invitation_service: Arc<dyn InvitationService>,
     pub invite_code_service: Option<Arc<dyn InviteCodeService>>,
     pub invite_code_gate_enabled: bool,
+    pub public_invite_code_claim_enabled: bool,
     pub register_service: Arc<dyn RegisterService>,
     pub friendship_service: Arc<dyn FriendshipService>,
     pub friend_connection_service: Option<Arc<dyn FriendConnectionService>>,
@@ -63,6 +64,7 @@ impl ApiState {
             invitation_service,
             invite_code_service: None,
             invite_code_gate_enabled: false,
+            public_invite_code_claim_enabled: false,
             register_service,
             friendship_service,
             friend_connection_service: None,
@@ -105,6 +107,12 @@ impl ApiState {
     /// Enable or disable invite-code gating for protected routes.
     pub fn with_invite_code_gate_enabled(mut self, enabled: bool) -> Self {
         self.invite_code_gate_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable anonymous invite-code claiming.
+    pub fn with_public_invite_code_claim_enabled(mut self, enabled: bool) -> Self {
+        self.public_invite_code_claim_enabled = enabled;
         self
     }
 
