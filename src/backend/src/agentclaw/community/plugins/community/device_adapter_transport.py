@@ -8,6 +8,7 @@ runtime-specific target prefixes or ARCA configuration.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
@@ -30,6 +31,16 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 logger = get_logger()
 
 _DEFAULT_TIMEOUT = 120.0
+
+
+def _is_standard_route_missing(response_text: str) -> bool:
+    """Recognize FastAPI's exact unmatched-route response, not arbitrary 404s."""
+
+    try:
+        payload = json.loads(response_text)
+    except (TypeError, ValueError):
+        return False
+    return payload == {"detail": "Not Found"}
 
 
 def _binding_id(conn_info: dict[str, Any]) -> int:
@@ -82,7 +93,8 @@ class CommunityDeviceAdapterTransport(DeviceAdapterTransport):
         status_code = exc.response.status_code
         if status_code == 404:
             return DeviceAdapterEndpointNotFoundError(
-                f"Adapter returned HTTP 404: {exc.response.text}"
+                exc.response.text,
+                standard_route_missing=_is_standard_route_missing(exc.response.text),
             )
         return DeviceAdapterHTTPStatusError(status_code, exc.response.text)
 

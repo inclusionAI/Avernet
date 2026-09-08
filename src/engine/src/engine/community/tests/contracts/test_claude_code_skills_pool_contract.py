@@ -4,18 +4,21 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+
 from engine.community.core.adapters.claude_code.skills import (
     ClaudeCodeSkillsAdapter,
     _serialize_pool_mapping,
 )
 from engine.community.core.skills.models import (
-    PoolMappingApplyMode,
-    PoolMappingProjectionStatus,
     PoolLayoutActivateRequest,
     PoolLayoutActivationStatus,
     PoolLayoutProbeRequest,
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
+    PoolMappingApplyMode,
+    PoolMappingApplyRequest,
+    PoolMappingProjectionStatus,
+    PoolMappingSourceLayout,
     PoolQuarantineCleanupRequest,
     PoolSkillMappingIntent,
     SymlinkItem,
@@ -59,7 +62,38 @@ def _port() -> SimpleNamespace:
         verify_pool_mappings=AsyncMock(
             return_value={"valid": True, "evidence": {"checked": 1}}
         ),
+        apply_pool_mappings=AsyncMock(
+            return_value={"status": "CONVERGED", "items": [], "issues": []}
+        ),
     )
+
+
+@pytest.mark.asyncio
+async def test_claude_code_adapter_forwards_daily_logical_apply() -> None:
+    port = _port()
+    adapter = ClaudeCodeSkillsAdapter(port)
+    mapping = PoolSkillMappingIntent("local", "package-dir", "runtime-name")
+
+    result = await adapter.apply_pool_mappings(
+        PoolMappingApplyRequest(
+            mappings=(mapping,),
+            retired_mappings=(),
+            source_layout=PoolMappingSourceLayout.POOL,
+        )
+    )
+
+    assert result.status is PoolMappingProjectionStatus.CONVERGED
+    assert port.apply_pool_mappings.await_args.args[0] == {
+        "mappings": [
+            {
+                "corpus": "local",
+                "relative_path": "package-dir",
+                "link_name": "runtime-name",
+            }
+        ],
+        "retired_mappings": [],
+        "source_layout": "pool",
+    }
 
 
 @pytest.mark.asyncio

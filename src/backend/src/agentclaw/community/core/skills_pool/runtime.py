@@ -19,6 +19,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skills_pool.models import (
     MappingApplyMode,
+    MappingApplyResult,
     MappingItemResult,
     MappingProjectionStatus,
     MappingPublishResult,
@@ -32,8 +33,10 @@ from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupResult,
     RuntimeQuarantineCleanupStatus,
 )
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
     DeviceAdapterTransport,
 )
 
@@ -66,6 +69,193 @@ class SkillsPoolRuntime:
             bot_id=bot_id,
             user_id=user_id,
             engine=engine,
+        )
+
+    async def apply_mappings(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
+    ) -> MappingApplyResult:
+        """Apply one logical snapshot, falling back only after bounded proof."""
+
+        context = self._resolver.resolve_for_bot(bot_id, user_id)
+        body = {
+            "mappings": [mapping.to_dict() for mapping in mappings],
+            "retired_mappings": [mapping.to_dict() for mapping in retired_mappings],
+            "source_layout": source_layout.value,
+        }
+        try:
+            response = await self._transport.invoke(
+                context.conn_info,
+                "POST",
+                "/api/skills/mappings/apply",
+                body=body,
+                timeout=30.0,
+            )
+        except DeviceAdapterEndpointNotFoundError as error:
+            if not error.standard_route_missing:
+                return self._unavailable_apply_result("runtime_mapping_apply_nonstandard_404")
+            try:
+                health = await self._transport.invoke(
+                    context.conn_info,
+                    "GET",
+                    "/health",
+                    timeout=10.0,
+                )
+            except Exception:
+                return self._unavailable_apply_result("runtime_mapping_apply_health_unavailable")
+            if health.get("status") == "ok" and health.get("engine") == engine:
+                raise LegacyMappingApplyRequired() from error
+            return self._unavailable_apply_result("runtime_mapping_apply_health_mismatch")
+        except Exception as error:
+            logger.exception(
+                "[skills_pool.runtime] logical mapping apply unavailable bot_id=%s",
+                bot_id,
+            )
+            return self._unavailable_apply_result(
+                "runtime_mapping_apply_outcome_unknown",
+                error_type=type(error).__name__,
+            )
+        return self._mapping_apply_result(response)
+
+    @staticmethod
+    def _unavailable_apply_result(
+        reason: str, *, error_type: str | None = None
+    ) -> MappingApplyResult:
+        evidence: dict[str, object] = {"reason": reason}
+        if error_type is not None:
+            evidence["error_type"] = error_type
+        return MappingApplyResult(
+            status=MappingProjectionStatus.PENDING,
+            evidence=evidence,
+        )
+
+    def _mapping_apply_result(self, response: dict[str, Any]) -> MappingApplyResult:
+        data = response.get("data")
+        if not isinstance(data, dict):
+            return self._unavailable_apply_result("invalid_runtime_response")
+        raw_status = data.get("status")
+        try:
+            status = MappingProjectionStatus(str(raw_status))
+        except ValueError:
+            return self._unavailable_apply_result("invalid_runtime_status")
+        success = response.get("success")
+        if not isinstance(success, bool):
+            return self._unavailable_apply_result("invalid_runtime_response")
+        if success is False and status is MappingProjectionStatus.CONVERGED:
+            return self._unavailable_apply_result("contradictory_runtime_response")
+        raw_items = data.get("items")
+        raw_issues = data.get("issues")
+        if not isinstance(raw_items, list) or not isinstance(raw_issues, list):
+            return self._unavailable_apply_result("invalid_runtime_response")
+        items = tuple(
+            item
+            for raw in raw_items
+            if isinstance(raw, dict)
+            and (item := self._logical_mapping_item(raw)) is not None
+        )
+        issues = tuple(
+            item
+            for raw in raw_issues
+            if isinstance(raw, dict)
+            and (item := self._logical_mapping_item(raw)) is not None
+        )
+        if len(items) != len(raw_items) or len(issues) != len(raw_issues):
+            return self._unavailable_apply_result("invalid_runtime_items")
+        return MappingApplyResult(
+            status=status,
+            items=items,
+            issues=issues,
+            evidence=dict(data.get("evidence") or {}),
+        )
+
+    @staticmethod
+    def _logical_mapping_item(raw: dict[str, Any]) -> MappingItemResult | None:
+        required_fields = {"target", "status", "retryable", "action"}
+        allowed_fields = required_fields | {"source", "code", "mapping"}
+        if (
+            not required_fields.issubset(raw)
+            or not set(raw).issubset(allowed_fields)
+            or not isinstance(raw["target"], str)
+            or not isinstance(raw["status"], str)
+            or not isinstance(raw["retryable"], bool)
+            or not isinstance(raw["action"], str)
+            or (
+                raw.get("source") is not None
+                and not isinstance(raw["source"], str)
+            )
+            or (
+                raw.get("code") is not None
+                and not isinstance(raw["code"], str)
+            )
+        ):
+            return None
+        raw_mapping = raw.get("mapping")
+        mapping: PoolSkillMapping | None = None
+        if raw_mapping is not None:
+            if not isinstance(raw_mapping, dict):
+                return None
+            corpus = raw_mapping.get("corpus")
+            expected_fields = (
+                {"corpus", "skill_uuid", "sc_version_number", "link_name"}
+                if corpus == "center"
+                else {"corpus", "relative_path", "link_name"}
+            )
+            if (
+                corpus not in {"local", "repo", "center"}
+                or set(raw_mapping) != expected_fields
+                or any(
+                    not isinstance(raw_mapping[field], str)
+                    or not raw_mapping[field]
+                    for field in expected_fields
+                )
+            ):
+                return None
+            try:
+                mapping = PoolSkillMapping(
+                    corpus=str(corpus),
+                    relative_path=(
+                        str(raw_mapping["relative_path"])
+                        if raw_mapping.get("relative_path") is not None
+                        else None
+                    ),
+                    link_name=str(raw_mapping["link_name"]),
+                    skill_uuid=(
+                        str(raw_mapping["skill_uuid"])
+                        if raw_mapping.get("skill_uuid") is not None
+                        else None
+                    ),
+                    sc_version_number=(
+                        str(raw_mapping["sc_version_number"])
+                        if raw_mapping.get("sc_version_number") is not None
+                        else None
+                    ),
+                )
+                mapping.to_dict()
+            except (KeyError, TypeError, ValueError):
+                return None
+            if any(not value for value in mapping.to_dict().values()):
+                return None
+        try:
+            status = MappingProjectionStatus(str(raw["status"]))
+        except (KeyError, ValueError):
+            return None
+        action = raw["action"]
+        if action not in {"APPLY", "RETIRE", "RUNTIME"}:
+            return None
+        return MappingItemResult(
+            target=raw["target"],
+            source=raw.get("source"),
+            status=status,
+            code=raw.get("code"),
+            retryable=raw["retryable"],
+            action=action,
+            mapping=mapping,
         )
 
     async def cutover(
@@ -551,4 +741,7 @@ class SkillsPoolRuntime:
 OpenClawSkillsPoolRuntime = SkillsPoolRuntime
 
 
-__all__ = ["OpenClawSkillsPoolRuntime", "SkillsPoolRuntime"]
+__all__ = [
+    "OpenClawSkillsPoolRuntime",
+    "SkillsPoolRuntime",
+]

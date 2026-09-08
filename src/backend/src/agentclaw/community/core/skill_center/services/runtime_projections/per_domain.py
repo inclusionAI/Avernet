@@ -11,6 +11,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ResolvedSkillPlan,
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
+    RuntimeServiceFactoryBoundary,
 )
 from agentclaw.community.core.skill_center.services.runtime_projections.skill_runtime_delivery import (
     SkillRuntimeDelivery,
@@ -64,6 +65,7 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
         plan: ResolvedSkillPlan,
         scope: ProjectionScope,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        service_factory: RuntimeServiceFactoryBoundary,
     ) -> RuntimeProjectionResult:
         """Write the halves ``scope`` declares, and only those.
 
@@ -83,7 +85,9 @@ class PerDomainRuntimeProjection(EngineRuntimeProjection):
             try:
                 results.append(
                     await self._skill_delivery.deliver(
-                        plan=plan, retired_mappings=retired_mappings
+                        plan=plan,
+                        retired_mappings=retired_mappings,
+                        service_factory=service_factory,
                     )
                 )
             except Exception:

@@ -93,6 +93,7 @@ class MappingItemResult:
     code: str | None = None
     retryable: bool = False
     action: str = "APPLY"
+    mapping: dict[str, str] | None = None
 
     def to_data(self) -> dict[str, object]:
         data: dict[str, object] = {
@@ -105,7 +106,27 @@ class MappingItemResult:
             data["source"] = self.source
         if self.code is not None:
             data["code"] = self.code
+        if self.mapping is not None:
+            data["mapping"] = self.mapping
         return data
+
+
+@dataclass(frozen=True, slots=True)
+class MappingApplyResult:
+    """Logical steady-state result; physical paths are diagnostic only."""
+
+    status: MappingProjectionStatus
+    items: tuple[MappingItemResult, ...]
+    issues: tuple[MappingItemResult, ...] = ()
+    evidence: dict[str, object] = field(default_factory=dict)
+
+    def to_data(self) -> dict[str, object]:
+        return {
+            "status": self.status.value,
+            "items": [item.to_data() for item in self.items],
+            "issues": [item.to_data() for item in self.issues],
+            "evidence": self.evidence,
+        }
 
 
 class ActiveRepoRetirementError(RuntimeError):
@@ -3126,10 +3147,11 @@ def publish_pool_mappings(
 
 __all__ = [
     "ActiveRepoRestorationError",
-    "MappingPublishResult",
     "MappingApplyMode",
+    "MappingApplyResult",
     "MappingItemResult",
     "MappingProjectionStatus",
+    "MappingPublishResult",
     "MappingSourceLayout",
     "MappingVerificationResult",
     "PoolActivationResult",

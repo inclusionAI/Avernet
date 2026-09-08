@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
-from engine.community.plugins.claude_code.symlinks import LocalSkillSymlinks
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +25,11 @@ from engine.community.plugins.claude_code.layout_pool import (
     rollback_claude_code_pool,
     verify_claude_code_pool_mappings,
 )
+from engine.community.plugins.claude_code.symlinks import LocalSkillSymlinks
 from engine.community.plugins.skills_pool.layout_quarantine import cleanup_quarantine
 from engine.community.plugins.skills_pool.mapping_contract import (
     ResolvedMappingPayload,
+    apply_logical_mapping_request,
     resolve_mapping_payload,
 )
 
@@ -54,6 +55,7 @@ class _SkillsPortMixin:
     ensure_center}."""
 
     _local_symlinks: LocalSkillSymlinks
+    _skills_center_is_mounted = staticmethod(os.path.ismount)
 
     @staticmethod
     def _pool_mappings(
@@ -164,6 +166,14 @@ class _SkillsPortMixin:
         if result.published and resolved.resolved_locators:
             data["evidence"]["resolved_mappings"] = list(resolved.resolved_locators)
         return data
+
+    async def apply_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        return await apply_logical_mapping_request(
+            params=params,
+            engine="claude_code",
+            additional_retirement_roots=claude_code_retirement_active_roots(),
+            center_is_mounted=self._skills_center_is_mounted,
+        )
 
     async def verify_pool_mappings(
         self,

@@ -58,6 +58,8 @@ provides:
   - "InstallationBackfillServiceProtocol"
   - "BotRuntimeProjector"
   - "BotRuntimeProjectorProtocol"
+  - "SkillRuntimeDelivery"
+  - "RuntimeServiceFactoryBoundary"
   - "LocalSkillCleanupWorkModel"
   - "SkillActivationSyncAction"
   - "SkillActivationSyncScope"

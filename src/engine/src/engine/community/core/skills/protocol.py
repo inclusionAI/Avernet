@@ -14,7 +14,7 @@ The Protocol carries two parallel surfaces:
   — used by engines that materialise skills as filesystem symlinks and
   reconcile the whole directory in one call (current OpenClaw deployment).
 * **Pool layout** ops (`probe_pool_layout`, `activate_pool_layout`,
-  `publish_pool_mappings`, `verify_pool_mappings`) — implemented by the
+  `apply_pool_mappings`, `publish_pool_mappings`, `verify_pool_mappings`) — implemented by the
   OpenClaw and Claude Code adapters/ports in this repository. Corp AICoding
   and Hermes composition roots consume the same Protocol, mapping contract,
   and shared Engine-owned layout planner.
@@ -46,6 +46,8 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeResult,
     PoolLayoutRollbackRequest,
     PoolMappingApplyMode,
+    PoolMappingApplyRequest,
+    PoolMappingApplyResult,
     PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
@@ -255,6 +257,14 @@ class SkillsService(Protocol):
             InvalidPoolMappingRequestError: The version, wire shape, or
                 logical mapping is invalid before filesystem publication.
         """
+        ...
+
+    async def apply_pool_mappings(
+        self,
+        request: PoolMappingApplyRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolMappingApplyResult:
+        """Apply one BEST_EFFORT logical snapshot with integrated checks."""
         ...
 
     async def verify_pool_mappings(

@@ -42,9 +42,11 @@ from engine.community.core.skills.models import (
     PoolLayoutProbeStatus,
     PoolLayoutRollbackRequest,
     PoolMappingApplyMode,
+    PoolMappingApplyRequest,
+    PoolMappingApplyResult,
     PoolMappingItemResult,
-    PoolMappingPublishResult,
     PoolMappingProjectionStatus,
+    PoolMappingPublishResult,
     PoolMappingSourceLayout,
     PoolMappingVerificationResult,
     PoolQuarantineCleanupRequest,
@@ -313,6 +315,39 @@ class OpenClawSkillsAdapter(SkillsService):
                 for item in raw.get("items", [])
                 if isinstance(item, dict)
             ),
+        )
+
+    async def apply_pool_mappings(
+        self,
+        request: PoolMappingApplyRequest,
+        auth: AuthContext | None = None,
+    ) -> PoolMappingApplyResult:
+        raw = await self._port.apply_pool_mappings(
+            {
+                "mappings": [_serialize_pool_mapping(item) for item in request.mappings],
+                "retired_mappings": [
+                    _serialize_pool_mapping(item) for item in request.retired_mappings
+                ],
+                "source_layout": request.source_layout.value,
+            }
+        )
+        try:
+            status = PoolMappingProjectionStatus(str(raw.get("status")))
+        except ValueError:
+            status = PoolMappingProjectionStatus.DEGRADED
+        return PoolMappingApplyResult(
+            status=status,
+            items=tuple(
+                PoolMappingItemResult.from_data(item)
+                for item in raw.get("items", [])
+                if isinstance(item, dict)
+            ),
+            issues=tuple(
+                PoolMappingItemResult.from_data(item)
+                for item in raw.get("issues", [])
+                if isinstance(item, dict)
+            ),
+            evidence=dict(raw.get("evidence") or {}),
         )
 
     async def verify_pool_mappings(
