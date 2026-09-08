@@ -323,6 +323,7 @@ allow_loopback = false
 
 [invite]
 token_secret = "replace-with-invite-token-secret"
+public_claim_enabled = false
 default_ttl_seconds = 86400
 base_url = "https://bcs.example.com"
 group_link_url = "https://botchat.example.com/groups/{group_id}"

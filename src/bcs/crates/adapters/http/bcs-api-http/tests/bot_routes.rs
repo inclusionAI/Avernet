@@ -120,6 +120,7 @@ struct FakeInviteCodeService {
     allow_access: bool,
     ensure_access_calls: Mutex<Vec<AuthenticatedCaller>>,
     init_invite_codes_calls: Mutex<Vec<InitInviteCodes>>,
+    claim_public_invite_code_calls: Mutex<Vec<ClaimPublicInviteCode>>,
     bind_invite_code_calls: Mutex<Vec<BindInviteCode>>,
     get_my_invite_code_binding_calls: Mutex<Vec<GetMyInviteCodeBinding>>,
 }
@@ -135,6 +136,19 @@ impl InviteCodeService for FakeInviteCodeService {
             .expect("init invite codes lock")
             .push(command);
         Ok(InitInviteCodesResult { codes: vec!["ABC123".to_string()] })
+    }
+
+    async fn claim_public_invite_code(
+        &self,
+        command: ClaimPublicInviteCode,
+    ) -> Result<ClaimPublicInviteCodeResult, ApplicationError> {
+        self.claim_public_invite_code_calls
+            .lock()
+            .expect("claim public invite code lock")
+            .push(command);
+        Ok(ClaimPublicInviteCodeResult {
+            invite_code: "ABC123".to_string(),
+        })
     }
 
     async fn bind_invite_code(
@@ -494,6 +508,7 @@ fn invite_code_test_router(
         )
         .with_invite_code_service(invite_code_service)
         .with_invite_code_gate_enabled(gate_enabled)
+        .with_public_invite_code_claim_enabled(true)
         .with_bot_service(service),
     )
 }
@@ -732,6 +747,19 @@ async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
     let invite_code_service = Arc::new(FakeInviteCodeService { allow_access: true, ..Default::default() });
     let app = invite_code_test_router(bot_service.clone(), invite_code_service.clone(), true);
 
+    let claim = app
+        .clone()
+        .oneshot(anonymous_request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/claim",
+            Value::Null,
+        ))
+        .await
+        .expect("public claim response");
+    assert_eq!(claim.status(), StatusCode::CREATED);
+    assert_eq!(claim.headers()["cache-control"], "no-store");
+    assert_eq!(response_json(claim).await["data"], json!({"invite_code": "ABC123"}));
+
     let bind = app
         .clone()
         .oneshot(request(
@@ -815,6 +843,14 @@ async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
     );
     assert_eq!(
         invite_code_service
+            .claim_public_invite_code_calls
+            .lock()
+            .expect("claim public invite code lock")
+            .len(),
+        1
+    );
+    assert_eq!(
+        invite_code_service
             .bind_invite_code_calls
             .lock()
             .expect("bind invite code lock")
@@ -845,6 +881,36 @@ async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
             .is_some(),
         "protected routes should flow through the invite-code gate when access is granted"
     );
+}
+
+#[tokio::test]
+async fn public_invite_code_claim_returns_not_found_when_disabled() {
+    let invite_code_service = Arc::new(FakeInviteCodeService::default());
+    let state = ApiState::new(
+        Arc::new(NoopGroupService),
+        Arc::new(NoopSessionService),
+        Arc::new(NoopMessageService),
+        Arc::new(NoopInvitationService),
+        Arc::new(NoopRegisterService),
+        Arc::new(NoopFriendshipService),
+        Arc::new(HeaderVerifier),
+    )
+    .with_invite_code_service(invite_code_service.clone());
+    let response = router(state)
+        .oneshot(anonymous_request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/claim",
+            Value::Null,
+        ))
+        .await
+        .expect("disabled public claim response");
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(invite_code_service
+        .claim_public_invite_code_calls
+        .lock()
+        .expect("claim public invite code lock")
+        .is_empty());
 }
 
 #[tokio::test]
@@ -1173,6 +1239,16 @@ fn request(method: &str, uri: &str, body: Value) -> Request<Body> {
         .header("x-request-id", "request-bot")
         .body(Body::from(body.to_string()))
         .expect("request")
+}
+
+fn anonymous_request(method: &str, uri: &str, body: Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json")
+        .header("x-request-id", "request-anonymous")
+        .body(Body::from(body.to_string()))
+        .expect("anonymous request")
 }
 
 async fn response_json(response: axum::response::Response) -> Value {

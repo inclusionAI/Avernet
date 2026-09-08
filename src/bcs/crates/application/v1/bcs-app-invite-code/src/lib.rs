@@ -3,9 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bcs_service_api::application::v1::{
-    ApplicationError, AuthenticatedCaller, AuthenticatedUserIdentity, BindInviteCode, BindInviteCodeResult,
-    GetMyInviteCodeBinding, InitInviteCodes, InitInviteCodesResult, InviteCodeBindingView,
-    InviteCodeService,
+    ApplicationError, AuthenticatedCaller, BindInviteCode, BindInviteCodeResult,
+    ClaimPublicInviteCode, ClaimPublicInviteCodeResult, GetMyInviteCodeBinding, InitInviteCodes,
+    InitInviteCodesResult, InviteCodeBindingView, InviteCodeService,
 };
 use bcs_service_api::port::repo::{
     InviteCodeBindOutcome, InviteCodeRecord, InviteCodeRepoPort, InviteCodeStatus,
@@ -94,6 +94,26 @@ impl InviteCodeServiceImpl {
         }
     }
 
+    async fn generate_and_store_code(
+        &self,
+        created_by: Option<String>,
+    ) -> Result<String, ApplicationError> {
+        loop {
+            let code = Self::generate_code();
+            let record = self.record_for_code(&code, created_by.clone());
+            match self.repo.insert_code(record).await {
+                Ok(true) => return Ok(code),
+                Ok(false) => continue,
+                Err(error) => {
+                    warn!(error = %error, "invite code generation failed");
+                    return Err(ApplicationError::internal(format!(
+                        "failed to generate invite code: {error}"
+                    )));
+                }
+            }
+        }
+    }
+
     fn human_user_id(caller: &AuthenticatedCaller) -> Result<&str, ApplicationError> {
         caller.user.as_ref().map(|user| user.id.as_str()).ok_or_else(|| {
             ApplicationError::invite_code_not_applicable(
@@ -111,20 +131,19 @@ impl InviteCodeService for InviteCodeServiceImpl {
     ) -> Result<InitInviteCodesResult, ApplicationError> {
         let mut codes = Vec::with_capacity(command.count as usize);
         while codes.len() < command.count as usize {
-            let code = Self::generate_code();
-            let record = self.record_for_code(&code, None);
-            match self.repo.insert_code(record).await {
-                Ok(true) => codes.push(code),
-                Ok(false) => continue,
-                Err(error) => {
-                    warn!(error = %error, "invite code initialization failed");
-                    return Err(ApplicationError::internal(format!(
-                        "failed to initialize invite codes: {error}"
-                    )));
-                }
-            }
+            codes.push(self.generate_and_store_code(None).await?);
         }
         Ok(InitInviteCodesResult { codes })
+    }
+
+    async fn claim_public_invite_code(
+        &self,
+        _command: ClaimPublicInviteCode,
+    ) -> Result<ClaimPublicInviteCodeResult, ApplicationError> {
+        let invite_code = self
+            .generate_and_store_code(Some("public_openapi".to_string()))
+            .await?;
+        Ok(ClaimPublicInviteCodeResult { invite_code })
     }
 
     async fn bind_invite_code(
@@ -233,6 +252,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    use bcs_service_api::application::v1::AuthenticatedUserIdentity;
+
     struct FakeInviteCodeRepo {
         records: tokio::sync::RwLock<HashMap<String, InviteCodeRecord>>,
     }
@@ -338,6 +359,31 @@ mod tests {
         assert_eq!(result.codes.len(), 3);
         assert!(result.codes.iter().all(|code| code.len() == 6));
         assert_eq!(repo.records.read().await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn public_claim_generates_and_persists_one_code() {
+        let (svc, repo) = service();
+        let result = svc
+            .claim_public_invite_code(ClaimPublicInviteCode)
+            .await
+            .expect("claim public invite code");
+
+        assert_eq!(result.invite_code.len(), 6);
+        assert!(result
+            .invite_code
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte.is_ascii_uppercase()));
+        let record = repo
+            .records
+            .read()
+            .await
+            .get(&svc.code_hash(&result.invite_code))
+            .cloned()
+            .expect("claimed code record");
+        assert_eq!(record.status, InviteCodeStatus::Active);
+        assert_eq!(record.created_by.as_deref(), Some("public_openapi"));
+        assert!(record.bound_user_id.is_none());
     }
 
     #[tokio::test]

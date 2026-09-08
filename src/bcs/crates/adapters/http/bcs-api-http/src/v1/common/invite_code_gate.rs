@@ -80,6 +80,15 @@ mod tests {
             Ok(bcs_service_api::application::v1::InitInviteCodesResult { codes: vec![] })
         }
 
+        async fn claim_public_invite_code(
+            &self,
+            _command: bcs_service_api::application::v1::ClaimPublicInviteCode,
+        ) -> Result<bcs_service_api::application::v1::ClaimPublicInviteCodeResult, ApplicationError> {
+            Ok(bcs_service_api::application::v1::ClaimPublicInviteCodeResult {
+                invite_code: "ABC123".to_string(),
+            })
+        }
+
         async fn bind_invite_code(
             &self,
             _command: bcs_service_api::application::v1::BindInviteCode,

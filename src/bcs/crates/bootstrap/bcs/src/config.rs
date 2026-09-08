@@ -36,6 +36,10 @@ pub struct InviteConfig {
     #[serde(default)]
     pub invite_code_gate_enabled: bool,
 
+    /// Whether anonymous OpenAPI callers may claim a newly generated invite code.
+    #[serde(default)]
+    pub public_claim_enabled: bool,
+
     #[serde(default = "default_invite_ttl_seconds")]
     pub default_ttl_seconds: u64,
 
@@ -3070,6 +3074,24 @@ base_url = "https://directory.example.com"
         let err = toml::from_str::<BcsConfig>(toml)
             .expect_err("legacy top-level provider options should be rejected");
         assert!(err.to_string().contains("base_url"));
+    }
+
+    #[test]
+    fn invite_public_claim_is_nested_and_disabled_by_default() {
+        let default_config = BcsConfig::default();
+        assert!(!default_config.invite.public_claim_enabled);
+
+        let config: BcsConfig = toml::from_str(
+            r#"
+            bots_base_dir = "/bots"
+
+            [invite]
+            public_claim_enabled = true
+            "#,
+        )
+        .expect("parse invite public claim config");
+
+        assert!(config.invite.public_claim_enabled);
     }
 
     #[test]

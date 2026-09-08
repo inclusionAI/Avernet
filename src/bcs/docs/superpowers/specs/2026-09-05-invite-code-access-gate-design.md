@@ -2,7 +2,7 @@
 
 > 状态：草案
 > 日期：2026-09-05
-> 范围：新增 6 位随机邀请码能力，用于限制 human 用户在绑定邀请码后才能使用平台功能。内部支持批量初始化邀请码；OpenAPI 仅暴露“绑定邀请码”和“查询当前用户是否已绑定邀请码”。
+> 范围：新增 6 位随机邀请码能力，用于限制 human 用户在绑定邀请码后才能使用平台功能。内部支持批量初始化邀请码；OpenAPI 暴露匿名领取、绑定邀请码和查询当前用户绑定状态。
 
 ## 1. 背景
 
@@ -21,7 +21,7 @@
 1. **深模块**：邀请码生成、去重、绑定、状态查询、门禁判断集中在一个独立模块内。
 2. **最小开放面**：
    - 内部只暴露批量初始化能力；
-   - OpenAPI 只暴露绑定和自查，不暴露任意用户查询。
+   - OpenAPI 暴露匿名单码领取、绑定和自查，不暴露任意用户查询或邀请码列表。
 3. **不可枚举**：不提供可批量查询的邀请码列表，不暴露任意用户绑定状态，不返回多余的码存在性细节。
 4. **可作为统一准入门禁**：未来平台功能入口可以统一复用“是否已绑定邀请码”的判断。
 
@@ -128,7 +128,38 @@ POST /internal/v1/invite-codes/init
 - 仅内部管理员、运维或后台任务可调用；
 - 明文邀请码只在该接口响应中出现一次。
 
-### 6.2 OpenAPI：绑定邀请码
+### 6.2 OpenAPI：匿名领取邀请码
+
+#### 接口
+
+```http
+POST /openapi/v1/collaboration/invite-codes/claim
+```
+
+#### 规则
+
+- 不要求登录，不读取 `Principal`，也不经过邀请码准入门禁；
+- 仅当配置 `invite.public_claim_enabled = true` 时开放，默认关闭；
+- 每次请求生成并持久化一个新的有效邀请码；
+- 明文邀请码只在本次响应中返回，响应携带 `Cache-Control: no-store` 和 `Pragma: no-cache`；
+- 当前版本不引入活动 token、总额度、限流或验证码。
+
+#### 返回
+
+```json
+{
+  "code": 20000,
+  "message": "OK",
+  "data": {
+    "invite_code": "A1B2C3"
+  },
+  "request_id": "..."
+}
+```
+
+建议将公共二维码指向一个独立领取页面，而不是直接指向此有副作用的 `POST` 接口。用户扫描二维码访问领取页面，页面服务端调用本接口并展示邀请码。
+
+### 6.3 OpenAPI：绑定邀请码
 
 #### 建议接口
 
@@ -161,7 +192,7 @@ POST /openapi/v1/collaboration/invite-codes/bind
 }
 ```
 
-### 6.3 OpenAPI：查询当前用户是否已绑定邀请码
+### 6.4 OpenAPI：查询当前用户是否已绑定邀请码
 
 #### 建议接口
 
@@ -193,7 +224,8 @@ GET /openapi/v1/collaboration/invite-codes/me
 
 - 对 **human** 调用者：必须已绑定邀请码，才能访问受保护的平台功能；
 - 对 **bot / 服务调用者**：默认不受邀请码门禁影响，避免影响现有自动化和内部调用链；
-- `bind` 和 `me` 接口本身必须允许未绑定用户访问，否则无法完成绑定流程。
+- `bind` 和 `me` 接口本身必须允许未绑定用户访问，否则无法完成绑定流程；
+- `claim` 挂载在匿名路由树中，不要求 Principal；关闭开关时返回 404。
 
 ### 建议拒绝方式
 
@@ -231,6 +263,7 @@ GET /openapi/v1/collaboration/invite-codes/me
 建议在应用层提供一个最小接口：
 
 - `init_codes(count) -> Vec<String>`
+- `claim_public_invite_code() -> String`
 - `bind_code(caller, code) -> BindResult`
 - `has_bound_code(caller) -> BindingState`
 
@@ -269,7 +302,9 @@ GET /openapi/v1/collaboration/invite-codes/me
 - 同一用户只能绑定一个邀请码；
 - `me` 接口能正确返回绑定状态；
 - 未绑定 human 调用受保护功能被拒绝；
-- `bind` 和 `me` 不会被门禁拦截。
+- `bind` 和 `me` 不会被门禁拦截；
+- `claim` 无认证可访问，关闭 `invite.public_claim_enabled` 后返回 404；
+- `claim` 每次仅生成一个已持久化的邀请码，并返回禁止缓存响应头。
 
 ## 13. 范围边界
 
@@ -279,6 +314,7 @@ GET /openapi/v1/collaboration/invite-codes/me
 - 邀请码作废/回收流程；
 - 邀请码转赠；
 - 复杂批次运营报表；
+- 公共领取接口的活动 token、总额度、限流、验证码和攻击防护；
 - 对 bot 的邀请码绑定。
 
 如果后续需要这些能力，可以在本模型上继续扩展。
