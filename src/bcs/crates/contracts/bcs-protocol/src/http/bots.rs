@@ -53,6 +53,7 @@ pub struct BotSearchQuery {
 #[derive(Debug, Clone, Serialize)]
 pub struct BotSearchEntry {
     pub bot_uuid: String,
+    pub created_by: Option<String>,
     pub name: Option<String>,
     pub summary: Option<String>,
     pub visibility: String,

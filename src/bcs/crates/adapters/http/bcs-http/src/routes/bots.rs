@@ -615,6 +615,7 @@ pub async fn search_bots(
         .into_iter()
         .map(|bot| BotSearchEntry {
             bot_uuid: bot.bot_uuid,
+            created_by: bot.created_by,
             name: bot.capabilities.name,
             summary: bot.capabilities.summary,
             visibility: bot.visibility,

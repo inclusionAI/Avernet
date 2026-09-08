@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 
 import httpx
@@ -18,6 +19,21 @@ from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.http_client import HttpClient
 
 logger = get_logger()
+
+_BCS_SEARCH_ROUTE = "/bots/search"
+_SENSITIVE_FIELD_NAMES = frozenset(
+    {
+        "authorization",
+        "cookie",
+        "credential",
+        "key",
+        "password",
+        "secret",
+        "session",
+        "session_id",
+        "token",
+    }
+)
 
 
 class BcsBotCatalogMetadataService:
@@ -43,8 +59,9 @@ class BcsBotCatalogMetadataService:
         params: dict[str, str | int] = {
             "offset": (page - 1) * page_size,
             "limit": page_size,
-            "tc_bot": True,
         }
+        if filters is None or filters.viewer_actor_type != "bot":
+            params["tc_bot"] = True
         if search and search.strip():
             params["q"] = search
         if bot_uuids:
@@ -62,11 +79,26 @@ class BcsBotCatalogMetadataService:
                 params["viewer_actor_id"] = filters.viewer_actor_id
             if filters.friendship is not None:
                 params["friendship"] = filters.friendship
+        started_at = time.perf_counter()
+        response: httpx.Response | None = None
+        logger.info(
+            "event=bcs_catalog_search.request request_id=%s route=%s offset=%s "
+            "limit=%s search_present=%s filter_count=%s viewer_type=%s "
+            "tc_bot_filter=%s",
+            request_id,
+            _BCS_SEARCH_ROUTE,
+            params["offset"],
+            params["limit"],
+            bool(search and search.strip()),
+            self._filter_count(filters),
+            filters.viewer_actor_type if filters is not None else None,
+            params.get("tc_bot"),
+        )
         try:
             # COSEC: The injected BCS client supplies the configured upstream host and
             # this constant relative path prevents request data from selecting a target.
             response = self._http.get(
-                "/bots/search", params=params, timeout=self._timeout
+                _BCS_SEARCH_ROUTE, params=params, timeout=self._timeout
             )
             response.raise_for_status()
             payload = response.json()
@@ -86,13 +118,21 @@ class BcsBotCatalogMetadataService:
                 bot_uuid = item.get("bot_uuid")
                 if not isinstance(bot_uuid, str):
                     raise BotCatalogMetadataUnavailableError()
-                address = self._address_from_bot_uuid(bot_uuid)
-                if address is None or address in seen:
-                    raise BotCatalogMetadataUnavailableError()
                 is_friend = item.get("is_friend")
                 # COSEC: Do not coerce an invalid upstream relationship state into
                 # a caller-visible boolean value.
                 if "is_friend" in item and not isinstance(is_friend, bool):
+                    raise BotCatalogMetadataUnavailableError()
+                optional_strings = {
+                    field_name: self._optional_string(item, field_name)
+                    for field_name in ("name", "summary", "created_by", "status")
+                }
+                created_by = optional_strings["created_by"]
+                if created_by is not None:
+                    created_by = created_by.strip() or None
+                    optional_strings["created_by"] = created_by
+                address = self._address_from_bot_uuid(bot_uuid, created_by)
+                if address is None or address in seen:
                     raise BotCatalogMetadataUnavailableError()
                 seen.add(address)
                 metadata.append(
@@ -104,43 +144,84 @@ class BcsBotCatalogMetadataService:
                         visibility=item.get("visibility"),
                         is_online=item.get("is_online"),
                         actor_kind=item.get("actor_kind"),
-                        friend_ext=item.get("friend_ext"),
+                        friend_ext=self._redact_sensitive_fields(
+                            item.get("friend_ext")
+                        ),
                         friend_check_in_strategy=item.get(
                             "friend_check_in_strategy"
                         ),
                         user_visibility=item.get("user_visibility"),
+                        **optional_strings,
                     )
                 )
         except BotCatalogMetadataUnavailableError:
             logger.warning(
-                "[BcsBotCatalogMetadataService.search] request_id=%s "
-                "failure=invalid_response",
+                "event=bcs_catalog_search.failed request_id=%s route=%s "
+                "failure=invalid_response http_status=%s duration_ms=%.1f",
                 request_id,
+                _BCS_SEARCH_ROUTE,
+                response.status_code if response is not None else None,
+                (time.perf_counter() - started_at) * 1000,
             )
             raise
         except (httpx.HTTPError, ValueError, TypeError):
             logger.warning(
-                "[BcsBotCatalogMetadataService.search] request_id=%s "
-                "failure=upstream_unavailable",
+                "event=bcs_catalog_search.failed request_id=%s route=%s "
+                "failure=upstream_unavailable http_status=%s duration_ms=%.1f",
                 request_id,
+                _BCS_SEARCH_ROUTE,
+                response.status_code if response is not None else None,
+                (time.perf_counter() - started_at) * 1000,
             )
             raise BotCatalogMetadataUnavailableError() from None
         except Exception:  # noqa: BLE001 - BCS failures must fail closed
             logger.warning(
-                "[BcsBotCatalogMetadataService.search] request_id=%s "
-                "failure=upstream_unavailable",
+                "event=bcs_catalog_search.failed request_id=%s route=%s "
+                "failure=upstream_unavailable http_status=%s duration_ms=%.1f",
                 request_id,
+                _BCS_SEARCH_ROUTE,
+                response.status_code if response is not None else None,
+                (time.perf_counter() - started_at) * 1000,
             )
             raise BotCatalogMetadataUnavailableError() from None
         logger.info(
-            "[BcsBotCatalogMetadataService.search] request_id=%s result_count=%s "
-            "filter_count=%s has_viewer=%s",
+            "event=bcs_catalog_search.succeeded request_id=%s route=%s "
+            "http_status=%s duration_ms=%.1f result_count=%s total=%s",
             request_id,
+            _BCS_SEARCH_ROUTE,
+            response.status_code,
+            (time.perf_counter() - started_at) * 1000,
             len(metadata),
-            self._filter_count(filters),
-            filters is not None and filters.viewer_actor_id is not None,
+            total,
         )
         return BotCatalogMetadataPage(total=total, items=metadata)
+
+    @classmethod
+    def _redact_sensitive_fields(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            return {
+                key: None
+                if isinstance(key, str) and cls._is_sensitive_field_name(key)
+                else cls._redact_sensitive_fields(nested)
+                for key, nested in value.items()
+            }
+        if isinstance(value, list):
+            return [cls._redact_sensitive_fields(item) for item in value]
+        return value
+
+    @staticmethod
+    def _is_sensitive_field_name(field_name: str) -> bool:
+        normalized = field_name.strip().lower().replace("-", "_")
+        return normalized in _SENSITIVE_FIELD_NAMES or normalized.endswith(
+            ("_token", "_secret", "_password", "_credential", "_key", "_session")
+        )
+
+    @staticmethod
+    def _optional_string(item: Mapping[object, object], field_name: str) -> str | None:
+        value = item.get(field_name)
+        if value is not None and not isinstance(value, str):
+            raise BotCatalogMetadataUnavailableError()
+        return value
 
     @staticmethod
     def _filter_count(filters: BotCatalogSearchFilters | None) -> int:
@@ -159,13 +240,21 @@ class BcsBotCatalogMetadataService:
         )
 
     @staticmethod
-    def _address_from_bot_uuid(value: object) -> BotCatalogAddress | None:
+    def _address_from_bot_uuid(
+        value: object, created_by: str | None = None
+    ) -> BotCatalogAddress | None:
         if not isinstance(value, str):
             return None
-        parts = value.rsplit(":", 1)
-        if len(parts) != 2:
+        normalized = value.strip()
+        if not normalized:
             return None
-        bot_id, entity_id = (part.strip() for part in parts)
+        bot_id, separator, suffix = normalized.rpartition(":")
+        if not separator:
+            bot_id = normalized
+            suffix = ""
+        else:
+            bot_id = bot_id.strip()
+        entity_id = (created_by or suffix).strip()
         if not bot_id or not entity_id:
             return None
         return BotCatalogAddress(bot_id=bot_id, entity_id=entity_id)

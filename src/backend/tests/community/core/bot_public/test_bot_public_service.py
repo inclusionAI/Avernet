@@ -1524,12 +1524,21 @@ class TestSearchPublicBotsByKeyword:
         assert result["total"] == 1
         metadata.search_public_bot_metadata.assert_not_called()
 
-    def test_catalog_search_joins_only_the_current_bcs_page_and_reports_its_count(self):
+    def test_catalog_search_keeps_bcs_only_bot_and_reports_bcs_count(self):
         metadata = MagicMock()
         metadata.search_public_bot_metadata.return_value = _metadata_page(
             [
                 BotCatalogMetadata(BotCatalogAddress("bot-1", "entity-1"), "bot"),
-                BotCatalogMetadata(BotCatalogAddress("missing", "entity-2"), "bot"),
+                BotCatalogMetadata(
+                    BotCatalogAddress("missing", "bcs-owner"),
+                    "bot",
+                    bot_uuid="missing:uuid-owner",
+                    actor_kind="bot",
+                    name="Native Bot",
+                    summary="BCS-only summary",
+                    created_by="bcs-owner",
+                    status="online",
+                ),
             ],
             total=2,
         )
@@ -1550,8 +1559,20 @@ class TestSearchPublicBotsByKeyword:
         )
 
         assert result["total"] == 2
-        assert [bot["bot_id"] for bot in result["items"]] == ["bot-1"]
-        assert [bot["bot_uuid"] for bot in result["items"]] == ["bot-1:entity-1"]
+        assert [bot["bot_id"] for bot in result["items"]] == ["bot-1", "missing"]
+        assert result["items"][1] == {
+            "bot_id": "missing",
+            "bot_uuid": "missing:uuid-owner",
+            "entity_id": "bcs-owner",
+            "owner_id": "bcs-owner",
+            "bot_type": "",
+            "bot_name": "Native Bot",
+            "bot_desc": "BCS-only summary",
+            "owner_name": None,
+            "active_engine": "",
+            "status": "online",
+            "actor_kind": "bot",
+        }
         metadata.search_public_bot_metadata.assert_called_once_with(
             search="agent",
             page=3,
@@ -1560,10 +1581,54 @@ class TestSearchPublicBotsByKeyword:
             request_id="trace-1",
         )
         repository.list_bots_by_owner_bot_pairs.assert_called_once_with(
-            [("bot-1", "entity-1"), ("missing", "entity-2")],
+            [("bot-1", "entity-1"), ("missing", "bcs-owner")],
             page=1,
             page_size=2,
         )
+
+    def test_catalog_search_prefers_non_blank_backend_fields_and_uses_bcs_fallbacks(self):
+        metadata = MagicMock()
+        metadata.search_public_bot_metadata.return_value = _metadata_page(
+            [
+                BotCatalogMetadata(
+                    BotCatalogAddress("backend", "owner-1"),
+                    "bot",
+                    summary="BCS ignored",
+                    created_by="owner-1",
+                ),
+                BotCatalogMetadata(
+                    BotCatalogAddress("fallback", "BCS-owner"),
+                    "bot",
+                    summary="BCS fallback",
+                    created_by="BCS-owner",
+                ),
+            ],
+            total=2,
+        )
+        backend = _make_catalog_bot("backend", "owner-1")
+        backend["bot_desc"] = "Backend description"
+        fallback = _make_catalog_bot("fallback", "BCS-owner")
+        fallback["bot_desc"] = "  "
+        fallback["entity_id"] = ""
+        fallback["owner_id"] = "BCS-owner"
+        repository = MagicMock()
+        repository.list_bots_by_owner_bot_pairs.return_value = (
+            2,
+            [backend, fallback],
+        )
+        svc = _make_service(
+            bot_repository=repository, catalog_metadata_service=metadata
+        )
+
+        result = svc.search_catalog_public_bots_by_keyword(
+            caller=BotCatalogCaller("tenant-1", "user-1", None),
+            request_id="trace-field-fallbacks",
+        )
+
+        assert result["items"][0]["bot_desc"] == "Backend description"
+        assert result["items"][0]["entity_id"] == "owner-1"
+        assert result["items"][1]["bot_desc"] == "BCS fallback"
+        assert result["items"][1]["entity_id"] == "BCS-owner"
 
     def test_catalog_search_preserves_bcs_total_when_join_has_fewer_items(self):
         metadata = MagicMock()
