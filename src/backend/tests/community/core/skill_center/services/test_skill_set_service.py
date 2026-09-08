@@ -297,6 +297,7 @@ class TestCollectBotActiveMcps:
     @pytest.mark.parametrize("reuse_snapshot", [False, True])
     def test_collect_excludes_user_excluded_default_mcps(self, caplog, reuse_snapshot):
         from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()
         mock_repo.get_all_active_skill_sets.return_value = [
@@ -327,7 +328,15 @@ class TestCollectBotActiveMcps:
         caplog.set_level(logging.INFO)
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
-            snapshot = BotCapabilitySnapshot("default", "user1", (), frozenset()) if reuse_snapshot else None
+            snapshot = BotCapabilitySnapshot(
+                "default", "user1",
+                (RegisteredSkillAsset(
+                    skill_id=1, name="center", git_path="center://public-code",
+                    skill_uuid="00000000-0000-4000-8000-000000000001",
+                    sc_version_number="2.0.0", mcp_dependencies=("mcp.dependency",),
+                ),),
+                frozenset({"mcp.installed"}),
+            ) if reuse_snapshot else None
             result = svc.collect_bot_active_mcps(
                 "entity1", "default", "user1", "staff", capability_snapshot=snapshot
             )
@@ -336,6 +345,8 @@ class TestCollectBotActiveMcps:
             svc._reader.active_mcp_server_codes.assert_not_called()
 
         codes = {r["server_code"] for r in result}
+        if reuse_snapshot:
+            assert {"mcp.installed", "mcp.dependency"} <= codes
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
         messages = [record.getMessage() for record in caplog.records]
         for stage in (
