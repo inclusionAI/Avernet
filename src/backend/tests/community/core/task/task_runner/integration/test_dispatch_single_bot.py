@@ -243,6 +243,28 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"verdict": "DONE"' in s
     assert '"acceptances_metric"' in s
 
+def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
+    """# 接自 接力分支:交接正文 + skill 回投协议(回调地址/请求体/自检/阶段闭环)+ 中文输出约束。"""
+    from agentclaw.community.core.task.domain.models import (
+        Goal, Metadata, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
+    )
+    fmt = PromptFormatterImpl()
+    relay = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
+    n = TaskNode(node_id="n1", task_id="t1", status=Status.RUNNING,
+                 task_spec=TaskSpec(Metadata("t1", "T", relay), Context("bg"), Goal("O", [])),
+                 run_info=RuntimeInfo(), node_run_graph=None)  # type: ignore[arg-type]
+    s = fmt.format_execute({
+        "mode": "execute", "node_instruction": relay,
+        "skill_report_enabled": True, "backend": "http://b", "task_id": "t1", "node_id": "n1",
+    }, n)
+    assert "# 接自:上游Bot" in s and "执行投放" in s
+    # 接力分支仍注入权威回投协议(回调地址/请求体/自检)
+    assert "回调地址" in s and "callback/report" in s
+    assert '"task_id": "t1"' in s and '"node_id": "n1"' in s
+    assert '"verdict": "DONE"' in s and '"acceptances_metric"' in s
+    # 中文输出约束
+    assert "必须使用中文" in s
+
 
 
 def test_dispatch_single_bot_persists_session_and_run_id_to_extend_props():

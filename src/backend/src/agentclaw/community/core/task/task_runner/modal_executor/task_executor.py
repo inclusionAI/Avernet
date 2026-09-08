@@ -788,39 +788,17 @@ class TaskExecutor(TaskExecutorBbsMixin):
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
             if str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群:群成员收到的 context 以"# 接自/## 群组成/## 上游产出正文/## 本群任务"
-                # 接力交接正文先导(与 single_bot format_execute 直发交接同口径),再附 driver 回投定位
-                # 协议作脚注;不再重复注入验收叙事/目标/字段要求/禁联网——回收与验收由各 bot 的
-                # skill/rule + 框架 80s 兜底承托,与 single_bot 接力保持一致。
+                # 接力协作群:任务正文 + 回投协议(回调地址/请求体/自检/阶段闭环)已由 format_execute
+                # 的 # 接自 分支完整注入(_skill_report_instruction);此处只补"上报者定位"这一条
+                # group 语义脚注,不再重复 目标/验收标准/任务上下文/回投请求体——避免与上方权威协议
+                # 重复且冲突(静态接力 Goal.acceptances=[] 会打印空 验收标准:[],末尾偏置误导 bot 跳过
+                # 验收;旧 回投请求体 acceptance_result:{} 与权威 acceptance_result:
+                # {verdict,acceptances_metric,gaps} 不一致,导致协议形态记错)。
                 _rfooter = [
                     "---",
                     "[协作群回投协议 — 仅 driver/reporter bot 上报回投,其它成员只提供产出,不得重复回调]",
                     f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}",
-                    f"目标:{_task_objective}",
-                    f"验收标准:{json.dumps(_acceptances, ensure_ascii=False)}",
                 ]
-                if _task_context:
-                    _rfooter.append(f"任务上下文:{_task_context}")
-                if _loop_task_id:
-                    try:
-                        _task_id, _node_id = _loop_task_id.split("::", 1)
-                    except ValueError:
-                        _task_id, _node_id = "<task_id>", "<node_id>"
-                    if _skill_report:
-                        _rfooter.append(
-                            "回投请求体只能包含以下节点级字段;callback 内部会根据 task_id/node_id 组装 loop_task_id 等关联字段:"
-                            + json.dumps({
-                                "task_id": _task_id,
-                                "node_id": _node_id,
-                                "status": "SUCCESS",
-                                "output": "完整协作群执行输出",
-                                "acceptance_result": {},
-                                "extend_props": {},
-                            }, ensure_ascii=False)
-                            + "\n验收通过时上报 status=SUCCESS；未通过时上报 status=DONE 并在 acceptance_result.gaps 填写具体差距；只有执行失败才使用 FAILED。"
-                        )
-                    else:
-                        _rfooter.append(_no_callback_instruction())
                 req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
             else:
                 # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。

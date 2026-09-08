@@ -7,7 +7,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
+from agentclaw.community.core.task.domain.prompt_constants import (
+    NO_WEB_SEARCH_CONSTRAINT,
+    OUTPUT_LANGUAGE_CONSTRAINT,
+)
 
 from agentclaw.community.core.task.domain.models import TaskNode
 from agentclaw.community.core.task.task_runner.client.ports import (
@@ -83,7 +86,7 @@ class PromptFormatterImpl(PromptFormatter):
                 if context.get("skill_report_enabled", True)
                 else _no_callback_instruction()
             )
-            return f"{instr.rstrip()}\n{protocol}"
+            return f"{instr.rstrip()}\n{protocol}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
@@ -93,6 +96,7 @@ class PromptFormatterImpl(PromptFormatter):
         parts = [
             "[task-execute]",
             NO_WEB_SEARCH_CONSTRAINT.rstrip(),
+            OUTPUT_LANGUAGE_CONSTRAINT,
             "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。",
             f"目标:{goal}",
             f"指令:{instr}",
