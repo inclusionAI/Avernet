@@ -28,18 +28,20 @@ green — the suite passes before the next one starts.
       carries the cell's own reason string. Green against **current** behaviour
       now; it is the acceptance gate for every later group.
 
-## Group B — one source model, v1 and v2
+## Group B — one source model
 
-- [ ] **B1** Add `schema/sources.py`: `SourceDecl` and `parse_source(raw, *,
-      schema_version)`, mapping v1 `git:`/`url:` and v2 `protocol:` onto one
-      model.
-- [ ] **B2** Unit-test B1: v1 `git:` → `GIT`; v1 `url:` → `OSS`; v2
-      `protocol:` both ways; v2 rejecting the v1 spelling and vice versa;
-      `ref` refused on `oss`.
+- [ ] **B1** Add `schema/sources.py`: `SourceDecl` and `parse_source(raw)`,
+      reading `protocol: git|oss` + `url` into one model.
+- [ ] **B2** Unit-test B1: both protocols parse; `protocol` missing or unknown
+      refused; the old `git:`/`url:`-as-protocol-key spelling refused with a
+      message naming the `protocol` form; `ref` refused on `oss`; `ref`
+      accepting a tag, a branch and a full commit SHA.
 - [ ] **B3** Route `schema/entries.py` and `apply/entry_fetch.py` through
       `SourceDecl` so no consumer reads `git`/`url` keys directly.
-- [ ] **B4** `SUPPORTED_SCHEMA_VERSIONS = (1, 2)` in `schema/validator.py`;
-      confirm the capabilities endpoint publishes both.
+- [ ] **B4** Update every in-repo manifest fixture and doc snippet using the
+      old spelling. `schema_version` stays `1` and
+      `SUPPORTED_SCHEMA_VERSIONS` is untouched — assert that in a test so a
+      later drive-by bump is caught.
 - [ ] **B5** **D3** — compose `source.subpath` with entry `subpath` in
       `fetch_declared()`, re-checked by `relative_path_refusal`. Delete the
       "entry-level 'subpath' is not supported on a git source" refusal.
@@ -49,8 +51,9 @@ green — the suite passes before the next one starts.
 - [ ] **B7** Refuse `unpack`/`strip_components` on a git source at `PUT` via
       `ARCHIVE_FIELDS_BY_KIND`, naming the field and the protocol. Test both
       fields.
-- [ ] **B8** v1/v2 equivalence test: a v1 document and its v2 translation
-      produce identical `SourceDecl`s and identical apply reports.
+- [ ] **B8** End-to-end refusal test: a stored-shaped document using the old
+      spelling is refused at `PUT`, and the violation names the `protocol`
+      form.
 
 ## Group C — the OSS road
 
@@ -89,22 +92,24 @@ green — the suite passes before the next one starts.
       unchanged; ask `unpack` only on the OSS road.
 - [ ] **D3** Flip the resources row of `MATRIX` to supported for `git` — A5
       then proves the surface agrees.
-- [ ] **D4** Materialiser tests over the existing write-counting fakes: file
-      entry writes one file at `path`; directory entry replaces the tree under
-      `path`; a member refused by admission aborts the category **with the
-      existing tree still standing**.
-- [ ] **D5** End-to-end: the `examples.zh-CN.md` document (v2 spelling) is
+- [ ] **D4** Materialiser tests over the existing write-counting fakes: a file
+      entry writes one file at `path`; a directory entry replaces the tree
+      under `path` **recursively, nested subdirectories included**, and a file
+      removed upstream disappears on the next apply; a member refused by
+      admission aborts the category **with the existing tree still standing**.
+- [ ] **D5** End-to-end: the `examples.zh-CN.md` document (protocol spelling) is
       accepted and applies — the D2 defect, closed.
 
 ## Group E — documentation
 
 - [ ] **E1** `docs/bot-config-manifest/manifest-schema.zh-CN.md`: the protocol
-      axis, v1↔v2, §7's undelivered list reduced to what is actually
-      undelivered.
+      axis replacing the `git:`/`url:` keys, and §7's undelivered list reduced
+      to what is actually undelivered.
 - [ ] **E2** `user-manual.zh-CN.md`: §5.3 resources sources; Appendix C's
       resources and `cli_tools` rows; §B.7 enum tables; **§10 gains the
       2048-char source-URL limit it omits today**.
-- [ ] **E3** `examples.zh-CN.md`: correct the document to v2 and fix its stale
+- [ ] **E3** `examples.zh-CN.md`: correct the document to the protocol
+      spelling, show an `oss` entry beside the git ones, and fix its stale
       caveat header (`cli_tools`, `from`/git are open).
 - [ ] **E4** `docs/bot-config-manifest/README.zh-CN.md` term table + the
       work-items entry for this follow-up.
@@ -113,16 +118,17 @@ green — the suite passes before the next one starts.
 
 - [ ] **F1** Full backend suite green: `uv run pytest tests/community -q`.
 - [ ] **F2** `tests/community/core/bot_config_manifest/` (865) and the manifest
-      endpoint cases pass **unedited**; any change to them is a contract change
-      and gets its own line in the PR body.
+      endpoint cases pass with **no behavioural edits** — updating a fixture's
+      source spelling (B4) is expected; changing an assertion is a contract
+      change and gets its own line in the PR body.
 - [ ] **F3** A5 green over the final matrix — the surface and the table agree
       cell for cell.
-- [ ] **F4** PR body records: the matrix as shipped, the v1/v2 decision, and
+- [ ] **F4** PR body records: the matrix as shipped, the in-place spelling change, and
       the four defects closed (D1, D3, D4, D5) with the one deferred
       (`aborted` semantics).
 
 ---
 
-**Counts.** 6 groups, 30 tasks. Groups A and B carry no user-visible behaviour
-change on their own; every behaviour change lands in C or D behind the A5
-conformance test.
+**Counts.** 6 groups, 30 tasks. Group A is behaviour-neutral scaffolding. Group
+B changes one user-visible thing — the source spelling — and everything else
+lands in C or D, all of it behind the A5 conformance test.

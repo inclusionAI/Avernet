@@ -14,8 +14,7 @@ disagree with each other and with the code.
 
 This change makes the source axis **explicit and enumerable**:
 
-1. A source declares a `protocol`. v2 defines exactly two: **`git`** and
-   **`oss`**.
+1. A source declares a `protocol`. Exactly two exist: **`git`** and **`oss`**.
 2. **`resources` gains git and named sources.** It is currently the one
    fetching category locked to inline sources only.
 3. The **(category × protocol) support matrix becomes one declarative table in
@@ -113,16 +112,16 @@ Two rules the table does not show, stated once here:
 
 ## Behaviour changes
 
-### Sources declare a protocol (`schema_version: 2`)
+### Sources declare a protocol
 
 ```yaml
-schema_version: 2
+schema_version: 1
 
 sources:
   content:
     protocol: git
     url: https://code.example-corp.com/team/content.git
-    ref: v1.2.0
+    ref: v1.2.0            # tag, branch, or a full commit SHA
     auth: corp-git-content
   artifacts:
     protocol: oss
@@ -130,26 +129,42 @@ sources:
     auth: oss-artifacts
 ```
 
+`ref` takes **a tag, a branch, or a commit SHA**. Whichever is written, the
+platform resolves it to one commit per `(url, ref)` per apply and records that
+commit in the apply report's `sources[]` row as `resolved_sha` — the answer to
+"which version is actually running". A tag or branch can move between applies;
+`mode: strict` refuses a ref that resolves to a different commit than the last
+apply saw, `non_strict` (the default) allows it and reports the move. Writing a
+commit SHA as the `ref` is the way to pin absolutely.
+
 An entry names a source and, where the protocol addresses a tree, the part it
 wants:
 
 ```yaml
 manifest:
   resources:
-    - path: data/faq.csv
+    - path: data/faq.csv       # one file, from git
       from: content
       subpath: kb/faq.csv
-    - path: data/kb/
+    - path: data/kb/           # a whole tree, from git — no packaging
       from: content
       subpath: kb/
+    - path: data/pricing.csv   # one object, from oss
+      from: artifacts
+      subpath: reference/pricing.csv
 ```
 
-**`schema_version: 1` documents keep working, unchanged and indefinitely.**
-The protocol axis is a v2 vocabulary; v1's `git:`/`url:` keys are accepted as
-before and normalised internally onto the same model. No stored manifest
-breaks, and no caller is forced to migrate to keep applying. This is what makes
-"exactly two protocols" a statement about the v2 vocabulary rather than a
-demand that every existing document be rewritten first.
+A `path` ending in `/` is a **directory entry**: the source subtree is
+delivered under it **recursively — every file at every depth**, and the
+declared area is replaced wholesale, so a file that disappears upstream
+disappears from the workspace on the next apply. A `path` not ending in `/` is
+a single file.
+
+**This replaces the `git:`/`url:` spelling; `schema_version` stays `1`.** The
+feature is pre-release and self-tested, so there is no installed base to carry:
+a stored document using the old spelling is refused at `PUT` with a message
+naming the `protocol` form. Adding a second schema version to preserve a
+spelling nobody depends on yet would buy a migration burden and no safety.
 
 ### `subpath` becomes an entry-level selector on every protocol
 
@@ -179,12 +194,13 @@ its shape and meaning; this is additive.
 
 ## Acceptance criteria
 
-1. A v2 manifest declaring `protocol: git` and `protocol: oss` sources is
+1. A manifest declaring `protocol: git` and `protocol: oss` sources is
    accepted, and entries in `identity`, `skills`, `resources` and `cli_tools`
    resolve through them.
 2. `resources` accepts `from:` and git sources: a **file** entry writes one
    file at its `path`; a **directory** entry (`path` ending in `/`) writes the
-   source tree under it, with no `unpack` declared.
+   source subtree under it **recursively, every file at every depth**, with no
+   `unpack` declared, replacing the declared area wholesale.
 3. Two entries referencing **one** named git source with different `subpath`
    values both resolve, and the apply reports one `sources[]` row with a single
    `resolved_sha` shared by both.
@@ -195,8 +211,8 @@ its shape and meaning; this is additive.
 6. A `type: oss_aksk` credential can be registered with both values, is never
    readable back, and an `oss` source using it fetches from a private bucket.
    A source outside the credential's `allowed_prefixes` is refused.
-7. Every `schema_version: 1` document that applies today still applies, byte
-   for byte, with the same report.
+7. A source using the old `git:`/`url:` spelling is refused at `PUT` with a
+   message naming the `protocol` form — no silent acceptance, no dual road.
 8. **The matrix is one table in code.** The validator's refusals and the
    capabilities endpoint's answers both derive from it, and a test drives a
    real `PUT` per cell and asserts the outcome matches the table. Adding a
@@ -216,16 +232,16 @@ its shape and meaning; this is additive.
   resolve/plan" while §B.2.5 defines it as "an entry failed"; a per-entry
   failure from `write` leaves it false. Real, separately tracked, not fixed
   here.
-- **Deprecating v1.** v2 is additive. Whether v1 is ever retired is a later
-  decision with its own migration.
+- **A second schema version.** `schema_version` stays `1`; the protocol axis
+  replaces the old spelling in place. See "Decisions taken".
 
 ## Decisions taken
 
-- **v2 rather than a breaking v1 edit.** Asked for "two protocols only"; the
-  literal reading — delete `url:` — breaks every stored manifest, including the
-  only working source form `resources` has today. Versioning the schema gives
-  the exact two-protocol vocabulary in v2 while keeping v1 documents applying.
-  Flag if you want v1 retired on a schedule instead.
+- **No schema versioning — the spelling changes in place.** An earlier draft
+  introduced `schema_version: 2` so v1 documents kept applying. Withdrawn on
+  review: the feature is pre-release and self-tested, so there is no installed
+  base to protect, and a compatibility layer for a spelling nobody depends on
+  yet is pure carrying cost. Old-spelling sources are refused at `PUT`.
 - **`oss` covers plain HTTPS object fetches**, authenticated or not. A public
   CDN file is an `oss` source with no `auth`. The alternative — a third `url`
   protocol — was declined in favour of the two-protocol vocabulary.

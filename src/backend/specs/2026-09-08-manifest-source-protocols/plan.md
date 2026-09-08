@@ -10,7 +10,7 @@ the first two carry no behaviour change on their own.
 ```
 ① support matrix  ──► one table; validator + capabilities both read it
         │
-② source model   ──► v1/v2 both parse into one internal SourceDecl(protocol=…)
+② source model   ──► `protocol:` parses into one internal SourceDecl
         │                 └─ entry subpath composes with source subpath  (D3)
         ├──► ③ oss road   ──► credential AK/SK + guarded object-store fetch (D4)
         └──► ④ resources  ──► consume GitEntrySource; drop unpack on git (D1)
@@ -58,7 +58,7 @@ existing `constructs` array — that array is published contract. `SourceKind` i
 the new, orthogonal vocabulary; `named` is deliberately absent from it, because
 a named source resolves to a protocol and the protocol's cell governs.
 
-## ② One source model for v1 and v2
+## ② One source model
 
 **New:** `core/bot_config_manifest/schema/sources.py`
 
@@ -67,32 +67,24 @@ a named source resolves to a protocol and the protocol's cell governs.
 class SourceDecl:
     protocol: SourceKind          # GIT | OSS
     url: str
-    ref: str | None               # git only
+    ref: str | None               # git only — tag, branch, or commit SHA
     subpath: str | None
     auth: str | None
     mode: str                     # strict | non_strict
 ```
 
-`parse_source(raw, *, schema_version)` is the one place either spelling is
-read:
+`parse_source(raw)` is the one place a source declaration is read, and
+everything downstream — validator, capability checks, `EntryFetcher` — sees
+`SourceDecl` only, never raw keys.
 
-| document | spelling | → |
-| --- | --- | --- |
-| v1 | `git: <url>` + `ref:` | `SourceDecl(protocol=GIT, …)` |
-| v1 | `url: <url>` | `SourceDecl(protocol=OSS, …)` |
-| v2 | `protocol: git\|oss` + `url:` | `SourceDecl(protocol=…, …)` |
+Rules: `protocol` required and one of `git`/`oss`; `url` required; the old
+`git:`/`url:`-as-protocol-key spelling refused with a message naming the
+`protocol` form; `ref` refused on `oss`; `unpack`/`strip_components` refused on
+`git` (spec §"unpack/strip_components").
 
-Everything downstream — validator, capability checks, `EntryFetcher` — sees
-`SourceDecl` only and never asks which schema version produced it. That is what
-keeps v1 compatibility from becoming a branch in every consumer.
-
-v2 rules: `protocol` required; `git:`/`url:`-as-protocol-key refused with a
-message naming the v2 spelling; `ref` refused on `oss`; `unpack`/
-`strip_components` refused on `git` (spec §"unpack/strip_components").
-
-**`schema/validator.py`**: `SUPPORTED_SCHEMA_VERSIONS` becomes `(1, 2)`. The
-capabilities endpoint publishes it already, so clients discover v2 without a
-new field.
+**`schema_version` stays `1`** — `SUPPORTED_SCHEMA_VERSIONS` is untouched. The
+spelling changes in place; the feature is pre-release, so there is no installed
+base and no compatibility road to build or test.
 
 ### Entry-level `subpath` (D3)
 
@@ -164,7 +156,6 @@ with the pair.
 | `core/bot_config_manifest/fetch/oss_source.py` | **new** — signed object-store fetch |
 | `core/bot_config_manifest/sql/2026_09_08_source_credential_aksk.sql` | **new** — DDL |
 | `core/bot_config_manifest/schema/entries.py` | matrix lookup replaces the ad-hoc gate; `subpath`/`unpack` rules per protocol |
-| `core/bot_config_manifest/schema/validator.py` | accept `schema_version: 2` |
 | `core/bot_config_manifest/capabilities.py` | publish `source_matrix`; drop the resources caveat |
 | `core/bot_config_manifest/apply/entry_fetch.py` | protocol dispatch; compose source+entry `subpath` |
 | `core/bot_config_manifest/apply/materialisers/resources.py` | consume `GitEntrySource` |
@@ -181,8 +172,9 @@ with the pair.
   supported and that a refusal carries the cell's own reason string. This is
   acceptance criterion 8 and the guard against the class of drift that produced
   D1–D5.
-- **v1/v2 equivalence**: a v1 document and its v2 translation produce identical
-  `SourceDecl`s and identical apply reports.
+- **Old spelling refused**: a source using `git:`/`url:` as the protocol key is
+  refused at `PUT` with a message naming the `protocol` form — not silently
+  accepted, not half-parsed.
 - **`subpath` composition**: two entries, one source, two paths, one
   `resolved_sha`; traversal attempts refused by the shared predicate.
 - **resources × git**: file entry and directory entry, over the existing
@@ -203,5 +195,7 @@ with the pair.
   (MinIO/S3 via boto3) is what this repo can test; a corp OSS variant may need
   its own signer behind the same seam. The port is shaped for that; only one
   implementation ships here.
-- **v1 must not regress.** Held by the equivalence test and by the existing
-  suites staying untouched, not by inspection.
+- **Existing stored documents stop applying.** Accepted: the feature is
+  pre-release and self-tested, so the only documents using the old spelling are
+  our own test fixtures. Any fixture carrying it is updated in the same change,
+  and the refusal message names the replacement.
