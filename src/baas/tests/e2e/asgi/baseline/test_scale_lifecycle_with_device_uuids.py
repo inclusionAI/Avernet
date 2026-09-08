@@ -182,15 +182,16 @@ class TestScaleLifecycleWithDeviceUuids:
             f"Expected scale-down publish SUCCESS, got {status}"
         )
 
-        # 4a. The two targeted devices must now be DESTROYED.
+        # 4a. The two targeted devices must be gone from the listing.
+        # destroy_device_by_uuid soft-deletes (is_deleted=1) before setting
+        # status=RELEASED, so list_by_bot_id (which filters is_deleted=0)
+        # never returns them. Assert absence rather than status.
         all_devices = await _get_bot_devices(api, bot_uuid)
-        destroyed_devices = [
-            d for d in all_devices if d.get("status") == "DESTROYED"
-        ]
-        destroyed_uuids = {d["device_uuid"] for d in destroyed_devices}
-        assert destroyed_uuids == set(device_uuids_to_destroy), (
-            f"Expected exactly {set(device_uuids_to_destroy)} to be DESTROYED, "
-            f"got {destroyed_uuids}"
+        all_device_uuids = {d["device_uuid"] for d in all_devices}
+        assert not (set(device_uuids_to_destroy) & all_device_uuids), (
+            f"Targeted devices {set(device_uuids_to_destroy)} should be "
+            f"absent from the bot device listing after scale down, "
+            f"got {all_device_uuids}"
         )
 
         # 4b. The two original devices must remain ACTIVE.
