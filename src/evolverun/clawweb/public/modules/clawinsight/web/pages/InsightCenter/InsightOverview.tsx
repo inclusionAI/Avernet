@@ -124,6 +124,7 @@ function aggregateTrendPoints(points: InsightTrendPoint[], granularity: TrendGra
     buckets.set(period.start, bucket)
   }
 
+  // Weekly counts are summed; rates and their standard deviations use the available daily values.
   return [...buckets.values()].sort((left, right) => left.period.start.localeCompare(right.period.start)).map(({ period, points: bucketPoints }) => ({
     date: period.start,
     periodStart: period.start,
