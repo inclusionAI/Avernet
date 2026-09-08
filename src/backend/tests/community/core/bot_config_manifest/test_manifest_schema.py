@@ -992,3 +992,130 @@ def test_relative_path_refusal_is_the_one_rule_both_sides_ask():
     # The legitimate shapes, including the per-segment '..' reading.
     for value in ("data/..config", "data/a.md", "top/sub/b.txt", "${BASE}/k.md"):
         assert relative_path_refusal(value) is None, value
+
+
+# ── the rules that must survive the protocol axis ──────────────────────────
+#
+# The source declaration is parsed by a new module now, and these are the rules
+# that would be silently lost if the wrapper stopped contributing them: the pure
+# parser knows nothing about https, userinfo, URL length or workspace paths.
+
+
+def test_userinfo_is_still_refused_on_a_declared_source():
+    """The rule with teeth (schema §2.1). A document is stored as written, read
+    back verbatim by `GET`, and recorded as provenance — which is exactly what
+    the encrypted credential store exists to avoid. Refused, never redacted:
+    redaction cannot un-store what was already accepted somewhere else."""
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://user:token@code.example.com/team/content.git
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: soul.md
+"""
+    assert ("sources.s.url", "source_url_has_userinfo") in _reject(document)
+
+
+def test_a_non_https_source_is_still_refused():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: oss
+    url: http://cdn.example.com/a.md
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert ("sources.s.url", "invalid_source") in _reject(document)
+
+
+@pytest.mark.parametrize(
+    ("where", "document"),
+    [
+        (
+            "sources.s.subpath",
+            """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+    subpath: ../../etc
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+""",
+        ),
+        (
+            "manifest.identity[0].subpath",
+            """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: ../../etc/shadow
+""",
+        ),
+    ],
+)
+def test_traversal_is_refused_on_both_halves_of_a_subpath(where, document):
+    """Both halves compose into one path at fetch time, so both are checked
+    here and the composition is checked again there — by the same predicate,
+    never a second weaker one."""
+    assert (where, "path_traversal") in _reject(document)
+
+
+def test_a_source_that_fails_to_parse_is_one_problem_not_two():
+    """An entry naming a source whose declaration was refused must not ALSO be
+    reported as naming an undeclared source. One mistake, one violation — the
+    caller fixes the source, not the reference."""
+    document = """schema_version: 1
+sources:
+  s:
+    url: https://cdn.example.com/a.md
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert _codes(document) == {"missing_protocol"}
+
+
+def test_the_reserved_word_is_still_swept_inside_a_source():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: git
+    url: https://code.example.com/team/content.git
+    apply_once: true
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+      subpath: soul.md
+"""
+    assert ("sources.s.apply_once", "reserved_field") in _reject(document)
+
+
+def test_an_unknown_key_on_a_source_is_refused_not_ignored():
+    document = """schema_version: 1
+sources:
+  s:
+    protocol: oss
+    url: https://cdn.example.com/a.md
+    nonsense: 1
+manifest:
+  identity:
+    - type: SOUL.md
+      from: s
+"""
+    assert ("sources.s.nonsense", "unknown_field") in _reject(document)
