@@ -405,6 +405,28 @@ def test_get_latest_success_by_source_bot_id_returns_none_when_no_success(repo):
     assert repo.get_latest_success_by_source_bot_id("src-missing", "dev") is None
 
 
+def test_get_latest_built_by_source_bot_id_owner_agnostic_returns_latest(repo):
+    """Eval 区版本锚定：latest built row, owner-agnostic."""
+    repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="built", env="dev"))
+    latest = repo.insert(
+        _data(source_bot_id="src-1", owner_id="other-owner", status="built", env="dev", version=2)
+    )
+    repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="success", env="dev", version=3))
+    repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="built", env="pre", version=4))
+
+    got = repo.get_latest_built_by_source_bot_id("src-1", "dev")
+
+    assert got is not None
+    assert got.id == latest.id
+
+
+def test_get_latest_built_by_source_bot_id_returns_none_when_no_built(repo):
+    repo.insert(_data(source_bot_id="src-1", owner_id="emp001", status="success", env="dev"))
+
+    assert repo.get_latest_built_by_source_bot_id("src-1", "dev") is None
+    assert repo.get_latest_built_by_source_bot_id("src-missing", "dev") is None
+
+
 # ── config_artifact OSS offload ─────────────────────────────────────
 #
 # When ``ext['config_artifact']`` serializes past the inline TEXT-column
