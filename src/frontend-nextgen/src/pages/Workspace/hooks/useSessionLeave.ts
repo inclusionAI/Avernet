@@ -3,6 +3,7 @@ import { sessionService } from '@/services/workspace/sessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback } from 'react';
 import { toast } from 'sonner';
+import { markSessionGone } from './useStaleSessionFallback';
 
 /** 从 map 中移除会话并校正选中态（删除/退出共用）。 */
 function removeSessionAndFixSelection(
@@ -32,6 +33,8 @@ export function useSessionMutations(
         toast.error(res.error.friendlyMessage);
         return false;
       }
+      // 登记「已知删除」：陈旧选中兜底/成员详情补齐不再对其发起必然失败的详情反查。
+      markSessionGone(sessionId);
       removeSessionAndFixSelection(applyMapUpdate, selectSession, sessionId);
       toast.success('会话已删除');
       return true;
@@ -46,6 +49,8 @@ export function useSessionMutations(
         toast.error(res.error.friendlyMessage);
         return false;
       }
+      // 登记「已知退出」：陈旧选中兜底/成员详情补齐不再对其发起必然失败的详情反查。
+      markSessionGone(sessionId);
       removeSessionAndFixSelection(applyMapUpdate, selectSession, sessionId);
       toast.success('已退出会话');
       return true;

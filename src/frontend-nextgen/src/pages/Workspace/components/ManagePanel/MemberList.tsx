@@ -1,8 +1,8 @@
-import { Badge, Button, Skeleton } from '@/components/ui';
+import { Badge, Button, IconButton, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView, ParticipantView } from '@/domain/collaboration';
 import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
-import { Plus, UserMinus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { AddMemberDialog } from './AddMemberDialog';
 
@@ -24,21 +24,19 @@ export interface MemberListProps {
   onRemove: (actorId: string) => Promise<boolean>;
 }
 
-const MEMBER_TAG_CLASS = 'text-[10px]';
-
-function getRoleLabel(participant: ParticipantView, groupKind: GroupView['kind']): string | null {
+/** 角色标签：自由聊天/自定义协同 driver→群主；任务协作 manager→主节点、worker→从节点；其余一律「成员」。 */
+function getRoleLabel(participant: ParticipantView, groupKind: GroupView['kind']): string {
   if (groupKind === 'task_master_slave') {
-    if (participant.kind !== 'bot') return null;
     if (participant.role === 'manager') return '主节点';
     if (participant.role === 'worker') return '从节点';
-    return null;
+    return '成员';
   }
-  return participant.role === 'driver' ? '群主' : null;
+  return participant.role === 'driver' ? '群主' : '成员';
 }
 
 function getModeLabel(participant: ParticipantView): string | null {
   if (participant.kind === 'bot') {
-    if (participant.mode === 'auto') return '自由';
+    if (participant.mode === 'auto') return '自动';
     if (participant.mode === 'muted') return '禁言';
     return null;
   }
@@ -47,13 +45,26 @@ function getModeLabel(participant: ParticipantView): string | null {
   return null;
 }
 
+/** 角色标签色：群主/主节点（管理角色）紫；从节点/成员走默认蓝。 */
+function getRoleTone(participant: ParticipantView, groupKind: GroupView['kind']): 'purple' | 'primary' {
+  if (groupKind === 'task_master_slave') return participant.role === 'manager' ? 'purple' : 'primary';
+  return participant.role === 'driver' ? 'purple' : 'primary';
+}
+
+/** 状态标签色：自动/参与绿，禁言/旁观灰。 */
+function getModeTone(participant: ParticipantView): 'success' | 'neutral' {
+  if (participant.kind === 'bot') return participant.mode === 'auto' ? 'success' : 'neutral';
+  return participant.mode === 'present' ? 'success' : 'neutral';
+}
+
 function Avatar({ participant }: { participant: ParticipantView }) {
   const symbol = participant.name?.trim().charAt(0) || '?';
   return (
     <div
       className={
         participant.kind === 'bot'
-          ? 'grid size-8 flex-none place-items-center rounded-full bg-foreground text-xs font-medium text-background shadow-sm'
+          ? // bot 图标对齐 Bot 工坊信息列首字母圆标：主色软底（bg-primary/10 + text-primary）。
+            'grid size-8 flex-none place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary shadow-sm'
           : 'grid size-8 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand shadow-sm'
       }
     >
@@ -133,19 +144,12 @@ export function MemberList({
                   <div className="flex items-center">
                     <span className="max-w-full truncate text-sm font-semibold text-foreground">{displayName}</span>
                   </div>
+                  {/* 标签分类型着色（Badge 默认字号）：成员类型默认蓝；群主/主节点紫；自动/参与绿；禁言/旁观灰。 */}
                   <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                    <Badge className={MEMBER_TAG_CLASS} tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
-                      {participant.kind === 'bot' ? 'Bot' : '用户'}
-                    </Badge>
-                    {getRoleLabel(participant, groupKind) ? (
-                      <Badge className={MEMBER_TAG_CLASS} tone="warning">
-                        {getRoleLabel(participant, groupKind)}
-                      </Badge>
-                    ) : null}
+                    <Badge tone="primary">{participant.kind === 'bot' ? 'Bot' : '用户'}</Badge>
+                    <Badge tone={getRoleTone(participant, groupKind)}>{getRoleLabel(participant, groupKind)}</Badge>
                     {showMode && getModeLabel(participant) ? (
-                      <Badge className={MEMBER_TAG_CLASS} tone="neutral">
-                        {getModeLabel(participant)}
-                      </Badge>
+                      <Badge tone={getModeTone(participant)}>{getModeLabel(participant)}</Badge>
                     ) : null}
                   </div>
                 </div>
@@ -157,10 +161,12 @@ export function MemberList({
                     confirmVariant="destructive"
                     onConfirm={() => void onRemove(participant.actorId)}
                   >
-                    <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive">
-                      <UserMinus className="h-4 w-4" />
-                      移除
-                    </Button>
+                    <IconButton
+                      label="移除成员"
+                      icon={<Trash2 className="h-4 w-4" aria-hidden />}
+                      size="sm"
+                      className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    />
                   </ConfirmDialog>
                 )}
               </div>

@@ -177,7 +177,9 @@ describe('collaboration square accessible UI', () => {
     );
     expect(memberHtml).toContain('用户');
     expect(memberHtml).not.toContain('Human');
-    expect(memberHtml).toContain('参与者');
+    // 角色标签按群类型归一化：自由聊天群非 driver 的未知 role（如「参与者」）统一展示「成员」。
+    expect(memberHtml).toContain('成员');
+    expect(memberHtml).not.toContain('参与者');
   });
 
   test('公开 Bot 页面保留名称搜索与智能搜索入口', () => {

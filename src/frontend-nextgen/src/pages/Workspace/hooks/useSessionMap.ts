@@ -45,6 +45,8 @@ export interface UseSessionMapResult {
   loadMoreSessions: (gid: string) => Promise<void>;
   /** 身份代际：切换身份时递增，供外部丢弃在途旧身份响应。 */
   identityEpochRef: MutableRefObject<number>;
+  /** 最新缓存 ref（重拉窗口清缓存时同步更新）：自动选中消费它避免命中同 commit 陈旧列表。 */
+  rawByGroupIdRef: MutableRefObject<Record<string, SessionView[]>>;
 }
 
 /**
@@ -208,5 +210,6 @@ export function useSessionMap(
     loadMoreErrorByGroupId,
     loadMoreSessions,
     identityEpochRef,
+    rawByGroupIdRef,
   };
 }

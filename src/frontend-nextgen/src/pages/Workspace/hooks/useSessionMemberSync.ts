@@ -4,6 +4,7 @@ import { sessionService } from '@/services/workspace/sessionService';
 import { useCallback, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { replaceSessionInMap } from './sessionMapPatch';
+import { isSessionKnownGone } from './useStaleSessionFallback';
 
 function notifyError(err: DomainError): void {
   toast.error(err.friendlyMessage);
@@ -67,6 +68,11 @@ export function useSessionMemberSync(
   useEffect(() => {
     pendingDetailRef.current = null;
     if (!selectedSessionId) {
+      return;
+    }
+    // 已知退出/删除的会话不再补齐详情（当前角色已非参与者，请求必然失败报错）；
+    // 陈旧选中兜底会直接把选中轮换到有效会话。
+    if (isSessionKnownGone(selectedSessionId)) {
       return;
     }
     let cancelled = false;

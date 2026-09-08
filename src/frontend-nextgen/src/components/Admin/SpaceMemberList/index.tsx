@@ -2,37 +2,19 @@
 // - 已加入且可管理：顶部右侧「添加成员」按钮；角色可改/可删；无底部提示。
 // - 未加入团队空间：顶部右侧「可申请」文字；最右下角「申请加入」按钮；最左下角提示文案(上方横线)。
 // - 个人空间：无顶部按钮；最左下角提示文案(上方横线)。
-// 单行渲染下沉到 SpaceMemberRow；角色变更直接执行（PRD 交互，无二次确认）。
+// 单行渲染下沉到 SpaceMemberRow；添加成员多选模态下沉到 AddMembersModal；角色变更直接执行（PRD 交互，无二次确认）。
 import type { SearchedUser } from '@/capabilities';
-import {
-  Button,
-  CaptionText,
-  ConfirmDialog,
-  Empty,
-  Modal,
-  ModalContent,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Skeleton,
-  TableHeaderText,
-  ValueText,
-} from '@/components/ui';
+import { Button, CaptionText, ConfirmDialog, Empty, Skeleton, TableHeaderText } from '@/components/ui';
 import { Card } from '@/components/ui/Card';
 import type { Space, SpaceMember } from '@/domain/admin/models';
 import { adminService } from '@/services/admin';
 import { readUserId } from '@/services/admin/userIdentity';
-import { Plus, User, Users, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Plus, User, Users } from 'lucide-react';
+import { useState } from 'react';
 import { SpaceJoinForm } from '../SpaceJoinForm';
 import { Tag } from '../Tag';
+import { AddMembersModal } from './AddMembersModal';
 import { SpaceMemberRow } from './SpaceMemberRow';
-import { UserSearchDropdown } from './UserSearchDropdown';
 
 // clawweb=Avernet 暂无 DELETE /openapi/v1/bots/spaces/{id} 接口；UI 入口隐藏，后端补接口时翻 true。
 const DELETE_SPACE_SUPPORTED = false;
@@ -41,7 +23,14 @@ export interface SpaceMemberListProps {
   space: Space;
   members: SpaceMember[];
   loading: boolean;
-  onAddMember: (userId: string, role: 'ADMIN' | 'MEMBER', userName?: string) => void | Promise<void>;
+  /** 批量添加成员（多选 chip + 共享角色）。返回 {succeeded, failed} 供模态做部分失败重试回填；可省返回。 */
+  onAddMembers: (
+    users: SearchedUser[],
+    role: 'ADMIN' | 'MEMBER',
+  ) => void | Promise<{ succeeded: SpaceMember[]; failed: { userId: string; userName?: string; reason: string }[] } | undefined>;
+  /** 批量添加 in-flight 加载态（来自 hook）；用于按钮禁用 + 加载文案。 */
+  addMembersLoading?: boolean;
+  addMembersDisabledReason?: string;
   onRemoveMember: (userId: string) => void | Promise<void>;
   onUpdateRole: (userId: string, role: 'ADMIN' | 'MEMBER') => void | Promise<void>;
   onDeleteSpace?: (spaceId: number | string) => void | Promise<void>;
@@ -52,7 +41,9 @@ export function SpaceMemberList({
   space,
   members,
   loading,
-  onAddMember,
+  onAddMembers,
+  addMembersLoading = false,
+  addMembersDisabledReason,
   onRemoveMember,
   onUpdateRole,
   onDeleteSpace,
@@ -67,29 +58,8 @@ export function SpaceMemberList({
   const joinableTeam = !isMember && space.spaceType === 'TEAM' && space.joinStatus !== 'APPLYING';
   const [addOpen, setAddOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<SearchedUser | null>(null);
-  const [newRole, setNewRole] = useState<'ADMIN' | 'MEMBER'>('MEMBER');
 
   const lastOwner = members.filter((m) => m.role === 'ADMIN').length <= 1;
-
-  // 添加成员下拉中禁用已有成员 + 当前用户（避免重复添加 / 加自己）
-  const disabledUserIds = useMemo(() => {
-    const set = new Set<string>(members.map((m) => m.userId));
-    if (currentUid) set.add(currentUid);
-    return set;
-  }, [members, currentUid]);
-
-  const submitAdd = async () => {
-    if (!selectedUser) return;
-    const { userId } = selectedUser;
-    // 花名随被加成员写入成员表：nickName 即花名；缺失时退到 displayName（仅当其非工号，避免把工号误写成花名）。
-    const userName =
-      selectedUser.nickName || (selectedUser.displayName !== userId ? selectedUser.displayName : undefined);
-    await onAddMember(userId, newRole, userName);
-    setSelectedUser(null);
-    setNewRole('MEMBER');
-    setAddOpen(false);
-  };
 
   // 顶部右侧：已加入可管理→添加成员按钮；未加入团队→「可申请」文字；个人空间→空
   const topRight = manageable ? (
@@ -201,66 +171,17 @@ export function SpaceMemberList({
       {/* 底部：状态化提示 + 申请加入按钮 */}
       {bottomBar}
 
-      {/* 添加成员 Modal */}
+      {/* 添加成员多选模态：条件挂载保证每次打开都是 fresh 状态（selectedUsers=[]） */}
       {addOpen && (
-        <Modal open={addOpen} onOpenChange={setAddOpen}>
-          <ModalContent size="sm" className="max-w-[420px]">
-            <ModalHeader>
-              <ModalTitle>添加成员</ModalTitle>
-            </ModalHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <CaptionText as="label">搜索员工</CaptionText>
-                <UserSearchDropdown
-                  disabledUserIds={disabledUserIds}
-                  onSelect={setSelectedUser}
-                  disabled={!!selectedUser}
-                />
-                {selectedUser && (
-                  <Card className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 shadow-sm">
-                    <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                      {(selectedUser.nickName || selectedUser.realName || selectedUser.userId || '?')
-                        .charAt(0)
-                        .toUpperCase()}
-                    </span>
-                    <ValueText as="span" className="min-w-0 flex-1 truncate">
-                      {selectedUser.nickName ? `${selectedUser.nickName}(${selectedUser.userId})` : selectedUser.userId}
-                    </ValueText>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="取消选择"
-                      className="h-6 w-6 text-muted-foreground"
-                      onClick={() => setSelectedUser(null)}
-                    >
-                      <X size={14} />
-                    </Button>
-                  </Card>
-                )}
-              </div>
-              <div className="space-y-2">
-                <CaptionText as="label">分配角色</CaptionText>
-                <Select value={newRole} onValueChange={(v) => setNewRole(v as 'ADMIN' | 'MEMBER')}>
-                  <SelectTrigger className="h-9 w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="MEMBER">成员</SelectItem>
-                    <SelectItem value="ADMIN">管理员</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <ModalFooter>
-              <Button variant="ghost" size="sm" onClick={() => setAddOpen(false)}>
-                取消
-              </Button>
-              <Button variant="primary" size="sm" onClick={() => void submitAdd()} disabled={!selectedUser}>
-                添加
-              </Button>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
+        <AddMembersModal
+          open={addOpen}
+          onOpenChange={setAddOpen}
+          members={members}
+          currentUid={currentUid}
+          onAddMembers={onAddMembers}
+          addMembersLoading={addMembersLoading}
+          addMembersDisabledReason={addMembersDisabledReason}
+        />
       )}
 
       {/* 申请加入 Modal（未加入团队时） */}

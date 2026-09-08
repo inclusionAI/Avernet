@@ -1,7 +1,7 @@
 import { cn } from '@/utils/cn';
 import React from 'react';
 
-type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'outline';
+type Tone = 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'outline' | 'purple';
 const tones: Record<Tone, string> = {
   // D3: token 迁到 shadcn 软色模式 (bg-X/10 text-X)，保历史软徽章观感；沿用 `tone` API 零 callsite 改动。
   neutral: 'bg-muted text-muted-foreground',
@@ -10,6 +10,7 @@ const tones: Record<Tone, string> = {
   warning: 'bg-warning/10 text-warning',
   error: 'bg-destructive/10 text-destructive',
   outline: 'border border-border text-foreground',
+  purple: 'bg-purple/10 text-purple',
 };
 
 export function Badge({
