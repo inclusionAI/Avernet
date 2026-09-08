@@ -644,16 +644,23 @@ class SkillSetService:
             )
             device_sync = self._device_sync_dispatcher.dispatch(ctx)
         except Exception:
-            logger.warning("[project_mcps] device resolution failed bot_id=%s", self.bot_id, exc_info=True)
+            logger.warning(
+                "[project_mcps] device resolution failed bot_id=%s",
+                self.bot_id, exc_info=True,
+            )
             return False
         finally:
-            logger.info("[project_mcps] timing stage=resolve_device bot_id=%s duration_ms=%.3f",
-                        self.bot_id, (time.perf_counter() - started) * 1000)
+            logger.info(
+                "[project_mcps] timing stage=resolve_device bot_id=%s duration_ms=%.3f",
+                self.bot_id, (time.perf_counter() - started) * 1000,
+            )
         if not await self.sync_mcp_delivery(
             claimed=claimed, released=released, device_sync=device_sync
         ):
             return False
-        return await self.sync_mcp_desired_state(server_codes=declared, device_sync=device_sync)
+        return await self.sync_mcp_desired_state(
+            server_codes=declared, device_sync=device_sync
+        )
 
     async def sync_mcp_delivery(
         self, *, claimed: frozenset[str], released: frozenset[str],
@@ -1828,8 +1835,11 @@ class SkillSetService:
             stage="active_skill_assets",
             bot_id=bot_id,
             engine_type=effective_engine,
-            operation=lambda: capability_snapshot.skills if capability_snapshot is not None else self._active_skill_assets(
-                entity_id=entity_id, bot_id=bot_id, user_id=user_id
+            operation=lambda: (
+                capability_snapshot.skills if capability_snapshot is not None
+                else self._active_skill_assets(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                )
             ),
             item_count=len,
         )
@@ -1837,8 +1847,11 @@ class SkillSetService:
             stage="installed_mcp_codes",
             bot_id=bot_id,
             engine_type=effective_engine,
-            operation=lambda: capability_snapshot.installed_mcp_server_codes if capability_snapshot is not None else self._installed_mcp_codes(
-                entity_id=entity_id, bot_id=bot_id, user_id=user_id
+            operation=lambda: (
+                capability_snapshot.installed_mcp_server_codes if capability_snapshot is not None
+                else self._installed_mcp_codes(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                )
             ),
             item_count=len,
         )

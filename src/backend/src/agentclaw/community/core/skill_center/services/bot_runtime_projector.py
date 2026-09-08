@@ -401,8 +401,8 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # over Installation that agrees with Set configuration — the lazy
         # flush every read runs, not a projector-only repair.
         skill_assets = tuple(
-            snapshot.skills if snapshot is not None else
-            self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
+            snapshot.skills if snapshot is not None
+            else self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
         )
         # Reject before querying or writing any external MCP, Passport, or
         # runtime boundary. What an engine's runtime cannot carry is the

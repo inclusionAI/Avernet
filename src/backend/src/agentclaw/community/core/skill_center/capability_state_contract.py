@@ -100,4 +100,4 @@ class BotCapabilityStateReaderProtocol(Protocol):
         ...
 
 
-__all__ = ["BotCapabilityStateReaderProtocol"]
+__all__ = ["BotCapabilitySnapshot", "BotCapabilityStateReaderProtocol"]
