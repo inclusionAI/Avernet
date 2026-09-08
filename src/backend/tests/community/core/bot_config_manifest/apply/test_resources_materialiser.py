@@ -64,9 +64,19 @@ class _StubEntryFetcher:
     resolve.
     """
 
-    def __init__(self, fixed_body: bytes | None = None) -> None:
+    def __init__(
+        self,
+        fixed_body: bytes | None = None,
+        *,
+        git_trees: dict[str, dict[str, bytes]] | None = None,
+        moved_from: str | None = None,
+    ) -> None:
         self.calls: list[dict[str, Any]] = []
+        self.filed: list[dict[str, Any]] = []
         self._fixed_body = fixed_body
+        #: repository url → the whole tree it delivers, path → bytes.
+        self.git_trees = git_trees or {}
+        self.moved_from = moved_from
 
     def fetch(
         self,
@@ -97,6 +107,152 @@ class _StubEntryFetcher:
             else b"bytes-of-" + source_url.encode()
         )
         return FetchedEntry(content=body, digest="sha256:stub", from_store=False)
+
+    def fetch_declared(
+        self,
+        ctx: Any,
+        *,
+        entry: dict[str, Any],
+        category: str = "resources_file",
+        entry_identity: str | None = None,
+    ):
+        """The declared-source front door, in the double.
+
+        Mirrors the real dispatch closely enough to be worth trusting: a
+        ``from`` name or an inline ``source`` object resolves through
+        ``sources`` on the apply context, and a git protocol answers with a
+        tree rather than bytes — which is the branch the materialiser has to
+        get right. Anything else falls through to the URL road's ``fetch``,
+        so every existing case still exercises the code it always did.
+        """
+        decl: dict[str, Any] | None = None
+        if isinstance(entry.get("from"), str):
+            sources = getattr(ctx, "source_session", None)
+            declared = getattr(sources, "sources", {}) if sources else {}
+            decl = dict(declared.get(entry["from"], {}))
+            if not decl:
+                raise EntryFetchError(
+                    f"'from' names source {entry['from']!r}, which is not "
+                    "declared under 'sources'"
+                )
+        elif isinstance(entry.get("source"), dict):
+            decl = dict(entry["source"])
+
+        if decl is not None and decl.get("protocol") == "git":
+            key = decl["url"]
+            tree = self.git_trees.get(key)
+            if tree is None:
+                raise EntryFetchError("git fetch failed")
+            self.calls.append(
+                {
+                    "source_url": key,
+                    "category": category,
+                    "entry_identity": entry_identity,
+                    "subpath": _compose(decl.get("subpath"), entry.get("subpath")),
+                    "auth": decl.get("auth"),
+                }
+            )
+            return _StubGitSource(
+                members=tree,
+                subpath=_compose(decl.get("subpath"), entry.get("subpath")),
+                auth=decl.get("auth"),
+                url=key,
+                moved=self.moved_from,
+            )
+
+        url = decl["url"] if decl is not None else entry.get("source")
+        return self.fetch(
+            ctx,
+            source_url=url,
+            digest=entry.get("digest"),
+            auth=(decl or {}).get("auth", entry.get("auth")),
+            category=category,
+            keep_last=(entry.get("on_fetch_failure", "keep_last") == "keep_last"),
+            entry_identity=entry_identity,
+        )
+
+    def file_bytes(
+        self,
+        ctx: Any,
+        *,
+        content: bytes,
+        source_url: str,
+        category: str,
+        entry_identity: str | None = None,
+        content_type: str | None = None,
+        credential_name: str | None = None,
+    ) -> str:
+        """Records the audit copy the git road files, exactly as the real one."""
+        self.filed.append(
+            {
+                "content": content,
+                "source_url": source_url,
+                "category": category,
+                "entry_identity": entry_identity,
+                "credential_name": credential_name,
+            }
+        )
+        return "sha256:filed"
+
+
+def _compose(source_subpath: str | None, entry_subpath: str | None) -> str | None:
+    """The composition ``EntryFetcher`` performs, so the double addresses the
+    same tree the real fetcher would."""
+    if entry_subpath is None:
+        return source_subpath
+    if not source_subpath:
+        return entry_subpath
+    return source_subpath.rstrip("/") + "/" + entry_subpath.lstrip("/")
+
+
+class _StubGitSource:
+    """A ``GitEntrySource``'s shape: a tree the entry reads, not bytes.
+
+    ``files()`` returns every member under ``subpath`` with the prefix
+    stripped — the recursive walk a real checkout does — so a directory entry's
+    nesting behaviour is genuinely exercised rather than assumed.
+    """
+
+    def __init__(self, *, members, subpath, auth, url, moved=None) -> None:
+        self._members = members
+        self.subpath = subpath
+        self.auth = auth
+        self.source_url = url
+        self.moved_from = moved
+
+    def _under(self):
+        if not self.subpath:
+            return list(self._members.items())
+        prefix = self.subpath.rstrip("/") + "/"
+        return [
+            (name[len(prefix):], data)
+            for name, data in self._members.items()
+            if name.startswith(prefix)
+        ]
+
+    def files(self):
+        found = self._under()
+        if not found:
+            raise EntryFetchError(
+                f"the source's subpath {self.subpath!r} selects nothing"
+            )
+        return sorted(found)
+
+    def read_file(self):
+        try:
+            return self._members[self.subpath]
+        except KeyError:
+            raise EntryFetchError(
+                f"the source's subpath {self.subpath!r} is not a file in the tree"
+            ) from None
+
+    def receipt_url(self):
+        return f"git+{self.source_url}@stubsha/{self.subpath or ''}"
+
+    def moved_note(self):
+        if self.moved_from is None:
+            return None
+        return f"ref moved: the last apply recorded {self.moved_from}"
 
 
 def _tgz(member: dict[str, bytes]) -> bytes:

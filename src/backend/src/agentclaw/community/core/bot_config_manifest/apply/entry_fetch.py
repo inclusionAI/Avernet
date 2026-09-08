@@ -53,11 +53,18 @@ the pin is byte-provable, so a re-fetch re-filed with the store heals the
 address and nobody upstream learns anything happened.
 
 W7 adds the declared-source front door, :meth:`fetch_declared`: the ``from``
-and inline-git roads resolve through the apply's source session, and the git
+and inline-source roads resolve through the apply's source session, and the git
 road returns a :class:`GitEntrySource` — the tree is the entry's to
 interpret (a file? a package?) — while its canonical, entry-level bytes are
 filed with the store via :meth:`file_bytes`, so audit and ``keep_last`` read
 the same receipts the URL roads always have.
+
+**Dispatch is on the declared protocol**, read through the one parser the
+``PUT`` validator also uses. It used to be on which key a source mapping
+happened to carry, which meant this module and the validator each derived the
+protocol their own way — and the digest rule derived it from a third place
+again, against the source *form*, which is how ``from:`` a git source came to
+be charged the object-store pin (D5).
 """
 from __future__ import annotations
 
@@ -101,6 +108,13 @@ from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchRequest,
 )
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
+from agentclaw.community.core.bot_config_manifest.schema._support import (
+    relative_path_refusal,
+)
+from agentclaw.community.core.bot_config_manifest.schema.sources import (
+    parse_source,
+)
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -493,12 +507,12 @@ class EntryFetcher:
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
         name: Optional[str] = None
-        decl: Optional["Mapping[str, Any]"] = None
+        raw: Optional["Mapping[str, Any]"] = None
 
         if isinstance(entry.get("from"), str):
             name = entry["from"]
-            decl = session.sources.get(name)
-            if decl is None:
+            raw = session.sources.get(name)
+            if raw is None:
                 raise EntryFetchError(
                     f"'from' names source {name!r}, which is not declared "
                     "under 'sources'"
@@ -514,21 +528,39 @@ class EntryFetcher:
                 entry_identity=entry_identity,
             )
         elif isinstance(inline, Mapping):
-            decl = inline
+            raw = inline
         else:
             raise EntryFetchError(
                 "an entry must name one of 'from', 'source' or 'content'"
             )
-        assert decl is not None
+        assert raw is not None
 
-        if "git" not in decl:
-            # A named or inline URL source: the same road, with the source's
-            # own auth — the declaration, not the entry, carries it (W7).
+        # The one place a stored declaration is read. The PUT validator parses
+        # through the same pure function, so a document that was accepted
+        # cannot fail here on vocabulary — and a document that skipped the
+        # validator (W8's hand-built apply points) meets the identical rules
+        # rather than a weaker apply-time re-derivation.
+        decl, violations = parse_source(raw)
+        if decl is None:
+            where = f"source {name!r}" if name is not None else "the entry's source"
+            raise EntryFetchError(
+                f"{where} is not a valid declaration: "
+                + "; ".join(v.message for v in violations)
+            )
+
+        if decl.protocol is not SourceKind.GIT:
+            # An object store: one request, one object, addressed by the
+            # source's own ``url``. The source carries the credential (W7 — the
+            # declaration, not the entry). An entry's ``subpath`` is NOT part
+            # of the address here: on this road it selects inside the fetched
+            # object, which the materialiser applies after unpacking. One rule,
+            # both protocols — ``subpath`` selects within what the source
+            # delivered; git delivers a tree, oss delivers an object.
             return self.fetch(
                 ctx,
-                source_url=decl["url"],
+                source_url=decl.url,
                 digest=entry.get("digest"),
-                auth=decl.get("auth"),
+                auth=decl.auth,
                 category=category,
                 keep_last=keep_last,
                 entry_identity=entry_identity,
@@ -542,18 +574,6 @@ class EntryFetcher:
                 "digest pinning is not supported on a git source in v1 — "
                 "pin by writing the commit SHA as the source's ref"
             )
-        if entry.get("subpath") is not None:
-            # The same narrowing, the same style: an entry-level 'subpath' is
-            # real vocabulary on the URL roads (it scopes an archive's
-            # subtree), and a caller who writes it beside a git source
-            # believes they scoped something they did not. One checkout serves
-            # *every* entry that names the source, so scoping belongs to the
-            # declaration the tree is read by.
-            raise EntryFetchError(
-                "entry-level 'subpath' is not supported on a git source in "
-                "v1 — declare 'subpath' on the source itself, which is what "
-                "the tree is read by"
-            )
         if entry.get("auth") is not None:
             # Schema already refuses this next to 'from'; an inline git
             # source reaches here with it, and the fetch must not quietly
@@ -564,14 +584,16 @@ class EntryFetcher:
                 "applies to the fetch the source names"
             )
 
+        subpath = _compose_subpath(decl.subpath, entry.get("subpath"))
+
         spec = GitSourceSpec(
-            url=_substitute(ctx, decl["git"]),
-            ref=decl.get("ref") or "HEAD",
-            subpath=decl.get("subpath"),
-            mode=decl.get("mode") or "non_strict",
+            url=_substitute(ctx, decl.url),
+            ref=decl.ref or "HEAD",
+            subpath=subpath,
+            mode=decl.mode,
         )
         display = name if name is not None else spec.url
-        auth = decl.get("auth")
+        auth = decl.auth
 
         try:
             headers: dict[str, str] = {}
@@ -753,6 +775,44 @@ class EntryFetcher:
                 policy=binding,
             )
         )
+
+
+def _compose_subpath(
+    source_subpath: Optional[str], entry_subpath: Any
+) -> Optional[str]:
+    """The source's ``subpath``, then the entry's — one path, re-checked.
+
+    **This is what lets one source serve many entries.** Before it, an entry
+    ``subpath`` beside a git source was refused at apply time (defect D3), so a
+    source addressed exactly one file and a second file from the same
+    repository needed a second source block carrying duplicate ``url``, ``ref``
+    and ``auth`` — reintroducing precisely the drift named sources exist to
+    remove. ``resources`` over git is not useful without it: a resources entry
+    names a workspace ``path`` *and* a source path, and those differ per entry
+    by construction.
+
+    The composed value is re-checked by the schema's own pure predicate rather
+    than by a local rule. Two safe segments can compose into an unsafe path
+    (``a/b`` under ``..``-free halves is fine, but the join is what the
+    checkout is finally asked to read), and a second, weaker rule here is
+    exactly how a traversal gets through one layer by satisfying the other.
+    """
+    if entry_subpath is None:
+        return source_subpath
+    if not isinstance(entry_subpath, str) or not entry_subpath:
+        raise EntryFetchError("entry 'subpath' must be a non-empty string")
+    joined = (
+        entry_subpath
+        if not source_subpath
+        else source_subpath.rstrip("/") + "/" + entry_subpath.lstrip("/")
+    )
+    refusal = relative_path_refusal(joined, what="subpath")
+    if refusal is not None:
+        raise EntryFetchError(
+            f"the source's subpath and the entry's compose to {joined!r}, "
+            f"which is refused: {refusal[1]}"
+        )
+    return joined
 
 
 def _substitute(ctx: "FetchContext", source_url: str) -> str:

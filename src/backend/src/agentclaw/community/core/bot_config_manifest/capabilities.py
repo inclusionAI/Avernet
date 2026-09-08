@@ -45,12 +45,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Callable, Iterable
+from typing import TYPE_CHECKING, Any, Callable, Iterable
 
 from agentclaw.community.core.workspace.constants import (
     DEFAULT_ENGINE_TYPE,
     SUPPORTED_ENGINE_TYPES,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # One-way dependency, deferred so it stays one way: ``support_matrix`` is
+    # built ON this module's ``ManifestCategory``, so importing it here at
+    # module scope would close the cycle. ``resolve_capabilities`` imports it
+    # inside the call, where the module is already initialised.
+    from agentclaw.community.core.bot_config_manifest.support_matrix import (
+        SourceKind,
+    )
 
 class ConstructKind(StrEnum):
     """What sort of thing a construct is. Derived, never chosen at a call site."""
@@ -184,6 +193,30 @@ class Capability:
 
 
 @dataclass(frozen=True)
+class SourceCell:
+    """One (category, protocol) combination's verdict.
+
+    The cartesian view the flat ``constructs`` array cannot express. A client
+    reads this to decide what to write **before** writing it, for a combination
+    rather than for a construct — which is the question callers actually have,
+    and the one a 422 used to be the only way to answer.
+    """
+
+    category: ManifestCategory
+    protocol: SourceKind
+    supported: bool
+    reason: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "category": self.category.value,
+            "protocol": self.protocol.value,
+            "supported": self.supported,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
 class ManifestCapabilities:
     """Every construct's verdict for one (engine type, bot type) pair."""
 
@@ -191,6 +224,18 @@ class ManifestCapabilities:
     bot_type: str
     schema_versions: tuple[int, ...]
     constructs: tuple[Capability, ...]
+    #: Every cell of (category × protocol), intersected with this bot's own
+    #: verdicts. Additive: ``constructs`` keeps its exact shape and meaning.
+    source_matrix: tuple[SourceCell, ...] = ()
+
+    def cell(
+        self, category: ManifestCategory, protocol: SourceKind
+    ) -> SourceCell | None:
+        """The verdict for one combination, or ``None`` if it has no row."""
+        for entry in self.source_matrix:
+            if entry.category is category and entry.protocol is protocol:
+                return entry
+        return None
 
     def find(self, construct: Construct) -> Capability | None:
         """The verdict for one construct, or ``None`` if it has no row."""
@@ -224,6 +269,7 @@ class ManifestCapabilities:
             "bot_type": self.bot_type,
             "schema_versions": list(self.schema_versions),
             "constructs": [c.as_dict() for c in self.constructs],
+            "source_matrix": [cell.as_dict() for cell in self.source_matrix],
         }
 
 
@@ -248,6 +294,15 @@ def resolve_capabilities(
             as an argument also keeps this a pure function, which is what lets
             W13 call it with no injector in reach.
     """
+    # Imported here, not at module scope: ``support_matrix`` imports this
+    # module for ``ManifestCategory``. The dependency runs one way — the table
+    # is built ON the vocabulary — and a top-level import here would close the
+    # cycle. The same lazy-import reasoning ``legal_identity_types`` records.
+    from agentclaw.community.core.bot_config_manifest.support_matrix import (
+        SourceKind,
+        refusal_for,
+    )
+
     engine = (active_engine or DEFAULT_ENGINE_TYPE).strip() or DEFAULT_ENGINE_TYPE
     bot = (bot_type or "").strip()
 
@@ -283,22 +338,47 @@ def resolve_capabilities(
         # platform-managed, independent of the teclaw switch, as ``mcp`` is.
         ManifestCategory.CLI_TOOLS: None,
         ManifestSection.SCRIPT: _script_reason(teclaw=teclaw, desktop=desktop),
-        # Materialised since W5 (skills/identity) and renamed-since-W7: the
-        # declared-source dispatch in ``EntryFetcher.fetch_declared`` resolves
-        # both forms for the categories that fetch. The one (category, form)
-        # pair still undelivered — resources × git/named, the URL-only road
-        # W6 shipped — is refused per entry at schema validation, with a
-        # reason that names the category, because a blanket row here cannot.
+        # Whether a *form* can be resolved at all. Which (category, protocol)
+        # COMBINATIONS are open is a different question, answered by
+        # ``source_matrix`` below — these flat rows structurally cannot express
+        # a pair, which is what forced the per-category narrowing this change
+        # removed. Every form resolves; the matrix says where.
         SourceForm.URL: None,
         SourceForm.CONTENT: None,
         SourceForm.GIT: None,
         SourceForm.NAMED: None,
     }
 
+    def cell(category: ManifestCategory, protocol: SourceKind) -> SourceCell:
+        """A cell, narrowed by this bot's own refusals.
+
+        Two independent verdicts, intersected: the deployment-wide one (a
+        desktop bot takes no category at all, so every cell closes) and the
+        table's. The table's reason is passed through **verbatim** — the
+        validator emits that same string, and a caller who compares the two
+        must not find them worded differently.
+        """
+        if desktop:
+            return SourceCell(category, protocol, False, _REASON_DESKTOP)
+        if unknown_engine:
+            return SourceCell(category, protocol, False, _REASON_UNKNOWN_ENGINE)
+        category_verdict = blocked[category]
+        if category_verdict:
+            return SourceCell(category, protocol, False, category_verdict)
+        refusal = refusal_for(category, protocol)
+        if refusal is not None:
+            return SourceCell(category, protocol, False, refusal.reason)
+        return SourceCell(category, protocol, True, "")
+
     return ManifestCapabilities(
         engine_type=engine,
         bot_type=bot,
         schema_versions=SUPPORTED_SCHEMA_VERSIONS,
+        source_matrix=tuple(
+            cell(category, protocol)
+            for category in ManifestCategory
+            for protocol in SourceKind
+        ),
         # Every member of every construct enum, in declaration order. Built by
         # iterating the enums rather than by listing them again, so a construct
         # added to the vocabulary without a verdict is a KeyError here — at

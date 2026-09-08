@@ -565,7 +565,10 @@ def test_fetch_declared_serves_a_url_from_a_named_source(rig):
     )
     ctx = make_context(
         source_session=_session(_ScriptedGit(), sources={
-            "cdn": {"url": "https://content.example/named.bin", "auth": None},
+            "cdn": {
+                "protocol": "oss",
+                "url": "https://content.example/named.bin",
+            },
         })
     )
     result = pipeline.fetch_declared(
@@ -581,7 +584,7 @@ def test_fetch_declared_gives_the_git_road_a_checkout(rig):
     git = _ScriptedGit()
     ctx = make_context(
         source_session=_session(git, sources={
-            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+            "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })
     )
     decl = pipeline.fetch_declared(
@@ -621,7 +624,7 @@ def test_strict_refuses_when_the_ref_moved(rig):
     with pytest.raises(EntryFetchError, match="moved"):
         pipeline.fetch_declared(
             ctx,
-            entry={"source": {"git": GIT_URL, "ref": "main", "mode": "strict"}},
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
             category="skills",
         )
     # The refused move was NOT adopted: this apply's report records no
@@ -639,7 +642,7 @@ def test_non_strict_records_the_move_in_the_note(rig):
     )
     decl = pipeline.fetch_declared(
         ctx,
-        entry={"source": {"git": GIT_URL, "ref": "main"}},
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"}},
         category="skills",
     )
     assert isinstance(decl, GitEntrySource)
@@ -653,7 +656,7 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
     ctx = make_context(source_session=_session(git))  # no baselines
     decl = pipeline.fetch_declared(
         ctx,
-        entry={"source": {"git": GIT_URL, "ref": "main", "mode": "strict"}},
+        entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
         category="skills",
     )
     assert isinstance(decl, GitEntrySource)
@@ -666,7 +669,7 @@ def test_digest_on_a_git_source_is_refused(rig):
     with pytest.raises(EntryFetchError, match="digest"):
         pipeline.fetch_declared(
             ctx,
-            entry={"source": {"git": GIT_URL, "ref": "main"},
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"},
                    "digest": "sha256:" + "0" * 64},
             category="skills",
         )
@@ -684,7 +687,7 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
     git = _ScriptedGit(error=FetchFailedError("git fetch failed"))
     ctx = make_context(source_session=_session(
         git,
-        sources={"app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"}},
+        sources={"app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"}},
         baselines={"app": old_sha},
     ))
     result = pipeline.fetch_declared(
@@ -703,7 +706,7 @@ def test_git_credentials_reach_the_transport_as_headers(rig):
     _, fetcher, credentials, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
-        "app": {"git": GIT_URL, "ref": "main", "auth": "ci-token"},
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
     pipeline.fetch_declared(ctx, entry={"from": "app"}, category="skills")
     assert credentials.binding_calls == ["ci-token"]
@@ -744,7 +747,7 @@ def test_the_git_fetchs_declared_bytes_charge_the_apply_ledger_once(rig):
     git = _ScriptedGit()
     ctx = _with_budget(
         make_context(source_session=_session(git, sources={
-            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+            "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })),
         _Ledger(),
     )
@@ -767,7 +770,7 @@ def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
 
     ctx = _with_budget(
         make_context(source_session=_session(git, sources={
-            "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+            "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
         })),
         ApplyFetchBudget(deadline=9e99, total_bytes=5),
     )
@@ -777,18 +780,103 @@ def test_a_git_fetch_exhausting_the_byte_ledger_fails_the_entry(rig):
         )
 
 
-def test_entry_level_subpath_on_a_git_source_is_refused(rig):
+def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
+    """Defect D3, closed — and the precondition for ``resources`` over git.
+
+    ``subpath`` is what distinguishes one entry from another, so refusing it
+    beside a git source meant one source could serve exactly one entry: two
+    files from one repository needed two source blocks carrying duplicate
+    ``url``, ``ref`` and ``auth``, which is the drift named sources exist to
+    remove. The two now compose, source's first.
+    """
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git, sources={
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
+    }))
+    decl = pipeline.fetch_declared(
+        ctx, entry={"from": "app", "subpath": "narrow/inner.md"},
+        category="skills",
+    )
+    assert isinstance(decl, GitEntrySource)
+    assert decl.subpath == "pkg/narrow/inner.md"
+    assert git.specs[-1].subpath == "pkg/narrow/inner.md"
+
+
+def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    ctx = make_context(source_session=_session(git, sources={
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main"},
+    }))
+    decl = pipeline.fetch_declared(
+        ctx, entry={"from": "app", "subpath": "kb/faq.csv"}, category="skills"
+    )
+    assert decl.subpath == "kb/faq.csv"
+
+
+def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
+    """One source, two paths, one fetch, one ``resolved_sha``.
+
+    The composition must not cost a second checkout: the cache and the report
+    identity key on ``(url, ref)`` and on the source's *name*, neither of which
+    an entry's subpath changes. If it did, the report would carry two rows for
+    one declared source and the strict-mode baseline would have two answers.
+    """
+    _, _, _, pipeline = rig
+    git = _ScriptedGit()
+    session = _session(git, sources={
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "kb"},
+    })
+    ctx = make_context(source_session=session)
+    first = pipeline.fetch_declared(
+        ctx, entry={"from": "app", "subpath": "faq.csv"}, category="resources_file"
+    )
+    second = pipeline.fetch_declared(
+        ctx, entry={"from": "app", "subpath": "pricing.csv"},
+        category="resources_file",
+    )
+    assert (first.subpath, second.subpath) == ("kb/faq.csv", "kb/pricing.csv")
+    assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
+    records = session.resolution_records()
+    assert len(records) == 1
+    assert records[0].name == "app"
+    assert first.checkout.sha == second.checkout.sha == records[0].resolved_sha
+
+
+def test_a_composed_subpath_that_escapes_the_tree_is_refused(rig):
+    """Two individually safe halves can compose into a traversal, and the
+    composed value is re-checked by the schema's own predicate — not by a
+    second, weaker rule here, which is how one gets through by satisfying the
+    other."""
     _, _, _, pipeline = rig
     ctx = make_context(source_session=_session(_ScriptedGit(), sources={
-        "app": {"git": GIT_URL, "ref": "main", "subpath": "pkg"},
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "subpath": "pkg"},
     }))
-    # Entry-level 'subpath' is real vocabulary on the URL roads, so a caller
-    # who writes it beside a git source believes they scoped something they
-    # did not — the refusal says where scoping belongs for this form.
-    with pytest.raises(EntryFetchError, match="'subpath' is not supported on a git"):
+    with pytest.raises(EntryFetchError, match="'..' segment"):
         pipeline.fetch_declared(
-            ctx, entry={"from": "app", "subpath": "pkg/narrow"}, category="skills"
+            ctx, entry={"from": "app", "subpath": "../../etc/shadow"},
+            category="skills",
         )
+
+
+def test_an_entry_subpath_is_not_appended_to_an_object_stores_url(rig):
+    """One rule, both protocols: ``subpath`` selects within what the source
+    delivered. Git delivers a tree, so it composes into the checkout's path;
+    oss delivers one object, so it is the materialiser's archive-internal
+    selector and never part of the address the platform requests."""
+    content, fetcher, _, pipeline = rig
+    fetcher.responses["https://content.example/named.bin"] = fetched_object(
+        BODY, url="https://content.example/named.bin"
+    )
+    ctx = make_context(source_session=_session(_ScriptedGit(), sources={
+        "cdn": {"protocol": "oss", "url": "https://content.example/named.bin"},
+    }))
+    fetched = pipeline.fetch_declared(
+        ctx, entry={"from": "cdn", "subpath": "inside/archive.md"},
+        category="skills", entry_identity="qc",
+    )
+    assert fetched.source_url == "https://content.example/named.bin"
 
 
 def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
@@ -797,7 +885,7 @@ def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
     with pytest.raises(EntryFetchError, match="'auth' is not supported on a git"):
         pipeline.fetch_declared(
             ctx,
-            entry={"source": {"git": GIT_URL, "ref": "main"}, "auth": "ci-token"},
+            entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"}, "auth": "ci-token"},
             category="skills",
         )
 
@@ -819,7 +907,7 @@ def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
     _, _, _, pipeline = rig
     git = _ScriptedGit()
     ctx = make_context(source_session=_session(git, sources={
-        "app": {"git": GIT_URL, "ref": "main", "auth": "ci-token"},
+        "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
     decl = pipeline.fetch_declared(ctx, entry={"from": "app"}, category="identity")
     assert isinstance(decl, GitEntrySource)

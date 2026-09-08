@@ -453,7 +453,8 @@ def _git_ctx(git: _StaticGit | None = None, *, sources=None, baselines=None):
 
 
 IDENTITY_GIT_SOURCE = {
-    "git": "https://git.corp/id.git",
+    "protocol": "git",
+    "url": "https://git.corp/id.git",
     "ref": "main",
     "subpath": "files/rules.md",
 }
@@ -477,7 +478,7 @@ def test_an_identity_entry_can_read_one_file_from_a_git_source():
 def test_a_git_identity_without_subpath_is_a_resolve_failure():
     materialiser, identity, _, _ = identity_rig()
     ctx = _git_ctx(
-        sources={"id": {"git": "https://git.corp/id.git", "ref": "main"}}
+        sources={"id": {"protocol": "git", "url": "https://git.corp/id.git", "ref": "main"}}
     )
     resolved = _run(materialiser.resolve(ctx, [{"type": "RULES.md", "from": "id"}]))
     assert not resolved.ok

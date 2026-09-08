@@ -27,6 +27,17 @@ from agentclaw.community.core.bot_config_manifest.schema._support import (
 from agentclaw.community.core.bot_config_manifest.schema.limits import (
     MAX_INLINE_CONTENT_BYTES,
 )
+from agentclaw.community.core.bot_config_manifest.schema.sources import (
+    SourceDecl,
+    parse_source,
+)
+from agentclaw.community.core.bot_config_manifest.support_matrix import (
+    ARCHIVE_FIELDS,
+    SourceKind,
+    archive_field_refusal,
+    digest_required,
+    refusal_for,
+)
 
 #: Engine-generated runtime state. Apply never writes them and never removes
 #: them (work-items §3.2), so a document declaring one would be accepted and
@@ -43,27 +54,12 @@ VALID_ON_FETCH_FAILURE: frozenset[str] = frozenset({"keep_last", "fail"})
 #: Archive forms the platform unpacks.
 VALID_UNPACK: frozenset[str] = frozenset({"zip", "tar.gz"})
 
-#: The v1 (category, source-form) narrowing: W7 resolved named and git sources
-#: for skills and identity entries only. Resources entries are refused in
-#: ``resolve_source`` by these reasons — precise, at PUT, instead of the
-#: misleading runtime failures the materialiser's URL-only road would give.
-_UNDELIVERED_FORM_REASON: dict[str, str] = {
-    SourceForm.GIT.value: (
-        "git sources are not delivered for resources entries in v1 — the "
-        "resources materialiser reads the URL road; wiring it to the git "
-        "road is the follow-up work the W7 delivery records"
-    ),
-    SourceForm.NAMED.value: (
-        "named sources ('from') are not delivered for resources entries in "
-        "v1 — a resources entry declares an inline 'source' URL or 'content'; "
-        "'from' is resolved for skills and identity entries"
-    ),
-}
-
-#: Selector for a moving ref (work-items §3.2). Declared on the **source**,
-#: never on an entry: the property being described is "may this ref move under
-#: me", which belongs to the thing holding the ref.
-VALID_SOURCE_MODES: frozenset[str] = frozenset({"strict", "non_strict"})
+#: Which (category, protocol) combinations this build accepts is no longer
+#: written here at all: it is
+#: :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`,
+#: one table that this validator and the capabilities endpoint both read. The
+#: per-category narrowing that used to live at this spot was the defect, not the
+#: rule — it could not be enumerated, published, or tested cell by cell.
 
 #: v1 reserved word. Refused wherever it appears — as a key at any depth — so
 #: that a v2 meaning cannot be silently assumed by a document written today.
@@ -109,13 +105,31 @@ _SOURCE_SELECTORS = ("from", "source", "content")
 
 @dataclass(frozen=True)
 class EntrySource:
-    """Which source an entry chose, once exclusivity has been settled."""
+    """Which source an entry chose, once exclusivity has been settled.
+
+    Two vocabularies, deliberately both kept. ``form`` is *how the entry was
+    spelled* and remains the published ``constructs`` axis. ``kind`` is *which
+    protocol the content travels by* and is what every support rule keys on —
+    a ``from:`` naming a git source is ``NAMED``/``GIT``, and the rules that
+    used to read ``form`` there are the ones that got D5 wrong.
+    """
 
     #: The chosen form, or ``None`` when the entry named no usable source.
     form: SourceForm | None
-    #: True when the source is a git reference — the one form for which a
-    #: ``digest`` is a contradiction rather than an option.
-    is_git: bool = False
+    #: The protocol, or ``None`` when it could not be determined (an undeclared
+    #: ``from`` name, a malformed source object). A ``None`` kind means every
+    #: protocol-keyed rule below stays silent: the entry is already refused for
+    #: a reason the caller has to fix first, and a second verdict derived from a
+    #: guess would send them at the wrong field.
+    kind: SourceKind | None = None
+    #: The resolved declaration, for the roads that have one. Inline ``content``
+    #: and an inline ``source:`` URL string have no declaration object.
+    decl: SourceDecl | None = None
+
+    @property
+    def is_git(self) -> bool:
+        """The one protocol whose commit SHA already is the entry's pin."""
+        return self.kind is SourceKind.GIT
 
 
 def legal_identity_types(engine_type: str) -> frozenset[str]:
@@ -166,8 +180,7 @@ def resolve_source(
 ) -> EntrySource:
     """Settle which source an entry uses, and refuse the illegal combinations.
 
-    Five rules, all from schema §2 (plus the v1 category narrowing below), and
-    each names the offending entry:
+    Five rules, all from schema §2, and each names the offending entry:
 
     * **exactly one source.** ``from``/``source``/``content`` are mutually
       exclusive; two of them is an entry whose content has two origins and no
@@ -179,12 +192,11 @@ def resolve_source(
     * **``digest`` and ``on_fetch_failure`` need a fetch.** Inline ``content``
       has none, and a git ref's commit SHA *is* its digest (§2.2), so writing
       one there is a second, weaker pin that can disagree with the first.
-    * **the form must be delivered for the category.** W7 resolved named and
-      git sources for the entries ``skills`` and ``identity`` consume; the
-      resources materialiser is still on the URL road it shipped with (W6),
-      so a resources entry naming ``from`` or a git source is refused HERE,
-      with a reason that says so, rather than passing PUT and failing at
-      apply under a misleading message.
+    * **the (category, protocol) cell must be open.** Asked of
+      :data:`~agentclaw.community.core.bot_config_manifest.support_matrix.MATRIX`
+      — the same table ``GET …/capabilities`` publishes — so a refusal here and
+      the answer a caller reads before writing are the same string, and the
+      combination is refused at ``PUT`` rather than at apply.
     """
     present = [key for key in _SOURCE_SELECTORS if key in entry]
     if len(present) > 1:
@@ -204,17 +216,19 @@ def resolve_source(
         return EntrySource(form=None)
 
     selector = present[0]
-    form = _classify(ctx, location, entry, selector)
-    if (
-        category is ManifestCategory.RESOURCES
-        and form.form in (SourceForm.GIT, SourceForm.NAMED)
-    ):
-        ctx.add(
-            location,
-            "unsupported_source",
-            _UNDELIVERED_FORM_REASON[form.form.value],
-        )
-        return EntrySource(form=None)
+    source = _classify(ctx, location, entry, selector)
+    if source.kind is not None:
+        refusal = refusal_for(category, source.kind)
+        if refusal is not None:
+            # The cell's own code and message, verbatim. Nothing here rewords
+            # or prefixes them: the capabilities endpoint publishes the same
+            # object, and a caller comparing the two must see one string.
+            ctx.add(
+                _refusal_location(location, selector, source),
+                refusal.code,
+                refusal.reason,
+            )
+            return EntrySource(form=None)
 
     if "auth" in entry:
         if selector == "from":
@@ -250,7 +264,7 @@ def resolve_source(
         _check_inline_content(ctx, location, entry["content"])
 
     if "digest" in entry:
-        if form.is_git:
+        if source.is_git:
             ctx.add(
                 f"{location}.digest",
                 "digest_on_git_source",
@@ -259,6 +273,17 @@ def resolve_source(
             )
         elif selector != "content":
             check_digest(ctx, f"{location}.digest", entry["digest"])
+    elif source.kind is not None and digest_required(category, source.kind):
+        # Keyed on the PROTOCOL, which is the whole of the D5 fix: reaching a
+        # git source by name used to classify as ``NAMED`` and be charged this
+        # rule, demanding a pin that git bytes cannot meaningfully carry.
+        ctx.add(
+            location,
+            "missing_digest",
+            f"a {category.value} entry fetched over '{source.kind.value}' must "
+            "declare a 'digest' — the platform is distributing executable "
+            "content, and an unpinned fetch takes whatever is there at the time",
+        )
 
     if "on_fetch_failure" in entry and selector != "content":
         value = entry["on_fetch_failure"]
@@ -270,20 +295,47 @@ def resolve_source(
             )
 
     if "subpath" in entry:
+        # Valid on every protocol, and composed with the source's own subpath
+        # at fetch time (source's first, then the entry's). This is what lets
+        # one declared source serve many entries — without it a git source
+        # addresses exactly one file and every second entry needs a duplicate
+        # source block carrying the same url, ref and auth.
         check_relative_path(
             ctx, f"{location}.subpath", entry["subpath"], what="subpath"
         )
 
-    return form
+    return source
+
+
+def _refusal_location(
+    location: str, selector: str, source: EntrySource
+) -> str:
+    """Where to hang a matrix refusal.
+
+    Inline ``content`` is refused *at the content field* — the caller wrote the
+    bytes right there and that is what has to go. Every other form is refused at
+    the entry, because the fix is usually the category or the source, not the
+    one key naming it.
+    """
+    if source.kind is SourceKind.CONTENT and selector == "content":
+        return f"{location}.content"
+    return location
 
 
 def _classify(
     ctx: Context, location: str, entry: dict[str, Any], selector: str
 ) -> EntrySource:
-    """Name the source form and gate it on what this build can resolve."""
+    """Name the source form, resolve its protocol, and gate it on this build.
+
+    Three roads reach a protocol. Inline ``content`` *is* one. An inline
+    ``source:`` string is an object over https, so ``oss``. Everything else —
+    an inline ``source:`` object, or a ``from:`` name — is a declaration, and
+    :func:`~agentclaw.community.core.bot_config_manifest.schema.sources.parse_source`
+    is the only thing that reads one.
+    """
     if selector == "content":
         ctx.require_source_support(f"{location}.content", SourceForm.CONTENT)
-        return EntrySource(form=SourceForm.CONTENT)
+        return EntrySource(form=SourceForm.CONTENT, kind=SourceKind.CONTENT)
 
     if selector == "from":
         name = entry["from"]
@@ -302,107 +354,80 @@ def _classify(
                 f"'from' references source '{name}', which is not declared "
                 "under top-level 'sources'",
             )
+            return EntrySource(form=SourceForm.NAMED)
         ctx.require_source_support(f"{location}.from", SourceForm.NAMED)
-        # A named source may be a git source, but the reference itself is
-        # already refused above in the first wave, so the git-ness of the target
-        # adds nothing a caller could act on.
-        return EntrySource(form=SourceForm.NAMED)
+        # The named source's protocol IS this entry's protocol — that identity
+        # is the point of the axis. ``sources`` is walked before ``manifest``,
+        # so a declaration that parsed is already here; one that did not is
+        # ``None``, its own violations already recorded at the source, and this
+        # entry stays silent rather than blaming it a second time.
+        decl = ctx.sources.get(name)
+        if decl is None:
+            return EntrySource(form=SourceForm.NAMED)
+        return EntrySource(form=SourceForm.NAMED, kind=decl.protocol, decl=decl)
 
     source = entry["source"]
     if isinstance(source, str):
+        # A bare https URL: one object, over https, with no ref. That is
+        # ``oss`` — the protocol covers a public CDN file and a private bucket
+        # alike, and the credential (or its absence) is the only difference.
         check_https_url(ctx, f"{location}.source", source)
         ctx.require_source_support(f"{location}.source", SourceForm.URL)
-        return EntrySource(form=SourceForm.URL)
+        return EntrySource(form=SourceForm.URL, kind=SourceKind.OSS)
     if isinstance(source, dict):
-        validate_git_source(ctx, f"{location}.source", source)
-        return EntrySource(form=SourceForm.GIT, is_git=True)
+        decl = validate_source_declaration(ctx, f"{location}.source", source)
+        if decl is None:
+            return EntrySource(form=None)
+        form = SourceForm.GIT if decl.is_git else SourceForm.URL
+        ctx.require_source_support(f"{location}.source", form)
+        return EntrySource(form=form, kind=decl.protocol, decl=decl)
     ctx.add(
         f"{location}.source",
         "invalid_source",
-        "'source' must be an https URL or a git reference object",
+        "'source' must be an https URL or a source object declaring "
+        "'protocol' and 'url'",
     )
     return EntrySource(form=None)
 
 
-#: Keys a git reference object may carry, inline or under ``sources``.
-_GIT_SOURCE_KEYS: frozenset[str] = frozenset({"git", "ref", "subpath", "auth", "mode"})
+def validate_source_declaration(
+    ctx: Context, location: str, source: Any
+) -> SourceDecl | None:
+    """Shape rules for a source declaration, wherever it is written.
 
-#: Keys a named URL source may carry.
-_URL_SOURCE_KEYS: frozenset[str] = frozenset({"url", "auth", "mode"})
-
-
-def validate_git_source(ctx: Context, location: str, source: dict[str, Any]) -> None:
-    """Shape rules for a git reference, wherever it is written."""
-    for key in source:
-        if key not in _GIT_SOURCE_KEYS and key != RESERVED_KEY_APPLY_ONCE:
-            ctx.add(
-                f"{location}.{key}",
-                "unknown_field",
-                f"unknown field '{key}' on a git source",
-            )
-    check_https_url(ctx, f"{location}.git", source.get("git"))
-    ref = source.get("ref")
-    if ref is not None and (not isinstance(ref, str) or not ref):
-        ctx.add(f"{location}.ref", "invalid_ref", "'ref' must be a non-empty string")
-    if "subpath" in source:
-        check_relative_path(
-            ctx, f"{location}.subpath", source["subpath"], what="subpath"
-        )
-    check_source_mode(ctx, location, source)
-    ctx.require_source_support(location, SourceForm.GIT)
-
-
-def check_source_mode(ctx: Context, location: str, source: dict[str, Any]) -> None:
-    """``mode`` is ``strict`` or ``non_strict``; anything else is refused.
-
-    Defaulted rather than required, and ``non_strict`` is the default: someone
-    who writes ``ref: main`` instead of a SHA wants the ref to move
-    (work-items §3.2). The reason a misspelling is refused rather than defaulted
-    is the same reason ``on_fetch_failure`` refuses one — a typo would land on
-    the default silently, and the caller would believe they had pinned something.
+    The pure parser owns the vocabulary (which protocols exist, which keys each
+    one takes, what replaces the old spelling); this wrapper contributes the two
+    checks that need document context — the https/userinfo/length rule on the
+    URL and the workspace-path rule on ``subpath`` — plus ``Context`` reporting.
+    One declaration, one parser, whether it was written inline on an entry or
+    under top-level ``sources``.
     """
-    if "mode" not in source:
-        return
-    if source["mode"] not in VALID_SOURCE_MODES:
-        ctx.add(
-            f"{location}.mode",
-            "invalid_mode",
-            "mode must be 'strict' or 'non_strict'",
+    decl, violations = parse_source(source)
+    for violation in violations:
+        ctx.add(location + violation.suffix, violation.code, violation.message)
+    if decl is None:
+        return None
+    check_https_url(ctx, f"{location}.url", decl.url)
+    if decl.subpath is not None:
+        check_relative_path(
+            ctx, f"{location}.subpath", decl.subpath, what="subpath"
         )
+    return decl
 
 
-def validate_named_source(ctx: Context, location: str, source: Any) -> None:
-    """One entry of the top-level ``sources`` map."""
-    if not isinstance(source, dict):
-        ctx.add(location, "invalid_source", "a named source must be a mapping")
-        return
-    has_git, has_url = "git" in source, "url" in source
-    if has_git and has_url:
-        ctx.add(
-            location,
-            "multiple_sources",
-            "a named source is either a git source or a url source, not both",
-        )
-        return
-    if has_git:
-        validate_git_source(ctx, location, source)
-        return
-    if not has_url:
-        ctx.add(
-            location,
-            "missing_source",
-            "a named source must declare either 'git' or 'url'",
-        )
-        return
-    for key in source:
-        if key not in _URL_SOURCE_KEYS and key != RESERVED_KEY_APPLY_ONCE:
-            ctx.add(
-                f"{location}.{key}",
-                "unknown_field",
-                f"unknown field '{key}' on a url source",
-            )
-    check_https_url(ctx, f"{location}.url", source.get("url"))
-    check_source_mode(ctx, location, source)
+def validate_named_source(
+    ctx: Context, location: str, name: str, source: Any
+) -> None:
+    """One entry of the top-level ``sources`` map.
+
+    The parsed declaration is recorded on the context under its name so an
+    entry's ``from:`` can resolve to a protocol. That resolution is what keeps
+    ``from:`` from being a third column in the support matrix: a named source
+    declares a protocol, and the protocol's cell is the one that governs.
+    """
+    decl = validate_source_declaration(ctx, location, source)
+    if decl is not None:
+        ctx.sources[name] = decl
 
 
 def _check_inline_content(ctx: Context, location: str, content: Any) -> None:
@@ -433,14 +458,41 @@ def _check_inline_content(ctx: Context, location: str, content: Any) -> None:
 
 
 def check_unpack(
-    ctx: Context, location: str, entry: dict[str, Any], *, archive_expected: bool
+    ctx: Context,
+    location: str,
+    entry: dict[str, Any],
+    *,
+    source: EntrySource,
+    archive_expected: bool,
 ) -> None:
     """``unpack`` / ``strip_components`` rules, shared by resources and cli_tools.
+
+    **The protocol gate comes first.** Both fields describe an archive, and an
+    archive is an ``oss`` idea: on git the platform holds a real tree and
+    ``subpath`` selects within it, so there is nothing to unpack. Declaring
+    either against a git source is refused rather than silently ignored — a
+    field that appears to configure something and does nothing is the failure
+    mode this whole change exists to remove, and it is the one Appendix C's
+    ``cli_tools`` trap and defect D3 both were.
 
     ``strip_components`` never auto-detects a single top-level directory
     (schema §3.2): the behaviour of a declaration must not depend on what the
     archive turns out to look like inside.
     """
+    if source.kind is not None:
+        refused = False
+        for field in sorted(ARCHIVE_FIELDS & entry.keys()):
+            refusal = archive_field_refusal(source.kind, field)
+            if refusal is not None:
+                ctx.add(
+                    f"{location}.{field}", "archive_field_on_source", refusal
+                )
+                refused = True
+        if refused:
+            # The shape checks below would report the same two fields again,
+            # under a rule that no longer applies to them.
+            return
+
     if "unpack" in entry:
         if entry["unpack"] not in VALID_UNPACK:
             ctx.add(
@@ -492,21 +544,25 @@ def validate_resource_entry(
     path = entry.get("path")
     usable = check_relative_path(ctx, f"{location}.path", path, what="path")
     is_directory = isinstance(path, str) and path.endswith("/")
-    form = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
-    # A git or named source carries directory structure natively, so no archive
-    # is involved (schema §2.2); only a URL source needs one to move a tree.
+    source = resolve_source(ctx, location, entry, ManifestCategory.RESOURCES)
+    # Git carries directory structure natively, so a tree needs no packaging
+    # (schema §2.2); only an object store does, because one HTTPS GET fetches
+    # one object and a tree has to travel inside it.
     check_unpack(
         ctx,
         location,
         entry,
-        archive_expected=is_directory and form.form is SourceForm.URL,
+        source=source,
+        archive_expected=is_directory and source.kind is SourceKind.OSS,
     )
-    if is_directory and form.form is SourceForm.URL and "unpack" not in entry:
+    if is_directory and source.kind is SourceKind.OSS and "unpack" not in entry:
         ctx.add(
             location,
             "missing_unpack",
-            "a directory entry fetched from a URL must declare 'unpack' — HTTP "
-            "has no directory semantics, so the tree travels as an archive",
+            "a directory entry fetched over 'oss' must declare 'unpack' — one "
+            "request fetches one object, so the tree travels as an archive; "
+            "over 'protocol: git' the tree arrives as a tree and no 'unpack' "
+            "is needed",
         )
     return path if usable and isinstance(path, str) else None
 
@@ -516,33 +572,14 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     check_entry_keys(ctx, location, entry, ManifestCategory.SKILLS)
     name = entry.get("name")
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
-    form = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
-    check_unpack(ctx, location, entry, archive_expected=True)
-    if form.form is SourceForm.CONTENT:
-        # A skill is a package — SKILL.md plus the files it names — and a body
-        # of inline text cannot be one. Identity keeps both source forms: an
-        # identity file IS one text body. W1's rule applies to the mismatch:
-        # the surface never accepts a construct nothing can apply, and W5 (the
-        # wave that materialises skills) has no inline form to give it.
-        ctx.add(
-            f"{location}.content",
-            "content_not_a_skill_package",
-            "a skills entry is a package (SKILL.md + the files it names) — "
-            "inline content cannot be one; declare 'source' (or 'from' once "
-            "named sources land)",
-        )
-    # A skill contains scripts the agent loads and runs — code, not data — so
-    # every non-git form must be pinned. A git ref has a commit SHA doing the
-    # same job; a URL without a digest is a blind fetch of the latest at every
-    # apply point (schema §3.3).
-    if form.form is SourceForm.URL and "digest" not in entry:
-        ctx.add(
-            location,
-            "missing_digest",
-            "a skill fetched from a URL must declare a 'digest' — a skill is "
-            "executable content and an unpinned fetch takes whatever is there "
-            "at the time",
-        )
+    source = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
+    check_unpack(ctx, location, entry, source=source, archive_expected=True)
+    # Two rules used to live here and now do not. That a skill cannot be inline
+    # text is the ``(skills, content)`` cell of the support matrix; that a skill
+    # fetched over ``oss`` must carry a digest is ``DIGEST_REQUIRED``. Both are
+    # enforced by ``resolve_source`` from the same table the capabilities
+    # endpoint publishes, so this category no longer holds a private copy of
+    # either — which is how the digest rule came to read the wrong axis (D5).
     return name if usable and isinstance(name, str) else None
 
 
@@ -591,19 +628,16 @@ def validate_cli_tool_entry(
     check_entry_keys(ctx, location, entry, ManifestCategory.CLI_TOOLS)
     name = entry.get("name")
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
-    form = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
-    check_unpack(ctx, location, entry, archive_expected="unpack" in entry)
+    source = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
+    check_unpack(
+        ctx, location, entry, source=source, archive_expected="unpack" in entry
+    )
     if "version" in entry and not isinstance(entry["version"], str):
         ctx.add(f"{location}.version", "invalid_version", "'version' must be a string")
-    # Mandatory for every form: the platform is distributing an executable on a
-    # caller's behalf, and the digest is also the only thing convergence can
-    # compare (schema §3.7). It covers the fetched source object — the binary
-    # itself, or the whole archive — with ``subpath`` selecting the file inside.
-    if form.form is not None and form.form is not SourceForm.GIT and "digest" not in entry:
-        ctx.add(
-            location,
-            "missing_digest",
-            "cli_tools requires a 'digest' — the platform is distributing an "
-            "executable, so the supply chain is pinned or the entry is refused",
-        )
+    # The mandatory digest is ``DIGEST_REQUIRED[(cli_tools, oss)]``, applied by
+    # ``resolve_source``. It used to be applied here against the source *form*,
+    # which is what made ``from:`` a git source demand a pin git bytes cannot
+    # meaningfully carry, and then fail at apply anyway (D5). Keyed on the
+    # protocol, reaching a git source by name and writing one inline are the
+    # same thing, because they are.
     return name if name_ok and isinstance(name, str) else None
