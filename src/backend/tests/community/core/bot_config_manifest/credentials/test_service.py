@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+import ipaddress
 import pytest
 from sqlalchemy import create_engine
 
@@ -63,7 +64,19 @@ _ENDPOINT_DNS: dict[str, list[str]] = {
 
 
 def _fake_dns(host: str) -> list[str]:
-    return _ENDPOINT_DNS.get(host, [])
+    """Scripted DNS that answers a numeric host with itself.
+
+    Not decoration: ``getaddrinfo`` resolves a literal address from the
+    string without touching the network, and the guard's "a literal metadata
+    address is still refused" property rests entirely on that. A double that
+    answered ``[]`` here would send the literal down the unresolvable road
+    and report the guard passing a case the real resolver refuses.
+    """
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return _ENDPOINT_DNS.get(host, [])
+    return [host]
 
 
 @pytest.fixture
@@ -534,7 +547,7 @@ def test_reauthorizing_a_credential_with_no_prefixes_refuses_in_family(service):
         ("https://store.corp.internal", "non-public"),
         ("https://user:pw@objects.example-corp.com", "userinfo"),
         ("not-a-url", "absolute"),
-        ("https://nowhere.invalid", "resolved"),
+        ("https://169.254.169.254/latest/meta-data/", "non-public"),
     ],
 )
 def test_an_unsafe_endpoint_is_refused_before_it_is_stored(
@@ -556,6 +569,44 @@ def test_an_unsafe_endpoint_is_refused_before_it_is_stored(
     with pytest.raises(CredentialError, match=expected):
         _put_aksk(service, endpoint=endpoint)
     assert service.list_credentials() == []  # nothing persisted
+
+
+def test_an_endpoint_that_does_not_resolve_here_is_stored_anyway(service):
+    """The one concession, pinned so nobody tightens it back by accident.
+
+    Storing a credential must not depend on this pod's DNS. The pod that
+    writes one is not the pod that later reads with it, so "does not resolve
+    here" is a prediction rather than a fact — split-horizon DNS, a private
+    zone and a minute's outage all produce it for a perfectly good endpoint,
+    and refusing would turn a rotation into a 4xx nobody can act on.
+
+    The concession costs nothing against what the guard is for: whoever
+    controls a name can answer with a public address at write time and a
+    link-local one at read time, so refusing here was never the thing
+    stopping them. What still bites — the literal metadata address, a name
+    that resolves somewhere private, every shape rule — is asserted above.
+    """
+    record = _put_aksk(service, endpoint="https://nowhere.invalid")
+    assert record.endpoint == "https://nowhere.invalid"
+
+
+def test_one_unparseable_answer_does_not_hide_a_private_one(sqlite_engine):
+    """A malformed entry in a DNS answer must not excuse the rest of it.
+
+    The first version parsed the answer as one comprehension, so a single
+    unparseable entry raised and threw the whole list away — including the
+    10.x address that was the reason to refuse — and the endpoint stored.
+    Refusal is per-address, and an entry that is not an address is skipped
+    rather than fatal.
+    """
+    svc = SourceCredentialService(
+        SourceCredentialRepository(InMemorySqliteDB(sqlite_engine)),
+        TokenVault("master-key-material"),
+        endpoint_resolver=lambda host: ["not-an-address", "10.0.0.7"],
+    )
+    with pytest.raises(CredentialError, match="non-public"):
+        _put_aksk(svc, endpoint="https://mixed.example-corp.com")
+    assert svc.list_credentials() == []
 
 
 def test_a_declared_internal_store_is_allowed_by_the_deployment(sqlite_engine):

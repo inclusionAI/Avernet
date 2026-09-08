@@ -12,9 +12,18 @@
 -- credential is presented to under the tenant document's control. That was
 -- survivable on the signing road only because ``allowed_prefixes`` was
 -- mandatory and pinned scheme, host and port: the constraint held **by
--- policy**. Reading the endpoint from the row holds it **by construction**,
--- and that is what lets ``allowed_prefixes`` stop being required for this
--- mechanism — there is no tenant-supplied host left for a prefix to constrain.
+-- policy**. Reading the endpoint from the row moves the choice off the
+-- *document*, and that is what lets ``allowed_prefixes`` stop being required
+-- for this mechanism — the manifest names no host, so a prefix here would
+-- constrain nothing.
+--
+-- WHAT THAT DOES *NOT* MEAN, corrected after review: it does not make the
+-- value trusted. A credential is written by an authenticated tenant
+-- application through the API, so "not from the document" was never "not from
+-- the tenant". The service validates this column at write against the guarded
+-- fetcher's own rules — shape, then every resolved address — with the
+-- deployment's transport allowlist as the sole escape hatch. What moved is
+-- *who declares the host*, not whether anyone checks it.
 --
 -- The bucket deliberately does NOT move here. One credential commonly reads
 -- several buckets in an account, and which bucket an entry reads is exactly

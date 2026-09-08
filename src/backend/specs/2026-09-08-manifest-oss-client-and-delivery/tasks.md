@@ -185,3 +185,27 @@ supported.
 pins the exact set of DI modules the community profile composes; group C added
 one without updating it. The manifest suite, the architecture gates and the
 contract suites do not reach `tests/community/di`.
+
+**The fix for the endpoint SSRF finding overshot, and two endpoint tests said
+so.** The first version refused an endpoint whose host would not resolve —
+carried over wholesale from the fetch road, where resolution failure states a
+fact about a hop happening now. At a *write* it is a prediction: the pod that
+stores a credential is not the pod that later reads with it. Two
+production-graph tests broke on hosts (`objects.example.test`,
+`objects.example-corp.com`) that never resolve by design, and the same rule
+would have made split-horizon DNS or a minute's outage enough to refuse a
+rotation. The tempting move — script DNS into the endpoint world, or swap the
+fixtures for literal IPs — would have kept a rule that also buys nothing:
+whoever controls a name can answer publicly at write time and link-locally at
+read time, so the strict form was TOCTOU either way. Resolution failure is now
+logged; a literal address needs no DNS, so `https://169.254.169.254/` and any
+name that *does* resolve somewhere private stay refused. The scripted-DNS
+double had to learn the same thing — `getaddrinfo` answers a numeric host from
+the string, and a double returning `[]` there would have reported the guard
+passing a case the real resolver refuses.
+
+**The prose correction claimed four places and changed three.** `03acbc72`
+listed `spec.md`, the DDL comment, the Chinese schema doc and the
+`ObjectStoreTarget` docstring; its diff touched three files, leaving the DDL
+comment still arguing the endpoint holds "by construction". Corrected here.
+The commit message was checked against its own diff only after the fact.

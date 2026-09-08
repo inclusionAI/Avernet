@@ -146,6 +146,24 @@ def endpoint_refusal(
     ``http://169.254.169.254/`` is a storable endpoint and the platform will
     connect to it on the next apply.
 
+    **A host that will not resolve is not refused**, and that divergence from
+    the fetch road is deliberate. There, resolution failure is a statement of
+    fact: the hop cannot happen, so refusing it describes reality. Here it
+    would be a prediction — the pod that stores a credential is not the pod
+    that later reads with it, and split-horizon DNS, a private zone, or a
+    minute's outage are all ordinary reasons a good endpoint does not answer
+    *here, now*. Refusing on that would make credential writes depend on the
+    network while buying nothing against the case this guard is for: whoever
+    controls a name can answer with a public address at write time and a
+    link-local one at read time, so the strict form was TOCTOU regardless. It
+    is logged, because in practice an endpoint that does not resolve is a
+    typo, and a typo is worth a line in the log and not a refusal.
+
+    What survives that concession is the part that does the work. A literal
+    address needs no DNS at all — ``getaddrinfo`` answers a numeric host from
+    the string — so ``https://169.254.169.254/`` is still refused, as is any
+    name that *does* resolve somewhere private, and every shape rule above it.
+
     ``resolver`` defaults to real DNS; tests inject. A host on the deployment
     transport allowlist is exempt from the public-only rule, exactly as it is
     on the fetch road — the deployment declared that destination.
@@ -171,13 +189,28 @@ def endpoint_refusal(
     try:
         resolved = (resolver or _resolve_via_socket)(host)
     except (FetchRefusedError, OSError):
-        return f"endpoint host cannot be resolved: {host!r}"
-    if not resolved:
-        return f"endpoint host cannot be resolved: {host!r}"
-    try:
-        addresses = [ipaddress.ip_address(ip) for ip in resolved]
-    except ValueError:
-        return f"endpoint host cannot be resolved: {host!r}"
+        resolved = []
+    # Parsed one at a time, not as a comprehension that raises on the first
+    # bad entry: a resolver answering ["10.0.0.1", "garbage"] would otherwise
+    # discard the whole list — including the private address that is the
+    # reason to refuse — and fall through to the permissive branch below.
+    addresses = []
+    for ip in resolved:
+        try:
+            addresses.append(ipaddress.ip_address(ip))
+        except ValueError:
+            continue
+    if not addresses:
+        # Unresolvable, or answered with something that is not an address:
+        # noted, not refused. See the docstring — this is the one rule that
+        # would have made storing a credential depend on this pod's DNS.
+        logger.warning(
+            "object store endpoint host does not resolve here: %r. Storing it "
+            "anyway; check it for a typo, because a fetch through it will "
+            "fail.",
+            host,
+        )
+        return None
     if any(_refused_address(ip) for ip in addresses):
         # Every address, not a lucky first one — the same rule the fetch road
         # applies, for the same reason.

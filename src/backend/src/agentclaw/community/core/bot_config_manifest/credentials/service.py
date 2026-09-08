@@ -169,6 +169,12 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             # Refusing at write rather than at read is deliberate: a bad
             # endpoint that reaches storage fails every apply that cites it,
             # and the person who can fix it is the one making this call.
+            #
+            # What it refuses is shape and *resolved* address. A host that
+            # will not resolve from here is logged and stored — this pod is
+            # not the pod that later reads, so its DNS must not decide
+            # whether a credential can exist. ``endpoint_refusal`` argues
+            # that boundary at length.
             refusal = endpoint_refusal(
                 endpoint,
                 allow_hosts=self._endpoint_allow_hosts,

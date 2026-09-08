@@ -128,6 +128,17 @@ allowlist as the only escape hatch. What moved is *who* declares the host
 (the deployment and the credential's issuer, not the manifest author), not
 whether anyone checks it.
 
+One rule is deliberately not carried over from the fetch road: a host that
+**fails to resolve** is logged, not refused. There, resolution failure states
+a fact about a hop that is happening now; here it would predict one that is
+not, and the pod that stores a credential is not the pod that later reads
+with it — split-horizon DNS, a private zone or a minute's outage would each
+turn a good endpoint into an unstorable one. It also buys nothing against the
+case the guard is for, since whoever controls a name can answer publicly at
+write time and link-locally at read time. A literal address needs no DNS, so
+`https://169.254.169.254/` stays refused, as does any name that *does* resolve
+somewhere private.
+
 ## The vocabulary
 
 `SourceKind` is **unchanged** — `content`, `oss`, `git` — and the support matrix
