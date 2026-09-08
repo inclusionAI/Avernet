@@ -1114,6 +1114,106 @@ class TestTeclawCallback:
         assert body["code"] == 0
         assert body["data"]["status"] == "ignored"
 
+    def test_teclaw_callback_missing_device_uuid(self, client):
+        """callback_context missing 'device_uuid' → 400 INVALID_CALLBACK_CONTEXT."""
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-no-duuid",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-7",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "INVALID_CALLBACK_CONTEXT"
+
+    def test_teclaw_callback_missing_publish_id(self, client):
+        """callback_context missing 'publish_id' → 400 INVALID_CALLBACK_CONTEXT."""
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-no-pub",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-8",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "INVALID_CALLBACK_CONTEXT"
+
+    def test_teclaw_callback_non_integer_publish_id(self, client):
+        """callback_context publish_id='not-a-number' → 400 INVALID_CALLBACK_CONTEXT."""
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "not-a-number",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-bad-pub",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-9",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error_code"] == "INVALID_CALLBACK_CONTEXT"
+
+    def test_teclaw_callback_generic_not_found_exception(self, client):
+        """Service raises Exception containing 'not found' → 404 DEVICE_NOT_FOUND."""
+        mock_svc = AsyncMock()
+        mock_svc.handle_device_callback = AsyncMock(
+            side_effect=Exception("device not found in registry")
+        )
+
+        _install_override(client, mock_svc)
+        response = client.post(
+            "/api/v1/publish/teclaw-callback",
+            json={
+                "success": True,
+                "data": {
+                    "schema_version": 1,
+                    "callback_context": {
+                        "device_uuid": "DEV-1",
+                        "publish_id": "42",
+                        "tenant": "t1",
+                    },
+                    "task_id": "t-nf",
+                    "operation": "CREATE",
+                    "task_status": "SUCCESS",
+                    "bot_id": "b-10",
+                    "version": 1,
+                },
+            },
+        )
+        assert response.status_code == 404
+        assert response.json()["detail"]["error_code"] == "DEVICE_NOT_FOUND"
+
 
 # ---------------------------------------------------------------------------
 # PublishType enum resolution (StrEnum validates input strings)
