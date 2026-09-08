@@ -121,16 +121,16 @@ if [ "$DATABASE_MODE" = "sqlite" ] && [ -z "${SQLITE_PATH:-}" ]; then
   export SQLITE_PATH="$local_state_dir/engine.db"
 fi
 
-# The OCB workspace links public packages to their real Avernet paths. Install
-# both roots from lockfiles so platform-specific optional dependencies resolve
-# correctly on macOS/Linux and ARM/x64 without relying on existing node_modules.
+# The Avernet workspace has a committed lockfile. The OCB composition workspace
+# intentionally has no committed lockfile because its public workspaces are linked
+# at runtime, so use npm install there to generate/update the local composition lock.
 (
   cd "$clawweb_root"
   npm ci --include=optional --no-audit --no-fund
 )
 
 cd "$ocb_clawweb"
-npm ci --include=optional --no-audit --no-fund
+npm install --include=dev --include=optional --no-audit --no-fund
 npm run build
 
 export CLAWWEB_DEPLOY_PROFILE="internal"
