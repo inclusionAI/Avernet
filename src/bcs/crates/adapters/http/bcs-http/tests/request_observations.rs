@@ -259,11 +259,11 @@ async fn protocol_upgrade_is_not_reported_as_an_http_error() {
     let writer = buffer.clone();
     let subscriber = tracing_subscriber::fmt().json().with_writer(move || writer.clone()).finish();
     async {
-        for status in [StatusCode::SWITCHING_PROTOCOLS, StatusCode::OK, StatusCode::UNAUTHORIZED] {
-            let app = Router::new().route("/ws/bot", post(move || async move { status }))
+        for (status, method) in [(StatusCode::SWITCHING_PROTOCOLS, "GET"), (StatusCode::OK, "PUT"), (StatusCode::UNAUTHORIZED, "POST")] {
+            let app = Router::new().route("/ws/bot", axum::routing::any(move || async move { status }))
                 .layer(middleware::from_fn(bcs_http::gateway_trace::observe_request));
             let request_id = format!("status-{}", status.as_u16());
-            let request = Request::builder().method("POST").uri("/ws/bot")
+            let request = Request::builder().method(method).uri("/ws/bot")
                 .header("x-request-id", &request_id).body(Body::empty()).unwrap();
             let response = app.oneshot(request).await.unwrap();
             assert_eq!(response.status(), status);
@@ -272,9 +272,10 @@ async fn protocol_upgrade_is_not_reported_as_an_http_error() {
     }.with_subscriber(subscriber).await;
     let logs = String::from_utf8(buffer.0.lock().unwrap().clone()).unwrap();
     let events: Vec<serde_json::Value> = logs.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
-    for (status, outcome) in [(101, "upgraded"), (200, "success"), (401, "http_error")] {
+    for (status, outcome, method) in [(101, "upgraded", "GET"), (200, "success", "PUT"), (401, "http_error", "POST")] {
         let event = events.iter().find(|event| event["fields"]["message"] == "http.request.response_ready"
             && event["fields"]["status"] == status).unwrap();
         assert_eq!(event["fields"]["outcome"], outcome);
+        assert_eq!(event["fields"]["method"], method);
     }
 }
