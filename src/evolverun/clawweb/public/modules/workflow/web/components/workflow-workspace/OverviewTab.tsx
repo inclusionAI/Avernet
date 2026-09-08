@@ -171,6 +171,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     : isMetricsError ? '运行指标加载失败' : '运行指标加载中'
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const currentPage = Math.min(page + 1, totalPages)
+  const isRefreshing = isFetching || isMetricsFetching
 
   const changeDays = (nextDays: 7 | 30) => {
     setDays(nextDays)
@@ -250,12 +251,13 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
             </button>
           </div>
           <button
-            onClick={() => void refetch()}
-            disabled={isFetching}
+            onClick={() => { void refetch(); void refetchMetrics() }}
+            disabled={isRefreshing}
+            aria-busy={isRefreshing}
             className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg
-              className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`}
+              className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"

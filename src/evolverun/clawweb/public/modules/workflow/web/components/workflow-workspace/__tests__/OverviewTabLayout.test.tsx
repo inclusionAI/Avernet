@@ -56,6 +56,32 @@ const workflow = {
 }
 
 describe('task escort overview layout', () => {
+  it.each(['history', 'metrics'])('refreshes both queries and stays busy while %s is fetching', async (pendingQuery) => {
+    mockQueries()
+    const history = mocks.useFlowRuns()
+    const metrics = { ...history, refetch: vi.fn() }
+    mocks.useFlowRuns.mockImplementation((params) => params.from ? metrics : history)
+    const view = render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    const refresh = screen.getByRole('button', { name: '刷新' })
+    await userEvent.click(refresh)
+    expect(history.refetch).toHaveBeenCalledTimes(1)
+    expect(metrics.refetch).toHaveBeenCalledTimes(1)
+
+    const pending = pendingQuery === 'history' ? history : metrics
+    pending.isFetching = true
+    view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(refresh).toBeDisabled()
+    expect(refresh).toHaveAttribute('aria-busy', 'true')
+    await userEvent.click(refresh)
+    expect(history.refetch).toHaveBeenCalledTimes(1)
+    expect(metrics.refetch).toHaveBeenCalledTimes(1)
+
+    pending.isFetching = false
+    view.rerender(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
+    expect(refresh).toBeEnabled()
+    expect(refresh).toHaveAttribute('aria-busy', 'false')
+  })
+
   it.each(['loading', 'error', 'refetchError', 'empty'] as const)('handles metric %s independently of successful history', async (state) => {
     mockQueries()
     const history = mocks.useFlowRuns()
