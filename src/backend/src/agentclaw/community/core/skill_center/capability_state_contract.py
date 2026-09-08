@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -10,6 +11,20 @@ if TYPE_CHECKING:
     # package __init__ is still executing, so a module-level import of
     # skills_pool.models here would close an import cycle.
     from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
+
+
+@dataclass(frozen=True)
+class BotCapabilitySnapshot:
+    """One reader-backed projection input, never cached across mutations.
+
+    This groups reads after one synchronization, not a database isolation
+    guarantee. Policy defaults remain the effective-MCP collector's concern.
+    """
+
+    bot_id: str
+    owner_id: str
+    skills: tuple[RegisteredSkillAsset, ...]
+    installed_mcp_server_codes: frozenset[str]
 
 
 @runtime_checkable
@@ -58,6 +73,20 @@ class BotCapabilityStateReaderProtocol(Protocol):
         bot: Mapping[str, Any] | None = None,
     ) -> tuple[RegisteredSkillAsset, ...]:
         """Flush, then return Runtime-ready assets with exact Center Versions."""
+        ...
+
+    def active_capabilities(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> BotCapabilitySnapshot:
+        """Synchronize once, then read exact Skills and installed MCP codes.
+
+        Consume only within the current projection; after a write or retry,
+        obtain a new snapshot. This does not include engine Policy MCPs.
+        """
         ...
 
     def active_mcp_server_codes(

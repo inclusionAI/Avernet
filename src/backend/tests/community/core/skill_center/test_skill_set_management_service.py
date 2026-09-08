@@ -2231,6 +2231,7 @@ async def test_runtime_projection_mcp_inputs_agree_when_the_union_overlaps():
 
 @pytest.mark.asyncio
 async def test_runtime_reconcile_projects_full_mcp_desired_state():
+    from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
     factory = _RuntimeFactory()
     passport = _RuntimePassport()
     runtime = BotRuntimeProjector(
@@ -2269,6 +2270,9 @@ async def test_runtime_reconcile_projects_full_mcp_desired_state():
             "entity_type": "staff",
             "engine_type": "openclaw",
             "strict_policy_context": True,
+            "capability_snapshot": BotCapabilitySnapshot(
+                "bot-1", "true-owner", (), frozenset({"mcp.weather"})
+            ),
         }
     ]
     assert passport.calls == [

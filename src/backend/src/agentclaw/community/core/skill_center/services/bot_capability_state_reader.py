@@ -31,6 +31,7 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol import BotCapabilityStateReaderProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
 
 
 logger = get_logger()
@@ -118,6 +119,11 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         self.synchronize_installations(
             bot_id=bot_id, owner_id=owner_id, bot=bot
         )
+        return self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
+
+    def _read_skill_assets(
+        self, *, bot_id: str, owner_id: str, bot: Mapping[str, Any]
+    ) -> tuple[RegisteredSkillAsset, ...]:
         assets = tuple(
             self._pool_skills.list_bot_installed_assets(
                 env=str(bot["env"]),
@@ -127,6 +133,24 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
         )
         return self._version_resolver.resolve_latest_runtime_assets(
             env=str(bot["env"]), assets=assets
+        )
+
+    def active_capabilities(
+        self,
+        *,
+        bot_id: str,
+        owner_id: str,
+        bot: Mapping[str, Any] | None = None,
+    ) -> BotCapabilitySnapshot:
+        bot = self._bot(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        self.synchronize_installations(bot_id=bot_id, owner_id=owner_id, bot=bot)
+        return BotCapabilitySnapshot(
+            bot_id=bot_id,
+            owner_id=owner_id,
+            skills=self._read_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot),
+            installed_mcp_server_codes=frozenset(
+                self._repository.list_installed_mcps(bot_id=bot_id, owner_id=owner_id)
+            ),
         )
 
     def active_mcp_server_codes(
