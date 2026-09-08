@@ -140,9 +140,10 @@ POST /openapi/v1/collaboration/invite-codes/claim
 
 - 不要求登录，不读取 `Principal`，也不经过邀请码准入门禁；
 - 仅当配置 `invite.public_claim_enabled = true` 时开放，默认关闭；
+- 公共领取总量由 `invite.public_claim_max_count` 控制，默认 1000；达到上限后返回 `429` 和 `invite_code_claim_limit_reached`；
 - 每次请求生成并持久化一个新的有效邀请码；
 - 明文邀请码只在本次响应中返回，响应携带 `Cache-Control: no-store` 和 `Pragma: no-cache`；
-- 当前版本不引入活动 token、总额度、限流或验证码。
+- 当前版本不引入活动 token、按时间窗口限流或验证码。
 
 #### 返回
 
@@ -314,7 +315,7 @@ GET /openapi/v1/collaboration/invite-codes/me
 - 邀请码作废/回收流程；
 - 邀请码转赠；
 - 复杂批次运营报表；
-- 公共领取接口的活动 token、总额度、限流、验证码和攻击防护；
+- 公共领取接口的活动 token、按时间窗口限流、验证码和攻击防护；
 - 对 bot 的邀请码绑定。
 
 如果后续需要这些能力，可以在本模型上继续扩展。

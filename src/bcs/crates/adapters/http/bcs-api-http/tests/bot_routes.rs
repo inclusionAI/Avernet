@@ -121,6 +121,7 @@ struct FakeInviteCodeService {
     ensure_access_calls: Mutex<Vec<AuthenticatedCaller>>,
     init_invite_codes_calls: Mutex<Vec<InitInviteCodes>>,
     claim_public_invite_code_calls: Mutex<Vec<ClaimPublicInviteCode>>,
+    claim_limit_reached: bool,
     bind_invite_code_calls: Mutex<Vec<BindInviteCode>>,
     get_my_invite_code_binding_calls: Mutex<Vec<GetMyInviteCodeBinding>>,
 }
@@ -146,6 +147,11 @@ impl InviteCodeService for FakeInviteCodeService {
             .lock()
             .expect("claim public invite code lock")
             .push(command);
+        if self.claim_limit_reached {
+            return Err(ApplicationError::invite_code_claim_limit_reached(
+                "maximum public invite-code claim count has been reached",
+            ));
+        }
         Ok(ClaimPublicInviteCodeResult {
             invite_code: "ABC123".to_string(),
         })
@@ -880,6 +886,31 @@ async fn invite_code_routes_forward_through_gate_and_validate_payloads() {
             .expect("candidates lock")
             .is_some(),
         "protected routes should flow through the invite-code gate when access is granted"
+    );
+}
+
+#[tokio::test]
+async fn public_invite_code_claim_returns_too_many_requests_at_max_count() {
+    let bot_service = Arc::new(FakeBotService::default());
+    let invite_code_service = Arc::new(FakeInviteCodeService {
+        claim_limit_reached: true,
+        ..Default::default()
+    });
+    let response = invite_code_test_router(bot_service, invite_code_service, false)
+        .oneshot(anonymous_request(
+            "POST",
+            "/openapi/v1/collaboration/invite-codes/claim",
+            Value::Null,
+        ))
+        .await
+        .expect("claim limit response");
+
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body = response_json(response).await;
+    assert_eq!(body["data"]["error_code"], "invite_code_claim_limit_reached");
+    assert_eq!(
+        body["message"],
+        "maximum public invite-code claim count has been reached"
     );
 }
 

@@ -13,6 +13,7 @@ pub const ERROR_INVITE_CODE_REQUIRED: &str = "invite_code_required";
 pub const ERROR_INVITE_CODE_ALREADY_BOUND: &str = "invite_code_already_bound";
 pub const ERROR_INVITE_CODE_UNAVAILABLE: &str = "invite_code_unavailable";
 pub const ERROR_INVITE_CODE_NOT_APPLICABLE: &str = "invite_code_not_applicable";
+pub const ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED: &str = "invite_code_claim_limit_reached";
 
 /// Transport-independent error vocabulary for OpenAPI v1 use cases.
 #[derive(Debug, thiserror::Error)]
@@ -155,6 +156,13 @@ impl ApplicationError {
 
     pub fn invite_code_not_applicable(message: impl Into<String>) -> Self {
         Self::forbidden_code(ERROR_INVITE_CODE_NOT_APPLICABLE, message)
+    }
+
+    pub fn invite_code_claim_limit_reached(message: impl Into<String>) -> Self {
+        Self::QuotaExceeded {
+            code: ERROR_INVITE_CODE_CLAIM_LIMIT_REACHED.to_string(),
+            message: message.into(),
+        }
     }
 
     pub fn code(&self) -> &str {

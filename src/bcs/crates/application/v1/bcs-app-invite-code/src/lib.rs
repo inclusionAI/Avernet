@@ -20,15 +20,27 @@ type HmacSha256 = Hmac<Sha256>;
 
 const INVITE_CODE_LEN: usize = 6;
 const INVITE_CODE_CHARSET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const PUBLIC_OPENAPI_CREATOR: &str = "public_openapi";
 
 pub struct InviteCodeServiceImpl {
     repo: Arc<dyn InviteCodeRepoPort>,
     secret: Vec<u8>,
+    public_claim_max_count: u64,
+    public_claim_lock: tokio::sync::Mutex<()>,
 }
 
 impl InviteCodeServiceImpl {
-    pub fn new(repo: Arc<dyn InviteCodeRepoPort>, secret: Vec<u8>) -> Self {
-        Self { repo, secret }
+    pub fn new(
+        repo: Arc<dyn InviteCodeRepoPort>,
+        secret: Vec<u8>,
+        public_claim_max_count: u64,
+    ) -> Self {
+        Self {
+            repo,
+            secret,
+            public_claim_max_count,
+            public_claim_lock: tokio::sync::Mutex::new(()),
+        }
     }
 
     fn normalize_code(code: &str) -> Result<String, ApplicationError> {
@@ -140,8 +152,22 @@ impl InviteCodeService for InviteCodeServiceImpl {
         &self,
         _command: ClaimPublicInviteCode,
     ) -> Result<ClaimPublicInviteCodeResult, ApplicationError> {
+        let _claim_guard = self.public_claim_lock.lock().await;
+        let claimed_count = self
+            .repo
+            .count_by_created_by(PUBLIC_OPENAPI_CREATOR)
+            .await
+            .map_err(|error| ApplicationError::internal(format!(
+                "failed to count publicly claimed invite codes: {error}"
+            )))?;
+        if claimed_count >= self.public_claim_max_count {
+            return Err(ApplicationError::invite_code_claim_limit_reached(
+                "maximum public invite-code claim count has been reached",
+            ));
+        }
+
         let invite_code = self
-            .generate_and_store_code(Some("public_openapi".to_string()))
+            .generate_and_store_code(Some(PUBLIC_OPENAPI_CREATOR.to_string()))
             .await?;
         Ok(ClaimPublicInviteCodeResult { invite_code })
     }
@@ -277,6 +303,16 @@ mod tests {
             Ok(true)
         }
 
+        async fn count_by_created_by(&self, created_by: &str) -> bcs_service_api::ServiceResult<u64> {
+            Ok(self
+                .records
+                .read()
+                .await
+                .values()
+                .filter(|record| record.created_by.as_deref() == Some(created_by))
+                .count() as u64)
+        }
+
         async fn bind_code(
             &self,
             code_hash: &str,
@@ -344,7 +380,11 @@ mod tests {
     fn service() -> (InviteCodeServiceImpl, Arc<FakeInviteCodeRepo>) {
         let repo = Arc::new(FakeInviteCodeRepo::new());
         (
-            InviteCodeServiceImpl::new(repo.clone() as Arc<dyn InviteCodeRepoPort>, b"secret".to_vec()),
+            InviteCodeServiceImpl::new(
+                repo.clone() as Arc<dyn InviteCodeRepoPort>,
+                b"secret".to_vec(),
+                1_000,
+            ),
             repo,
         )
     }
@@ -384,6 +424,45 @@ mod tests {
         assert_eq!(record.status, InviteCodeStatus::Active);
         assert_eq!(record.created_by.as_deref(), Some("public_openapi"));
         assert!(record.bound_user_id.is_none());
+    }
+
+    #[tokio::test]
+    async fn public_claim_rejects_when_max_count_is_reached() {
+        let repo = Arc::new(FakeInviteCodeRepo::new());
+        let svc = InviteCodeServiceImpl::new(
+            repo.clone() as Arc<dyn InviteCodeRepoPort>,
+            b"secret".to_vec(),
+            1,
+        );
+        svc.claim_public_invite_code(ClaimPublicInviteCode)
+            .await
+            .expect("first public claim");
+
+        let error = svc
+            .claim_public_invite_code(ClaimPublicInviteCode)
+            .await
+            .expect_err("second public claim should exceed the limit");
+
+        assert_eq!(error.code(), "invite_code_claim_limit_reached");
+        assert_eq!(repo.records.read().await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn concurrent_public_claims_do_not_exceed_max_count() {
+        let repo = Arc::new(FakeInviteCodeRepo::new());
+        let svc = InviteCodeServiceImpl::new(
+            repo.clone() as Arc<dyn InviteCodeRepoPort>,
+            b"secret".to_vec(),
+            1,
+        );
+
+        let (first, second) = tokio::join!(
+            svc.claim_public_invite_code(ClaimPublicInviteCode),
+            svc.claim_public_invite_code(ClaimPublicInviteCode),
+        );
+
+        assert_eq!(u8::from(first.is_ok()) + u8::from(second.is_ok()), 1);
+        assert_eq!(repo.records.read().await.len(), 1);
     }
 
     #[tokio::test]

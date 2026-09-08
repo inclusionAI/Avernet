@@ -1486,7 +1486,11 @@ fn build_invite_code_service(
         },
         _ => Arc::new(MemoryInviteCodeRepo::with_data_dir(config.bots_base_dir.clone())),
     };
-    Arc::new(InviteCodeServiceImpl::new(repo, invite_token_secret))
+    Arc::new(InviteCodeServiceImpl::new(
+        repo,
+        invite_token_secret,
+        config.invite.public_claim_max_count,
+    ))
 }
 
 fn resolve_invite_token_secret(config: &BcsConfig) -> Vec<u8> {
