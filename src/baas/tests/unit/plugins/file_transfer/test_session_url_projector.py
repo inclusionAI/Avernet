@@ -24,6 +24,9 @@ from secbaas.community.plugins.file_transfer import NoopSessionFileUrlProjector
 from secbaas.community.plugins.file_transfer.aliyun_ack import (
     AliyunAckSessionFileUrlProjector,
 )
+from secbaas.community.plugins.file_transfer.aliyun_ack._projector import (
+    logger as _projector_logger,
+)
 from secbaas.community.spi.file_transfer import SessionFileUrlProjector
 
 _ORIGINAL_UPLOAD_URL = (
@@ -40,8 +43,13 @@ _MULTIPART_PART_URL = (
 
 @pytest.fixture(autouse=True)
 def _enable_log_propagation():
-    """BareLoggerPlugin sets propagate=False, which breaks caplog."""
-    logger = logging.getLogger("file_transfer")
+    """BareLoggerPlugin sets propagate=False, which breaks caplog.
+
+    Patch the logger the projector actually uses — derived from the module
+    constant instead of a hardcoded second name, so a logger rename cannot
+    silently turn this fixture back into a no-op (IN-03/88).
+    """
+    logger = logging.getLogger(_projector_logger.name)
     old = logger.propagate
     logger.propagate = True
     yield
