@@ -39,7 +39,7 @@ bcs-route-security = { workspace = true }
 tokio-test  = "0.4"
 tokio-tungstenite = "0.26"
 bcs-session = { workspace = true }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 bcs-services-container = { workspace = true, features = ["test-support"] }
 bcs-interaction = { workspace = true }
 tracing-subscriber = { workspace = true }
