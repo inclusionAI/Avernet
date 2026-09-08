@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import zipfile
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    LocalSkillVersionConflictError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.services import (
@@ -224,6 +226,17 @@ class _Storage:
         if not entries:
             raise OSError("missing package")
         return True
+
+    async def read_package_files(self):
+        prefix = f"{self.directory}/"
+        return sorted(
+            (
+                (path[len(prefix) :], content)
+                for path, content in self.filesystem.files.items()
+                if path.startswith(prefix)
+            ),
+            key=lambda item: item[0],
+        )
 
     async def copy_to(self, target, *, replace=False):
         prefix = f"{self.directory}/"
@@ -928,6 +941,58 @@ async def test_same_name_replacement_preserves_id_owner_and_desired_state_after_
     assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
         _skill_md(description="new description")
     )
+
+
+@pytest.mark.asyncio
+async def test_exact_skill_replacement_compares_baseline_before_writing():
+    filesystem = _Filesystem()
+    old_package = _skill_md(description="old description")
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = old_package
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    service = _replacement_service(filesystem, repo, _ReplacementRuntime([True]))
+    expected_digest = "sha256:" + hashlib.sha256(
+        SkillPackageValidator(SkillParser()).pack_directory(
+            [("SKILL.md", old_package)]
+        )
+    ).hexdigest()
+
+    result = await service.replace_local_skill_package(
+        skill_id="9",
+        bot_id="bot",
+        owner_id="owner",
+        actor_id="owner",
+        package=_zip({"SKILL.md": _skill_md(description="new description")}),
+        expected_digest=expected_digest,
+    )
+
+    assert result["operation"] == "updated"
+    assert result["package_digest"].startswith("sha256:")
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == (
+        _skill_md(description="new description")
+    )
+
+
+@pytest.mark.asyncio
+async def test_exact_skill_replacement_refuses_stale_baseline_without_writing():
+    filesystem = _Filesystem()
+    old_package = _skill_md(description="old description")
+    filesystem.files["/private/skills-local/upload-skill/SKILL.md"] = old_package
+    repo = _ReplacementRepo([_existing_skill(active=False)])
+    runtime = _ReplacementRuntime([True])
+    service = _replacement_service(filesystem, repo, runtime)
+
+    with pytest.raises(LocalSkillVersionConflictError):
+        await service.replace_local_skill_package(
+            skill_id="9",
+            bot_id="bot",
+            owner_id="owner",
+            actor_id="owner",
+            package=_zip({"SKILL.md": _skill_md(description="new description")}),
+            expected_digest="sha256:" + "0" * 64,
+        )
+
+    assert filesystem.files["/private/skills-local/upload-skill/SKILL.md"] == old_package
+    assert runtime.calls == 0
 
 
 @pytest.mark.asyncio

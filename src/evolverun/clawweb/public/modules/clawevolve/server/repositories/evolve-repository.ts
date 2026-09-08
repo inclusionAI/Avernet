@@ -1863,6 +1863,17 @@ export class EvolveRepository {
     });
   }
 
+  async resumeWaitingStep(stepId: string): Promise<boolean> {
+    const result = await this.db.exec(
+      `UPDATE ce_steps SET status = 'created', bot_run_id = NULL, bot_session_id = NULL,
+       bot_response_json = NULL, error_code = NULL, error_message = NULL, retryable = 0,
+       completed_at = NULL, gmt_modified = ?
+       WHERE step_id = ? AND status = 'waiting_context'`,
+      [this.db.dialect.now(), stepId],
+    );
+    return result.affectedRows === 1;
+  }
+
   async claimCreatedBusinessStep(taskId: string): Promise<EvolveStepRow | null> {
     return this.db.transaction(async (tx) => {
       const candidate = (await tx.query<EvolveStepRow>(

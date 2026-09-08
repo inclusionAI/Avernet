@@ -8,6 +8,8 @@ import { BenchTemplateVersionRepository } from "./repositories/bench-template-ve
 import { BenchTaskResultRepository } from "./repositories/bench-task-result-repository.js";
 import { BenchArtifactRepository } from "./repositories/bench-artifact-repository.js";
 import { BenchTagRepository } from "./repositories/bench-tag-repository.js";
+import { StageSkillRepository } from "./repositories/stage-skill-repository.js";
+import { SkillAssetRepository } from "./repositories/skill-asset-repository.js";
 import { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { createEvolveRouter, type EvolveRouterDeps } from "./routes/evolve.js";
 import {
@@ -16,12 +18,15 @@ import {
 } from "./routes/internal/evolve.js";
 import { createInternalTaskGuardRouter } from "./routes/internal/task-guard.js";
 import { createBenchRouter } from "./routes/bench.js";
+import { createStageSkillsRouter } from "./routes/stage-skills.js";
+import { createSkillAssetsRouter } from "./routes/skill-assets.js";
 import { dispatchEvolveCommand } from "./services/evolve-dispatcher.js";
 import { configureArtifactBucket, type ObjectStore } from "./services/object-storage/oss-object-store.js";
 import { startRunAnalysisTimeoutSweeper } from "./services/evolve/run-analysis-timeout.js";
 import { startSuggestionApplyTimeoutSweeper } from "./services/evolve/suggestion-apply-timeout.js";
 import { configureClawWebPublicBaseUrl } from "./env.js";
 import type { ClawEvolveInternalApi, ClawInsightInternalApi } from "./internal/module-api.js";
+import type { OcbLocalSkillPort } from "./internal/module-api.js";
 
 export type ClawevolveModuleOptions = {
   db: IDatabase;
@@ -37,6 +42,7 @@ export type ClawevolveModuleOptions = {
   publicBaseUrl?: string;
   trustedPublicOrigins?: readonly string[];
   workflowRuntime?: InternalEvolveWorkflowRuntime;
+  ocbLocalSkills?: OcbLocalSkillPort;
 };
 
 export type ClawevolveModule = {
@@ -78,6 +84,8 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
   const benchTaskResult = new BenchTaskResultRepository(db);
   const benchArtifact = new BenchArtifactRepository(db);
   const benchTag = new BenchTagRepository(db);
+  const stageSkill = new StageSkillRepository(db);
+  const skillAsset = new SkillAssetRepository(db);
   const botWorkflowPermission = new BotWorkflowPermissionRepository(db);
   const taskSourceService = options.taskSourceService ?? null;
   const dispatch = options.dispatch ?? dispatchEvolveCommand;
@@ -97,7 +105,23 @@ export function createClawevolveModule(options: ClawevolveModuleOptions): Clawev
     artifactStore: options.artifactStore,
     artifactUrlStore: options.artifactUrlStore,
     botWorkflowPermissionRepo: botWorkflowPermission,
+    ocbLocalSkills: options.ocbLocalSkills ?? null,
+    stageSkillRepo: stageSkill,
+    skillAssetRepo: skillAsset,
   });
+  publicRouter.use(createStageSkillsRouter({
+    repo: stageSkill,
+    evolveRepo: evolve,
+    artifactStore: options.artifactStore,
+    skillAssetRepo: skillAsset,
+    ocbLocalSkills: options.ocbLocalSkills ?? null,
+    dispatch,
+  }));
+  publicRouter.use(createSkillAssetsRouter({
+    repo: skillAsset,
+    ocbLocalSkills: options.ocbLocalSkills ?? null,
+    artifactStore: options.artifactStore,
+  }));
 
   const internalRouter = createInternalEvolveRouter({
     db,

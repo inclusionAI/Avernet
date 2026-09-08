@@ -255,6 +255,7 @@ from agentclaw.community.core.skill_center.errors import (
     SkillSetAccessDeniedError,
     McpPermissionDeniedError,
     LocalSkillTooLargeError,
+    LocalSkillVersionConflictError,
 )
 from agentclaw.community.adapters.http.openapi_v1 import errors_skill_center
 from agentclaw.community.core.services.identity import (
@@ -624,6 +625,7 @@ ENVELOPE_ERRORS: dict[type[Exception], tuple[int, str]] = {
     LocalSkillNotReadyError: (409, "Bot is not ready"),
     LocalSkillActiveError: (409, "Skill is active"),
     LocalSkillDuplicateError: (409, "Local Skill already exists"),
+    LocalSkillVersionConflictError: (409, "Skill package changed since it was read"),
     LocalSkillTooLargeError: (413, "Skill package is too large"),
     LocalSkillStorageError: (502, "Skill storage operation failed"),
     SkillParameterValidationError: (422, "Skill parameters are invalid"),
@@ -838,6 +840,7 @@ ENVELOPE_ERROR_CODES: dict[type[Exception], int] = {
     LocalSkillNotReadyError: 409101,
     LocalSkillActiveError: 409102,
     LocalSkillDuplicateError: 409103,
+    LocalSkillVersionConflictError: 409105,
     LocalSkillTooLargeError: 413101,
     LocalSkillStorageError: 502101,
     SkillParameterValidationError: 422101,

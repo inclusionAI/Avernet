@@ -1,11 +1,14 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
-import type { IDatabase } from "@avernet/clawweb-shared/server/db";import { getClawWebPublicBaseUrl } from "../env.js";
+import type { IDatabase } from "@avernet/clawweb-shared/server/db";
+import { getClawWebPublicBaseUrl } from "../env.js";
 import { asyncHandler } from "@avernet/clawweb-shared/server/middleware/async-handler";
 import type { EvolveBotRuntime, EvolvePackRow, EvolveStepRow, EvolveRepository, EvolveSuggestionRow, EvolveTaskRow } from "../repositories/evolve-repository.js";
 import type { BenchDomainRepository } from "../repositories/bench-domain-repository.js";
 import type { BenchTemplateRepository } from "../repositories/bench-template-repository.js";
 import type { BenchRunRepository } from "../repositories/bench-run-repository.js";
+import type { StageSkillRepository } from "../repositories/stage-skill-repository.js";
+import type { SkillAssetRepository } from "../repositories/skill-asset-repository.js";
 import type { BotWorkflowPermissionRepository } from "@avernet/clawweb-shared/server/repositories/bot-workflow-permission-repository";
 import { WorkflowEvolutionRepository } from "../repositories/workflow-evolution-repository.js";
 import {
@@ -20,6 +23,7 @@ import type {
   InsightImprovementPort,
   InsightTaskCreatorPort,
   InsightTaskSourcePort,
+  OcbLocalSkillPort,
 } from "../internal/module-api.js";
 import {
   cancelEvolveExecution,
@@ -54,6 +58,26 @@ import {
   taskLogArchiveLocation,
 } from "../services/evolve/artifact-url.js";
 import { getArtifactBucket, UnavailableObjectStore, type ObjectStore } from "../services/object-storage/oss-object-store.js";
+import {
+  findOfficialStage,
+  isStageExtensionMode,
+  stageRuntimeInputSchema,
+  validateJsonSchema,
+  type StageExtensionMode,
+  type StageKey,
+} from "../services/evolve/stage-catalog.js";
+import {
+  nextStageExecution,
+  type FrozenStageExtensions,
+  type FrozenTaskStageExtensions,
+  type StageExecutionPhase,
+} from "../services/evolve/stage-execution.js";
+import { parseStageSkillResult } from "../services/evolve/stage-skill-result.js";
+import {
+  freezeSkillTarget,
+  type FrozenSkillTarget,
+} from "../services/evolve/skill-candidate.js";
+import { skillPackageDiff, skillPackagesEquivalent } from "../services/evolve/skill-package-view.js";
 
 type InsightBoundaryError = Error & {
   code: string;
@@ -105,12 +129,127 @@ export type EvolveRouterDeps = {
   artifactUrlStore?: Pick<ObjectStore, "createSignedUrl">;
   botWorkflowPermissionRepo?: BotWorkflowPermissionRepository | null;
   runAnalysisStarter?: RunAnalysisStarter | null;
+  ocbLocalSkills?: OcbLocalSkillPort | null;
+  stageSkillRepo?: StageSkillRepository | null;
+  skillAssetRepo?: SkillAssetRepository | null;
 };
 type BenchDomains = { trainBenchDomainId: string; testBenchDomainId: string };
 const DIAGNOSE_MODELS = new Set(["GLM-5.1", "GLM-5.2"]);
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "canceled"]);
-const ALLOWED_STATUSES = new Set(["running", ...TERMINAL_STATUSES]);
+const ALLOWED_STATUSES = new Set(["running", "waiting_context", ...TERMINAL_STATUSES]);
+
+type ExtendedTaskConfig = Record<string, unknown> & {
+  stageExtensions?: FrozenTaskStageExtensions;
+  stageSelection?: FrozenStageSelection;
+  targetSkill?: FrozenSkillTarget;
+};
+
+type FrozenStageSelection = Record<StageKey, boolean>;
+
+function resolveStageSelection(
+  value: unknown,
+  taskType: "diagnose" | "full",
+  inputMode: string,
+): FrozenStageSelection {
+  const defaults: FrozenStageSelection = {
+    diagnose: taskType === "diagnose" || inputMode !== "direct_goal",
+    plan: true,
+    optimize: taskType === "full",
+  };
+  if (value == null) return defaults;
+  if (!isRecord(value)) throw new Error("stageSelection 必须是 JSON 对象");
+  for (const key of Object.keys(value)) {
+    if (!findOfficialStage(key) || typeof value[key] !== "boolean") {
+      throw new Error(`Stage 开关不合法: ${key}`);
+    }
+  }
+  const selection = { ...defaults, ...value } as FrozenStageSelection;
+  if (taskType === "diagnose" && (!selection.diagnose || selection.optimize)) {
+    throw new Error("诊断任务必须执行 Diagnose，且不能执行 Optimize");
+  }
+  if (selection.optimize && !selection.plan) {
+    throw new Error("执行 Optimize 时必须先执行 Plan");
+  }
+  if (!selection.diagnose && !selection.plan && !selection.optimize) {
+    throw new Error("至少需要启用一个 Stage");
+  }
+  return selection;
+}
+
+function stageEnabled(task: { config_json: string }, stage: StageKey): boolean {
+  const config = parseJson(task.config_json) as ExtendedTaskConfig | null;
+  return config?.stageSelection?.[stage] !== false;
+}
+
+function firstEnabledStage(selection: FrozenStageSelection): StageKey {
+  if (selection.diagnose) return "diagnose";
+  if (selection.plan) return "plan";
+  return "optimize";
+}
+
+function taskExtensions(task: { config_json: string }, stage: StageKey): FrozenStageExtensions {
+  const config = parseJson(task.config_json) as ExtendedTaskConfig | null;
+  return config?.stageExtensions?.[stage] ?? {};
+}
+
+function hasEnabledStageExtensions(value: FrozenTaskStageExtensions | undefined): boolean {
+  return Object.values(value ?? {}).some((stage) => Object.values(stage ?? {})
+    .some((binding) => binding?.enabled === true));
+}
+
+function objectKeyFromEvolveRef(ref: string): string {
+  const prefix = `oss://${getArtifactBucket()}/`;
+  if (!ref.startsWith(prefix)) throw new Error("Artifact 引用不属于当前 Evolve Bucket");
+  const key = ref.slice(prefix.length);
+  if (!key || key.startsWith("/") || key.split("/").some((part) => !part || part === "." || part === "..")) {
+    throw new Error("Artifact 引用路径不合法");
+  }
+  return key;
+}
+
+async function resolveFrozenStageExtensions(
+  value: unknown,
+  ownerUserId: string,
+  repo: StageSkillRepository | null,
+): Promise<FrozenTaskStageExtensions> {
+  if (value == null) return {};
+  if (!isRecord(value)) throw new Error("stageExtensions 必须是 JSON 对象");
+  if (!repo) throw new Error("Stage Skill 服务不可用");
+  const frozen: FrozenTaskStageExtensions = {};
+  for (const [stageValue, modesValue] of Object.entries(value)) {
+    const stage = findOfficialStage(stageValue);
+    if (!stage || !isRecord(modesValue)) throw new Error(`未知 Stage: ${stageValue}`);
+    const modes: FrozenStageExtensions = {};
+    for (const [modeValue, bindingValue] of Object.entries(modesValue)) {
+      if (!isStageExtensionMode(modeValue) || !stage.extensionModes.includes(modeValue)
+        || !isRecord(bindingValue)) {
+        throw new Error(`${stage.name} 的接入方式不合法: ${modeValue}`);
+      }
+      const enabled = bindingValue.enabled === true;
+      const implementationId = String(bindingValue.implementationId ?? "").trim();
+      if (!enabled) {
+        modes[modeValue] = { enabled: false, implementationId };
+        continue;
+      }
+      const implementation = implementationId
+        ? await repo.findImplementation(implementationId)
+        : null;
+      if (!implementation || implementation.owner_user_id !== ownerUserId
+        || implementation.status !== "registered"
+        || implementation.stage_key !== stage.stage
+        || implementation.extension_mode !== modeValue) {
+        throw new Error(`${stage.name} ${modeValue} 没有可用的已注册 Skill 实现`);
+      }
+      modes[modeValue] = {
+        enabled: true,
+        implementationId: implementation.implementation_id,
+      };
+    }
+    frozen[stage.stage] = modes;
+  }
+  return frozen;
+}
 
 async function rejectUnsupportedBotEngine(
   repo: EvolveRepository,
@@ -654,19 +793,192 @@ async function markInsightTaskApplied(
   });
 }
 
+function stageRuntimeCommand(taskId: string, stepId: string, action: "execute" | "prepare" | "finalize"): string {
+  return `/clawevolve-stage --action ${action} --task-id ${taskId} --step-id ${stepId} --clawweb-url ${getClawWebPublicBaseUrl()}`;
+}
+
+async function dispatchCreatedStep(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  task: EvolveTaskRow,
+  step: EvolveStepRow,
+  options: { initial?: boolean; runtime?: EvolveBotRuntime | null } = {},
+): Promise<void> {
+  const config = (parseJson(task.config_json) as {
+    dispatchMode?: "message" | "run";
+    forceMessage?: boolean;
+    runtimeMaintenance?: boolean;
+    clawwebUrl?: string;
+    trainBenchDomainId?: string;
+    testBenchDomainId?: string;
+  } | null) ?? {};
+  const runtime = options.runtime ?? await repo.resolveEvolveBotRuntime(
+    task.user_id,
+    task.bot_id,
+    taskBotEnv(task),
+  );
+  const mode = config.dispatchMode
+    ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
+  const businessDispatch = {
+    taskId: task.task_id,
+    stepPk: step.id,
+    stepId: step.step_id,
+    stepType: step.step_type,
+    userId: task.user_id,
+    botId: task.bot_id,
+    command: step.command,
+    mode,
+    callbackUrl: botCallbackUrl(req, task.task_id, step.step_id),
+    runtime,
+    forceMessage: config.forceMessage === true,
+    runtimeMaintenance: step.step_type === "stage_extension" || step.step_type === "skill_prepare"
+      || step.step_type === "skill_finalize" ? false : config.runtimeMaintenance !== false,
+    ...(step.step_type === "optimize" ? {
+      optimizeArgs: {
+        round: Number(step.round_no ?? 1),
+        trainBenchDomainId: config.trainBenchDomainId,
+        testBenchDomainId: config.testBenchDomainId,
+      },
+    } : {}),
+  };
+  if (options.initial) {
+    await startInitialEvolveStep({
+      repo,
+      dispatch,
+      task: { task_id: task.task_id, user_id: task.user_id, bot_id: task.bot_id },
+      businessStep: step,
+      runtime,
+      clawwebUrl: config.clawwebUrl ?? getClawWebPublicBaseUrl(),
+      callbackUrl: (createdStepId) => botCallbackUrl(req, task.task_id, createdStepId),
+      businessDispatch,
+    });
+    return;
+  }
+  try {
+    const result = await dispatch(businessDispatch);
+    await repo.markDispatched(step.step_id, result.runId, result.sessionId, result.platformResponse);
+  } catch (error) {
+    await repo.markDispatchFailed(step.step_id, error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function createStageExtensionStep(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  stageSkillRepo: StageSkillRepository,
+  task: EvolveTaskRow,
+  stage: StageKey,
+  mode: StageExtensionMode,
+  binding: { implementationId: string },
+  options: { initial?: boolean; roundNo?: number | null; runtime?: EvolveBotRuntime | null } = {},
+) {
+  const existingSteps = await repo.listSteps(task.task_id);
+  const existingStepById = new Map(existingSteps.map((item) => [item.step_id, item]));
+  const existing = (await stageSkillRepo.listExtensionRuns(task.task_id)).find((run) =>
+    run.stage_key === stage && run.extension_mode === mode
+      && (stage !== "optimize"
+        || Number(existingStepById.get(run.step_id)?.round_no ?? 0) === Number(options.roundNo ?? 0)));
+  if (existing) {
+    const step = await repo.findStep(existing.step_id);
+    if (step) return step;
+  }
+  const implementation = await stageSkillRepo.findImplementation(binding.implementationId);
+  if (!implementation || !new Set(["registered", "deleted"]).has(implementation.status)
+    || implementation.owner_user_id !== task.user_id
+    || implementation.stage_key !== stage || implementation.extension_mode !== mode) {
+    throw new Error(`冻结的 ${stage} ${mode} Skill 实现不可用`);
+  }
+  const stepId = id("STEP");
+  const step = await repo.createStep({
+    stepId,
+    taskId: task.task_id,
+    stepType: "stage_extension",
+    stepNo: Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1,
+    roundNo: options.roundNo ?? null,
+    command: stageRuntimeCommand(task.task_id, stepId, "execute"),
+  });
+  await stageSkillRepo.createExtensionRun({
+    stepId,
+    taskId: task.task_id,
+    stage,
+    mode,
+    implementationId: implementation.implementation_id,
+  });
+  await dispatchCreatedStep(req, repo, dispatch, task, step, options);
+  return step;
+}
+
+async function createBuiltinDiagnoseStep(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  task: EvolveTaskRow,
+  options: { initial?: boolean; runtime?: EvolveBotRuntime | null } = {},
+) {
+  const config = (parseJson(task.config_json) as {
+    nodeCommands?: NodeCommandYamls;
+    model?: string;
+    diagnoseIntent?: string;
+    maxSessions?: number;
+    startDate?: string;
+    endDate?: string;
+    judgeBackend?: "subagent" | "api";
+    sessionSource?: { mode?: string };
+    clawwebUrl?: string;
+  } | null) ?? {};
+  if (config.judgeBackend === "api") {
+    throw new Error("启用 Stage 扩展或 Skill 候选隔离时，诊断暂只支持 Agent Judge");
+  }
+  const stepId = id("STEP");
+  const systemArgs: Array<[string, string | number]> = [
+    ["judge-backend", "subagent"], ["max-sessions", Number(config.maxSessions ?? 10)],
+    ["task-id", task.task_id], ["step-id", stepId],
+    ["clawweb-url", config.clawwebUrl ?? getClawWebPublicBaseUrl()],
+  ];
+  if (config.sessionSource?.mode === "service_export") {
+    systemArgs.push(
+      ["source", "service_export"], ["source-user-id", task.user_id],
+      ["source-bot-id", task.bot_id], ["source-download-network", "office"],
+    );
+  }
+  const command = withoutDiagnoseApiKey(renderCommand(
+    config.nodeCommands?.diagnose ?? defaultNodeCommand("diagnose"),
+    {
+      api_key: "******",
+      model: config.model ?? "GLM-5.1",
+      diagnose_intent: quoteCommandArgument(config.diagnoseIntent ?? ""),
+      start_date: config.startDate ?? "",
+      end_date: config.endDate ?? "",
+    },
+    systemArgs,
+  ));
+  const steps = await repo.listSteps(task.task_id);
+  const step = await repo.createStep({
+    stepId,
+    taskId: task.task_id,
+    stepType: "diagnose",
+    stepNo: Math.max(0, ...steps.map((item) => item.step_no)) + 1,
+    command,
+  });
+  await dispatchCreatedStep(req, repo, dispatch, task, step, options);
+  return step;
+}
+
 async function createPlanStep(
   req: Request,
   repo: EvolveRepository,
   dispatch: Dispatch,
-  step: EvolveStepRow,
-  task: { task_id: string; user_id: string; bot_id: string; config_json: string },
+  task: EvolveTaskRow,
+  initialTaskStep = false,
+  initialRuntime?: EvolveBotRuntime | null,
 ) {
   const taskConfig = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string;
     goal?: string;
+    targetSkill?: FrozenSkillTarget;
   } | null;
-  const dispatchMode = taskConfig?.dispatchMode
-    ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
   const nextStepId = id("STEP");
   const systemArgs: Array<[string, string | number]> = [
     ["task-id", task.task_id], ["step-id", nextStepId],
@@ -675,30 +987,27 @@ async function createPlanStep(
     ["clawweb-url", taskConfig?.clawwebUrl ?? getClawWebPublicBaseUrl()],
   ];
   if (taskConfig?.goal) systemArgs.push(["goal", quoteCommandArgument(taskConfig.goal)]);
+  if (taskConfig?.targetSkill) {
+    systemArgs.push(
+      ["workspace", quoteCommandArgument(taskConfig.targetSkill.workspacePath)],
+      ["target", quoteCommandArgument(taskConfig.targetSkill.skillPath)],
+      ["run-dir", quoteCommandArgument(`/home/admin/.openclaw/workspace/clawevolve_results/${task.task_id}/diagnose`)],
+    );
+  }
   const nextCommand = renderCommand(
     taskConfig?.nodeCommands?.plan ?? "/clawevolve-plan",
     {},
     systemArgs,
   );
+  const existingSteps = await repo.listSteps(task.task_id);
   const next = await repo.createStep({
     stepId: nextStepId, taskId: task.task_id, stepType: "plan",
-    stepNo: step.step_no + 1, command: nextCommand,
+    stepNo: Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1, command: nextCommand,
   });
-  try {
-    const runtime = await repo.resolveEvolveBotRuntime(task.user_id, task.bot_id, taskBotEnv(task));
-    const result = await dispatch({
-      taskId: task.task_id, stepPk: next.id, stepId: nextStepId,
-      stepType: "plan", userId: task.user_id, botId: task.bot_id,
-      command: nextCommand, mode: dispatchMode,
-      runtime,
-      forceMessage: taskConfig?.forceMessage === true,
-      runtimeMaintenance: taskConfig?.runtimeMaintenance !== false,
-      callbackUrl: botCallbackUrl(req, task.task_id, nextStepId),
-    });
-    await repo.markDispatched(nextStepId, result.runId, result.sessionId, result.platformResponse);
-  } catch (dispatchError) {
-    await repo.markDispatchFailed(nextStepId, dispatchError instanceof Error ? dispatchError.message : String(dispatchError));
-  }
+  await dispatchCreatedStep(req, repo, dispatch, task, next, {
+    initial: initialTaskStep,
+    runtime: initialRuntime,
+  });
   return { stepId: nextStepId, stepType: "plan" as const };
 }
 
@@ -763,6 +1072,7 @@ async function createOptimizeStep(
   const config = parseJson(task.config_json) as {
     dispatchMode?: "message" | "run"; trainBenchDomainId?: string; testBenchDomainId?: string;
     ownerUserId?: string; nodeCommands?: NodeCommandYamls; forceMessage?: boolean; runtimeMaintenance?: boolean; clawwebUrl?: string; openclawExecutionMode?: "local" | "gateway";
+    targetSkill?: FrozenSkillTarget;
   } | null;
   const dispatchMode = config?.dispatchMode ?? await repo.resolveBotDispatchMode(task.user_id, task.bot_id, taskBotEnv(task));
   const stepId = id("STEP");
@@ -773,8 +1083,9 @@ async function createOptimizeStep(
        ["train-bench-domain-id", config?.trainBenchDomainId ?? ""],
        ["test-bench-domain-id", config?.testBenchDomainId ?? ""],
        ["clawweb-url", config?.clawwebUrl ?? getClawWebPublicBaseUrl()],
-       ["openclaw-execution-mode", config?.openclawExecutionMode ?? "local"]])
-    : `/clawevolve-workflow --stage optimize --task-id ${task.task_id} --step-id ${stepId} --round ${roundNo} --train-bench-domain-id ${config?.trainBenchDomainId} --test-bench-domain-id ${config?.testBenchDomainId} --clawweb-url ${config?.clawwebUrl ?? getClawWebPublicBaseUrl()} --openclaw-execution-mode ${config?.openclawExecutionMode ?? "local"}`;
+       ["openclaw-execution-mode", config?.openclawExecutionMode ?? "local"],
+       ...(config?.targetSkill ? [["workspace", quoteCommandArgument(config.targetSkill.workspacePath)] as [string, string]] : [])])
+    : `/clawevolve-workflow --stage optimize --task-id ${task.task_id} --step-id ${stepId} --round ${roundNo} --train-bench-domain-id ${config?.trainBenchDomainId} --test-bench-domain-id ${config?.testBenchDomainId} --clawweb-url ${config?.clawwebUrl ?? getClawWebPublicBaseUrl()} --openclaw-execution-mode ${config?.openclawExecutionMode ?? "local"}${config?.targetSkill ? ` --workspace ${quoteCommandArgument(config.targetSkill.workspacePath)}` : ""}`;
   const ownerUserId = safeBenchCommandValue("ownerId", config?.ownerUserId ?? task.user_id);
   const commandWithOwner = `${command} --owner-id ${ownerUserId}`;
   const stepNo = Math.max(0, ...existingSteps.map((item) => item.step_no)) + 1;
@@ -824,6 +1135,227 @@ async function createOptimizeStep(
   return { stepId: stepId, stepType: "optimize" as const, roundNo };
 }
 
+async function scheduleStageCut(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  stageSkillRepo: StageSkillRepository,
+  task: EvolveTaskRow,
+  stage: StageKey,
+  completed: StageExecutionPhase,
+  options: { initial?: boolean; roundNo?: number | null; runtime?: EvolveBotRuntime | null } = {},
+): Promise<{ stepId: string; stepType: string; roundNo?: number | null } | null> {
+  const decision = nextStageExecution(taskExtensions(task, stage), completed);
+  if (decision.kind === "complete") return null;
+  if (decision.kind === "extension") {
+    const step = await createStageExtensionStep(
+      req,
+      repo,
+      dispatch,
+      stageSkillRepo,
+      task,
+      stage,
+      decision.mode,
+      decision.binding,
+      options,
+    );
+    return { stepId: step.step_id, stepType: step.step_type, roundNo: step.round_no };
+  }
+  if (stage === "diagnose") {
+    const step = await createBuiltinDiagnoseStep(req, repo, dispatch, task, options);
+    return { stepId: step.step_id, stepType: step.step_type, roundNo: step.round_no };
+  }
+  if (stage === "plan") {
+    return createPlanStep(req, repo, dispatch, task, options.initial === true, options.runtime);
+  }
+  return createOptimizeStep(
+    req,
+    repo,
+    dispatch,
+    task,
+    Number(options.roundNo ?? 1),
+    options.initial === true,
+  );
+}
+
+async function createSkillLifecycleStep(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  task: EvolveTaskRow,
+  action: "prepare" | "finalize",
+  initial = false,
+  runtime?: EvolveBotRuntime | null,
+) {
+  const existing = (await repo.listSteps(task.task_id)).find((item) => item.step_type === `skill_${action}`);
+  if (existing) return existing;
+  const steps = await repo.listSteps(task.task_id);
+  const stepId = id("STEP");
+  const step = await repo.createStep({
+    stepId,
+    taskId: task.task_id,
+    stepType: `skill_${action}`,
+    stepNo: Math.max(0, ...steps.map((item) => item.step_no)) + 1,
+    command: stageRuntimeCommand(task.task_id, stepId, action),
+  });
+  await dispatchCreatedStep(req, repo, dispatch, task, step, { initial, runtime });
+  return step;
+}
+
+async function logicalStageOutput(
+  repo: EvolveRepository,
+  stageSkillRepo: StageSkillRepository,
+  taskId: string,
+  stage: StageKey,
+  beforeStepNo = Number.MAX_SAFE_INTEGER,
+  roundNo?: number | null,
+): Promise<Record<string, unknown> | null> {
+  const steps = (await repo.listSteps(taskId)).filter((item) =>
+    item.status === "succeeded" && item.step_no < beforeStepNo
+      && (stage !== "optimize" || roundNo == null || Number(item.round_no ?? 0) === Number(roundNo)));
+  const runs = await stageSkillRepo.listExtensionRuns(taskId);
+  const runByStep = new Map(runs.filter((run) => run.stage_key === stage).map((run) => [run.step_id, run]));
+  const ranked = steps.flatMap((step) => {
+    if (step.step_type === stage) return [{ step, rank: 1 }];
+    const run = runByStep.get(step.step_id);
+    if (!run) return [];
+    return [{ step, rank: run.extension_mode === "postprocess" ? 3 : run.extension_mode === "replace" ? 2 : 0 }];
+  }).filter((item) => item.rank > 0)
+    .sort((left, right) => right.rank - left.rank || right.step.step_no - left.step.step_no);
+  const output = ranked[0] ? parseJson(ranked[0].step.output_json) : null;
+  return isRecord(output) ? output : null;
+}
+
+function diagnoseHasNoCases(output: Record<string, unknown>): boolean {
+  const items = isRecord(output.cases) ? output.cases.items : null;
+  return Array.isArray(items) && items.length === 0;
+}
+
+async function stageRuntimeInput(
+  repo: EvolveRepository,
+  stageSkillRepo: StageSkillRepository,
+  task: EvolveTaskRow,
+  step: EvolveStepRow,
+  stage: StageKey,
+  mode: StageExtensionMode,
+  initialInput: unknown,
+): Promise<Record<string, unknown>> {
+  const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+  const latestAnswer = await stageSkillRepo.findLatestAnsweredInteraction(task.task_id, step.step_id);
+  const targetSkill = config.targetSkill ? {
+    asset_id: config.targetSkill.assetId,
+    skill_id: config.targetSkill.skillId,
+    name: config.targetSkill.name,
+    workspace: config.targetSkill.workspacePath,
+    path: config.targetSkill.skillPath,
+    baseline_sha256: config.targetSkill.baseline.sha256,
+  } : undefined;
+  const testInput = task.task_type === "stage_test" && isRecord(initialInput)
+    ? initialInput
+    : null;
+  const humanInput = (() => {
+    if (!latestAnswer?.response_json) return null;
+    const answer = parseJson(latestAnswer.response_json);
+    const request = parseJson(latestAnswer.request_json);
+    const tag = isRecord(request) ? String(request.tag ?? "") : "";
+    if (isRecord(answer)) {
+      return "tag" in answer ? answer : { tag, fields: answer };
+    }
+    return { tag, content: String(answer ?? "") };
+  })();
+  const common = {
+    ...(testInput ?? {}),
+    task: {
+      task_id: task.task_id,
+      task_type: task.task_type,
+      target_bot_id: task.bot_id,
+    },
+    ...(targetSkill ? { target_skill: targetSkill } : {}),
+    ...(humanInput ? { human_input: humanInput } : {}),
+  };
+  const currentResult = await logicalStageOutput(
+    repo,
+    stageSkillRepo,
+    task.task_id,
+    stage,
+    step.step_no,
+    step.round_no,
+  );
+  if (stage === "diagnose") {
+    return {
+      ...common,
+      diagnose_goal: testInput?.diagnose_goal ?? config.diagnoseIntent ?? "",
+      session_source: testInput?.session_source ?? config.sessionSource ?? { mode: "local" },
+      ...(mode === "postprocess" && currentResult ? { stage_result: currentResult } : {}),
+    };
+  }
+  if (stage === "plan") {
+    const diagnoseResult = testInput?.diagnose_result
+      ?? await logicalStageOutput(repo, stageSkillRepo, task.task_id, "diagnose", step.step_no);
+    return {
+      ...common,
+      goal: testInput?.goal ?? config.goal ?? "",
+      ...(diagnoseResult ? { diagnose_result: diagnoseResult } : {}),
+      ...(mode === "postprocess" && currentResult ? { stage_result: currentResult } : {}),
+    };
+  }
+  const previousRound = Number(step.round_no ?? 1) > 1
+    ? await logicalStageOutput(repo, stageSkillRepo, task.task_id, "optimize", step.step_no, Number(step.round_no) - 1)
+    : null;
+  return {
+    ...common,
+    round: Number(testInput?.round ?? step.round_no ?? 1),
+    plan_result: testInput?.plan_result
+      ?? await logicalStageOutput(repo, stageSkillRepo, task.task_id, "plan", step.step_no),
+    ...(previousRound ? { previous_round_result: previousRound } : {}),
+    ...(mode === "postprocess" && currentResult ? { stage_result: currentResult } : {}),
+  };
+}
+
+async function finishLogicalStage(
+  req: Request,
+  repo: EvolveRepository,
+  dispatch: Dispatch,
+  stageSkillRepo: StageSkillRepository,
+  task: EvolveTaskRow,
+  stage: StageKey,
+  sourceStep: EvolveStepRow,
+  output: Record<string, unknown>,
+  improvementRepo: InsightImprovementPort | null,
+) {
+  const finishTask = async () => {
+    const config = parseJson(task.config_json) as ExtendedTaskConfig | null;
+    if (config?.targetSkill) {
+      const finalStep = await createSkillLifecycleStep(req, repo, dispatch, task, "finalize");
+      return { stepId: finalStep.step_id, stepType: finalStep.step_type };
+    }
+    await repo.completeTask(task.task_id);
+    return null;
+  };
+  if (stage === "diagnose") {
+    const diagnoseCases = (output as { cases?: { items?: unknown[] } }).cases?.items;
+    if (Array.isArray(diagnoseCases) && diagnoseCases.length === 0) {
+      return finishTask();
+    }
+    if (!stageEnabled(task, "plan")) return finishTask();
+    return scheduleStageCut(req, repo, dispatch, stageSkillRepo, task, "plan", "start");
+  }
+  if (stage === "plan") {
+    if (task.task_type !== "full" || !stageEnabled(task, "optimize")) return finishTask();
+    const domains = output.benchDomains as { trainBenchDomainId?: unknown; testBenchDomainId?: unknown };
+    const config = {
+      ...((parseJson(task.config_json) as Record<string, unknown> | null) ?? {}),
+      trainBenchDomainId: String(domains.trainBenchDomainId),
+      testBenchDomainId: String(domains.testBenchDomainId),
+    };
+    await repo.updateTaskConfig(task.task_id, config);
+    const updatedTask = await repo.findTask(task.task_id);
+    if (!updatedTask) throw new Error("任务不存在");
+    return scheduleStageCut(req, repo, dispatch, stageSkillRepo, updatedTask, "optimize", "start", { roundNo: 1 });
+  }
+  return advanceOptimizeTask(req, repo, dispatch, sourceStep, output, improvementRepo, stageSkillRepo);
+}
+
 async function advanceOptimizeTask(
   req: Request,
   repo: EvolveRepository,
@@ -831,6 +1363,7 @@ async function advanceOptimizeTask(
   step: EvolveStepRow,
   output: unknown,
   improvementRepo: InsightImprovementPort | null,
+  stageSkillRepo?: StageSkillRepository | null,
 ) {
   const task = await repo.findTask(step.task_id);
   if (!task) throw new Error("step 关联任务不存在");
@@ -842,7 +1375,7 @@ async function advanceOptimizeTask(
     return null;
   }
 
-  const config = parseJson(task.config_json) as { maxRounds?: number } | null;
+  const config = parseJson(task.config_json) as ExtendedTaskConfig & { maxRounds?: number } | null;
   const configuredMaxRounds = Number(config?.maxRounds ?? 1);
   const maxRounds = Number.isSafeInteger(configuredMaxRounds) && configuredMaxRounds > 0
     ? configuredMaxRounds : 1;
@@ -852,7 +1385,16 @@ async function advanceOptimizeTask(
     && output.roundDecision.stop === false;
 
   if (explicitContinue && roundNo < maxRounds) {
+    if (stageSkillRepo && (config?.targetSkill || hasEnabledStageExtensions(config?.stageExtensions))) {
+      return scheduleStageCut(req, repo, dispatch, stageSkillRepo, task, "optimize", "start", {
+        roundNo: roundNo + 1,
+      });
+    }
     return createOptimizeStep(req, repo, dispatch, task, roundNo + 1);
+  }
+  if (config?.targetSkill) {
+    const finalStep = await createSkillLifecycleStep(req, repo, dispatch, task, "finalize");
+    return { stepId: finalStep.step_id, stepType: finalStep.step_type };
   }
   await markInsightTaskApplied(repo, improvementRepo, step.task_id);
   // Mark the Evolve Task completed only after the linked Insight item has
@@ -1084,6 +1626,9 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
   const artifactStore = deps.artifactStore ?? unavailableArtifactStore;
   const artifactUrlStore = deps.artifactUrlStore ?? deps.artifactStore ?? unavailableArtifactStore;
   const botWorkflowPermissionRepo = deps.botWorkflowPermissionRepo ?? null;
+  const ocbLocalSkills = deps.ocbLocalSkills ?? null;
+  const stageSkillRepo = deps.stageSkillRepo ?? null;
+  const skillAssetRepo = deps.skillAssetRepo ?? null;
   const runAnalysisStarter = deps.runAnalysisStarter
     ?? (repo && db ? createRunAnalysisStarter({ repo, db, dispatch }) : null);
 
@@ -1296,13 +1841,23 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       forceMessage: rawForceMessage, runtimeMaintenance: rawRuntimeMaintenance,
       openclawExecutionMode: rawOpenClawExecutionMode,
       improvementId: rawImprovementId, improvementRequestId: rawImprovementRequestId,
+      targetSkillAssetId: rawTargetSkillAssetId,
+      stageExtensions: rawStageExtensions,
+      stageSelection: rawStageSelection,
     } = req.body ?? {};
     const taskType = requestedTaskType === "full" ? "full" : "diagnose";
-    const inputMode = taskType === "full" ? String(rawInputMode ?? "diagnose_goal") : "diagnose_goal";
+    let inputMode = taskType === "full" ? String(rawInputMode ?? "diagnose_goal") : "diagnose_goal";
     if (!new Set(["diagnose_goal", "direct_goal"]).has(inputMode)) {
       res.status(400).json({ error: "inputMode 必须是 diagnose_goal 或 direct_goal" }); return;
     }
-    const requiresDiagnose = taskType === "diagnose" || inputMode === "diagnose_goal";
+    let stageSelection: FrozenStageSelection;
+    try {
+      stageSelection = resolveStageSelection(rawStageSelection, taskType, inputMode);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
+    }
+    inputMode = stageSelection.diagnose ? "diagnose_goal" : "direct_goal";
+    const requiresDiagnose = stageSelection.diagnose;
     let sessionSourceMode = rawSessionSource == null || rawSessionSource === "local"
       ? "local"
       : rawSessionSource === "service_export" ? "service_export" : null;
@@ -1315,8 +1870,8 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
     }
-    if (taskType === "full" && inputMode === "direct_goal" && !goal) {
-      res.status(400).json({ error: "按目标进化必须提供非空 goal" }); return;
+    if (taskType === "full" && stageSelection.plan && !goal) {
+      res.status(400).json({ error: "启用 Plan 时必须提供非空 goal" }); return;
     }
     const improvementIdRaw = String(rawImprovementId ?? "").trim();
     const improvementId = improvementIdRaw ? Number(improvementIdRaw) : null;
@@ -1371,6 +1926,28 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     if (improvementRequestId && improvementId === null) {
       res.status(400).json({ error: "improvementRequestId 必须与 improvementId 一起提供" }); return;
+    }
+    const targetSkillAssetId = String(rawTargetSkillAssetId ?? "").trim();
+    if (targetSkillAssetId && taskType !== "full") {
+      res.status(400).json({ error: "待进化 Skill 只能用于完整自进化任务" }); return;
+    }
+    let stageExtensions: FrozenTaskStageExtensions;
+    try {
+      stageExtensions = await resolveFrozenStageExtensions(rawStageExtensions, String(userId), stageSkillRepo);
+    } catch (error) {
+      res.status(422).json({ error: error instanceof Error ? error.message : String(error) }); return;
+    }
+    for (const stage of ["diagnose", "plan", "optimize"] as const) {
+      if (!stageSelection[stage] && Object.values(stageExtensions[stage] ?? {})
+        .some((binding) => binding?.enabled === true)) {
+        res.status(422).json({ error: `${findOfficialStage(stage)?.name ?? stage}已关闭，不能启用该 Stage 的自定义实现` }); return;
+      }
+    }
+    if ((targetSkillAssetId || hasEnabledStageExtensions(stageExtensions)) && requiresDiagnose
+      && judgeBackend === "api" && stageExtensions.diagnose?.replace?.enabled !== true) {
+      res.status(422).json({
+        error: "启用 Stage 扩展或 Skill 候选隔离时，诊断暂只支持 Agent Judge；也可使用诊断整体替换实现",
+      }); return;
     }
     if (await rejectUnsupportedBotEngine(repo, res, String(userId), String(botId), String(botEnv ?? ""))) return;
     const targetRuntime = await repo.resolveEvolveBotRuntime(String(userId), String(botId), String(botEnv ?? ""));
@@ -1451,11 +2028,13 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     const taskId = evolveTaskId();
     const stepId = id("STEP");
     const clawwebUrl = getClawWebPublicBaseUrl();
+    const enabledNodeKeys = (["diagnose", "plan", "optimize"] as const)
+      .filter((stage) => stageSelection[stage]);
     let nodeCommands: NodeCommandYamls;
     try {
       nodeCommands = parseNodeCommandYamls(
         nodeCommandYamls,
-        taskType === "full" && inputMode === "direct_goal" ? ["plan", "optimize"] : [...taskNodeKeys(taskType)],
+        enabledNodeKeys,
       );
     } catch (error) {
       res.status(400).json({ error: error instanceof Error ? error.message : String(error) }); return;
@@ -1468,9 +2047,36 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const dispatchMode = await repo.resolveBotDispatchMode(String(userId), String(botId), String(botEnv ?? ""));
     const diagnoseTemplate = nodeCommands.diagnose ?? defaultNodeCommand("diagnose");
+    let targetSkill: FrozenSkillTarget | undefined;
+    if (targetSkillAssetId) {
+      if (!skillAssetRepo || !ocbLocalSkills || !deps.artifactStore?.putObject) {
+        res.status(503).json({ error: "Skill 进化所需的 OCB 或版本存储服务不可用" }); return;
+      }
+      try {
+        targetSkill = await freezeSkillTarget({
+          taskId,
+          ownerUserId: String(userId),
+          botId: String(botId),
+          assetId: targetSkillAssetId,
+          skillAssetRepo,
+          ocbLocalSkills,
+          artifactStore: { putObject: deps.artifactStore.putObject.bind(deps.artifactStore) },
+          identity: {
+            userId: String(userId),
+            authorization: req.header("Authorization") || undefined,
+            cookie: req.header("Cookie") || undefined,
+          },
+        });
+      } catch (error) {
+        res.status(Number((error as { status?: unknown })?.status) || 502).json({
+          error: `无法从 OCB 读取待进化 Skill: ${error instanceof Error ? error.message : String(error)}`,
+        }); return;
+      }
+    }
     const config = {
       ...(taskType === "full" ? { inputMode } : {}),
-      ...(requiresDiagnose ? { model: diagnoseModel, diagnoseIntent, maxSessions } : {}),
+      stageSelection,
+      ...(requiresDiagnose ? { model: diagnoseModel, diagnoseIntent, maxSessions, judgeBackend } : {}),
       ...(requiresDiagnose ? { sessionSource: { mode: sessionSourceMode } } : {}),
       maxRounds: rounds,
       ...(taskType === "full" && goal ? { goal } : {}),
@@ -1478,10 +2084,12 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       ...(requiresDiagnose && endDate ? { endDate: String(endDate) } : {}),
       nodeCommands: {
         ...(requiresDiagnose ? { diagnose: diagnoseTemplate } : {}),
-        plan: nodeCommands.plan ?? defaultNodeCommand("plan"),
-        ...(taskType === "full" ? { optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize") } : {}),
+        ...(stageSelection.plan ? { plan: nodeCommands.plan ?? defaultNodeCommand("plan") } : {}),
+        ...(stageSelection.optimize ? { optimize: nodeCommands.optimize ?? defaultNodeCommand("optimize") } : {}),
       },
       dispatchMode, forceMessage, runtimeMaintenance, clawwebUrl, openclawExecutionMode, botEnv: String(botEnv ?? ""), ...(dispatchMode === "run" ? { lifecycleStage: "draft" } : {}),
+      ...(hasEnabledStageExtensions(stageExtensions) ? { stageExtensions } : {}),
+      ...(targetSkill ? { targetSkill } : {}),
     };
     const diagnoseSystemArgs: Array<[string, string | number]> = [
       ["judge-backend", judgeBackend], ["max-sessions", maxSessions],
@@ -1512,6 +2120,41 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       taskName: String(taskName).trim(), remark: String(remark ?? "").trim() || null,
       configJson: JSON.stringify(config), createdBy: improvementActorUserId ?? String(req.header("X-User-Id") || userId),
     });
+    const defaultSelection = resolveStageSelection(null, taskType, inputMode);
+    const hasCustomStageSelection = (Object.keys(stageSelection) as StageKey[])
+      .some((stage) => stageSelection[stage] !== defaultSelection[stage]);
+    const usesStageExecution = Boolean(targetSkill) || hasEnabledStageExtensions(stageExtensions)
+      || hasCustomStageSelection;
+    if (usesStageExecution) {
+      const task = await repo.findTask(taskId);
+      if (!task || !stageSkillRepo) {
+        await repo.deleteTask(taskId);
+        res.status(503).json({ error: "Stage 执行服务不可用" }); return;
+      }
+      const initialStage = firstEnabledStage(stageSelection);
+      try {
+        if (targetSkill) {
+          await createSkillLifecycleStep(req, repo, dispatch, task, "prepare", true, targetRuntime);
+        } else {
+          await scheduleStageCut(req, repo, dispatch, stageSkillRepo, task, initialStage, "start", {
+            initial: true,
+            runtime: targetRuntime,
+          });
+        }
+      } catch (error) {
+        await repo.updateTaskState({
+          taskId,
+          status: "failed",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+      }
+      const created = await repo.findTask(taskId);
+      res.status(201).json(publicTask(
+        created as unknown as Record<string, unknown>,
+        await repo.listSteps(taskId),
+      ));
+      return;
+    }
     if (taskType === "full" && inputMode === "direct_goal") {
       const task = await repo.findTask(taskId);
       if (!task) { res.status(500).json({ error: "创建目标进化任务失败" }); return; }
@@ -2197,6 +2840,16 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     );
     res.json({
       ...view,
+      interactions: stageSkillRepo ? (await stageSkillRepo.listInteractions(task.task_id)).map((item) => ({
+        interactionId: item.interaction_id,
+        stepId: item.step_id,
+        attempt: item.attempt_no,
+        status: item.status,
+        question: parseJson(item.request_json),
+        answer: parseJson(item.response_json),
+        createdAt: item.gmt_create,
+        updatedAt: item.gmt_modified,
+      })) : [],
       initialPack: initialPack ? {
         packId: initialPack.pack_id,
         taskId: initialPack.source_task_id,
@@ -2210,6 +2863,207 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
           contentType: initialPack.artifact_content_type,
         },
       } : null,
+    });
+  }));
+
+  router.post("/tasks/:taskId/steps/:stepId/interactions/:interactionId/answer", asyncHandler(async (req, res) => {
+    if (!repo || !stageSkillRepo) { res.status(503).json({ error: "Stage 交互服务不可用" }); return; }
+    const task = await repo.findTask(String(req.params.taskId));
+    const step = await repo.findStep(String(req.params.stepId));
+    const interaction = await stageSkillRepo.findInteraction(String(req.params.interactionId));
+    if (!task || !step || step.task_id !== task.task_id || !interaction
+      || interaction.task_id !== task.task_id || interaction.step_id !== step.step_id) {
+      res.status(404).json({ error: "待回答问题不存在" }); return;
+    }
+    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以回答" }); return; }
+    if (step.status !== "waiting_context" || interaction.status !== "waiting") {
+      res.status(409).json({ error: "当前问题已回答或 Stage 不在等待中" }); return;
+    }
+    const answer = req.body?.answer;
+    if (answer == null || (typeof answer === "string" && !answer.trim())
+      || (typeof answer !== "string" && !isRecord(answer))) {
+      res.status(400).json({ error: "请提交文本答案或表单字段" }); return;
+    }
+    if (!await stageSkillRepo.answerInteraction(interaction.interaction_id, answer)) {
+      res.status(409).json({ error: "问题已经被回答" }); return;
+    }
+    if (!await repo.resumeWaitingStep(step.step_id)) {
+      res.status(409).json({ error: "Stage 已不在等待状态" }); return;
+    }
+    const resumedStep = await repo.findStep(step.step_id);
+    if (!resumedStep) { res.status(409).json({ error: "Stage 不存在" }); return; }
+    await dispatchCreatedStep(req, repo, dispatch, task, resumedStep);
+    res.json({
+      ok: true,
+      taskId: task.task_id,
+      stepId: step.step_id,
+      interactionId: interaction.interaction_id,
+      status: (await repo.findStep(step.step_id))?.status,
+    });
+  }));
+
+  router.get("/tasks/:taskId/skill-diff", asyncHandler(async (req, res) => {
+    if (!repo || !artifactStore) { res.status(503).json({ error: "Skill 版本文件存储不可用" }); return; }
+    const task = await repo.findTask(String(req.params.taskId));
+    if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
+    if (!canReadTask(req, task)) { res.status(403).json({ error: "没有查看该任务的权限" }); return; }
+    const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+    const target = config.targetSkill;
+    if (!target) { res.status(404).json({ error: "该任务不是 Skill 进化任务" }); return; }
+    if (!target.candidate.artifact) {
+      res.status(409).json({ error: "候选 Skill 尚未生成" }); return;
+    }
+    const [baseline, candidate] = await Promise.all([
+      artifactStore.getObject(objectKeyFromEvolveRef(target.baseline.ref)),
+      artifactStore.getObject(objectKeyFromEvolveRef(target.candidate.artifact.ref)),
+    ]);
+    res.json({
+      target: { assetId: target.assetId, skillId: target.skillId, name: target.name },
+      baseline: { sha256: target.baseline.sha256 },
+      candidate: { sha256: target.candidate.artifact.sha256 },
+      ...await skillPackageDiff(baseline.content, candidate.content),
+    });
+  }));
+
+  router.post("/tasks/:taskId/skill-decision", asyncHandler(async (req, res) => {
+    if (!repo || !skillAssetRepo || !ocbLocalSkills) {
+      res.status(503).json({ error: "Skill 版本服务不可用" }); return;
+    }
+    const task = await repo.findTask(String(req.params.taskId));
+    if (!task) { res.status(404).json({ error: "任务不存在" }); return; }
+    if (!canManageTask(req, task)) { res.status(403).json({ error: "只有任务创建人可以确认版本" }); return; }
+    if (task.status !== "waiting_acceptance") {
+      res.status(409).json({ error: `任务当前不在版本确认阶段: ${task.status}` }); return;
+    }
+    const decision = String(req.body?.decision ?? "");
+    if (decision !== "accept" && decision !== "reject") {
+      res.status(400).json({ error: "decision 只能是 accept 或 reject" }); return;
+    }
+    const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+    const target = config.targetSkill;
+    if (!target?.candidate.artifact) {
+      res.status(409).json({ error: "任务缺少已冻结的候选 Skill 包" }); return;
+    }
+    if (decision === "reject") {
+      const nextConfig = { ...config, skillDecision: { decision, decidedAt: new Date().toISOString() } };
+      await repo.updateTaskState({ taskId: task.task_id, status: "completed", config: nextConfig });
+      res.json({ taskId: task.task_id, status: "completed", decision });
+      return;
+    }
+    const asset = await skillAssetRepo.findAsset(target.assetId);
+    if (!asset || asset.owner_user_id !== task.user_id || asset.bot_id !== task.bot_id
+      || asset.ocb_skill_id !== target.skillId) {
+      res.status(409).json({ error: "待更新的 OCB Skill 与任务冻结目标不一致" }); return;
+    }
+    const stored = await artifactStore.getObject(objectKeyFromEvolveRef(target.candidate.ref));
+    const sha256 = createHash("sha256").update(stored.content).digest("hex");
+    if (stored.content.byteLength !== target.candidate.artifact.size
+      || sha256 !== target.candidate.artifact.sha256) {
+      res.status(409).json({ error: "候选 Skill 包与 Agent 上报的摘要不一致" }); return;
+    }
+    const recordedVersion = await skillAssetRepo.findVersionBySourceTask(asset.asset_id, task.task_id);
+    if (recordedVersion) {
+      const live = await ocbLocalSkills.exportLocalSkill({
+        botId: task.bot_id,
+        skillId: target.skillId,
+        identity: {
+          userId: task.user_id,
+          authorization: req.header("Authorization") || undefined,
+          cookie: req.header("Cookie") || undefined,
+        },
+      });
+      const nextConfig = {
+        ...config,
+        skillDecision: {
+          decision,
+          decidedAt: new Date().toISOString(),
+          versionId: recordedVersion.version_id,
+          version: `v${recordedVersion.version_no}`,
+          ocbPackageSha256: live.sha256,
+        },
+      };
+      await repo.updateTaskState({ taskId: task.task_id, status: "completed", config: nextConfig });
+      res.json({
+        taskId: task.task_id,
+        status: "completed",
+        decision,
+        duplicate: true,
+        version: { versionId: recordedVersion.version_id, version: `v${recordedVersion.version_no}` },
+      });
+      return;
+    }
+    let replaced;
+    try {
+      replaced = await ocbLocalSkills.replaceLocalSkill({
+        botId: task.bot_id,
+        skillId: target.skillId,
+        packageBytes: stored.content,
+        expectedSha256: target.baseline.sha256,
+        identity: {
+          userId: task.user_id,
+          authorization: req.header("Authorization") || undefined,
+          cookie: req.header("Cookie") || undefined,
+        },
+      });
+    } catch (error) {
+      const statusCode = Number((error as { status?: unknown })?.status) || 502;
+      if (statusCode === 409) {
+        try {
+          const live = await ocbLocalSkills.exportLocalSkill({
+            botId: task.bot_id,
+            skillId: target.skillId,
+            identity: {
+              userId: task.user_id,
+              authorization: req.header("Authorization") || undefined,
+              cookie: req.header("Cookie") || undefined,
+            },
+          });
+          if (await skillPackagesEquivalent(live.packageBytes, stored.content)) {
+            replaced = { sha256: live.sha256 };
+          }
+        } catch {
+          // Keep the original compare-and-swap conflict when the live package
+          // cannot be read and proven equal to this task's exact candidate.
+        }
+      }
+      if (!replaced) {
+        res.status(statusCode).json({
+          code: statusCode === 409 ? "SKILL_VERSION_CONFLICT" : "OCB_SKILL_UPDATE_FAILED",
+          error: statusCode === 409
+            ? "待进化 Skill 在任务运行期间已被其他操作修改，请重新发起任务"
+            : error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+    }
+    const version = await skillAssetRepo.createAcceptedVersion({
+      versionId: `SKVER-${randomUUID().slice(0, 12).toUpperCase()}`,
+      assetId: asset.asset_id,
+      packageRef: target.candidate.ref,
+      // This digest describes the exact immutable bytes kept by ClawEvolve.
+      // OCB may canonicalize the same file set into different ZIP bytes, so
+      // its authoritative live digest is recorded separately below.
+      packageSha256: `sha256:${sha256}`,
+      sourceTaskId: task.task_id,
+      baselinePackageRef: target.baseline.ref,
+      baselinePackageSha256: target.baseline.sha256,
+    });
+    const nextConfig = {
+      ...config,
+      skillDecision: {
+        decision,
+        decidedAt: new Date().toISOString(),
+        versionId: version.version_id,
+        version: `v${version.version_no}`,
+        ocbPackageSha256: replaced.sha256,
+      },
+    };
+    await repo.updateTaskState({ taskId: task.task_id, status: "completed", config: nextConfig });
+    res.json({
+      taskId: task.task_id,
+      status: "completed",
+      decision,
+      version: { versionId: version.version_id, version: `v${version.version_no}` },
     });
   }));
 
@@ -2736,6 +3590,108 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     }
     const task = await repo.findTask(step.task_id);
     if (!task) { res.status(409).json({ error: "step 关联任务不存在" }); return; }
+    if (step.step_type === "skill_prepare" || step.step_type === "skill_finalize") {
+      const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+      const target = config.targetSkill;
+      if (!target) { res.status(409).json({ error: "Skill 生命周期 Step 缺少冻结目标" }); return; }
+      if (step.step_type === "skill_prepare") {
+        const packageUrl = await artifactUrlStore.createSignedUrl(
+          objectKeyFromEvolveRef(target.baseline.ref),
+          "GET",
+          EVOLVE_ARTIFACT_URL_TTL_SECONDS,
+        );
+        res.json({
+          protocolVersion: "clawevolve.skill-candidate/v1",
+          action: "prepare",
+          task: { taskId: task.task_id, targetBotId: task.bot_id },
+          sourceWorkspace: "/home/admin/.openclaw/workspace",
+          candidateWorkspace: target.workspacePath,
+          targetSkill: {
+            skillId: target.skillId,
+            path: target.skillPath,
+            baselineSha256: target.baseline.sha256,
+            package: { method: "GET", url: packageUrl },
+          },
+          report: { url: `/api/evolve/internal/tasks/${task.task_id}/steps/${step.step_id}/report` },
+        });
+        return;
+      }
+      const uploadUrl = await artifactUrlStore.createSignedUrl(
+        objectKeyFromEvolveRef(target.candidate.ref),
+        "PUT",
+        EVOLVE_ARTIFACT_URL_TTL_SECONDS,
+        { "Content-Type": "application/zip" },
+      );
+      res.json({
+        protocolVersion: "clawevolve.skill-candidate/v1",
+        action: "finalize",
+        task: { taskId: task.task_id, targetBotId: task.bot_id },
+        candidateWorkspace: target.workspacePath,
+        targetSkill: { skillId: target.skillId, path: target.skillPath },
+        candidatePackage: {
+          ref: target.candidate.ref,
+          method: "PUT",
+          url: uploadUrl,
+          headers: { "Content-Type": "application/zip" },
+        },
+        report: { url: `/api/evolve/internal/tasks/${task.task_id}/steps/${step.step_id}/report` },
+      });
+      return;
+    }
+    if (step.step_type === "stage_extension") {
+      if (!stageSkillRepo) { res.status(503).json({ error: "Stage Skill 服务不可用" }); return; }
+      const run = await stageSkillRepo.findExtensionRun(step.step_id);
+      const implementation = run
+        ? await stageSkillRepo.findImplementation(run.implementation_id)
+        : null;
+      if (!run || !implementation || implementation.owner_user_id !== task.user_id
+        || implementation.stage_key !== run.stage_key
+        || implementation.extension_mode !== run.extension_mode) {
+        res.status(409).json({ error: "Stage Skill 冻结绑定不存在或不一致" }); return;
+      }
+      const packageUrl = await artifactUrlStore.createSignedUrl(
+        objectKeyFromEvolveRef(implementation.package_ref),
+        "GET",
+        EVOLVE_ARTIFACT_URL_TTL_SECONDS,
+      );
+      const rawInitialInput = parseJson(run.initial_input_json);
+      const stageInput = await stageRuntimeInput(
+        repo,
+        stageSkillRepo,
+        task,
+        step,
+        run.stage_key,
+        run.extension_mode,
+        rawInitialInput,
+      );
+      const stageDefinition = findOfficialStage(run.stage_key);
+      const inputError = stageDefinition
+        ? validateJsonSchema(stageRuntimeInputSchema(stageDefinition, run.extension_mode), stageInput)
+        : "Stage 定义不存在";
+      if (inputError) {
+        res.status(422).json({ error: `Stage 输入不符合协议：${inputError}` }); return;
+      }
+      res.json({
+        protocolVersion: "clawevolve.stage-runtime/v1",
+        task: { taskId: task.task_id, taskType: task.task_type, targetBotId: task.bot_id },
+        stage: {
+          key: run.stage_key,
+          name: findOfficialStage(run.stage_key)?.name ?? run.stage_key,
+          mode: run.extension_mode,
+          round: step.round_no,
+        },
+        implementation: {
+          implementationId: implementation.implementation_id,
+          version: `v${implementation.version_no}`,
+          entrypoint: "implementation/SKILL.md",
+          packageSha256: implementation.package_sha256,
+          package: { method: "GET", url: packageUrl },
+        },
+        input: stageInput,
+        report: { url: `/api/evolve/internal/tasks/${task.task_id}/steps/${step.step_id}/report` },
+      });
+      return;
+    }
     if (step.step_type === "plan" && isInsightImprovementTask(task)) {
       if (!taskSourceService) {
         res.status(503).json({ code: "PLAN_SOURCE_INPUT_UNAVAILABLE", error: "Task Source 服务不可用" }); return;
@@ -3060,6 +4016,98 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
     let output = reportedOutput;
     if (!status) { res.status(400).json({ error: "status 为必填项" }); return; }
     if (!ALLOWED_STATUSES.has(String(status))) { res.status(400).json({ error: `不支持的状态: ${status}` }); return; }
+    if (step.step_type === "stage_extension" && status !== "running"
+      && status !== "failed" && status !== "canceled") {
+      if (!stageSkillRepo) { res.status(503).json({ error: "Stage Skill 服务不可用" }); return; }
+      let parsedResult;
+      try {
+        parsedResult = parseStageSkillResult(reportedOutput);
+      } catch (parseError) {
+        res.status(422).json({ error: parseError instanceof Error ? parseError.message : String(parseError) }); return;
+      }
+      if (parsedResult.kind === "waiting") {
+        if (await stageSkillRepo.findWaitingInteraction(step.task_id, step.step_id)) {
+          res.status(409).json({ error: "当前 Stage 已在等待用户回答" }); return;
+        }
+        const interaction = await stageSkillRepo.createInteraction({
+          interactionId: `HITL-${randomUUID().slice(0, 12).toUpperCase()}`,
+          taskId: step.task_id,
+          stepId: step.step_id,
+          request: parsedResult.question,
+        });
+        await repo.updateStepStatus(step.step_id, {
+          status: "waiting_context",
+          summary: summary == null ? "等待用户补充信息" : String(summary),
+          output: { hitl: true, question: parsedResult.question },
+        });
+        res.json({
+          ok: true,
+          stepId,
+          status: "waiting_context",
+          interaction: {
+            interactionId: interaction.interaction_id,
+            attempt: interaction.attempt_no,
+            question: parsedResult.question,
+          },
+          nextStep: null,
+        });
+        return;
+      }
+      if (status !== "succeeded") {
+        res.status(422).json({ error: "hitl=false 时 status 必须是 succeeded" }); return;
+      }
+      const run = await stageSkillRepo.findExtensionRun(step.step_id);
+      if (!run) { res.status(409).json({ error: "Stage Skill 运行记录不存在" }); return; }
+      const outputError = run.extension_mode === "preprocess"
+        ? (!nonEmptyString(parsedResult.result.summary) ? "预处理结果必须包含非空 summary" : null)
+        : validateStepOutput(run.stage_key, parsedResult.result);
+      if (outputError) { res.status(422).json({ error: outputError }); return; }
+      if (run.stage_key === "plan" && run.extension_mode !== "preprocess") {
+        if (!benchTemplateRepo) { res.status(503).json({ error: "Bench Template 数据库不可用" }); return; }
+        const task = await repo.findTask(step.task_id);
+        if (!task) { res.status(409).json({ error: "step 关联任务不存在" }); return; }
+        const value = parsedResult.result;
+        const domains = value.benchDomains as Record<string, unknown>;
+        const items = ((value.benchCases as Record<string, unknown>).items as Array<Record<string, unknown>>);
+        for (const item of items) {
+          const template = item.template as Record<string, unknown>;
+          const expectedDomainId = item.split === "train"
+            ? String(domains.trainBenchDomainId) : String(domains.testBenchDomainId);
+          const ownerUserId = String(template.ownerUserId);
+          const domainId = String(template.domainId);
+          const templateName = String(template.templateName);
+          const published = await benchTemplateRepo.findByOwnerDomainAndName(ownerUserId, domainId, templateName);
+          if (!published || published.status !== "published" || published.published_version == null
+            || ownerUserId !== task.user_id || domainId !== expectedDomainId
+            || (template.version != null && Number(template.version) !== published.published_version)) {
+            res.status(422).json({
+              code: "PLAN_TEMPLATE_MISMATCH",
+              error: "Plan Bench Case 引用的模板未发布或与冻结 owner/domain/version 不一致",
+              ownerUserId, domainId, templateName,
+            }); return;
+          }
+        }
+      }
+      output = parsedResult.result;
+    }
+    if (status === "succeeded" && step.step_type === "skill_prepare") {
+      if (!isRecord(output) || output.prepared !== true
+        || !nonEmptyString(output.workspace) || !nonEmptyString(output.targetSkillPath)) {
+        res.status(422).json({ error: "候选准备结果必须包含 prepared、workspace 和 targetSkillPath" }); return;
+      }
+    }
+    if (status === "succeeded" && step.step_type === "skill_finalize") {
+      const task = await repo.findTask(step.task_id);
+      const config = task ? parseJson(task.config_json) as ExtendedTaskConfig | null : null;
+      const artifact = isRecord(output) && isRecord(output.artifact) ? output.artifact : null;
+      if (!config?.targetSkill || !artifact
+        || artifact.ref !== config.targetSkill.candidate.ref
+        || !Number.isSafeInteger(Number(artifact.size)) || Number(artifact.size) <= 0
+        || !/^[0-9a-f]{64}$/.test(String(artifact.sha256 ?? ""))
+        || artifact.contentType !== "application/zip") {
+        res.status(422).json({ error: "候选 Skill 包结果与本次任务的冻结上传位置不一致" }); return;
+      }
+    }
     if (step.status === "canceled" && step.step_type === "optimize") {
       res.json({
         ok: true, duplicate: true, ignored: true, revised: false,
@@ -3388,6 +4436,137 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       errorMessage: error?.message == null ? undefined : String(error.message),
       retryable: error?.retryable == null ? undefined : Boolean(error.retryable),
     });
+    if (status !== "succeeded" && stageSkillRepo
+      && (step.step_type === "skill_prepare" || step.step_type === "skill_finalize")) {
+      const task = await repo.findTask(step.task_id);
+      if (task?.task_type === "stage_test") {
+        const run = (await stageSkillRepo.listExtensionRuns(task.task_id)).at(-1);
+        if (run) await stageSkillRepo.updateIntegrationTest(run.implementation_id, task.task_id, "test_failed");
+      }
+    }
+    if (step.step_type === "stage_extension" && stageSkillRepo) {
+      const run = await stageSkillRepo.findExtensionRun(step.step_id);
+      const task = await repo.findTask(step.task_id);
+      if (run && task?.task_type === "stage_test") {
+        if (status !== "succeeded") {
+          await stageSkillRepo.updateIntegrationTest(run.implementation_id, task.task_id, "test_failed");
+          res.json({ ok: true, duplicate: false, stepId, status, nextStep: null });
+          return;
+        }
+        const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+        if (config.targetSkill) {
+          const finalStep = await createSkillLifecycleStep(req, repo, dispatch, task, "finalize");
+          res.json({
+            ok: true,
+            duplicate: false,
+            stepId,
+            status,
+            nextStep: { stepId: finalStep.step_id, stepType: finalStep.step_type },
+          });
+          return;
+        }
+        await stageSkillRepo.updateIntegrationTest(run.implementation_id, task.task_id, "test_passed");
+        await repo.completeTask(task.task_id);
+        res.json({ ok: true, duplicate: false, stepId, status, nextStep: null });
+        return;
+      }
+      if (status === "succeeded" && run && task && isRecord(output)) {
+        const next = await scheduleStageCut(
+          req,
+          repo,
+          dispatch,
+          stageSkillRepo,
+          task,
+          run.stage_key,
+          run.extension_mode,
+          { roundNo: step.round_no },
+        );
+        if (next) {
+          res.json({ ok: true, duplicate: false, stepId, status, nextStep: next });
+          return;
+        }
+        const finalStep = await repo.findStep(step.step_id) ?? step;
+        const nextStage = await finishLogicalStage(
+          req,
+          repo,
+          dispatch,
+          stageSkillRepo,
+          task,
+          run.stage_key,
+          finalStep,
+          output,
+          improvementRepo,
+        );
+        res.json({
+          ok: true, duplicate: false, stepId, status, nextStep: nextStage,
+          ...(run.stage_key === "diagnose" && diagnoseHasNoCases(output)
+            ? { reason: "diagnose_no_cases" } : {}),
+        });
+        return;
+      }
+    }
+    if (status === "succeeded" && step.step_type === "skill_prepare") {
+      const task = await repo.findTask(step.task_id);
+      if (!task || !stageSkillRepo) { res.status(409).json({ error: "Skill 候选任务上下文不存在" }); return; }
+      if (task.task_type === "stage_test") {
+        const extensionStep = (await repo.listSteps(task.task_id))
+          .find((item) => item.step_type === "stage_extension" && item.status === "created");
+        if (!extensionStep) {
+          res.status(409).json({ error: "集成测试缺少待执行的 Stage Skill Step" }); return;
+        }
+        await dispatchCreatedStep(req, repo, dispatch, task, extensionStep);
+        res.json({
+          ok: true,
+          duplicate: false,
+          stepId,
+          status,
+          nextStep: {
+            stepId: extensionStep.step_id,
+            stepType: extensionStep.step_type,
+            roundNo: extensionStep.round_no,
+          },
+        });
+        return;
+      }
+      const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+      const selection = config.stageSelection ?? {
+        diagnose: !(task.task_type === "full" && config.inputMode === "direct_goal"),
+        plan: true,
+        optimize: task.task_type === "full",
+      };
+      const initialStage = firstEnabledStage(selection);
+      const next = await scheduleStageCut(req, repo, dispatch, stageSkillRepo, task, initialStage, "start");
+      res.json({ ok: true, duplicate: false, stepId, status, nextStep: next });
+      return;
+    }
+    if (status === "succeeded" && step.step_type === "skill_finalize") {
+      const task = await repo.findTask(step.task_id);
+      if (!task || !isRecord(output) || !isRecord(output.artifact)) {
+        res.status(409).json({ error: "候选 Skill 交付上下文不存在" }); return;
+      }
+      const config = (parseJson(task.config_json) as ExtendedTaskConfig | null) ?? {};
+      const target = config.targetSkill;
+      if (!target) { res.status(409).json({ error: "任务没有待确认的 Skill" }); return; }
+      const nextConfig: ExtendedTaskConfig = {
+        ...config,
+        targetSkill: {
+          ...target,
+          candidate: { ...target.candidate, artifact: output.artifact },
+        } as FrozenSkillTarget,
+      };
+      if (task.task_type === "stage_test") {
+        const runs = await stageSkillRepo?.listExtensionRuns(task.task_id) ?? [];
+        const run = runs.at(-1);
+        if (!run) { res.status(409).json({ error: "集成测试缺少 Stage Skill 运行记录" }); return; }
+        await stageSkillRepo!.updateIntegrationTest(run.implementation_id, task.task_id, "test_passed");
+        await repo.updateTaskState({ taskId: task.task_id, status: "completed", config: nextConfig });
+        res.json({ ok: true, duplicate: false, stepId, status, taskStatus: "completed", nextStep: null });
+        return;
+      }
+      await repo.updateTaskState({ taskId: task.task_id, status: "waiting_acceptance", config: nextConfig });
+      res.json({ ok: true, duplicate: false, stepId, status, taskStatus: "waiting_acceptance", nextStep: null });
+      return;
+    }
     if (status === "succeeded" && step.step_type === "skill_init") {
       const task = await repo.findTask(step.task_id);
       if (!task) { res.status(409).json({ error: "step 关联任务不存在" }); return; }
@@ -3421,6 +4600,48 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       }
     }
 
+    if (status === "succeeded" && stageSkillRepo
+      && (step.step_type === "diagnose" || step.step_type === "plan" || step.step_type === "optimize")) {
+      const task = await repo.findTask(step.task_id);
+      const config = task ? parseJson(task.config_json) as ExtendedTaskConfig | null : null;
+      if (task && (config?.stageSelection || config?.targetSkill
+        || hasEnabledStageExtensions(config?.stageExtensions)) && isRecord(output)) {
+        const stage = step.step_type as StageKey;
+        const next = await scheduleStageCut(
+          req,
+          repo,
+          dispatch,
+          stageSkillRepo,
+          task,
+          stage,
+          "builtin",
+          { roundNo: step.round_no },
+        );
+        if (next) {
+          res.json({ ok: true, duplicate: false, stepId, status, nextStep: next });
+          return;
+        }
+        const finalStep = await repo.findStep(step.step_id) ?? step;
+        const nextStage = await finishLogicalStage(
+          req,
+          repo,
+          dispatch,
+          stageSkillRepo,
+          task,
+          stage,
+          finalStep,
+          output,
+          improvementRepo,
+        );
+        res.json({
+          ok: true, duplicate: false, stepId, status, nextStep: nextStage,
+          ...(stage === "diagnose" && diagnoseHasNoCases(output)
+            ? { reason: "diagnose_no_cases" } : {}),
+        });
+        return;
+      }
+    }
+
     if (status === "succeeded" && step.step_type === "diagnose") {
       const diagnoseCases = (output as { cases?: { items?: unknown[] } }).cases?.items;
       if (Array.isArray(diagnoseCases) && diagnoseCases.length === 0) {
@@ -3437,7 +4658,7 @@ export function createEvolveRouter(repo: EvolveRepository | null, deps: EvolveRo
       }
       const task = await repo.findTask(step.task_id);
       if (!task) { res.status(409).json({ error: "step 关联任务不存在" }); return; }
-      const nextStep = await createPlanStep(req, repo, dispatch, step, task);
+      const nextStep = await createPlanStep(req, repo, dispatch, task);
       res.json({
         ok: true, duplicate: false, stepId: stepId, status,
         nextStep,

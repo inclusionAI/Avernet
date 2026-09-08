@@ -14,6 +14,19 @@ class LocalSkillUploadServiceProtocol(Protocol):
         self, *, bot_id: str, owner_id: str, actor_id: str, package: bytes
     ) -> dict[str, Any]: ...
 
+    async def replace_local_skill_package(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        expected_digest: str,
+    ) -> dict[str, Any]:
+        """Replace one exact Local Skill only when its package still matches."""
+        ...
+
     async def upload_local_skill_files(
         self,
         *,

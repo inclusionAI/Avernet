@@ -13,6 +13,7 @@ makes a SkillSet-bridged Skill answerable before anything else wrote its row.
 from __future__ import annotations
 
 from enum import StrEnum
+import hashlib
 from typing import Any, Callable, Protocol, TYPE_CHECKING
 
 from injector import inject
@@ -39,6 +40,11 @@ from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
 )
 from agentclaw.community.core.skill_center.services.skill_parser import SkillParser
+from agentclaw.community.core.skill_center.skill_package import (
+    SkillPackageInvalidError,
+    SkillPackageTooLargeError,
+    SkillPackageValidator,
+)
 
 if TYPE_CHECKING:
     from agentclaw.community.core.devices.services.device_context_resolver import (
@@ -307,6 +313,25 @@ class SkillQueryService(SkillQueryServiceProtocol):
         if isinstance(content, str):
             return content
         return SkillParser.decode_content_for_display(content)
+
+    async def get_local_package(
+        self, *, skill_id: str, bot_id: str, owner_id: str, user_id: str
+    ) -> tuple[bytes, str]:
+        """Export exactly the complete Local Skill package the Bot is using."""
+        skill, bot, owner_id = self._resolve(
+            skill_id=skill_id,
+            bot_id=bot_id,
+            owner_id=owner_id,
+            user_id=user_id,
+        )
+        if self._kind_for(skill) is not SkillAssetKind.LOCAL:
+            raise LocalSkillNotFoundError()
+        try:
+            files = await self._local_storage(skill, bot, owner_id).read_package_files()
+            package = SkillPackageValidator(SkillParser).pack_directory(files)
+        except (OSError, SkillPackageInvalidError, SkillPackageTooLargeError) as exc:
+            raise LocalSkillStorageError() from exc
+        return package, "sha256:" + hashlib.sha256(package).hexdigest()
 
     async def get_readme_by_skill(self, *, skill_id: str, actor_id: str) -> str:
         """Read a Local or public Repo Skill without a Bot on the wire.

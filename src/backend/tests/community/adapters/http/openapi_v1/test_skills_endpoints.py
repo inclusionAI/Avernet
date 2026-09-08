@@ -93,6 +93,7 @@ class _Query:
         self.list_args = None
         self.get_args = None
         self.content_args = None
+        self.package_args = None
         self.parameter_args = None
         self.replace_args = None
 
@@ -126,6 +127,10 @@ class _Query:
         self.content_args = kwargs
         return "---\nname: weather\ndescription: Forecast\n---\n# Weather"
 
+    async def get_local_package(self, **kwargs):
+        self.package_args = kwargs
+        return b"canonical-package", "sha256:" + "a" * 64
+
     async def get_parameters(self, **kwargs):
         self.parameter_args = kwargs
         return {"region": "cn"}
@@ -157,6 +162,13 @@ class _Upload:
     async def upload_local_skill_files(self, **kwargs):
         self.folder_args = kwargs
         return await self.upload_local_skill(**kwargs)
+
+    async def replace_local_skill_package(self, **kwargs):
+        self.replace_args = kwargs
+        result = await self.upload_local_skill(**kwargs)
+        result["operation"] = "updated"
+        result["package_digest"] = "sha256:" + "b" * 64
+        return result
 
 
 class _DirectActivation:
@@ -308,6 +320,74 @@ def test_upload_rejects_multipart_and_other_content_types_before_service_call():
         )
         assert response.status_code == 400
         assert response.json()["code"] == 400101
+
+
+def test_download_local_skill_package_returns_canonical_zip_and_digest():
+    query = _Query()
+    client = _client(query)
+
+    response = client.get("/openapi/v1/bots/bot-1/skills/7/package")
+
+    assert response.status_code == 200
+    assert response.content == b"canonical-package"
+    assert response.headers["etag"] == '"sha256:' + "a" * 64 + '"'
+    assert response.headers["x-skill-package-sha256"] == "sha256:" + "a" * 64
+    assert query.package_args == {
+        "skill_id": "7",
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "user_id": "actor",
+    }
+
+
+def test_replace_local_skill_package_requires_baseline_digest_and_returns_new_digest():
+    query = _Query()
+    upload = _Upload()
+
+    class Bindings(Module):
+        def configure(self, binder):
+            binder.bind(SkillQueryServiceProtocol, to=query)
+            binder.bind(LocalSkillUploadServiceProtocol, to=upload)
+            binder.bind(LocalSkillDeleteServiceProtocol, to=_Delete())
+            bind_bot_access_seam(binder)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_principal] = lambda: {"user_id": "actor"}
+    attach_injector(app, Injector([Bindings()]))
+    client = user_scoped_client(app, "actor")
+
+    response = client.put(
+        "/openapi/v1/bots/bot-1/skills/7/package",
+        content=b"candidate-package",
+        headers={
+            "content-type": "application/zip",
+            "if-match": '"sha256:' + "a" * 64 + '"',
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == '"sha256:' + "b" * 64 + '"'
+    assert upload.replace_args == {
+        "skill_id": "7",
+        "bot_id": "bot-1",
+        "owner_id": "actor",
+        "actor_id": "actor",
+        "package": b"candidate-package",
+        "expected_digest": "sha256:" + "a" * 64,
+    }
+
+
+def test_replace_local_skill_package_rejects_missing_if_match():
+    client = _client(_Query())
+
+    response = client.put(
+        "/openapi/v1/bots/bot-1/skills/7/package",
+        content=b"candidate-package",
+        headers={"content-type": "application/zip"},
+    )
+
+    assert response.status_code == 400
 
 
 def test_upload_folder_preserves_legacy_file_paths_and_returns_created_skill():
@@ -585,9 +665,10 @@ def test_openapi_declares_local_compatibility_and_skill_asset_operations():
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}": {"get", "delete"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate": {"post"},
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate": {"post"},
-        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
-        "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
-    }
+            "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content": {"get"},
+            "/openapi/v1/bots/{bot_id}/skills/{skill_id}/package": {"get", "put"},
+            "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters": {"get", "put"},
+        }
     for path in (
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate",
         "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate",

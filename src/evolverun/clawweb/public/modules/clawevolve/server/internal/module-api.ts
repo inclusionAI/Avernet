@@ -102,6 +102,37 @@ export type ClawInsightInternalApi = {
   improvementRepository: InsightImprovementPort;
 };
 
+export type OcbRequestIdentity = {
+  authorization?: string;
+  cookie?: string;
+  userId: string;
+};
+
+export type OcbLocalSkillSummary = {
+  skillId: string;
+  displayName: string;
+};
+
+/** OCB owns live Local Skills; ClawEvolve only receives whole-package snapshots. */
+export type OcbLocalSkillPort = {
+  listLocalSkills(input: {
+    botId: string;
+    identity: OcbRequestIdentity;
+  }): Promise<OcbLocalSkillSummary[]>;
+  exportLocalSkill(input: {
+    botId: string;
+    skillId: string;
+    identity: OcbRequestIdentity;
+  }): Promise<{ packageBytes: Buffer; sha256: string; displayName: string }>;
+  replaceLocalSkill(input: {
+    botId: string;
+    skillId: string;
+    expectedSha256: string;
+    packageBytes: Buffer;
+    identity: OcbRequestIdentity;
+  }): Promise<{ sha256: string }>;
+};
+
 export type ClawEvolveInternalApi = {
   createInsightTask(input: CreateInsightTaskInput): Promise<InsightTaskCreationResult>;
 };

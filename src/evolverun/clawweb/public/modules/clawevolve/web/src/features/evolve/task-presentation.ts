@@ -17,6 +17,8 @@ export function isGovernanceTask(task: EvolveTask): boolean {
 
 export function taskDisplayType(task: EvolveTask): { key: string; label: string } {
   if (isGovernanceTask(task)) return { key: 'governance', label: '治理优化' }
+  if (task.task_type === 'full' && task.config.targetSkill) return { key: 'skill_evolution', label: 'Skill 自进化' }
+  if (task.task_type === 'stage_test') return { key: 'stage_test', label: 'Stage Skill 集成测试' }
   return {
     key: task.task_type,
     label: evolveTaskRegistry[task.task_type as keyof typeof evolveTaskRegistry]?.label ?? task.task_type,

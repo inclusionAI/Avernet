@@ -11,6 +11,9 @@ Skill is visible before any listing ran.
 
 from __future__ import annotations
 
+import hashlib
+import io
+import zipfile
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -289,6 +292,15 @@ class _Storage:
         assert path == "SKILL.md"
         return b"---\nname: weekly-report\ndescription: weekly\nconfig:\n  - name: region\n    required: true\n---\n# Report"
 
+    async def read_package_files(self):
+        return [
+            (
+                "SKILL.md",
+                b"---\nname: weekly-report\ndescription: weekly\n---\n# Report",
+            ),
+            ("guides/usage.md", b"# Usage"),
+        ]
+
 
 class _Factory:
     def local_skill_package_storage_for_locator(self, **kwargs):
@@ -357,6 +369,20 @@ async def test_local_content_and_parameters_use_one_skill_id_resolver() -> None:
         parameters={"region": "cn"},
     ) == {"region": "cn"}
     assert parameters.parameters.saved == ("weekly-report", {"region": "cn"})
+
+
+@pytest.mark.asyncio
+async def test_local_package_export_contains_every_skill_file_and_stable_digest() -> None:
+    service, _parameters, _reader = _asset_service()
+
+    package, digest = await service.get_local_package(
+        skill_id="42", bot_id="bot", owner_id="owner", user_id="owner"
+    )
+
+    assert digest == "sha256:" + hashlib.sha256(package).hexdigest()
+    with zipfile.ZipFile(io.BytesIO(package)) as archive:
+        assert archive.namelist() == ["SKILL.md", "guides/usage.md"]
+        assert archive.read("guides/usage.md") == b"# Usage"
 
 
 @pytest.mark.asyncio

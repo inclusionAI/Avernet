@@ -409,6 +409,8 @@ AUTHORIZATION: dict[tuple[str, str], Authorization] = {
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}"): Check(PermissionLevel.MEMBER),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/activate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/content"): Check(PermissionLevel.MEMBER),
+    ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/package"): Check(PermissionLevel.MEMBER),
+    ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/package"): Check(PermissionLevel.MEMBER, EDIT_LOCK),
     ("POST", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/deactivate"): Check(PermissionLevel.MEMBER),
     ("GET", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER),
     ("PUT", "/openapi/v1/bots/{bot_id}/skills/{skill_id}/parameters"): Check(PermissionLevel.MEMBER, EDIT_LOCK),

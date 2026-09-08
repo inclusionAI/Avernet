@@ -16,6 +16,11 @@ import EvolveBotPicker from '../components/EvolveBotPicker'
 import { evolveBotOptionKey } from '../components/evolveBotIdentity'
 import EvolveModelFields, { EVOLVE_CUSTOM_MODEL, EVOLVE_MODEL_OPTIONS } from '../components/EvolveModelFields'
 import EvolveTaskOverview from '../components/EvolveTaskOverview'
+import SkillEvolutionFields, {
+  type StageExtensionDraft,
+  type StageSelectionDraft,
+} from '../components/SkillEvolutionFields'
+import SkillTaskRuntimePanel from '../components/SkillTaskRuntimePanel'
 import { EvolveAdminScopeProvider, useEvolveAdminScope } from '../features/evolve/admin-scope'
 import {
 
@@ -26,6 +31,11 @@ import {
 import { GitDiffView, TaskType } from './evolve/common'
 import { TaskList } from './evolve/TaskList'
 import { PackManagement } from './evolve/PackManagement'
+import StageSkillManagement from './StageSkillManagement'
+import StageSkillDevelopment from './StageSkillDevelopment'
+import StageSkillDetail from './StageSkillDetail'
+import SkillCenter from './SkillCenter'
+import SkillDetail from './SkillDetail'
 
 type IconName = 'spark' | 'plus' | 'bot' | 'arrow' | 'check' | 'clock' | 'file' | 'chart' | 'code' | 'send' | 'target' | 'package'
 
@@ -140,6 +150,9 @@ const taskStatusText: Record<string, string> = {
 }
 const taskStepText: Record<string, string> = {
   skill_init: 'Skill 初始化',
+  skill_prepare: '准备 Skill 候选',
+  stage_extension: 'Stage Skill',
+  skill_finalize: '冻结候选版本',
   diagnose: 'Bot诊断',
   plan: '目标规划',
   envprep: '环境准备',
@@ -331,6 +344,13 @@ function StartEvolution() {
   const [maxRounds, setMaxRounds] = useState('3')
   const [benchObjective, setBenchObjective] = useState('')
   const [evolutionGoal, setEvolutionGoal] = useState('')
+  const [targetSkillAssetId, setTargetSkillAssetId] = useState(() => searchParams.get('assetId') ?? '')
+  const [stageExtensions, setStageExtensions] = useState<StageExtensionDraft>({})
+  const [stageSelection, setStageSelection] = useState<StageSelectionDraft>({
+    diagnose: true,
+    plan: true,
+    optimize: true,
+  })
   const [fullInputMode, setFullInputMode] = useState<FullInputMode>('diagnose_goal')
   const [startDate, setStartDate] = useState(() => dateValue(-3))
   const [endDate, setEndDate] = useState(() => dateValue())
@@ -562,8 +582,11 @@ function StartEvolution() {
     return () => { active = false }
   }, [taskType, evolveUserId])
 
+  const effectiveStageSelection: StageSelectionDraft = taskType === 'diagnose'
+    ? { ...stageSelection, diagnose: true, optimize: false }
+    : stageSelection
   const diagnoseEnabled = taskType === 'diagnose'
-    || (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal')
+    || (taskType === 'full' && !improvementSource && effectiveStageSelection.diagnose)
   const selectedBot = bots.find((bot) => bot.botId === botId && (bot.env ?? '') === botEnv)
   const arcaSelected = selectedBot?.deviceProvider?.toLowerCase() === 'arca'
   const serviceRuntimeSelected = selectedBot?.botType?.toLowerCase() === 'service'
@@ -582,6 +605,7 @@ function StartEvolution() {
     goodCaseCount: Number(goodCaseCount),
     focusIssue,
   })
+  const isSkillEvolution = taskType === 'full' && !improvementSource && searchParams.get('target') === 'skill'
 
   useEffect(() => {
     if (diagnoseEnabled && serviceRuntimeSelected && diagnoseSessionSource !== 'service_export') {
@@ -633,7 +657,12 @@ function StartEvolution() {
       description: '复用已有 Diagnose 和 Plan 结果，直接运行优化 Loop。',
       submit: '创建诊断后优化任务',
     },
-    full: {
+    full: isSkillEvolution ? {
+      eyebrow: 'Skill 自进化',
+      title: '发起 Skill 自进化',
+      description: '基于真实 Session 完成诊断、规划和多轮优化，确认后将候选版本应用回原 Skill。',
+      submit: '创建 Skill 自进化任务',
+    } : {
       eyebrow: 'Bot自进化',
       title: '发起 Bot 自进化全流程',
       description: fullInputMode === 'direct_goal'
@@ -822,11 +851,19 @@ function StartEvolution() {
             </div>}
           </section>
 
-          {taskType === 'full' && !improvementSource && <FullFlowFields
-            mode={fullInputMode}
-            onModeChange={setFullInputMode}
-            goal={evolutionGoal}
-            onGoalChange={setEvolutionGoal}
+          {!improvementSource && (taskType === 'diagnose' || taskType === 'full') && <SkillEvolutionFields
+            botId={botId}
+            includeTargetSkill={isSkillEvolution}
+            assetId={targetSkillAssetId}
+            onAssetIdChange={setTargetSkillAssetId}
+            extensions={stageExtensions}
+            onExtensionsChange={setStageExtensions}
+            stageSelection={effectiveStageSelection}
+            onStageSelectionChange={(value) => {
+              setStageSelection(value)
+              if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
+            }}
+            fullTask={taskType === 'full'}
           />}
 
           {(taskType === 'diagnose' || (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal')) && <DiagnoseFields
@@ -861,6 +898,11 @@ function StartEvolution() {
             onFocusIssueChange={setFocusIssue}
             diagnoseIntent={diagnoseIntent}
           />}
+          {taskType === 'full' && !improvementSource && effectiveStageSelection.plan && <FullFlowFields
+            diagnoseEnabled={effectiveStageSelection.diagnose}
+            goal={evolutionGoal}
+            onGoalChange={setEvolutionGoal}
+          />}
           {taskType === 'optimize' && <OptimizeFields botSelected={Boolean(botId)} tasks={diagnosisTasks} selectedTaskIds={sourceDiagnosisTaskIds} onTaskIdsChange={setSourceDiagnosisTaskIds} />}
           {taskType === 'bench' && <BenchFields domains={benchDomains} domainId={benchDomainId} onDomainIdChange={setBenchDomainId} error={benchDomainsError} />}
           {taskType === 'bench_optimize' && <BenchOptimizeFields domains={benchDomains} trainDomainId={trainBenchDomainId} testDomainId={testBenchDomainId} onTrainDomainIdChange={setTrainBenchDomainId} onTestDomainIdChange={setTestBenchDomainId} error={benchDomainsError} />}
@@ -869,18 +911,21 @@ function StartEvolution() {
           {taskType === 'bench_optimize' && <section className="border-t border-gray-100 pt-6"><h2 className="text-sm font-semibold text-gray-900">优化目标</h2><label className="mt-3 block"><span className="mb-1.5 block text-xs font-medium text-gray-600">目标、成功标准和约束 <span className="text-red-500">*</span></span><textarea className={`${inputClass} min-h-28 resize-y`} value={benchObjective} onChange={(event) => setBenchObjective(event.target.value)} placeholder="例如：提升博客的结构完整性、事实准确性和语言表达，测试集得分不低于 0.9，不得针对测试用例硬编码。" /></label></section>}
           {(taskType === 'diagnose' || taskType === 'full' || taskType === 'optimize' || taskType === 'bench' || taskType === 'bench_optimize') && <NodeCommandYamlFields definitions={improvementSource && taskType === 'full'
             ? insightNodeDefinitions
-            : taskType === 'full' && fullInputMode === 'direct_goal'
-              ? (nodeDefinitions.full ?? []).filter((node) => node.key !== 'diagnose')
-              : (nodeDefinitions[taskType] ?? [])} expanded={customCommands} onExpandedChange={setCustomCommands} values={nodeCommandYamls} onChange={setNodeCommandYamls} />}
+            : (nodeDefinitions[taskType] ?? []).filter((node) => {
+              if (node.key === 'diagnose') return effectiveStageSelection.diagnose
+              if (node.key === 'plan') return effectiveStageSelection.plan
+              if (node.key === 'optimize') return effectiveStageSelection.optimize
+              return true
+            })} expanded={customCommands} onExpandedChange={setCustomCommands} values={nodeCommandYamls} onChange={setNodeCommandYamls} />}
 
-          {taskType === 'optimize' || taskType === 'full' || taskType === 'bench_optimize' ? <section className="border-t border-gray-100 pt-6">
-            <h2 className="text-sm font-semibold text-gray-900">优化迭代</h2>
+          {taskType === 'optimize' || (taskType === 'full' && effectiveStageSelection.optimize) || taskType === 'bench_optimize' ? <section className="border-t border-gray-100 pt-6">
+            <h2 className="text-sm font-semibold text-gray-900">优化 Stage 输入</h2>
             <label className="mt-3 block max-w-xs"><span className="mb-1.5 block text-xs font-medium text-gray-600">最大优化轮数 <span className="font-normal text-gray-400">（上限 100 轮）</span></span><input className={inputClass} type="number" min={1} max={100} step={1} inputMode="numeric" value={maxRounds} onChange={(event) => setMaxRounds(event.target.value)} placeholder="请输入 1 到 100" /></label>
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
           {taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
           </div>
-          <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} />
+          <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} stageSelection={effectiveStageSelection} />
           </div>
         </div>
 
@@ -898,7 +943,8 @@ function StartEvolution() {
             if (taskType === 'bench_optimize' && (!trainBenchDomainId || !testBenchDomainId)) { setSubmitError('请选择训练和测试 Bench Domain'); return }
             if (taskType === 'bench_optimize' && !benchObjective.trim()) { setSubmitError('请输入优化目标'); return }
             if (taskType === 'pack_restore' && !selectedRestorePack) { setSubmitError('请选择要应用的 Pack 版本'); return }
-            if (taskType === 'full' && !improvementSource && !evolutionGoal.trim()) { setSubmitError('请输入一句话优化目标'); return }
+            if (taskType === 'full' && !improvementSource && effectiveStageSelection.plan && !evolutionGoal.trim()) { setSubmitError('请输入一句话优化目标'); return }
+            if (isSkillEvolution && !targetSkillAssetId) { setSubmitError('请选择待进化 Skill'); return }
             if (taskType === 'optimize' && sourceDiagnosisTaskIds.length === 0) { setSubmitError('请选择一个已完成 Plan 的诊断任务'); return }
             if (improvementSource && !activeHandoff) { setSubmitError('请先成功加载 Insight Center 改进项'); return }
             if (crossBotTarget && !crossBotConfirmed) { setSubmitError('请确认 Evidence 来源与实际执行目标不同'); return }
@@ -929,7 +975,8 @@ function StartEvolution() {
             try {
               const taskInfo = { taskName: taskName.trim(), remark: remark.trim() || undefined }
               const fullNodeCommandYamls = customCommands
-                ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => fullInputMode === 'diagnose_goal' || node !== 'diagnose'))
+                ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) =>
+                    effectiveStageSelection[node as keyof StageSelectionDraft] !== false))
                 : undefined
               const input = {
                 ...taskInfo, userId: evolveUserId, botId, botEnv, judgeBackend: effectiveJudgeBackend,
@@ -940,6 +987,9 @@ function StartEvolution() {
                 startDate, endDate, nodeCommandYamls: customCommands ? (improvementSource
                   ? Object.fromEntries(Object.entries(nodeCommandYamls).filter(([node]) => node === 'plan' || node === 'optimize'))
                   : nodeCommandYamls) : undefined, forceMessage, runtimeMaintenance: taskType === 'pack' || taskType === 'pack_restore' ? false : runtimeMaintenance,
+                ...(!improvementSource && (taskType === 'diagnose' || taskType === 'full')
+                  ? { stageExtensions, stageSelection: effectiveStageSelection }
+                  : {}),
               }
               const result = activeHandoff
                 ? await api.evolve.createTask({
@@ -975,10 +1025,14 @@ function StartEvolution() {
                       ...taskInfo, taskType: 'full', inputMode: 'direct_goal', userId: evolveUserId, botId, botEnv,
                       goal: evolutionGoal.trim(), maxRounds: parsedMaxRounds, nodeCommandYamls: fullNodeCommandYamls,
                       forceMessage, runtimeMaintenance,
+                      ...(!improvementSource ? { stageExtensions, stageSelection: effectiveStageSelection } : {}),
+                      ...(isSkillEvolution ? { targetSkillAssetId } : {}),
                     })
                   : await api.evolve.createTask({
                       ...input, taskType: 'full', inputMode: 'diagnose_goal', maxRounds: parsedMaxRounds,
                       nodeCommandYamls: fullNodeCommandYamls,
+                      ...(!improvementSource ? { stageExtensions, stageSelection: effectiveStageSelection } : {}),
+                      ...(isSkillEvolution ? { targetSkillAssetId } : {}),
                     })
                 : taskType === 'pack'
                 ? await api.evolve.createPack({ ...taskInfo, userId: evolveUserId, botId, botEnv, forceMessage, runtimeMaintenance: false })
@@ -1041,7 +1095,7 @@ function DiagnoseFields({
   return (
     <>
       <section className="border-t border-gray-100 pt-6">
-        <h2 className="text-sm font-semibold text-gray-900">诊断对象</h2>
+        <h2 className="text-sm font-semibold text-gray-900">诊断 Stage 输入 · Session 来源</h2>
         <p className="mt-1 text-xs leading-5 text-gray-500">选择本次用于提取诊断 Case 的 Bot 运行形态。</p>
         <div role="radiogroup" aria-label="诊断对象" className="mt-3 grid gap-3 sm:grid-cols-2">
           <button type="button" role="radio" aria-checked={sessionSource === 'local'} onClick={() => onSessionSourceChange('local')} className={`rounded-xl border p-4 text-left transition ${sessionSource === 'local' ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500/10' : 'border-gray-200 bg-white hover:border-blue-200'}`}>
@@ -1063,7 +1117,7 @@ function DiagnoseFields({
         </div>
       </section>
       <section className="border-t border-gray-100 pt-6">
-        <h2 className="text-sm font-semibold text-gray-900">诊断范围</h2>
+        <h2 className="text-sm font-semibold text-gray-900">诊断 Stage 输入 · 范围与要求</h2>
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           {dateRangeEnabled ? <>
             <label><span className="mb-1.5 block text-xs font-medium text-gray-600">开始日期</span><input type="date" className={inputClass} value={startDate} max={endDate} onChange={(event) => onStartDateChange(event.target.value)} /></label>
@@ -1234,35 +1288,14 @@ function PackRestoreFields({ packs, selectedPackId, onPackIdChange, loading, err
   )
 }
 
-function FullFlowFields({ mode, onModeChange, goal, onGoalChange }: {
-  mode: FullInputMode;
-  onModeChange: (value: FullInputMode) => void;
+function FullFlowFields({ diagnoseEnabled, goal, onGoalChange }: {
+  diagnoseEnabled: boolean;
   goal: string;
   onGoalChange: (value: string) => void;
 }) {
   return (
-    <>
-      <section className="border-t border-gray-100 pt-6">
-        <h2 className="text-sm font-semibold text-gray-900">进化方式</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          {([
-            ['diagnose_goal', '先诊断再进化', '分析历史 Session，再结合目标生成 Bench 并优化。'],
-            ['direct_goal', '按目标进化', '跳过 Session 诊断，根据一句话目标生成 Bench 并优化。'],
-          ] as const).map(([value, title, description]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => onModeChange(value)}
-              className={`rounded-xl border p-4 text-left transition ${mode === value ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500/10' : 'border-gray-200 bg-white hover:border-blue-200'}`}
-            >
-              <span className={`block text-sm font-semibold ${mode === value ? 'text-blue-800' : 'text-gray-900'}`}>{title}</span>
-              <span className="mt-1.5 block text-xs leading-5 text-gray-500">{description}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="border-t border-gray-100 pt-6">
-        <h2 className="text-sm font-semibold text-gray-900">优化目标</h2>
+    <section className="border-t border-gray-100 pt-6">
+        <h2 className="text-sm font-semibold text-gray-900">规划 Stage 输入</h2>
         <label className="mt-3 block">
           <span className="mb-1.5 block text-xs font-medium text-gray-600">一句话目标、成功标准和优先级 <span className="text-red-500">*</span></span>
           <textarea
@@ -1272,19 +1305,19 @@ function FullFlowFields({ mode, onModeChange, goal, onGoalChange }: {
             onChange={(event) => onGoalChange(event.target.value)}
             placeholder="例如：通过优化相关 Skill 和工具调用流程，使工具调用失败与异步任务未完成问题的任务完成率达到90%以上，优先解决诊断阶段识别出的高频根因。"
           />
-          <span className="mt-1 block text-xs leading-5 text-gray-400">{mode === 'direct_goal'
+          <span className="mt-1 block text-xs leading-5 text-gray-400">{!diagnoseEnabled
             ? 'Plan 将根据该目标生成预期验证 Case、Spec 与 Bench Domain。'
             : 'Diagnose 提供事实和高频根因，Plan 将结合该目标生成 Spec 与 Bench Case。'}{goal.length}/2000</span>
         </label>
-      </section>
-    </>
+    </section>
   )
 }
 
-function TaskFormOverview({ taskType, fullInputMode, improvementSource }: {
+function TaskFormOverview({ taskType, fullInputMode, improvementSource, stageSelection }: {
   taskType: EvolveTask['task_type']
   fullInputMode: FullInputMode
   improvementSource: boolean
+  stageSelection: StageSelectionDraft
 }) {
   const overview = (() => {
     if (taskType === 'full' && improvementSource) return {
@@ -1420,6 +1453,14 @@ function TaskFormOverview({ taskType, fullInputMode, improvementSource }: {
       deliverables: [['执行结果', '节点输出与运行记录']],
     }
   })()
+  if (overview && (taskType === 'full' || taskType === 'diagnose') && !improvementSource) {
+    const enabledNames = new Set([
+      ...(stageSelection.diagnose ? ['Bot 诊断'] : []),
+      ...(stageSelection.plan ? ['进化规划', '目标规划'] : []),
+      ...(stageSelection.optimize ? ['优化 Loop'] : []),
+    ])
+    overview.stages = overview.stages.filter(([name]) => enabledNames.has(name))
+  }
   return (
     <EvolveTaskOverview {...overview} />
   )
@@ -1726,6 +1767,8 @@ function TaskDetail() {
 
       <GovernanceSourceCard task={task} />
       {['full', 'optimize', 'bench_optimize'].includes(task.task_type) && <TaskVersionStatus task={task} adminReadMode={adminReadMode} canLoadVersions={adminReadMode || user?.userId === task.user_id} />}
+
+      <div className="mt-6"><SkillTaskRuntimePanel task={task} canOperate={canOperate} onUpdated={loadTask} /></div>
 
       <div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)]">
         <div className="min-w-0 space-y-5">
@@ -2111,7 +2154,7 @@ function WorkflowNodeInspector({ step }: { step: EvolveStep }) {
       </div>
       {step.summary && <p className="mt-3 text-xs text-gray-700">{step.summary}</p>}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} />}
+      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3">
         <summary className="cursor-pointer text-[11px] font-medium text-blue-600">查看命令与运行标识</summary>
         <div className="mt-2 grid gap-2 rounded-lg border border-gray-200 bg-white p-3 text-[10px] sm:grid-cols-2">
@@ -2167,6 +2210,7 @@ function StepCard({ step, canRetry = false, canCancel = false, retrying = false,
   const stepLabel: Record<string, string> = {
     skill_init: 'Skill 初始化', diagnose: 'Bot 诊断', plan: '目标规划', envprep: '环境准备', bench: '基线评测',
     optimize: '策略优化', test: '验证评测', review: '轮次复盘', apply: '应用 Patch',
+    skill_prepare: '准备待进化 Skill', stage_extension: '执行自定义 Stage Skill', skill_finalize: '生成候选 Skill',
   }
   return (
     <div className="rounded-xl border border-gray-200 p-4 transition hover:border-gray-300">
@@ -2176,7 +2220,7 @@ function StepCard({ step, canRetry = false, canCancel = false, retrying = false,
       </div>
       {step.summary && <p className="mt-3 text-sm text-gray-700">{step.summary}</p>}
       {step.error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">{step.error.code ? `${step.error.code}: ` : ''}{step.error.message}</p>}
-      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} />}
+      {step.output && <StepDeliverables output={step.output} taskId={step.taskId} stepId={step.stepId} stepType={step.stepType} />}
       <details className="mt-3 border-t border-gray-100 pt-3">
         <summary className="cursor-pointer text-xs text-gray-400 hover:text-gray-600">技术信息</summary>
         <div className="mt-2 rounded-lg bg-gray-50 px-3 py-2 font-mono text-[10px] leading-5 text-gray-600">{step.command}</div>
@@ -2187,7 +2231,7 @@ function StepCard({ step, canRetry = false, canCancel = false, retrying = false,
   )
 }
 
-function StepDeliverables({ output, taskId, stepId }: { output: Record<string, unknown>; taskId: string; stepId: string }) {
+function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record<string, unknown>; taskId: string; stepId: string; stepType?: string }) {
   const initialization = output.schemaVersion === 'clawevolve.skill-init.v1' ? {
     result: String(output.result ?? ''),
     releaseVersion: String(output.releaseVersion ?? ''),
@@ -2310,7 +2354,10 @@ function StepDeliverables({ output, taskId, stepId }: { output: Record<string, u
     cases && { label: 'Bench Case', value: `${cases.total ?? 0} 个 · Good ${cases.goodCount ?? 0} / Bad ${cases.badCount ?? 0}`, tone: 'blue' },
     goal && { label: 'Goal', value: typeof goal === 'string' ? goal : goal.title ?? goal.summary ?? '已生成', tone: 'emerald' },
   ].filter(Boolean) as Array<{ label: string; value: string; tone: string }>
-  if (items.length === 0 && !spec && !benchCases && !baseline && !benchResult && !diff && !runMetrics && !roundDecision && !benchDecision && !reviewStatus && !scoreComparison) return null
+  const hasKnownPresentation = items.length > 0 || Boolean(spec || benchCases || baseline || benchResult || diff || runMetrics || roundDecision || benchDecision || reviewStatus || scoreComparison)
+  const showStageSkillResult = stepType === 'stage_extension' && !hasKnownPresentation
+  const showLifecycleResult = (stepType === 'skill_prepare' || stepType === 'skill_finalize') && !hasKnownPresentation
+  if (!hasKnownPresentation && !showStageSkillResult && !showLifecycleResult) return null
   const toneClass: Record<string, string> = {
     violet: 'border-violet-100 bg-violet-50 text-violet-700',
     blue: 'border-blue-100 bg-blue-50 text-blue-700',
@@ -2319,6 +2366,13 @@ function StepDeliverables({ output, taskId, stepId }: { output: Record<string, u
   }
   return (
     <div className="mt-3 space-y-2">
+      {(showStageSkillResult || showLifecycleResult) && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
+          {showStageSkillResult ? 'Stage Skill 交付结果' : 'Skill 候选处理结果'}
+        </p>
+        {typeof output.summary === 'string' && output.summary.trim() && <p className="mt-2 text-xs leading-5 text-gray-700">{output.summary}</p>}
+        <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-mono text-[10px] leading-5 text-gray-700">{JSON.stringify(output, null, 2)}</pre>
+      </div>}
       {items.length > 0 && <div className="grid gap-2 sm:grid-cols-2">
         {items.map((item) => <div key={item.label} className={`rounded-lg border px-3 py-2.5 ${toneClass[item.tone]}`}><p className="text-[10px] font-medium uppercase tracking-wide opacity-70">{item.label}</p><p className="mt-1 line-clamp-2 text-xs font-medium">{item.value}</p></div>)}
       </div>}
@@ -2542,9 +2596,10 @@ function EvolveShell({ children }: { children: ReactNode }) {
           <EvolveSidebarLink to="/evolve" label="进化任务" icon="spark" activeWhen={(pathname) => pathname === '/evolve' || pathname.startsWith('/evolve/tasks') || pathname.startsWith('/evolve/runs') || pathname.startsWith('/evolve/new')} />
           <EvolveSidebarEvaluationGroup />
           <EvolveSidebarLink to="/evolve/packs" label="进化版本" icon="package" />
+          <EvolveSidebarLink to="/evolve/skills" label="技能中心" icon="package" activeWhen={(pathname) => pathname.startsWith('/evolve/skills')} />
+          <EvolveSidebarLink to="/evolve/stage-skills" label="Stage Skill" icon="code" activeWhen={(pathname) => pathname.startsWith('/evolve/stage-skills')} />
           <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">专项进化</div>
           <p className="px-3 pb-1 text-[10px] leading-4 text-gray-400">特定模块的独立管理与定向进化</p>
-          <EvolveSidebarComingSoon label="Skill 进化" />
           <EvolveSidebarComingSoon label="Memory 进化" />
           <EvolveSidebarComingSoon label="Context 进化" />
         </nav>
@@ -2605,7 +2660,12 @@ export default function Evolve() {
     return <div className="mx-auto max-w-5xl px-4 py-20 text-center text-sm text-red-600">登录状态无效，请刷新页面后重试。</div>
   }
   let content: ReactNode
-  if (location.pathname.startsWith('/evolve/packs/')) content = <PackDetail />
+  if (location.pathname === '/evolve/stage-skills/new') content = <StageSkillDevelopment />
+  else if (location.pathname.startsWith('/evolve/stage-skills/')) content = <StageSkillDetail />
+  else if (location.pathname === '/evolve/stage-skills') content = <StageSkillManagement />
+  else if (location.pathname.startsWith('/evolve/skills/')) content = <SkillDetail />
+  else if (location.pathname === '/evolve/skills') content = <SkillCenter />
+  else if (location.pathname.startsWith('/evolve/packs/')) content = <PackDetail />
   else if (location.pathname === '/evolve/packs') content = <PackManagement />
   else if (location.pathname === '/evolve/tasks') content = <TaskList />
   else if (location.pathname.startsWith('/evolve/repair-runs/')) content = <Repair view="detail" />

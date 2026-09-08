@@ -8,6 +8,7 @@ non-public surfaces.
 from __future__ import annotations
 
 import json
+import re
 from typing import Annotated, Any, Literal
 
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
@@ -89,6 +90,19 @@ from fastapi import (
     Response,
     UploadFile,
 )
+
+_PACKAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+
+
+def _if_match_digest(request: Request) -> str:
+    value = request.headers.get("if-match", "").strip()
+    if value.startswith("W/"):
+        value = value[2:].strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        value = value[1:-1]
+    if not _PACKAGE_DIGEST.fullmatch(value):
+        raise LocalSkillInvalidPackageError()
+    return value
 
 publish_status_router = APIRouter(
     prefix="/openapi/v1/bots/skills",
@@ -398,6 +412,100 @@ async def get_skill_content(
         user_id=user_id,
     )
     return envelope(SkillContent(content=content), request)
+
+
+@router.get(
+    "/{skill_id}/package",
+    response_class=Response,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def download_skill_package(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+) -> Response:
+    """Download the complete canonical package of one Bot-owned Local Skill."""
+    record = query_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    package, digest = await query_service.get_local_package(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    return Response(
+        content=package,
+        media_type="application/zip",
+        headers={
+            "ETag": f'"{digest}"',
+            "X-Skill-Package-SHA256": digest,
+            "Content-Disposition": f'attachment; filename="skill-{skill_id}.zip"',
+        },
+    )
+
+
+@router.put(
+    "/{skill_id}/package",
+    response_model=Envelope[SkillUpload],
+    response_model_exclude_none=True,
+    dependencies=_GRANT_CHECKED_ADDRESSED_BOT,
+)
+@envelope_errors
+async def replace_skill_package(
+    bot_id: BotIdPath,
+    skill_id: SkillIdPath,
+    owner_id: OwnerIdDep,
+    user_id: UserIdDep,
+    caller: ActingCallerDep,
+    request: Request,
+    response: Response,
+    package: bytes = Body(..., media_type="application/zip"),
+    query_service: SkillQueryServiceProtocol = Injected(
+        SkillQueryServiceProtocol
+    ),
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
+) -> Envelope[SkillUpload]:
+    """CAS-replace one exact Local Skill using the package read at task start."""
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].lower()
+        != "application/zip"
+    ):
+        raise LocalSkillInvalidPackageError()
+    record = query_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=user_id,
+    )
+    _require_addressed_bot(record, bot_id)
+    _require_skills_grant(caller, record)
+    result = await upload_service.replace_local_skill_package(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        actor_id=user_id,
+        package=package,
+        expected_digest=_if_match_digest(request),
+    )
+    digest = str(result.get("package_digest") or "")
+    if digest:
+        response.headers["ETag"] = f'"{digest}"'
+        response.headers["X-Skill-Package-SHA256"] = digest
+    return _uploaded_skill_response(result, request, response)
 
 
 @router.get(

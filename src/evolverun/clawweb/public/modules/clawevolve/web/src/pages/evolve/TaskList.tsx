@@ -189,6 +189,7 @@ export function TaskList() {
                       </CreateMenuGroup>
                       <CreateMenuGroup title="全流程最佳实践">
                         <CreateMenuItem icon="send" title="Bot自进化" description="可选择先诊断再进化，或按目标直接进化" onClick={() => navigate('/evolve/new?type=full')} emphasized />
+                        <CreateMenuItem icon="spark" title="Skill 自进化" description="诊断并持续优化 Bot 中已登记的一个 Skill" onClick={() => navigate('/evolve/new?type=full&target=skill')} emphasized />
                       </CreateMenuGroup>
                     </div>
                   </div>
@@ -267,6 +268,7 @@ export function TaskList() {
                 const lifecycle = taskLifecycle(task)
                 const display = taskDisplayType(task)
                 const status = statusView(task.status)
+                const targetSkill = task.config.targetSkill as { name?: string; skillId?: string } | undefined
                 return (
                   <tr key={task.task_id} className="group transition hover:bg-gray-50/70">
                     <td className="px-5 py-4">
@@ -290,8 +292,8 @@ export function TaskList() {
                       <div className="flex items-center gap-3">
                         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><Icon name="bot" /></span>
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-gray-900">{botNameCache[`${task.user_id}:${task.bot_id}`] || task.bot_name || '未命名 Bot'}</p>
-                          <p className="mt-0.5 truncate font-mono text-[11px] text-gray-400">{task.user_id} / {task.bot_id}</p>
+                          <p className="truncate font-medium text-gray-900">{targetSkill?.name || botNameCache[`${task.user_id}:${task.bot_id}`] || task.bot_name || '未命名 Bot'}</p>
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-gray-400">{targetSkill ? `${task.bot_id} / ${targetSkill.skillId || 'Skill'}` : `${task.user_id} / ${task.bot_id}`}</p>
                         </div>
                       </div>
                     </td>

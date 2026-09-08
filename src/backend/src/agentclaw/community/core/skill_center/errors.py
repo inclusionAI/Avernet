@@ -79,6 +79,10 @@ class LocalSkillDuplicateError(Exception):
     """A same-name Local Skill already exists; replacement is not supported."""
 
 
+class LocalSkillVersionConflictError(Exception):
+    """A caller tried to replace a Local Skill from a stale package baseline."""
+
+
 class LocalSkillStorageError(Exception):
     """A package persistence or compensating cleanup operation failed."""
 

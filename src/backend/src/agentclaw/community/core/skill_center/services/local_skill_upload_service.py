@@ -33,6 +33,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillStorageError,
     LocalSkillTooLargeError,
+    LocalSkillVersionConflictError,
 )
 from agentclaw.community.core.skill_center.factories import (
     SkillServiceFactory,
@@ -202,6 +203,75 @@ class LocalSkillUploadService(LocalSkillUploadServiceProtocol):
                 files=list(validated.files),
                 is_teclaw=is_teclaw,
             )
+        finally:
+            self._edit_guard.release(lease)
+
+    async def replace_local_skill_package(
+        self,
+        *,
+        skill_id: str,
+        bot_id: str,
+        owner_id: str,
+        actor_id: str,
+        package: bytes,
+        expected_digest: str,
+    ) -> dict[str, Any]:
+        """CAS-replace one exact Local Skill through the normal safe write path."""
+        initial_bot = self._authorize(bot_id, owner_id, actor_id)
+        scope = self._scope_for(initial_bot, bot_id)
+        try:
+            lease = await self._edit_guard.acquire_for_edit_wait(scope=scope)
+        except SkillsPoolEditBusyError as exc:
+            raise LocalSkillEditBusyError() from exc
+        except SkillsPoolEditRollbackError as exc:
+            raise LocalSkillLayoutRollbackError() from exc
+        except SkillsPoolEditLockUnavailableError as exc:
+            raise LocalSkillEditLockUnavailableError() from exc
+        except SkillsPoolEditPausedError as exc:
+            raise LocalSkillEditPausedError() from exc
+        try:
+            bot = self._authorize(bot_id, owner_id, actor_id)
+            if self._scope_for(bot, bot_id) != scope or not is_bot_ready(bot):
+                raise LocalSkillNotReadyError()
+            skill = self._skill_repo.get_bot_local_skill(
+                skill_id=skill_id, bot_id=bot_id, user_id=owner_id
+            )
+            if not skill or not str(skill.get("git_path") or "").startswith("local://"):
+                from agentclaw.community.core.skill_center.errors import (
+                    LocalSkillNotFoundError,
+                )
+
+                raise LocalSkillNotFoundError()
+            validated = self._validate_zip(package)
+            if validated.name != str(skill.get("name") or ""):
+                raise LocalSkillInvalidPackageError("invalid_metadata")
+            current_digest = await self.installed_package_digest(
+                bot=bot,
+                bot_id=bot_id,
+                owner_id=owner_id,
+                name=validated.name,
+            )
+            if current_digest is None:
+                raise LocalSkillStorageError()
+            if current_digest != expected_digest:
+                raise LocalSkillVersionConflictError()
+            result = await self._replace(
+                skill=skill,
+                bot=bot,
+                owner_id=owner_id,
+                bot_id=bot_id,
+                actor_id=actor_id,
+                name=validated.name,
+                description=validated.description,
+                files=list(validated.files),
+                is_teclaw=self._is_teclaw(bot_id=bot_id, owner_id=owner_id),
+            )
+            import hashlib
+
+            result["package_digest"] = (
+                "sha256:" + hashlib.sha256(validated.canonical_zip).hexdigest()
+            )
+            return result
         finally:
             self._edit_guard.release(lease)
 

@@ -4,6 +4,7 @@ export const EVOLVE_TASK_TYPES = [
   "diagnose", "optimize", "apply", "full", "bench", "bench_optimize", "pack", "pack_restore", "runtime_cleanup", "repair",
   "suggestion_apply",
   "run_analysis",
+  "stage_test",
 ] as const;
 
 export type EvolveTaskType = typeof EVOLVE_TASK_TYPES[number];
@@ -12,6 +13,9 @@ export const EVOLVE_STEP_TYPES = [
   "skill_init", "diagnose", "plan", "optimize", "apply", "bench", "bench_plan", "pack", "restore", "runtime_cleanup", "repair_plan", "repair_apply",
   "suggestion_apply",
   "run_analysis",
+  "stage_extension",
+  "skill_prepare",
+  "skill_finalize",
 ] as const;
 
 export type EvolveStepType = typeof EVOLVE_STEP_TYPES[number];
@@ -56,6 +60,7 @@ export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> 
   repair: { type: "repair", label: "Bot修复", initialStepType: "repair_plan", supportsRetry: false, supportsCancel: false, nodes: [] },
   suggestion_apply: { type: "suggestion_apply", label: "应用进化建议", initialStepType: "suggestion_apply", supportsRetry: true, supportsCancel: false, nodes: [] },
   run_analysis: { type: "run_analysis", label: "运行日志分析", initialStepType: "run_analysis", supportsRetry: true, supportsCancel: false, nodes: [] },
+  stage_test: { type: "stage_test", label: "Stage Skill 集成测试", initialStepType: "stage_extension", supportsRetry: true, supportsCancel: true, nodes: [] },
 };
 
 export const INSIGHT_IMPROVEMENT_NODES = ["plan", "optimize"] as const satisfies readonly NodeCommandKey[];
@@ -87,6 +92,9 @@ const EVOLVE_STEP_REGISTRY: Record<EvolveStepType, { baasStage: string; usesBaas
   repair_apply: { baasStage: "repair-apply", usesBaasRuntime: false },
   suggestion_apply: { baasStage: "suggestion-apply", usesBaasRuntime: false },
   run_analysis: { baasStage: "run-analysis", usesBaasRuntime: false },
+  stage_extension: { baasStage: "clawevolve-stage", usesBaasRuntime: false },
+  skill_prepare: { baasStage: "clawevolve-stage", usesBaasRuntime: false },
+  skill_finalize: { baasStage: "clawevolve-stage", usesBaasRuntime: false },
 };
 
 export function stepUsesBaasRuntime(stepType: string): boolean {
