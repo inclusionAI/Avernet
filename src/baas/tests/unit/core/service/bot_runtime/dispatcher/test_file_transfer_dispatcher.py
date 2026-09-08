@@ -797,9 +797,7 @@ class TestProjectedClientUrls:
         ticket = _make_ticket(status="DONE")
         ticket_repo.get_by_transfer_id.return_value = ticket
 
-        result = await dispatcher.dispatch_generate_share_link(
-            "tf-001", tenant="t1"
-        )
+        result = await dispatcher.dispatch_generate_share_link("tf-001", tenant="t1")
 
         assert result.share_url == "https://oss.example.com/get?token=abc"
 

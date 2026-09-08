@@ -783,9 +783,7 @@ class DefaultBotManagementService(BotManageService):
 
         # Get current device count (fetched once, reused for validation)
         device_repo = self._device_repo
-        devices = device_repo.list_by_bot_id(
-            bot_id=bot.id, tenant=tenant, env=env
-        )
+        devices = device_repo.list_by_bot_id(bot_id=bot.id, tenant=tenant, env=env)
         current_count = len(devices)
 
         # Validate device_uuids if provided
@@ -793,16 +791,12 @@ class DefaultBotManagementService(BotManageService):
         if device_uuids:
             unique_device_uuids = list(dict.fromkeys(device_uuids))
             if not unique_device_uuids:
-                raise ValueError(
-                    "device_uuids must contain at least one valid UUID"
-                )
+                raise ValueError("device_uuids must contain at least one valid UUID")
 
             bot_device_map = {d.device_uuid: d for d in devices}
 
             invalid_uuids = [
-                uuid
-                for uuid in unique_device_uuids
-                if uuid not in bot_device_map
+                uuid for uuid in unique_device_uuids if uuid not in bot_device_map
             ]
             if invalid_uuids:
                 raise ValueError(
@@ -851,9 +845,7 @@ class DefaultBotManagementService(BotManageService):
 
         # Reject device_uuids on scale-up
         if publish_type == PublishType.SCALE_UP and unique_device_uuids:
-            raise ValueError(
-                "device_uuids cannot be combined with SCALE_UP"
-            )
+            raise ValueError("device_uuids cannot be combined with SCALE_UP")
 
         # Resolve config for PublishConfig
         # Pattern matches update_devices merge at lines 1133-1151:

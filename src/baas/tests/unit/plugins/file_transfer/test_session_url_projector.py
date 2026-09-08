@@ -176,9 +176,7 @@ class TestProxyBaseUrlConstructionValidation:
                 deploy_tenant="aliyun",
             )
 
-        assert (
-            exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
-        )
+        assert exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
         assert "proxy_base_url" in exc_info.value.reason
         assert "not a valid absolute http(s) URL" in exc_info.value.reason
 

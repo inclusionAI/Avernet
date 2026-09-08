@@ -241,8 +241,7 @@ class DefaultBotFileTransferDispatcher(BotBaseDispatcher, BotFileTransferDispatc
                     # The caller must still receive the original refusal even
                     # if the cleanup roundtrip fails; log for operator review.
                     logger.exception(
-                        "Aborting leaked multipart session %s failed "
-                        "(transfer_id=%s)",
+                        "Aborting leaked multipart session %s failed (transfer_id=%s)",
                         multipart_session.session_id,
                         transfer_id,
                     )
