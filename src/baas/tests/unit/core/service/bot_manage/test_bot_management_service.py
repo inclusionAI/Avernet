@@ -2732,6 +2732,34 @@ class TestScaleBotWithDeviceUuids:
             assert call_kwargs["config"].replica_desired == 1
             assert call_kwargs["config"].target_device_uuids is None
 
+    async def test_scale_down_with_empty_device_uuids_list_behaves_like_none(self):
+        """An empty ``device_uuids`` list is treated the same as ``None``:
+        no targeted destruction — the publish config's
+        ``target_device_uuids`` is ``None``."""
+        service, mock_publish_service, _, _ = self._make_service()
+
+        with patch.object(
+            service,
+            "get_bot",
+            new_callable=AsyncMock,
+            return_value=self._make_bot_response(),
+        ):
+            result = await service.scale_bot(
+                tenant="test_tenant",
+                bot_uuid="BOT-001",
+                operator="user1",
+                request_id="test-request-id-12345678901234567890",
+                target_count=1,  # Scale from 3 to 1
+                device_uuids=[],
+            )
+
+            assert result.publish_id == 555
+            assert result.target_count == 1
+            call_kwargs = mock_publish_service.create_publish.call_args.kwargs
+            assert call_kwargs["publish_type"] == PublishType.SCALE_DOWN
+            assert call_kwargs["config"].replica_desired == 1
+            assert call_kwargs["config"].target_device_uuids is None
+
 
 class TestListBotsStatusFilter:
     """Tests for BotManagementService.list_bots with status filter"""

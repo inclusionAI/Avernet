@@ -1128,6 +1128,65 @@ async def test_scale_bot_with_device_uuids_unknown_bot_returns_404(mock_service)
     assert detail["error_code"] == "BOT_NOT_FOUND"
 
 
+@pytest.mark.asyncio
+async def test_scale_bot_with_empty_device_uuids_list_passes_empty(mock_service):
+    """POST /{bot_uuid}/scale with ``device_uuids: []`` is accepted by the
+    request model (no ``min_length`` constraint) and forwarded as-is to the
+    service, mirroring legacy count-based behavior."""
+    now = datetime.now(tz=UTC)
+    scale_resp = ScaleBotResponse(
+        id=1,
+        bot_uuid="BOT-001",
+        tenant="test_tenant",
+        env="dev",
+        domain="default",
+        is_deleted=0,
+        creator="user1",
+        modifier="op",
+        status="ACTIVE",
+        name="test-bot",
+        description=None,
+        template_uuid="TMPL-001",
+        replica_desired=3,
+        replica_minimum=1,
+        replica_maximum=10,
+        auto_scaling_enabled=0,
+        sla_grade="standard",
+        gmt_create=now,
+        gmt_modified=now,
+        config=None,
+        devices=[],
+        target_count=2,
+        publish_id=405,
+        request_id="a" * 32,
+    )
+    mock_service.scale_bot.return_value = scale_resp
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/bots/BOT-001/scale?tenant=test_tenant",
+            json={
+                "operator": "op",
+                "request_id": "a" * 32,
+                "target_count": 2,
+                "device_uuids": [],
+            },
+        )
+
+    assert resp.status_code == 200
+    mock_service.scale_bot.assert_awaited_once_with(
+        tenant="test_tenant",
+        bot_uuid="BOT-001",
+        target_count=2,
+        operator="op",
+        request_id="a" * 32,
+        auto_approve_publish=False,
+        bot_config=None,
+        device_uuids=[],
+    )
+
+
 # ==================== POST /{bot_uuid}/restart — restart_bot ====================
 
 
@@ -1817,6 +1876,19 @@ class TestScaleBotRequest:
         assert req.target_count == 1
         assert req.operator == "op"
         assert req.device_uuids == ["uuid-1"]
+
+    def test_empty_device_uuids_list_accepted(self):
+        from secbaas.community.adapters.web.routers.bot_service.management_router import (
+            ScaleBotRequest,
+        )
+
+        req = ScaleBotRequest(
+            target_count=1,
+            operator="op",
+            request_id="a" * 32,
+            device_uuids=[],
+        )
+        assert req.device_uuids == []
 
 
 class TestRestartBotRequest:

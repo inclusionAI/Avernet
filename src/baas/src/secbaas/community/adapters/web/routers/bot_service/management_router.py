@@ -97,9 +97,10 @@ class ScaleBotRequest(BaseRequest):
     """Scale bot request.
 
     ``target_count`` is always required. When ``device_uuids`` is also
-    provided, SCALE_DOWN destroys exactly those devices and
-    ``target_count`` must equal
-    ``current_count - len(device_uuids)``.
+    provided (and non-empty), SCALE_DOWN destroys exactly those devices
+    and ``target_count`` must equal
+    ``current_count - len(device_uuids)``. An empty list is treated the
+    same as ``None`` (count-based scaling).
     """
 
     target_count: int = Field(
@@ -120,9 +121,9 @@ class ScaleBotRequest(BaseRequest):
     )
     device_uuids: list[str] | None = Field(
         default=None,
-        min_length=1,
         description="Optional explicit list of device UUIDs to destroy during "
-        "SCALE_DOWN. When set, target_count must equal "
+        "SCALE_DOWN. Empty list is treated the same as None (count-based "
+        "scaling). When non-empty, target_count must equal "
         "current_count - len(device_uuids).",
     )
 

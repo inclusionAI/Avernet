@@ -730,7 +730,8 @@ class DefaultBotManagementService(BotManageService):
         operation targets exactly those devices for SCALE_DOWN. In that
         case ``target_count`` must equal
         ``current_count - len(unique_device_uuids)``. ``device_uuids`` is
-        rejected on SCALE_UP.
+        rejected on SCALE_UP. An empty list is treated the same as
+        ``None`` (count-based scaling).
 
         When ``bot_config`` is provided, its non-None fields are merged with
         the bot's existing extra_config and consumed by the publish workflow

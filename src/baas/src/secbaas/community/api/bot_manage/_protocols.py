@@ -155,13 +155,14 @@ class BotManageService(Protocol):
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN).
 
         ``target_count`` is always required. When ``device_uuids`` is
-        also supplied, it must satisfy ``target_count ==
+        also supplied (and non-empty), it must satisfy ``target_count ==
         current_count - len(device_uuids)`` and the operation targets
         exactly those devices for SCALE_DOWN destruction.
-        ``device_uuids`` is rejected on SCALE_UP.
+        ``device_uuids`` is rejected on SCALE_UP. An empty list is
+        treated the same as ``None`` (count-based scaling).
 
-        When ``device_uuids`` is omitted, behavior is unchanged:
-        SCALE_DOWN destroys the oldest ACTIVE devices.
+        When ``device_uuids`` is omitted or empty, behavior is
+        unchanged: SCALE_DOWN destroys the oldest ACTIVE devices.
         """
         ...
 
