@@ -1,7 +1,7 @@
 """Aliyun ACK session file URL projector.
 
 Projects service-generated presigned OSS URLs to the BaaS-domain
-``/api/v1/file-transfer-proxy/`` prefix so ALIYUN_ACK clients PUT/GET
+``/api/v1/file-transfer-proxy/`` prefix so aliyun-tenant clients PUT/GET
 through the BaaS entry point (gateway auth + nginx streaming proxy)
 instead of talking to OSS directly.
 
@@ -21,18 +21,18 @@ from secbaas.community.spi.file_transfer import SessionFileUrlProjector
 
 logger = get_logger("plugin-file-transfer")
 
-_ALIYUN_ACK_TENANT = "ALIYUN_ACK"
+_ALIYUN_TENANT = "aliyun"
 
 
 class AliyunAckSessionFileUrlProjector(SessionFileUrlProjector):
-    """Project session file URLs behind the BaaS domain for ALIYUN_ACK.
+    """Project session file URLs behind the BaaS domain for the aliyun tenant.
 
     Guard semantics (D-01 / D-06):
-    - ``deploy_tenant != "ALIYUN_ACK"`` → WARNING
+    - ``deploy_tenant != "aliyun"`` → WARNING
       ``SESSION_URL_PROJECTOR_PASSTHROUGH`` and the URL is returned
       unchanged — main-site misconfiguration must never alter
       main-site behavior.
-    - ``deploy_tenant == "ALIYUN_ACK"`` with an empty ``proxy_base_url``
+    - ``deploy_tenant == "aliyun"`` with an empty ``proxy_base_url``
       → ``SessionFileTransferProxyUnavailableError`` (503): a bare OSS
       URL is never handed out in that tenant.  There is no escape hatch —
       serving bare URLs requires fixing the config and restarting.
@@ -43,10 +43,10 @@ class AliyunAckSessionFileUrlProjector(SessionFileUrlProjector):
         self._deploy_tenant = deploy_tenant
 
     def project(self, url: str) -> str:
-        if self._deploy_tenant != _ALIYUN_ACK_TENANT:
+        if self._deploy_tenant != _ALIYUN_TENANT:
             logger.warning(
                 "[SESSION_URL_PROJECTOR_PASSTHROUGH] deploy_tenant=%s is not "
-                "ALIYUN_ACK — returning the URL unchanged "
+                "aliyun — returning the URL unchanged "
                 "(main-site misconfiguration immunity)",
                 self._deploy_tenant,
             )

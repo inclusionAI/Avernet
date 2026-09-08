@@ -172,7 +172,7 @@ class TestSessionFileUrlProjectorSelector:
             "env": {"deploy_tenant": ""},
         }
         if projector == "aliyun_ack":
-            cfg["env"]["deploy_tenant"] = "ALIYUN_ACK"
+            cfg["env"]["deploy_tenant"] = "aliyun"
             cfg["session_file_url_proxy"] = {
                 "proxy_base_url": "https://bff.example.com",
             }
@@ -195,4 +195,4 @@ class TestSessionFileUrlProjectorSelector:
         projector = self._container("aliyun_ack").session_file_url_projector()
         assert isinstance(projector, AliyunAckSessionFileUrlProjector)
         assert projector._proxy_base_url == "https://bff.example.com"
-        assert projector._deploy_tenant == "ALIYUN_ACK"
+        assert projector._deploy_tenant == "aliyun"

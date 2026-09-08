@@ -956,14 +956,14 @@ class TestDeleteTransfer:
 
 
 class TestSessionFileUrlProjection:
-    """ALIYUN_ACK end-to-end: upload-url SINGLE, MULTIPART per-part, and
+    """aliyun end-to-end: upload-url SINGLE, MULTIPART per-part, and
     share_url are projected; shape-invariant fields keep their values."""
 
     @pytest.fixture
     def aliyun_projector(self):
         return AliyunAckSessionFileUrlProjector(
             proxy_base_url="https://bff.example.com",
-            deploy_tenant="ALIYUN_ACK",
+            deploy_tenant="aliyun",
         )
 
     @pytest.fixture
@@ -1088,7 +1088,7 @@ class TestSessionFileUrlProjection:
             ticket_repo=ticket_repo,
             session_file_url_projector=AliyunAckSessionFileUrlProjector(
                 proxy_base_url="",
-                deploy_tenant="ALIYUN_ACK",
+                deploy_tenant="aliyun",
             ),
         )
         file_backend.generate_upload_url.return_value = (
@@ -1117,7 +1117,7 @@ class TestSessionFileUrlProjection:
             ticket_repo=ticket_repo,
             session_file_url_projector=AliyunAckSessionFileUrlProjector(
                 proxy_base_url="",
-                deploy_tenant="ALIYUN_ACK",
+                deploy_tenant="aliyun",
             ),
         )
         mock_parts = [
@@ -1162,7 +1162,7 @@ class TestSessionFileUrlProjection:
             ticket_repo=ticket_repo,
             session_file_url_projector=AliyunAckSessionFileUrlProjector(
                 proxy_base_url="",
-                deploy_tenant="ALIYUN_ACK",
+                deploy_tenant="aliyun",
             ),
         )
         mock_parts = [

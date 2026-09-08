@@ -3,7 +3,7 @@
 ## Context Boundary
 
 ```yaml
-purpose: Rewrites session-file presigned OSS URLs to the BaaS-domain /api/v1/file-transfer-proxy/ prefix for the ALIYUN_ACK deploy tenant.
+purpose: Rewrites session-file presigned OSS URLs to the BaaS-domain /api/v1/file-transfer-proxy/ prefix for the aliyun deploy tenant.
 provides:
   - AliyunAckSessionFileUrlProjector
 consumes:
@@ -18,7 +18,7 @@ internal_dependencies:
 ### Change impact
 
 Changing the projection transform alters the shape of every URL handed to
-ALIYUN_ACK clients (upload-url SINGLE, MULTIPART per-part, and share-link).
+aliyun-tenant clients (upload-url SINGLE, MULTIPART per-part, and share-link).
 Clients PUT/GET those URLs through the BaaS-domain nginx proxy, so the
 `/api/v1/file-transfer-proxy/` prefix must stay in sync with the nginx
 rewrite rule, and the query must remain byte-preserved for OSS signature

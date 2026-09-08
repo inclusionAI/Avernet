@@ -96,7 +96,7 @@ class NoopSessionFileUrlProjector(SessionFileUrlProjector):
 
     Returns every URL unchanged (D-01: main-site behavior is byte-identical
     to today — bare OSS URLs).  This is the second half of the D-06
-    two-sided guard: if ``deploy_tenant`` is ALIYUN_ACK but the stub
+    two-sided guard: if ``deploy_tenant`` is aliyun but the stub
     projector is selected, the configuration is contradictory and
     projection must refuse with a 503 instead of leaking a bare OSS URL
     in that tenant.
@@ -106,11 +106,11 @@ class NoopSessionFileUrlProjector(SessionFileUrlProjector):
         self._deploy_tenant = deploy_tenant
 
     def project(self, url: str) -> str:
-        if self._deploy_tenant == "ALIYUN_ACK":
+        if self._deploy_tenant == "aliyun":
             raise SessionFileTransferProxyUnavailableError(
                 reason=(
                     "session_file_url_projector selector 'stub' is selected "
-                    "while deploy_tenant is ALIYUN_ACK — configure "
+                    "while deploy_tenant is aliyun — configure "
                     "plugins.session_file_url_projector: 'aliyun_ack'"
                 )
             )

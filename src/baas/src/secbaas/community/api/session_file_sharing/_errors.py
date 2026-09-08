@@ -68,10 +68,10 @@ class SourceTransferNotReadyError(SessionFileSharingError):
 class SessionFileTransferProxyUnavailableError(SessionFileSharingError):
     """The file transfer URL proxy is not configured for the active tenant.
 
-    Raised when ``deploy_tenant`` selects URL projection (ALIYUN_ACK) but
+    Raised when ``deploy_tenant`` selects URL projection (aliyun) but
     no ``session_file_url_proxy.proxy_base_url`` is configured, or the stub
     projector is selected for that tenant (D-06 fail-fast).  The service
-    refuses to hand out a bare OSS URL in the ALIYUN_ACK environment.
+    refuses to hand out a bare OSS URL in the aliyun environment.
 
     Carries ``reason`` describing what is missing so operators can fix the
     configuration and restart.

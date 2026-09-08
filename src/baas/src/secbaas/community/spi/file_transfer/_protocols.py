@@ -306,7 +306,7 @@ class SessionFileUrlProjector(Protocol):
     - NoopSessionFileUrlProjector: identity — returns the URL unchanged.
       The degree-zero default, never failing on account of proxy config.
     - AliyunAckSessionFileUrlProjector: projects URLs to the BaaS-domain
-      ``/api/v1/file-transfer-proxy/`` prefix for the ALIYUN_ACK tenant.
+      ``/api/v1/file-transfer-proxy/`` prefix for the aliyun tenant.
 
     Unlike ``FileTransferBackend`` there is no ``disabled`` property: every
     deployment ships a working projector (the Noop identity at minimum).

@@ -267,7 +267,7 @@ class FileTransferOssConfigSchema(ConfigSchema):
 
 
 class FileTransferOssAliyunConfigSchema(FileTransferOssConfigSchema):
-    """Cloud OSS section for the ALIYUN_ACK tenant (D-07).
+    """Cloud OSS section for the aliyun tenant (D-07).
 
     Fields are inherited verbatim from FileTransferOssConfigSchema — only
     the config section differs, so the two sections never collide and
@@ -283,7 +283,7 @@ class FileTransferOssAliyunConfigSchema(FileTransferOssConfigSchema):
 class SessionFileUrlProxyConfigSchema(ConfigSchema):
     """Session file URL proxy base (D-06) — independent section (A4).
 
-    ``proxy_base_url`` is the BaaS-domain base the ALIYUN_ACK projector
+    ``proxy_base_url`` is the BaaS-domain base the aliyun projector
     rewrites client-visible URLs onto. Empty in main-site deployments
     (the Noop projector never reads it).
 
@@ -306,7 +306,7 @@ class DeployEnvConfig(ConfigSchema):
 
     ``deploy_tenant`` resolves from the BAAS_DEPLOY_TENANT environment
     variable via the ConfigLoader placeholder. Empty means the main
-    site; ``"ALIYUN_ACK"`` selects the Aliyun ACK tenant (cloud OSS
+    site; ``"aliyun"`` selects the aliyun tenant (cloud OSS
     section + session URL projection). Extra keys already present in
     the section (e.g. ``deploy_env_var``) pass through unchanged.
     """

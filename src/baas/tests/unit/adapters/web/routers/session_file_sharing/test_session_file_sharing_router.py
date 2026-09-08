@@ -217,7 +217,7 @@ class TestGetUploadUrl:
         mock_dispatcher.dispatch_get_upload_url.side_effect = (
             SessionFileTransferProxyUnavailableError(
                 reason="session_file_url_proxy.proxy_base_url is not configured "
-                "for deploy_tenant=ALIYUN_ACK"
+                "for deploy_tenant=aliyun"
             )
         )
 
@@ -628,7 +628,7 @@ class TestGenerateShareLink:
         mock_dispatcher.dispatch_get_share_link.side_effect = (
             SessionFileTransferProxyUnavailableError(
                 reason="session_file_url_proxy.proxy_base_url is not configured "
-                "for deploy_tenant=ALIYUN_ACK"
+                "for deploy_tenant=aliyun"
             )
         )
 

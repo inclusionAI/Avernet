@@ -50,7 +50,7 @@ class TestAliyunAckSessionFileUrlProjector(SessionFileUrlProjectorContract):
     def setup_method(self) -> None:
         self.plugin = AliyunAckSessionFileUrlProjector(
             proxy_base_url="https://bff.example.com",
-            deploy_tenant="ALIYUN_ACK",
+            deploy_tenant="aliyun",
         )
 
     def test_projected_path_has_proxy_prefix_and_original_suffix(self) -> None:

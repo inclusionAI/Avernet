@@ -202,7 +202,7 @@ user_config:
   # 部署环境探测配置（单机模式使用通用环境变量名称）
   env:
     deploy_env_var: "DEPLOY_ENV"
-    # Deploy tenant selector (D-01): BAAS_DEPLOY_TENANT=ALIYUN_ACK enables
+    # Deploy tenant selector (D-01): BAAS_DEPLOY_TENANT=aliyun enables
     # cloud OSS + session URL proxy projection; unset/other = main site
     deploy_tenant: "${BAAS_DEPLOY_TENANT:-}"
 
@@ -222,7 +222,7 @@ user_config:
     bucket_name: ""
     staging_root_path: "baas-file-transfer"
     secret_name: ""
-  # ALIYUN_ACK cloud OSS section (D-07): values injected by deploy team;
+  # aliyun cloud OSS section (D-07): values injected by deploy team;
   # empty values fail fast at startup when plugins.file_transfer is 'real'
   file_transfer_oss_aliyun:
     endpoint: ""
@@ -230,7 +230,7 @@ user_config:
     bucket_name: ""
     staging_root_path: ""
     secret_name: ""
-  # Session file URL proxy base (D-06): BaaS-domain base for ALIYUN_ACK projection
+  # Session file URL proxy base (D-06): BaaS-domain base for aliyun projection
   session_file_url_proxy:
     proxy_base_url: ""
   # Poolab API 端点（按环境，单机模式）

@@ -6,9 +6,9 @@ Covers the AliyunAckSessionFileUrlProjector fidelity + guard rows
     and response-content-disposition params)
   - scheme/host replaced by proxy_base_url, /api/v1/file-transfer-proxy/
     path prefix prepended
-  - non-ALIYUN_ACK tenants pass through untouched with a
+  - non-aliyun tenants pass through untouched with a
     SESSION_URL_PROJECTOR_PASSTHROUGH warning
-  - ALIYUN_ACK with an empty proxy_base_url raises
+  - aliyun with an empty proxy_base_url raises
     SessionFileTransferProxyUnavailableError (503)
 """
 
@@ -60,7 +60,7 @@ def _enable_log_propagation():
 def aliyun_projector():
     return AliyunAckSessionFileUrlProjector(
         proxy_base_url="https://bff.example.com",
-        deploy_tenant="ALIYUN_ACK",
+        deploy_tenant="aliyun",
     )
 
 
@@ -99,7 +99,7 @@ class TestAliyunAckProjectionFidelity:
     def test_proxy_base_url_trailing_slash_stripped(self):
         projector = AliyunAckSessionFileUrlProjector(
             proxy_base_url="https://bff.example.com/",
-            deploy_tenant="ALIYUN_ACK",
+            deploy_tenant="aliyun",
         )
 
         projected = projector.project(_ORIGINAL_UPLOAD_URL)
@@ -116,7 +116,7 @@ class TestAliyunAckProjectionFidelity:
 
 
 class TestPassthroughGuards:
-    """D-01: any tenant other than ALIYUN_ACK passes the URL through
+    """D-01: any tenant other than aliyun passes the URL through
     untouched with a structured WARNING — main-site misconfig immunity."""
 
     @pytest.mark.parametrize("deploy_tenant", ["", "SIGMA", "aliyun_ack"])
@@ -137,13 +137,13 @@ class TestPassthroughGuards:
 
 
 class TestProxyUnavailableGuard:
-    """D-06: ALIYUN_ACK with an empty proxy_base_url refuses instead of
+    """D-06: aliyun with an empty proxy_base_url refuses instead of
     handing out a bare OSS URL."""
 
     def test_proxy_missing_raises(self):
         projector = AliyunAckSessionFileUrlProjector(
             proxy_base_url="",
-            deploy_tenant="ALIYUN_ACK",
+            deploy_tenant="aliyun",
         )
 
         with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
@@ -152,13 +152,13 @@ class TestProxyUnavailableGuard:
         assert exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
         assert exc_info.value.http_status == 503
         assert "proxy_base_url" in exc_info.value.reason
-        assert "deploy_tenant=ALIYUN_ACK" in exc_info.value.reason
+        assert "deploy_tenant=aliyun" in exc_info.value.reason
 
 
 class TestNoopSessionFileUrlProjector:
-    """Noop matrix rows: identity passthrough for every non-ALIYUN_ACK
+    """Noop matrix rows: identity passthrough for every non-aliyun
     tenant (row 1), and the D-06 refusal when the stub projector is
-    selected for ALIYUN_ACK (row 3 — naked-URL leak prevention)."""
+    selected for aliyun (row 3 — naked-URL leak prevention)."""
 
     def test_noop_identity_passthrough_default_tenant(self):
         projector = NoopSessionFileUrlProjector()
@@ -177,7 +177,7 @@ class TestNoopSessionFileUrlProjector:
         assert result == _ORIGINAL_UPLOAD_URL
 
     def test_stub_raises_for_aliyun_ack_tenant(self):
-        projector = NoopSessionFileUrlProjector(deploy_tenant="ALIYUN_ACK")
+        projector = NoopSessionFileUrlProjector(deploy_tenant="aliyun")
 
         with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
             projector.project(_ORIGINAL_UPLOAD_URL)

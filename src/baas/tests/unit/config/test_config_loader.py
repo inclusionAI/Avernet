@@ -201,6 +201,110 @@ class TestEnvOverlaySelection:
         assert config.workers == 1
 
 
+class TestDeployTenantOverlay:
+    """Tests for the BAAS_DEPLOY_TENANT tenant overlay layer.
+
+    Merged after the SERVER_ENV/COMMUNITY_DEPLOY layer; a missing file is
+    silently skipped; an unset var keeps the legacy behaviour byte-identical.
+    """
+
+    def test_tenant_overlay_merges_after_env_layer(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        (config_dir / "application-aliyun.yaml").write_text("workers: 9\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        # Tenant layer is merged last — its value wins over the env layer.
+        assert config.workers == 9
+
+    def test_tenant_overlay_merges_without_env_layer(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-aliyun.yaml").write_text("workers: 9\n")
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 9
+
+    def test_tenant_overlay_missing_file_silently_skipped(
+        self, monkeypatch, tmp_path
+    ):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        # No application-aliyun.yaml: the missing tenant overlay is ignored.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.workers == 1
+        assert config.app_name == "base"
+
+    def test_tenant_env_unset_keeps_legacy_behavior(self, monkeypatch, tmp_path):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        (config_dir / "application-dev.yaml").write_text("workers: 4\n")
+        # No BAAS_DEPLOY_TENANT at all: behaviour identical to today.
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.delenv("BAAS_DEPLOY_TENANT", raising=False)
+        monkeypatch.setenv("SERVER_ENV", "dev")
+        from secbaas.community.config import ConfigLoader
+
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 4
+
+    @pytest.mark.parametrize("tenant_value", ["../../evil", "ali^yun"])
+    def test_tenant_value_charset_guard(self, monkeypatch, tmp_path, tenant_value):
+        config_dir = tmp_path / "configs"
+        config_dir.mkdir()
+        (config_dir / "application.yaml").write_text(
+            "app_name: base\nworkers: 1\nuser_config: {}\n"
+        )
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", tenant_value)
+        from secbaas.community.config import ConfigLoader
+
+        # No filesystem escape, no error — the invalid tenant is skipped.
+        config = ConfigLoader.load()
+        assert config.app_name == "base"
+        assert config.workers == 1
+
+
 class TestEnvInterpolation:
     """Tests for `${NAME}` (and `${NAME:-default}`) placeholder expansion."""
 
