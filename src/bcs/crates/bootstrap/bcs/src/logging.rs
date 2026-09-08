@@ -214,7 +214,7 @@ fn timer_for_output<F: Clone>(
     timer: &LocalTime<F>,
     millisecond_timer: &LocalTime<F>,
 ) -> LocalTime<F> {
-    if output_name == "common-error" || output_name == "observability" {
+    if output_name == "common-error" {
         millisecond_timer.clone()
     } else {
         timer.clone()
@@ -618,12 +618,12 @@ mod tests {
         assert_eq!(json["event_type"], "bot_accept");
     }
     #[test]
-    fn observation_file_duplicates_diagnostics_as_json_with_milliseconds() {
+    fn observation_file_duplicates_diagnostics_in_main_text_format() {
         let dir = tempfile::tempdir().unwrap();
         let output = LogOutputConfig {
             name: "observability".into(), path: dir.path().to_string_lossy().into(),
             file: "bcs-observability.log".into(), level: "info".into(), rotation: "daily".into(),
-            format: LogOutputFormat::Json, targets: vec!["bcs_observation".into(), "bcs_http_access".into()],
+            format: LogOutputFormat::Text, targets: vec!["bcs_observation".into(), "bcs_http_access".into()],
             max_keep_days: 7,
         };
         let timer = LocalTime::new(format_description!("[year]-[month]-[day] [hour]:[minute]:[second]"));
@@ -631,14 +631,15 @@ mod tests {
         let (main_writer, main_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), "bcs.log"));
         let (observation_writer, observation_guard) = buffered_writer(RotatingFileWriter::new(dir.path(), &output.file));
         let subscriber = tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(main_writer))
-            .with(tracing_subscriber::fmt::layer().json().flatten_event(true)
-                .with_current_span(false).with_span_list(false)
+            .with(tracing_subscriber::fmt::layer().with_ansi(false).with_writer(main_writer)
+                .with_timer(timer_for_output("main", &timer, &millis)))
+            .with(tracing_subscriber::fmt::layer().with_ansi(false)
                 .with_timer(timer_for_output(&output.name, &timer, &millis))
                 .with_writer(observation_writer).with_filter(build_output_targets_filter(&output)));
         let dispatch = tracing::Dispatch::new(subscriber);
         tracing::dispatcher::with_default(&dispatch, || {
             tracing::warn!(target: "bcs_observation", request_id = "diagnostic-42", operation = "test.io",
+                operation_id = "operation-42", process_instance_id = "process-42",
                 duration_ms = 123.5, "bcs.operation.finished");
             tracing::info!(target: "bcs_http_access", request_id = "diagnostic-42", status = 200, "http.request.response_ready");
             tracing::info!(target: "unrelated_module", "ordinary business log");
@@ -650,15 +651,21 @@ mod tests {
         assert!(main.contains("bcs.operation.finished") && main.contains("http.request.response_ready"));
         assert!(main.contains("ordinary business log"));
         let diagnostics = fs::read_to_string(dir.path().join(&output.file)).unwrap();
-        let events: Vec<serde_json::Value> = diagnostics.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        let events: Vec<&str> = diagnostics.lines().collect();
         assert_eq!(events.len(), 2);
         for event in &events {
-            assert_eq!(event["request_id"], "diagnostic-42");
-            assert!(event.get("trace_id").is_none() && event.get("span").is_none() && event.get("spans").is_none());
-            assert_eq!(event["timestamp"].as_str().unwrap().as_bytes().get(19), Some(&b'.'));
+            assert!(chrono::NaiveDateTime::parse_from_str(&event[..19], "%Y-%m-%d %H:%M:%S").is_ok());
+            assert_eq!(event.as_bytes().get(19), Some(&b' '), "diagnostic timestamp should match bcs.log");
+            assert!(event.contains("request_id=\"diagnostic-42\""));
+            assert!(!event.contains("trace_id=") && !event.contains("\u{1b}["));
+            assert!(main.lines().any(|line| line.get(19..) == event.get(19..)), "diagnostic event should use the main log format");
         }
-        assert_eq!(events[0]["duration_ms"], 123.5);
-        assert_eq!(events[1]["status"], 200);
+        assert!(events[0].contains(" WARN bcs_observation: bcs.operation.finished"));
+        assert!(events[0].contains("duration_ms=123.5"));
+        assert!(events[0].contains("operation_id=\"operation-42\""));
+        assert!(events[0].contains("process_instance_id=\"process-42\""));
+        assert!(events[1].contains(" INFO bcs_http_access: http.request.response_ready"));
+        assert!(events[1].contains("status=200"));
     }
 
 }
