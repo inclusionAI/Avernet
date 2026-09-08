@@ -1,0 +1,3 @@
+Original panel code and bridge artwork are licensed under Apache-2.0; see ../LICENSE.
+
+Selected source pixels derived from Kenney RPG Urban Pack and Kenney Roguelike/RPG Pack are CC0 1.0. Exact source files/cells, transformations, source URLs, and retained license text are recorded in THIRD_PARTY_NOTICES.md and assets/source/.

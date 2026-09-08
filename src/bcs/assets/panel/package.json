@@ -1,6 +1,6 @@
 {
   "name": "@avernet-assets/bcs-panel",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Prebuilt BCS side-panel components distributed as a UMD asset.",
   "main": "./dist/index.umd.js",
   "browser": "./dist/index.umd.js",
@@ -20,15 +20,20 @@
     "dist/index.umd.js",
     "README.md",
     "PUBLISHING.md",
-    "LICENSE"
+    "LICENSE",
+    "UNDERCOVER_GAME.md",
+    "assets"
   ],
   "scripts": {
     "build": "vite build",
     "test:umd": "node test/umd-contract.mjs",
     "typecheck": "tsc --noEmit",
-    "scan:public": "node scripts/public-scan.mjs",
-    "verify": "npm run typecheck && npm run build && npm run test:umd && npm run scan:public",
-    "prepack": "npm run verify"
+    "scan:public": "node scripts/public-scan.mjs && node scripts/asset-scan.mjs",
+    "verify": "npm run typecheck && npm run build && npm run test:umd && npm run test:focused && npm run test:integration && npm run test:visual && npm run scan:public",
+    "prepack": "npm run verify",
+    "test:focused": "node test/undercover-game/focused.mjs && node test/undercover-game/component-lifecycle.mjs",
+    "test:integration": "node test/undercover-game/integration-smoke.mjs && node test/shared-panels.mjs",
+    "test:visual": "node test/undercover-game/visual-regression.mjs"
   },
   "dependencies": {
     "styled-components": "^6.0.7"
@@ -41,6 +46,7 @@
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
     "typescript": "^5.0.0",
-    "vite": "^8.1.0"
+    "vite": "^8.1.0",
+    "jsdom": "27.4.0"
   }
 }
