@@ -366,3 +366,47 @@ async def test_aggregate_degraded_status_survives_empty_items() -> None:
 
     assert result.status is RuntimeProjectionStatus.DEGRADED
     assert result.issues[0].code == "SKILL_MAPPING_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_logical_issue_preserves_requested_action_and_skill_identity() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime()
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="runtime-name",
+        git_path="git://team/package-name",
+    )
+    mapping = RuntimeProjectionResolver().resolve_skills((asset,)).skill_mappings[0]
+
+    async def pending(**kwargs):
+        pool.calls.append(("apply", kwargs))
+        return MappingApplyResult(
+            status=MappingProjectionStatus.PENDING,
+            items=(
+                MappingItemResult(
+                    target="/diagnostic/not-the-skill-name",
+                    source="/diagnostic/package-name",
+                    status=MappingProjectionStatus.PENDING,
+                    code="MANAGED_SOURCE_MISSING",
+                    retryable=True,
+                    action="APPLY",
+                    mapping=mapping,
+                ),
+            ),
+        )
+
+    pool.apply_mappings = pending
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(
+        plan=_plan(asset),
+        service_factory=_Factory(service),
+    )
+
+    assert result.issues[0].resource_id == "8"
+    assert result.issues[0].name == "runtime-name"
+    assert result.issues[0].requested_action == "APPLY"

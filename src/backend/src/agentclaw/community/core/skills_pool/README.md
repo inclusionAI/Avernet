@@ -151,10 +151,11 @@ Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发
 ## Context Boundary
 
 ```yaml
-purpose: "Persist Bot Skills Layout state and atomically admit one Pool migration generation through a fail-closed rollout gate."
+purpose: "Own Bot Skills layout migration plus steady-state logical Mapping transport and bounded legacy compatibility."
 provides:
   - "SkillsPoolRuntimeProtocol"
   - "MappingApplyResult"
+  - "LegacyMappingApplyRequired"
   - "SkillsPoolLayoutRepositoryProtocol"
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"

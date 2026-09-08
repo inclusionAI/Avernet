@@ -165,13 +165,9 @@ class SkillRuntimeDelivery:
         seen_apply: dict[PoolSkillMapping, MappingProjectionStatus] = {}
         seen_retire: dict[PoolSkillMapping, MappingProjectionStatus] = {}
         issues: list[RuntimeProjectionIssue] = []
-        asset_by_mapping = dict(
-            zip(
-                plan.projection.skill_mappings,
-                plan.projection.skill_assets,
-                strict=True,
-            )
-        )
+        asset_by_name = {
+            asset.name: asset for asset in plan.projection.skill_assets
+        }
         all_items = [*applied.items, *applied.issues]
         invalid = False
         for item in all_items:
@@ -188,7 +184,11 @@ class SkillRuntimeDelivery:
                 invalid = True
             if item.status is MappingProjectionStatus.CONVERGED:
                 continue
-            asset = asset_by_mapping.get(mapping) if mapping is not None else None
+            asset = (
+                asset_by_name.get(mapping.link_name)
+                if mapping is not None
+                else None
+            )
             code, reason, suggested_action, observed, expected = (
                 SkillRuntimeDelivery._mapping_message(item.code)
             )
@@ -198,6 +198,7 @@ class SkillRuntimeDelivery:
                     resource_id=str(asset.skill_id) if asset is not None else None,
                     name=(asset.name if asset is not None else mapping.link_name if mapping else None),
                     corpus=mapping.corpus.upper() if mapping is not None else None,
+                    requested_action=item.action,
                     code=code,
                     reason=reason,
                     status=(
