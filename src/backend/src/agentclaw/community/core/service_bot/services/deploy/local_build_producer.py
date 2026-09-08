@@ -1,24 +1,11 @@
 """``LocalBuildProducer`` — produce a build snapshot from a local engine source.
 
-The singlebox / local-dev counterpart of :class:`ArcaSnapshotProducer`. It still
-delegates to ``bot_build_service.build()`` (host-side copy of the engine root
-into the versioned target), but the **source** is the engine's local working
-directory (``EngineSandboxProvider.get_base_path()``, e.g. ``~/.openclaw`` for
-singlebox) instead of the production per-bot NAS merge area (which only
-exists on the ARCA/ECS sandbox and is never writable/executable from a dev host).
-
-Why a separate producer:
-- The ARCA build path assumes a per-bot NFS mount that only exists on the
-  production ARCA/ECS sandbox. A developer laptop running singlebox has the
-  engine's real files under the configured engine root (``openclaw_root``),
-  never under the NAS merge path — so the NAS migration
-  (``get_bot_nas_dir`` + ``sudo chmod`` + ``sudo rsync``) aborts on the host
-  (``sudo: a password is required``) and the publish build stage fails.
-- ``BotBuildService.build()`` already accepts an optional
-  ``local_source_root`` keyword that, when set, replaces the NAS source and
-  disables the ``sudo chmod`` / ``sudo rsync`` privilege dance. This producer
-  is the thin layer that supplies that root from the matching engine sandbox
-  provider.
+The singlebox counterpart of :class:`ArcaSnapshotProducer` delegates to
+``bot_build_service.build()`` but obtains its source from the existing
+``WorkspacePathFactory`` per-bot host layout. The source is selected by entity,
+Bot ID and engine, not by the global engine sandbox default (such as
+``~/.openclaw``). Missing per-bot sources fail rather than falling back to that
+unrelated global directory or the production NAS merge area.
 
 Behavior parity with ARCA:
 - Same ``requires_runtime_layout_observation = True`` so ``BuildStageRunner``
@@ -51,6 +38,7 @@ from agentclaw.community.core.service_bot.services.deploy.service_skills_manifes
     ServiceSkillsManifestBuilder,
 )
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentclaw.community.core.service_bot.services.bot_build_service import (
@@ -73,10 +61,12 @@ class LocalBuildProducer(DeployArtifactProducer):
         build_service: "BotBuildService",
         skills_manifest_builder: ServiceSkillsManifestBuilder,
         sandbox_registry: EngineSandboxRegistry,
+        path_factory: WorkspacePathFactory,
     ) -> None:
         self._build_service = build_service
         self._skills_manifest_builder = skills_manifest_builder
         self._sandbox_registry = sandbox_registry
+        self._path_factory = path_factory
 
     def _resolve_local_source_root(self, bot: dict[str, Any]) -> Path:
         """Resolve the local engine source root for ``bot``.
@@ -103,7 +93,21 @@ class LocalBuildProducer(DeployArtifactProducer):
                 raise ValueError(
                     "no engine sandbox provider available for local build"
                 ) from exc
-        return Path(provider.get_base_path())
+        identity: dict[str, str] = {}
+        for field in ("entity_id", "bot_id", "entity_type"):
+            value = bot.get(field, "staff" if field == "entity_type" else None)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"local build requires {field}")
+            identity[field] = value
+        source_root = self._path_factory.get_bot_engine_dir(
+            entity_id=identity["entity_id"],
+            bot_id=identity["bot_id"],
+            engine_type=provider.engine_type,
+            entity_type=identity["entity_type"],
+        )
+        if not source_root.is_dir():
+            raise ValueError("local build source directory does not exist")
+        return source_root
 
     def produce_artifact(self, request: ArtifactBuildRequest) -> DeployArtifact:
         """Delegate to ``build()`` with the local engine source root.

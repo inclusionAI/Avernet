@@ -2,7 +2,7 @@
 
 Singlebox runs on a developer laptop (or CI) with **no ARCA/ECS sandbox**, so
 the engine's bot files live on the **localhost filesystem** under the
-configured engine root (``openclaw_root`` → ``~/.openclaw``), never under the
+per-bot engine root selected by ``WorkspacePathFactory``, never under the
 production per-bot NAS merge area. The base
 ``ServiceBotModule`` wires the publish build's ``DeployArtifactProducerRouter``
 to point ``arca``/``baas`` at :class:`ArcaSnapshotProducer`, which computes
@@ -12,7 +12,7 @@ required``; the NAS path does not exist), failing the publish build stage.
 
 This module re-binds ``DeployArtifactProducerRouter`` so singlebox routes the
 publish build through :class:`LocalBuildProducer`, which sources the artifact
-from the engine's local working directory (``EngineSandboxProvider.get_base_path()``).
+from the selected Bot's local working directory, not the global engine default.
 Following the existing singlebox override pattern (see ``SingleboxAccessModule``,
 ``SingleboxDevicesModule``), installing this module after the base
 ``ServiceBotModule`` makes the later binding win.
@@ -67,6 +67,7 @@ from agentclaw.community.core.skill_center.canonical_center_store import (
 )
 from agentclaw.community.core.storage.path import get_skills_repo_path
 from agentclaw.community.core.workspace.engine_sandbox import EngineSandboxRegistry
+from agentclaw.community.core.workspace.path_factory import WorkspacePathFactory
 from agentclaw.community.log import get_logger
 
 logger = get_logger()
@@ -86,6 +87,7 @@ class SingleboxServiceBotModule(Module):
         center_store: CanonicalCenterStoreConfig,
         canonical_center_versions: CanonicalCenterVersionStore,
         sandbox_registry: EngineSandboxRegistry,
+        path_factory: WorkspacePathFactory,
     ) -> LocalBuildProducer:
         """Local-source build snapshot producer for singlebox.
 
@@ -103,6 +105,7 @@ class SingleboxServiceBotModule(Module):
                 get_skills_repo_path(),
             ),
             sandbox_registry=sandbox_registry,
+            path_factory=path_factory,
         )
 
     @singleton
