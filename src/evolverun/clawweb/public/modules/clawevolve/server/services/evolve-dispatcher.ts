@@ -91,6 +91,11 @@ class EvolveDispatchValidationError extends Error {}
 const MAX_EVOLVE_COMMAND_BYTES = 64 * 1024;
 const SAFE_EVOLVE_SCRIPT_PATH = /^\/[A-Za-z0-9._/-]+$/;
 export function resolveEvolveTransport(input: Pick<EvolveDispatchInput, "stepType" | "runtime" | "forceMessage">): "baas_execute_command" | "message" {
+  // Singlebox BaaS uses local_proc, whose execute-command endpoint is intentionally
+  // a no-op. Route dev Bots through the real message/OpenClaw path instead.
+  if (input.runtime?.provider === "baas" && input.runtime.env?.trim().toLowerCase() === "dev") {
+    return "message";
+  }
   return input.runtime?.provider === "baas" && stepUsesBaasRuntime(input.stepType)
     ? "baas_execute_command"
     : "message";

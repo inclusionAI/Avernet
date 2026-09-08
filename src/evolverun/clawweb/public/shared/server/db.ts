@@ -225,6 +225,7 @@ type YamlBaasConfig = {
   iamtoken?: string;
   baseUrl?: string;
   environments?: {
+    dev?: YamlBaasEnvironmentConfig;
     pre?: YamlBaasEnvironmentConfig;
     prod?: YamlBaasEnvironmentConfig;
   };
@@ -794,7 +795,7 @@ export type ResolvedBaasEnvironmentConfig = {
 
 export type ResolvedBaasConfig = {
   apiKey: string; iamtoken: string; baseUrl: string;
-  environments: Record<"pre" | "prod", ResolvedBaasEnvironmentConfig>;
+  environments: Record<"dev" | "pre" | "prod", ResolvedBaasEnvironmentConfig>;
   evolveScriptPaths: Record<"dev" | "pre" | "prod", string>;
   commandTenant: string; commandTimeoutSeconds: number;
 };
@@ -818,7 +819,14 @@ export function resolveBaasConfig(configPath?: string): ResolvedBaasConfig {
   if (!evolveScriptPaths.dev || !evolveScriptPaths.pre || !evolveScriptPaths.prod) {
     throw new Error("BaaS evolveScriptPaths.dev/pre/prod 必须在 YAML 中显式配置");
   }
-  const environments: Record<"pre" | "prod", ResolvedBaasEnvironmentConfig> = {
+  const environments: Record<"dev" | "pre" | "prod", ResolvedBaasEnvironmentConfig> = {
+    dev: {
+      apiKey: firstNonBlank(
+        getEnv("CLAWEVOLVE_BAAS_DEV_API_KEY"),
+        yaml.baas?.environments?.dev?.apiKey,
+      ),
+      baseUrl: firstNonBlank(yaml.baas?.environments?.dev?.baseUrl).replace(/\/$/, ""),
+    },
     pre: {
       apiKey: firstNonBlank(
         getEnv("CLAWEVOLVE_BAAS_PRE_API_KEY"),

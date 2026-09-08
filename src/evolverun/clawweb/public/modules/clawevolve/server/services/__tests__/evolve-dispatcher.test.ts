@@ -20,6 +20,10 @@ vi.mock("@avernet/clawweb-shared/server/db", () => ({
     iamtoken: "test-iam-token",
     baseUrl: "https://baas.example.com",
     environments: {
+      dev: {
+        apiKey: "dev-api-key",
+        baseUrl: "http://127.0.0.1:8890",
+      },
       pre: {
         apiKey: "pre-api-key",
         baseUrl: "https://baas-pre.example.com",
@@ -232,6 +236,13 @@ describe("resolveEvolveTransport", () => {
   it("does not let the legacy forceMessage flag bypass the BaaS runner", () => {
     expect(resolveEvolveTransport({ stepType: "optimize", runtime: baasRuntime, forceMessage: true })).toBe("baas_execute_command");
   });
+
+  it.each(["diagnose", "plan", "optimize", "bench"])(
+    "uses the real Message/OpenClaw path for local dev BaaS %s",
+    (stepType) => {
+      expect(resolveEvolveTransport({ stepType, runtime: runtime("dev") })).toBe("message");
+    },
+  );
 
   it.each(["diagnose", "plan", "optimize", "apply", "bench"])("uses Message for ARCA %s", (stepType) => {
     expect(resolveEvolveTransport({ stepType, runtime: arcaRuntime })).toBe("message");
@@ -666,7 +677,7 @@ describe("dispatchEvolveCommand environment routing", () => {
     expect(requestBody.env).toBeUndefined();
   });
 
-  it.each([undefined, "dev", "unknown"])("fails closed for unsupported runtime env %s", async (env) => {
+  it.each([undefined, "unknown"])("fails closed for unsupported runtime env %s", async (env) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
