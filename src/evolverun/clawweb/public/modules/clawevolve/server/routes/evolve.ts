@@ -246,6 +246,12 @@ async function resolveFrozenStageExtensions(
         implementationId: implementation.implementation_id,
       };
     }
+    const enabledModes = Object.entries(modes)
+      .filter(([, binding]) => binding?.enabled === true)
+      .map(([mode]) => mode);
+    if (enabledModes.includes("replace") && enabledModes.length > 1) {
+      throw new Error(`${stage.name}的整体替换不能与前置处理或后置处理同时启用`);
+    }
     frozen[stage.stage] = modes;
   }
   return frozen;

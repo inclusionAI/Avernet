@@ -54,7 +54,8 @@ function loadCatalog(value: unknown): OfficialEvolveCatalog {
   for (const stage of catalog.stages) {
     if (!STAGES.has(stage.stage) || !stage.name?.trim() || !stage.description?.trim()
       || stage.inputSchema?.type !== "object" || stage.resultSchema?.type !== "object"
-      || stage.extensionModes.length !== MODES.size
+      || !Array.isArray(stage.extensionModes)
+      || new Set(stage.extensionModes).size !== stage.extensionModes.length
       || stage.extensionModes.some((mode) => !MODES.has(mode))) {
       throw new Error(`Invalid official Stage definition: ${String(stage.stage)}`);
     }

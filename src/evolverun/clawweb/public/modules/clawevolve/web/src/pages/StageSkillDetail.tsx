@@ -22,7 +22,7 @@ export default function StageSkillDetail() {
       setItem(nextItem)
       setPackageContent(nextContent)
       setSelectedPath(nextContent.selected?.path ?? '')
-    }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Stage Skill 加载失败'))
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : '自定义实现加载失败'))
   }, [implementationId])
 
   useEffect(() => {
@@ -34,7 +34,7 @@ export default function StageSkillDetail() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-7 sm:px-6 lg:px-8">
-      <button onClick={() => navigate('/evolve/stage-skills')} className="mb-5 text-sm text-gray-500">← 返回 Stage Skill</button>
+      <button onClick={() => navigate('/evolve/stage-skills')} className="mb-5 text-sm text-gray-500">← 返回自定义 Stage</button>
       {item && <>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -47,7 +47,7 @@ export default function StageSkillDetail() {
 
         <section className="mt-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-100 px-5 py-4">
-            <h2 className="text-sm font-semibold text-gray-900">Skill 内容</h2>
+            <h2 className="text-sm font-semibold text-gray-900">自定义实现内容</h2>
             <p className="mt-1 text-xs text-gray-500">查看这个版本实际上传并在运行时执行的文件。</p>
           </div>
           <div className="grid min-h-[360px] md:grid-cols-[240px_minmax(0,1fr)]">

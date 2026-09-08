@@ -151,7 +151,7 @@ const taskStatusText: Record<string, string> = {
 const taskStepText: Record<string, string> = {
   skill_init: 'Skill 初始化',
   skill_prepare: '准备 Skill 候选',
-  stage_extension: 'Stage Skill',
+  stage_extension: '自定义 Stage',
   skill_finalize: '冻结候选版本',
   diagnose: 'Bot诊断',
   plan: '目标规划',
@@ -851,9 +851,9 @@ function StartEvolution() {
             </div>}
           </section>
 
-          {!improvementSource && (taskType === 'diagnose' || taskType === 'full') && <SkillEvolutionFields
+          {isSkillEvolution && <SkillEvolutionFields
             botId={botId}
-            includeTargetSkill={isSkillEvolution}
+            includeTargetSkill
             assetId={targetSkillAssetId}
             onAssetIdChange={setTargetSkillAssetId}
             extensions={stageExtensions}
@@ -864,6 +864,7 @@ function StartEvolution() {
               if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
             }}
             fullTask={taskType === 'full'}
+            section="target"
           />}
 
           {(taskType === 'diagnose' || (taskType === 'full' && !improvementSource && fullInputMode === 'diagnose_goal')) && <DiagnoseFields
@@ -924,6 +925,21 @@ function StartEvolution() {
             <p className="mt-2 text-xs text-gray-400">{taskType === 'full' && fullInputMode === 'direct_goal' ? 'Plan 只执行一次；' : '诊断只执行一次；'}只有优化阶段会按验证结果进行多轮迭代，最多执行 100 轮。</p>
           </section> : null}
           {taskType !== 'pack' && taskType !== 'pack_restore' && taskType !== 'runtime_cleanup' && <RuntimeMaintenanceOption enabled={runtimeMaintenance} onChange={setRuntimeMaintenance} />}
+          {!improvementSource && (taskType === 'diagnose' || taskType === 'full') && <SkillEvolutionFields
+            botId={botId}
+            includeTargetSkill={false}
+            assetId={targetSkillAssetId}
+            onAssetIdChange={setTargetSkillAssetId}
+            extensions={stageExtensions}
+            onExtensionsChange={setStageExtensions}
+            stageSelection={effectiveStageSelection}
+            onStageSelectionChange={(value) => {
+              setStageSelection(value)
+              if (taskType === 'full') setFullInputMode(value.diagnose ? 'diagnose_goal' : 'direct_goal')
+            }}
+            fullTask={taskType === 'full'}
+            section="extensions"
+          />}
           </div>
           <TaskFormOverview taskType={taskType} fullInputMode={fullInputMode} improvementSource={improvementSource} stageSelection={effectiveStageSelection} />
           </div>
@@ -2210,7 +2226,7 @@ function StepCard({ step, canRetry = false, canCancel = false, retrying = false,
   const stepLabel: Record<string, string> = {
     skill_init: 'Skill 初始化', diagnose: 'Bot 诊断', plan: '目标规划', envprep: '环境准备', bench: '基线评测',
     optimize: '策略优化', test: '验证评测', review: '轮次复盘', apply: '应用 Patch',
-    skill_prepare: '准备待进化 Skill', stage_extension: '执行自定义 Stage Skill', skill_finalize: '生成候选 Skill',
+    skill_prepare: '准备待进化 Skill', stage_extension: '执行自定义 Stage', skill_finalize: '生成候选 Skill',
   }
   return (
     <div className="rounded-xl border border-gray-200 p-4 transition hover:border-gray-300">
@@ -2368,7 +2384,7 @@ function StepDeliverables({ output, taskId, stepId, stepType }: { output: Record
     <div className="mt-3 space-y-2">
       {(showStageSkillResult || showLifecycleResult) && <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-gray-900">
         <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-          {showStageSkillResult ? 'Stage Skill 交付结果' : 'Skill 候选处理结果'}
+          {showStageSkillResult ? '自定义 Stage 交付结果' : 'Skill 候选处理结果'}
         </p>
         {typeof output.summary === 'string' && output.summary.trim() && <p className="mt-2 text-xs leading-5 text-gray-700">{output.summary}</p>}
         <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-md border border-gray-200 bg-white p-3 font-mono text-[10px] leading-5 text-gray-700">{JSON.stringify(output, null, 2)}</pre>
@@ -2597,7 +2613,7 @@ function EvolveShell({ children }: { children: ReactNode }) {
           <EvolveSidebarEvaluationGroup />
           <EvolveSidebarLink to="/evolve/packs" label="进化版本" icon="package" />
           <EvolveSidebarLink to="/evolve/skills" label="技能中心" icon="package" activeWhen={(pathname) => pathname.startsWith('/evolve/skills')} />
-          <EvolveSidebarLink to="/evolve/stage-skills" label="Stage Skill" icon="code" activeWhen={(pathname) => pathname.startsWith('/evolve/stage-skills')} />
+          <EvolveSidebarLink to="/evolve/stage-skills" label="自定义 Stage" icon="code" activeWhen={(pathname) => pathname.startsWith('/evolve/stage-skills')} />
           <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">专项进化</div>
           <p className="px-3 pb-1 text-[10px] leading-4 text-gray-400">特定模块的独立管理与定向进化</p>
           <EvolveSidebarComingSoon label="Memory 进化" />

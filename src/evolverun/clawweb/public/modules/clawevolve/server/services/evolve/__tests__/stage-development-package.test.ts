@@ -44,6 +44,8 @@ describe("Stage Skill developer package", () => {
     expect(guide).toContain("平台负责");
     expect(guide).toContain("hitl");
     expect(guide).toContain("implementation/SKILL.md");
+    const manifest = JSON.parse(await zip.file("stage-skill.json")!.async("string"));
+    expect(manifest.display_name).toBe("诊断预处理自定义实现");
   });
 
   it("documents the real postprocess input", async () => {
@@ -63,6 +65,7 @@ describe("Stage Skill developer package", () => {
     const zip = new JSZip();
     zip.file("stage-skill.json", JSON.stringify({
       schema_version: "clawevolve.stage-skill/v1",
+      display_name: "诊断预处理",
       stage: "diagnose",
       mode: "preprocess",
       entrypoint: "implementation/SKILL.md",
@@ -83,6 +86,25 @@ describe("Stage Skill developer package", () => {
         expect.objectContaining({ id: "stage-binding", status: "failed" }),
       ]),
     });
+  });
+
+  it("requires the uploaded package to declare its display identity", async () => {
+    const zip = new JSZip();
+    zip.file("stage-skill.json", JSON.stringify({
+      schema_version: "clawevolve.stage-skill/v1",
+      stage: "diagnose",
+      mode: "preprocess",
+      entrypoint: "implementation/SKILL.md",
+    }));
+    zip.file("implementation/SKILL.md", "# 诊断预处理\n\n读取输入并完成结构检查。\n");
+
+    const result = await inspectStageSkillPackage(
+      await zip.generateAsync({ type: "nodebuffer" }),
+      { stage: "diagnose", mode: "preprocess" },
+    );
+
+    expect(result.status).toBe("failed");
+    expect(result.checks).toContainEqual(expect.objectContaining({ id: "manifest", status: "failed" }));
   });
 
   it("rejects the untouched placeholder instead of treating any ZIP as an implementation", async () => {

@@ -16,6 +16,7 @@ const MAX_FILES = 300;
 
 export type StageSkillManifest = {
   schema_version: typeof STAGE_SKILL_SCHEMA_VERSION;
+  display_name: string;
   stage: StageKey;
   mode: StageExtensionMode;
   entrypoint: "implementation/SKILL.md";
@@ -62,10 +63,12 @@ function parseManifest(value: unknown): StageSkillManifest | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   if (Object.keys(row).some((key) => !new Set([
-    "schema_version", "stage", "mode", "entrypoint",
+    "schema_version", "display_name", "stage", "mode", "entrypoint",
   ]).has(key))) return null;
+  const displayName = String(row.display_name ?? "").trim();
   const stage = findOfficialStage(String(row.stage ?? ""));
   if (row.schema_version !== STAGE_SKILL_SCHEMA_VERSION || !stage
+    || !displayName || displayName.length > 128
     || !isStageExtensionMode(row.mode)
     || !stage.extensionModes.includes(row.mode)
     || row.entrypoint !== "implementation/SKILL.md") return null;
@@ -133,9 +136,9 @@ export async function inspectStageSkillPackage(
       ? "implementation/SKILL.md 仍是未开发的占位内容" : "";
   const checks = [
     check("archive-safety", "压缩包安全", archiveError),
-    check("manifest", "Stage Skill 声明", manifestError),
-    check("stage-binding", "Stage 与接入方式", bindingError),
-    check("entrypoint", "Skill 内容", entrypointError),
+    check("manifest", "声明文件", manifestError),
+    check("stage-binding", "Stage 绑定", bindingError),
+    check("entrypoint", "Skill 入口文件", entrypointError),
   ];
   return {
     status: checks.some((item) => item.status === "failed") ? "failed" : "passed",
@@ -155,6 +158,7 @@ export async function createStageDevelopmentPackage(input: {
   if (!stage || !stage.extensionModes.includes(input.mode)) throw new Error("Stage 或接入方式不存在");
   const manifest: StageSkillManifest = {
     schema_version: STAGE_SKILL_SCHEMA_VERSION,
+    display_name: `${stage.name}${MODE_NAMES[input.mode]}自定义实现`,
     stage: stage.stage,
     mode: input.mode,
     entrypoint: "implementation/SKILL.md",
@@ -187,7 +191,7 @@ export async function createStageDevelopmentPackage(input: {
     "", "## 开发与交付步骤", "",
     "1. 完整阅读 AGENT_TASK.md、contract.json 和 stage-skill.json。",
     "2. 在 implementation/SKILL.md 直接编写本 Stage 的 Skill；可以在 implementation/ 下增加脚本和说明文件。",
-    "3. 不要修改 stage-skill.json 中的平台绑定信息。",
+    "3. 不要修改 stage-skill.json 中的 Stage、接入位置和入口文件；display_name 是上传后展示给用户的实现名称，可根据实际能力调整。",
     "4. 将本目录重新压缩为 ZIP，回到平台上传。平台先做确定性的结构与安全校验，再可选运行真实 Agent 集成测试。", "",
   ].join("\n");
   const contract = {

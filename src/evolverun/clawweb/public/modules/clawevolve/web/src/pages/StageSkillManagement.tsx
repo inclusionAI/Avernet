@@ -31,7 +31,7 @@ export default function StageSkillManagement() {
       setItems(result.items)
       setError('')
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Stage Skill 加载失败')
+      setError(reason instanceof Error ? reason.message : '自定义 Stage 加载失败')
     } finally {
       setLoading(false)
     }
@@ -64,20 +64,20 @@ export default function StageSkillManagement() {
     <div className="mx-auto max-w-6xl px-4 py-7 sm:px-6 lg:px-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-sm font-medium text-blue-600">Evolve · Stage 扩展</p>
-          <h1 className="mt-1 text-2xl font-semibold text-gray-950">Stage Skill</h1>
+          <p className="text-sm font-medium text-blue-600">Evolve · 流程能力</p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-950">自定义 Stage</h1>
           <p className="mt-1.5 max-w-3xl text-sm leading-6 text-gray-500">
-            Stage 定义进化流程中一步的职责、输入输出和平台规则；Stage Skill 实现这一步开放给用户自定义的处理逻辑。
+            Stage 是进化模板中由平台定义的处理步骤，包含职责、输入输出和运行规则。你可以在 Stage 开放的位置接入自己的 Skill 实现，不会创建新的 Stage，也不会新建业务 Skill。
           </p>
         </div>
         <button onClick={() => navigate('/evolve/stage-skills/new')} className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700">
-          新建 Stage Skill
+          接入自定义实现
         </button>
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="grid grid-cols-[minmax(0,1.4fr)_160px_180px_150px] gap-4 border-b border-gray-100 bg-gray-50 px-5 py-3 text-xs font-medium text-gray-500">
-          <span>Skill</span><span>用于 Stage</span><span>版本</span><span className="text-right">操作</span>
+          <span>自定义实现</span><span>用于 Stage</span><span>版本</span><span className="text-right">操作</span>
         </div>
         {groups.map((group) => {
           const currentId = selected[group.id] || group.versions[0]?.implementationId
@@ -104,7 +104,7 @@ export default function StageSkillManagement() {
             </div>
           )
         })}
-        {!loading && groups.length === 0 && <div className="px-5 py-16 text-center text-sm text-gray-400">还没有 Stage Skill，点击右上角开始开发。</div>}
+        {!loading && groups.length === 0 && <div className="px-5 py-16 text-center text-sm text-gray-400">还没有自定义实现，点击右上角开始接入。</div>}
         {loading && <div className="px-5 py-16 text-center text-sm text-gray-400">正在加载…</div>}
       </section>
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}

@@ -993,14 +993,12 @@ export const api = {
     uploadStageSkill(input: {
       stage: string
       mode: EvolveStageMode
-      displayName: string
       stageSkillId?: string
       package: File
     }): Promise<EvolveStageSkill> {
       const body = new FormData()
       body.set('stage', input.stage)
       body.set('mode', input.mode)
-      body.set('displayName', input.displayName)
       if (input.stageSkillId) body.set('stageSkillId', input.stageSkillId)
       body.set('package', input.package)
       return fetchJson(`${BASE}/evolve/stage-skills/uploads`, { method: 'POST', body })

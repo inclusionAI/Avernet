@@ -60,7 +60,7 @@ export const EVOLVE_TASK_REGISTRY: Record<EvolveTaskType, EvolveTaskDefinition> 
   repair: { type: "repair", label: "Bot修复", initialStepType: "repair_plan", supportsRetry: false, supportsCancel: false, nodes: [] },
   suggestion_apply: { type: "suggestion_apply", label: "应用进化建议", initialStepType: "suggestion_apply", supportsRetry: true, supportsCancel: false, nodes: [] },
   run_analysis: { type: "run_analysis", label: "运行日志分析", initialStepType: "run_analysis", supportsRetry: true, supportsCancel: false, nodes: [] },
-  stage_test: { type: "stage_test", label: "Stage Skill 集成测试", initialStepType: "stage_extension", supportsRetry: true, supportsCancel: true, nodes: [] },
+  stage_test: { type: "stage_test", label: "自定义 Stage 集成测试", initialStepType: "stage_extension", supportsRetry: true, supportsCancel: true, nodes: [] },
 };
 
 export const INSIGHT_IMPROVEMENT_NODES = ["plan", "optimize"] as const satisfies readonly NodeCommandKey[];

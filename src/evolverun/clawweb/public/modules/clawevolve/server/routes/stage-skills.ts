@@ -45,11 +45,6 @@ function actor(req: Request): string | null {
   return value || null;
 }
 
-function validDisplayName(value: unknown): string | null {
-  const name = String(value ?? "").trim();
-  return name && name.length <= 128 ? name : null;
-}
-
 function implementationView(row: Awaited<ReturnType<StageSkillRepository["findImplementation"]>>) {
   if (!row) return null;
   const stage = findOfficialStage(row.stage_key);
@@ -144,9 +139,8 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       }
       const stage = String(req.body?.stage ?? "") as StageKey;
       const mode = String(req.body?.mode ?? "") as StageExtensionMode;
-      const displayName = validDisplayName(req.body?.displayName);
-      if (!findOfficialStage(stage) || !isStageExtensionMode(mode) || !displayName || !req.file?.buffer) {
-        res.status(400).json({ error: "Stage、接入方式、名称和 ZIP 均为必填项" }); return;
+      if (!findOfficialStage(stage) || !isStageExtensionMode(mode) || !req.file?.buffer) {
+        res.status(400).json({ error: "Stage、接入方式和 ZIP 均为必填项" }); return;
       }
       const inspection = await inspectStageSkillPackage(req.file.buffer, { stage, mode });
       if (inspection.status !== "passed") {
@@ -162,6 +156,7 @@ export function createStageSkillsRouter(input: StageSkillsRouterInput): Router {
       }
       const stageSkillId = existingStageSkill?.stage_skill_id
         ?? `STAGESKILL-${randomUUID().slice(0, 12).toUpperCase()}`;
+      const displayName = existingStageSkill?.display_name ?? inspection.manifest!.display_name;
       const implementationId = `IMPL-${randomUUID().slice(0, 12).toUpperCase()}`;
       const versionNo = await input.repo.nextVersion(stageSkillId);
       const objectKey = `evolve/stage-implementations/${implementationId}/v${versionNo}/package.zip`;

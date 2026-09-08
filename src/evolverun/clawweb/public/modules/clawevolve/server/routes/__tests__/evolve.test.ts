@@ -382,6 +382,23 @@ describe("ClawEvolve Stage extensions and Skill candidates", () => {
     });
     expect(disabledExtension.status).toBe(422);
     expect((await disabledExtension.json()).error).toContain("已关闭");
+
+    const replaceImplementationId = await seedStageImplementation("replace", "diagnose");
+    const conflictingExtensions = await fetch(`${baseUrl}/api/evolve/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-User-Id": "user-1" },
+      body: JSON.stringify({
+        taskType: "full", taskName: "冲突的自定义实现", userId: "user-1", botId: "bot-1",
+        goal: "提升完成率。", maxRounds: 3,
+        diagnoseIntent: "检查最近的失败 Session。",
+        stageExtensions: { diagnose: {
+          preprocess: { enabled: true, implementationId },
+          replace: { enabled: true, implementationId: replaceImplementationId },
+        } },
+      }),
+    });
+    expect(conflictingExtensions.status).toBe(422);
+    expect((await conflictingExtensions.json()).error).toContain("整体替换不能与前置处理或后置处理同时启用");
   });
 
   it("runs a registered preprocess before the ordinary Diagnose and preserves the fixed flow", async () => {
