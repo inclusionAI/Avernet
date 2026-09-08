@@ -642,7 +642,7 @@ async def teclaw_callback(
             },
         )
 
-    arca_request = DeviceCallbackRequest(
+    device_callback_request = DeviceCallbackRequest(
         device_uuid=device_uuid,
         publish_id=publish_id,
         event_type="start",
@@ -652,7 +652,7 @@ async def teclaw_callback(
     )
 
     try:
-        result = await service.handle_device_callback(arca_request)
+        result = await service.handle_device_callback(device_callback_request)
         return ApiResponse(data=result)
     except PublishNotFoundError as e:
         raise HTTPException(
