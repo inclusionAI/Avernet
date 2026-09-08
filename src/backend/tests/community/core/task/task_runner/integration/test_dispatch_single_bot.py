@@ -268,7 +268,12 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     assert "三步缺一不可" in s
     assert "接力上下文" in s and "执行产出" in s and "gap与交接" in s
     assert "step1" not in s and "step2" not in s and "step3" not in s
-    assert "获取上方最新统一上下文" in s and "按问题智能匹配能力" in s
+    assert "获取上方最新统一上下文" in s
+    # 接力第3步"派发"为描述性交接,禁止真调路由/派发/收尾工具,且正文唯一、不二次重述
+    assert "交接只描述,不执行派发" in s
+    assert "禁止调用 bcs_route" in s and "bcs_task_complete" in s and "bcs_fuse" in s
+    assert "正文唯一,不重复输出" in s
+    assert "按问题智能匹配能力" not in s
     # 中文输出约束
     assert "必须使用中文" in s
 

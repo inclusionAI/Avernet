@@ -148,7 +148,12 @@ def test_form_coop_group_relay_appends_closure_for_raw_instruction():
     ctx = bcs.created[0].context
     # raw 指令(无 closure)按需补承接→执行→交接三步硬约束 + 中文约束
     assert "三步缺一不可" in ctx
-    assert "获取上方最新统一上下文" in ctx and "按问题智能匹配能力" in ctx
+    assert "获取上方最新统一上下文" in ctx
+    # 接力第3步"派发"为描述性交接,禁止真调路由/派发/收尾工具,正文唯一、不二次重述
+    assert "交接只描述,不执行派发" in ctx
+    assert "禁止调用 bcs_route" in ctx and "bcs_task_complete" in ctx and "bcs_fuse" in ctx
+    assert "正文唯一,不重复输出" in ctx
+    assert "按问题智能匹配能力" not in ctx
     assert "必须使用中文" in ctx
     # 仍只补 driver/reporter 定位脚注(协作群分工),不注入上报协议/mock
     assert "reporter_bot_id=mgr" in ctx and "协作群分工" in ctx
