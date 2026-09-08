@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from time import perf_counter
 from typing import Any
 
 from injector import inject
+
+from agentclaw.community.log import get_logger
 
 from agentclaw.community.core.repository.capability_desired_state_types import (
     InstallationFlushPlan,
@@ -28,6 +31,9 @@ from agentclaw.community.core.skill_center.version_resolution_contract import (
 )
 from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
 from agentclaw.community.core.skill_center.bot_capability_state_reader_protocol import BotCapabilityStateReaderProtocol
+
+
+logger = get_logger()
 
 
 class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
@@ -152,15 +158,33 @@ class BotCapabilityStateReader(BotCapabilityStateReaderProtocol):
     def _flush(
         self, *, bot: Mapping[str, Any], bot_id: str, owner_id: str
     ) -> InstallationFlushPlan:
+        started = perf_counter()
+        default_sync_only = self._read_config.default_sync_only
+        sync_mode = "DEFAULT_ONLY" if default_sync_only else "FULL_FLUSH"
         sync = (
             self._repository.sync_default_installations
-            if self._read_config.default_sync_only
+            if default_sync_only
             else self._repository.flush_installations
         )
-        return sync(
-            bot_id=bot_id,
-            owner_id=owner_id,
-            env=str(bot["env"]),
-            engine_type=bot_engine_type(bot),
-            default_engine_types=bot_default_engine_types(bot),
-        )
+        status = "FAILED"
+        try:
+            plan = sync(
+                bot_id=bot_id,
+                owner_id=owner_id,
+                env=str(bot["env"]),
+                engine_type=bot_engine_type(bot),
+                default_engine_types=bot_default_engine_types(bot),
+            )
+            status = "SUCCEEDED"
+            return plan
+        finally:
+            logger.info(
+                "[BotCapabilityStateReader] installation_sync env=%s owner_id=%s "
+                "bot_id=%s sync_mode=%s status=%s duration_ms=%d",
+                str(bot["env"]),
+                owner_id,
+                bot_id,
+                sync_mode,
+                status,
+                int((perf_counter() - started) * 1000),
+            )
