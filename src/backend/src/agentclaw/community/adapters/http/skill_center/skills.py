@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import os
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -16,12 +17,14 @@ from typing import Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     File,
     Form,
     HTTPException,
     Query,
     Request,
+    Response,
     UploadFile,
 )
 from starlette.concurrency import run_in_threadpool
@@ -132,6 +135,9 @@ from agentclaw.community.api.direct_activation_service import (
     DirectActivationServiceProtocol,
 )
 from agentclaw.community.api.skill_query_service import SkillQueryServiceProtocol
+from agentclaw.community.api.local_skill_upload_service import (
+    LocalSkillUploadServiceProtocol,
+)
 from agentclaw.community.api.repository_catalog_service import (
     RepositoryCatalogServiceProtocol,
 )
@@ -162,6 +168,7 @@ from agentclaw.community.core.bot_collaborator.interceptor.extractors import (
 
 DEFAULT_ENGINE_TYPE = "openclaw"
 _UPLOAD_SIGN_URL_EXPIRES = 7200
+_PACKAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 logger = get_logger()
@@ -169,7 +176,9 @@ logger = get_logger()
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 
 
-def _legacy_runtime_projection(item: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
+def _legacy_runtime_projection(
+    item: dict[str, Any],
+) -> tuple[str, dict[str, Any] | None]:
     """Keep the BFF wire stable and only surface non-converged diagnostics."""
 
     projection = item.get("runtime_projection")
@@ -181,6 +190,7 @@ def _legacy_runtime_projection(item: dict[str, Any]) -> tuple[str, dict[str, Any
     if status == "DEGRADED":
         return "能力集状态已保存，但部分 Skill 未完成运行时收敛", projection
     return "", None
+
 
 BOT_RUNTIME_UNAVAILABLE_MESSAGE = "当前 Bot 的运行环境暂不可用，请重新启动 Bot 后重试。"
 _BOT_RUNTIME_UNAVAILABLE_MARKERS = (
@@ -275,6 +285,19 @@ def _build_upload_oss_path(
         "upload_prefix", "aidesktop/aidesktop_pre/bolt_shared/skills-upload"
     )
     return f"{prefix}/{skill_name}/{ts}/{version}.zip"
+
+
+def _if_match_package_digest(request: Request) -> str:
+    value = request.headers.get("if-match", "").strip()
+    if value.startswith("W/"):
+        value = value[2:].strip()
+    if len(value) >= 2 and value[0] == value[-1] == '"':
+        value = value[1:-1]
+    if not _PACKAGE_DIGEST.fullmatch(value):
+        raise HTTPException(
+            status_code=400, detail="If-Match must be a package sha256 digest"
+        )
+    return value
 
 
 # ==================== Helper Functions ====================
@@ -833,8 +856,10 @@ async def create_skill(
     # skills-repo (local: unified ~/.openclaw/workspace/skills/skills-repo).
     # Without scoping it falls back to ~/.moltis/skills-repo and git skill
     # validation can't find the host source.
-    entity_id, bot_id, engine_type, runtime_engine, entity_type, is_desktop = _get_path_params(
-        ctx, request.user_id, None, request.bot_id, None, bot_repo=bot_repo
+    entity_id, bot_id, engine_type, runtime_engine, entity_type, is_desktop = (
+        _get_path_params(
+            ctx, request.user_id, None, request.bot_id, None, bot_repo=bot_repo
+        )
     )
     repo_dir = path_factory.get_bot_skills_repo_dir(
         entity_id, bot_id, runtime_engine, entity_type, is_desktop=is_desktop
@@ -1039,11 +1064,7 @@ async def get_current_skill_set(
         user_id=ctx.user_id or effective_entity_id,
     )
     current = next(
-        (
-            item
-            for item in sets
-            if item.get("is_active") and not item.get("is_default")
-        ),
+        (item for item in sets if item.get("is_active") and not item.get("is_default")),
         None,
     )
     if current is not None:
@@ -1416,7 +1437,9 @@ async def get_skill_readme(
             ) from exc
         if not readme:
             raise HTTPException(status_code=404, detail="Skill or README not found")
-        logger.info(f"[skills.get_skill_readme] Found in Git market: skill_id={skill_id}")
+        logger.info(
+            f"[skills.get_skill_readme] Found in Git market: skill_id={skill_id}"
+        )
         return SkillReadmeResponse(success=True, data={"content": readme})
 
     # A Skill may be read while the caller is operating another Bot.  Its DB
@@ -1709,9 +1732,7 @@ async def activate_skills_batch(
     engine_type: Optional[str] = Query(
         None, description="Engine type override; defaults to bot's active_engine"
     ),
-    query_service: SkillQueryServiceProtocol = Injected(
-        SkillQueryServiceProtocol
-    ),
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
     direct_activation: DirectActivationServiceProtocol = Injected(
         DirectActivationServiceProtocol
     ),
@@ -1970,6 +1991,87 @@ async def list_user_skills(
         ],
         count=len(skills),
     )
+
+
+# ==================== Complete Local Skill package APIs ====================
+
+
+@router.get("/{skill_id}/package", response_class=Response)
+async def download_local_skill_package(
+    skill_id: str,
+    bot_id: str = Query(..., description="Bot ID"),
+    ctx: RequestContext = Depends(get_request_context),
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
+) -> Response:
+    """Export the current user's complete Local Skill package for one Bot."""
+    owner_id = ctx.user_id
+    query_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=ctx.user_id,
+    )
+    package, digest = await query_service.get_local_package(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=ctx.user_id,
+    )
+    return Response(
+        content=package,
+        media_type="application/zip",
+        headers={
+            "ETag": f'"{digest}"',
+            "X-Skill-Package-SHA256": digest,
+            "Content-Disposition": f'attachment; filename="skill-{skill_id}.zip"',
+        },
+    )
+
+
+@router.put("/{skill_id}/package")
+async def replace_local_skill_package(
+    skill_id: str,
+    request: Request,
+    response: Response,
+    package: bytes = Body(..., media_type="application/zip"),
+    bot_id: str = Query(..., description="Bot ID"),
+    ctx: RequestContext = Depends(get_request_context),
+    query_service: SkillQueryServiceProtocol = Injected(SkillQueryServiceProtocol),
+    upload_service: LocalSkillUploadServiceProtocol = Injected(
+        LocalSkillUploadServiceProtocol
+    ),
+) -> dict[str, Any]:
+    """CAS-replace the current user's Local Skill through OCB's write service."""
+    if (
+        request.headers.get("content-type", "").split(";", 1)[0].lower()
+        != "application/zip"
+    ):
+        raise HTTPException(
+            status_code=415, detail="Content-Type must be application/zip"
+        )
+    owner_id = ctx.user_id
+    query_service.get_skill(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        user_id=ctx.user_id,
+    )
+    result = await upload_service.replace_local_skill_package(
+        skill_id=skill_id,
+        bot_id=bot_id,
+        owner_id=owner_id,
+        actor_id=ctx.user_id,
+        package=package,
+        expected_digest=_if_match_package_digest(request),
+    )
+    digest = str(result.get("package_digest") or "")
+    if not _PACKAGE_DIGEST.fullmatch(digest):
+        raise HTTPException(
+            status_code=502, detail="Skill replacement omitted package digest"
+        )
+    response.headers["ETag"] = f'"{digest}"'
+    response.headers["X-Skill-Package-SHA256"] = digest
+    return {"success": True, "data": {"sha256": digest}}
 
 
 # ==================== Individual Skill CRUD APIs (MUST be after all specific routes) ====================
