@@ -23,7 +23,7 @@ schema_version: 1
 
 sources:                       # 命名源（可选，§2.3）：一处声明、多处引用
   content:
-    protocol: git                # 源声明它的协议：git | oss（§2.2）
+    protocol: git                # 源声明它的协议：git | oss，二者其一（§2.2）
     url: https://code.example-corp.com/team/content.git
     ref: v1.2.0
     auth: corp-git-content
@@ -99,7 +99,7 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 | 字段 | 说明 |
 | --- | --- |
 | `from` + `subpath` | 引用一个**命名源**（§2.3）并取其中某个子路径。多类目共用同一仓库同一版本时的推荐写法 |
-| `source` | 内联来源。两种形态：**HTTPS URL**（字符串，等价于 `protocol: oss`），或**源对象**（结构化，声明 `protocol` 与 `url`，§2.2）。由平台在 apply 点经 guarded fetcher 拉取（design §4），支持变量替换（§4） |
+| `source` | 内联来源，**必须是源对象**：声明 `protocol: git`（带 `url` / `ref`）或 `protocol: oss`（带 `bucket` / `key` / `auth`，§2.2）。**裸 URL 字符串已不再是一种来源**，写了会被 `PUT` 拒绝并给出替代写法——清单不再把一个 URL 交给平台去 GET。支持变量替换（§4），`git` 的 `url` 与 `oss` 的 `bucket` / `key` 都替换 |
 | `content` | 内联 UTF-8 文本（YAML block scalar）。**不推荐**：内容游离于版本控制之外，仅用于 per-bot 一次性小片段；常规内容一律走取源。内联条目无 fetch 环节，`auth` / `digest` / `on_fetch_failure` 对它非法 |
 | （注册项引用） | 仅特定类别：MCP 的 `server_code`；v2 的 `center://` skill 引用 |
 
@@ -107,7 +107,8 @@ report；一个类别的失败**不牵连**别的类别。在覆盖语义下，�
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `subpath` | 无 | **源交付物之内的路径**——一条规则，两种协议：`git` 交付一棵树，`subpath` 选树内的文件或目录（并与源自身的 `subpath` 拼接，源在前）；`oss` 交付一个对象，`subpath` 选**归档之内**的成员。缺省 = 交付物的根。**`oss` 源的 `url` 指向对象本身，不是可枚举的前缀**（一次请求取一个对象，平台不列举桶），所以两个对象是两个源。**在 `oss` 上、且这一条不解包任何归档时，写 `subpath` 会被 `PUT` 拒绝**（`subpath_without_archive`）——没有归档就没有东西可选，它什么都不配置。git 上永远有意义 |
+| `subpath` | 无 | **源交付物之内的路径**——一条规则，两种协议：`git` 交付一棵树，`subpath` 选树内的文件或目录（并与源自身的 `subpath` 拼接，源在前）；`oss` 交付一个对象，`subpath` 选**归档之内**的成员。缺省 = 交付物的根。**在 `oss` 上、且这一条不解包任何归档时，写 `subpath` 会被 `PUT` 拒绝**（`subpath_without_archive`）——没有归档就没有东西可选，它什么都不配置。git 上永远有意义 |
+| `key` | 无 | **仅 `oss`**：这一条读取的对象名，与源自身的 `key` 拼接（源在前，源的那半是前缀）——和 `subpath` 在 git 上的拼接是同一条规则，也走同一条路径安全校验。一个源因此能服务多个条目。`key` 定位**哪个对象**，`subpath` 定位**对象解包后的哪个成员**：两件事，在一条 `oss` 条目上都成立 |
 | `digest` | 无 | `sha256:…`。校验 fetch 内容，不匹配按 fetch 失败处理（钉扎可复现）。**仅适用于 `oss` 源**——git 源以 commit SHA 为天然 digest，写了报错；**这与源是内联写的还是 `from` 引用的无关**，协议决定规则 |
 | `auth` | 无 | 租户级命名凭证的引用（§2.1）；仅对内联 `source` 有效（命名源的凭证声明在源上）。fetch 时注入为请求头 |
 | `on_fetch_failure` | `keep_last` | **只有两个取值**：`keep_last`（用平台上一次为这一条成功物化的副本补全集合）/ `fail`（该类别不写）。**`skip` 已删除**——在类目覆盖语义下它会意味着「把这一条删掉」，与字面相反 |
@@ -170,10 +171,12 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 
 PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
-  "type": "header",
-  "header_name": "Authorization",
-  "secret": "Bearer …",
-  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
+  "type": "oss_aksk",
+  "access_key_id": "LTAI5t…",                                      # 标识符，可回读
+  "endpoint": "https://objects.example-corp.com",                  # 地址，可回读；与密钥对一起签发
+  "region": "cn-shanghai",
+  "secret": "…",                                                   # 密钥半边，永不回读
+  "allowed_prefixes": []                                           # 这条路上没有租户可控的主机
 }
 ```
 
@@ -186,27 +189,36 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 | type | 字段 | 何时需要 |
 | --- | --- | --- |
 | `header` | `header_name` + `secret` | 静态请求头：git token、对象存储的临时 token |
-| `oss_aksk` | `access_key_id` + `secret`（密钥对的密钥半边），可选 `region` | 私有对象存储的 **AK/SK 请求签名**——不是固定头，而是每个请求现场按签名算法计算 |
+| `oss_aksk` | `access_key_id` + `endpoint` + `secret`（密钥对的密钥半边），可选 `region` | 私有对象存储的 **AK/SK**——交给对象存储客户端，由它按自己的协议访问 |
 
 `basic`（`username` + `password`）仍是预留字，写入即拒。
 
-**`header` 出示，`oss_aksk` 签名**，这条差别决定了两者的字段与可回读性：
+**`header` 出示，`oss_aksk` 不出示**，这条差别决定了两者的字段与可回读性：
 
-- `header` 把 secret **本身**放上线路；
-- `oss_aksk` 的密钥半边**从不上线路**——它派生签名密钥，线路上走的是对
-  这一个请求的签名。因此 `access_key_id` **可以回读**（它是标识符，且轮换
-  若不可验证就没人会做），而它的密钥半边在任何响应、日志、apply report 里
-  都**没有任何表示**。
-- 字段与机制**必须对上**：`header` 凭证写 `access_key_id`、`oss_aksk` 凭证
-  写 `header_name`，都会被**拒绝**而不是忽略——静默丢弃会让调用方以为自己
-  配置了签名。
+- `header` 把 secret **本身**放上线路，而且是放到清单里那个 URL 上；
+- `oss_aksk` 不产生任何请求头。平台把密钥对交给**对象存储客户端**，由它
+  按自己的协议去访问——平台不再手写签名。因此 `access_key_id` 与
+  `endpoint` **都可以回读**（它们是标识符与地址，且轮换若不可验证就没人
+  会做），而密钥半边在任何响应、日志、apply report 里都**没有任何表示**。
+- **`endpoint` 在凭证上，`bucket` 在源上**，这个划分本身就是一条安全性质：
+  租户的清单决定**读哪个桶**，永远不决定**连到哪台主机**——密钥对是和
+  endpoint 一起签发的，属于同一个信任边界。签名那条路上这条性质只能靠
+  `allowed_prefixes` 这条**策略**维持，现在它由**结构**保证。
+- 字段与机制**必须对上**：`header` 凭证写 `access_key_id` 或 `endpoint`、
+  `oss_aksk` 凭证写 `header_name`，都会被**拒绝**而不是忽略——静默丢弃会让
+  调用方以为自己配置了什么。
 
 判别键留在 `type` 上而非源协议上，正是为了让机制不同的凭证加进同一个端点，
 而不必新开接口——AK/SK 就是这个设计兑现的第一例。
 
 #### `allowed_prefixes`：凭证可被出示给谁
 
-**必填，至少一项**，每项是绝对 https URL 前缀。fetch 前校验目标 URL 落在
+**`header` 凭证必填，至少一项；`oss_aksk` 凭证写了会被拒绝。** 这条边界约束
+的是「secret 可以被出示给哪些 URL」，而 `oss_aksk` 不出示 secret、endpoint
+也不来自清单——没有租户可控的主机需要约束，写前缀只会看起来约束了什么而
+实际什么都不约束。约束搬到它真正生效的地方，而不是硬套到不合身的那条路上。
+
+以下规则因此都只讲 `header`。每项是绝对 https URL 前缀。fetch 前校验目标 URL 落在
 某个前缀之下，否则该条目 `failed`——**不降级为「不带凭证继续请求」**
 （静默降级会把配置错误或攻击企图伪装成 401，或在源站恰好允许匿名时掩盖
 过去）。跨前缀重定向同样直接失败，凭证不会被重定向带走。
@@ -219,8 +231,7 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 匹配规则（必须按**路径段边界**比较，否则前缀匹配本身就是漏洞）：目标
 URL 规范化后，须等于前缀、或以「前缀 + `/`」开头——前缀
 `…/team/content` **不得**匹配 `…/team/content-secret`。git 源比较仓库
-URL（忽略可选的 `.git` 后缀），oss 源比较完整目标 URL。**签名凭证同样受这条
-边界约束**：「被出示」对一个 `oss_aksk` 凭证而言就是「被用来签名」。
+URL（忽略可选的 `.git` 后缀）。
 
 想覆盖整个 origin 就显式写 `https://host/`——这是一个明确选择，不是默认。
 
@@ -282,7 +293,7 @@ scope 里只读的那个（`read_repository`）**只有 Git-over-HTTP、没有 A
 | `protocol` | 交付物 | 专有字段 | `digest` |
 | --- | --- | --- | --- |
 | `git` | 仓库解析到一个 commit 后的**整棵树** | `ref`、`subpath`、`mode` | 不适用（commit SHA 即天然 digest） |
-| `oss` | 一次 HTTPS 请求取回的**一个对象**（签名或匿名） | —— | `skills` / `cli_tools` **强制** |
+| `oss` | 对象存储中**一个对象**：源声明 `bucket` 与 `key`，凭证声明 endpoint 与 AK/SK | —— | `skills` / `cli_tools` **强制** |
 
 > **为什么是显式的 `protocol` 而不是旧写法。** 旧写法用 `git:` / `url:` 哪个键
 > 出现来区分协议，于是「协议」是一个形状的副产品而不是一条声明：没有任何东西
@@ -314,7 +325,8 @@ skills:
   - name: order-lookup
     source:
       protocol: oss                       # 对象存储上的一个 zip
-      url: https://artifacts.example-corp.com/tools/order-lookup-1.4.0.zip
+      bucket: artifacts             # 桶名来自源
+      key: tools/order-lookup-1.4.0.zip
       auth: oss-artifacts
     digest: "sha256:3e7a…"                # oss + skills:强制钉版
     unpack: zip
@@ -404,7 +416,8 @@ sources:
     auth: corp-git-content
   order-lookup:                             # oss 源同样可命名
     protocol: oss
-    url: https://artifacts.example-corp.com/tools/order-lookup-1.4.0.zip
+    bucket: artifacts             # 桶名来自源
+    key: tools/order-lookup-1.4.0.zip
     auth: oss-artifacts
 
 manifest:
@@ -528,11 +541,19 @@ lock epoch 与不可逆语义（`CallerLockEpochError`、`CallerIdentityReadOnly
 resources:
   # 文件条目
   - path: data/sales.csv         # workspace 相对路径（必填）
-    source: https://my-svc.example.com/data/sales.csv
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: data/sales.csv
+      auth: oss-artifacts
 
   # 目录条目（归档形态）：source 为归档，内容按相对层次展开到 path 之下
   - path: data/kb/
-    source: https://my-svc.example.com/kb/knowledge-base.zip
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: kb/knowledge-base.zip
+      auth: oss-artifacts
     unpack: zip                  # zip | tar.gz（归档形态必填）
     strip_components: 1          # 可选，默认 0：剥掉归档内的前 N 层目录
                                  # （语义同 tar --strip-components；业务用
@@ -634,7 +655,11 @@ engine_config:
 ```yaml
 identity:
   - type: SOUL.md                # 必须属于该引擎的合法 identity 文件集
-    source: https://my-svc.example.com/bots/support-agent/soul.md
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: bots/support-agent/soul.md
+      auth: oss-artifacts
   - type: RULES.md
     content: |                   # 小文件可内联
       # 团队规范
@@ -694,11 +719,19 @@ script:
 ```yaml
 cli_tools:
   - name: mycli                              # 命令名。一个条目 = 一个命令 = 一个文件
-    source: https://my-svc.example.com/tools/mycli-linux-amd64
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: tools/mycli-linux-amd64
+      auth: oss-artifacts
     digest: "sha256:…"                       # 本类目强制，无 digest 拒绝写入
     version: "1.4.2"                         # 元数据，进 apply report，审计线上版本
   - name: tk                                 # 压缩包形态：用 subpath 指出包内哪个文件是命令
-    source: https://my-svc.example.com/tools/toolkit.tar.gz
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: tools/toolkit.tar.gz
+      auth: oss-artifacts
     subpath: bin/tk                          # 源内路径（§2），此处即包内路径
     unpack: tar.gz                           # 可选，扩展名不可靠时显式指定
     digest: "sha256:…"

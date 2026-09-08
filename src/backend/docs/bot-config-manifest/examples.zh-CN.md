@@ -8,9 +8,16 @@
 >
 > **本文展示的是 v1 的完整形状。**其中仍未开放的只有 `engine_config`（没有
 > 物化器），写了会在 `PUT` 时被拒绝；`cli_tools`、命名源 `from`、`git` 源与
-> `oss` 源都**已经开放**，`resources` 的 git 那条路是本轮接通的。完整的
-> 「类别 × 协议」矩阵见 `manifest-schema.zh-CN.md` §7，它在代码里是一张表，
-> 并由一个逐格发真实 `PUT` 的测试守着。
+> `oss` 源都**已经开放**。完整的「类别 × 协议」矩阵见
+> `manifest-schema.zh-CN.md` §7，它在代码里是一张表，并由一个逐格发真实
+> `PUT` 的测试守着。
+>
+> **可声明的协议只有两个：`git` 与 `oss`。** 裸 URL 字符串
+> （`source: https://…`）曾经等价于 `oss`，现已不再是一种来源，写了会被
+> `PUT` 拒绝。HTTPS 当然还在线路上——git 走 HTTPS 连远端，对象存储客户端
+> 走 HTTPS 连 endpoint——它只是不再是一种**源协议**：清单不再把一个 URL
+> 交给平台去 GET。`oss` 源用 `bucket` + `key` 定位对象，endpoint 与密钥对
+> 来自 `auth` 指向的凭证。
 
 ## 0. 场景设定
 
@@ -93,11 +100,13 @@ sources:                                     # 命名源：一处声明、多处
     auth: corp-git-content
   order-lookup:                              # ② 制品桶上的一个 zip
     protocol: oss                            #    oss:一次请求取一个对象，
-    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    bucket: artifacts             # 桶名来自源
+    key: tools/skills/order-lookup-1.4.0.zip
     auth: oss-artifacts                      #    所以 url 指向对象本身
   shopctl:                                   # ③ 同一个桶、另一个对象 = 另一个源
     protocol: oss
-    url: https://artifacts.example-corp.com/tools/shopctl/2.3.0/shopctl-linux-amd64
+    bucket: artifacts             # 桶名来自源
+    key: tools/shopctl/2.3.0/shopctl-linux-amd64
     auth: oss-artifacts                      #    凭证是共享的，地址不是
 
 manifest:
@@ -201,7 +210,8 @@ sources:
     auth: corp-git-content
   order-lookup:
     protocol: oss
-    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    bucket: artifacts             # 桶名来自源
+    key: tools/skills/order-lookup-1.4.0.zip
     auth: oss-artifacts
 ```
 
@@ -368,11 +378,14 @@ resources:
 
   # 归档形态（oss 源）
   - path: data/archive/
-    source: https://cms.example.com/kb/knowledge-base.zip
+    source:
+      protocol: oss
+      bucket: cms-assets        # 桶在源上：一个凭证常读同账号下的多个桶，
+      key: kb/knowledge-base.zip  # 而读哪个桶正是清单作者该选的那一半
+      auth: cms-oss             # endpoint 与 AK/SK 都来自这个凭证
     unpack: zip                 # oss 目录条目**必填**：树要装在归档里才走得动
     strip_components: 1         # 可选，默认 0：剥掉归档内前 N 层目录
                                 # （业务 `zip -r kb.zip kb/` 的壳目录用它消掉）
-    auth: cms-token
 ```
 
 `unpack` / `strip_components` **只属于 `oss`**：git 手上已经是一棵真实的

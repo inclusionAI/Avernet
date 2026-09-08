@@ -980,7 +980,11 @@ URL:
 ```yaml
 cli_tools:
   - name: mycli
-    source: https://my-svc.example.com/tools/mycli-linux-amd64
+    source:
+      protocol: oss
+      bucket: my-svc
+      key: tools/mycli-linux-amd64
+      auth: oss-artifacts
 ```
 
 If every ARCA bot container runs on x86_64, that single URL is always right. If

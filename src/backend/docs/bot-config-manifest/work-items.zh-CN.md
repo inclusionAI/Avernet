@@ -1654,6 +1654,15 @@ manifest 概念。
 > 条目）、把 `cli_tools` 的取源接上同一扇门（它此前是唯一「PUT 过、apply
 > 炸」的构造），并实现 `oss_aksk` 凭证（私有对象存储的 AK/SK 请求签名）。
 >
+> **🔁 `oss` 那条路已被替换（2026-09-08，`specs/2026-09-08-manifest-oss-client-and-delivery/`）。**
+> 上面写的「AK/SK 请求签名」不再成立，也从未真正可用：那份实现发的是 AWS
+> SigV4，而阿里云 OSS 的原生 API 要的是 `OSS4-HMAC-SHA256`——服务名、
+> scope 后缀、签名密钥链条都不同，且它的 canonical URI 由**结构化的 bucket
+> 与 key** 拼出，不是从 URL 里解析出来的，所以 `sign_headers(url=…)` 错的
+> 不只是算法，是**签名本身**。现在 `oss` 源声明 `bucket` + `key`，endpoint
+> 与密钥对来自凭证，读取交给一个**按凭证分配**的对象存储客户端插件；
+> `credentials/signing.py` 已删除。同一轮里裸 URL 源也不再是一种来源：可
+> 声明的协议只有 `git` 与 `oss`。
 > **🔧 评审修复（2026-09-02，`fix/w7-review-fixes`）。**#1829 的全量评审发现
 > 上述交付被闸门挡住，另有五个潜在缺陷，本 PR 全部修掉：admission 的
 > `SourceForm.GIT`/`NAMED` 从未翻转，整个运行时经 PUT 不可达（现翻转，

@@ -255,7 +255,11 @@ PATH 上，再配一个 SKILL.md 教模型怎么用。`cli_tools` 是把这套�
 manifest:
   cli_tools:
     - name: mycli
-      source: https://my-svc.example.com/tools/mycli-linux-amd64
+      source:
+        protocol: oss
+        bucket: my-svc
+        key: tools/mycli-linux-amd64
+        auth: oss-artifacts
       digest: "sha256:3f7a…"
       version: "1.4.2"
 ```
@@ -275,7 +279,11 @@ md5: "9f2c…", version: "1.4.2"}`。
 manifest:
   cli_tools:
     - name: tk
-      source: https://my-svc.example.com/tools/toolkit-0.9.0.tar.gz
+      source:
+        protocol: oss
+        bucket: my-svc
+        key: tools/toolkit-0.9.0.tar.gz
+        auth: oss-artifacts
       subpath: bin/tk               # 包内哪个文件是这个命令
       digest: "sha256:9b21…"
       version: "0.9.0"
