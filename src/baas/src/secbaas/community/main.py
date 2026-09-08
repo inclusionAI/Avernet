@@ -12,7 +12,9 @@ Usage::
 Environment variables:
     SERVER_ENV             — env overlay (dev, prepub, prod, etc.)
     SOFAPY_CONFIG_OVERLAY  — overlay YAML to merge on top of base config
-    BAAS_DEPLOY_TENANT     — tenant overlay (application-<value>.yaml, e.g. aliyun)
+    BAAS_DEPLOY_TENANT     — tenant overlay (application-<value>.yaml, e.g. aliyun);
+                             merged after SERVER_ENV, but an explicitly-set
+                             SOFAPY_CONFIG_OVERLAY still merges last and wins
 """
 
 from __future__ import annotations

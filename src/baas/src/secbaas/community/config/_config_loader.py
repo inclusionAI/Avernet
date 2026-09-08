@@ -26,7 +26,9 @@ class ConfigLoader:
     # Deploy-tenant overlay: when set, its value names the
     # application-<value>.yaml overlay (e.g. BAAS_DEPLOY_TENANT=aliyun loads
     # application-aliyun.yaml). Merged after the SERVER_ENV/COMMUNITY_DEPLOY
-    # layer so tenant-specific settings win over the env overlay.
+    # layer so tenant-specific settings win over the env overlay. Note that
+    # load() merges an explicitly-set SOFAPY_CONFIG_OVERLAY after this layer,
+    # so that explicit overlay still merges last and wins.
     ENV_DEPLOY_TENANT = "BAAS_DEPLOY_TENANT"
 
     # A tenant value becomes an application-{tenant}.yaml filename component,
