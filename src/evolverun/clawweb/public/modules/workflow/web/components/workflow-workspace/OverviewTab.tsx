@@ -119,7 +119,13 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   } = useWorkflowHealth(workflowId, days)
   const pageSize = 20
   const windowStart = windowEnd - days * 86400
-  const { data: metricsData } = useFlowRuns({
+  const {
+    data: metricsData,
+    isPending: isMetricsPending,
+    isError: isMetricsError,
+    isFetching: isMetricsFetching,
+    refetch: refetchMetrics,
+  } = useFlowRuns({
     workflowId,
     limit: 1,
     from: String(windowStart),
@@ -158,8 +164,11 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     }
   }, [metricsData?.statusCounts])
 
-  const currentSuccessRate = stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
-  const currentDetail = `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
+  const hasMetrics = !isMetricsPending && !isMetricsError && metricsData?.statusCounts != null
+  const currentSuccessRate = hasMetrics && stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
+  const currentDetail = hasMetrics
+    ? `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
+    : isMetricsError ? '运行指标加载失败' : '运行指标加载中'
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize))
   const currentPage = Math.min(page + 1, totalPages)
 
@@ -182,7 +191,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
       <section aria-label="工作流关键指标" className="grid grid-cols-2 divide-x divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white lg:grid-cols-4 lg:divide-y-0">
         <MetricCell label="健康度" value={health ? String(health.overallScore) : '—'} detail={health ? (health.overallScore >= 80 ? '运行稳定' : health.overallScore >= 60 ? '需要关注' : '建议优先处理') : '等待健康数据'} emphasis={health && health.overallScore < 60 ? 'danger' : 'default'} />
         <MetricCell label="运行成功率" value={currentSuccessRate} detail={`近 ${days} 天 · 成功 / 终态`} />
-        <MetricCell label="异常结束" value={String(stats.abnormalRuns)} detail="失败、终止或取消" emphasis={stats.abnormalRuns > 0 ? 'danger' : 'default'} />
+        <MetricCell label="异常结束" value={hasMetrics ? String(stats.abnormalRuns) : '—'} detail="失败、终止或取消" emphasis={hasMetrics && stats.abnormalRuns > 0 ? 'danger' : 'default'} />
         <MetricCell label="节点耗时 P95" value={health ? formatDuration(health.p95DurationMs) : '—'} detail="最慢节点 P95 口径" />
       </section>
 
@@ -194,10 +203,17 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
           ['排队中', stats.queuedRuns, 'bg-violet-50 text-violet-700'],
         ].map(([label, count, cls]) => (
           <div key={String(label)} className={`rounded-lg px-3 py-2 text-xs font-medium ${cls}`}>
-            {`${label} ${count}`}
+            {`${label} ${hasMetrics ? count : '—'}`}
           </div>
         ))}
       </section>
+
+      {isMetricsError ? (
+        <div role="alert" className="flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">
+          <span>运行指标加载失败；运行列表仍可继续查看。</span>
+          <button type="button" onClick={() => void refetchMetrics()} disabled={isMetricsFetching} className="shrink-0 rounded px-2 py-1 font-medium hover:bg-rose-100 disabled:opacity-50">重试指标</button>
+        </div>
+      ) : isMetricsPending && <p role="status" className="px-4 text-xs text-slate-500">运行指标加载中…</p>}
 
       {isHealthError && <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-2 text-xs text-rose-600">健康指标加载失败；运行列表仍可继续查看。</div>}
 
