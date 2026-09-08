@@ -156,8 +156,8 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
                 # CredentialError 面对外(一个家族,调用方一次捕获)。
                 raise CredentialError(str(exc)) from exc
         elif allowed_prefixes:
-            # Not silently dropped: a caller who wrote prefixes on a signing
-            # credential believes they constrained something.
+            # Not silently dropped: a caller who wrote prefixes on an
+            # object-store credential believes they constrained something.
             raise CredentialError(
                 "'allowed_prefixes' constrains the URL a 'header' credential "
                 "is presented to; an 'oss_aksk' credential reads the endpoint "
@@ -184,8 +184,9 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         row = self._repository.upsert(
             name=name,
             credential_type=credential_type,
-            # The column is NOT NULL and a signing credential presents no
-            # header, so the empty string is the storage form of "none". The
+            # The column is NOT NULL and an ``oss_aksk`` credential presents
+            # no header at all, so the empty string is the storage form of
+            # "none" rather than a header named "". The
             # public record turns it back into ``None`` — nothing downstream
             # ever sees an empty header name and wonders whether to present it.
             header_name=header_name or "",
@@ -213,8 +214,9 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         Both directions, and the second is the one that matters. A missing
         required field fails loudly the first time it is used anyway. A field
         sent to the *wrong* mechanism would be silently dropped, and the caller
-        would go on believing they had configured signing on a credential that
-        presents a header — which is a security expectation, not a typo.
+        would go on believing they had pointed a credential at an object store
+        when it in fact presents a header to a URL — which is a security
+        expectation, not a typo.
         """
         supplied = {
             "header_name": header_name,

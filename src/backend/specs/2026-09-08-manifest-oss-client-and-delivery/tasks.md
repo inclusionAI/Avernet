@@ -45,89 +45,143 @@ lands atomically.
 
 ## Group B — one fetcher per protocol (no behaviour change)
 
-- [ ] **B1** — `apply/fetchers/`: `SourceFetcher` Protocol, `GitSourceFetcher`
+- [x] **B1** — `apply/fetchers/`: `SourceFetcher` Protocol, `GitSourceFetcher`
       (today's git branch), `ObjectStoreFetcher` (today's non-git branch, still
       a guarded fetch by URL — group D swaps its body).
-- [ ] **B2** — `fetch_declared` becomes parse → look up → call. The shared
+- [x] **B2** — `fetch_declared` becomes parse → look up → call. The shared
       preamble stays: session lookup, the `needs_session` refusal, `keep_last`
       resolution, budget checks, `declared_protocol`'s no-fetch gate.
-- [ ] **B3** — module-level exhaustiveness check on `_FETCHERS` (raise at import,
+- [x] **B3** — module-level exhaustiveness check on `_FETCHERS` (raise at import,
       never `KeyError` at apply), mirroring `support_matrix._build_matrix`.
-- [ ] **B4** — test the table and the dispatch. **Gate: existing suite untouched.**
+- [x] **B4** — test the table and the dispatch. **Gate: existing suite untouched.**
 
 ## Group C — the object-store client plugin (nothing consumes it yet)
 
-- [ ] **C1** — `plugin_api/object_store_client.py`: `ObjectStoreTarget`,
+- [x] **C1** — `plugin_api/object_store_client.py`: `ObjectStoreTarget`,
       `ObjectFetchStatus`, `ObjectFetchResult`, `ObjectStoreClient`,
       `ObjectStoreClientFactory`. Document *why* it is not `ObjectStoragePlugin`
       (singleton, env-chain credentials, swallowing error contract).
-- [ ] **C2** — `tests/community/contracts/test_object_store_client.py`: the five
+- [x] **C2** — `tests/community/contracts/test_object_store_client.py`: the five
       statuses and the cap enforced **without draining** the body, against the
       local impl as spec. The Rule 25 *consumer* half lands in D9 — the consumer
       is `ObjectStoreFetcher` and it has no bucket/key to read until D2. Split
       rather than exempted: `EXEMPT_PROTOCOLS` is a set each commit drains.
-- [ ] **C3** — `plugins/local/object_store_client.py`: in-memory, per-key
+- [x] **C3** — `plugins/local/object_store_client.py`: in-memory, per-key
       scriptable status.
-- [ ] **C4** — `plugins/community/object_store_client.py`: boto3 S3. AK/SK passed
+- [x] **C4** — `plugins/community/object_store_client.py`: boto3 S3. AK/SK passed
       explicitly (**not** the env chain). Chunked read against `byte_limit`.
       Error classification: `NoSuchKey`/404 → `NOT_FOUND`;
       `AccessDenied`/`InvalidAccessKeyId`/`SignatureDoesNotMatch`/403 → `DENIED`;
       `BotoCoreError`/timeout/5xx → `UNAVAILABLE`. `detail` composed from
       bucket + key + status, never from the SDK message.
-- [ ] **C5** — DI module; factory singleton, clients **not** singletons.
+- [x] **C5** — DI module; factory singleton, clients **not** singletons.
 
 ## Group D — the `oss` road, and the URL road removed (behaviour change, atomic)
 
-- [ ] **D1** — `schema/sources.py`: `_KEYS_BY_PROTOCOL` / `_REQUIRED_BY_PROTOCOL`
+- [x] **D1** — `schema/sources.py`: `_KEYS_BY_PROTOCOL` / `_REQUIRED_BY_PROTOCOL`
       per protocol; `SourceDecl.url` → `str | None`, `+bucket`, `+key`.
       `url` on `oss` refused with a message naming `bucket`/`key`. Keep the
       `misplaced`-set discipline: one mistake, one violation.
       `SourceKind` and the 18-cell matrix are **unchanged** — only the docstrings
       that describe `oss` as a URL road.
-- [ ] **D2** — `schema/entries.py`: the bare-string `source: "https://…"` branch
+- [x] **D2** — `schema/entries.py`: the bare-string `source: "https://…"` branch
       becomes a refusal naming the two protocols and the mapping form;
       `SourceForm.URL` → `SourceForm.OSS`; entry-level `key`, composed
       source-first and re-checked by `relative_path_refusal`, refused on a
       non-`oss` entry. `subpath` keeps its shipped meaning on both roads.
-- [ ] **D3** — `capabilities.py`: `SourceForm.URL` → `SourceForm.OSS` in the enum
+- [x] **D3** — `capabilities.py`: `SourceForm.URL` → `SourceForm.OSS` in the enum
       and the `constructs` verdict map. The test asserts the full construct set.
-- [ ] **D4** — DDL `sql/2026_09_09_source_credential_endpoint.sql`
+- [x] **D4** — DDL `sql/2026_09_09_source_credential_endpoint.sql`
       (`ADD COLUMN endpoint varchar(512) NULL`); row, record, repository protocol
       and impl; `REQUIRED_FIELDS_BY_TYPE` / `EXCLUSIVE_FIELDS_BY_TYPE`.
-- [ ] **D5** — `allowed_prefixes` optional-and-ignored for `oss_aksk`, still
+- [x] **D5** — `allowed_prefixes` optional-and-ignored for `oss_aksk`, still
       mandatory for `header` (the mechanism git sources use).
-- [ ] **D6** — `ObjectStoreFetcher`'s body swaps to the plugin: reads by bucket +
+- [x] **D6** — `ObjectStoreFetcher`'s body swaps to the plugin: reads by bucket +
       composed key; status → outcome per the spec table; sha256 +
       declared-digest stays in the fetcher.
-- [ ] **D7** — **delete** `credentials/signing.py` and its test; `headers_for`
+- [x] **D7** — **delete** `credentials/signing.py` and its test; `headers_for`
       back to one line.
-- [ ] **D8** — migrate ~77 bare-string source usages across 8 test files
+- [x] **D8** — migrate ~77 bare-string source usages across 8 test files
       (41 `test_resources_materialiser.py`, 26 `test_manifest_schema.py`, the rest
       in ones and threes) to `oss` bucket/key, or to refusal assertions where the
       test is *about* the URL form.
-- [ ] **D9** — the guarded fetcher is **not called** on the `oss` road
+- [x] **D9** — the guarded fetcher is **not called** on the `oss` road
       (`stub.calls == []`) — and a test that it **is** still called by
       `cli_tools`' API-driven install, which keeps the URL transport.
 
 ## Group E — documentation
 
-- [ ] **E1** — `manifest-schema.zh-CN.md`: two declarable protocols (`git`,
+- [x] **E1** — `manifest-schema.zh-CN.md`: two declarable protocols (`git`,
       `oss`); bucket/key addressing; `key` vs `subpath` on an `oss` entry; the
       bare-string source form is gone. Say plainly that HTTPS remains the wire
       for both roads and stops being a source protocol.
-- [ ] **E2** — `examples.zh-CN.md`: an `oss` example that is actually accepted;
+- [x] **E2** — `examples.zh-CN.md`: an `oss` example that is actually accepted;
       refresh the stale caveat header.
-- [ ] **E3** — credential docs: `oss_aksk` now stores `endpoint`; no
+- [x] **E3** — credential docs: `oss_aksk` now stores `endpoint`; no
       `allowed_prefixes`; the secret is never presented on the wire.
-- [ ] **E4** — `work-items.zh-CN.md`: record that W3's signing road is replaced
+- [x] **E4** — `work-items.zh-CN.md`: record that W3's signing road is replaced
       by the plugin seam.
 
 ## Group F — verification
 
-- [ ] **F1** — full backend suite; compare failures against merge-base so
+- [x] **F1** — full backend suite; compare failures against merge-base so
       pre-existing ones are not attributed here.
-- [ ] **F2** — lint + type check.
-- [ ] **F3** — architecture gates (`docs/arch/ci.enforce.md`): plugin protocol
+- [x] **F2** — lint + type check.
+- [x] **F3** — architecture gates (`docs/arch/ci.enforce.md`): plugin protocol
       conformance, context-boundary metadata on the new modules.
-- [ ] **F4** — confirm every acceptance criterion in `spec.md` has a test that
+- [x] **F4** — confirm every acceptance criterion in `spec.md` has a test that
       **fails against the unfixed code**, the #2019 discipline.
+
+
+---
+
+## Implementation notes — where the plan bent
+
+**The Rule 25 suite split across C and D.** Group C as written created a
+Plugin Protocol with no consumer, and Rule 25 defines conformance as
+*consumer ↔ Protocol*. Rather than take an `EXEMPT_PROTOCOLS` entry — a set
+the arch test says each commit drains — C landed the local impl's spec and D
+added the consumer half. Recorded in `plan.md` §③.
+
+**The test migration was ~47 cases, not ~77.** The plan counted *usages* of a
+bare-URL source. Most live in materialiser tests that stub the fetcher and
+never reach the schema, so they migrated for free. The real surface was
+`test_manifest_schema.py` (26 documents), the credential service (12), and
+ones and threes elsewhere.
+
+**Four defects the migration found that the design had missed**, each fixed
+where it belonged rather than worked around:
+
+1. `auth` was required by the fetcher and not by `PUT` — the surface
+   accepting what it cannot apply, introduced in this same change set. Now a
+   schema rule, with the fetcher's check demoted to a belt.
+2. `${BOT_*}` substitution applied to a source URL and nothing replaced it on
+   the bucket/key road, so a per-env bucket would have been silently inert.
+3. `check_https_url` ran against `decl.url` unconditionally and answered
+   "source URL must be a string" to a document that correctly declared none.
+4. One mistake produced two violations: writing `url` on an oss source got
+   both "not valid here" and "you must declare bucket", though the first
+   already names the replacement.
+
+**Two test doubles were lying, and both hid real breakage** (group A).
+`identity`'s `_StaticGit.read_file` answered where the real checkout refuses;
+`cli_tools`' `FakeGitEntrySource` returns a *real* `GitEntrySource` to guard
+its dispatch, a guard defeated because the fetcher's return type changed
+rather than the dispatch — leaving the service broken in production and green
+in tests. Both now answer in the seam's currency.
+
+**A test asserted a message where it should have asserted a ruling.** The
+consumer-side "a refusal is never masked by keep_last" test passed against a
+mutation that made `TOO_LARGE` maskable, because with nothing in the store
+there was nothing to mask either way. It now files a receipt first, and the
+mutation fails it.
+
+**The branch count was wrong twice, in the same direction.** Zero → one
+(after reading `skills._build_package`) → one branch and one condition (after
+implementing `cli_tools`). Each time the claim was cleaner than the code
+supported.
+
+**CI caught what local scopes did not.** `test_modules_for_community_is_isolated`
+pins the exact set of DI modules the community profile composes; group C added
+one without updating it. The manifest suite, the architecture gates and the
+contract suites do not reach `tests/community/di`.

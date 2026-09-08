@@ -650,41 +650,42 @@ def test_the_document_names_the_bucket_and_the_credential_names_the_host(
 
 
 @pytest.mark.parametrize(
-    "seed,expected",
+    "break_it,expected",
     [
-        # The bucket exists and the key does not. Seeding nothing would give
-        # DENIED instead — an unknown bucket is not distinguishable from one
-        # this credential may not see, and the store's own answer is honest.
+        # The bucket exists and the key does not. Removing the object rather
+        # than the bucket matters: an unknown bucket answers DENIED, since it
+        # is not distinguishable from one this credential may not see.
+        (lambda o: o.buckets["b"].objects.pop("k"), "no such object"),
+        (lambda o: setattr(o.buckets["b"], "access_key_id", "rotated-away"), "not authorized"),
         (
-            lambda o: o.put("b", "a-different-key", BODY, access_key_id=_OBJ_AK),
-            "no such object",
-        ),
-        (
-            lambda o: o.put("b", "k", BODY, access_key_id="a-different-key"),
-            "not authorized",
-        ),
-        (
-            lambda o: o.put("b", "k", b"x" * (1024 * 1024 + 1), access_key_id=_OBJ_AK),
+            lambda o: o.buckets["b"].objects.__setitem__("k", b"x" * (1024 * 1024 + 1)),
             "exceeds",
         ),
     ],
 )
-def test_a_refusal_is_never_masked_by_keep_last(objects_rig, seed, expected):
+def test_a_refusal_is_never_masked_by_keep_last(objects_rig, break_it, expected):
     """NOT_FOUND, DENIED and TOO_LARGE are the document's or the credential's
     fault. ``keep_last`` exists for an unreachable store, and a denied
     credential quietly serving last apply's bytes for a year is exactly what
-    that ruling prevents — so these fail even with a stored copy in hand."""
+    that ruling prevents.
+
+    **A stored copy is filed first, on purpose.** Asserting the refusal with
+    nothing in the store would pass against code that treated these as
+    failures — there would be nothing to fall back to either way. The receipt
+    is what makes this test able to tell the two rulings apart.
+    """
     _, objects, pipeline = objects_rig
-    seed(objects)
+    objects.put("b", "k", BODY, access_key_id=_OBJ_AK)
     ctx = make_context(source_session=_session(_ScriptedGit(), sources={
         "s": {"protocol": "oss", "bucket": "b", "key": "k", "auth": "oss-cred"},
     }))
+    entry = {"from": "s", "on_fetch_failure": "keep_last"}
+    # The first apply succeeds and files the receipt a fallback would read.
+    assert pipeline.fetch_declared(ctx, entry=entry, category="identity").single() == BODY
+
+    break_it(objects)
     with pytest.raises(EntryFetchError, match=expected):
-        pipeline.fetch_declared(
-            ctx,
-            entry={"from": "s", "on_fetch_failure": "keep_last"},
-            category="identity",
-        )
+        pipeline.fetch_declared(ctx, entry=entry, category="identity")
 
 
 def test_an_unreachable_store_is_a_failure_keep_last_may_answer(objects_rig):

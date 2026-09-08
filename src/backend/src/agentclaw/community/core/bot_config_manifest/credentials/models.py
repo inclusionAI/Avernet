@@ -73,8 +73,8 @@ REQUIRED_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
 
 #: Fields that belong to exactly one mechanism. Sending one on another is
 #: refused rather than ignored: a caller who writes ``access_key_id`` on a
-#: header credential believes they configured signing, and silence would let
-#: them believe it until a fetch failed.
+#: header credential believes they pointed it at an object store, and silence
+#: would let them believe it until a fetch failed.
 EXCLUSIVE_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
     CredentialType.HEADER: frozenset({"header_name"}),
     CredentialType.OSS_AKSK: frozenset({"access_key_id", "region", "endpoint"}),
@@ -92,8 +92,9 @@ class SourceCredentialRecord(BaseModel):
     id: int | None = None
     name: str
     credential_type: CredentialType = CredentialType.HEADER
-    #: ``None`` on a mechanism that presents no header — signing builds its
-    #: own, and there is nothing the caller chose to report back.
+    #: ``None`` on a mechanism that presents no header at all — an
+    #: ``oss_aksk`` credential is handed to an object-store client rather than
+    #: put on a request, so there is nothing the caller chose to report back.
     header_name: str | None = None
     #: ``oss_aksk`` only. Present in every read: an identifier, not a secret,
     #: and rotation is unoperable without it. Its partner
