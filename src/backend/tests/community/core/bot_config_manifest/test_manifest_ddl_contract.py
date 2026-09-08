@@ -12,21 +12,30 @@ OceanBase modifiers these files carry. The distinction being guarded therefore
 cannot be observed by creating the tables — only by reading what is declared.
 The sibling ``core/task_queue/test_task_queue_schema_contract.py`` guards its
 file the same way and for the same reason.
+
+WHY ``bot_startup_script/sql`` IS IN SCOPE HERE. The rule these tests state is
+about a column-type choice under OceanBase, not about one module, and
+``ac_bot_startup_script`` is materialised by this module's ``script`` category
+-- it is the manifest's own storage for that construct, kept in its own package
+only because #926 shipped it first. It sat outside this directory and therefore
+outside this rule, and that is exactly where the drift turned up: the deployed
+table carries TIMESTAMP audit columns while the file declared DATETIME, found by
+reading a ``SHOW CREATE TABLE`` rather than by anything in CI. Scoping by rule
+instead of by directory is what closes that.
 """
 
 from pathlib import Path
 import re
 
 
-_SQL_DIR = (
-    Path(__file__).parents[4]
-    / "src"
-    / "agentclaw"
-    / "community"
-    / "core"
-    / "bot_config_manifest"
-    / "sql"
-)
+_CORE = Path(__file__).parents[4] / "src" / "agentclaw" / "community" / "core"
+
+_SQL_DIR = _CORE / "bot_config_manifest" / "sql"
+
+#: Every directory whose DDL this rule governs. ``_SQL_DIR`` stays a single
+#: directory because ``_APPLICATION_SUPPLIED`` addresses files inside it by
+#: name.
+_SQL_DIRS = (_SQL_DIR, _CORE / "bot_startup_script" / "sql")
 
 #: Columns filled by the application, which must stay DATETIME. TIMESTAMP reads
 #: the bound naive value as session-local and converts it, so an instant the
@@ -109,8 +118,15 @@ def _declarations(path: Path) -> dict[str, str]:
 
 
 def _sql_files() -> list[Path]:
-    files = sorted(_SQL_DIR.glob("*.sql"))
-    assert files, f"no DDL found under {_SQL_DIR}"
+    files = sorted(path for directory in _SQL_DIRS for path in directory.glob("*.sql"))
+    assert files, f"no DDL found under {[str(d) for d in _SQL_DIRS]}"
+    # Asserted per directory as well as overall: a mistyped path would other-
+    # wise leave one directory silently contributing nothing, which is the
+    # shape of the shadowing bug ``_tables`` already documents.
+    for directory in _SQL_DIRS:
+        assert any(
+            path.parent == directory for path in files
+        ), f"no DDL found under {directory}"
     return files
 
 
@@ -170,6 +186,7 @@ def test_every_table_in_every_file_is_parsed() -> None:
         "ac_manifest_content",
         "ac_source_credential",
         "ac_bot_cli_tool",
+        "ac_bot_startup_script",
     }
 
 
