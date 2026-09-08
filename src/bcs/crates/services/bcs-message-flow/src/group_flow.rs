@@ -434,10 +434,17 @@ pub(crate) async fn try_persist_group_message(
     };
     let created_at = now_ms();
     let group = flow.group.try_get(group_id).await?;
+    // When the group cannot be resolved, default the strategy to `ManagerWorker`
+    // rather than `Chat`: `Chat` maps to `MessageVisibilityDomain::Chat`, which is
+    // always visible to Participant-scoped Humans regardless of the real audience.
+    // `ManagerWorker` keeps the message hidden from Participant views unless the
+    // audience computation below explicitly grants visibility, matching the same
+    // fail-closed default used by `frontend_domain_for_group` and
+    // `publish_web_user_message` for the identical "group lookup missed" case.
     let group_strategy = group
         .as_ref()
         .map(|group| group.group_strategy)
-        .unwrap_or(GroupStrategy::Chat);
+        .unwrap_or(GroupStrategy::ManagerWorker);
     let strategy_supports_message_event = flow.event_record_factory.is_some()
         && message_type == "chat"
         && matches!(
