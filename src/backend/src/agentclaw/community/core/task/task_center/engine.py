@@ -538,25 +538,16 @@ class ExecutionEngine:
     ) -> AcceptanceResult:
         """结构父/根 gap 闭(自身验收通过)翻 DONE 时的父自身验收结果(验收执行者=owner)。
 
-        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_verdicts`` 非空 →
-        用 owner bot plan 逐条结论填 ``acceptances_metric``(每条 ac 的 reason);否则回退合成"验收通过"。"""
-        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
-        verdicts: list[dict] = []
-        if pr is not None:
-            verdicts = getattr(pr, "acceptance_verdicts", None) or []
-        if verdicts:
-            vmap: dict[str, dict] = {}
-            for v in verdicts:
-                if isinstance(v, dict):
-                    vmap[str(v.get("ac_id", ""))] = v
-            metrics: list[Any] = []
-            for ac_id in ac_ids:
-                v = vmap.get(ac_id)
-                reason = str(v.get("reason") or "") if v else ""
-                metrics.append({ac_id: reason or "验收通过(子节点交付达成)"})
+        调用上下文已 ``not pr.has_gap`` → verdict 恒 DONE。``pr.acceptance_result``(owner bot plan
+        自评,对齐 common_task 协议)非空 → 直接用(acceptances_metric 透传);空 → 回退合成逐条"验收通过"。"""
+        if pr is not None and pr.acceptance_result is not None:
+            ar = pr.acceptance_result
             return AcceptanceResult(
-                verdict=AcceptanceVerdict.DONE, acceptances_metric=metrics, gaps=[]
+                verdict=AcceptanceVerdict.DONE,  # gap 闭语境恒 DONE(防御 owner 自评 FAILED)
+                acceptances_metric=list(ar.acceptances_metric or []),
+                gaps=[],
             )
+        ac_ids = [a.id for a in parent.task_spec.goal.acceptances]
         metrics = [{ac_id: "验收通过(子节点交付达成)"} for ac_id in ac_ids]
         if not metrics:
             metrics = [{"all": "验收通过"}]
@@ -2455,9 +2446,9 @@ class ExecutionEngine:
             [n.node_id for n in pending],
             dispatch_started_at,
         )
-        dispatched = await self._dispatcher.dispatch(pending)
         to_run: list[TaskNode] = []
-        for node in dispatched:
+
+        def _handle_node(node: TaskNode) -> None:
             miss = node.run_info.extend_props.get("miss_events")
             gf = node.run_info.extend_props.pop("pending_group_formation", None)
             if gf is not None:
@@ -2492,7 +2483,7 @@ class ExecutionEngine:
                     )
                 )
                 side.append(("group", node, gf))
-                continue
+                return
             if node.run_info.run_mode and node.run_info.assignee:
                 logger.info(
                     "[task][prepare] task=%s node=%s → run(mode=%s assignee=%s)",
@@ -2512,7 +2503,8 @@ class ExecutionEngine:
                     )
                 )
                 to_run.append(node)
-            elif miss:
+                return
+            if miss:
                 logger.info(
                     "[task][prepare] task=%s node=%s → miss(%s)",
                     task_id,
@@ -2529,27 +2521,93 @@ class ExecutionEngine:
                         ),
                     )
                 )
-            else:
-                # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
-                derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
-                logger.warning(
-                    "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
-                    task_id,
-                    node.node_id,
-                    derr,
+                return
+            # 派发未产出执行者也非 MISS(dispatcher 已容错吞异常):标 dispatch_error 留 PENDING,harness 按超时重试搜推
+            derr = node.run_info.extend_props.get("dispatch_error") or "no_result"
+            logger.warning(
+                "[task][prepare] task=%s node=%s 派发未产出(%s)→留 PENDING 待 harness",
+                task_id,
+                node.node_id,
+                derr,
+            )
+            side.append(
+                (
+                    "dispatch_fail",
+                    TaskNodePatch(
+                        task_id=task_id,
+                        node_id=node.node_id,
+                        extend_props_patch={"dispatch_error": derr},
+                    ),
                 )
-                side.append(
-                    (
-                        "dispatch_fail",
-                        TaskNodePatch(
-                            task_id=task_id,
-                            node_id=node.node_id,
-                            extend_props_patch={"dispatch_error": derr},
-                        ),
-                    )
-                )
+            )
+
+        mode_coverage_on = (
+            self._task_settings is not None
+            and self._task_settings.is_enabled("mode_coverage")
+        )
+        if mode_coverage_on:
+            # on-path 模式覆盖:per-node 串行派发 + 每节点后即时 _record_mode_coverage 写回 covered,
+            # 下节点 apply 读到更新后的 covered → 批次内 single→group→bbs 依次轮替,保证全模态覆盖。
+            # 并发 gather 会共享派发前 covered 快照,同批多节点全命中同一档,轮替失效;故 ON 时串行。
+            for node in pending:
+                d = await self._dispatcher.dispatch([node])
+                for dn in d:
+                    _handle_node(dn)
+                if d:
+                    self._record_mode_coverage(task_id, d)
+        else:
+            dispatched = await self._dispatcher.dispatch(pending)
+            for node in dispatched:
+                _handle_node(node)
+            # 批后一次性写回 covered(并发模式无批次内轮替;OFF 链路仅累计,不下轮依赖)
+            self._record_mode_coverage(task_id, dispatched)
         if to_run:
             side.append(("run", to_run))
+
+    def _record_mode_coverage(self, task_id: str, dispatched: list) -> None:
+        """mode_coverage ON 时,按本批派发 outcome 映射已覆盖模式(single/group/bbs)并 union 写回
+        graph.extend_props["mode_coverage"]。strategy 下轮派发读该标记决定覆盖路由;OFF/无产出不写。
+
+        映射:HIT_SINGLE→single(run_mode=single_bot)、HIT_MULTI→group(run_mode=coop_group)、
+        bbs 档 MISS(reason=mode_coverage_bbs)→bbs。仅 mode_coverage ON 写,避免 OFF 运行污染 extend_props。
+        best-effort:读/写图异常不阻断 dispatch 主流程(标记丢失仅影响覆盖路由,下轮重新评估)。
+        """
+        if self._task_settings is None or not self._task_settings.is_enabled("mode_coverage"):
+            return
+        new_modes: set[str] = set()
+        for node in dispatched or []:
+            run_mode = node.run_info.run_mode
+            if run_mode == "single_bot":
+                new_modes.add("single")
+            elif run_mode == "coop_group":
+                new_modes.add("group")
+            else:
+                miss_events = node.run_info.extend_props.get("miss_events") or []
+                if any(str(m) == "mode_coverage_bbs" for m in miss_events):
+                    new_modes.add("bbs")
+        if not new_modes:
+            return
+        try:
+            existing = set(
+                self._graph.query_task_dashboard(task_id).extend_props.get("mode_coverage") or []
+            )
+        except Exception:  # noqa: BLE001  读图容错:标记 best-effort
+            existing = set()
+        merged = existing | new_modes
+        if merged == existing:
+            return
+        try:
+            self._graph.update_task_graph_info(
+                task_id,
+                TaskGraphPatch(extend_props_patch={"mode_coverage": sorted(merged)}),
+            )
+        except Exception as exc:  # noqa: BLE001  写图容错:不阻断 dispatch 主流程
+            logger.warning(
+                "[task][prepare] mode_coverage 标记写失败 task=%s modes=%s: %s",
+                task_id,
+                sorted(merged),
+                exc,
+            )
 
     async def _drain(self, task_id: str, side: list[tuple]) -> None:
         """锁外统一执行 side effects。投递/拉群 IO 锁外 await;翻态(side effect)收口锁内。
