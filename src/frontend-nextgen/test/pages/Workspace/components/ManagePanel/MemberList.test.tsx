@@ -54,14 +54,35 @@ describe('MemberList', () => {
     expect(memberRow('bot-driver').textContent).toContain('驱动 Bot');
     expect(memberRow('bot-driver').textContent).toContain('Bot');
     expect(memberRow('bot-driver').textContent).toContain('群主');
-    expect(screen.getByText('Bot')).toHaveClass('text-[10px]');
-    expect(screen.getByText('群主')).toHaveClass('text-[10px]');
+    // 标签分类型着色：成员类型默认蓝（primary），群主/主节点紫（purple），Badge 默认字号。
+    expect(screen.getByText('Bot')).toHaveClass('text-[11px]', 'bg-primary/10', 'text-primary');
+    expect(screen.getByText('群主')).toHaveClass('text-[11px]', 'bg-purple/10', 'text-purple');
+    expect(screen.getByText('Bot')).not.toHaveClass('text-[10px]');
+    // bot 图标对齐 Bot 工坊信息列：主色软底圆形首字母（不再黑底 bg-foreground）。
+    expect(screen.getByText('驱')).toHaveClass('bg-primary/10', 'text-primary', 'font-semibold');
     expect(memberRow('bot-driver').textContent).not.toContain('禁言');
     expect(memberRow('human-member').textContent).toContain('用户');
-    expect(memberRow('human-member').textContent).not.toContain('成员');
+    // 自由聊天群：非 driver 一律展示「成员」（默认蓝）。
+    expect(memberRow('human-member').textContent).toContain('成员');
+    expect(screen.getByText('成员')).toHaveClass('bg-primary/10', 'text-primary');
   });
 
-  it('任务协作群展示主从节点标签，human 成员不展示角色', () => {
+  it('可管理时移除入口为红色垃圾桶图标按钮（无文字）', () => {
+    render(
+      <MemberList
+        participants={[baseParticipant]}
+        canManage
+        onAddMany={jest.fn()}
+        onRemove={jest.fn()}
+        groupKind="free_chat"
+      />,
+    );
+    const removeButton = screen.getByRole('button', { name: '移除成员' });
+    expect(removeButton).toHaveClass('text-destructive');
+    expect(removeButton.textContent).toBe('');
+  });
+
+  it('任务协作群按角色展示主/从节点标签（不区分 bot/human）', () => {
     renderMembers(
       [
         { ...baseParticipant, actorId: 'manager', name: '主节点 Bot', role: 'manager' },
@@ -79,10 +100,14 @@ describe('MemberList', () => {
 
     expect(memberRow('manager').textContent).toContain('主节点');
     expect(memberRow('worker').textContent).toContain('从节点');
-    expect(memberRow('human-manager').textContent).not.toContain('主节点');
+    // 角色映射不区分 bot/human：human 的 manager 同样展示「主节点」。
+    expect(memberRow('human-manager').textContent).toContain('主节点');
+    // 主节点紫；从节点走默认蓝。
+    expect(screen.getAllByText('主节点')[0]).toHaveClass('bg-purple/10', 'text-purple');
+    expect(screen.getByText('从节点')).toHaveClass('bg-primary/10', 'text-primary');
   });
 
-  it('自定义协作群仅展示群主标签', () => {
+  it('自定义协作群：driver→群主，其余展示「成员」', () => {
     renderMembers(
       [
         { ...baseParticipant, actorId: 'driver', role: 'driver' },
@@ -93,7 +118,7 @@ describe('MemberList', () => {
 
     expect(memberRow('driver').textContent).toContain('群主');
     expect(memberRow('consultant').textContent).not.toContain('群主');
-    expect(memberRow('consultant').textContent).not.toContain('成员');
+    expect(memberRow('consultant').textContent).toContain('成员');
   });
 
   it('会话成员第二行按成员类型展示模式标签', () => {
@@ -121,9 +146,14 @@ describe('MemberList', () => {
       { groupKind: 'task_master_slave', showMode: true },
     );
 
-    expect(memberRow('bot-auto').textContent).toContain('自由');
+    expect(memberRow('bot-auto').textContent).toContain('自动');
     expect(memberRow('bot-muted').textContent).toContain('禁言');
     expect(memberRow('human-present').textContent).toContain('参与');
     expect(memberRow('human-absent').textContent).toContain('旁观');
+    // 状态色：自动/参与绿（success），禁言/旁观灰（neutral）。
+    expect(screen.getByText('自动')).toHaveClass('bg-success/10', 'text-success');
+    expect(screen.getByText('参与')).toHaveClass('bg-success/10', 'text-success');
+    expect(screen.getByText('禁言')).toHaveClass('bg-muted', 'text-muted-foreground');
+    expect(screen.getByText('旁观')).toHaveClass('bg-muted', 'text-muted-foreground');
   });
 });

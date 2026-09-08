@@ -46,6 +46,7 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --info: 199 89% 48%;
+  --purple: 272 81% 56%; /* 管理角色标签紫（群主/主节点），purple-600 #9333ea */
   --brand: 221.2 83.2% 53.3%; /* 经典科技蓝 #2563eb，与 --primary 保持一致 */
 
   --border: 240 5.9% 90%;
@@ -133,6 +134,7 @@
   --success: 142 71% 45%;
   --warning: 38 92% 50%;
   --info: 199 89% 48%;
+  --purple: 272 81% 56%;
   --brand: 221.7 100% 65%; /* D2: 暗色 brand 提亮 */
 
   --border: 240 3.7% 15.9%;
@@ -177,6 +179,7 @@
   --color-warning: hsl(var(--warning));
   --color-error: hsl(var(--destructive));
   --color-info: hsl(var(--info));
+  --color-purple: hsl(var(--purple));
   --color-brand: hsl(var(--brand));
 
   --color-border: hsl(var(--border));

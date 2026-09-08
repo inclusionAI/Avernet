@@ -11,6 +11,36 @@ interface GroupMembersModalProps {
   onClose: () => void;
 }
 
+/**
+ * 角色 → 中文标签与色调，按群类型归一（与「对话协作」成员管理 card 一致）：
+ * 自由聊天/自定义协同 driver→群主；任务协作 manager→主节点、worker→从节点；其余一律「成员」（默认蓝）。
+ */
+function getRoleBadge(role: string, typeLabel?: string): { label: string; tone: 'purple' | 'primary' } {
+  if (typeLabel === '任务协作') {
+    if (role === 'manager') return { label: '主节点', tone: 'purple' };
+    if (role === 'worker') return { label: '从节点', tone: 'primary' };
+    return { label: '成员', tone: 'primary' };
+  }
+  if (role === 'driver') return { label: '群主', tone: 'purple' };
+  return { label: '成员', tone: 'primary' };
+}
+
+/** 与 MemberList 一致的首字母圆标头像：bot 主色软底、human brand 软底。 */
+function MemberAvatar({ member }: { member: PublicGroupMember }) {
+  const symbol = member.displayName?.trim().charAt(0) || '?';
+  return (
+    <div
+      className={
+        member.type === 'bot'
+          ? 'grid size-8 flex-none place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary shadow-sm'
+          : 'grid size-8 flex-none place-items-center rounded-full bg-brand/15 text-xs font-medium text-brand shadow-sm'
+      }
+    >
+      {symbol}
+    </div>
+  );
+}
+
 export function GroupMembersModal({ open, group, members, loading, onClose }: GroupMembersModalProps) {
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
@@ -28,18 +58,28 @@ export function GroupMembersModal({ open, group, members, loading, onClose }: Gr
           <p className="m-0 text-sm leading-6 text-muted-foreground">暂无成员信息。</p>
         ) : (
           <div className="space-y-2">
-            {members.map((member) => (
-              <div
-                key={member.id}
-                className="flex items-center justify-between gap-3 rounded-lg border border-border p-3"
-              >
-                <div className="min-w-0">
-                  <p className="m-0 truncate text-sm font-medium text-foreground">{member.displayName}</p>
-                  <p className="m-0 mt-1 text-xs text-muted-foreground">{member.type === 'human' ? '用户' : 'Bot'}</p>
+            {members.map((member) => {
+              const roleBadge = getRoleBadge(member.role, group?.typeLabel);
+              return (
+                <div
+                  key={member.id}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
+                >
+                  <MemberAvatar member={member} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center">
+                      <span className="max-w-full truncate text-sm font-semibold text-foreground">
+                        {member.displayName}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <Badge tone="primary">{member.type === 'bot' ? 'Bot' : '用户'}</Badge>
+                      <Badge tone={roleBadge.tone}>{roleBadge.label}</Badge>
+                    </div>
+                  </div>
                 </div>
-                <Badge>{member.role}</Badge>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </ModalContent>

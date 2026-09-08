@@ -467,3 +467,121 @@ it('选中归属其他群（参数群滞后）时兜底不得误清选中', asyn
   });
   expect(useWorkspaceStore.getState().selectedSessionId).toBe('g2-s9');
 });
+
+it('切回已加载过的群：重新拉取会话列表（不复用陈旧缓存）', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  const { rerender } = renderHook(({ gid }: { gid: string | null }) => useGroupSessions(gid), {
+    initialProps: { gid: 'g1' as string | null },
+  });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(1));
+  rerender({ gid: 'g2' });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(2));
+  // 旧实现：rawByGroupIdRef['g1'] 缓存命中 → 不再请求（停留在 2 次）。
+  rerender({ gid: 'g1' });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(3));
+  expect(gs.loadGroupSessionsOrBcs).toHaveBeenLastCalledWith('g1', 'me');
+});
+
+it('收起后重新展开未选中的群：重新拉取会话列表', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  const { rerender } = renderHook(({ expanded }: { expanded: string[] }) => useGroupSessions(null, expanded), {
+    initialProps: { expanded: ['g1'] as string[] },
+  });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(1));
+  rerender({ expanded: [] });
+  await act(async () => Promise.resolve());
+  rerender({ expanded: ['g1'] });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(2));
+});
+
+it('选中群收起后再次点击其 tab（groupId 未变）：由展开 transition 重拉', async () => {
+  gs.loadGroupSessionsOrBcs.mockResolvedValue({ ok: true, data: [session('s1', 'g1', '一号')] });
+  const { rerender } = renderHook(({ expanded }: { expanded: string[] }) => useGroupSessions('g1', expanded), {
+    initialProps: { expanded: ['g1'] as string[] },
+  });
+  // 首次：选中路径拉取；展开路径因在途去重不重复请求。
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(1));
+  rerender({ expanded: [] });
+  await act(async () => Promise.resolve());
+  // 旧实现：选中路径 key 未变不拉、展开路径因 gid===groupId 恒跳过 → 停留在 1 次。
+  rerender({ expanded: ['g1'] });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(2));
+});
+
+it('重拉窗口清空陈旧缓存：不会自动选中当前角色已离开的会话', async () => {
+  let resolveRefetch: (value: unknown) => void = () => {};
+  gs.loadGroupSessionsOrBcs
+    .mockResolvedValueOnce({ ok: true, data: [session('s-gone', 'g1', '已离开'), session('s2', 'g1', '二号')] })
+    .mockResolvedValueOnce({ ok: true, data: [session('x', 'g2', 'X')] })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefetch = resolve;
+        }),
+    );
+  const { rerender } = renderHook(({ gid }: { gid: string | null }) => useGroupSessions(gid), {
+    initialProps: { gid: 'g1' as string | null },
+  });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('s-gone'));
+  rerender({ gid: 'g2' });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(2));
+
+  // 模拟再次点击 g1 的 tab：selectGroup 清空选中 + groupId 切回。
+  act(() => {
+    useWorkspaceStore.getState().selectGroup('g1');
+  });
+  rerender({ gid: 'g1' });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(3));
+  await act(async () => Promise.resolve());
+  // 旧实现：缓存未清 → 自动选中立即命中陈旧列表首条 s-gone（当前角色已离开 → 右栏请求报错）。
+  expect(useWorkspaceStore.getState().selectedSessionId).not.toBe('s-gone');
+
+  await act(async () => {
+    resolveRefetch({ ok: true, data: [session('s2', 'g1', '二号')] });
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('s2'));
+});
+
+it('退出会话登记「已知退出」：陈旧选中再指向它时不反查详情，直接轮换', async () => {
+  // 首拉返回 [S, S2]；退出后服务端不再返回 S（重拉只剩 [S2]）。
+  let g1Calls = 0;
+  gs.loadGroupSessionsOrBcs.mockImplementation(async (gid: string) => {
+    if (gid !== 'g1') return { ok: true, data: [session('x', 'g2', 'X')] };
+    g1Calls += 1;
+    return g1Calls === 1
+      ? { ok: true, data: [session('S', 'g1', 'S'), session('S2', 'g1', 'S2')] }
+      : { ok: true, data: [session('S2', 'g1', 'S2')] };
+  });
+  // S 的详情自始失败（当前角色已退出后反查必然报错的形态）。
+  ss.getSessionDetail.mockImplementation(async (sid: string) =>
+    sid === 'S'
+      ? { ok: false, error: { code: 'X', friendlyMessage: 'fail', canRetry: true } }
+      : { ok: true, data: { ...session('S2', 'g1', 'S2'), participants: [] } },
+  );
+  ss.leaveSession.mockResolvedValue({ ok: true, data: null });
+  useWorkspaceStore.getState().selectGroup('g1');
+  const { result, rerender } = renderHook(({ gid }: { gid: string | null }) => useGroupSessions(gid), {
+    initialProps: { gid: 'g1' as string | null },
+  });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('S'));
+
+  await act(async () => {
+    await result.current.leaveSession('S', 'me');
+  });
+  // 退出成功：从列表移除并轮换选中。
+  expect(useWorkspaceStore.getState().selectedSessionId).toBe('S2');
+  const sCallsBefore = ss.getSessionDetail.mock.calls.filter((c: unknown[]) => c[0] === 'S').length;
+
+  // 模拟陈旧选中再次指向已退出会话（记忆恢复/深链），随后点击群 tab 触发重拉：
+  // 列表到达时兜底不得再发 S 详情请求（已登记已知退出），应直接轮换回有效会话。
+  act(() => {
+    useWorkspaceStore.getState().selectSession('S');
+  });
+  rerender({ gid: 'g2' });
+  await waitFor(() => expect(gs.loadGroupSessionsOrBcs).toHaveBeenCalledTimes(2));
+  rerender({ gid: 'g1' });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedSessionId).toBe('S2'));
+  const sCallsAfter = ss.getSessionDetail.mock.calls.filter((c: unknown[]) => c[0] === 'S').length;
+  expect(sCallsAfter).toBe(sCallsBefore);
+});

@@ -58,3 +58,16 @@ export function normalizePage(data: GroupSessionPage | SessionView[], fallbackOf
   }
   return data;
 }
+
+/** 清掉指定群的陈旧会话缓存（ref+state 同步更新）：重拉窗口内自动选中/陈旧选中兜底不消费旧数据。 */
+export function dropGroupCache(
+  rawByGroupIdRef: SessionMapRef,
+  setRawByGroupId: Dispatch<SetStateAction<SessionMap>>,
+  gid: string,
+): void {
+  if (rawByGroupIdRef.current[gid] === undefined) return;
+  const next = { ...rawByGroupIdRef.current };
+  delete next[gid];
+  rawByGroupIdRef.current = next;
+  setRawByGroupId(next);
+}

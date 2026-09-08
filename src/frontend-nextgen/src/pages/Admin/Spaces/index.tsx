@@ -30,7 +30,9 @@ export function AdminSpacesView() {
     openSpaceDetail,
     closeSpaceDetail,
     deleteSpace,
-    addMember,
+    addMembers,
+    addMembersLoading,
+    addMembersDisabledReason,
     removeMember,
     updateRole,
     requestJoin,
@@ -149,7 +151,9 @@ export function AdminSpacesView() {
                 space={currentSpace}
                 members={members}
                 loading={membersLoading}
-                onAddMember={addMember}
+                onAddMembers={addMembers}
+                addMembersLoading={addMembersLoading}
+                addMembersDisabledReason={addMembersDisabledReason}
                 onRemoveMember={removeMember}
                 onUpdateRole={updateRole}
                 onRequestJoin={(s, reason) => void requestJoin(s.spaceId, reason)}

@@ -63,17 +63,21 @@ export interface BcsGroupDetailRaw {
  * BCS 群会话列表（sessions-only）：仅 GET /groups/{id}/sessions，不拉群详情。
  * 供 useSessionMap 选中/展开群填充会话——选中群不再触发 GET /groups/{id} 详情请求，
  * 群详情仅在管理面板（查看/编辑）时按需拉取（见 loadBcsGroupDetail）。兼容历史 BCS raw 字段。
+ * view_bot_id 语义与通用端点一致：当前身份 mine bot_id（bot_id 原始值，含 human_ 前缀形态），
+ * 供后端按当前角色视角过滤会话；缺省（无身份）时省略参数。
  */
 export async function loadBcsGroupSessions(
   groupId: string,
   pageOpts: SessionPageOpts = {},
+  viewBotId?: string,
 ): Promise<DomainResult<GroupSessionPage>> {
   try {
     const base = '/openapi/v1/collaboration';
     const offset = pageOpts.offset ?? 0;
     const limit = pageOpts.limit ?? 10;
+    const viewParam = viewBotId ? `&view_bot_id=${encodeURIComponent(viewBotId)}` : '';
     const sResp = await fetch(
-      `${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=${offset}&limit=${limit}`,
+      `${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=${offset}&limit=${limit}${viewParam}`,
       {
         credentials: 'include',
       },
@@ -115,12 +119,15 @@ export async function loadBcsGroupSessions(
  *
  * 兼容历史 BCS raw 字段，同时接受 OpenAPI envelope.data，避免 execute 链路依赖本地服务。
  */
-export async function loadBcsGroupDetail(groupId: string): Promise<DomainResult<GroupView>> {
+export async function loadBcsGroupDetail(groupId: string, viewBotId?: string): Promise<DomainResult<GroupView>> {
   try {
     const base = '/openapi/v1/collaboration';
+    const viewParam = viewBotId ? `&view_bot_id=${encodeURIComponent(viewBotId)}` : '';
     const [dResp, sResp] = await Promise.all([
       fetch(`${base}/groups/${encodeURIComponent(groupId)}`, { credentials: 'include' }),
-      fetch(`${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=0&limit=50`, { credentials: 'include' }),
+      fetch(`${base}/groups/${encodeURIComponent(groupId)}/sessions?offset=0&limit=50${viewParam}`, {
+        credentials: 'include',
+      }),
     ]);
     if (!dResp.ok) {
       return { ok: false, error: toDomainError('GROUP_MISSING', '该协作群不存在或已被删除。') };
@@ -169,10 +176,10 @@ export async function loadBcsGroupDetail(groupId: string): Promise<DomainResult<
 }
 
 /** 是否为 BCS(execute) 群:内存标记(会话内建群时 markBcsGroup 写入)命中,或 groupId 按 `bcs_grp_` 前缀约定命中。
- *  新开页 `target=_blank` 全新挂载时 `bcsGroupIds` 内存态为空(非持久化),仅靠标记会把既有 BCS 群误判为预发群 →
- *  走通用端点时带 `view_bot_id=人类 me id`,以身份受限的视角拉不回会话 → 右栏"请选择或创建一个会话"。
- *  前缀兜底保证 BCS 群始终走 BCS 路径(不带 view_bot_id),与 ViewSessionButton / NodeListView / taskPanelMapper
- *  判定单/群的口径(`bcs_grp_` 前缀)对齐(后端建群 group_id 即 `bcs_grp_<uuid>`)。 */
+ *  新开页 `target=_blank` 全新挂载时 `bcsGroupIds` 内存态为空(非持久化),仅靠标记会把既有 BCS 群误判为预发群。
+ *  前缀兜底保证 BCS 群始终走 BCS raw-fetch 旁路(ACE 登录体处理 + 历史字段兼容),与 ViewSessionButton /
+ *  NodeListView / taskPanelMapper 判定单/群的口径(`bcs_grp_` 前缀)对齐(后端建群 group_id 即 `bcs_grp_<uuid>`)。
+ *  view_bot_id 两条路径语义一致:当前身份 mine bot_id,缺省时省略。 */
 function isBcsGroupId(groupId: string): boolean {
   return Boolean(useWorkspaceStore.getState().bcsGroupIds[groupId]) || groupId.startsWith('bcs_grp_');
 }
@@ -184,7 +191,7 @@ export async function loadGroupDetailOrBcs(
   viewBotId: string | undefined,
   loadGroupDetail: (id: string, vid?: string) => Promise<DomainResult<GroupView>>,
 ): Promise<DomainResult<GroupView>> {
-  return isBcsGroupId(groupId) ? loadBcsGroupDetail(groupId) : loadGroupDetail(groupId, viewBotId);
+  return isBcsGroupId(groupId) ? loadBcsGroupDetail(groupId, viewBotId) : loadGroupDetail(groupId, viewBotId);
 }
 
 /** 选中/展开群填充会话列表的统一入口：BCS 群走 loadBcsGroupSessions，
@@ -201,7 +208,7 @@ export async function loadGroupSessionsOrBcs(
   const existingRequest = groupSessionRequestsInFlight.get(requestKey);
   if (existingRequest) return existingRequest;
   const request = (
-    isBcsGroup ? loadBcsGroupSessions(groupId, pageOpts) : loadGroupSessions(groupId, viewBotId, pageOpts)
+    isBcsGroup ? loadBcsGroupSessions(groupId, pageOpts, viewBotId) : loadGroupSessions(groupId, viewBotId, pageOpts)
   ).finally(() => {
     if (groupSessionRequestsInFlight.get(requestKey) === request) {
       groupSessionRequestsInFlight.delete(requestKey);

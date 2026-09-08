@@ -46,6 +46,27 @@ export interface SpaceServiceResult<T> {
   error?: ServiceError;
 }
 
+/** 批量添加成员入参项（与单发 addMember 的 userId + 可选花名一致）。 */
+export interface BatchMemberInput {
+  userId: string;
+  /** 被加成员花名，逐项透传为单发 body 的 member_user_name（不共享、不丢失）。 */
+  userName?: string;
+}
+
+/** 批量添加中单个失败项：携带重试所需最小信息（userId + 花名）与后端原因。 */
+export interface BatchMemberFailure {
+  userId: string;
+  userName?: string;
+  /** 后端 message 或回退「请求异常」（业务失败透传后端 message；网络异常无可读 message 时回退）。 */
+  reason: string;
+}
+
+/** 批量添加结果：成功成员集合 + 失败项集合（供上层 toast 聚合与失败重试）。 */
+export interface BatchMembersResult {
+  succeeded: SpaceMember[];
+  failed: BatchMemberFailure[];
+}
+
 // 从后端信封 body 直接读取可读 message（不沿用 extractErrorMessage：后者面向 error 形状，
 // 会优先下钻 .data，对信封不适用）。
 function envelopeMessage(data: unknown): string {
@@ -186,6 +207,38 @@ export const adminService = {
     } catch (e) {
       return { error: toServiceError(e) };
     }
+  },
+
+  /**
+   * 批量添加成员（v1 纯前端聚合，design D1）：Promise.allSettled 并行调用单发 addMember，
+   * 按 envelope {error} 归属成功/失败——业务失败（已是成员/无权限等）在 service 层是
+   * resolve({error}) 而非 reject，故聚合必检 value.error；仅按 rejected 判定会把业务
+   * 失败静默误算为成功（design D2）。无 React 依赖、不抛错、不调 toast；
+   * 失败仅落入 failed 供上层 toast 聚合与失败重试。不新增后端批量端点。
+   */
+  async addMembersBatch(
+    spaceId: number | string,
+    items: BatchMemberInput[],
+    role: 'ADMIN' | 'MEMBER' = 'MEMBER',
+  ): Promise<BatchMembersResult> {
+    if (items.length === 0) return { succeeded: [], failed: [] };
+    const settled = await Promise.allSettled(
+      items.map((item) => this.addMember(spaceId, item.userId, role, item.userName)),
+    );
+    const succeeded: SpaceMember[] = [];
+    const failed: BatchMemberFailure[] = [];
+    settled.forEach((res, i) => {
+      const item = items[i];
+      // fulfilled 且无业务 error 且有数据 → 成功；其余（业务失败 resolve{error} / 网络 reject）→ 失败。
+      if (res.status === 'fulfilled' && !res.value.error && res.value.data) {
+        succeeded.push(res.value.data);
+        return;
+      }
+      // rejected（addMember 实际不 reject，兜底）→「请求异常」；业务失败无 message →「请求异常」。
+      const reason = res.status === 'fulfilled' ? res.value.error?.message || '请求异常' : '请求异常';
+      failed.push({ userId: item.userId, ...(item.userName ? { userName: item.userName } : {}), reason });
+    });
+    return { succeeded, failed };
   },
 
   /** 删除成员（path 为被删成员 userId；user_id 为操作者）。 */
