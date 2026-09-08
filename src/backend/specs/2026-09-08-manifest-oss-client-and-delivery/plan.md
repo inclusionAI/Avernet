@@ -14,7 +14,7 @@ validator no longer accepts.
 |---|---|---|---|
 | A | `EntryDelivery` replaces the union | none | existing materialiser tests, unchanged |
 | B | one fetcher per protocol | none | existing fetch tests, unchanged |
-| C | the object-store client plugin | none (nothing consumes it yet) | new conformance test |
+| C | the object-store client plugin | none (nothing consumes it yet) | conformance suite (Rule 25) |
 | D | `oss` on the plugin + the URL road removed | **yes** | new tests + the matrix cell test |
 | E | documentation | — | — |
 | F | verification | — | full suite, lint, type check |
@@ -111,8 +111,27 @@ checks, and `declared_protocol`'s no-fetch gate.
 `ObjectStoreClient`, `ObjectStoreClientFactory`).
 
 Per `docs/arch/protocol-contract-tests.md`, a plugin protocol needs a conformance
-test shape every implementation runs. Ours asserts the five statuses and the
-streaming cap.
+suite at `tests/community/contracts/test_<module>.py`, and
+`tests/community/architecture/test_protocol_contracts.py` fails the build
+without one — discovery keys on a class with `Plugin` in its MRO, which
+`ObjectStoreClientFactory` has.
+
+**Where the plan bends.** Rule 25 defines conformance as *consumer ↔ Protocol*,
+with the local impl as the executable spec. Group C as written creates a
+Protocol with no consumer — the consumer is `ObjectStoreFetcher`, and it cannot
+read a bucket and key until group D adds them to the schema. Two honest
+options: add an `EXEMPT_PROTOCOLS` entry (a set the arch test says each commit
+*drains*, so adding to it goes backwards), or split the suite. **The suite is
+split**: C lands the local impl's spec — the five statuses and the streaming cap,
+which is the half Rule 25 calls "what we believe prod does" — and D adds the
+consumer-level test with its plugin-hit assertion once `ObjectStoreFetcher`
+reads through it. Neither half is skipped; the file exists from C so the head
+never goes red, and the group-D commit is what makes it a Rule 25 suite proper.
+
+Two constraints the arch tests impose, checked rather than assumed: no file
+under `src/agentclaw/` may exceed 1000 lines, and `core/` may not import
+`agentclaw.community.plugins.*` — the fetcher takes the factory by injection,
+never by import.
 
 | impl | file | notes |
 |---|---|---|

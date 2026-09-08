@@ -61,8 +61,11 @@ lands atomically.
       `ObjectFetchStatus`, `ObjectFetchResult`, `ObjectStoreClient`,
       `ObjectStoreClientFactory`. Document *why* it is not `ObjectStoragePlugin`
       (singleton, env-chain credentials, swallowing error contract).
-- [ ] **C2** — conformance test per `docs/arch/protocol-contract-tests.md`: the
-      five statuses, and the cap enforced **without draining** the body.
+- [ ] **C2** — `tests/community/contracts/test_object_store_client.py`: the five
+      statuses and the cap enforced **without draining** the body, against the
+      local impl as spec. The Rule 25 *consumer* half lands in D9 — the consumer
+      is `ObjectStoreFetcher` and it has no bucket/key to read until D2. Split
+      rather than exempted: `EXEMPT_PROTOCOLS` is a set each commit drains.
 - [ ] **C3** — `plugins/local/object_store_client.py`: in-memory, per-key
       scriptable status.
 - [ ] **C4** — `plugins/community/object_store_client.py`: boto3 S3. AK/SK passed
