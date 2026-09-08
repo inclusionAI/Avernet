@@ -2458,6 +2458,170 @@ async fn delete_participant_still_rejects_group_driver() {
     assert!(recorded_bot_left(&fixture, &session.id).is_empty());
 }
 
+#[tokio::test]
+async fn delete_participant_self_leave_needs_no_manage_rights() {
+    // A plain Human participant — not a group manager and not the session
+    // creator — may remove its own Human Actor: self-leave is voluntary and
+    // must not require session-manage authorization.
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::human("human_leaver", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("leaver"),
+            session_id: session.id.clone(),
+            bot_uuid: "human_leaver".into(),
+        })
+        .await
+        .expect("plain participant may leave the session");
+    assert!(removed.deleted);
+    let left = recorded_bot_left(&fixture, &session.id);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0], "human_leaver");
+}
+
+#[tokio::test]
+async fn delete_participant_owner_removes_owned_bot_without_manage_rights() {
+    // Removing a Bot owned by the caller is the owner's voluntary leave and
+    // needs no session-manage authorization either.
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.add_bot_with("expert", "public", "owner-9").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("expert", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-9"),
+            session_id: session.id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect("owner may withdraw its own bot");
+    assert!(removed.deleted);
+    let left = recorded_bot_left(&fixture, &session.id);
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0], "expert");
+}
+
+#[tokio::test]
+async fn delete_participant_non_manager_still_cannot_remove_others() {
+    // Self-leave does not widen authorization: a plain participant removing
+    // someone else's Actor still requires session-manage rights.
+    let fixture = Fixture::new().await;
+    fixture.add_bot("driver").await;
+    fixture.add_bot_with("expert", "public", "owner-9").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("expert", ParticipantRole::Consultant),
+                    Participant::human("human_leaver", ParticipantRole::Observer),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("leaver"),
+            session_id: session.id.clone(),
+            bot_uuid: "expert".into(),
+        })
+        .await
+        .expect_err("removing another actor requires manage rights");
+    assert_eq!(error.code(), "forbidden");
+    assert!(recorded_bot_left(&fixture, &session.id).is_empty());
+}
+
+#[tokio::test]
+async fn delete_participant_driver_owner_self_leave_still_rejected() {
+    // The driver/manager pin applies to self-leaves too: the owner of the
+    // driver Bot acting as the driver may not remove it from the session.
+    let fixture = Fixture::new().await;
+    fixture.add_bot_with("driver", "public", "owner-1").await;
+    fixture
+        .store_group_with_originator("g1", "driver", "human_other", None)
+        .await;
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![Participant::bot("driver", ParticipantRole::Driver)],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("seed Session");
+
+    let error = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("owner-1"),
+            session_id: session.id.clone(),
+            bot_uuid: "driver".into(),
+        })
+        .await
+        .expect_err("driver remains pinned even for its owner");
+    assert!(
+        matches!(error, bcs_service_api::application::v1::ApplicationError::InvalidInput { .. }),
+        "expected invalid_request, got {error:?}"
+    );
+    assert!(recorded_bot_left(&fixture, &session.id).is_empty());
+}
+
 /// Collect `ParticipantModeChanged` events recorded for `session_id`.
 fn recorded_mode_changes(
     fixture: &Fixture,
@@ -2978,7 +3142,7 @@ async fn update_mode_does_not_auto_add_a_missing_bot() {
 }
 
 #[tokio::test]
-async fn owned_bot_does_not_grant_session_participant_removal_permission() {
+async fn owned_bot_removal_is_owner_self_leave_not_management() {
     let fixture = Fixture::new().await;
     for bot in ["driver", "bot-a"] {
         fixture.add_bot(bot).await;
@@ -2990,31 +3154,25 @@ async fn owned_bot_does_not_grant_session_participant_removal_permission() {
         .await
         .expect("save owner");
     fixture.store_group("g1", "driver", None).await;
-    let outcome = create_session(
-        &fixture,
-        bot_principal("driver"),
-        "g1",
-        "driver",
-        vec![participant_input("bot-a", None)],
-        None,
-        None,
-    )
-    .await;
-    let session_id = outcome.session.session_id.clone();
-
-    let owner_error = fixture
-        .service
-        .delete_participant(DeleteSessionParticipant {
-            caller: human_principal("staff-1"),
-            session_id: session_id.clone(),
-            bot_uuid: "bot-a".into(),
-        })
+    let group = fixture.groups.get("g1").await.expect("group exists");
+    // Seed the session directly so bot-a is an actual session participant
+    // (the V1 create flow inherits the group roster, which lacks bot-a).
+    let session = fixture
+        .session_repo
+        .create(
+            "g1",
+            NewSessionParams {
+                participants: vec![
+                    Participant::bot("driver", ParticipantRole::Driver),
+                    Participant::bot("bot-a", ParticipantRole::Consultant),
+                ],
+                group_version: Some(group.version),
+                ..Default::default()
+            },
+        )
         .await
-        .expect_err("Bot ownership grants detail read only, not management");
-    assert!(matches!(
-        owner_error,
-        bcs_service_api::application::v1::ApplicationError::Forbidden(_)
-    ));
+        .expect("seed Session");
+    let session_id = session.id.clone();
 
     // Non-owner Human (staff-2) is forbidden — neither self, owner, nor
     // manager/creator.
@@ -3022,7 +3180,7 @@ async fn owned_bot_does_not_grant_session_participant_removal_permission() {
         .service
         .delete_participant(DeleteSessionParticipant {
             caller: human_principal("staff-2"),
-            session_id,
+            session_id: session_id.clone(),
             bot_uuid: "bot-a".into(),
         })
         .await
@@ -3031,6 +3189,21 @@ async fn owned_bot_does_not_grant_session_participant_removal_permission() {
         error,
         bcs_service_api::application::v1::ApplicationError::Forbidden(_)
     ));
+
+    // The owner removing its own Bot is a voluntary leave (Design §8.7 parity
+    // with the Group facade), not an exercise of management rights: it is
+    // allowed even though staff-1 cannot manage the session. Ownership still
+    // grants no management — see the sibling update-permission test.
+    let removed = fixture
+        .service
+        .delete_participant(DeleteSessionParticipant {
+            caller: human_principal("staff-1"),
+            session_id: session_id.clone(),
+            bot_uuid: "bot-a".into(),
+        })
+        .await
+        .expect("owner may withdraw its own bot");
+    assert!(removed.deleted);
 }
 
 #[tokio::test]

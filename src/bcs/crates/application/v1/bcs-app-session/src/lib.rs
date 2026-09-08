@@ -164,6 +164,26 @@ impl SessionServiceImpl {
         Ok(false)
     }
 
+    /// Whether the Principal acts as `actor_id` itself: the same Actor, or
+    /// a Human acting for a Bot it owns / has a creator relation edge to.
+    /// Mirrors the sibling `bcs-app-group` helper of the same name.
+    async fn principal_can_act_as(
+        &self,
+        principal: &Principal,
+        actor_id: &str,
+    ) -> Result<bool, ApplicationError> {
+        if principal.actor_id() == actor_id {
+            return Ok(true);
+        }
+        match principal {
+            Principal::Human(human) => {
+                self.human_can_act_as_any(human, vec![actor_id.to_string()])
+                    .await
+            }
+            Principal::Bot(_) => Ok(false),
+        }
+    }
+
     async fn can_manage_group(
         &self,
         principal: &Principal,
@@ -1118,9 +1138,22 @@ impl SessionService for SessionServiceImpl {
         command: DeleteSessionParticipant,
     ) -> Result<DeleteResult, ApplicationError> {
         let principal = require_human(&command.caller)?;
-        let (session, _) = self
-            .load_session_for_manage(&principal, &command.session_id)
+        // Design §8.7 parity with the Group facade: the target Actor may leave
+        // the Session (self-service delete) without session-manage
+        // authorization — removing the caller's own Human Actor, or a Bot the
+        // caller owns, is a voluntary leave. The legacy removal path still
+        // rejects removing the group driver or the ManagerWorker Manager, so
+        // the structural invariant is preserved for self-leaves too.
+        let is_self = self
+            .principal_can_act_as(&principal, &command.bot_uuid)
             .await?;
+        let session = if is_self {
+            self.load_session(&command.session_id).await?
+        } else {
+            self.load_session_for_manage(&principal, &command.session_id)
+                .await?
+                .0
+        };
         // Capture the participant being removed (its real role/mode/actor_kind)
         // before the mutation so the `BotLeft` event carries accurate identity
         // — the legacy `remove_session_participant` hardcodes `Observer`/`None`.
