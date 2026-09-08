@@ -90,10 +90,10 @@ def test_form_coop_group_manager_worker_sets_strategy():
     assert bcs.created[0].master_bot == "mgr:double-owner"  # master 即 driver/manager
 
 def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
-    """# 接力任务:task_instruction 已含 format_execute(# 接自 分支)注入的完整回投协议(回调地址/
-    请求体/自检/阶段闭环),form_coop_group 只补 reporter 定位脚注,不再重复 目标/验收标准/任务上下文/
-    回投请求体——静态接力 Goal.acceptances=[] 否则会打印空 验收标准:[](末尾偏置误导 bot 跳过验收),
-    且旧 回投请求体 acceptance_result:{} 与权威 acceptance_result:{verdict,acceptances_metric,gaps} 冲突。"""
+    """# 接力协作群(static_plan):task_instruction 已含 format_execute(# 接自 分支)注入的执行闭环
+    (禁联网/平台回收/接力交接,不含 HTTP 上报协议),form_coop_group 只补 driver/reporter 定位脚注,
+    不再重复 目标/验收标准/任务上下文——静态接力 Goal.acceptances=[] 会打印空 验收标准:[](末尾偏置
+    误导 bot 跳过验收)。"""
     bcs = _Bcs()
     fmt = PromptFormatterImpl()
     relay_body = "# 接自:上游Bot\n## 上游产出正文\n上游摘要\n## 本角色任务\n执行投放"
@@ -111,12 +111,14 @@ def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
         extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": fc_msg},
     )))
     ctx = bcs.created[0].context
-    # 权威协议(由 format_execute # 接自 分支注入)在 context 中
-    assert "回调地址" in ctx and "callback/report" in ctx
-    assert '"verdict": "DONE"' in ctx and '"acceptances_metric"' in ctx
-    # 接力脚注仅保留 reporter 定位
+    # static_plan 接力:不注入 HTTP 上报协议(回调地址/请求体/verdict/acceptances_metric)
+    assert "回调地址" not in ctx and "callback/report" not in ctx
+    assert '"verdict"' not in ctx and '"acceptances_metric"' not in ctx
+    # 接力脚注仅保留 driver/reporter 定位(协作群分工,不提上报回投),无 mock 字样
     assert "reporter_bot_id=mgr" in ctx and "reporter_role=master/manager" in ctx
-    # 不再重复打印空验收标准 / 旧回投请求体 / 任务上下文(权威协议已含)
+    assert "协作群分工" in ctx
+    assert "mock" not in ctx and "演示" not in ctx
+    # 不再重复打印空验收标准 / 任务上下文
     assert "验收标准:" not in ctx
     assert "回投请求体只能包含" not in ctx
     assert "任务上下文:" not in ctx
