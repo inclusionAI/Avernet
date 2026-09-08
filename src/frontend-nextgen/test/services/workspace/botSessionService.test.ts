@@ -299,6 +299,95 @@ describe('botSessionService', () => {
     );
     expect(res.ok && res.data.model).toBe('openai/gpt-5.3');
   });
+
+  it('好友 Bot 的单聊接口统一携带 f_user_id，管理 Bot 不携带', async () => {
+    const sessionDto = {
+      session_id: 's1',
+      title: '标题',
+      agent_id: 'main',
+      model: 'openai/gpt-5.3',
+      message_count: 1,
+      gmt_create: '',
+      gmt_modified: '',
+    };
+    const messageDto = { message_id: 'm1', session_id: 's1', role: 'user', content: 'q', gmt_create: '' };
+    const friendBot = { ...bot, isFriendBot: true };
+    const baseParams = { user_id: '327325', owner_id: '2088', f_user_id: '327325' };
+
+    mocked.listBotSessions.mockResolvedValue({ data: { items: [], total: 0 } });
+    mocked.createBotSession.mockResolvedValue({ data: sessionDto });
+    mocked.getBotSession.mockResolvedValue({ data: sessionDto });
+    mocked.deleteBotSession.mockResolvedValue({ data: { deleted: true } });
+    mocked.updateBotSession.mockResolvedValue({ data: sessionDto });
+    mocked.deleteBotSessionMessages.mockResolvedValue({ data: { deleted: true } });
+    mocked.listBotSessionMessages.mockResolvedValue({ data: { items: [messageDto], total: 1 } });
+    mocked.favoriteBotSession.mockResolvedValue({ data: { session_id: 's1', favorited: true } });
+    mocked.unfavoriteBotSession.mockResolvedValue({ data: { session_id: 's1', favorited: false } });
+    mocked.listFavoriteSessions.mockResolvedValue({ data: { items: [], total: 0 } });
+    mocked.listBotModels.mockResolvedValue({ data: { items: [], total: 0 } });
+
+    await botSessionService.listSessionsPage(friendBot, 'human_327325', 1, 10);
+    expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
+      ...baseParams,
+      page: 1,
+      page_size: 10,
+    });
+
+    await botSessionService.createSession(friendBot, 'human_327325');
+    expect(mocked.createBotSession).toHaveBeenLastCalledWith('20260402_ab', baseParams, { title: undefined });
+
+    await botSessionService.getSessionDetail(friendBot, 'human_327325', 's1');
+    expect(mocked.getBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
+
+    await botSessionService.deleteSession(friendBot, 'human_327325', 's1');
+    expect(mocked.deleteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
+
+    await botSessionService.updateSessionTitle(friendBot, 'human_327325', 's1', '新标题');
+    expect(mocked.updateBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams, { title: '新标题' });
+
+    await botSessionService.clearContext(friendBot, 'human_327325', 's1');
+    expect(mocked.deleteBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
+
+    await botSessionService.listMessages(friendBot, 'human_327325', 's1');
+    expect(mocked.listBotSessionMessages).toHaveBeenLastCalledWith('20260402_ab', 's1', {
+      ...baseParams,
+      page: 1,
+      page_size: 50,
+    });
+
+    await botSessionService.toggleFavorite(friendBot, 'human_327325', 's1', true);
+    expect(mocked.favoriteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
+    await botSessionService.toggleFavorite(friendBot, 'human_327325', 's1', false);
+    expect(mocked.unfavoriteBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams);
+
+    await botSessionService.listFavoriteSessionsPage(friendBot, 'human_327325', 1, 10);
+    expect(mocked.listFavoriteSessions).toHaveBeenLastCalledWith('20260402_ab', {
+      ...baseParams,
+      page: 1,
+      page_size: 10,
+    });
+
+    await botSessionService.listModels(friendBot, 'human_327325');
+    expect(mocked.listBotModels).toHaveBeenLastCalledWith('20260402_ab', {
+      ...baseParams,
+      page: 1,
+      page_size: 50,
+    });
+
+    await botSessionService.updateSessionModel(friendBot, 'human_327325', 's1', 'openai/gpt-5.3');
+    expect(mocked.updateBotSession).toHaveBeenLastCalledWith('20260402_ab', 's1', baseParams, {
+      model: 'openai/gpt-5.3',
+    });
+
+    mocked.listBotSessions.mockClear();
+    await botSessionService.listSessionsPage(bot, 'human_327325', 1, 10);
+    expect(mocked.listBotSessions).toHaveBeenLastCalledWith('20260402_ab', {
+      user_id: '327325',
+      owner_id: '2088',
+      page: 1,
+      page_size: 10,
+    });
+  });
 });
 
 it('listSessionsPage 与收藏分页复用统一标题映射并透传分页参数', async () => {

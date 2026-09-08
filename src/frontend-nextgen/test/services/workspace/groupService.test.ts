@@ -288,7 +288,10 @@ describe('policy', () => {
   } as any;
   it('canManageGroup: originator user ok, member bot denied', () => {
     expect(groupService.canManageGroup(group, 'me-owner')).toEqual({ allowed: true });
-    expect(groupService.canManageGroup(group, 'bot-1')).toMatchObject({ allowed: false });
+    expect(groupService.canManageGroup(group, 'bot-1')).toEqual({
+      allowed: false,
+      disabledReason: '仅群主/主节点可管理该协作群',
+    });
     expect(
       groupService.canManageGroup(
         { ...group, participants: [{ actorId: 'bot-1', role: 'driver' as const }] } as never,
@@ -301,6 +304,14 @@ describe('policy', () => {
         'bot-1',
       ),
     ).toEqual({ allowed: true });
+  });
+  it('canDissolveGroup: driver bot owner from group list item ok', () => {
+    const listGroup = {
+      ...group,
+      participants: [],
+      driverBotUuid: 'bot-driver',
+    } as any;
+    expect(groupService.canDissolveGroup(listGroup, 'bot-driver')).toEqual({ allowed: true });
   });
   it('canDissolveGroup: dissolved group denied', () => {
     expect(groupService.canDissolveGroup({ ...group, status: 'dissolved' }, 'me-owner')).toMatchObject({

@@ -1,6 +1,6 @@
 import { Button, Empty, Input } from '@/components/ui';
 import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import type { GroupView } from '@/domain/collaboration';
+import type { GroupView, SessionView } from '@/domain/collaboration';
 import { useFuse, type FusionBotInfo } from '@/pages/Workspace/hooks/useFuse';
 import { cn } from '@/utils/cn';
 import type { TextBlock } from '@tc-chat/core';
@@ -11,16 +11,18 @@ import { AvatarTile } from '../AvatarTile';
 
 interface FuseChatPanelProps {
   group: GroupView | null;
+  session: SessionView | null;
   sessionId: string | null;
   viewerName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-export function FuseChatPanel({ group, sessionId, viewerName, open, onOpenChange }: FuseChatPanelProps) {
+export function FuseChatPanel({ group, session, sessionId, viewerName, open, onOpenChange }: FuseChatPanelProps) {
   const { messages, isFusing, submitQuestion, fusionBots, isLoadingFusionBots } = useFuse(
     open ? group : null,
     open ? sessionId : null,
+    session?.participants ?? [],
   );
   const [input, setInput] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());

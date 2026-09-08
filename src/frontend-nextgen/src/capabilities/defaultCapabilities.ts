@@ -9,6 +9,7 @@ import type {
   BotEngineOption,
   CapabilityResult,
   HumanIdentity,
+  InviteCodeGatePolicy,
   LoginStrategy,
   MetricsDashboardSpec,
   OpenSourceExperienceNoticeSpec,
@@ -131,6 +132,9 @@ export const defaultCapabilities: AppCapabilities = {
   getMemberAvatarUrl: (): CapabilityResult<string | null> => ({ status: 'available', value: null }),
   // Open Core 默认走外部 OAuth provider 登录（开源部署 = 外部用户，无 ACE）；internal overlay 覆盖为 'ace-gateway'（员工）。
   getLoginStrategy: (): CapabilityResult<LoginStrategy> => ({ status: 'available', value: 'oauth-provider' }),
+  // Open Core（=阿里云外部生产形态）默认激活邀请码门禁——gate 为产品对外准入控制（登录后未绑码则弹不可关闭输入弹窗）。
+  // internal overlay 覆盖为 'disabled'（员工形态，ACE 后端无邀请码端点）。门禁生效性由 getLoginStrategy + 本 capability 双门控。
+  getInviteCodeGatePolicy: (): CapabilityResult<InviteCodeGatePolicy> => ({ status: 'available', value: 'enabled' }),
   // Open Core（开源部署）task 接口走 openapi 公开面 /openapi/v1/collaboration/tasks/*（后端 openapi_v1/task router + gateway spanner 鉴权）。
   // internal overlay 覆盖为内面 /api/v1/collaboration/tasks（不经 spanner，内部网关直连 task 引擎）。
   getTaskApiBase: (): CapabilityResult<string> => ({ status: 'available', value: '/openapi/v1/collaboration/tasks' }),

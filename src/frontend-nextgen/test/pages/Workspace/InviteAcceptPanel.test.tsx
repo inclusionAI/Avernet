@@ -29,9 +29,9 @@ describe('InviteAcceptPanel', () => {
       data: { targetType: 'group', targetId: 'g1', alreadyJoined: false },
     });
     render(
-      <MemoryRouter initialEntries={['/workspace/invite/tk-1']}>
+      <MemoryRouter initialEntries={['/workspace/invite/groups/tk-1']}>
         <Routes>
-          <Route path="/workspace/invite/:token" element={<InviteAcceptPanel />} />
+          <Route path="/workspace/invite/:type/:token" element={<InviteAcceptPanel />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -40,12 +40,12 @@ describe('InviteAcceptPanel', () => {
     await waitFor(() => expect(svc.acceptInvitation).toHaveBeenCalledWith('tk-1'));
   });
 
-  it('uses type=session to show session join copy', async () => {
+  it('uses sessions path segment to show session join copy', async () => {
     svc.getAcceptPageState.mockResolvedValue({ ok: true, data: { isValid: true } });
     render(
-      <MemoryRouter initialEntries={['/workspace/invite/tk-9?type=session']}>
+      <MemoryRouter initialEntries={['/workspace/invite/sessions/tk-9']}>
         <Routes>
-          <Route path="/workspace/invite/:token" element={<InviteAcceptPanel />} />
+          <Route path="/workspace/invite/:type/:token" element={<InviteAcceptPanel />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -60,9 +60,9 @@ describe('InviteAcceptPanel', () => {
       error: { code: 'INVITATION_INVALID', friendlyMessage: '该邀请已失效，请让群主重新生成。' },
     });
     render(
-      <MemoryRouter initialEntries={['/workspace/invite/bad']}>
+      <MemoryRouter initialEntries={['/workspace/invite/groups/bad']}>
         <Routes>
-          <Route path="/workspace/invite/:token" element={<InviteAcceptPanel />} />
+          <Route path="/workspace/invite/:type/:token" element={<InviteAcceptPanel />} />
         </Routes>
       </MemoryRouter>,
     );

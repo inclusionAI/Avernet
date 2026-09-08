@@ -176,7 +176,35 @@ export type BotAction =
   | 'authorize'
   | 'health-check';
 
-export type BotInventoryAction = 'view' | 'chat' | 'edit' | 'delete' | 'restart' | 'engine_restart' | 'upgrade';
+export type BotInventoryAction =
+  | 'view'
+  | 'chat'
+  | 'edit'
+  | 'delete'
+  | 'restart'
+  | 'engine_restart'
+  | 'upgrade'
+  | 'restart_publish';
+
+/** 卡片管理菜单可分发的动词（菜单路由键），是 BotInventoryAction 中管理类动词的子集。 */
+export type BotManagementVerb = 'delete' | 'restart' | 'engine_restart' | 'upgrade' | 'restart_publish';
+
+/** 重启发布的发布阶段：仅 prestable/online 存在已发布 runtime（Avernet #1911 词表口径）。 */
+export type BotPublishRestartStage = 'prestable' | 'online';
+
+/** 重启发布阶段 → 用户可读环境名。 */
+export const restartPublishStageLabel: Record<BotPublishRestartStage, string> = {
+  prestable: '预发',
+  online: '线上',
+};
+
+/**
+ * 由卡片生命周期推导重启发布阶段；draft/deploying/offline/failed/unknown 无发布 runtime，返回 undefined。
+ * 该推导是 stage 的单一事实源：Service 请求与确认弹窗文案均消费此处，避免多处映射漂移。
+ */
+export function restartPublishStageOf(lifecycle: BotLifecycle): BotPublishRestartStage | undefined {
+  return lifecycle === 'prestable' ? 'prestable' : lifecycle === 'running' ? 'online' : undefined;
+}
 
 export interface BotActionAvailability {
   action: BotAction;

@@ -1,4 +1,5 @@
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 export interface BotSessionPageMeta {
   total: number;
@@ -22,4 +23,7 @@ export interface UseBotSessionMapResult {
   loadMoreSessions: (bot: ChatBotView, userId: string, mode: 'all' | 'favorite') => Promise<void>;
   /** 按 section 展开 bot，记录归属 section 并懒加载会话。 */
   toggleBotExpanded: (botId: string, sectionKey?: string) => void;
+  /** 原始 set 接口与已加载标记：供上层 useDirectSessionFallback 使用（本 hook 不再内联调用）。 */
+  setRawByBotId: Dispatch<SetStateAction<Record<string, BotChatSessionView[]>>>;
+  loadedRef: MutableRefObject<Set<string>>;
 }

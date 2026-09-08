@@ -8,6 +8,7 @@ import type { UseGroupSessionsResult } from './useGroupSessions.types';
 import { useSessionMutations } from './useSessionLeave';
 import { useSessionMap } from './useSessionMap';
 import { useSessionMemberSync } from './useSessionMemberSync';
+import { useStaleSessionFallback } from './useStaleSessionFallback';
 
 export type { UseGroupSessionsResult } from './useGroupSessions.types';
 function notifyError(err: DomainError): void {
@@ -48,6 +49,7 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     loadMoreSessions,
     errorByGroupId,
     loadMoreErrorByGroupId,
+    identityEpochRef,
   } = useSessionMap(groupId, expandedGroupIds, activeIdentityId);
 
   // 会话成员详情补齐与 mode 更新(从本 Hook 拆出以控体积,详见 useSessionMemberSync)。
@@ -112,7 +114,11 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     selectedSessionId,
     applyMapUpdate,
     selectedSession?.participants.length ?? 0,
+    rawByGroupId,
   );
+
+  // 陈旧选中兜底（拆出以控体积，详见 useStaleSessionFallback）。
+  useStaleSessionFallback(groupId, isLoading, rawByGroupId, applyMapUpdate, selectSession, identityEpochRef);
 
   const createSessionIn = useCallback(
     async (gid: string, title?: string, contextQuery?: string): Promise<SessionView | null> => {

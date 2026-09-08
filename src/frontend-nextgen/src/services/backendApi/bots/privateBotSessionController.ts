@@ -25,6 +25,7 @@ export interface BotMessageDto {
   role: BotMessageRole;
   content: string;
   gmt_create: string;
+  metadata?: Record<string, unknown>;
 }
 export interface BotMessagePageDto {
   items: BotMessageDto[];
@@ -54,6 +55,7 @@ export interface BotConnectionDto {
 export interface BotRequestParams {
   user_id: string;
   owner_id?: string;
+  f_user_id?: string;
 }
 
 export function listBotSessions(botId: string, params: BotRequestParams & { page?: number; page_size?: number }) {

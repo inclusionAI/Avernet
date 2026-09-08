@@ -33,7 +33,7 @@ const ROLE_NATIVE_TO_DOMAIN: Record<string, ParticipantRole> = {
   driver: 'driver',
   manager: 'manager',
   consultant: 'member',
-  worker: 'member',
+  worker: 'worker',
   observer: 'member',
 };
 

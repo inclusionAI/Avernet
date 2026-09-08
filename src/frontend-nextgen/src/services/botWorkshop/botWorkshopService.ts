@@ -1,4 +1,5 @@
 import { getCapabilities } from '@/capabilities';
+import { restartPublishStageOf } from '@/domain/botWorkshop';
 import {
   createBot,
   deleteBot,
@@ -17,6 +18,7 @@ import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BackendUnknownRecord } from '@/services/backendApi/types';
 import { runAfterCreateActions } from './agentCodingAfterCreateService';
 import { agentCodingTemplateService, supportsServiceBot, type AgentCodingTemplate } from './agentCodingTemplateService';
+import { botEditorService } from './botEditorService';
 import { mapBotDto, mapBotList } from './botMapper';
 import type {
   AvernetBotCreateRequest,
@@ -280,6 +282,16 @@ export const botWorkshopService = {
   },
   async restartEngine(id: string) {
     await restartBotEngine(id);
+  },
+  /**
+   * 重启发布的服务 runtime（`POST /bots/{id}/lifecycle/restart`，复用 botEditorService 既有封装）。
+   * 动作名即路由键：`restart_publish` 只在服务预发/上线卡由后端授权，stage 推导收敛在
+   * `restartPublishStageOf`（domain 单一事实源，确认弹窗文案同源消费）。
+   */
+  async restartPublish(bot: BotDomain) {
+    const stage = restartPublishStageOf(bot.lifecycle);
+    if (!stage) throw new Error('当前发布状态不支持重启发布');
+    await botEditorService.restartLifecycle(bot.id, stage);
   },
   async enableService(id: string) {
     await upgradeBotToService(id);

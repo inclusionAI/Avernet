@@ -6,18 +6,18 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useBotSessionMap } from './useBotSessionMap';
 import type { UseBotSessionsResult } from './useBotSessions.types';
-function notifyError(err: DomainError): void {
+import { useDirectSessionFallback } from './useDirectSessionFallback';
+const notifyError = (err: DomainError): void => {
   toast.error(err.friendlyMessage);
-}
-function errOf(res: { ok: false; error: DomainError }): DomainError {
-  return res.error;
-}
+};
+const errOf = (res: { ok: false; error: DomainError }): DomainError => res.error;
 export type { UseBotSessionsResult } from './useBotSessions.types';
 /** useBotSessions 编排 bot 单聊会话列表:展开懒加载、选中、新建/删除(镜像 useGroupSessions)。 */
 export function useBotSessions(
   chatBots: ChatBotView[],
   expandedBotIds: string[],
   activeIdentityId: string | null,
+  isBotListsLoading = false,
 ): UseBotSessionsResult {
   const selectedBotSessionId = useWorkspaceStore((s) => s.selectedBotSessionId);
   const selectBotSession = useWorkspaceStore((s) => s.selectBotSession);
@@ -33,7 +33,20 @@ export function useBotSessions(
     loadFavoriteSessions: loadFavoriteSessionsFromMap,
     loadMoreSessions: loadMoreSessionsFromMap,
     toggleBotExpanded: toggleBotExpandedFromMap,
+    setRawByBotId,
+    loadedRef,
   } = useBotSessionMap(chatBots, expandedBotIds, activeIdentityId);
+
+  useDirectSessionFallback(
+    activeIdentityId,
+    chatBots,
+    expandedBotIds,
+    rawByBotId,
+    setRawByBotId,
+    loadedRef,
+    isBotListsLoading,
+  );
+
   const selectedBotId = expandedBotIds[0] ?? null;
   const selectedSession = useMemo(() => {
     if (!selectedBotId || !selectedBotSessionId) return null;

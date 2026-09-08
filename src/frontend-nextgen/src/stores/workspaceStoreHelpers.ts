@@ -19,6 +19,7 @@ export function rememberLastSession(
     membership: GroupMembership;
     selectedBotSessionId: string | null;
     expandedBotId: string | null;
+    expandedBotSection: string | null;
   },
 ): typeof prev {
   const last = prev[identityId] ?? {};
@@ -31,6 +32,7 @@ export function rememberLastSession(
     botId: opts.expandedBotId ?? last.botId ?? null,
     botSessionId: opts.selectedBotSessionId ?? last.botSessionId ?? null,
     expandedBotId: opts.expandedBotId ?? last.expandedBotId ?? null,
+    botSectionKey: opts.expandedBotSection ?? last.botSectionKey ?? null,
   };
   return { ...prev, [identityId]: entry };
 }
@@ -50,7 +52,7 @@ export function restoreIdentitySelection(
   const membership = memoForNext?.membership ?? 'direct';
   const selectedBotSessionId = memoForNext?.botSessionId ?? null;
   const expandedBotIds = memoForNext?.botId ? { [memoForNext.botId]: true as const } : {};
-  const expandedBotSectionKey = memoForNext?.botId ? { [memoForNext.botId]: 'mine' } : {};
+  const expandedBotSectionKey = memoForNext?.botId ? { [memoForNext.botId]: memoForNext.botSectionKey ?? 'mine' } : {};
   return {
     memoForNext,
     restoredView,

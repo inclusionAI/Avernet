@@ -1,6 +1,6 @@
 import { Badge, Button, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import type { IdentityView, ParticipantRole, ParticipantView } from '@/domain/collaboration';
+import type { GroupView, IdentityView, ParticipantView } from '@/domain/collaboration';
 import { Plus, UserMinus } from 'lucide-react';
 import { useState } from 'react';
 import { AddMemberDialog } from './AddMemberDialog';
@@ -15,23 +15,34 @@ export interface MemberListProps {
   disabledReason?: string;
   emptyText?: string;
   addLabel?: string;
+  groupKind: GroupView['kind'];
+  showMode?: boolean;
   onAddMany: (actorIds: string[]) => Promise<number>;
   onRemove: (actorId: string) => Promise<boolean>;
 }
 
-const ROLE_LABEL: Record<ParticipantRole, string> = {
-  owner: '群主',
-  driver: '驱动',
-  manager: '主节点',
-  member: '成员',
-};
+const MEMBER_TAG_CLASS = 'text-[10px]';
 
-const ROLE_BADGE_TONE: Record<ParticipantRole, 'primary' | 'neutral' | 'warning'> = {
-  owner: 'primary',
-  driver: 'warning',
-  manager: 'warning',
-  member: 'neutral',
-};
+function getRoleLabel(participant: ParticipantView, groupKind: GroupView['kind']): string | null {
+  if (groupKind === 'task_master_slave') {
+    if (participant.kind !== 'bot') return null;
+    if (participant.role === 'manager') return '主节点';
+    if (participant.role === 'worker') return '从节点';
+    return null;
+  }
+  return participant.role === 'driver' ? '群主' : null;
+}
+
+function getModeLabel(participant: ParticipantView): string | null {
+  if (participant.kind === 'bot') {
+    if (participant.mode === 'auto') return '自由';
+    if (participant.mode === 'muted') return '禁言';
+    return null;
+  }
+  if (participant.mode === 'present') return '参与';
+  if (participant.mode === 'absent') return '旁观';
+  return null;
+}
 
 function Avatar({ participant }: { participant: ParticipantView }) {
   const symbol = participant.name?.trim().charAt(0) || '?';
@@ -57,6 +68,8 @@ export function MemberList({
   disabledReason,
   emptyText = '暂无成员',
   addLabel = '添加成员',
+  groupKind,
+  showMode = false,
   onAddMany,
   onRemove,
 }: MemberListProps) {
@@ -102,26 +115,29 @@ export function MemberList({
           {participants.map((participant) => (
             <div
               key={participant.actorId}
+              data-testid={`member-${participant.actorId}`}
               className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
             >
               <Avatar participant={participant} />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex items-center">
                   <span className="max-w-full truncate text-sm font-semibold text-foreground">{participant.name}</span>
-                  <Badge tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <Badge className={MEMBER_TAG_CLASS} tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
                     {participant.kind === 'bot' ? 'Bot' : '用户'}
                   </Badge>
-                  <Badge tone={ROLE_BADGE_TONE[participant.role]}>{ROLE_LABEL[participant.role]}</Badge>
+                  {getRoleLabel(participant, groupKind) ? (
+                    <Badge className={MEMBER_TAG_CLASS} tone="warning">
+                      {getRoleLabel(participant, groupKind)}
+                    </Badge>
+                  ) : null}
+                  {showMode && getModeLabel(participant) ? (
+                    <Badge className={MEMBER_TAG_CLASS} tone="neutral">
+                      {getModeLabel(participant)}
+                    </Badge>
+                  ) : null}
                 </div>
-                <p className="m-0 mt-0.5 text-xs text-muted-foreground">
-                  {participant.mode === 'present'
-                    ? '在场'
-                    : participant.mode === 'muted'
-                    ? '静音'
-                    : participant.mode === 'absent'
-                    ? '离开'
-                    : '自动'}
-                </p>
               </div>
               {canManage && participant.role !== 'owner' && (
                 <ConfirmDialog

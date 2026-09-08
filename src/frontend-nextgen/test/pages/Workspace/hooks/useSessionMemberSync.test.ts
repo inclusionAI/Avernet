@@ -15,8 +15,8 @@ type Map = Record<string, SessionView[]>;
 /** 包装子 hook:用真实 React state 承载 map,applyMapUpdate 走 setState 以触发重渲染。 */
 function useHarness(initial: Map, selectedId: string | null) {
   const [map, setMap] = useState<Map>(initial);
-  const { updateMemberMode } = useSessionMemberSync(selectedId, setMap, 0);
-  return { map, updateMemberMode };
+  const { updateMemberMode } = useSessionMemberSync(selectedId, setMap, 0, map);
+  return { map, setMap, updateMemberMode };
 }
 
 beforeEach(() => {
@@ -136,6 +136,45 @@ it('updateMemberMode 成功后用 PATCH 响应刷新对应会话 participants', 
     expect(result.current.map.g1[0].participants.find((p) => p.actorId === 'b1')?.mode).toBe('muted');
   });
   expect(result.current.map.g1[0].groupId).toBe('g1');
+  expect(result.current.map.g1[0].favorite).toBe(true);
+});
+
+it('detail 返回早于 session 列表或列表后到时，participants 不被丢弃', async () => {
+  ss.getSessionDetail.mockResolvedValue({
+    ok: true,
+    data: {
+      sessionId: 's1',
+      groupId: 'g1',
+      title: '一号',
+      kind: 'chat',
+      status: 'running',
+      participants: [
+        { actorId: 'b1', kind: 'bot' as const, name: 'Alpha', role: 'driver' as const, mode: 'auto' as const },
+        { actorId: 'human_1', kind: 'human' as const, name: '章梧', role: 'member' as const, mode: 'present' as const },
+      ],
+      lastMessageAt: 1,
+      createdAt: 1,
+      favorite: false,
+    },
+  });
+  const emptySession: SessionView = {
+    sessionId: 's1',
+    groupId: 'g1',
+    title: '一号',
+    kind: 'chat',
+    status: 'running',
+    participants: [],
+    lastMessageAt: 2,
+    createdAt: 2,
+    favorite: true,
+  };
+  const { result } = renderHook(() => useHarness({}, 's1'));
+  await waitFor(() => expect(result.current.map.g1?.[0]?.participants.length).toBe(2));
+
+  await act(async () => {
+    result.current.setMap({ g1: [emptySession] });
+  });
+  await waitFor(() => expect(result.current.map.g1[0].participants.length).toBe(2));
   expect(result.current.map.g1[0].favorite).toBe(true);
 });
 

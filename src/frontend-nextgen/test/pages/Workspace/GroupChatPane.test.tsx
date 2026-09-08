@@ -48,14 +48,28 @@ jest.mock('@tc-chat/ui/es/Sender', () => {
     Sender: (props: {
       placeholder?: string;
       onSubmit?: (message: string, context: { mentions: Array<{ id: string; name: string }> }) => void;
+      mention?: { categories?: Array<{ items?: Array<{ id: string }> }> };
+      loading?: boolean;
     }) => (
       <div>
-        <input data-testid="sender" placeholder={props.placeholder} readOnly />
+        <input
+          data-testid="sender"
+          data-mention-ids={props.mention?.categories?.[0]?.items?.map((item) => item.id).join(',')}
+          data-loading={props.loading ? 'true' : 'false'}
+          placeholder={props.placeholder}
+          readOnly
+        />
         <MockButton
           data-testid="sender-submit"
-          onClick={() => props.onSubmit?.('@ALL 你们呢', { mentions: [{ id: 'ALL', name: 'ALL' }] })}
+          onClick={() => props.onSubmit?.('@ALL-Bots 你们呢', { mentions: [{ id: 'ALL-Bots', name: 'ALL-Bots' }] })}
         >
           submit
+        </MockButton>
+        <MockButton
+          data-testid="sender-submit-human"
+          onClick={() => props.onSubmit?.('@李四 出个主意', { mentions: [{ id: 'human_2', name: '李四' }] })}
+        >
+          submit human
         </MockButton>
       </div>
     ),
@@ -216,7 +230,21 @@ describe('GroupChatPane', () => {
     expect(screen.getByTestId('sender')).toBeInTheDocument();
   });
 
-  it('human 提交 @ALL 时展开为全部 bot ids 并传给 send', () => {
+  it('human 视角的 @ 面板包含其他会话用户并排除当前用户', () => {
+    const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
+    const humanPresentSession: SessionView = {
+      ...session,
+      participants: [
+        { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+        { actorId: 'human_2', kind: 'human', name: '李四', role: 'member', mode: 'present' },
+        { actorId: 'bot-a', kind: 'bot', name: '甲', role: 'member', mode: 'auto' },
+      ],
+    };
+    renderPane({ session: humanPresentSession, activeIdentity: humanIdentity });
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-mention-ids', 'ALL-Bots,human_2,bot-a');
+  });
+
+  it('human 提交 @ALL-Bots 时展开为全部 bot ids 并传给 send', () => {
     const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
     const humanPresentSession: SessionView = {
       ...session,
@@ -233,7 +261,49 @@ describe('GroupChatPane', () => {
     const send = jest.fn();
     renderPane({ group: groupWithBots, session: humanPresentSession, activeIdentity: humanIdentity, send });
     fireEvent.click(screen.getByTestId('sender-submit'));
-    expect(send).toHaveBeenCalledWith('@ALL 你们呢', ['bot-a', 'bot-b'], undefined);
+    expect(send).toHaveBeenCalledWith('@ALL-Bots 你们呢', ['bot-a', 'bot-b'], undefined);
+  });
+
+  it('human-only 请求等待期间输入框不进入 loading', () => {
+    const humanIdentity = { id: 'human_1', kind: 'user' as const, displayName: '章梧', online: true };
+    const humanPresentSession: SessionView = {
+      ...session,
+      participants: [
+        { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+        { actorId: 'human_2', kind: 'human', name: '李四', role: 'member', mode: 'present' },
+      ],
+    };
+    const send = jest.fn();
+    const panelRef = React.createRef<PanelHandle>();
+    const view = renderPane({ session: humanPresentSession, activeIdentity: humanIdentity, send, panelRef });
+    fireEvent.click(screen.getByTestId('sender-submit-human'));
+    expect(send).toHaveBeenCalledWith('@李四 出个主意', ['human_2'], undefined);
+
+    view.rerender(
+      <MemoryRouter>
+        <GroupChatPane
+          group={group}
+          session={humanPresentSession}
+          chat={makeChat({ isRequesting: true })}
+          supportState={supportState}
+          connectionStatus="connected"
+          send={send}
+          submitPanelMessage={() => {}}
+          stop={() => {}}
+          reconnect={() => {}}
+          reloadHistory={() => {}}
+          canManageGroup={{ allowed: false }}
+          activePanel="none"
+          onTogglePanel={() => {}}
+          onRequestDissolve={() => {}}
+          onRequestShareGroup={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/g' } })}
+          onRequestShareSession={() => Promise.resolve({ ok: true, data: { invitationUrl: 'https://example.test/s' } })}
+          panelRef={panelRef}
+          activeIdentity={humanIdentity}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId('sender')).toHaveAttribute('data-loading', 'false');
   });
 });
 
@@ -641,12 +711,29 @@ describe('resolveSender', () => {
     expect(sender?.name).toBe('Bot');
   });
 
-  it('falls back to group.name only when no participant matches senderId', () => {
+  it('assistant message uses ws senderName before botName and participant lookup', () => {
+    const sender = resolveSender(
+      {
+        id: 'm1',
+        role: 'assistant',
+        content: '...',
+        status: 'streaming',
+        extra: { botUuid: 'bot-c', botName: 'bot-c', senderName: '真实Bot' },
+      } as never,
+      groupWithParticipants,
+      [],
+    );
+    expect(sender?.name).toBe('真实Bot');
+    expect(sender?.name).not.toBe('主站协作群');
+  });
+
+  it('falls back to sender id instead of group.name when no participant matches', () => {
     const sender = resolveSender(
       { id: 'm1', role: 'assistant', content: 'hi', status: 'history', extra: { senderId: 'unknown-bot' } } as never,
       groupWithParticipants,
     );
-    expect(sender?.name).toBe('主站协作群');
+    expect(sender?.name).toBe('unknown-bot');
+    expect(sender?.name).not.toBe('主站协作群');
   });
 
   it('ws 消息 botName 退化为 botUuid 时,通过会话成员匹配真实 bot 名称', () => {

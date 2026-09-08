@@ -18,7 +18,7 @@ export { buildGroupWsUrl } from './groupChatProviderHelpers';
 export interface GroupChatRequest {
   content: string;
   sessionId: string;
-  /** 被 human @ 的 bot UUID 列表；@ALL 在 UI 层展开为全部 bot。 */
+  /** 被 human @ 的会话成员 ID 列表（Bot UUID / human actor ID）；@ALL 在 UI 层展开为全部 Bot。 */
   mentions?: string[];
   /** 指定路由目标 bot UUID（桥路径 @指定 bot 时由 buildRequestParams 透传；缺省由身份兜底）。 */
   botUuid?: string;

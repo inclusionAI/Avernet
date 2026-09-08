@@ -269,3 +269,59 @@ it('选中首页外会话时直接拉取详情并补入列表（外链直达旧�
   await waitFor(() => expect(result.current.sessionsByBotId['b:1'].find((s) => s.sessionId === 's-old')).toBeDefined());
   await waitFor(() => expect(result.current.selectedSession?.sessionId).toBe('s-old'));
 });
+
+it('记忆的 bot 会话已删除：详情反查失败后回落首条', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('gone');
+  renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 'gone'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('s2'));
+});
+
+it('展开的 bot 已不在可用列表：清空悬空选中', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('sX');
+  renderHook(() => useBotSessions([bot], ['ghost-bot'], 'human-1'));
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBeNull());
+});
+
+it('bot 列表仍在加载（好友 bot 未到位）：不清空展开 bot 缺失时的选中', async () => {
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('sF1');
+  const { rerender } = renderHook(
+    ({ loading }: { loading: boolean }) => useBotSessions([bot], ['fr:1'], 'human-1', loading),
+    { initialProps: { loading: true } },
+  );
+  await act(async () => Promise.resolve());
+  // 好友 bot 列表在途：选中必须保住（旧实现 chatBots.length>0 即清空）。
+  expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('sF1');
+
+  // 列表加载完成且 fr:1 确实不存在 → 兜底恢复，清空悬空选中。
+  rerender({ loading: false });
+  await waitFor(() => expect(useWorkspaceStore.getState().selectedBotSessionId).toBeNull());
+});
+
+it('兜底反查在途时用户已切换选中：失败回调不得劫持新选中', async () => {
+  const detailResolvers: Array<(value: { ok: false }) => void> = [];
+  svc.getSessionDetail.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        detailResolvers.push(resolve);
+      }),
+  );
+  useWorkspaceStore.getState().setView('chat');
+  useWorkspaceStore.getState().selectBotSession('gone');
+  renderHook(() => useBotSessions([bot], ['b:1'], 'human-1'));
+  await waitFor(() => expect(svc.getSessionDetail).toHaveBeenCalledWith(bot, 'human-1', 'gone'));
+
+  // 反查在途期间用户点选了 s1。
+  act(() => {
+    useWorkspaceStore.getState().selectBotSession('s1');
+  });
+  await act(async () => {
+    detailResolvers.splice(0).forEach((resolve) => resolve({ ok: false }));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(useWorkspaceStore.getState().selectedBotSessionId).toBe('s1');
+});

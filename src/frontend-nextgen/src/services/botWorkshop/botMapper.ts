@@ -145,8 +145,11 @@ export function mapBotDto(dto: BackendUnknownRecord, addressedBotId?: string, cu
   const runtime = runtimeFrom(dto, warnings);
   const templateType = templateTypeFrom(dto);
   const deployment = botType === 'desktop' ? ('local' as const) : ('cloud' as const);
+  // kind/bot_type 契约未约束大小写；与 lifecycle() 的防御口径保持一致，避免 'SERVICE' 被误判为 non-service。
   const serviceMode =
-    inventoryKind === 'service' || botType === 'service' ? ('service' as const) : ('non-service' as const);
+    inventoryKind?.toLowerCase() === 'service' || botType?.toLowerCase() === 'service'
+      ? ('service' as const)
+      : ('non-service' as const);
   const codingTemplate = runtime.isAgentCodingBot
     ? ({
         templateType,

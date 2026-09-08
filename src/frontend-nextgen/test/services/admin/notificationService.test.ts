@@ -1,28 +1,37 @@
 /** @jest-environment node */
 import { notificationService } from '@/services/admin/notificationService';
+import { getCapabilities } from '@/capabilities';
 import * as notificationController from '@/services/backendApi/admin/notificationController';
 import { identityService } from '@/services/workspace/identityService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // auto-mock controller，避免真实网络（与 test/services/workspace/* 同款写法）。
 jest.mock('@/services/backendApi/admin/notificationController');
-// ensureUserId 在 activeIdentityId 未就绪时补拉 identityService.loadIdentities；
-// stub @tc-chat/adapters ESM transitive（identityService→testUser→supportProvider）。
+// ensureUserId 数据源 = getCapabilities().getHumanIdentity()；auto-mock 出可控能力访问器（避免在 hoisted factory 内引用 jest）。
+// capability 未就绪时 ensureUserId 仍走 identityService.loadIdentities 兜底（默认失败降级为 unsupported）。
+jest.mock('@/capabilities');
 jest.mock('@/services/workspace/identityService');
 jest.mock('@tc-chat/adapters', () => ({}));
 
 const nc = notificationController as unknown as Record<string, jest.Mock<any>>;
+const getCapabilitiesMock = getCapabilities as unknown as jest.Mock;
+
+/** 固定能力：恒返回给定操作者身份（null = 未就绪）。默认 userId-only（不落 user_name）。 */
+function setUserIdentity(value: { userId: string; displayName?: string | null } | null): void {
+  const capVal = value ? { userId: value.userId, displayName: value.displayName ?? null } : null;
+  getCapabilitiesMock.mockReturnValue({
+    getHumanIdentity: () => ({ status: 'available', value: capVal }),
+  });
+}
 
 beforeEach(() => {
   jest.resetAllMocks();
-  // Service 经 ensureUserId → resolveUserId(activeIdentityId) 注入 user_id query。
-  useWorkspaceStore.setState({ activeIdentityId: 'human_327325' });
-  // 命中缓存用例不调 loadIdentities；未就绪用例走 ensureUserId 补拉，默认失败降级为 unsupported（不发业务请求）。
+  // 命中缓存用例取能力 user_id='327325'；未就绪用例（setUserIdentity(null)）走 ensureUserId 补拉，默认失败降级为 unsupported（不发业务请求）。
   (identityService.loadIdentities as unknown as jest.Mock<any>).mockResolvedValue({
     ok: false,
     error: { code: 'IDENTITY_LOAD_FAILED', friendlyMessage: '', canRetry: true },
   });
+  setUserIdentity({ userId: '327325', displayName: null });
 });
 
 describe('notificationService.fetchUnreadCount', () => {
@@ -53,8 +62,8 @@ describe('notificationService.fetchUnreadCount', () => {
     expect(r.data).toBeUndefined();
   });
 
-  it('activeIdentityId 未就绪时返回 unsupported 且不发请求', async () => {
-    useWorkspaceStore.setState({ activeIdentityId: null });
+  it('能力未就绪时返回 unsupported 且不发请求', async () => {
+    setUserIdentity(null);
     const r = await notificationService.fetchUnreadCount();
     expect(r.unsupported).toBe(true);
     expect(nc.fetchUnreadCount).not.toHaveBeenCalled();

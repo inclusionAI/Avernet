@@ -197,6 +197,7 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         {
           user_id: context.userId,
           ...(ownerId ? { owner_id: ownerId } : {}),
+          f_user_id: context.userId,
         },
         {},
       );

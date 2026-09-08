@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 
 export interface ManagePanelHeaderProps {
   title: string;
-  description: string;
+  description?: string;
   subtitle?: string;
   statusLabel: '可管理' | '可查看';
   onClose: () => void;
@@ -21,7 +21,7 @@ export function ManagePanelHeader({ title, description, subtitle, statusLabel, o
             <h3 className="m-0 text-base font-semibold text-foreground">{title}</h3>
             <Badge tone={statusLabel === '可管理' ? 'success' : 'neutral'}>{statusLabel}</Badge>
           </div>
-          <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+          {description ? <p className="m-0 mt-1 text-xs leading-5 text-muted-foreground">{description}</p> : null}
           {subtitle ? <p className="m-0 mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p> : null}
         </div>
         <IconButton label="关闭管理面板" icon={<X className="h-4 w-4" />} size="sm" variant="ghost" onClick={onClose} />

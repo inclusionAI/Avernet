@@ -81,6 +81,7 @@ export function WorkspaceManagePanels(props: WorkspaceManagePanelsProps) {
             key={session.sessionId}
             session={session}
             groupName={group.name}
+            groupKind={group.kind}
             canManage={canManage}
             activeIdentity={activeIdentity}
             candidates={identities.filter((identity) => identity.kind === 'bot')}

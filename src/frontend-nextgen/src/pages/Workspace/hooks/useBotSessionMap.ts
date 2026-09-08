@@ -3,7 +3,6 @@ import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSe
 import { BOT_SESSION_PAGE_SIZE, botSessionService } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useDirectSessionFallback } from './useDirectSessionFallback';
 
 import type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
 import { errorBotPageMeta, hasMoreForPage, successBotPageMeta } from './useBotSessionMap.utils';
@@ -25,17 +24,21 @@ export function useBotSessionMap(
   const favoriteLoadedRef = useRef<Set<string>>(new Set());
   const generationRef = useRef(0);
 
-  useEffect(() => {
+  // 身份切换 → 渲染期同步重置（镜像 useSessionMap）：useEffect 在 commit 后才清空，
+  // 会让首帧先绘制旧身份的会话数据再变骨架（闪烁）；generation 使旧身份在途请求回填失效。
+  const [lastIdentityId, setLastIdentityId] = useState(activeIdentityId);
+  if (lastIdentityId !== activeIdentityId) {
+    setLastIdentityId(activeIdentityId);
     generationRef.current += 1;
+    inFlightRef.current.clear();
+    loadedRef.current.clear();
+    favoriteLoadedRef.current.clear();
     setRawByBotId({});
     setFavoriteByBotId({});
     setPageMetaByBotId({});
     setFavoritePageMetaByBotId({});
-    inFlightRef.current.clear();
     setIsLoading(false);
-    loadedRef.current.clear();
-    favoriteLoadedRef.current.clear();
-  }, [activeIdentityId]);
+  }
 
   const syncLoadingState = useCallback(() => setIsLoading(inFlightRef.current.size > 0), []);
 
@@ -88,8 +91,6 @@ export function useBotSessionMap(
       void loadFirstPage(bot, activeIdentityId);
     }
   }, [activeIdentityId, chatBots, expandedBotIds, loadFirstPage]);
-
-  useDirectSessionFallback(activeIdentityId, chatBots, expandedBotIds, rawByBotId, setRawByBotId, loadedRef);
 
   const updateBotSessions = useCallback(
     (botId: string, fn: (list: BotChatSessionView[]) => BotChatSessionView[]) =>
@@ -242,5 +243,7 @@ export function useBotSessionMap(
     loadFavoriteSessions,
     loadMoreSessions,
     toggleBotExpanded,
+    setRawByBotId,
+    loadedRef,
   };
 }

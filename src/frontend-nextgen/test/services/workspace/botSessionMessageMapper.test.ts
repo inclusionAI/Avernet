@@ -19,13 +19,70 @@ describe('mapBotSessionMessages', () => {
     ]);
     expect(out[0].role).toBe('system');
   });
-  it('未知 role(tool_use/tool_result)跳过', () => {
+  it('tool_use 与同 call_id 的 tool_result 合并为历史工具卡片', () => {
     const out = mapBotSessionMessages([
-      { message_id: 't1', session_id: 's', role: 'tool_use', content: '', gmt_create: '' },
-      { message_id: 'u1', session_id: 's', role: 'user', content: 'hi', gmt_create: '' },
+      { message_id: 'u1', session_id: 's', role: 'user', content: 'hi', gmt_create: '2026-08-14T09:00:00+00:00' },
+      {
+        message_id: 't1',
+        session_id: 's',
+        role: 'tool_use',
+        content: '',
+        gmt_create: '2026-08-14T09:01:00+00:00',
+        metadata: { tool_call_id: 'call-1', tool_name: 'search', arguments: { query: 'teamclaw' } },
+      },
+      {
+        message_id: 'tr1',
+        session_id: 's',
+        role: 'tool_result',
+        content: '',
+        gmt_create: '2026-08-14T09:02:00+00:00',
+        metadata: { tool_call_id: 'call-1', tool_name: 'search', result: 'found' },
+      },
+      {
+        message_id: 'a1',
+        session_id: 's',
+        role: 'assistant',
+        content: 'done',
+        gmt_create: '2026-08-14T09:03:00+00:00',
+      },
     ]);
+
+    expect(out).toHaveLength(3);
+    expect(out[0]).toMatchObject({ id: 'u1', role: 'user' });
+    expect(out[1]).toMatchObject({ id: 't1', role: 'assistant', content: '', status: 'history' });
+    expect(out[1].blocks?.[0]).toMatchObject({
+      type: 'tool_execution',
+      steps: [
+        {
+          id: 'call-1',
+          tool: 'search',
+          title: 'search',
+          status: 'success',
+          input: '{\n  "query": "teamclaw"\n}',
+          output: 'found',
+        },
+      ],
+    });
+    expect(out[2]).toMatchObject({ id: 'a1', role: 'assistant', content: 'done' });
+  });
+
+  it('tool_result 可独立成卡片并识别错误状态', () => {
+    const out = mapBotSessionMessages([
+      {
+        message_id: 'tr1',
+        session_id: 's',
+        role: 'tool_result',
+        content: 'boom',
+        gmt_create: '',
+        metadata: { tool_call_id: 'call-1', tool_name: 'bash', success: false },
+      },
+    ]);
+
     expect(out).toHaveLength(1);
-    expect(out[0].id).toBe('u1');
+    expect(out[0].blocks?.[0]).toMatchObject({
+      type: 'tool_execution',
+      steps: [{ id: 'call-1', tool: 'bash', status: 'error', output: 'boom' }],
+    });
   });
   it('空 content 的 user/assistant 跳过', () => {
     const out = mapBotSessionMessages([

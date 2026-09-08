@@ -18,7 +18,7 @@ export const routes = [
     routes: [
       { path: '/workspace', component: '@/pages/Workspace' },
       { path: '/work/my-task', component: '@/pages/MyTask' },
-      { path: '/workspace/invite/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
+      { path: '/workspace/invite/:type/:token', component: '@/pages/Workspace/InviteAcceptPanel' },
       { path: '/collaboration-square', redirect: '/collaboration-square/bots' },
       { path: '/collaboration-square/bots', component: '@/pages/CollaborationSquare/Bots' },
       { path: '/collaboration-square/groups', component: '@/pages/CollaborationSquare/Groups' },

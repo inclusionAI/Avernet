@@ -30,6 +30,7 @@ function toChatBotView(bot: {
     chatable: true,
     engine: bot.engine,
     botType: bot.botType,
+    isFriendBot: true,
   };
 }
 

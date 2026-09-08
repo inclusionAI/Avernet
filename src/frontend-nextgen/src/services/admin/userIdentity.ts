@@ -1,9 +1,12 @@
-// admin 共用的当前操作者 user_id 解析 + 懒加载兜底。
-// 痛点：admin 三 Service（adminService/workOrderService/notificationService）原本直接读
-// workspaceStore.activeIdentityId，但它在 workspace 页 initWorkspace 完成前为 null
-// （尤其 admin/全局铃铛先于 init 触发）→ 直接报“未获取到当前用户身份”。
-// ensureUserId：null 时主动调 identityService.loadIdentities 拉一次并写回 store，仍失败返回 null，
-// Service 降级为 MISSING_IDENTITY_ERROR / unsupported。不依赖 React/DOM/toast（Service 层约束）。
+// admin 共用的当前操作者 user_id / user_name 解析 + 懒加载兜底。
+// 数据源：getCapabilities().getHumanIdentity() — canonical 能力，按部署态产出匹配网关签名
+// 主体的 id（内部 staffNo / Open Core 阿里云 BCS id），与 useHumanIdentity / httpClient
+// injectUserId / capability-workshop / account badge 同源。admin 不直接读
+// workspaceStore.activeIdentityId（bots/mine 在内部裁出 BCS id，与内部网关签的 staffNo 不符
+// → 403 UserIdMismatch）；readUserName 早已同源，此处对齐 readUserId。
+// ensureUserId：能力值未就绪时主动调 identityService.loadIdentities 拉一次并写回 store
+// （Open Core me 兜底分支；内部 staffNo 同步命中），仍失败返回 null，Service 降级为
+// MISSING_IDENTITY_ERROR / unsupported。不依赖 React/DOM/toast（Service 层约束）。
 // identityService 已做模块级单飞，此处无需重复去重。
 
 import { getCapabilities } from '@/capabilities';
@@ -11,9 +14,9 @@ import { resolveUserId } from '@/services/workspace/botSessionService';
 import { identityService } from '@/services/workspace/identityService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
-/** 同步读当前已就绪身份，剥前缀得工号；未就绪返回 null（不主动拉取）。 */
+/** 同步读当前已就绪操作者 user_id（经 canonical getHumanIdentity 能力），剥前缀兜底；未就绪返回 null（不主动拉取）。 */
 export function readUserId(): string | null {
-  const raw = useWorkspaceStore.getState().activeIdentityId;
+  const raw = getCapabilities().getHumanIdentity().value?.userId?.trim();
   return raw ? resolveUserId(raw) : null;
 }
 

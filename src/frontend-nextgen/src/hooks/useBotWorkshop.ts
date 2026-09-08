@@ -1,4 +1,5 @@
 import { getCapabilities } from '@/capabilities';
+import type { BotManagementVerb } from '@/domain/botWorkshop';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useBotWorkshopNavigation } from '@/hooks/useBotWorkshopNavigation';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
@@ -16,6 +17,24 @@ import { toast } from 'sonner';
 import { useAgentCodingTemplates } from './useAgentCodingTemplates';
 import { useBotCreateAuthorization } from './useBotCreateAuthorization';
 import { useBotWorkshopAccess } from './useBotWorkshopAccess';
+
+/** 动作名即路由键：新增动词时补一行 runner/toast，漏补会在编译期报错而非静默无操作。 */
+const RUN_ACTION_RUNNER: Record<BotManagementVerb, (bot: BotDomain) => Promise<void>> = {
+  delete: (bot) => botWorkshopService.remove(bot),
+  restart: (bot) => botWorkshopService.restart(bot),
+  engine_restart: (bot) => botWorkshopService.restartEngine(bot.id),
+  upgrade: (bot) => botWorkshopService.enableService(bot.id),
+  restart_publish: (bot) => botWorkshopService.restartPublish(bot),
+};
+
+const RUN_ACTION_SUCCESS_TOAST: Record<BotManagementVerb, string> = {
+  delete: 'Bot 已删除',
+  restart: '重启请求已提交',
+  engine_restart: '重启请求已提交',
+  upgrade: '已开启服务化',
+  restart_publish: '重启发布已提交',
+};
+
 export function useBotWorkshop() {
   const state = useBotWorkshopStore();
   const requestIdentity = useBotWorkshopRequestIdentity();
@@ -141,13 +160,10 @@ export function useBotWorkshop() {
     [currentOpenApiUserId],
   );
   const runAction = useCallback(
-    async (action: 'delete' | 'restart' | 'engine_restart' | 'upgrade', bot: BotDomain) => {
+    async (action: BotManagementVerb, bot: BotDomain) => {
       try {
-        if (action === 'delete') await botWorkshopService.remove(bot);
-        if (action === 'restart') await botWorkshopService.restart(bot);
-        if (action === 'engine_restart') await botWorkshopService.restartEngine(bot.id);
-        if (action === 'upgrade') await botWorkshopService.enableService(bot.id);
-        toast.success(action === 'delete' ? 'Bot 已删除' : action === 'upgrade' ? '已开启服务化' : '重启请求已提交');
+        await RUN_ACTION_RUNNER[action](bot);
+        toast.success(RUN_ACTION_SUCCESS_TOAST[action]);
         await load();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : '操作失败');

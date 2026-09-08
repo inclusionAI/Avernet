@@ -134,6 +134,52 @@ it('participants 列表刷新清空时 human 状态保持不闪烁', () => {
   expect(result.current.humanName).toBe('章梧');
 });
 
+/** 构造「用户身份此前停留在单聊页、bot 身份正在浏览群会话 g1/s1」的 store 状态。 */
+function seedHumanSingleChatMemo() {
+  const store = useWorkspaceStore.getState();
+  // 用户身份停在单聊页（botX 的 dm1）。
+  store.setActiveIdentity(humanIdentity.id);
+  store.setView('chat');
+  store.toggleBotExpanded('botX');
+  store.selectBotSession('dm1');
+  // 切到 bot 身份浏览群会话；setActiveIdentity 会把上面的单聊态写入用户身份记忆。
+  store.setActiveIdentity(botIdentity.id);
+  store.setView('group');
+  store.selectGroup('g1');
+  store.selectSession('s1');
+}
+
+it('去发言：用户身份记忆为单聊时，切换后回到群视图并选中当前会话', () => {
+  seedHumanSingleChatMemo();
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));
+  act(() => result.current.switchToHuman());
+  const s = useWorkspaceStore.getState();
+  expect(s.activeIdentityId).toBe('human_1');
+  // 不应停留在记忆恢复的单聊视图，而应回到当前群会话。
+  expect(s.view).toBe('group');
+  expect(s.selectedGroupId).toBe('g1');
+  expect(s.selectedSessionId).toBe('s1');
+  expect(s.expandedGroupIds.g1).toBe(true);
+});
+
+it('加入会话：用户身份记忆为单聊时，加入后回到群视图并选中当前会话', async () => {
+  seedHumanSingleChatMemo();
+  const session = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' }]);
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));
+  let ok = false;
+  await act(async () => {
+    ok = await result.current.joinSession();
+  });
+  expect(ok).toBe(true);
+  const s = useWorkspaceStore.getState();
+  expect(s.activeIdentityId).toBe('human_1');
+  expect(s.view).toBe('group');
+  expect(s.selectedGroupId).toBe('g1');
+  expect(s.selectedSessionId).toBe('s1');
+  expect(s.expandedGroupIds.g1).toBe(true);
+});
+
 it('切换会话时 human ref 缓存被清空，不串数据', () => {
   const session1 = makeSession([{ actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' }]);
   const session2: SessionView = {

@@ -17,6 +17,7 @@ const ROLE_LABEL: Record<ParticipantRole, string> = {
   owner: '群主',
   driver: '驱动',
   manager: '主节点',
+  worker: '从节点',
   member: '成员',
 };
 
@@ -24,6 +25,7 @@ const ROLE_BADGE_TONE: Record<ParticipantRole, 'primary' | 'neutral' | 'warning'
   owner: 'primary',
   driver: 'warning',
   manager: 'warning',
+  worker: 'warning',
   member: 'neutral',
 };
 
