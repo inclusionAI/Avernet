@@ -10,27 +10,38 @@ lands atomically.
 
 ## Group A — `EntryDelivery` replaces the union (no behaviour change)
 
-- [ ] **A1** — `apply/delivery.py`: `EntryDelivery` Protocol, `BlobDelivery`,
+- [x] **A1** — `apply/delivery.py`: `EntryDelivery` Protocol, `BlobDelivery`,
       `GitDelivery`. `GitDelivery` takes a `file_bytes` callable, not the
       fetcher, so `delivery.py` never imports `entry_fetch.py`.
-- [ ] **A2** — move `_canonical_tree_bytes` / `_decode_tree_bytes` out of
+- [x] **A2** — move `_canonical_tree_bytes` / `_decode_tree_bytes` out of
       `materialisers/resources.py` into `delivery.py` (private). `BlobDelivery.members`
       checks `_TREE_MAGIC` **before** considering `unpack`.
-- [ ] **A3** — move `resources._unpack_members` into `BlobDelivery.members`, and
+- [x] **A3** — move `resources._unpack_members` into `BlobDelivery.members`, and
       `resources._git_members` / `_git_file` into `GitDelivery.members` / `.single`.
       Refusals stay strings, not exceptions — `resolve`'s currency is unchanged.
-- [ ] **A4** — `fetch_declared` returns `EntryDelivery`. `FetchedEntry` and
+- [x] **A4** — `fetch_declared` returns `EntryDelivery`. `FetchedEntry` and
       `GitEntrySource` become internal payloads.
-- [ ] **A5** — remove all eight `isinstance(…, GitEntrySource)` sites:
+- [x] **A5** — remove all eight `isinstance(…, GitEntrySource)` sites:
       `resources.py` ×4, `skills.py` ×2, `identity.py` ×1, `cli_tools/service.py` ×1.
-      `skills` keeps **one** branch, on `is_tree()` — it runs two validators by
-      design. The other three end with no branch.
-- [ ] **A6** — drop `identity`'s own git-without-subpath check (spec D-9);
+      `skills` keeps one branch on `is_tree()` (two validators by design);
+      `cli_tools` keeps one *condition* on it (a tree is not an archive, so the
+      "subpath without unpack" refusal must not fire there). `resources` and
+      `identity` end with neither.
+- [x] **A6** — drop `identity`'s own git-without-subpath check (spec D-9);
       `GitCheckout.read_file` already refuses the case. Update the one test whose
       expected message changes.
-- [ ] **A7** — `apply/test_delivery.py`. **Gate: the existing suite passes with
+- [x] **A7** — `apply/test_delivery.py`. **Gate: the existing suite passes with
       exactly one test edited (A6).** Any other test needing a change is a
       finding (R2), not churn.
+
+> **Group A landed.** Two test doubles were found lying, in the same shape:
+> `identity`'s `_StaticGit.read_file` answered where the real checkout refuses,
+> and `cli_tools`' `FakeGitEntrySource` returns a *real* `GitEntrySource` to
+> guard its dispatch — a guard defeated because the fetcher's return type
+> changed rather than the dispatch, leaving the service broken in production
+> and green in tests. Both doubles now answer in the seam's currency. Worth
+> expecting more of these in B and D: a double that impersonates the thing
+> being refactored is where a refactor hides.
 
 ## Group B — one fetcher per protocol (no behaviour change)
 

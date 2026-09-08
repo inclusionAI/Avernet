@@ -335,9 +335,13 @@ check names *this* implementation, while `is_tree()` names a property of what
 arrived, so a third protocol that delivers a tree slots into the existing branch
 instead of adding a third arm to it.
 
-**Net: 8 `isinstance` sites become 1 `is_tree()` branch**, not zero. Stated
-honestly here because the earlier draft of this spec claimed zero, and reading
-`skills._build_package` is what corrected it.
+**Net: 8 `isinstance` sites become 1 branch and 1 condition**, not zero.
+`skills` branches on `is_tree()` to pick a validator; `cli_tools` uses it as a
+*condition* — its "subpath without unpack" refusal is about a missing archive,
+and a tree is not an archive (its subpath already selected the file `single()`
+returned). Stated honestly here because the first draft of this spec claimed
+zero: reading `skills._build_package` corrected it to one, and implementing
+`cli_tools` corrected it again.
 
 ### One fetcher per protocol
 
