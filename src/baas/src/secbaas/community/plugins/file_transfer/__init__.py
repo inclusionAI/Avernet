@@ -6,6 +6,8 @@
 # The proxy, the no-op backend and the projector must already be bound
 # here, so _aliyun_oss has to go last — otherwise the re-entrant package
 # import at bootstrap time raises a circular-import ImportError.
+# _http_proxy keeps its own ConfigError import function-local (WR-03/89),
+# so importing this package cold touches bootstrap only at the final line.
 from ._http_proxy import OssStreamingProxy  # noqa: I001
 from ._noop import NoopFileTransferBackend, NoopSessionFileUrlProjector
 from .aliyun_ack import AliyunAckSessionFileUrlProjector

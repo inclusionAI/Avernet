@@ -39,7 +39,6 @@ import httpx
 from secbaas.community.api.session_file_sharing import (
     SessionFileTransferProxyUnavailableError,
 )
-from secbaas.community.bootstrap._configs import ConfigError
 from secbaas.community.logger import get_logger
 
 log = get_logger("plugin-file-transfer")
@@ -114,7 +113,16 @@ class OssStreamingProxy:
         main-site container (empty config) still resolves.  Only non-loopback
         hosts are validated: the e2e fake-upstream runs on an ephemeral
         loopback port, and no production OSS endpoint is loopback.
+
+        ``ConfigError`` is imported inside the method (WR-03/89): a module-
+        level import would pull ``bootstrap`` transitively the moment this
+        module is imported, crashing any process whose first secbaas import
+        is ``plugins.file_transfer`` (cold-import circularity).  The method
+        only ever runs at container resolution, when bootstrap is already
+        fully loaded.
         """
+        from secbaas.community.bootstrap._configs import ConfigError
+
         endpoint = (self._endpoint or "").strip()
         if not endpoint:
             return
