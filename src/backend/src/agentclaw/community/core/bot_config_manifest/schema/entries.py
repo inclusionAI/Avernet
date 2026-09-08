@@ -368,24 +368,31 @@ def _classify(
 
     source = entry["source"]
     if isinstance(source, str):
-        # A bare https URL: one object, over https, with no ref. That is
-        # ``oss`` — the protocol covers a public CDN file and a private bucket
-        # alike, and the credential (or its absence) is the only difference.
-        check_https_url(ctx, f"{location}.source", source)
-        ctx.require_source_support(f"{location}.source", SourceForm.URL)
-        return EntrySource(form=SourceForm.URL, kind=SourceKind.OSS)
+        # The bare-URL spelling. A manifest no longer hands the platform a URL
+        # to GET: content travels by git or out of an object store, and both
+        # are declared. Refused with the replacement named, because this is
+        # the spelling almost every existing document uses and the shortest
+        # path from the refusal to a working document is worth a sentence.
+        ctx.add(
+            f"{location}.source",
+            "invalid_source",
+            "a bare URL is no longer a source; declare an object with "
+            "'protocol: git' (with 'url' and 'ref') or 'protocol: oss' "
+            "(with 'bucket' and 'key')",
+        )
+        return EntrySource(form=None)
     if isinstance(source, dict):
         decl = validate_source_declaration(ctx, f"{location}.source", source)
         if decl is None:
             return EntrySource(form=None)
-        form = SourceForm.GIT if decl.is_git else SourceForm.URL
+        form = SourceForm.GIT if decl.is_git else SourceForm.OSS
         ctx.require_source_support(f"{location}.source", form)
         return EntrySource(form=form, kind=decl.protocol, decl=decl)
     ctx.add(
         f"{location}.source",
         "invalid_source",
-        "'source' must be an https URL or a source object declaring "
-        "'protocol' and 'url'",
+        "'source' must be an object declaring 'protocol: git' or "
+        "'protocol: oss'",
     )
     return EntrySource(form=None)
 

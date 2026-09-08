@@ -83,6 +83,7 @@ from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
 from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     DeclaredFetch,
     build_fetchers,
+    object_receipt_url,
     substitute,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
@@ -106,6 +107,9 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
     git_receipt_url,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.limits import (
+    FETCH_ENTRY_LIMITS,
+)
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchRefusedError,
@@ -117,6 +121,11 @@ from agentclaw.community.core.bot_config_manifest.schema.sources import (
     parse_source,
 )
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
+from agentclaw.community.plugin_api.object_store_client import (
+    ObjectFetchStatus,
+    ObjectStoreClientFactory,
+    ObjectStoreTarget,
+)
 from agentclaw.community.log import get_logger
 
 if TYPE_CHECKING:
@@ -191,10 +200,17 @@ class EntryFetcher:
         fetcher: GuardedFetcher,
         content: "ManifestContentServiceProtocol",
         credentials: "SourceCredentialServiceProtocol",
+        objects: Optional[ObjectStoreClientFactory] = None,
     ) -> None:
         self._fetcher = fetcher
         self._content = content
         self._credentials = credentials
+        # Optional at construction, required at use. The composition root
+        # always binds one; the default exists for the many rigs that drive
+        # only the git or URL roads and have no business assembling an
+        # object-store factory to do it. ``acquire_object`` says so plainly
+        # rather than failing with an AttributeError.
+        self._objects = objects
         # Bound once, to this pipeline: the fetchers are strategies over these
         # same collaborators, so every road files receipts under one policy
         # and W11's lineage cannot answer differently by protocol.
@@ -537,6 +553,147 @@ class EntryFetcher:
             )
         except (ContentStoreError, ContentStoreFault) as exc:
             raise EntryFetchError(str(exc)) from exc
+
+    def acquire_object(
+        self,
+        ctx: "FetchContext",
+        *,
+        target: "ObjectStoreTarget",
+        key: str,
+        digest: Optional[str],
+        auth: Optional[str],
+        category: str,
+        keep_last: bool,
+        entry_identity: Optional[str],
+    ) -> FetchedEntry:
+        """One object out of a tenant-named bucket, through the store plugin.
+
+        The same shape :meth:`fetch` has on the URL road — pinned fast path,
+        acquire, ``keep_last``, file — with the transport swapped and four of
+        the guarded fetcher's six protections gone *because they have nothing
+        left to guard*: there is no tenant-supplied URL to shape-check, no
+        host to resolve and pin, and no redirect to re-validate, since the
+        endpoint comes off the credential row and the client owns the wire.
+        The two that survive are the two that were never about the URL: the
+        byte cap (enforced inside the client, while streaming) and the
+        content address computed here.
+        """
+        if self._objects is None:
+            raise EntryFetchError(
+                "this deployment has no object-store client bound, so a "
+                "'protocol: oss' source cannot be read"
+            )
+        expired = ctx.budget.expired() if ctx.budget is not None else None
+        if expired is not None:
+            raise EntryFetchError(expired)
+
+        address = object_receipt_url(target.bucket, key)
+        scope = scope_of(ctx)
+        try:
+            receipt = self._content.latest_receipt(scope, source_url=address)
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(str(exc)) from exc
+
+        if digest is not None and receipt is not None and receipt.digest == digest:
+            # Content addressing makes the stored bytes *the* declared bytes,
+            # so the store is the strictly more available source of the same
+            # truth — the identical ruling the URL road records.
+            try:
+                return FetchedEntry(
+                    content=self._content.read(digest),
+                    digest=digest,
+                    from_store=True,
+                    content_type=receipt.content_type,
+                    source_url=address,
+                )
+            except ContentMissingError:
+                logger.warning(
+                    "[manifest.object_store] the pinned blob is missing; "
+                    "re-reading to heal the platform's copy, digest=%s",
+                    digest,
+                )
+            except (ContentStoreError, ContentStoreFault) as exc:
+                raise EntryFetchError(
+                    "the platform's copy of the pinned content could not be "
+                    f"read: {exc}"
+                ) from exc
+
+        limit = FETCH_ENTRY_LIMITS.get(category, FETCH_ENTRY_LIMITS["resources_file"])
+        result = self._objects.client_for(target).get(key, byte_limit=limit)
+
+        if result.is_refusal:
+            # NOT_FOUND, DENIED, TOO_LARGE — the document or the credential is
+            # wrong. keep_last must not mask any of them: a denied credential
+            # quietly serving last apply's bytes for a year is exactly the
+            # outcome that ruling exists to prevent.
+            raise EntryFetchError(result.detail)
+
+        if result.status is not ObjectFetchStatus.FOUND:
+            # UNAVAILABLE: the store could not be reached, which is what
+            # keep_last is for.
+            if keep_last and receipt is not None and (
+                digest is None or receipt.digest == digest
+            ):
+                try:
+                    return FetchedEntry(
+                        content=self._content.read(receipt.digest),
+                        digest=receipt.digest,
+                        from_store=True,
+                        content_type=receipt.content_type,
+                        source_url=address,
+                        fallback_reason=(
+                            "delivered from the platform's stored copy "
+                            f"(keep_last): {result.detail}"
+                        ),
+                    )
+                except (ContentStoreError, ContentStoreFault) as read_exc:
+                    raise EntryFetchError(
+                        f"{result.detail}; the keep_last fallback copy could "
+                        f"not be read: {read_exc}"
+                    ) from read_exc
+            raise EntryFetchError(result.detail)
+
+        content = result.content or b""
+        computed = "sha256:" + hashlib.sha256(content).hexdigest()
+        if digest is not None and computed != digest:
+            # The pin, checked here rather than in the client: a plugin has no
+            # business knowing what a manifest digest is, and this is the one
+            # place both roads agree on what "the declared bytes" means.
+            raise EntryFetchError(
+                f"the object's bytes are {computed}, the entry declared {digest}"
+            )
+
+        fetched = FetchedObject(
+            bytes=content,
+            sha256=computed,
+            size_bytes=len(content),
+            url=address,
+            content_type=None,
+        )
+        try:
+            self._content.store(
+                fetched,
+                scope=scope,
+                source_url=address,
+                credential_name=auth,
+                modifier=ctx.actor_id,
+                apply_id=ctx.apply_id,
+                category=category,
+                entry_identity=entry_identity,
+            )
+        except (ContentStoreError, ContentStoreFault) as exc:
+            raise EntryFetchError(
+                "the fetched bytes could not be filed with the platform's "
+                f"store: {exc}"
+            ) from exc
+        if ctx.budget is not None:
+            ctx.budget.charge(len(content))
+        return FetchedEntry(
+            content=content,
+            digest=computed,
+            from_store=False,
+            source_url=address,
+        )
 
     def file_bytes(
         self,

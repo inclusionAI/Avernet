@@ -309,9 +309,13 @@ def test_modifier_and_rotation_stamp_the_audit_row(service):
 # all. These pin the mechanism as a whole — storage, redaction, refusal of
 # mismatched shapes, and what actually goes on the wire.
 
-_AKSK_PREFIXES = ["https://artifacts.example-corp.com/tools"]
+#: Empty, and that is the mechanism's shape rather than an omission: the
+#: endpoint comes off the row, so there is no tenant-supplied host for a
+#: prefix to constrain (see ``test_prefixes_are_refused_on_a_signing_credential``).
+_AKSK_PREFIXES: list[str] = []
 _AK = "LTAI5tExampleKeyId"
 _SK = "an-object-store-secret-key"
+_ENDPOINT = "https://objects.example-corp.com"
 
 
 def _put_aksk(service, name="oss-artifacts", **overrides):
@@ -319,6 +323,7 @@ def _put_aksk(service, name="oss-artifacts", **overrides):
         name=name,
         credential_type="oss_aksk",
         access_key_id=_AK,
+        endpoint=_ENDPOINT,
         secret=_SK,
         allowed_prefixes=_AKSK_PREFIXES,
         owner_app_id=OWNER_APP,
@@ -398,50 +403,87 @@ def test_a_header_credential_still_requires_its_header_name(service):
         _put(service, header_name=None)
 
 
-def test_an_aksk_binding_signs_the_request_and_never_presents_the_key(service):
-    """What actually goes on the wire.
+def test_an_aksk_binding_hands_over_a_target_and_never_a_header(service):
+    """What actually reaches the wire, now that nothing is signed here.
 
-    A header credential puts its secret there; this one must not. The signature
-    is derived from the secret key and the request, so the wire carries the key
-    *id* (inside the credential scope) and a signature — and nothing an
-    interceptor could replay against another URL.
+    A header credential puts its secret on the wire under a name the caller
+    chose. This one puts nothing there: it hands the object-store client an
+    address and an identity, and the client owns the request. ``headers_for``
+    is not merely unused on this road — there is no header a bucket read
+    presents, and asking for one is a category error.
     """
     _put_aksk(service)
-    target = "https://artifacts.example-corp.com/tools/rg"
-    headers = service.binding(name="oss-artifacts").headers_for(target)
+    target = service.binding(name="oss-artifacts").object_store_target("bkt")
 
-    # Presence, not an exact set: the signer decides which headers its own
-    # signature covers, and an equality here would pin today's list and block
-    # the day it legitimately grows — which is precisely what it did for
-    # ``x-amz-content-sha256``. The exact set is not this test's subject; what
-    # travels and what does not is.
-    assert {"authorization", "x-amz-date"} <= {n.lower() for n in headers}
-    joined = " ".join(headers.values())
-    assert _SK not in joined
-    assert _AK in joined  # the id is public by design; the secret key is not
-    assert "AWS4-HMAC-SHA256" in headers["Authorization"]
+    assert target.endpoint == _ENDPOINT
+    assert target.bucket == "bkt"
+    assert target.access_key_id == _AK
+    assert target.secret_access_key == _SK  # reaches the client, nothing else
 
 
-def test_two_urls_do_not_share_a_signature(service):
-    """A signature is bound to the request. Reusing one across URLs would be
-    the platform authenticating a request nobody signed."""
+def test_the_target_redacts_the_secret_when_it_is_printed(service):
+    """A target reaches a log or a traceback the moment something raises while
+    holding one, and a dataclass's default repr would print the key."""
+    _put_aksk(service)
+    text = repr(service.binding(name="oss-artifacts").object_store_target("bkt"))
+    assert _SK not in text
+    assert "<redacted>" in text
+    assert _AK in text  # the id is public by design; the secret key is not
+
+
+def test_the_document_chooses_the_bucket_and_never_the_endpoint(service):
+    """The security property the signing road had to enforce with a policy.
+
+    ``bucket`` is the caller's argument — a manifest names it. ``endpoint``
+    comes off the row and no argument can move it, so a tenant's document
+    cannot point its own credential at a host of its choosing. Held by
+    construction here, where ``allowed_prefixes`` used to hold it by rule.
+    """
     _put_aksk(service)
     binding = service.binding(name="oss-artifacts")
-    first = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
-    second = binding.headers_for("https://artifacts.example-corp.com/tools/fd")
-    assert first["Authorization"] != second["Authorization"]
+    first = binding.object_store_target("bucket-one")
+    second = binding.object_store_target("bucket-two")
+    assert (first.bucket, second.bucket) == ("bucket-one", "bucket-two")
+    assert first.endpoint == second.endpoint == _ENDPOINT
 
 
-def test_rotating_an_aksk_credential_lands_on_the_next_signature(service):
+def test_rotation_lands_on_the_next_target(service):
     """Rotation has no signal — the binding re-reads the row per call, which is
     the observable contract the header mechanism already has."""
     _put_aksk(service)
     binding = service.binding(name="oss-artifacts")
-    before = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
+    assert binding.object_store_target("b").access_key_id == _AK
     _put_aksk(service, access_key_id="LTAI5tRotated")
-    after = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
-    assert "LTAI5tRotated" in after["Authorization"]
-    assert before["Authorization"] != after["Authorization"]
+    assert binding.object_store_target("b").access_key_id == "LTAI5tRotated"
+
+
+def test_a_header_credential_has_no_object_store_target(service):
+    """Asked of the wrong mechanism, this refuses by name rather than handing
+    back a target with an empty endpoint that would fail later as a transport
+    error nobody could trace back to the credential's type."""
+    service.put(
+        name="hdr",
+        secret="tok",
+        header_name="Authorization",
+        allowed_prefixes=["https://artifacts.example-corp.com/tools"],
+        owner_app_id=OWNER_APP,
+        modifier="alice",
+    )
+    with pytest.raises(CredentialError, match="oss_aksk"):
+        service.binding(name="hdr").object_store_target("bkt")
+
+
+def test_prefixes_are_refused_on_a_signing_credential(service):
+    """Not ignored — refused.
+
+    ``allowed_prefixes`` exists to bound the URLs a secret may be presented
+    to. An ``oss_aksk`` credential presents its secret to nothing and reads
+    its endpoint from its own row, so a prefix here would constrain nothing
+    while looking like it constrained something. Silence would let a caller
+    believe they had drawn a boundary.
+    """
+    with pytest.raises(CredentialError, match="allowed_prefixes"):
+        _put_aksk(service, allowed_prefixes=["https://objects.example-corp.com/x"])
 
 
 def test_rotating_from_one_mechanism_to_the_other_clears_the_old_fields(service):
@@ -462,36 +504,3 @@ def test_rotating_from_one_mechanism_to_the_other_clears_the_old_fields(service)
     assert back.header_name == "PRIVATE-TOKEN"
 
 
-def test_the_prefix_boundary_applies_to_a_signing_credential_too(service):
-    """``allowed_prefixes`` bounds where a credential may be presented, and a
-    signing credential is presented by being *used to sign*. The match is on
-    whole path segments, so a sibling with a longer name is outside — the case
-    that a naive startswith would authorize."""
-    _put_aksk(service)
-    binding = service.binding(name="oss-artifacts")
-    binding.reauthorize("https://artifacts.example-corp.com/tools/rg")
-    for outside in (
-        "https://artifacts.example-corp.com/tools-secret/rg",
-        "https://artifacts.example-corp.com/other/rg",
-        "https://elsewhere.example.com/tools/rg",
-    ):
-        with pytest.raises(PrefixAuthorizationError, match="oss-artifacts"):
-            binding.reauthorize(outside)
-
-
-def test_the_signature_carries_every_header_s3_requires(service):
-    """`x-amz-content-sha256` is mandatory on an S3 SigV4 request.
-
-    The generic `SigV4Auth` does not emit it, and an allowlist over the
-    signer's output would drop it — either way the request fails as an opaque
-    403 with nothing pointing at the cause. A signature covers a specific set
-    of headers, so presenting a subset is not a weaker request, it is an
-    invalid one; the signer is the authority on what its own signature needs.
-    """
-    _put_aksk(service)
-    headers = service.binding(name="oss-artifacts").headers_for(
-        "https://artifacts.example-corp.com/tools/rg"
-    )
-    lowered = {name.lower() for name in headers}
-    assert {"authorization", "x-amz-date", "x-amz-content-sha256"} <= lowered
-    assert _SK not in " ".join(headers.values())

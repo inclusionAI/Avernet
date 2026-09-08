@@ -1,0 +1,41 @@
+-- The object store an ``oss_aksk`` credential is for.
+--
+-- Additive and nullable with no backfill, the same shape as
+-- 2026_09_08_source_credential_aksk.sql and for the same reason: every existing
+-- row is a ``header`` credential, for which an endpoint is meaningless, and a
+-- NOT NULL default would put a value on those rows that reads like
+-- configuration and governs nothing.
+--
+-- WHY THE ENDPOINT LIVES ON THE CREDENTIAL. It arrives with the key pair, from
+-- whoever issued them, and belongs to the same trust boundary. The alternative
+-- — a manifest naming the endpoint alongside the bucket — puts the *host* a
+-- credential is presented to under the tenant document's control. That was
+-- survivable on the signing road only because ``allowed_prefixes`` was
+-- mandatory and pinned scheme, host and port: the constraint held **by
+-- policy**. Reading the endpoint from the row holds it **by construction**,
+-- and that is what lets ``allowed_prefixes`` stop being required for this
+-- mechanism — there is no tenant-supplied host left for a prefix to constrain.
+--
+-- The bucket deliberately does NOT move here. One credential commonly reads
+-- several buckets in an account, and which bucket an entry reads is exactly
+-- the part a manifest author legitimately chooses; the source declaration
+-- carries it.
+--
+-- READABLE BACK, like ``access_key_id`` and for the same reason: it is an
+-- address, not a secret, and an operator cannot rotate or diagnose a
+-- credential whose store they cannot see. ``secret_ciphertext`` keeps its
+-- contract unchanged — no representation in any response, log, or apply
+-- report, ever.
+--
+-- WIDTH. varchar(512): an endpoint is a URL, and the service validates against
+-- this same number at the boundary so an over-long value is refused with a
+-- message rather than truncated or rejected by the driver.
+--
+-- DIALECT: OCEANBASE, MYSQL MODE — see 2026_08_31_source_credential.sql for the
+-- conventions this file follows (GLOBAL indexes, TIMESTAMP vs DATETIME, no
+-- ENGINE clause). Not indexed: it is read only after a row has already been
+-- found by ``(avernet_tenant, name)``.
+
+ALTER TABLE `ac_source_credential`
+  ADD COLUMN `endpoint` varchar(512) NULL COMMENT 'oss_aksk：对象存储 endpoint（地址，非密钥；可回读）'
+    AFTER `region`;

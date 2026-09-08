@@ -64,7 +64,11 @@ RESERVED_TYPES = (CredentialType.BASIC,)
 #: applies to categories and protocols.
 REQUIRED_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
     CredentialType.HEADER: frozenset({"header_name"}),
-    CredentialType.OSS_AKSK: frozenset({"access_key_id"}),
+    # ``endpoint`` joins ``access_key_id`` as required: it is issued with the
+    # key pair and belongs to the same trust boundary. Keeping it here rather
+    # than on the source is what makes the host a property of the credential
+    # instead of something a tenant's document chooses.
+    CredentialType.OSS_AKSK: frozenset({"access_key_id", "endpoint"}),
 }
 
 #: Fields that belong to exactly one mechanism. Sending one on another is
@@ -73,7 +77,7 @@ REQUIRED_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
 #: them believe it until a fetch failed.
 EXCLUSIVE_FIELDS_BY_TYPE: dict[CredentialType, frozenset[str]] = {
     CredentialType.HEADER: frozenset({"header_name"}),
-    CredentialType.OSS_AKSK: frozenset({"access_key_id", "region"}),
+    CredentialType.OSS_AKSK: frozenset({"access_key_id", "region", "endpoint"}),
 }
 
 
@@ -95,8 +99,13 @@ class SourceCredentialRecord(BaseModel):
     #: and rotation is unoperable without it. Its partner
     #: (``secret_ciphertext``) still has no public representation at all.
     access_key_id: str | None = None
-    #: ``oss_aksk`` only. Signing input; ``None`` takes the signer's default.
+    #: ``oss_aksk`` only. Passed to the object-store client; ``None`` lets the
+    #: client take its own default.
     region: str | None = None
+    #: ``oss_aksk`` only. The object store this credential is for. Readable
+    #: back for the same reason ``access_key_id`` is — it is an address, not a
+    #: secret, and rotation cannot be operated blind.
+    endpoint: str | None = None
     allowed_prefixes: list[str]
     has_secret: bool = True
     #: The owning application (registry id). Rotation and delete are its
@@ -120,6 +129,7 @@ class SourceCredentialRow(BaseModel):
     header_name: str = ""
     access_key_id: str | None = None
     region: str | None = None
+    endpoint: str | None = None
     allowed_prefixes: str  # JSON array as stored
     secret_ciphertext: str
     #: Set at insert, immutable after: the application whose PUT created
@@ -149,6 +159,7 @@ class SourceCredentialModel(Base):
     #: configuration while governing nothing.
     access_key_id = Column(String(256), nullable=True)
     region = Column(String(64), nullable=True)
+    endpoint = Column(String(512), nullable=True)
     #: JSON array of absolute https prefixes, validated at write time.
     allowed_prefixes = Column(Text, nullable=False)
     #: ``enc:v1:<AES-GCM ciphertext>`` (or plaintext under a non fail-closed
@@ -183,6 +194,7 @@ class SourceCredentialModel(Base):
             header_name=self.header_name,
             access_key_id=self.access_key_id,
             region=self.region,
+            endpoint=self.endpoint,
             allowed_prefixes=self.allowed_prefixes,
             secret_ciphertext=self.secret_ciphertext,
             owner_app_id=self.owner_app_id,

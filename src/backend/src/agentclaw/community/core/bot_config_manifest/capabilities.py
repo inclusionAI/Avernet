@@ -93,12 +93,16 @@ class ManifestSection(StrEnum):
 class SourceForm(StrEnum):
     """How an entry names its content.
 
-    Four forms. ``GIT`` covers both spellings of a git source — inline on an
-    entry and declared under ``sources`` — because one resolver serves both
-    (W7's declared-source dispatch).
+    Four forms. ``GIT`` and ``OSS`` each cover both spellings of their
+    protocol — inline on an entry and declared under ``sources`` — because one
+    resolver serves both (W7's declared-source dispatch).
     """
 
-    URL = "url"
+    #: An object store, addressed by ``bucket``/``key``. Named for the
+    #: protocol rather than the spelling it replaced (``url``): the spelling
+    #: is gone, because a manifest no longer names a URL for the platform to
+    #: fetch.
+    OSS = "oss"
     GIT = "git"
     NAMED = "named"
     CONTENT = "content"
@@ -348,7 +352,7 @@ def resolve_capabilities(
         # ``source_matrix`` below — these flat rows structurally cannot express
         # a pair, which is what forced the per-category narrowing this change
         # removed. Every form resolves; the matrix says where.
-        SourceForm.URL: None,
+        SourceForm.OSS: None,
         SourceForm.CONTENT: None,
         SourceForm.GIT: None,
         SourceForm.NAMED: None,

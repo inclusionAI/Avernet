@@ -115,12 +115,35 @@ class ObjectStoreFetcher:
         self._owner = owner
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
+        decl, entry = request.decl, request.entry
+        key = compose_key(decl.key, entry.get("key"))
+        if not key:
+            raise EntryFetchError(
+                "an object store entry must name the object: declare 'key' on "
+                "the entry, on the source, or both — the source's is a prefix"
+            )
+        if not decl.auth:
+            # No anonymous road. A bucket read needs an endpoint, and the
+            # endpoint is a property of the credential — without one there is
+            # nowhere to send the request, which is a better failure than
+            # inventing a default host.
+            raise EntryFetchError(
+                "an object store source must declare 'auth': the endpoint and "
+                "the key pair come from the named credential"
+            )
+        try:
+            target = self._owner._credentials.binding(
+                name=decl.auth
+            ).object_store_target(decl.bucket or "")
+        except CredentialError as exc:
+            raise EntryFetchError(str(exc)) from exc
         return BlobDelivery(
-            self._owner.fetch(
+            self._owner.acquire_object(
                 request.ctx,
-                source_url=request.decl.url,
-                digest=request.entry.get("digest"),
-                auth=request.decl.auth,
+                target=target,
+                key=key,
+                digest=entry.get("digest"),
+                auth=decl.auth,
                 category=request.category,
                 keep_last=request.keep_last,
                 entry_identity=request.entry_identity,
@@ -278,6 +301,45 @@ def build_fetchers(owner: "EntryFetcher") -> Mapping[SourceKind, SourceFetcher]:
     return MappingProxyType(
         {kind: cls(owner) for kind, cls in FETCHER_TYPES.items()}
     )
+
+
+def object_receipt_url(bucket: str, key: str) -> str:
+    """The W11 identity for bytes read out of a bucket.
+
+    ``oss://bucket/key`` — deliberately not a fetchable URL. It is a stable
+    *name* for a delivery, the way ``git_receipt_url`` names a tree at a
+    commit: the endpoint is not part of it, because the same object read
+    through an internal and an external endpoint is the same object, and a
+    receipt keyed on the endpoint would file it twice and let ``keep_last``
+    miss its own copy.
+    """
+    return f"oss://{bucket}/{key.lstrip('/')}"
+
+
+def compose_key(source_key: Optional[str], entry_key: Any) -> Optional[str]:
+    """The source's key prefix, then the entry's — one object name.
+
+    Exactly ``compose_subpath``'s rule on the other road, and re-checked by
+    the same pure predicate for the same reason: two safe halves can compose
+    into an unsafe whole, and a second weaker rule here is how a traversal
+    gets through one layer by satisfying the other.
+    """
+    if entry_key is None:
+        return source_key
+    if not isinstance(entry_key, str) or not entry_key:
+        raise EntryFetchError("entry 'key' must be a non-empty string")
+    joined = (
+        entry_key
+        if not source_key
+        else source_key.rstrip("/") + "/" + entry_key.lstrip("/")
+    )
+    refusal = relative_path_refusal(joined, what="key")
+    if refusal is not None:
+        raise EntryFetchError(
+            f"the source's key and the entry's compose to {joined!r}, "
+            f"which is refused: {refusal[1]}"
+        )
+    return joined
 
 
 def compose_subpath(

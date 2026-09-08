@@ -45,10 +45,8 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
 from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
     SourceCredentialServiceProtocol,
 )
-from agentclaw.community.core.bot_config_manifest.credentials.signing import (
-    sign_headers,
-)
 from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.plugin_api.object_store_client import ObjectStoreTarget
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
     SourceCredentialRepositoryProtocol,
 )
@@ -60,6 +58,7 @@ _NAME_MAX = 128
 _HEADER_NAME_MAX = 256  # 列宽同构;超长在边界拒绝,不是 DB 报错
 _ACCESS_KEY_ID_MAX = 256  # 同上:列宽即边界
 _REGION_MAX = 64
+_ENDPOINT_MAX = 512  # 同上:列宽即边界
 
 
 class SourceCredentialService(SourceCredentialServiceProtocol):
@@ -89,6 +88,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         header_name: str | None = None,
         access_key_id: str | None = None,
         region: str | None = None,
+        endpoint: str | None = None,
         credential_type: CredentialType = CredentialType.HEADER,
         modifier: str = "",
     ) -> SourceCredentialRecord:
@@ -121,6 +121,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             header_name=header_name,
             access_key_id=access_key_id,
             region=region,
+            endpoint=endpoint,
         )
         if credential_type is CredentialType.HEADER:
             if not _HEADER_NAME_RE.fullmatch(header_name or ""):
@@ -135,14 +136,34 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             )
         if region is not None and len(region) > _REGION_MAX:
             raise CredentialError(f"region over {_REGION_MAX} characters")
+        if endpoint is not None and len(endpoint) > _ENDPOINT_MAX:
+            raise CredentialError(f"endpoint over {_ENDPOINT_MAX} characters")
         if not isinstance(allowed_prefixes, list):
             raise CredentialError("allowed_prefixes must be a list")
-        try:
-            validate_prefixes(allowed_prefixes)
-        except ValueError as exc:
-            # 换分类学不换规则:policy 层的输入错误以服务的统一
-            # CredentialError 面对外(一个家族,调用方一次捕获)。
-            raise CredentialError(str(exc)) from exc
+        if credential_type is CredentialType.HEADER:
+            # Mandatory for ``header`` and only for it. That mechanism puts a
+            # secret on the wire to a URL the tenant's document names, so the
+            # prefix boundary is the only thing deciding which hosts may
+            # receive it. ``oss_aksk`` has no tenant-supplied host at all —
+            # the endpoint comes off the credential row — so requiring
+            # prefixes there would be a boundary drawn around nothing, and
+            # callers would satisfy it with a placeholder that governs
+            # nothing. The constraint moves to where it bites.
+            try:
+                validate_prefixes(allowed_prefixes)
+            except ValueError as exc:
+                # 换分类学不换规则:policy 层的输入错误以服务的统一
+                # CredentialError 面对外(一个家族,调用方一次捕获)。
+                raise CredentialError(str(exc)) from exc
+        elif allowed_prefixes:
+            # Not silently dropped: a caller who wrote prefixes on a signing
+            # credential believes they constrained something.
+            raise CredentialError(
+                "'allowed_prefixes' constrains the URL a 'header' credential "
+                "is presented to; an 'oss_aksk' credential reads the endpoint "
+                "from its own row, so there is no tenant-supplied host to "
+                "constrain — leave it empty"
+            )
 
         if self._fail_closed and not self._vault.has_master_key:
             raise MasterKeyUnavailableError(
@@ -170,6 +191,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             header_name=header_name or "",
             access_key_id=access_key_id,
             region=region,
+            endpoint=endpoint,
             allowed_prefixes=allowed_prefixes,
             secret_ciphertext=self._vault.encrypt(secret),
             owner_app_id=owner_app_id,
@@ -184,6 +206,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         header_name: str | None,
         access_key_id: str | None,
         region: str | None,
+        endpoint: str | None,
     ) -> None:
         """Every field belongs to a mechanism; a mismatch is refused, not dropped.
 
@@ -197,6 +220,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             "header_name": header_name,
             "access_key_id": access_key_id,
             "region": region,
+            "endpoint": endpoint,
         }
         for field in sorted(REQUIRED_FIELDS_BY_TYPE.get(credential_type, ())):
             if not supplied.get(field):
@@ -259,6 +283,7 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             # the two records exist so that is true by construction.
             access_key_id=row.access_key_id,
             region=row.region,
+            endpoint=row.endpoint,
             allowed_prefixes=self._prefixes_of(row),
             has_secret=bool(row.secret_ciphertext),
             owner_app_id=row.owner_app_id,
@@ -294,25 +319,51 @@ class SourceCredentialBinding:
         return row
 
     def headers_for(self, url) -> dict[str, str]:
-        """What this credential presents for this URL, per mechanism.
+        """What this credential presents for this URL.
 
-        ``header`` puts the secret on the wire under the caller's header name.
-        ``oss_aksk`` never does: the secret derives a signing key and what
-        travels is a signature over this exact request, which is why the URL
-        is an argument here and why the result is not reusable across hops.
+        One mechanism reaches here: ``header``, which puts the secret on the
+        wire under the caller's header name. ``oss_aksk`` never does and never
+        did — what it used to do was *sign*, and that road is gone: an object
+        store is read through its own client now, which is handed the key pair
+        directly rather than a set of headers computed here. A binding for one
+        cannot reach this method, because nothing on the object road asks a
+        credential for headers.
         """
         row = self._current()
-        secret = self._service._vault.decrypt_or_passthrough(row.secret_ciphertext)
-        if row.credential_type == CredentialType.OSS_AKSK:
-            return dict(
-                sign_headers(
-                    url=str(url),
-                    access_key_id=row.access_key_id or "",
-                    secret_access_key=secret,
-                    region=row.region,
-                )
+        return {
+            row.header_name: self._service._vault.decrypt_or_passthrough(
+                row.secret_ciphertext
             )
-        return {row.header_name: secret}
+        }
+
+    def object_store_target(self, bucket: str) -> "ObjectStoreTarget":
+        """The address and identity for reading ``bucket`` as this credential.
+
+        The endpoint, the region and both halves of the key pair come off the
+        row; only the bucket comes from the caller. That split is the whole
+        security property of this road: a tenant's document chooses *what* to
+        read and never *where from*, so there is no host for it to point a
+        credential at.
+
+        The secret is decrypted here and lives only on the returned value —
+        which redacts it in ``repr`` for the traceback case.
+        """
+        row = self._current()
+        if row.credential_type is not CredentialType.OSS_AKSK:
+            raise CredentialError(
+                f"credential {self.name!r} is a {row.credential_type.value!r} "
+                "credential; an object store source needs one of type "
+                f"{CredentialType.OSS_AKSK.value!r}"
+            )
+        return ObjectStoreTarget(
+            endpoint=row.endpoint or "",
+            bucket=bucket,
+            access_key_id=row.access_key_id or "",
+            secret_access_key=self._service._vault.decrypt_or_passthrough(
+                row.secret_ciphertext
+            ),
+            region=row.region,
+        )
 
     def reauthorize(self, url) -> None:
         row = self._current()
