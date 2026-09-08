@@ -294,7 +294,10 @@ class TestGetSetMcpServers:
 class TestCollectBotActiveMcps:
     """collect_bot_active_mcps filters out user-excluded default MCPs."""
 
-    def test_collect_excludes_user_excluded_default_mcps(self, caplog):
+    @pytest.mark.parametrize("reuse_snapshot", [False, True])
+    def test_collect_excludes_user_excluded_default_mcps(self, caplog, reuse_snapshot):
+        from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
+        from agentclaw.community.core.skills_pool.models import RegisteredSkillAsset
         from agentclaw.community.core.skill_center.services.skill_set_service import SkillSetService
         mock_repo = MagicMock()
         mock_repo.get_all_active_skill_sets.return_value = [
@@ -325,9 +328,25 @@ class TestCollectBotActiveMcps:
         caplog.set_level(logging.INFO)
         with patch.object(svc, "get_set_mcp_servers") as mock_get_mcps:
             mock_get_mcps.return_value = []
-            result = svc.collect_bot_active_mcps("entity1", "default", "user1", "staff")
+            snapshot = BotCapabilitySnapshot(
+                "default", "user1",
+                (RegisteredSkillAsset(
+                    skill_id=1, name="center", git_path="center://public-code",
+                    skill_uuid="00000000-0000-4000-8000-000000000001",
+                    sc_version_number="2.0.0", mcp_dependencies=("mcp.dependency",),
+                ),),
+                frozenset({"mcp.installed"}),
+            ) if reuse_snapshot else None
+            result = svc.collect_bot_active_mcps(
+                "entity1", "default", "user1", "staff", capability_snapshot=snapshot
+            )
+        if reuse_snapshot:
+            svc._reader.active_skill_assets.assert_not_called()
+            svc._reader.active_mcp_server_codes.assert_not_called()
 
         codes = {r["server_code"] for r in result}
+        if reuse_snapshot:
+            assert {"mcp.installed", "mcp.dependency"} <= codes
         assert "mcp.ant.antprocessai.anttaskmcp" not in codes
         messages = [record.getMessage() for record in caplog.records]
         for stage in (
@@ -813,6 +832,46 @@ class TestSyncMcpDesiredState:
         plugin.sync_all_mcp_servers.assert_called_once_with(
             [{"server_code": code} for code in sorted(codes)]
         )
+
+    @pytest.mark.asyncio
+    async def test_projection_reuses_device_for_details_and_declaration(self):
+        svc, plugin = self._make_svc()
+        events = []
+
+        async def deliver(**kwargs):
+            assert kwargs["device_sync"] is plugin
+            events.append("details")
+            return {"success": True}
+
+        svc._mcp_sync_service.sync_mcp_details_for_bot.side_effect = deliver
+        plugin.sync_all_mcp_servers.side_effect = lambda _codes: events.append("declare") or True
+        assert await svc.project_mcps(
+            claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
+        )
+        assert events == ["details", "declare"]
+        svc._resolver.resolve_for_bot.assert_called_once_with("bot1", "staff_user1")
+        svc._device_sync_dispatcher.dispatch.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_projection_failure_does_not_declare_and_next_call_resolves_again(self):
+        svc, plugin = self._make_svc(delivery={"success": False})
+        for _ in range(2):
+            assert not await svc.project_mcps(
+                claimed=frozenset({"mcp.new"}), released=frozenset(), declared={"mcp.new"}
+            )
+        assert svc._resolver.resolve_for_bot.call_count == 2
+        plugin.sync_all_mcp_servers.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_release_only_reuses_device_and_still_declares_empty_scope(self):
+        svc, plugin = self._make_svc()
+        svc._mcp_sync_service.remove_mcp_detail = AsyncMock(return_value={"success": True})
+        assert await svc.project_mcps(
+            claimed=frozenset(), released=frozenset({"mcp.old"}), declared=set()
+        )
+        assert svc._mcp_sync_service.remove_mcp_detail.await_args.kwargs["device_sync"] is plugin
+        svc._resolver.resolve_for_bot.assert_called_once()
+        plugin.sync_all_mcp_servers.assert_called_once_with([])
 
     @pytest.mark.asyncio
     async def test_declaration_pushes_no_configuration(self):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from agentclaw.community.core.skill_center.capability_state_contract import BotCapabilitySnapshot
 
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
     ProjectionScope,
@@ -34,10 +35,18 @@ class _Factory:
 
 class _SkillSetService:
     def collect_bot_active_mcps(self, **_kwargs) -> list[dict]:
+        assert isinstance(_kwargs["capability_snapshot"], BotCapabilitySnapshot)
         return []
 
 
 class _Reader:
+    def __init__(self):
+        self.snapshot_reads = 0
+
+    def active_capabilities(self, **kwargs):
+        self.snapshot_reads += 1
+        return BotCapabilitySnapshot(kwargs["bot_id"], kwargs["owner_id"], (), frozenset())
+
     def active_skill_assets(self, **_kwargs) -> list:
         return []
 
@@ -91,6 +100,7 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
     )
 
     assert isinstance(plan, ResolvedCapabilityPlan)
+    assert projector._reader.snapshot_reads == 1
     messages = [record.getMessage() for record in caplog.records]
     for stage in (
         "build_skill_plan",
@@ -98,7 +108,6 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
         "resolve_mcp_identity_modes",
         "collect_effective_mcps",
         "query_passport_clis",
-        "read_installed_mcps",
         "resolve_effective_capabilities",
     ):
         assert any(
@@ -115,7 +124,7 @@ def test_runtime_projector_logs_skill_and_mcp_plan_timing(caplog) -> None:
     "stage",
     (
         "resolve_mcp_identity_modes",
-        "read_installed_mcps",
+        "build_skill_plan",
         "resolve_effective_capabilities",
     ),
 )
@@ -130,8 +139,8 @@ def test_runtime_projector_logs_substage_errors(
 
     if stage == "resolve_mcp_identity_modes":
         monkeypatch.setattr(projector, "_resolve_mcp_identity_modes", fail)
-    elif stage == "read_installed_mcps":
-        monkeypatch.setattr(projector._repository, "list_installed_mcps", fail)
+    elif stage == "build_skill_plan":
+        monkeypatch.setattr(projector._reader, "active_capabilities", fail)
     else:
         monkeypatch.setattr(RuntimeProjectionResolver, "resolve", fail)
 

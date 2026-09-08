@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Mapping, Optional, TypeVa
 
 from agentclaw.community.core.devices.models import SynlinkMappingInfo
 from agentclaw.community.core.devices.services.device_accessor import DeviceAccessor
+from agentclaw.community.core.devices.services.device_sync import DeviceSync
 
 if TYPE_CHECKING:
     from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -28,6 +29,7 @@ from agentclaw.community.core.mcp.services.config_service import MCPConfigServic
 from agentclaw.community.core.repository.protocols.skill_center import SkillSetRepository
 from agentclaw.community.core.repository.protocols.skill_center import SkillRepository
 from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilitySnapshot,
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.skill_center.errors import (
@@ -633,12 +635,36 @@ class SkillSetService:
         has to declare the larger one — the declaration is a full replacement,
         so skipping it would leave the device's view of the set behind.
         """
-        if not await self.sync_mcp_delivery(claimed=claimed, released=released):
+        started = time.perf_counter()
+        try:
+            ctx = await asyncio.to_thread(
+                self._resolver.resolve_for_bot,
+                self.bot_id,
+                self.entity_id or self.user_id or "",
+            )
+            device_sync = self._device_sync_dispatcher.dispatch(ctx)
+        except Exception:
+            logger.warning(
+                "[project_mcps] device resolution failed bot_id=%s",
+                self.bot_id, exc_info=True,
+            )
             return False
-        return await self.sync_mcp_desired_state(server_codes=declared)
+        finally:
+            logger.info(
+                "[project_mcps] timing stage=resolve_device bot_id=%s duration_ms=%.3f",
+                self.bot_id, (time.perf_counter() - started) * 1000,
+            )
+        if not await self.sync_mcp_delivery(
+            claimed=claimed, released=released, device_sync=device_sync
+        ):
+            return False
+        return await self.sync_mcp_desired_state(
+            server_codes=declared, device_sync=device_sync
+        )
 
     async def sync_mcp_delivery(
-        self, *, claimed: frozenset[str], released: frozenset[str]
+        self, *, claimed: frozenset[str], released: frozenset[str],
+        device_sync: DeviceSync | None = None,
     ) -> bool:
         """Deliver configuration for newly claimed MCPs, withdraw it for released ones.
 
@@ -683,6 +709,7 @@ class SkillSetService:
                     bot_id=self.bot_id,
                     entity_id=self.entity_id,
                     engine_type=self.engine_type,
+                    **({"device_sync": device_sync} if device_sync is not None else {}),
                 )
                 if not delivery.get("success"):
                     logger.error(
@@ -704,6 +731,7 @@ class SkillSetService:
                     server_code=server_code,
                     bot_id=self.bot_id,
                     user_id=self.entity_id or self.user_id or "",
+                    **({"device_sync": device_sync} if device_sync is not None else {}),
                 )
                 if not removal.get("success"):
                     logger.error(
@@ -721,7 +749,9 @@ class SkillSetService:
             )
             return False
 
-    async def sync_mcp_desired_state(self, *, server_codes: set[str]) -> bool:
+    async def sync_mcp_desired_state(
+        self, *, server_codes: set[str], device_sync: DeviceSync | None = None
+    ) -> bool:
         """Declare the complete MCP allow-list to the Bot runtime.
 
         Declaration is total on purpose: ``sync_all_mcp_servers`` is the
@@ -737,18 +767,20 @@ class SkillSetService:
         try:
             # resolve_for_bot 与 sync_all_mcp_servers 都是同步阻塞调用(前者含
             # ws-info HTTP,后者是设备侧 HTTP),留在协程里会占住 event loop。
-            ctx = await asyncio.to_thread(
-                self._resolver.resolve_for_bot,
-                self.bot_id,
-                self.entity_id or self.user_id or "",
-            )
+            if device_sync is None:
+                ctx = await asyncio.to_thread(
+                    self._resolver.resolve_for_bot,
+                    self.bot_id,
+                    self.entity_id or self.user_id or "",
+                )
+                device_sync = self._device_sync_dispatcher.dispatch(ctx)
             logger.info(
                 "[sync_mcp_desired_state] declaring MCP allow-list: bot_id=%s, mcps=%s",
                 self.bot_id, len(server_codes),
             )
             return bool(
                 await asyncio.to_thread(
-                    self._device_sync_dispatcher.dispatch(ctx).sync_all_mcp_servers,
+                    device_sync.sync_all_mcp_servers,
                     # ``filter_servers`` reads server_code/serverCode off each
                     # entry, so bare strings would silently declare nothing.
                     [{"server_code": code} for code in sorted(server_codes)],
@@ -1686,6 +1718,7 @@ class SkillSetService:
         engine_type: Optional[str] = None,
         *,
         strict_policy_context: bool = False,
+        capability_snapshot: BotCapabilitySnapshot | None = None,
     ) -> List[dict]:
         """Effective MCPs = default policy ∪ installed ∪ Skill dependencies.
 
@@ -1699,6 +1732,10 @@ class SkillSetService:
 
         Args:
             engine_type: Engine type for scoping. Defaults to self.engine_type.
+            capability_snapshot: Reader output for this same Bot and projection.
+                When supplied, reuse its Skills and Installation codes while
+                retaining the canonical Default/exclusion/metadata logic below.
+                Omit for standalone reads; never retain across commands.
         """
         if self._reader is None:
             raise RuntimeError(
@@ -1706,6 +1743,10 @@ class SkillSetService:
                 "capability state reader; construct through "
                 "SkillSetServiceFactory"
             )
+        if capability_snapshot is not None and (
+            capability_snapshot.bot_id != bot_id or capability_snapshot.owner_id != user_id
+        ):
+            raise ValueError("Capability snapshot belongs to a different Bot")
         effective_engine = engine_type if engine_type is not None else self.engine_type
         effective_ext_info = self._run_effective_mcp_stage(
             stage="default_ext_info",
@@ -1794,8 +1835,11 @@ class SkillSetService:
             stage="active_skill_assets",
             bot_id=bot_id,
             engine_type=effective_engine,
-            operation=lambda: self._active_skill_assets(
-                entity_id=entity_id, bot_id=bot_id, user_id=user_id
+            operation=lambda: (
+                capability_snapshot.skills if capability_snapshot is not None
+                else self._active_skill_assets(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                )
             ),
             item_count=len,
         )
@@ -1803,8 +1847,11 @@ class SkillSetService:
             stage="installed_mcp_codes",
             bot_id=bot_id,
             engine_type=effective_engine,
-            operation=lambda: self._installed_mcp_codes(
-                entity_id=entity_id, bot_id=bot_id, user_id=user_id
+            operation=lambda: (
+                capability_snapshot.installed_mcp_server_codes if capability_snapshot is not None
+                else self._installed_mcp_codes(
+                    entity_id=entity_id, bot_id=bot_id, user_id=user_id
+                )
             ),
             item_count=len,
         )
