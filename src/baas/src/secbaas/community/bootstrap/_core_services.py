@@ -387,6 +387,7 @@ class CoreServiceContainer(containers.DeclarativeContainer):
         paas_facade=paas_facade,
         file_transfer_backend=file_transfer_backend,
         ticket_repo=ticket_repository,
+        session_file_url_projector=session_file_url_projector,
     )
 
     session_file_sharing_dispatcher = providers.Singleton(
