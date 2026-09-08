@@ -67,7 +67,10 @@ green — the suite passes before the next one starts.
       and that read-back exposes `access_key_id` but never the secret.
 - [ ] **C4** `source_credentials/schemas.py` — optional `access_key_id`;
       correct the `oss_aksk` description. Endpoint cases for register, rotate
-      and masked read.
+      and masked read, **one per credential type** (`header` for git,
+      `oss_aksk` for the object store), plus the three refused shapes:
+      `header` with no `header_name`, `oss_aksk` missing either half, and
+      `access_key_id` sent on a `header` credential.
 - [ ] **C5** Add `fetch/oss_source.py`: per-call signed client built from the
       tenant credential, under `guarded_fetcher`'s ceilings, timeout budget and
       redirect policy. Not the injected `ObjectStoragePlugin`.

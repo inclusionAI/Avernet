@@ -112,6 +112,72 @@ unreadable.
 gains optional `access_key_id`; the `oss_aksk` description stops saying
 "refused at write".
 
+**Registering one, per protocol.** Same endpoint, same path shape, one body
+field apart. Note this group is **tenant-level and takes no `user_id`**, unlike
+every other route in the feature.
+
+*A git host token* — presented in a header while cloning:
+
+```http
+PUT /openapi/v1/bots/source-credentials/corp-git-content
+```
+```json
+{
+  "type": "header",
+  "header_name": "PRIVATE-TOKEN",
+  "secret": "<token>",
+  "allowed_prefixes": ["https://code.example-corp.com/team/content"]
+}
+```
+
+*An object-store key pair* — signs the request; **`access_key_id` is the new
+field**, and `secret` carries the secret key:
+
+```json
+{
+  "type": "oss_aksk",
+  "access_key_id": "LTAI5t...",
+  "secret": "<secret key>",
+  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
+}
+```
+
+Read-back is redacted the same way for both — the id is an identifier, the
+secret has no representation at all:
+
+```json
+{
+  "name": "oss-artifacts", "type": "oss_aksk", "has_secret": true,
+  "access_key_id": "LTAI5t...", "header_name": null,
+  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
+}
+```
+
+Either is then referenced from a source **by name only**:
+
+```yaml
+sources:
+  content:
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
+    ref: v1.2.0
+    auth: corp-git-content     # → type: header
+  artifacts:
+    protocol: oss
+    url: https://artifacts.example-corp.com/tools/
+    auth: oss-artifacts        # → type: oss_aksk
+```
+
+The manifest never sees a secret, and neither does an apply report: the
+`sources[].auth` row carries the credential **name**. `allowed_prefixes` is
+what stops `corp-git-content` from being presented to
+`https://code.example-corp.com/team/content-secret` — the match is on whole
+path segments, so a sibling repo with a longer name is not inside the scope.
+
+The service refuses the mismatched shapes rather than ignoring the extra field:
+`header` without `header_name`, `oss_aksk` missing either half, and
+`access_key_id` sent on a `header` credential.
+
 **Fetch.** `fetch/oss_source.py`, beside `git_source.py`, constructing a
 per-call signed client from the tenant's credential — *not* the injected
 `ObjectStoragePlugin`, which is the platform's own store bound to boto3's env
