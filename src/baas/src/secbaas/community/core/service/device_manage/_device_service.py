@@ -1468,7 +1468,8 @@ class DefaultDeviceService(DeviceService):
         device container.
 
         Platform-specific behavior:
-        - LOCAL / POOLAB / TECLAW: Single-step native update via facade.update_device()
+        - LOCAL / POOLAB: Single-step native update via facade.update_device()
+        - TECLAW: Single-step native update with async callback (DeviceCallbackContext)
         - DOCKER: Two-phase destroy + create (no lifecycle hooks, no async callback)
         - SIGMA: Not yet implemented (raises ValueError)
         - ARCA: Two-phase destroy + create with hooks
@@ -1545,14 +1546,28 @@ class DefaultDeviceService(DeviceService):
             )
 
         elif provider_type == "TECLAW":
+            callback_url = _resolve_teclaw_callback_url()
+            if not publish_id:
+                raise ValueError(
+                    f"publish_id is required for TeClaw async callback "
+                    f"(device {device_uuid}); got {publish_id!r}."
+                )
+            callback_context = DeviceCallbackContext(
+                callback_url=callback_url,
+                publish_id=str(publish_id),
+                device_uuid=device_uuid,
+                tenant=tenant,
+                operator=modifier,
+            )
             config = (
                 TeClawCreateConfig(
                     teclaw_bot_config=deploy_config.teclaw_bot_config
                     if deploy_config
-                    else None
+                    else None,
+                    callback_context=callback_context,
                 )
                 if deploy_config
-                else None
+                else TeClawCreateConfig(callback_context=callback_context)
             )
             return await _native_update_device(
                 facade=self._paas_facade,
@@ -1563,7 +1578,7 @@ class DefaultDeviceService(DeviceService):
                 tenant=tenant,
                 env=env,
                 modifier=modifier,
-                has_async_callback=False,
+                has_async_callback=True,
                 config=config,
             )
 
