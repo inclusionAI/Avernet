@@ -463,3 +463,104 @@ class TestGetConfig:
 
         config = get_config(strict=False)
         assert config.user_config["secret"] == "${REQUIRED_VAR}"
+
+
+class TestAliyunOverlayStrictContract:
+    """Strict ${VAR} contract of the shipped configs/application-aliyun.yaml.
+
+    Exercises the REAL overlay file in the community config tree (not a
+    hand-written tmp copy): full expansion under BAAS_DEPLOY_TENANT=aliyun,
+    fail-closed KeyError when a referenced placeholder variable is missing,
+    and unreachability (base "stub" values win) when the tenant is unset.
+    """
+
+    def _isolate_loader_env(self, monkeypatch):
+        """Clear loader selectors and point at the real configs/ directory."""
+        from pathlib import Path
+
+        config_dir = Path(__file__).resolve().parents[3] / "configs"
+        monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
+        monkeypatch.delenv("SERVER_ENV", raising=False)
+        monkeypatch.delenv("COMMUNITY_DEPLOY", raising=False)
+        monkeypatch.delenv("BAAS_DEPLOY_TENANT", raising=False)
+        for name in (
+            "FT_OSS_ENDPOINT",
+            "FT_OSS_EXTERNAL_ENDPOINT",
+            "FT_OSS_BUCKET",
+            "FT_OSS_STAGING_ROOT",
+            "FT_PROXY_BASE_URL",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
+
+    def test_aliyun_overlay_full_expansion(self, monkeypatch):
+        """All 8 variables set: the real overlay merges and expands fully."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        monkeypatch.setenv("FT_OSS_BUCKET", "my-bucket")
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        config = ConfigLoader.load()
+        plugins = config.user_config["plugins"]
+        assert plugins["file_transfer"] == "real"
+        assert plugins["session_file_url_projector"] == "aliyun_ack"
+        assert config.user_config["env"]["deploy_tenant"] == "aliyun"
+        oss = config.user_config["file_transfer_oss_aliyun"]
+        assert oss["endpoint"] == "https://oss-cn-hangzhou.aliyuncs.com"
+        assert (
+            oss["external_endpoint"] == "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        assert oss["bucket_name"] == "my-bucket"
+        assert oss["staging_root_path"] == "baas-file-transfer"
+        assert (
+            config.user_config["session_file_url_proxy"]["proxy_base_url"]
+            == "https://bff.example.com"
+        )
+
+    def test_aliyun_overlay_missing_var_raises_keyerror(self, monkeypatch):
+        """A strict placeholder unset: load() fails closed with KeyError."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        monkeypatch.setenv("BAAS_DEPLOY_TENANT", "aliyun")
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        # FT_OSS_BUCKET deliberately left unset: the placeholder has no
+        # ":-default" fallback, so startup fails before any service runs.
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        with pytest.raises(KeyError, match="FT_OSS_BUCKET"):
+            ConfigLoader.load()
+
+    def test_aliyun_overlay_unreachable_without_tenant(self, monkeypatch):
+        """Tenant unset: the overlay file is unreachable — base stub wins."""
+        from secbaas.community.config import ConfigLoader
+
+        self._isolate_loader_env(monkeypatch)
+        # The reference variables are set but must not matter: without
+        # BAAS_DEPLOY_TENANT the overlay is never loaded, so it cannot leak
+        # aliyun values into the main-site config.
+        monkeypatch.setenv("FT_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+        monkeypatch.setenv(
+            "FT_OSS_EXTERNAL_ENDPOINT", "https://oss-cn-hangzhou-ext.aliyuncs.com"
+        )
+        monkeypatch.setenv("FT_OSS_BUCKET", "my-bucket")
+        monkeypatch.setenv("FT_OSS_STAGING_ROOT", "baas-file-transfer")
+        monkeypatch.setenv("FT_PROXY_BASE_URL", "https://bff.example.com")
+
+        config = ConfigLoader.load()
+        plugins = config.user_config["plugins"]
+        assert plugins["file_transfer"] == "stub"
+        assert plugins["session_file_url_projector"] == "stub"
+        assert config.user_config["file_transfer_oss_aliyun"]["endpoint"] == ""
+        assert config.user_config["session_file_url_proxy"]["proxy_base_url"] == ""
