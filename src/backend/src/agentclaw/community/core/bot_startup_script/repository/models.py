@@ -107,13 +107,25 @@ class BotStartupScriptModel(Base):
         String(256), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
     )
 
-    # ``DateTime`` here, ``timestamp`` in the DDL, and the two are not in
-    # conflict: these types only shape the local-mode ``create_all`` schema,
-    # and SQLite has no TIMESTAMP/DATETIME distinction to shape. The column
-    # type that matters is the one in the .sql file, which states the rule --
-    # database-filled times are TIMESTAMP. Every sibling model in this repo is
-    # declared the same way; switching this one to ``TIMESTAMP`` would make it
-    # the outlier without changing a single byte of behaviour.
+    # ``DateTime`` here, ``timestamp`` in the DDL. Deliberate, and the same
+    # split apply_models.py states for the same reason.
+    #
+    # It cannot disagree with the deployed column, because it never describes
+    # it: the OceanBase schema is operator-provisioned (``create_schema:
+    # false``), so the .sql file creates these and the ORM emits no DDL there.
+    # For reads and writes the declaration makes no difference either --
+    # SQLAlchemy's ``TIMESTAMP`` is a subclass of ``DateTime``, both bind and
+    # return ``datetime``, and the driver hands back a ``datetime`` for a
+    # TIMESTAMP column whichever is declared.
+    #
+    # Where it is NOT a no-op, and this is the part worth knowing: a community
+    # deployment on MySQL with ``create_schema: true`` bootstraps through
+    # ``create_all(mysql=True)``, which emits DATETIME from this declaration.
+    # That gap is repo-wide rather than this table's -- every model here is
+    # declared this way -- and switching this one column would only half-close
+    # it, since ``default=``/``onupdate=`` are client-side constructs: the
+    # bootstrap emits neither DEFAULT CURRENT_TIMESTAMP nor ON UPDATE
+    # CURRENT_TIMESTAMP for any table here, whatever the type says.
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
