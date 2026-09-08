@@ -11,7 +11,7 @@ Endpoints:
 - GET /api/v1/bots/{bot_uuid} - Get bot details
 - POST /api/v1/bots/{bot_uuid}/destroy - Destroy bot
 - POST /api/v1/bots/{bot_uuid}/update - Update bot
-- POST /api/v1/bots/{bot_uuid}/scale - Scale bot devices
+- POST /api/v1/bots/{bot_uuid}/scale - Scale bot devices (optional device_uuids for targeted SCALE_DOWN)
 - POST /api/v1/bots/{bot_uuid}/restart - Restart bot
 - POST /api/v1/bots/{bot_uuid}/update-devices - Update specified bot devices
 - GET /api/v1/bots/{bot_uuid}/sessions - List bot sessions
@@ -94,9 +94,22 @@ class UpdateBotRequest(BaseModel):
 
 
 class ScaleBotRequest(BaseRequest):
-    """Scale bot request."""
+    """Scale bot request.
 
-    target_count: int = Field(..., ge=1, le=100)
+    ``target_count`` is always required. When ``device_uuids`` is also
+    provided (and non-empty), SCALE_DOWN destroys exactly those devices
+    and ``target_count`` must equal
+    ``current_count - len(device_uuids)``. An empty list is treated the
+    same as ``None`` (count-based scaling).
+    """
+
+    target_count: int = Field(
+        ...,
+        ge=1,
+        le=100,
+        description="Target device count (required). When device_uuids is "
+        "supplied, must equal current_count - len(device_uuids).",
+    )
     operator: str = Field(..., min_length=1, max_length=64)
     auto_approve_publish: bool = Field(
         default=False,
@@ -105,6 +118,13 @@ class ScaleBotRequest(BaseRequest):
     config: BotConfig | None = Field(
         default=None,
         description="Bot configuration for the scale publish workflow (merged with existing config; not persisted to DB)",
+    )
+    device_uuids: list[str] | None = Field(
+        default=None,
+        description="Optional explicit list of device UUIDs to destroy during "
+        "SCALE_DOWN. Empty list is treated the same as None (count-based "
+        "scaling). When non-empty, target_count must equal "
+        "current_count - len(device_uuids).",
     )
 
 
@@ -430,15 +450,33 @@ async def scale_bot(
     Initiates scaling through publish workflow.
     Returns bot info with target_count and publish_id for workflow tracking.
     """
-    result = await service.scale_bot(
-        tenant=tenant,
-        bot_uuid=bot_uuid,
-        target_count=request.target_count,
-        operator=request.operator,
-        request_id=request.request_id,
-        auto_approve_publish=request.auto_approve_publish,
-        bot_config=request.config,
-    )
+    try:
+        result = await service.scale_bot(
+            tenant=tenant,
+            bot_uuid=bot_uuid,
+            target_count=request.target_count,
+            operator=request.operator,
+            request_id=request.request_id,
+            auto_approve_publish=request.auto_approve_publish,
+            bot_config=request.config,
+            device_uuids=request.device_uuids,
+        )
+    except BotNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_code": "BOT_NOT_FOUND",
+                "message": f"Bot not found: {bot_uuid}",
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_code": "INVALID_REQUEST",
+                "message": str(e),
+            },
+        )
     return ApiResponse(data=result)
 
 

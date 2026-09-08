@@ -36,6 +36,7 @@ from secbaas.community.api.device_manage import (
     DeployConfig,
     DeviceInfo,
     DeviceListResponse,
+    DeviceStatus,
 )
 from secbaas.community.api.health_check.bot import (
     BotHealthCheckerService as BotHealthCheckerServiceProtocol,
@@ -717,12 +718,20 @@ class DefaultBotManagementService(BotManageService):
         request_id: str,
         auto_approve_publish: bool = False,
         bot_config: BotConfig | None = None,
+        device_uuids: list[str] | None = None,
     ) -> ScaleBotResponse:
         """Scale Bot to target device count (SCALE_UP or SCALE_DOWN).
 
         Creates appropriate publish for capacity adjustment:
         - target_count > current: SCALE_UP adding devices
         - target_count < current: SCALE_DOWN removing devices
+
+        When ``device_uuids`` is provided alongside ``target_count``, the
+        operation targets exactly those devices for SCALE_DOWN. In that
+        case ``target_count`` must equal
+        ``current_count - len(unique_device_uuids)``. ``device_uuids`` is
+        rejected on SCALE_UP. An empty list is treated the same as
+        ``None`` (count-based scaling).
 
         When ``bot_config`` is provided, its non-None fields are merged with
         the bot's existing extra_config and consumed by the publish workflow
@@ -742,6 +751,9 @@ class DefaultBotManagementService(BotManageService):
                                   without manual intervention (default: False)
             bot_config: Optional bot configuration to merge with existing
                         config for the scale publish workflow
+            device_uuids: Optional explicit list of device UUIDs to destroy
+                          during SCALE_DOWN. When set, target_count must
+                          equal current_count - len(device_uuids).
 
         Returns:
             ScaleBotResponse with bot info, target_count and publish_id
@@ -769,14 +781,57 @@ class DefaultBotManagementService(BotManageService):
         if bot.status == BotStatus.DESTROYING.value:
             raise ValueError("Cannot scale bot in DESTROYING status")
 
+        # Get current device count (fetched once, reused for validation)
+        device_repo = self._device_repo
+        devices = device_repo.list_by_bot_id(
+            bot_id=bot.id, tenant=tenant, env=env
+        )
+        current_count = len(devices)
+
+        # Validate device_uuids if provided
+        unique_device_uuids: list[str] | None = None
+        if device_uuids:
+            unique_device_uuids = list(dict.fromkeys(device_uuids))
+            if not unique_device_uuids:
+                raise ValueError(
+                    "device_uuids must contain at least one valid UUID"
+                )
+
+            bot_device_map = {d.device_uuid: d for d in devices}
+
+            invalid_uuids = [
+                uuid
+                for uuid in unique_device_uuids
+                if uuid not in bot_device_map
+            ]
+            if invalid_uuids:
+                raise ValueError(
+                    f"Device(s) not found or not belonging to bot {bot_uuid}: "
+                    f"{invalid_uuids}"
+                )
+
+            non_active_uuids = [
+                uuid
+                for uuid in unique_device_uuids
+                if bot_device_map[uuid].status != DeviceStatus.ACTIVE.value
+            ]
+            if non_active_uuids:
+                raise ValueError(
+                    f"Device(s) not ACTIVE, cannot scale down: {non_active_uuids}"
+                )
+
+            # target_count is required and must be consistent with device_uuids.
+            derived_target = current_count - len(unique_device_uuids)
+            if target_count != derived_target:
+                raise ValueError(
+                    f"target_count ({target_count}) does not match "
+                    f"current_count - len(device_uuids) ({derived_target})"
+                )
+
         # Validate target_count >= 1
         if target_count < 1:
             raise ValueError(f"Target count must be at least 1, got {target_count}")
 
-        # Get current device count
-        device_repo = self._device_repo
-        devices = device_repo.list_by_bot_id(bot_id=bot.id, tenant=tenant, env=env)
-        current_count = len(devices)
         logger.info(
             f"[scale_bot] bot_id={bot.id} current_count={current_count} "
             f"target_count={target_count} delta={target_count - current_count}"
@@ -793,6 +848,12 @@ class DefaultBotManagementService(BotManageService):
             publish_type = PublishType.SCALE_UP
         else:
             publish_type = PublishType.SCALE_DOWN
+
+        # Reject device_uuids on scale-up
+        if publish_type == PublishType.SCALE_UP and unique_device_uuids:
+            raise ValueError(
+                "device_uuids cannot be combined with SCALE_UP"
+            )
 
         # Resolve config for PublishConfig
         # Pattern matches update_devices merge at lines 1133-1151:
@@ -836,6 +897,7 @@ class DefaultBotManagementService(BotManageService):
                 bot_config.callback_timeout_seconds if bot_config is not None else None
             )
             or DEFAULT_CALLBACK_TIMEOUT_SECONDS,
+            target_device_uuids=unique_device_uuids,
         )
         publish = await self._publish_service.create_publish(
             tenant=tenant,
@@ -848,7 +910,8 @@ class DefaultBotManagementService(BotManageService):
 
         logger.info(
             f"[scale_bot] publish created: publish_id={publish.id} "
-            f"type={publish_type.value} target={target_count} current={current_count} config={scale_config}"
+            f"type={publish_type.value} target={target_count} current={current_count} "
+            f"target_device_uuids={unique_device_uuids} config={scale_config}"
         )
 
         # Auto-approve publish stage gates when requested

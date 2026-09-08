@@ -1117,6 +1117,143 @@ class TestCreateDeviceRecordsForPublish:
         call_kwargs = svc._publish_record_repo.insert_record.call_args.kwargs
         assert call_kwargs["extra_config"] is None
 
+    def test_scale_down_with_target_device_uuids_filters_eligible(self):
+        """SCALE_DOWN with target_device_uuids filters ACTIVE devices to the requested set."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="uuid-a", status="ACTIVE"),
+            _make_device(id=2, device_uuid="uuid-b", status="ACTIVE"),
+            _make_device(id=3, device_uuid="uuid-c", status="ACTIVE"),  # filtered out
+        ]
+        # target_device_uuids live on the persisted publish record's extra_config.
+        pub = _make_publish_record(
+            extra_config={"target_device_uuids": ["uuid-a", "uuid-b"]}
+        )
+        svc._publish_repo.get_by_id.return_value = pub
+        batch = _make_batch_record(batch_capacity=2)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.SCALE_DOWN,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        assert svc._publish_record_repo.insert_record.call_count == 2
+        inserted_device_ids = [
+            call.kwargs["device_id"]
+            for call in svc._publish_record_repo.insert_record.call_args_list
+        ]
+        assert sorted(inserted_device_ids) == [1, 2]
+        assert 3 not in inserted_device_ids
+
+    def test_scale_down_with_target_device_uuids_missing_uuid_raises(self):
+        """SCALE_DOWN raises ValueError when a requested UUID is not ACTIVE/owned."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="uuid-a", status="ACTIVE"),
+            _make_device(id=2, device_uuid="uuid-b", status="ACTIVE"),
+        ]
+        pub = _make_publish_record(
+            extra_config={"target_device_uuids": ["uuid-a", "nonexistent"]}
+        )
+        svc._publish_repo.get_by_id.return_value = pub
+        batch = _make_batch_record(batch_capacity=2)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with pytest.raises(ValueError, match="nonexistent"):
+                svc._create_device_records_for_publish(
+                    tenant="t",
+                    env="test",
+                    publish_id=1,
+                    publish_type=PublishType.SCALE_DOWN,
+                    bot_record=bot,
+                    batch_records=[batch],
+                    operator="op",
+                )
+
+    def test_scale_down_with_target_device_uuids_count_mismatch_raises(self):
+        """SCALE_DOWN raises ValueError when target count != batch capacity (scale_amount)."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=1, device_uuid="uuid-a", status="ACTIVE"),
+            _make_device(id=2, device_uuid="uuid-b", status="ACTIVE"),
+            _make_device(id=3, device_uuid="uuid-c", status="ACTIVE"),
+        ]
+        # scale_amount = batch_capacity = 2, but target_uuids has 3 entries.
+        pub = _make_publish_record(
+            extra_config={"target_device_uuids": ["uuid-a", "uuid-b", "uuid-c"]}
+        )
+        svc._publish_repo.get_by_id.return_value = pub
+        batch = _make_batch_record(batch_capacity=2)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            with pytest.raises(ValueError, match="scale_amount"):
+                svc._create_device_records_for_publish(
+                    tenant="t",
+                    env="test",
+                    publish_id=1,
+                    publish_type=PublishType.SCALE_DOWN,
+                    bot_record=bot,
+                    batch_records=[batch],
+                    operator="op",
+                )
+
+    def test_scale_down_without_target_device_uuids_oldest_active_behavior(self):
+        """SCALE_DOWN without target_device_uuids preserves oldest-ACTIVE selection (by id)."""
+        svc = _make_service()
+        bot = _make_bot_record()
+        # Devices deliberately out of id order to verify sort-by-id before slicing.
+        svc._device_repo.list_by_bot_id.return_value = [
+            _make_device(id=3, device_uuid="uuid-c", status="ACTIVE"),
+            _make_device(id=1, device_uuid="uuid-a", status="ACTIVE"),
+            _make_device(id=2, device_uuid="uuid-b", status="ACTIVE"),
+        ]
+        # No target_device_uuids on persisted record → old behavior (None becomes {}).
+        pub = _make_publish_record(extra_config=None)
+        svc._publish_repo.get_by_id.return_value = pub
+        # Oldest 2 ACTIVE devices by id should be selected (ids 1 and 2).
+        batch = _make_batch_record(batch_capacity=2)
+
+        with patch(
+            "secbaas.community.core.service.publish_manage._publish_service.get_current_env",
+            return_value="test",
+        ):
+            svc._create_device_records_for_publish(
+                tenant="t",
+                env="test",
+                publish_id=1,
+                publish_type=PublishType.SCALE_DOWN,
+                bot_record=bot,
+                batch_records=[batch],
+                operator="op",
+            )
+
+        assert svc._publish_record_repo.insert_record.call_count == 2
+        inserted_device_ids = [
+            call.kwargs["device_id"]
+            for call in svc._publish_record_repo.insert_record.call_args_list
+        ]
+        # Oldest ACTIVE devices (ids 1, 2) selected over id=3.
+        assert sorted(inserted_device_ids) == [1, 2]
+        assert 3 not in inserted_device_ids
+
 
 # ====================================================================
 # _get_current_stage / _get_pending_batches / _check_all_batches_complete
