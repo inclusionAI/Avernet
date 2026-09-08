@@ -1585,7 +1585,7 @@ class BotPublicService(BotPublicServiceProtocol):
         request_id: str,
         filters: BotCatalogSearchFilters | None = None,
     ) -> Dict[str, Any]:
-        """Return the current BCS catalog page joined to public Backend Bots."""
+        """Return the current BCS catalog page enriched with Backend Bot data."""
         try:
             metadata_kwargs: dict[str, Any] = {
                 "search": search,
@@ -1626,13 +1626,44 @@ class BotPublicService(BotPublicServiceProtocol):
             if (address := self._catalog_address(bot)) in addresses
         }
         items = []
+        bcs_only_count = 0
+        description_fallback_count = 0
+        entity_fallback_count = 0
         for address in addresses:
             bot = bots_by_address.get(address)
-            if bot is None:
-                continue
             metadata_item = metadata_by_address[address]
-            # COSEC: The BCS value reached this service only after the adapter
-            # validated its composite address; fall back only to the exact joined Backend address.
+            if bot is None:
+                entity_id = metadata_item.created_by or address.entity_id
+                bot = {
+                    "bot_id": address.bot_id,
+                    "bot_uuid": metadata_item.bot_uuid,
+                    "entity_id": entity_id,
+                    "owner_id": entity_id,
+                    "bot_type": "",
+                    "bot_name": metadata_item.name or "",
+                    "bot_desc": metadata_item.summary or "",
+                    "owner_name": None,
+                    "active_engine": "",
+                    "status": metadata_item.status or "",
+                }
+                bcs_only_count += 1
+            else:
+                backend_description = bot.get("bot_desc")
+                if (
+                    metadata_item.summary is not None
+                    and (
+                        not isinstance(backend_description, str)
+                        or not backend_description.strip()
+                    )
+                ):
+                    bot["bot_desc"] = metadata_item.summary
+                    description_fallback_count += 1
+                backend_entity_id = bot.get("entity_id")
+                if not isinstance(backend_entity_id, str) or not backend_entity_id.strip():
+                    bot["entity_id"] = metadata_item.created_by or address.entity_id
+                    entity_fallback_count += 1
+            # COSEC: The adapter validated this public BCS address; request
+            # identity is never used as a Bot owner fallback.
             bot["bot_uuid"] = metadata_item.bot_uuid or (
                 f"{address.bot_id}:{address.entity_id}"
             )
@@ -1670,10 +1701,14 @@ class BotPublicService(BotPublicServiceProtocol):
         total = metadata_page.total
         logger.info(
             "[BotPublicService.catalog_search] request_id=%s bcs_count=%s "
-            "joined_count=%s total=%s",
+            "result_count=%s bcs_only_count=%s description_fallback_count=%s "
+            "entity_fallback_count=%s total=%s",
             request_id,
             len(addresses),
             len(items),
+            bcs_only_count,
+            description_fallback_count,
+            entity_fallback_count,
             total,
         )
         return {"total": total, "items": items}

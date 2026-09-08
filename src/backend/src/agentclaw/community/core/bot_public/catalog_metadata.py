@@ -49,6 +49,10 @@ class BotCatalogMetadata:
     friend_ext: Any = None
     friend_check_in_strategy: Any = None
     user_visibility: Any = None
+    name: str | None = None
+    summary: str | None = None
+    created_by: str | None = None
+    status: str | None = None
 
 
 @dataclass(frozen=True)
