@@ -489,18 +489,36 @@ def decode_tree_bytes(blob: bytes) -> Optional[list[tuple[str, bytes]]]:
     at = len(TREE_MAGIC)
     try:
         while at < len(blob):
+            before = at
             colon = blob.index(b":", at)
             name_len = int(blob[at:colon])
+            # A **negative** length is the interesting one, not a large one.
+            # ``int(b"-3")`` parses happily, and a negative size moved the
+            # cursor *backwards* — the loop then read the same frame forever,
+            # hanging the worker thread with the apply's lock held while more
+            # applies queued behind it. These bytes are attacker-reachable:
+            # they are whatever a bucket served for a ``resources`` directory
+            # entry, decoded before any archive validation runs.
+            if name_len < 0:
+                return None
             at = colon + 1
             name = blob[at : at + name_len].decode("utf-8")
             at += name_len
             colon = blob.index(b":", at)
             size = int(blob[at:colon])
+            if size < 0:
+                return None
             at = colon + 1
             if at + size > len(blob):
                 return None
             members.append((name, blob[at : at + size]))
             at += size
+            if at <= before:
+                # Belt: every frame must consume at least one byte. Two
+                # explicit sign checks are easy to add a third case beside and
+                # forget; this makes non-termination structurally impossible
+                # rather than impossible-by-enumeration.
+                return None
     except (ValueError, UnicodeDecodeError):
         return None
     return members

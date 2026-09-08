@@ -247,8 +247,13 @@ def parse_source(
             misaddressed and required in _ADDRESSING_FIELDS
         ):
             continue
-        value = raw.get(required)
-        if not isinstance(value, str) or not value:
+        # **Absence only.** The per-field checks below own empty and
+        # wrong-typed values, and answering here as well produced two
+        # violations for one mistake — worse, for ``url: 123`` the "must
+        # declare 'url'" half is actively false, since the field *is*
+        # declared. Same rule as ``misaddressed`` a few lines up, which this
+        # did not follow.
+        if raw.get(required) is None:
             add(
                 f".{required}",
                 "missing_source",

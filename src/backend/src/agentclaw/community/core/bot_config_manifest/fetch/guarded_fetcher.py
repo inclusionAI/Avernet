@@ -125,6 +125,66 @@ class FetchedObject:
     size_bytes: int
 
 
+def endpoint_refusal(
+    endpoint: str,
+    *,
+    allow_hosts: Iterable[str] = (),
+    resolver: Optional[ResolverType] = None,
+) -> Optional[str]:
+    """Why this object-store endpoint may not be stored, or ``None``.
+
+    The same two rules :class:`GuardedFetcher` applies to a source URL —
+    shape, then every resolved address — lifted out so the credential surface
+    can apply them **before persisting**, which is the only point at which
+    refusing costs nobody an apply.
+
+    It exists because of a wrong assumption. The object-store road drops the
+    fetcher's SSRF machinery on the argument that its endpoint comes from a
+    credential rather than from a tenant's document — but a credential is
+    itself written by an authenticated tenant application through the API, so
+    "not from the document" is not "not from the tenant". Without this,
+    ``http://169.254.169.254/`` is a storable endpoint and the platform will
+    connect to it on the next apply.
+
+    ``resolver`` defaults to real DNS; tests inject. A host on the deployment
+    transport allowlist is exempt from the public-only rule, exactly as it is
+    on the fetch road — the deployment declared that destination.
+    """
+    if any(ch in endpoint for ch in "\r\n\x00"):
+        return "endpoint must not contain control characters"
+    try:
+        parsed = httpx.URL(endpoint)
+    except (httpx.InvalidURL, ValueError, UnicodeError):
+        return "endpoint is not a valid URL"
+    host = parsed.host
+    if not host:
+        return "endpoint must be an absolute URL with a host"
+    if parsed.userinfo:
+        return "endpoint must not carry userinfo — the key pair is the credential"
+    hosts = frozenset(allow_hosts)
+    if parsed.scheme not in SAFE_SCHEMES and not (
+        parsed.scheme == "http" and host in hosts
+    ):
+        return f"endpoint scheme {parsed.scheme!r} is not allowed"
+    if host in hosts:
+        return None
+    try:
+        resolved = (resolver or _resolve_via_socket)(host)
+    except (FetchRefusedError, OSError):
+        return f"endpoint host cannot be resolved: {host!r}"
+    if not resolved:
+        return f"endpoint host cannot be resolved: {host!r}"
+    try:
+        addresses = [ipaddress.ip_address(ip) for ip in resolved]
+    except ValueError:
+        return f"endpoint host cannot be resolved: {host!r}"
+    if any(_refused_address(ip) for ip in addresses):
+        # Every address, not a lucky first one — the same rule the fetch road
+        # applies, for the same reason.
+        return f"endpoint host resolves to a non-public address: {host!r}"
+    return None
+
+
 def _refused_address(ip: ipaddress._BaseAddress) -> bool:
     """The refusal set, explicit.
 

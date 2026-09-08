@@ -27,6 +27,9 @@ from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
     SourceFetcher,
     build_fetchers,
 )
+from agentclaw.community.core.bot_config_manifest.credentials.errors import (
+    CredentialError,
+)
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     DECLARABLE_PROTOCOLS,
 )
@@ -214,3 +217,69 @@ def test_a_named_source_carries_its_name_for_the_report(pipeline):
     )
 
     assert recorder.requests[0].name == "content"
+
+
+# ── a credential of the wrong type ───────────────────────────────────────────
+
+
+def test_a_git_source_naming_an_object_store_credential_fails_one_entry():
+    """Nothing ties a source's protocol to its credential's type, so this
+    document is legal at PUT — and it must fail *this entry*, not the apply.
+
+    Before the guard it did neither cleanly: ``reauthorize`` ran against the
+    empty ``allowed_prefixes`` an ``oss_aksk`` row now legitimately stores,
+    ``validate_prefixes`` answered with a bare ``ValueError``, and nothing in
+    the fetch pipeline catches that — it escaped ``resolve`` and took the
+    whole apply with it. And had it got past, ``headers_for`` would have put
+    the object store's secret key on the wire to a git host under an
+    empty-named header.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+        EntryFetchError,
+    )
+
+    class _AksKBinding:
+        """A binding for a credential of the wrong type, answering as the real
+        one does: both seams refuse, in the family the fetcher catches."""
+
+        name = "oss-cred"
+
+        def reauthorize(self, url):
+            raise CredentialError(
+                "credential 'oss-cred' has no usable 'allowed_prefixes'"
+            )
+
+        def headers_for(self, url):
+            raise CredentialError(
+                "credential 'oss-cred' is a 'oss_aksk' credential and "
+                "presents no header"
+            )
+
+    class _WrongTypeCredentials:
+        def binding(self, *, name):
+            return _AksKBinding()
+
+    pipeline = EntryFetcher(
+        FakeGuardedFetcher(responses={}),
+        FakeManifestContent(),
+        _WrongTypeCredentials(),
+    )
+    ctx = make_context(
+        source_session=_session(
+            {
+                "repo": {
+                    "protocol": "git",
+                    "url": "https://code.example.com/team/x.git",
+                    "ref": "main",
+                    "auth": "oss-cred",
+                }
+            }
+        )
+    )
+
+    # EntryFetchError, not ValueError: the materialiser turns this into one
+    # entry's ResolveFailure. Anything else aborts the category.
+    with pytest.raises(EntryFetchError, match="oss-cred"):
+        pipeline.fetch_declared(
+            ctx, entry={"from": "repo"}, category="identity", entry_identity="x"
+        )

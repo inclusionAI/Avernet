@@ -23,6 +23,8 @@ fake encodes, because those rules are what the boto3 impl and the corp
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from agentclaw.community.plugin_api.object_store_client import (
@@ -46,6 +48,26 @@ def _target(bucket: str = "b1", *, access_key_id: str = AK) -> ObjectStoreTarget
         secret_access_key=SECRET,
         region="cn-shanghai",
     )
+
+
+@dataclass(frozen=True)
+class _ApplyLikeContext:
+    """Just the surface ``FetchContext`` declares — the fetch funnel's seam.
+
+    Built here rather than reaching for an ``ApplyContext``: this suite is
+    about the plugin's consumer contract, and the funnel documents exactly
+    what it reads off its caller so a double can be honest about it.
+    """
+
+    source_session: object
+    bot_id: str = "b_1"
+    entity_id: str = "ent"
+    env: str = "test"
+    tenant: str = "default"
+    engine_type: str = "claude_code"
+    actor_id: str = "alice"
+    apply_id: str | None = None
+    budget: object | None = None
 
 
 @pytest.fixture
@@ -206,22 +228,82 @@ def test_every_read_is_recorded_with_what_it_was_asked_for(factory):
 
 
 def test_a_manifest_source_reads_through_the_bound_factory(world, factory):
-    """The Rule 25 assertion proper: the consumer reaches the plugin.
+    """Rule 25's assertion proper: the consumer reaches the plugin.
 
     ``EntryFetcher`` is the fetch funnel every materialising category shares.
     Driven with a declared ``protocol: oss`` source it must acquire the bytes
-    *through the injected factory* — and the recorded call is what proves it
-    did, rather than finding them by some other road.
+    **through the injected factory** — so this drives ``fetch_declared`` for
+    real and asserts three things: the content came back, the recorded call
+    names the composed key, and the guarded transport was never touched.
+
+    An earlier version of this test stopped after checking singleton identity.
+    It would have passed against an ``EntryFetcher`` that bypassed the plugin
+    entirely, which is precisely the bypass Rule 25 names the plugin-hit
+    assertion to catch.
     """
     from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
         EntryFetcher,
     )
+    from agentclaw.community.core.bot_config_manifest.apply.source_session import (
+        SourceSession,
+    )
 
-    factory.put("tenant-bucket", "skills/qc.zip", b"package-bytes")
     pipeline = world.get(EntryFetcher)
-    assert isinstance(pipeline, EntryFetcher)
-
-    # Same singleton the injector handed the pipeline — if these were two
-    # instances the seeding above would be invisible to it, which is the
-    # bypass this assertion exists to catch.
+    # Same singleton the injector handed the pipeline — two instances would
+    # make the seeding below invisible to it.
     assert world.get(ObjectStoreClientFactory) is factory
+
+    # The credential the source names has to exist: the oss road resolves it
+    # (for the endpoint and the key pair) before it reads anything, and that
+    # ordering is part of the contract under test.
+    #
+    # Written straight to the repository rather than through the service: the
+    # service now validates that an endpoint resolves to a public address —
+    # correctly, and it has its own tests — but that would make this suite
+    # depend on DNS to say something about the *fetch* contract.
+    from agentclaw.community.core.bot_config_manifest.credentials.models import (
+        CredentialType,
+    )
+    from agentclaw.community.core.repository.protocols.bot.source_credential import (  # noqa: E501
+        SourceCredentialRepositoryProtocol,
+    )
+
+    world.get(SourceCredentialRepositoryProtocol).upsert(
+        name="oss-cred",
+        credential_type=CredentialType.OSS_AKSK,
+        header_name="",
+        access_key_id=AK,
+        endpoint=ENDPOINT,
+        region="cn-shanghai",
+        allowed_prefixes=[],
+        secret_ciphertext=SECRET,
+        owner_app_id=1,
+        modifier="alice",
+    )
+
+    body = b"package-bytes"
+    factory.put("tenant-bucket", "skills/qc.zip", body)
+    ctx = _ApplyLikeContext(
+        source_session=SourceSession(
+            sources={
+                "pkg": {
+                    "protocol": "oss",
+                    "bucket": "tenant-bucket",
+                    "key": "skills/",
+                    "auth": "oss-cred",
+                }
+            },
+            baselines={},
+            git=None,
+        )
+    )
+
+    delivery = pipeline.fetch_declared(
+        ctx, entry={"from": "pkg", "key": "qc.zip"}, category="skills",
+        entry_identity="qc",
+    )
+
+    assert delivery.single() == body
+    assert len(factory.calls) == 1
+    target, key, _ = factory.calls[0]
+    assert (target.bucket, key) == ("tenant-bucket", "skills/qc.zip")

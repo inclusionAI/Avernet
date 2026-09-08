@@ -39,12 +39,17 @@ from agentclaw.community.core.bot_config_manifest.credentials.models import (
     SourceCredentialRow,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.policy import (
+    PrefixAuthorizationError,
     PrefixAuthorizationPolicy,
     validate_prefixes,
 )
 from agentclaw.community.core.bot_config_manifest.credentials.service_protocol import (
     SourceCredentialServiceProtocol,
 )
+from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    endpoint_refusal,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.limits import Resolver
 from agentclaw.community.core.bot_management.token_vault import TokenVault
 from agentclaw.community.plugin_api.object_store_client import ObjectStoreTarget
 from agentclaw.community.core.repository.protocols.bot.source_credential import (
@@ -71,12 +76,23 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
         vault: TokenVault,
         *,
         fail_closed: bool = False,
+        endpoint_allow_hosts: tuple[str, ...] = (),
+        endpoint_resolver: "Resolver | None" = None,
     ):
         # ``fail_closed`` is bound true only for profiles whose storage must
         # be ciphertext (see di module); singlebox/CI bind the default.
         self._repository = repository
         self._vault = vault
         self._fail_closed = fail_closed
+        # The deployment's transport allowlist — the same value the guarded
+        # fetcher takes, so a legitimately internal object store is declared
+        # in one place rather than two that can disagree.
+        self._endpoint_allow_hosts = endpoint_allow_hosts
+        # Address resolution seam, the same one the guarded fetcher takes:
+        # real DNS in production, scripted in tests — including the
+        # check-public/connect-private rebinding pair, which is only
+        # expressible with an injected resolver.
+        self._endpoint_resolver = endpoint_resolver
 
     def put(
         self,
@@ -136,8 +152,30 @@ class SourceCredentialService(SourceCredentialServiceProtocol):
             )
         if region is not None and len(region) > _REGION_MAX:
             raise CredentialError(f"region over {_REGION_MAX} characters")
-        if endpoint is not None and len(endpoint) > _ENDPOINT_MAX:
-            raise CredentialError(f"endpoint over {_ENDPOINT_MAX} characters")
+        if endpoint is not None:
+            if len(endpoint) > _ENDPOINT_MAX:
+                raise CredentialError(
+                    f"endpoint over {_ENDPOINT_MAX} characters"
+                )
+            # Validated BEFORE it is stored. The object-store road drops the
+            # guarded fetcher's SSRF machinery because its endpoint comes off
+            # a credential rather than out of a tenant's document — but the
+            # credential is itself written by an authenticated tenant
+            # application through this very method, so "not from the
+            # document" was never "not from the tenant". Without this,
+            # ``http://169.254.169.254/`` is a storable endpoint and the
+            # platform connects to it on the next apply.
+            #
+            # Refusing at write rather than at read is deliberate: a bad
+            # endpoint that reaches storage fails every apply that cites it,
+            # and the person who can fix it is the one making this call.
+            refusal = endpoint_refusal(
+                endpoint,
+                allow_hosts=self._endpoint_allow_hosts,
+                resolver=self._endpoint_resolver,
+            )
+            if refusal is not None:
+                raise CredentialError(refusal)
         if not isinstance(allowed_prefixes, list):
             raise CredentialError("allowed_prefixes must be a list")
         if credential_type is CredentialType.HEADER:
@@ -323,15 +361,27 @@ class SourceCredentialBinding:
     def headers_for(self, url) -> dict[str, str]:
         """What this credential presents for this URL.
 
-        One mechanism reaches here: ``header``, which puts the secret on the
-        wire under the caller's header name. ``oss_aksk`` never does and never
-        did — what it used to do was *sign*, and that road is gone: an object
-        store is read through its own client now, which is handed the key pair
-        directly rather than a set of headers computed here. A binding for one
-        cannot reach this method, because nothing on the object road asks a
-        credential for headers.
+        One mechanism may reach here: ``header``, which puts the secret on the
+        wire under the caller's header name. ``oss_aksk`` never does — an
+        object store is read through its own client, handed the key pair
+        directly rather than a set of headers computed here.
+
+        **The type is checked, not assumed.** Nothing ties a source's
+        ``protocol`` to its credential's ``credential_type``, so a
+        ``protocol: git`` source may legally name an ``oss_aksk`` credential
+        and the git road will ask that binding for headers. Answering would
+        return ``{"": <the object store's secret key>}`` — the empty string
+        being the stored "no header" sentinel — and send it to whatever git
+        host the document named. The mirror of ``object_store_target``'s own
+        guard, and the direction that was missing.
         """
         row = self._current()
+        if row.credential_type is not CredentialType.HEADER:
+            raise CredentialError(
+                f"credential {self.name!r} is a {row.credential_type.value!r} "
+                "credential and presents no header; a source that fetches over "
+                f"HTTP needs one of type {CredentialType.HEADER.value!r}"
+            )
         return {
             row.header_name: self._service._vault.decrypt_or_passthrough(
                 row.secret_ciphertext
@@ -368,7 +418,28 @@ class SourceCredentialBinding:
         )
 
     def reauthorize(self, url) -> None:
+        """Refuse the hop unless the URL is inside this credential's prefixes.
+
+        The ``ValueError`` catch is not defensive noise. ``oss_aksk`` rows now
+        legitimately store an empty prefix list — there is no tenant-supplied
+        host on that road for a prefix to constrain — and a ``git`` source may
+        name one, at which point this runs against ``[]`` and
+        ``validate_prefixes`` answers with a bare ``ValueError``. That is in no
+        family the fetch pipeline catches, so it escaped ``resolve`` and
+        crashed the whole apply rather than failing one entry. The
+        ``credential_type`` guard on ``headers_for`` closes the path that gets
+        here; this makes the class of mistake survivable rather than fatal, so
+        the next stored value nobody anticipated fails one entry with a reason.
+        """
         row = self._current()
-        PrefixAuthorizationPolicy(
-            self.name, json.loads(row.allowed_prefixes)
-        ).reauthorize(url)
+        try:
+            PrefixAuthorizationPolicy(
+                self.name, json.loads(row.allowed_prefixes)
+            ).reauthorize(url)
+        except PrefixAuthorizationError:
+            raise
+        except (ValueError, TypeError) as exc:
+            raise CredentialError(
+                f"credential {self.name!r} has no usable 'allowed_prefixes', "
+                f"so it cannot authorize a fetch: {exc}"
+            ) from exc

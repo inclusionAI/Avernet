@@ -50,6 +50,22 @@ OWNER_APP = 7
 OTHER_APP = 8
 
 
+#: Scripted DNS for the endpoint guard. Real resolution in a unit test would
+#: make these cases depend on the network, and the interesting ones — a host
+#: that resolves somewhere private — are not expressible without it.
+_ENDPOINT_DNS: dict[str, list[str]] = {
+    "objects.example-corp.com": ["93.184.216.34"],
+    "objects.example.test": ["93.184.216.35"],
+    "localhost": ["127.0.0.1"],
+    "metadata.internal": ["169.254.169.254"],
+    "store.corp.internal": ["10.0.0.7"],
+}
+
+
+def _fake_dns(host: str) -> list[str]:
+    return _ENDPOINT_DNS.get(host, [])
+
+
 @pytest.fixture
 def service() -> SourceCredentialService:
     engine = create_engine("sqlite:///:memory:")
@@ -59,6 +75,7 @@ def service() -> SourceCredentialService:
     return SourceCredentialService(
         SourceCredentialRepository(InMemorySqliteDB(engine)),
         TokenVault("master-key-material"),
+        endpoint_resolver=_fake_dns,
     )
 
 
@@ -471,6 +488,91 @@ def test_a_header_credential_has_no_object_store_target(service):
     )
     with pytest.raises(CredentialError, match="oss_aksk"):
         service.binding(name="hdr").object_store_target("bkt")
+
+
+def test_a_signing_credential_presents_no_headers(service):
+    """The symmetry ``object_store_target`` already had, in the other
+    direction — and it is the one that was missing.
+
+    Nothing ties a source's ``protocol`` to its credential's type, so a
+    ``protocol: git`` source may legally name an ``oss_aksk`` credential. The
+    git road then asks that binding for headers. Without this guard it
+    answered ``{"": <the object store's secret key>}`` — the empty string is
+    the stored "no header" sentinel — and sent it to whatever git host the
+    document named. A refusal by name is the only safe answer.
+    """
+    _put_aksk(service)
+    with pytest.raises(CredentialError, match="header"):
+        service.binding(name="oss-artifacts").headers_for(
+            "https://code.example.com/team/x.git"
+        )
+
+
+def test_reauthorizing_a_credential_with_no_prefixes_refuses_in_family(service):
+    """A stored empty prefix list must not raise a bare ``ValueError``.
+
+    ``oss_aksk`` rows legitimately store ``[]`` now, and the git road calls
+    ``reauthorize`` before it fetches. ``PrefixAuthorizationPolicy`` answers an
+    empty list with a plain ``ValueError``, which none of the fetcher's except
+    clauses catch — it escaped ``resolve`` and crashed the whole apply, the
+    one failure mode that module's docstring says must never happen. The
+    reason has to arrive in a family the caller already handles.
+    """
+    _put_aksk(service)
+    with pytest.raises((CredentialError, PrefixAuthorizationError)):
+        service.binding(name="oss-artifacts").reauthorize(
+            "https://code.example.com/team/x.git"
+        )
+
+
+@pytest.mark.parametrize(
+    "endpoint,expected",
+    [
+        ("http://localhost:9000", "scheme"),
+        ("https://localhost", "non-public"),
+        ("https://metadata.internal/latest/meta-data/", "non-public"),
+        ("https://store.corp.internal", "non-public"),
+        ("https://user:pw@objects.example-corp.com", "userinfo"),
+        ("not-a-url", "absolute"),
+        ("https://nowhere.invalid", "resolved"),
+    ],
+)
+def test_an_unsafe_endpoint_is_refused_before_it_is_stored(
+    service, endpoint, expected
+):
+    """The hole the object-store road opened, closed at the write.
+
+    That road drops the guarded fetcher's SSRF machinery on the grounds that
+    its endpoint comes off a credential rather than out of a tenant's
+    document. But the credential is written by an authenticated tenant
+    application through this very method — "not from the document" was never
+    "not from the tenant". Without this check
+    ``http://169.254.169.254/`` is a storable endpoint and the platform
+    connects to it on the next apply.
+
+    Refused at write, not at read: a bad endpoint that reaches storage fails
+    every apply citing it, and the caller who can fix it is the one here.
+    """
+    with pytest.raises(CredentialError, match=expected):
+        _put_aksk(service, endpoint=endpoint)
+    assert service.list_credentials() == []  # nothing persisted
+
+
+def test_a_declared_internal_store_is_allowed_by_the_deployment(sqlite_engine):
+    """The escape hatch is the deployment's, not the document's.
+
+    An internal object store is a legitimate deployment choice, and it is
+    declared in the same transport allowlist the fetch road reads — one place,
+    so the two cannot disagree about which internal hosts exist.
+    """
+    svc = SourceCredentialService(
+        SourceCredentialRepository(InMemorySqliteDB(sqlite_engine)),
+        TokenVault("master-key-material"),
+        endpoint_allow_hosts=("store.corp.internal",),
+        endpoint_resolver=_fake_dns,
+    )
+    record = _put_aksk(svc, endpoint="https://store.corp.internal")
+    assert record.endpoint == "https://store.corp.internal"
 
 
 def test_prefixes_are_refused_on_a_signing_credential(service):

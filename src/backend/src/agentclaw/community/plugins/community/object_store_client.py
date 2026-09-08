@@ -47,6 +47,27 @@ _CHUNK = 256 * 1024
 #: S3 error codes that mean "the document names something that is not there".
 _NOT_FOUND_CODES = frozenset({"NoSuchKey", "NoSuchBucket", "404", "NotFound"})
 
+#: Codes that mean "the request itself is wrong" — a malformed bucket name, a
+#: bad argument, a signature the store rejects because the region is wrong.
+#: These are configuration, not availability: retrying changes nothing, and
+#: letting ``keep_last`` mask them is how a mistyped region goes on serving
+#: last apply's bytes indefinitely while looking healthy.
+_INVALID_REQUEST_CODES = frozenset(
+    {
+        "InvalidBucketName",
+        "InvalidArgument",
+        "InvalidRequest",
+        "InvalidObjectName",
+        "AuthorizationHeaderMalformed",
+        "AuthorizationQueryParametersError",
+        "MalformedXML",
+        "MethodNotAllowed",
+        "PermanentRedirect",
+        "400",
+        "BadRequest",
+    }
+)
+
 #: ...and that mean "this credential may not read it". Both halves matter:
 #: a wrong key and a right key without permission are the same refusal to the
 #: caller, and neither may be masked by ``keep_last``.
@@ -149,11 +170,23 @@ class S3ObjectStoreClient(ObjectStoreClient):
             return ObjectFetchResult(
                 ObjectFetchStatus.DENIED, detail=f"{where}: not authorized"
             )
-        # Anything else — 5xx, throttling, an unmapped code — is the store
-        # having a bad time rather than the document being wrong. Maskable,
-        # which is the safe direction *for this bucket*: a refusal wrongly
-        # called a failure keeps stale bytes for one apply; a failure wrongly
-        # called a refusal fails an apply that would have recovered.
+        if code in _INVALID_REQUEST_CODES or status.startswith("4"):
+            # A 4xx the store did not classify further is still the request
+            # being wrong, and retrying it changes nothing. Refusing rather
+            # than reporting UNAVAILABLE is what keeps ``keep_last`` from
+            # masking a mistyped region or bucket name forever.
+            return ObjectFetchResult(
+                ObjectFetchStatus.NOT_FOUND,
+                detail=(
+                    f"{where}: the object store refused the request"
+                    + (f" ({code})" if code else "")
+                ),
+            )
+        # What is left is the store having a bad time — 5xx, throttling, a
+        # code with no status at all. Maskable, and only this. An earlier
+        # version of this function sent *everything* unmapped down this path
+        # on the reasoning that masking is the safer direction; it is not,
+        # for a configuration error, which never recovers on its own.
         logger.warning(
             "[manifest.object_store] unclassified bucket=%s code=%s status=%s",
             self._target.bucket,

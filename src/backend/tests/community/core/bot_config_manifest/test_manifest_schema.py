@@ -1368,3 +1368,31 @@ def test_subpath_is_always_meaningful_on_a_git_source(category, entry):
         "    ref: v1.2.0\n"
         f"manifest:\n  {category}:\n{entry}"
     )
+
+
+def test_one_mistake_on_a_source_field_is_one_violation():
+    """Absence and malformedness are different mistakes with different fixes,
+    and each gets exactly one message.
+
+    The required-field check used to fire alongside the per-field one, so an
+    empty ``url`` produced both "must declare 'url'" and "'url' must be a
+    non-empty string" — and for a wrong-typed value the first was actively
+    false, since the field *is* declared. Same anti-duplication rule the
+    misplaced-key path already followed.
+    """
+    from agentclaw.community.core.bot_config_manifest.schema.sources import (
+        parse_source,
+    )
+
+    for raw, expected in [
+        ({"protocol": "git", "url": ""}, "non-empty"),
+        ({"protocol": "git", "url": 123}, "non-empty"),
+        ({"protocol": "git"}, "must declare"),
+        # ``auth`` has its own wording; what is pinned is the count.
+        ({"protocol": "oss", "bucket": "b", "auth": ""}, "credential"),
+        ({"protocol": "oss", "bucket": "b"}, "must declare"),
+    ]:
+        decl, violations = parse_source(raw)
+        assert decl is None
+        assert len(violations) == 1, (raw, [v.message for v in violations])
+        assert expected in violations[0].message, (raw, violations[0].message)
