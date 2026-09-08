@@ -82,6 +82,7 @@ def _submit(seam, apply_result=None, passport=None):
     skill_set_factory = MagicMock()
     skill_set_factory.create.return_value.get_bot_mcp_codes.return_value = []
     outcome = submit_bot_creation_with_manifest(
+        nick_name="Test Owner",
         user_id="u1",
         bot_id="b_1",
         document=_DOCUMENT,
