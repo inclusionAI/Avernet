@@ -150,8 +150,19 @@ class BotManageService(Protocol):
         request_id: str,
         auto_approve_publish: bool = False,
         bot_config: BotConfig | None = None,
+        device_uuids: list[str] | None = None,
     ) -> ScaleBotResponse:
-        """Scale Bot to target device count (SCALE_UP or SCALE_DOWN)."""
+        """Scale Bot to target device count (SCALE_UP or SCALE_DOWN).
+
+        ``target_count`` is always required. When ``device_uuids`` is
+        also supplied, it must satisfy ``target_count ==
+        current_count - len(device_uuids)`` and the operation targets
+        exactly those devices for SCALE_DOWN destruction.
+        ``device_uuids`` is rejected on SCALE_UP.
+
+        When ``device_uuids`` is omitted, behavior is unchanged:
+        SCALE_DOWN destroys the oldest ACTIVE devices.
+        """
         ...
 
     async def update_bot(

@@ -1073,10 +1073,52 @@ class DefaultPublishService(PublishService):
                 [d for d in all_devices if d.status == DeviceStatus.ACTIVE.value],
                 key=lambda d: d.id,
             )
+
+            publish_repo = self._publish_repo
+            publish_record = publish_repo.get_by_id(
+                publish_id, tenant=tenant, env=env
+            )
+            target_uuids: list[str] = []
+            if publish_record and publish_record.extra_config:
+                try:
+                    cfg = PublishConfig.model_validate(
+                        publish_record.extra_config
+                    )
+                    target_uuids = cfg.target_device_uuids or []
+                except Exception:
+                    logger.warning(
+                        f"[create_device_records] Failed to parse "
+                        f"target_device_uuids for SCALE_DOWN "
+                        f"publish_id={publish_id}"
+                    )
+
+            if target_uuids:
+                target_set = set(target_uuids)
+                present_uuids = {d.device_uuid for d in eligible_devices}
+                missing = target_set - present_uuids
+                if missing:
+                    raise ValueError(
+                        f"Requested SCALE_DOWN devices not ACTIVE/owned: "
+                        f"{sorted(missing)}"
+                    )
+                eligible_devices = [
+                    d for d in eligible_devices if d.device_uuid in target_set
+                ]
+                expected_scale_amount = sum(
+                    b.batch_capacity for b in batch_records
+                )
+                if len(eligible_devices) != expected_scale_amount:
+                    raise ValueError(
+                        f"SCALE_DOWN target_device_uuids count "
+                        f"({len(eligible_devices)}) != scale_amount "
+                        f"({expected_scale_amount})"
+                    )
+
             event_type = PublishEventType.DESTROY.value
             logger.info(
                 f"[create_device_records] SCALE_DOWN publish_id={publish_id} "
                 f"found {len(eligible_devices)} ACTIVE devices"
+                + (f" targeted={target_uuids}" if target_uuids else "")
             )
 
         elif publish_type == PublishType.DESTROY:

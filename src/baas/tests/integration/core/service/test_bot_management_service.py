@@ -1481,3 +1481,201 @@ class TestBotManagementServiceIntegration:
         assert stored_config.deploy_config is not None
         assert stored_config.deploy_config.docker_image == "scale-img:v2"
         assert stored_config.deploy_config.ttl_in_minutes == 120
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_workflow_with_device_uuids(
+        self,
+        bot_repository,
+        device_repository,
+        shared_bot_setup,
+        created_bot_ids,
+        created_device_ids,
+        created_publish_ids,
+    ):
+        """Scale down with explicit device_uuids targets exactly those devices.
+
+        - Create a bot with 3 ACTIVE devices
+        - Scale down via device_uuids targeting the first 2 devices
+        - Assert: publish created, target_count = 1 (matches 3 - 2 = 1)
+        - Assert: publish record stores target_device_uuids = [uuid1, uuid2]
+        - Assert: uuid3 is NOT in target_device_uuids (it remains)
+        """
+        from secbaas.community.api.publish_manage import PublishConfig
+
+        # Create a fresh bot with 3 ACTIVE devices
+        bot_uuid = generate_uuid()
+        bot_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.ACTIVE.value,
+            name="Scale With Device UUIDs Bot",
+            description="Bot for scale down with device_uuids",
+            template_uuid=None,
+            replica_desired=3,
+            replica_minimum=1,
+            replica_maximum=10,
+            auto_scaling_enabled=0,
+            sla_grade="standard",
+            extra_config={},
+        )
+        created_bot_ids.append(bot_id)
+
+        rel_repo = get_container().repository.bot_device_rel_repository()
+
+        # Create 3 ACTIVE devices and track their UUIDs
+        device_uuids: list[str] = []
+        for _ in range(3):
+            d_uuid = generate_uuid()
+            d_id = device_repository.insert_device(
+                device_uuid=d_uuid,
+                tenant=FIXED_TENANT_NAME,
+                env=TEST_ENV,
+                domain="test_domain",
+                creator="test_user",
+                modifier="test_user",
+                status=DeviceStatus.ACTIVE.value,
+                provider_type="Sigma",
+                provider_device_id=None,
+                provider_device_props={},
+                extra_config={},
+            )
+            created_device_ids.append(d_id)
+            rel_repo.insert_rel(
+                bot_id=bot_id,
+                device_uuid=d_uuid,
+                tenant=FIXED_TENANT_NAME,
+                env=TEST_ENV,
+                domain="test_domain",
+                creator="test_user",
+                modifier="test_user",
+            )
+            device_uuids.append(d_uuid)
+
+        target_uuids = device_uuids[:2]
+        remaining_uuid = device_uuids[2]
+
+        with patch.object(
+            DefaultTenantManageService,
+            "get_tenant_by_name",
+            return_value=create_mock_tenant_response(),
+        ):
+            result = await _bms().scale_bot(
+                tenant=FIXED_TENANT_NAME,
+                bot_uuid=bot_uuid,
+                target_count=1,
+                device_uuids=target_uuids,
+                operator="test_user",
+                request_id=uuid4().hex,
+            )
+
+        # Publish must be created successfully
+        assert result is not None
+        assert result.publish_id is not None
+        # target_count = current_count - len(device_uuids) = 3 - 2 = 1
+        assert result.target_count == 1
+        assert result.bot_uuid == bot_uuid
+        created_publish_ids.append(result.publish_id)
+
+        # Read the publish record and verify target_device_uuids.
+        # The integration test does not execute the publish (matching the
+        # existing test_scale_bot_workflow pattern); asserting the publish
+        # record stores the right target_device_uuids proves the targeting
+        # reached the persistence layer.
+        publish_repo = get_container().repository.publish_repository()
+        publish = publish_repo.get_by_id(
+            result.publish_id, tenant=FIXED_TENANT_NAME, env=TEST_ENV
+        )
+        assert publish is not None
+        stored_config = PublishConfig.model_validate(publish.extra_config)
+        assert stored_config.target_device_uuids is not None
+        assert set(stored_config.target_device_uuids) == set(target_uuids)
+        # The device not in device_uuids must NOT be marked for destruction.
+        assert remaining_uuid not in stored_config.target_device_uuids
+
+    @pytest.mark.asyncio
+    async def test_scale_bot_with_device_uuids_validates_against_real_repo(
+        self,
+        bot_repository,
+        device_repository,
+        shared_bot_setup,
+        created_bot_ids,
+        created_device_ids,
+    ):
+        """Scale down with device_uuids referencing a foreign device raises ValueError.
+
+        - Create bot A with one ACTIVE device (uuid-a)
+        - Attempt to scale down bot A with device_uuids=["uuid-from-other-bot"]
+        - Assert: ValueError raised because device does not belong to bot A.
+
+        Uses the real DI container and SQLite-backed repositories so the
+        validation hits the real device/relationship lookup.
+        """
+        bot_uuid = generate_uuid()
+        bot_id = bot_repository.insert_bot(
+            bot_uuid=bot_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=BotStatus.ACTIVE.value,
+            name="UUID Validation Bot",
+            description="Bot for device_uuids validation test",
+            template_uuid=None,
+            replica_desired=1,
+            replica_minimum=1,
+            replica_maximum=10,
+            auto_scaling_enabled=0,
+            sla_grade="standard",
+            extra_config={},
+        )
+        created_bot_ids.append(bot_id)
+
+        # Create one ACTIVE device owned by this bot
+        own_device_uuid = generate_uuid()
+        own_device_id = device_repository.insert_device(
+            device_uuid=own_device_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+            status=DeviceStatus.ACTIVE.value,
+            provider_type="Sigma",
+            provider_device_id=None,
+            provider_device_props={},
+            extra_config={},
+        )
+        created_device_ids.append(own_device_id)
+        rel_repo = get_container().repository.bot_device_rel_repository()
+        rel_repo.insert_rel(
+            bot_id=bot_id,
+            device_uuid=own_device_uuid,
+            tenant=FIXED_TENANT_NAME,
+            env=TEST_ENV,
+            domain="test_domain",
+            creator="test_user",
+            modifier="test_user",
+        )
+
+        # A device UUID that does not belong to this bot
+        foreign_device_uuid = generate_uuid()
+
+        with patch.object(
+            DefaultTenantManageService,
+            "get_tenant_by_name",
+            return_value=create_mock_tenant_response(),
+        ):
+            with pytest.raises(ValueError, match="not found or not belonging to bot"):
+                await _bms().scale_bot(
+                    tenant=FIXED_TENANT_NAME,
+                    bot_uuid=bot_uuid,
+                    target_count=1,
+                    device_uuids=[foreign_device_uuid],
+                    operator="test_user",
+                    request_id=uuid4().hex,
+                )
