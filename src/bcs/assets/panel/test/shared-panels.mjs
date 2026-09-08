@@ -46,7 +46,8 @@ try {
   assert.match(container.querySelector('#game').textContent, /玩家/);
   assert.ok(requests.includes('/bcnproxy/state-machine-runs/default-run/graph'));
   assert.ok(requests.includes('/bcnproxy/state-machine-runs/game-run/graph'));
-  assert.ok(requests.some(url => url.includes('/sessions/game-session/messages')));
+  assert.equal(requests.some(url => url.includes('/sessions/')), false);
+  assert.ok(requests.includes('/bcnproxy/state-machine-runs/game-run/pending-human-nodes'));
 } finally {
   await act(async () => root.unmount());
   dom.window.close();

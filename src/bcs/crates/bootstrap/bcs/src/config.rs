@@ -2354,9 +2354,19 @@ file = "assets/panel/dist/index.umd.js"
     #[test]
     fn test_shipped_manifests_use_the_shared_panel_bundle() {
         for (source, uses_cdn) in [
-            (include_str!("../../../../configs/bcs-config-example.toml"), false),
+            (include_str!("../../../../configs/bcs-config-example.toml"), true),
             (include_str!("../../../../configs/bcs-config-local.toml"), false),
-            (include_str!("../../../../configs/bcs-config-prod.toml"), true),
+            (
+                r#"
+bots_base_dir = "/bots"
+
+[[manifest.bundles]]
+name = "bcsPanel"
+type = "file"
+url = "https://cdn.example.com/bcs-panel/1.0.0/index.js"
+"#,
+                true,
+            ),
         ] {
             let config: BcsConfig = toml::from_str(source).unwrap();
             assert_eq!(config.manifest.bundles.len(), 1);

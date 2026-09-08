@@ -42,19 +42,27 @@ The panel polls non-terminal runs, preserves the last good room on refresh failu
 
 ## Existing contracts
 
-The asset uses only existing BCS endpoints:
+Game-generated panel parameters omit `apiBaseUrl` and `baseUrl` so the host can
+inject its deployment API base (currently `/api/v1/collaboration` in the UMD
+host). Without host injection, the game component uses `/bcnproxy` for local
+development. Explicit `apiBaseUrl` overrides remain supported. Do not pin a
+deployment path in the referee's generated parameters: it prevents host injection.
+Existing panel parameters containing the old explicit `/bcnproxy` must be
+regenerated with the updated referee script and reopened. A successful HTTP
+response containing HTML instead of JSON is reported as an API routing error.
+
+The game panel uses only existing BCS state-machine endpoints:
 
 - `GET /state-machine-runs/{run_id}/graph`
 - `GET /state-machine-runs/{run_id}/pending-human-nodes`
 - `GET /state-machine-runs/{run_id}/nodes/{node_id}`
-- `GET /sessions/{session_id}/messages?include_pending=true`
 - `POST /state-machine-runs/{run_id}/nodes/{node_id}/respond`
 
 No backend endpoint, graph topology, generic frontend behavior, or runtime dependency is added.
 
 ## Real-run output and bounded-layout behavior
 
-The panel does not assume that manager-worker one-shot node outputs are copied into ordinary session messages. For completed nodes explicitly listed in `nodeActorMap`, it incrementally reads the existing authenticated node-detail endpoint, caches by `(runId, nodeId, attempt)`, and merges those results with the session-message compatibility path. Speech artifacts become phase-local player bubbles; vote artifacts become only `已投票` until an authorized host tally/result is public. Host and unknown artifacts are never inferred as player speech.
+The panel does not assume that manager-worker one-shot node outputs are copied into ordinary session messages. For completed nodes explicitly listed in `nodeActorMap`, it incrementally reads the existing authenticated node-detail endpoint, caches by `(runId, nodeId, attempt)`, and uses those results as the sole source of current-phase public outputs. It does not request session messages: the deployed session-message API belongs to `/openapi/v1/collaboration`, while state-machine endpoints belong to `/api/v1/collaboration`. Output appears after node completion and the next successful refresh; in-progress message previews are not displayed. Sanitized cross-round history still comes from `publicHistory`. Node-detail failures surface a refresh error, preserve the last good room, and are retried on refresh instead of being silently discarded. Speech artifacts become phase-local player bubbles; vote artifacts become only `已投票` until an authorized host tally/result is public. Host and unknown artifacts are never inferred as player speech.
 
 The panel root is its own bounded viewport. The room scrolls inside the scene region, while the Action Dock uses a fixed header, internally scrollable context body, and non-scrolling footer for submit/confirmation and recovery controls. Actor details use an absolute panel-local overlay, close with Escape, and restore focus to the invoking seat or bubble. Automatic refresh is run-owned and continues after unchanged non-terminal snapshots; it stops on terminal state, run replacement, disabled refresh, or unmount.
 
@@ -109,7 +117,7 @@ a round progress bar, independent host broadcasts, and a persistent action foote
 
 The room uses original paneled walls, parquet, brass-trimmed green felt, a geometric rug and warm window lighting with the existing CC0 characters. All art remains embedded in the UMD bundle.
 
-The game-over dialog opens after a completed run only when the phase explicitly denotes a whole-game finish (`complete`, `completed`, `finished`, `game_over`), or the current run has a non-pending mapped host output with an explicit Chinese game-end declaration and a civilian/undercover victory verdict. Ordinary phase completion, player claims, private messages and conditional rule explanations do not trigger it. This is a conservative compatibility path for the existing host prose, not an inference from player count or round number. Other wording remains available in the host broadcast without an automatic popup.
+The game-over dialog opens after a completed run only when the phase explicitly denotes a whole-game finish (`complete`, `completed`, `finished`, `game_over`), or the current run has a non-pending mapped host output with an explicit Chinese game-end declaration and a civilian/undercover victory verdict. Ordinary phase completion, player claims, unmapped artifacts and conditional rule explanations do not trigger it. This is a conservative compatibility path for the existing host prose, not an inference from player count or round number. Other wording remains available in the host broadcast without an automatic popup.
 
 The dialog shows only the existing public host summary and honors `showPublicReveal` and `showHostOutput`. It traps keyboard focus, supports Escape and “回到圆桌”, and can be reopened via “查看终局”. Dismissal is scoped to the mounted game session and survives refreshes and phase updates; no private data is persisted.
 
