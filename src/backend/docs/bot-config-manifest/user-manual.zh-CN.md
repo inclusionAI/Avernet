@@ -394,14 +394,37 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 }
 ```
 
-**四个字段的意思**：
+**注意这一组端点是租户级的、不带 `user_id`**——与本特性其余每条路由都不同。
+
+**字段的意思**：
 
 | 字段 | 说明 |
 | --- | --- |
 | `{name}`（URL 里） | 凭证名，自由标识符。清单里用 `auth: corp-git-content` 引用它。它与域名之间**没有**任何推导关系 |
-| `type` | 判别键是**认证机制**，不是存储类型。v1 只实现 `header`；`oss_aksk`、`basic` 是保留值，写了会被拒绝 |
-| `header_name` + `secret` | fetch 时原样注入的请求头。`secret` 是**完整头值** |
+| `type` | 判别键是**认证机制**，不是源协议。已实现 `header` 与 `oss_aksk`；`basic` 仍是保留值，写了会被拒绝 |
+| `header_name` + `secret` | **`header` 专有**：fetch 时原样注入的请求头。`secret` 是**完整头值** |
+| `access_key_id` + `secret` | **`oss_aksk` 专有**：密钥对。`secret` 是密钥半边 |
+| `region` | **`oss_aksk` 可选**：签名区域，缺省取签名器默认（`us-east-1`，不校验区域的 S3 兼容存储都接受） |
 | `allowed_prefixes` | **必填，至少一项**：这个凭证允许被出示给哪些 URL 前缀 |
+
+**私有对象存储用 `oss_aksk`**——它签名，不出示：
+
+```text
+PUT /openapi/v1/bots/source-credentials/oss-artifacts
+{
+  "type": "oss_aksk",
+  "access_key_id": "LTAI5t…",
+  "secret": "…",
+  "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
+}
+```
+
+两种机制的差别不只是字段：`header` 把 secret **本身**放上线路；`oss_aksk` 的密钥
+半边**从不上线路**——它派生签名密钥，线路上走的是对**这一个请求**的签名，换个
+URL 就换一个签名，拦到也重放不了。
+
+**字段与机制必须对上**：`header` 凭证写 `access_key_id`、`oss_aksk` 凭证写
+`header_name`，都会被**拒绝**而不是忽略——静默丢弃会让你以为自己配置了签名。
 
 **`allowed_prefixes` 为什么必填**：git 服务和对象存储都是**单 origin 承载大量
 互不相关的内容**。只按域名放行的话，任何有清单编辑权的人把 `source` 改指同域名下
@@ -435,8 +458,10 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 **生命周期**：
 
 - **读回是掩码的**——`GET /openapi/v1/bots/source-credentials/{name}` 只返回
-  `has_secret` / `type` / `header_name` / `allowed_prefixes` / `owner_app_id` /
-  `updated_at`，任何路径下都不返回值；不带 `{name}` 的 `GET` 是租户内的列表，按名字
+  `has_secret` / `type` / `header_name` / `access_key_id` / `region` /
+  `allowed_prefixes` / `owner_app_id` / `updated_at`，任何路径下都**不返回
+  secret**。`access_key_id` 是**唯一**回读的那一半，因为它是标识符不是密钥——
+  轮换若不可验证就没人会做；它的密钥半边没有任何表示。不带 `{name}` 的 `GET` 是租户内的列表，按名字
   排序，字段更少（`name` / `has_secret` / `updated_at`）。日志、错误信息、apply 报告
   里只出现凭证**名**。
 - **凭证有「属主应用」**：第一次 `PUT` 一个没被占用的名字，调用方那个应用就成了它的
@@ -455,7 +480,8 @@ schema_version: 1          # 必填，v1 固定为 1；未知版本拒绝写入
 
 sources:                   # 可选：命名源，一处声明、多处引用
   content:
-    git: https://code.example-corp.com/team/content.git
+    protocol: git          # 源声明它的协议：git | oss
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0
     auth: corp-git-content
     mode: non_strict       # 可选：移动 ref 的策略，见 §6.2
@@ -709,7 +735,8 @@ GET /openapi/v1/bots/{bot_id}/with-manifest/status
 ```diff
  sources:
    content:
-     git: https://code.example-corp.com/team/content.git
+     protocol: git
+     url: https://code.example-corp.com/team/content.git
 -    ref: v1.2.0
 +    ref: v1.3.0
 ```
@@ -914,13 +941,15 @@ cli_tools:
   `subpath` 指出包内哪个文件是这个命令，平台取出它，**包内其余文件不下发**。一个
   包里两个命令就写两个条目。所以**需要同包辅助程序、或运行时要读同包 `lib/` 的
   工具用不了**，请打成静态二进制。（没有 `entrypoints` 字段。）
-- **两种源形态**：直接指向一个二进制，或指向一个压缩包 + `subpath`。两种都必须
-  带 `digest` —— 平台代你分发可执行物，供应链必须钉死。（`md5` 是平台物化之后
-  自己算出来给引擎做变更判断的，不是你写的字段。）
-- ⚠️ **来源只能写内联 `source` URL，不要用 `from` 引用命名源、也不要用 git 源。**
-  这一条与 `resources` 那条不同、也更危险：`resources` 写了会在 `PUT` 当场被拒，而
-  `cli_tools` 写了**能通过 `PUT`**，然后在 apply 时失败——物化器不解析命名源，会把
-  `from` 的那个**源名当成 URL** 直接拿去取。见附录 C。
+- **`oss` 的两种形态**：直接指向一个二进制，或指向一个压缩包 + `subpath`。两种
+  都必须带 `digest` —— 平台代你分发可执行物，供应链必须钉死。（`md5` 是平台物化
+  之后自己算出来给引擎做变更判断的，不是你写的字段。）
+- **`from` 与 git 源现在都可用**。以前不行，而且失败得最难看：写了**能通过
+  `PUT`**、在 apply 时才失败——物化器不解析命名源，会把 `from` 的那个**源名当成
+  URL** 直接拿去取。这是这个面唯一一处「提交得过、跑不通」的构造，现在没有了。
+- **git 源不需要 `digest`**（commit SHA 就是钉子），但**每次 apply 都会重新取**：
+  没有 digest 就没有收敛坐标可比，而 ref 可能已经移动——宁可重取，也不能让一个
+  移动过的 ref 以 `unchanged` 蒙混过去。要跳过重取就用 `oss` + `digest`。
 - **`digest` + `subpath` 才是收敛依据，`version` 不是。**只改 `version` 不会
   触发重新下发——否则改一个字符串就会重推一个可能 200 MiB 的二进制。
 - **两个入口，一套实现**：清单里声明，或直接调管理 API——
@@ -1293,13 +1322,15 @@ schema_version: 1
 
 sources:
   content:                                   # 内容仓库（git）
-    git: https://code.example-corp.com/team/content.git
+    protocol: git
+    url: https://code.example-corp.com/team/content.git
     ref: v1.2.0                              # ← 整套配置升版本只改这一行
     auth: corp-git-content
     mode: non_strict
-  artifacts:                                 # 制品桶（URL 前缀）
-    url: https://artifacts.example-corp.com/tools/
-    auth: oss-artifacts
+  order-lookup:                              # 制品桶上的一个对象
+    protocol: oss                            # oss:一次请求取一个对象，
+    url: https://artifacts.example-corp.com/tools/skills/order-lookup-1.4.0.zip
+    auth: oss-artifacts                      # 所以 url 指向对象本身
 
 manifest:
   identity:
@@ -1325,9 +1356,9 @@ manifest:
       from: content
       subpath: skills/quality-check/
     - name: order-lookup
-      from: artifacts
-      subpath: skills/order-lookup-1.4.0.zip
-      digest: "sha256:3e7a…"
+      from: order-lookup
+      digest: "sha256:3e7a…"                 # oss 形态：强制钉版
+      unpack: zip
 
   mcp:
     - server_code: mcp.ant.homistudio.meetmcp
@@ -1353,9 +1384,9 @@ PUT /openapi/v1/bots/source-credentials/corp-git-content
 
 PUT /openapi/v1/bots/source-credentials/oss-artifacts
 {
-  "type": "header",
-  "header_name": "Authorization",
-  "secret": "Bearer …",
+  "type": "oss_aksk",                        # 私有对象存储:签名，不出示
+  "access_key_id": "LTAI5t…",
+  "secret": "…",                             # 密钥半边:永不上线路、永不回读
   "allowed_prefixes": ["https://artifacts.example-corp.com/tools/"]
 }
 ```
@@ -1914,10 +1945,14 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | --- | --- | --- |
 | `type` | enum | 认证机制：`header` / `oss_aksk` / `basic`，见 B.7 |
 | `header_name` | string \| null | secret 会被放进哪个请求头；机制不用请求头时 `null` |
+| `access_key_id` | string \| null | `oss_aksk` 的访问密钥 ID，其余机制为 `null`。**原样返回**——它是标识符不是密钥，每个签名请求里都带着它 |
+| `region` | string \| null | `oss_aksk` 的签名区域；取默认时为 `null` |
 | `allowed_prefixes` | string[] | 这个凭证**允许被出示给**哪些绝对 HTTPS 前缀 |
 | `owner_app_id` | int | 属主应用的注册 id。轮换与删除只有它能做；租户内所有应用都能读这份元数据 |
 
 **任何路径下都不返回 secret 的值。**日志、错误信息、apply 报告里只出现凭证**名**。
+`access_key_id` 是唯一的例外，而它不是 secret：密钥对的密钥半边在这里**没有字段**
+——不是被掩码，是根本没有表示。
 
 **错误**：`404` —— 本租户下没有这个名字的凭证。
 
@@ -1937,10 +1972,12 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 必填 | 类型 | 含义与取值 |
 | --- | --- | --- | --- |
-| `type` | ❌ | enum，默认 `header` | 出示 secret 的**认证机制**（不是存储类型）。`header` 是唯一已实现的；`oss_aksk` 与 `basic` 是保留值，**写了会被 `422` 拒绝** |
+| `type` | ❌ | enum，默认 `header` | secret 的**认证机制**（不是源协议）。`header` **出示**（secret 本身上线路）；`oss_aksk` **签名**（密钥半边从不上线路，线路上是对这一个请求的签名）。`basic` 仍是保留值，**写了会被 `422` 拒绝** |
 | `header_name` | 见右 | string \| null | secret 放进哪个请求头。**`type` 是 `header` 时必填**（如 git 宿主的 `PRIVATE-TOKEN`，或 bearer 风格的 `Authorization`）。必须是合法的 HTTP header token（RFC 7230：字母数字与 `!#$%&'*+.^_\`\|~-`，**不含空格、冒号**），**长度 ≤ 256**；不合法 → `422` |
-| `secret` | ✅ | string | secret 值本身，**是完整的头值**。加密落库，**永远读不回来**，不进日志、不进 apply 报告 |
-| `allowed_prefixes` | ✅ | string[] | 授权出示范围：绝对 HTTPS 前缀，**至少一项，空数组即拒绝**。按**路径段边界**匹配——`https://host/team/content` 授权的是那棵树，**不包括** `…/team/content-secret` |
+| `access_key_id` | 见右 | string \| null | 访问密钥 ID。**`type` 是 `oss_aksk` 时必填**，长度 ≤ 256。它是**标识符不是密钥**（每个签名请求里都带着它），所以**可以回读**——轮换若不可验证就没人会做。写在 `header` 凭证上 → `422` |
+| `region` | ❌ | string \| null | `oss_aksk` 的签名区域，长度 ≤ 64。缺省取签名器默认（`us-east-1`）。写在 `header` 凭证上 → `422` |
+| `secret` | ✅ | string | secret 值本身——`header` 的完整头值，或 `oss_aksk` 密钥对的**密钥半边**。加密落库，**永远读不回来**，不进日志、不进 apply 报告 |
+| `allowed_prefixes` | ✅ | string[] | 授权出示范围：绝对 HTTPS 前缀，**至少一项，空数组即拒绝**。按**路径段边界**匹配——`https://host/team/content` 授权的是那棵树，**不包括** `…/team/content-secret`。对签名凭证同样成立：「被出示」对它而言就是「被用来签名」 |
 
 **响应 `data`**：与 B.4.2 相同的掩码详情（回显你刚写的元数据，不含 secret）。
 
@@ -1949,7 +1986,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 状态 | 什么时候 |
 | --- | --- |
 | `403` | 这个名字已被别的应用占着——轮换是属主应用一个人的事 |
-| `422` | **`name` 不合规**（空、超 128 字符、含空白）；`type` 是保留机制；`type` 是 `header` 却没给 `header_name`，或 `header_name` 不是合法 header token / 超 256 字符；`secret` 为空；前缀不是绝对 HTTPS 或数组为空 |
+| `422` | **`name` 不合规**（空、超 128 字符、含空白）；`type` 是保留机制或未知；`type` 是 `header` 却没给 `header_name`，或 `header_name` 不是合法 header token / 超 256 字符；`type` 是 `oss_aksk` 却没给 `access_key_id`；**字段与机制对不上**（`header` 上写 `access_key_id`/`region`，或 `oss_aksk` 上写 `header_name`）——拒绝而不是忽略，静默丢弃会让调用方以为自己配置了签名；`secret` 为空；前缀不是绝对 HTTPS 或数组为空 |
 | `503` | 生产环境解析不到平台主密钥。**写入被拒绝，绝不明文落库** |
 
 > **注册/轮换不触发任何 apply**，下一个 apply 点自然用新值。
