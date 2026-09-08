@@ -27,6 +27,7 @@ from engine.community.api.skills.schemas import (
     RuntimeLayoutProbeApiResponse,
     RuntimeLayoutProbeRequest,
     RuntimeLayoutProbeResponse,
+    SkillMappingApplyRequest,
     SyncSymlinkRequest,
 )
 from engine.community.api.skills.schemas import (
@@ -54,6 +55,7 @@ from engine.community.core.skills.models import (
     CenterEnsureRequest,
     CleanSymlinksRequest,
     PoolMappingApplyMode,
+    PoolMappingApplyRequest,
     PoolMappingSourceLayout,
     PoolSkillMappingIntent,
     SymlinkItem,
@@ -103,6 +105,57 @@ def _mapping_command(
     return SymlinkItem(
         source=item.source,
         target=item.target,
+    )
+
+
+def _logical_mapping_command(
+    item: PoolSkillMappingIntentSchema | PoolCenterMappingIntentSchema,
+) -> PoolSkillMappingIntent:
+    command = _mapping_command(item)
+    assert isinstance(command, PoolSkillMappingIntent)
+    return command
+
+
+@router.post("/mappings/apply", response_model=ApiResponse)
+async def apply_runtime_skill_mappings(
+    body: SkillMappingApplyRequest,
+) -> ApiResponse:
+    """Thin adapter for the steady-state logical Mapping Plugin API."""
+
+    plugin = _skills_plugin()
+    apply = getattr(plugin, "apply_pool_mappings", None)
+    if apply is None:
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "code": "SKILL_MAPPINGS_APPLY_UNSUPPORTED",
+                "message": "active Engine does not implement logical mapping apply",
+            },
+        )
+    try:
+        result = await apply(
+            PoolMappingApplyRequest(
+                mappings=tuple(_logical_mapping_command(item) for item in body.mappings),
+                retired_mappings=tuple(
+                    _logical_mapping_command(item) for item in body.retired_mappings
+                ),
+                source_layout=PoolMappingSourceLayout(body.source_layout),
+            )
+        )
+    except CapabilityNotSupportedError as error:
+        raise HTTPException(
+            status_code=501,
+            detail={
+                "code": "SKILL_MAPPINGS_APPLY_UNSUPPORTED",
+                "message": str(error),
+            },
+        ) from error
+    except InvalidPoolMappingRequestError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return ApiResponse(
+        success=result.status.value == "CONVERGED",
+        data=result.to_data(),
+        message="Skill logical mappings apply completed",
     )
 
 

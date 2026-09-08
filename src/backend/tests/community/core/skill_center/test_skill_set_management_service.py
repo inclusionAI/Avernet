@@ -741,6 +741,7 @@ class _RuntimeSkills:
 
 class _RuntimePool:
     def __init__(self, *, published=True, verified=True) -> None:
+        self.apply_calls: list[dict] = []
         self.publish_calls: list[dict] = []
         self.verify_calls: list[dict] = []
         self._published = published
@@ -748,6 +749,14 @@ class _RuntimePool:
 
     async def probe(self, **_kwargs):
         raise AssertionError("non-Center projection must keep the legacy adapter")
+
+    async def apply_mappings(self, **kwargs):
+        from agentclaw.community.core.skills_pool.runtime import (
+            LegacyMappingApplyRequired,
+        )
+
+        self.apply_calls.append(kwargs)
+        raise LegacyMappingApplyRequired()
 
     async def publish_mappings(self, **kwargs):
         self.publish_calls.append(kwargs)
@@ -2029,12 +2038,13 @@ async def test_runtime_projection_fails_before_engine_writes_when_flush_fails():
 async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavailable():
     factory = _FailingPolicyCollectFactory()
     passport = _RuntimePassport()
+    pool = _RuntimePool()
     runtime = BotRuntimeProjector(
         factory=factory,
         bot_repo=_RuntimeBots(),
         repository=_McpInstallations(),
         reader=_reader(_RuntimeSkills()),
-        registry=_registry(pool_runtime=_RuntimePool(), pool_layouts=_RuntimeLayouts()),
+        registry=_registry(pool_runtime=pool, pool_layouts=_RuntimeLayouts()),
         passport=passport,
         caller_identity_repo=_RuntimeCallerIdentity(),
     )
@@ -2048,6 +2058,9 @@ async def test_runtime_projection_fails_closed_when_default_mcp_policy_is_unavai
 
     assert factory.service.mcp_codes is None
     assert passport.calls == []
+    assert pool.apply_calls == []
+    assert pool.publish_calls == []
+    assert pool.verify_calls == []
 
 
 @pytest.mark.asyncio
@@ -3872,7 +3885,9 @@ async def test_projector_exposes_skill_and_complete_plan_shapes_at_the_engine_se
         def validate_plan(self, *, skill_assets, retired_mappings=()) -> None:
             return None
 
-        async def apply(self, *, plan, scope, retired_mappings=()) -> None:
+        async def apply(
+            self, *, plan, scope, retired_mappings=(), service_factory
+        ) -> None:
             plans.append(plan)
 
     projection = _RecordingProjection()

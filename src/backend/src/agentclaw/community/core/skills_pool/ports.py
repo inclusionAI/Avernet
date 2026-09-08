@@ -10,6 +10,7 @@ from agentclaw.community.core.skill_center.services.runtime_layout_probe import 
 )
 from agentclaw.community.core.skills_pool.models import (
     MappingApplyMode,
+    MappingApplyResult,
     MappingPublishResult,
     MappingVerificationResult,
     PoolCutoverResult,
@@ -31,6 +32,17 @@ class SkillsPoolRuntimeProtocol(Protocol):
         user_id: str,
         engine: str,
     ) -> RuntimeLayoutProbeResult: ...
+
+    async def apply_mappings(
+        self,
+        *,
+        bot_id: str,
+        user_id: str,
+        engine: str,
+        mappings: list[PoolSkillMapping],
+        retired_mappings: Sequence[PoolSkillMapping] = (),
+        source_layout: SkillMappingSourceLayout = SkillMappingSourceLayout.POOL,
+    ) -> MappingApplyResult: ...
 
     async def cutover(
         self,

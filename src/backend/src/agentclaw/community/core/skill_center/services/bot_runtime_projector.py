@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
-import time
 
 from injector import inject
 
@@ -182,6 +181,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             plan=plan,
             scope=scope,
             retired_mappings=retired_mappings,
+            service_factory=self._factory,
         )
         # The Passport is not a runtime and not engine-shaped: it is the
         # platform's authorization record, the same for every engine. Its
@@ -238,6 +238,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         result = await self._registry.for_engine(plan.engine).apply(
             plan=plan,
             scope=scope,
+            service_factory=self._factory,
         )
         try:
             self._apply_passport_projection(plan=plan)
@@ -383,13 +384,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         retired_mappings: Sequence[PoolSkillMapping] = (),
     ) -> ResolvedSkillPlan:
         engine = str(bot.get("active_engine") or "openclaw")
-        service = self._factory.create(
-            user_id=owner_id,
-            entity_id=str(bot.get("entity_id") or owner_id),
-            bot_id=bot_id,
-            engine_type=engine,
-            entity_type=bot.get("entity_type") or "staff",
-        )
         # The reader flushes before answering, so the plan is always built
         # over Installation that agrees with Set configuration — the lazy
         # flush every read runs, not a projector-only repair.
@@ -406,7 +400,6 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         return ResolvedSkillPlan(
             bot_id=bot_id,
             owner_id=owner_id,
-            service=service,
             bot=bot,
             engine=engine,
             projection=RuntimeProjectionResolver().resolve_skills(skill_assets),
@@ -419,12 +412,18 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         bot_id = skill_plan.bot_id
         owner_id = skill_plan.owner_id
         engine = skill_plan.engine
-        service = skill_plan.service
         # Resolved here, with the other pre-flight checks, because it can fail:
         # doing it at the Passport call would abort after the device allow-list
         # was already written, and compensation would hit the same failure.
         identity_modes = self._resolve_mcp_identity_modes(
             bot=bot, bot_id=bot_id, engine=engine
+        )
+        service = self._factory.create(
+            user_id=owner_id,
+            entity_id=str(bot.get("entity_id") or owner_id),
+            bot_id=bot_id,
+            engine_type=engine,
+            entity_type=bot.get("entity_type") or "staff",
         )
         # The legacy SkillSet service remains the authority for effective
         # System Defaults during Phase 1. It resolves template presets and

@@ -136,6 +136,36 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        if path == "/health":
+            return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
+        if path == "/api/skills/mappings/apply":
+            request = body or {}
+            return {
+                "success": True,
+                "data": {
+                    "status": "CONVERGED",
+                    "items": [
+                        {
+                            "mapping": item,
+                            "action": "APPLY",
+                            "status": "CONVERGED",
+                            "retryable": False,
+                        }
+                        for item in request.get("mappings", [])
+                    ]
+                    + [
+                        {
+                            "mapping": item,
+                            "action": "RETIRE",
+                            "status": "CONVERGED",
+                            "retryable": False,
+                        }
+                        for item in request.get("retired_mappings", [])
+                    ],
+                    "issues": [],
+                    "evidence": {"simulated": True},
+                },
+            }
         if path == "/api/skills/layout/probe":
             contract_version = (body or {}).get(
                 "layout_contract_version", "skills-pool-p3-v1"

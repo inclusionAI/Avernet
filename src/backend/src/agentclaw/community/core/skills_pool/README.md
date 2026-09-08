@@ -6,6 +6,13 @@ Skills Pool 控制面的 Bot 级布局状态、首次迁移认领和激活编排
 locator 和 `POOL_ACTIVE`。当前已接入 OpenClaw、Claude Code、AICoding 与
 Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
 
+日常文件型 Skill 投影通过 `POST /api/skills/mappings/apply` 一次发送完整
+logical desired/retired snapshot 与 Backend 选定的 `source_layout`。Engine
+在一次业务操作内完成 Center 精确版本只读检查和 BEST_EFFORT 软链应用，逐项
+回显 logical Mapping；STRICT migration/cutover 仍使用原 publish/verify 合同。
+新入口缺失时，只有标准 route miss 加同目标 Engine health 匹配才能进入旧
+Mapping/DeviceSync 兼容路线，超时、5xx、普通 404 或 501 不会触发第二次写协议。
+
 ## 核心语义
 
 - `(env, entity_id, bot_id)` 没有状态行时，等价于非持久化
@@ -146,6 +153,8 @@ Hermes；物理路径投影由 Engine Layout Descriptor 统一持有。
 ```yaml
 purpose: "Persist Bot Skills Layout state and atomically admit one Pool migration generation through a fail-closed rollout gate."
 provides:
+  - "SkillsPoolRuntimeProtocol"
+  - "MappingApplyResult"
   - "SkillsPoolLayoutRepositoryProtocol"
   - "SkillsPoolRolloutGate"
   - "SkillsPoolMigrationClaimService"

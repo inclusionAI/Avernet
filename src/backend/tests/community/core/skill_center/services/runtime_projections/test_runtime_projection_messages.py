@@ -39,6 +39,13 @@ class _MappingResultRuntime:
             items=(self.item,),
         )
 
+    async def apply_mappings(self, **_kwargs):
+        from agentclaw.community.core.skills_pool.runtime import (
+            LegacyMappingApplyRequired,
+        )
+
+        raise LegacyMappingApplyRequired()
+
     async def verify_mappings(self, **_kwargs):
         return MappingVerificationResult(
             valid=False,
@@ -55,6 +62,11 @@ class _MissingLayouts:
 class _UnusedLegacyService:
     async def project_skills(self, **_kwargs):
         raise AssertionError("Repo mapping must not use Legacy DeviceSync")
+
+
+class _UnusedFactory:
+    def create(self, **_kwargs):
+        raise AssertionError("Repo mapping must not construct Legacy DeviceSync")
 
 
 @pytest.mark.parametrize(
@@ -94,7 +106,6 @@ async def test_mapping_message_exposes_complete_user_action(
     plan = ResolvedSkillPlan(
         bot_id="bot-1",
         owner_id="owner-1",
-        service=_UnusedLegacyService(),
         bot={
             "env": "pre",
             "entity_id": "owner-1",
@@ -108,7 +119,7 @@ async def test_mapping_message_exposes_complete_user_action(
         pool_layouts=_MissingLayouts(),
     )
 
-    result = await delivery.deliver(plan=plan)
+    result = await delivery.deliver(plan=plan, service_factory=_UnusedFactory())
 
     assert result.issues[0].suggested_action == expected_action
 

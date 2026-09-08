@@ -15,6 +15,10 @@ from engine.community.core.skills.models import (
     CenterEnsureItem,
     CenterEnsureRequest,
     CleanSymlinksRequest,
+    PoolMappingApplyRequest,
+    PoolMappingProjectionStatus,
+    PoolMappingSourceLayout,
+    PoolSkillMappingIntent,
     SkillConfig,
     SkillExecutionRequest,
     SymlinkItem,
@@ -43,6 +47,55 @@ class _FakeSkillsPort:
     async def clean_symlinks(self, params):
         self.calls["clean_symlinks"] = params
         return self._results["clean_symlinks"]
+
+    async def apply_pool_mappings(self, params):
+        self.calls["apply_pool_mappings"] = params
+        return self._results["apply_pool_mappings"]
+
+
+async def test_apply_pool_mappings_preserves_logical_result() -> None:
+    mapping = PoolSkillMappingIntent("repo", "package-dir", "runtime-name")
+    port = _FakeSkillsPort(
+        apply_pool_mappings={
+            "status": "PENDING",
+            "items": [
+                {
+                    "mapping": {
+                        "corpus": "repo",
+                        "relative_path": "package-dir",
+                        "link_name": "runtime-name",
+                    },
+                    "action": "APPLY",
+                    "status": "PENDING",
+                    "code": "MANAGED_SOURCE_MISSING",
+                    "retryable": True,
+                }
+            ],
+            "issues": [],
+        }
+    )
+
+    result = await OpenClawSkillsAdapter(port).apply_pool_mappings(
+        PoolMappingApplyRequest(
+            mappings=(mapping,),
+            retired_mappings=(),
+            source_layout=PoolMappingSourceLayout.LEGACY,
+        )
+    )
+
+    assert result.status is PoolMappingProjectionStatus.PENDING
+    assert result.items[0].mapping["link_name"] == "runtime-name"
+    assert port.calls["apply_pool_mappings"] == {
+        "mappings": [
+            {
+                "corpus": "repo",
+                "relative_path": "package-dir",
+                "link_name": "runtime-name",
+            }
+        ],
+        "retired_mappings": [],
+        "source_layout": "legacy",
+    }
 
 
 async def test_ensure_center_skills_serializes_and_builds_result():

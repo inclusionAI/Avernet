@@ -104,6 +104,28 @@ def test_invoke_maps_http_statuses(status, expected):
         )
 
 
+@pytest.mark.parametrize(
+    ("payload", "standard_route_missing"),
+    [
+        ({"detail": "Not Found"}, True),
+        ({"detail": "skill source not found"}, False),
+    ],
+)
+def test_404_retains_structured_route_missing_evidence(
+    payload, standard_route_missing
+):
+    transport, _ = _transport(_response(404, payload))
+
+    with pytest.raises(DeviceAdapterEndpointNotFoundError) as caught:
+        asyncio.run(
+            transport.invoke(
+                conn_info={"binding_id": 1}, method="GET", path="/api/test"
+            )
+        )
+
+    assert caught.value.standard_route_missing is standard_route_missing
+
+
 def test_invoke_maps_explicit_timeout():
     transport, baas = _transport()
     baas.invoke_http.side_effect = httpx.ReadTimeout(

@@ -142,6 +142,10 @@ class OpenClawSkillsPort(Protocol):
         """发布受管 mapping；``source_layout`` 缺省为 ``pool``。"""
         ...
 
+    async def apply_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Apply one logical steady-state Mapping snapshot."""
+        ...
+
     async def verify_pool_mappings(
         self, params: dict[str, Any]
     ) -> dict[str, Any]:
