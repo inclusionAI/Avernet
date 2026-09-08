@@ -36,6 +36,7 @@ from collections.abc import AsyncIterable, AsyncIterator
 
 import httpx
 
+from secbaas.community.api import ConfigError
 from secbaas.community.api.session_file_sharing import (
     SessionFileTransferProxyUnavailableError,
 )
@@ -114,15 +115,11 @@ class OssStreamingProxy:
         hosts are validated: the e2e fake-upstream runs on an ephemeral
         loopback port, and no production OSS endpoint is loopback.
 
-        ``ConfigError`` is imported inside the method (WR-03/89): a module-
-        level import would pull ``bootstrap`` transitively the moment this
-        module is imported, crashing any process whose first secbaas import
-        is ``plugins.file_transfer`` (cold-import circularity).  The method
-        only ever runs at container resolution, when bootstrap is already
-        fully loaded.
+        ``ConfigError`` is imported from the api contract layer: api has no
+        bootstrap dependency, so the module-level import is safe on the
+        cold-import path (``plugins.file_transfer`` never pulls bootstrap
+        transitively through this module).
         """
-        from secbaas.community.bootstrap._configs import ConfigError
-
         endpoint = (self._endpoint or "").strip()
         if not endpoint:
             return

@@ -13,12 +13,12 @@ from typing import TYPE_CHECKING, ClassVar
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from secbaas.community.api import (
+    ConfigError,  # noqa: F401 — re-exported for historical importers
+)
+
 if TYPE_CHECKING:
     from ._container import ApplicationContainer
-
-
-class ConfigError(Exception):
-    """Raised when a required config value is missing or invalid."""
 
 
 class ConfigKey(StrEnum):
