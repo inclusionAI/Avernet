@@ -84,15 +84,12 @@ class ConfigLoader:
         if tenant:
             if not cls.DEPLOY_TENANT_PATTERN.fullmatch(tenant):
                 logger.warning(
-                    "Deploy tenant value %r does not match %s — tenant overlay "
-                    "skipped",
+                    "Deploy tenant value %r does not match %s — tenant overlay skipped",
                     tenant,
                     cls.DEPLOY_TENANT_PATTERN.pattern,
                 )
             else:
-                tenant_path = os.path.join(
-                    config_dir, f"application-{tenant}.yaml"
-                )
+                tenant_path = os.path.join(config_dir, f"application-{tenant}.yaml")
                 tenant_data = cls._load_yaml_file(tenant_path)
                 if tenant_data:
                     base = Config.merge_configs(base, tenant_data)

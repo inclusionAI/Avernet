@@ -246,9 +246,7 @@ class TestDeployTenantOverlay:
         assert config.app_name == "base"
         assert config.workers == 9
 
-    def test_tenant_overlay_missing_file_silently_skipped(
-        self, monkeypatch, tmp_path
-    ):
+    def test_tenant_overlay_missing_file_silently_skipped(self, monkeypatch, tmp_path):
         config_dir = tmp_path / "configs"
         config_dir.mkdir()
         (config_dir / "application.yaml").write_text(
