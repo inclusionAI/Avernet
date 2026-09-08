@@ -97,6 +97,34 @@ beforeEach(() => {
   });
 });
 
+it('发起协作顶栏只在当前 human ID 匹配时使用认证用户名，Bot 保留自身名称', () => {
+  const { rerender } = render(
+    <CreateGroupModal
+      open
+      activeIdentity={{ id: 'human_447147', kind: 'user', displayName: '447147', online: true }}
+      authenticatedUserId="447147"
+      authenticatedUserName="风太"
+      onClose={jest.fn()}
+      onCreated={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('风太')).toBeInTheDocument();
+  expect(screen.queryByText('447147')).not.toBeInTheDocument();
+
+  rerender(
+    <CreateGroupModal
+      open
+      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="447147"
+      authenticatedUserName="风太"
+      onClose={jest.fn()}
+      onCreated={jest.fn()}
+    />,
+  );
+  expect(screen.getByText('协作 Bot')).toBeInTheDocument();
+  expect(screen.queryByText('风太')).not.toBeInTheDocument();
+});
+
 it('free_chat strategy posts delivery_policy on confirm', async () => {
   gs.createGroup.mockResolvedValue({ ok: true, data: { groupId: 'g9', initialSessionId: 's-initial' } });
   const onCreated = jest.fn();

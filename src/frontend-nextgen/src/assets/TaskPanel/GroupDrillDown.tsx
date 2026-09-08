@@ -493,20 +493,24 @@ export const GroupSessionView: React.FC<{
     setError(null);
     setNoMessagePermission(false);
     // group_id 非空（群执行）→ 查群成员（预发 OpenAPI；传入 bcsBaseUrl 时兼容 BCS raw）
-    // group_id 空（单 bot）→ bot 信息由后端 dashboard 返回（待实现），本地用 node executor 兜底
+    // group_id 空时（单 bot，或群信息缺失）：本地用节点执行者兜底合成一条成员。
+    // 后端 dashboard 返回单 bot 信息尚未实现；不兜底会导致单 bot（根节点）下钻「执行者（0）」错显。
+    const fallbackName = node.executor ?? node.assigneeName ?? assignee ?? null;
+    const fallbackActorId = assignee ?? node.assigneeName ?? node.executor ?? '';
     const memberPromise = groupId
       ? fetchGroupDetail(groupId, bcsBaseUrl)
       : Promise.resolve(
-          isGroup && assignee
+          fallbackName || fallbackActorId
             ? {
                 group_id: '',
-                name: node.executor ?? assignee,
+                name: fallbackName ?? fallbackActorId,
                 status: 'active',
                 participants: [
                   {
-                    actor_id: assignee,
+                    actor_id: fallbackActorId,
                     actor_kind: 'bot',
-                    name: node.executor ?? assignee,
+                    name: fallbackName ?? fallbackActorId,
+                    // 群兜底走执行侧；单 bot 是会话 owner，统一标 worker，与顶部「执行者」分区语义一致。
                     role: 'worker',
                     mode: 'auto',
                   },

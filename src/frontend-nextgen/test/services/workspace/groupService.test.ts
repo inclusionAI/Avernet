@@ -2,6 +2,7 @@
 import * as groupController from '@/services/backendApi/collaboration/collaborationGroupController';
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { groupService } from '@/services/workspace/groupService';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 // auto-mock（不带 factory），避免 hoisted factory 内引用 jest.fn() 触发 @jest/globals 的 TDZ。
@@ -217,6 +218,66 @@ describe('loadGroupSessions pagination', () => {
 
     expect(sc.listGroupSessions).toHaveBeenCalledWith('g1', { offset: 10, limit: 10 });
     expect(res.ok && res.data).toMatchObject({ offset: 10, limit: 10, total: 12, hasMore: true });
+  });
+});
+
+describe('BCS group routing by bcs_grp_ prefix', () => {
+  const originalFetch = global.fetch;
+  const userMe = { id: 'human-me', kind: 'user' as const, displayName: 'Me', online: true };
+
+  function jsonOk(body: unknown): Response {
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => body,
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+  });
+  afterEach(() => {
+    global.fetch = originalFetch;
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+  });
+
+  it('routes bcs_grp_ group to BCS fetch path even when in-memory marker is empty (fresh tab)', async () => {
+    // 模拟新开页 target=_blank 全新挂载:bcsGroupIds 内存标记为空(非持久化),
+    // 仅靠 groupId 的 bcs_grp_ 前缀兜底应走 BCS 会话端点(不带 view_bot_id),
+    // 不走通用 listGroupSessions(通用端点会带人类 me id,身份受限拉不回会话 → 右栏空态)。
+    useWorkspaceStore.setState({ bcsGroupIds: {} });
+    global.fetch = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonOk({ code: 200000, message: 'OK', data: { items: [], offset: 0, limit: 10, total: 0 } }));
+
+    const res = await groupService.loadGroupSessionsOrBcs('bcs_grp_abc', userMe.id);
+
+    expect(sc.listGroupSessions).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const calledUrl = (global.fetch as jest.Mock).mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/openapi/v1/collaboration/groups/bcs_grp_abc/sessions?offset=0&limit=10');
+    expect(res.ok).toBe(true);
+    expect(res.ok && res.data).toMatchObject({ items: [], total: 0, hasMore: false });
+    expect(typeof (res.ok && res.data.limit)).toBe('number');
+  });
+
+  it('routes non-prefixed group to generic listGroupSessions path with view_bot_id', async () => {
+    sc.listGroupSessions.mockResolvedValue({
+      code: 20000,
+      message: '',
+      request_id: 'r',
+      data: { items: [], offset: 0, limit: 10, total: 0 },
+    });
+
+    await groupService.loadGroupSessionsOrBcs('g-presets-1', userMe.id);
+
+    expect(sc.listGroupSessions).toHaveBeenCalledWith('g-presets-1', {
+      offset: 0,
+      limit: 10,
+      view_bot_id: 'human-me',
+    });
+    expect(global.fetch).toBe(originalFetch);
   });
 });
 

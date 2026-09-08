@@ -8,6 +8,10 @@ import {
   SessionManagePanel,
   type SessionManagePanelProps,
 } from '@/pages/Workspace/components/ManagePanel/SessionManagePanel';
+import {
+  WorkspaceManagePanels,
+  type WorkspaceManagePanelsProps,
+} from '@/pages/Workspace/components/WorkspaceManagePanels';
 import type { PolicyResult } from '@/services/workspace/groupService';
 import { expect, it, jest } from '@jest/globals';
 import '@testing-library/jest-dom';
@@ -84,6 +88,30 @@ it('group panel exposes base info tabs and member management', () => {
   expect(screen.getByText('用户可以通过链接加入群组')).toBeInTheDocument();
   expect(screen.queryByText(/Human/)).not.toBeInTheDocument();
   expect(screen.getByText('删除协作群')).toBeInTheDocument();
+});
+
+it('member list resolves only the authenticated human and preserves other human names', () => {
+  const otherHumanGroup: GroupView = {
+    ...group,
+    participants: [
+      { actorId: 'human_447147', kind: 'human', name: '447147', role: 'owner', mode: 'present' },
+      { actorId: 'human_447148', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    ],
+    participantCount: 2,
+  };
+  render(
+    <GroupManagePanel
+      {...groupProps()}
+      group={otherHumanGroup}
+      activeIdentity={{ id: 'bot_xxx:447147', kind: 'bot', displayName: '协作 Bot', online: true }}
+      authenticatedUserId="447147"
+      authenticatedUserName="风太"
+    />,
+  );
+
+  expect(screen.getByText('风太')).toBeInTheDocument();
+  expect(screen.getByText('其他成员')).toBeInTheDocument();
+  expect(screen.queryByText('447147')).not.toBeInTheDocument();
 });
 
 it('group panel advanced tab renders dingtalk binding form', () => {
@@ -183,4 +211,50 @@ it('session panel maps group kind to collaboration type label', () => {
     expect(screen.getByText(label)).toBeInTheDocument();
     unmount();
   });
+});
+
+it.each(['manage', 'sessionManage'] as const)('%s 入口将认证名称传递到实际成员列表', (activePanel) => {
+  const participants: GroupView['participants'] = [
+    { actorId: 'human_user-101', kind: 'human', name: '旧用户名称', role: 'member', mode: 'present' },
+    { actorId: 'human_user-202', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'bot_fixture:user-101', kind: 'bot', name: '协作 Bot', role: 'driver', mode: 'auto' },
+  ];
+  const groupHandlers = groupProps();
+  const sessionHandlers = sessionProps();
+  const props: WorkspaceManagePanelsProps = {
+    activePanel,
+    group: { ...group, participants, participantCount: participants.length },
+    session: { ...session, participants, participantCount: participants.length },
+    groupAdvancedConfigEnabled: true,
+    canManage: allowed,
+    identities: [],
+    activeIdentity: { id: 'bot_fixture:user-101', kind: 'bot', displayName: '协作 Bot', online: true },
+    authenticatedUserId: 'user-101',
+    authenticatedUserName: '认证用户',
+    onClose: groupHandlers.onClose,
+    onUpdateGroup: groupHandlers.onUpdate,
+    onDissolveGroup: groupHandlers.onDissolve,
+    onLeaveGroup: groupHandlers.onLeaveGroup,
+    onAddGroupMember: groupHandlers.onAddMember,
+    onRemoveGroupMember: groupHandlers.onRemoveMember,
+    onShareGroup: groupHandlers.onShare,
+    onSaveDingTalk: groupHandlers.onSaveDingTalk,
+    onToggleDingTalkActive: groupHandlers.onToggleDingTalkActive,
+    onDeleteDingTalk: groupHandlers.onDeleteDingTalk,
+    dingTalkBinding: null,
+    dingTalkLoading: false,
+    onRenameSession: sessionHandlers.onRename,
+    onDeleteSession: sessionHandlers.onDelete,
+    onLeaveSession: sessionHandlers.onLeaveSession,
+    onAddSessionMember: sessionHandlers.onAddMember,
+    onRemoveSessionMember: sessionHandlers.onRemoveMember,
+    onShareSession: sessionHandlers.onShare,
+  };
+
+  render(<WorkspaceManagePanels {...props} />);
+
+  expect(screen.getByText('认证用户')).toBeInTheDocument();
+  expect(screen.getByText('其他成员')).toBeInTheDocument();
+  expect(screen.getByText('协作 Bot')).toBeInTheDocument();
+  expect(screen.queryByText('旧用户名称')).not.toBeInTheDocument();
 });

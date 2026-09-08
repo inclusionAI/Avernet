@@ -69,7 +69,7 @@ describe('WorkspaceIdentitySelector', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '当前协作身份：协作 Bot' }));
     expect(
-      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).not.toBeInTheDocument();
     expect(await screen.findByText('隐藏 Bot')).toBeInTheDocument();
     expect(screen.getByText('ClaudeCode')).toBeInTheDocument();
@@ -136,7 +136,7 @@ describe('WorkspaceIdentitySelector', () => {
     fireEvent.pointerMove(infoTrigger);
 
     expect(
-      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/我参与的会话|当前身份可见/)).not.toBeInTheDocument();
   });
@@ -150,11 +150,11 @@ describe('WorkspaceIdentitySelector', () => {
     expect(screen.getByLabelText('工作身份说明')).toHaveClass('top-px', 'text-muted-foreground/70');
     expect(screen.getByLabelText('工作身份说明').querySelector('svg')).toHaveClass('h-3', 'w-3');
     expect(
-      screen.queryByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      screen.queryByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).not.toBeInTheDocument();
     fireEvent.pointerMove(screen.getByLabelText('工作身份说明'));
     expect(
-      await screen.findByText('当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围'),
+      await screen.findByText('当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。'),
     ).toBeInTheDocument();
     expect(screen.getByLabelText('协作 Bot')).toHaveStyle({ width: '24px', height: '24px' });
     expect(screen.getByText('协作 Bot')).toHaveClass('text-xs');

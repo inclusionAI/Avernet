@@ -72,6 +72,7 @@ export function resolveSender(
   sessionParticipants?: ParticipantView[],
   userAvatarUrl?: string,
   userIdentityId?: string | null,
+  userIdentityName?: string | null,
 ): { name: string; avatar: ReactNode } | undefined {
   const senderId = typeof message.extra?.senderId === 'string' ? message.extra.senderId : undefined;
   const senderName = typeof message.extra?.senderName === 'string' ? message.extra.senderName : undefined;
@@ -97,7 +98,7 @@ export function resolveSender(
       !senderId ||
       (Boolean(normalizedSenderId && normalizedUserIdentityId) && normalizedSenderId === normalizedUserIdentityId);
     if (isCurrentUserMessage) {
-      const name = senderName || humanParticipant?.name || '未命名成员';
+      const name = userIdentityName?.trim() || senderName || humanParticipant?.name || '未命名成员';
       return { name, avatar: renderCurrentUserAvatar(name, userAvatarUrl ?? senderAvatarUrl) };
     }
     if (humanParticipant) {

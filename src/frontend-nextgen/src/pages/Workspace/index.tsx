@@ -13,7 +13,6 @@ import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import { buildAgentCodingChatPath } from '@/services/workspace';
 import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { resolveUserId } from '@/services/workspace/botSessionService';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ResourceReference } from '@tc-chat/core';
 import { PanelLeft } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -40,8 +39,7 @@ const WorkspacePage: React.FC = () => {
   useEffect(() => {
     if (isDesktop) setMobileListOpen(false);
   }, [isDesktop]);
-  const identities = useWorkspaceStore((s) => s.identities);
-  const activeIdentity = identities.find((i) => i.id === workspace.activeIdentityId) ?? null;
+  const activeIdentity = workspace.activeIdentity;
 
   // view 钳制安全网(与 useWorkspace 内同名 effect 双保险,确保页面层不渲染越界 tab)。
   useEffect(() => {
@@ -147,6 +145,8 @@ const WorkspacePage: React.FC = () => {
         <ChatPanel
           target={workspace.botChatTarget}
           viewer={workspace.activeIdentity}
+          authenticatedUserId={workspace.currentUserId}
+          authenticatedUserName={workspace.currentUserDisplayName}
           userAvatarUrl={workspace.currentUserAvatarUrl}
           messages={workspace.supportMessages}
           isRequesting={workspace.supportIsRequesting}
@@ -188,6 +188,8 @@ const WorkspacePage: React.FC = () => {
           <ChatPanel
             target={workspace.botChatTarget}
             viewer={workspace.activeIdentity}
+            authenticatedUserId={workspace.currentUserId}
+            authenticatedUserName={workspace.currentUserDisplayName}
             userAvatarUrl={workspace.currentUserAvatarUrl}
             messages={botChat.chat.messages}
             isRequesting={botChat.chat.isRequesting}
@@ -244,7 +246,8 @@ const WorkspacePage: React.FC = () => {
             onViewChange={setView}
             availableViews={availableViews}
             userAvatarUrl={workspace.currentUserAvatarUrl}
-            userIdentityId={workspace.activeIdentityId}
+            userIdentityId={workspace.currentUserId}
+            userIdentityName={workspace.currentUserDisplayName}
             mobileListOpen={mobileListOpen}
             onCloseMobileList={() => setMobileListOpen(false)}
           />

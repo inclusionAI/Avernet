@@ -19,6 +19,7 @@ interface GroupChatMessageListProps {
   interactions: MessageInteractions;
   userAvatarUrl?: string;
   userIdentityId?: string | null;
+  userIdentityName?: string | null;
   onQuoteSelected: (text: string) => void;
   onExplainSelected: (text: string) => void;
   onEditMessage: (message: ChatMessage) => void;
@@ -38,6 +39,7 @@ export function GroupChatMessageList({
   interactions,
   userAvatarUrl,
   userIdentityId,
+  userIdentityName,
   onQuoteSelected,
   onExplainSelected,
   onEditMessage,
@@ -82,6 +84,7 @@ export function GroupChatMessageList({
                 sessionId={session.sessionId}
                 userAvatarUrl={userAvatarUrl}
                 userIdentityId={userIdentityId}
+                userIdentityName={userIdentityName}
                 onCopy={(text) => interactions.copyText(text)}
                 onEdit={() => onEditMessage(message)}
                 isEditable={isEditable}

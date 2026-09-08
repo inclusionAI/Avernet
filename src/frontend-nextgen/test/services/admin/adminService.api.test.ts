@@ -1,6 +1,6 @@
 /** @jest-environment node */
-import { adminService } from '@/services/admin/adminService';
 import { getCapabilities } from '@/capabilities';
+import { adminService } from '@/services/admin/adminService';
 import * as spaceController from '@/services/backendApi/admin/spaceController';
 import { BackendRequestError } from '@/services/backendApi/httpClient';
 import { identityService } from '@/services/workspace/identityService';

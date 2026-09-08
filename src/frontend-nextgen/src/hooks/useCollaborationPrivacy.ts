@@ -6,6 +6,7 @@ import type {
   PublicConfig,
 } from '@/domain/collaborationPrivacy/types';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
+import { useCopyBotId } from './useCopyBotId';
 import { collaborationPrivacyService, type DirectSetting } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -152,7 +153,11 @@ export function useCollaborationPrivacy() {
       const succeeded = await runBotAction(
         `${bot.id}:friendApproval`,
         () => collaborationPrivacyService.updateFriendApproval({ botId: bot.id, config }),
-        '好友审批策略已更新',
+        config.mode === 'none'
+          ? '好友审批策略已更新为“无需审批”'
+          : config.mode === 'all'
+          ? '好友审批策略已更新为“全部审批”'
+          : '好友审批策略已更新',
       );
       if (succeeded) setFriendEditorBotId(null);
     },
@@ -179,14 +184,7 @@ export function useCollaborationPrivacy() {
   const searchDepartments = useCallback(async (keyword: string, signal?: AbortSignal) => {
     return await collaborationPrivacyService.searchDepartments(keyword, signal);
   }, []);
-  const copyBotId = useCallback(async (botId: string) => {
-    try {
-      await navigator.clipboard.writeText(botId);
-      notifySuccess('Bot ID 已复制');
-    } catch {
-      notifyError(`复制失败，请手动复制：${botId}`);
-    }
-  }, []);
+  const copyBotId = useCopyBotId();
   const publicationBot = useMemo(
     () => store.overview?.bots.find((bot) => bot.id === publicationEditor?.botId),
     [publicationEditor?.botId, store.overview],

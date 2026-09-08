@@ -168,6 +168,15 @@ export async function loadBcsGroupDetail(groupId: string): Promise<DomainResult<
   }
 }
 
+/** 是否为 BCS(execute) 群:内存标记(会话内建群时 markBcsGroup 写入)命中,或 groupId 按 `bcs_grp_` 前缀约定命中。
+ *  新开页 `target=_blank` 全新挂载时 `bcsGroupIds` 内存态为空(非持久化),仅靠标记会把既有 BCS 群误判为预发群 →
+ *  走通用端点时带 `view_bot_id=人类 me id`,以身份受限的视角拉不回会话 → 右栏"请选择或创建一个会话"。
+ *  前缀兜底保证 BCS 群始终走 BCS 路径(不带 view_bot_id),与 ViewSessionButton / NodeListView / taskPanelMapper
+ *  判定单/群的口径(`bcs_grp_` 前缀)对齐(后端建群 group_id 即 `bcs_grp_<uuid>`)。 */
+function isBcsGroupId(groupId: string): boolean {
+  return Boolean(useWorkspaceStore.getState().bcsGroupIds[groupId]) || groupId.startsWith('bcs_grp_');
+}
+
 /** 选中群详情统一入口：execute 建群后 markBcsGroup 的群走 OpenAPI 兼容映射，
  *  预发群走通用 loadGroupDetail（由调用方注入，避免循环依赖）。判断收敛于此。 */
 export async function loadGroupDetailOrBcs(
@@ -175,9 +184,7 @@ export async function loadGroupDetailOrBcs(
   viewBotId: string | undefined,
   loadGroupDetail: (id: string, vid?: string) => Promise<DomainResult<GroupView>>,
 ): Promise<DomainResult<GroupView>> {
-  return useWorkspaceStore.getState().bcsGroupIds[groupId]
-    ? loadBcsGroupDetail(groupId)
-    : loadGroupDetail(groupId, viewBotId);
+  return isBcsGroupId(groupId) ? loadBcsGroupDetail(groupId) : loadGroupDetail(groupId, viewBotId);
 }
 
 /** 选中/展开群填充会话列表的统一入口：BCS 群走 loadBcsGroupSessions，
@@ -189,7 +196,7 @@ export async function loadGroupSessionsOrBcs(
   pageOpts: SessionPageOpts | undefined,
   loadGroupSessions: (id: string, vid?: string, opts?: SessionPageOpts) => Promise<DomainResult<GroupSessionPage>>,
 ): Promise<DomainResult<GroupSessionPage>> {
-  const isBcsGroup = Boolean(useWorkspaceStore.getState().bcsGroupIds[groupId]);
+  const isBcsGroup = isBcsGroupId(groupId);
   const requestKey = JSON.stringify([isBcsGroup, groupId, viewBotId ?? null, pageOpts ?? {}]);
   const existingRequest = groupSessionRequestsInFlight.get(requestKey);
   if (existingRequest) return existingRequest;

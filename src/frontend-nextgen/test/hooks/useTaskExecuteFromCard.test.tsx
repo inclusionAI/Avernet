@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
+import { deriveTaskTitle, useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
 import { isBotTaskClaimEnabled } from '@/services/tasks/taskClaimQuery';
 import type { TaskComposerContext } from '@/services/tasks/taskMapper';
 import { executeTaskService } from '@/services/tasks/taskService';
@@ -138,5 +138,36 @@ describe('useTaskExecuteFromCard 执行前任务认领门禁', () => {
 
     expect(mockedToastWarning).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ action: undefined }));
     expect(mockedExecute).not.toHaveBeenCalled();
+  });
+});
+
+describe('deriveTaskTitle —— 从 goal 派生 ≤20 字短标题（协议 §4.3.1 平台生成短标题）', () => {
+  it('短 goal 原样返回', () => {
+    expect(deriveTaskTitle('修复 PR #1')).toBe('修复 PR #1');
+  });
+  it('取首个分句（逗号切）', () => {
+    expect(deriveTaskTitle('修复 PR 命名问题，并补充测试用例')).toBe('修复 PR 命名问题');
+  });
+  it('取首个分句（换行/句末标点切）', () => {
+    expect(deriveTaskTitle('大促 GMV 增长目标。补齐营销策略')).toBe('大促 GMV 增长目标');
+    expect(deriveTaskTitle('目标A\n目标B')).toBe('目标A');
+  });
+  it('超 20 字的首分句截 19 字+…，结果 ≤20 字且为原文前缀', () => {
+    const goal = '大促GMV增长目标加长版活动营销场景下做营销策略补齐方案';
+    const t = deriveTaskTitle(goal);
+    expect(t.length).toBeLessThanOrEqual(20);
+    expect(t.endsWith('…')).toBe(true);
+    expect(goal.startsWith(t.slice(0, 19))).toBe(true);
+  });
+  it('恰好 20 字（边界）不带省略号', () => {
+    const exact = '一二三四五六七八九十一二三四五六七八九十'; // 20 字
+    expect(exact.length).toBe(20);
+    expect(deriveTaskTitle(exact)).toBe(exact);
+  });
+  it('空/缺省 goal 兜底「任务执行」', () => {
+    expect(deriveTaskTitle('')).toBe('任务执行');
+    expect(deriveTaskTitle(undefined)).toBe('任务执行');
+    expect(deriveTaskTitle(null)).toBe('任务执行');
+    expect(deriveTaskTitle('   \n  ')).toBe('任务执行');
   });
 });

@@ -19,6 +19,8 @@ export interface GroupManagePanelProps {
   canManage: PolicyResult;
   candidates: IdentityView[];
   activeIdentity: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   onClose: () => void;
   onUpdate: (patch: {
     name?: string;
@@ -44,7 +46,17 @@ const KIND_LABEL: Record<GroupView['kind'], string> = {
 };
 
 export function GroupManagePanel(props: GroupManagePanelProps) {
-  const { group, canManage, activeIdentity, onClose, onUpdate, onDissolve, onLeaveGroup } = props;
+  const {
+    group,
+    canManage,
+    activeIdentity,
+    authenticatedUserId,
+    authenticatedUserName,
+    onClose,
+    onUpdate,
+    onDissolve,
+    onLeaveGroup,
+  } = props;
   const [tab, setTab] = useState<'basic' | 'advanced'>('basic');
   const [name, setName] = useState(group.name);
   const [shareOpen, setShareOpen] = useState(false);
@@ -162,6 +174,8 @@ export function GroupManagePanel(props: GroupManagePanelProps) {
                 participants={group.participants}
                 participantCount={group.participantCount}
                 activeIdentity={activeIdentity}
+                authenticatedUserId={authenticatedUserId}
+                authenticatedUserName={authenticatedUserName}
                 canManage={canManageGroup}
                 disabledReason={canManage.disabledReason}
                 emptyText="暂无成员"

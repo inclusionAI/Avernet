@@ -52,7 +52,7 @@ export function WorkspaceIdentitySelector({
                   <Info className="h-3 w-3" aria-hidden />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围</TooltipContent>
+              <TooltipContent>当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。</TooltipContent>
             </Tooltip>
           </div>
         </TooltipProvider>
@@ -74,7 +74,7 @@ export function WorkspaceIdentitySelector({
                   <Info className="h-3.5 w-3.5" aria-hidden />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围</TooltipContent>
+              <TooltipContent>当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。</TooltipContent>
             </Tooltip>
           </div>
         </TooltipProvider>
@@ -135,7 +135,7 @@ export function WorkspaceIdentitySelector({
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
-                          当前协作身份决定在对话或群聊中，你以个人或指定 Bot 身份可查看的数据范围
+                          当前工作身份决定你以个人或指定 Bot 身份使用工作区各项功能，并影响各菜单中可查看的数据和可执行的操作。
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>

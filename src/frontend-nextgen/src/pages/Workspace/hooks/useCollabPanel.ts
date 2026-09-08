@@ -1,4 +1,5 @@
 import type { IdentityView, ParticipantMode, ParticipantView, SessionView } from '@/domain/collaboration';
+import { isSameHumanIdentity } from '@/domain/userIdentity';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -42,6 +43,8 @@ export function useCollabPanel(
   session: SessionView | null,
   activeIdentity: IdentityView | null,
   updateMemberMode: (sessionId: string, actorId: string, mode: ParticipantMode) => Promise<boolean>,
+  authenticatedUserId?: string | null,
+  authenticatedUserName?: string | null,
 ): CollabPanelState {
   const [switchingBotMode, setSwitchingBotMode] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -62,6 +65,15 @@ export function useCollabPanel(
     return isBotViewer && session ? 'auto' : null;
   }, [botParticipant, isBotViewer, session]);
 
+  const identities = useWorkspaceStore((s) => s.identities);
+  const humanIdentity = useMemo(
+    () => identities.find((i) => i.kind === 'user' && !i.id.startsWith('test-')) ?? null,
+    [identities],
+  );
+  const humanIdentityId = authenticatedUserId ?? humanIdentity?.id ?? null;
+  const humanIdentityName = authenticatedUserName?.trim() || humanIdentity?.displayName || '';
+  const setActiveIdentity = useWorkspaceStore((s) => s.setActiveIdentity);
+
   // 列表接口刷新会暂时把 participants 置空（列表不返回 participants），
   // 用 ref 暂存最近一次非空的 human 成员，避免面板在刷新间隙闪烁消失。
   // 切换身份（如「去发言」）时 session 会短暂变为 null，此时不清空缓存，
@@ -77,24 +89,20 @@ export function useCollabPanel(
     } else if (currentSessionId) {
       lastSessionIdRef.current = currentSessionId;
     }
-    const found = session?.participants.find((p) => p.kind === 'human') ?? null;
+    const found =
+      session?.participants.find(
+        (p) => p.kind === 'human' && isSameHumanIdentity(p.actorId, humanIdentityId, 'human'),
+      ) ?? null;
     if (found) {
       humanRef.current = found;
       return found;
     }
     // participants 暂时为空（列表刷新中/session 为 null），回退到上次缓存的 human 状态。
     return humanRef.current;
-  }, [session]);
+  }, [humanIdentityId, session]);
   const humanJoined = human?.mode === 'present';
   const humanAbsent = human?.mode === 'absent';
-  const humanName = human?.name ?? (activeIdentity?.kind === 'user' ? activeIdentity.displayName : '用户协作身份');
-
-  const identities = useWorkspaceStore((s) => s.identities);
-  const humanIdentityId = useMemo(
-    () => identities.find((i) => i.kind === 'user' && !i.id.startsWith('test-'))?.id ?? null,
-    [identities],
-  );
-  const setActiveIdentity = useWorkspaceStore((s) => s.setActiveIdentity);
+  const humanName = (human?.name ?? humanIdentityName) || (activeIdentity?.kind === 'user' ? activeIdentity.displayName : '用户协作身份');
 
   // 切到用户身份并落到当前群会话。setActiveIdentity 会恢复该身份上次记忆的
   // 视图/选中态（可能停留在某个单聊页），若不显式覆盖 view 与选中态，

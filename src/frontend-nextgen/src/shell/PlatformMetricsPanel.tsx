@@ -27,13 +27,13 @@ interface QuotaItem {
 }
 
 const METRIC_ROWS: MetricRow[] = [
-  { title: '服务端接口调用成功率', dataKey: 'server', color: 'rgb(22,93,255)', avg: '99.72' },
+  { title: '服务端接口调用成功率', dataKey: 'server', color: 'rgb(37,99,235)', avg: '99.72' },
   { title: 'Theta 模型调用成功率', dataKey: 'theta', color: 'rgb(114,46,209)', avg: '99.35' },
   { title: '服务 Bot - OpenAP 执行', dataKey: 'openap', color: 'rgb(245,154,35)', avg: '98.91' },
 ];
 
 const QUOTA_ITEMS: QuotaItem[] = [
-  { label: '运行容器数量', value: '8,299', color: 'rgb(22,93,255)' },
+  { label: '运行容器数量', value: '8,299', color: 'rgb(37,99,235)' },
   { label: '租户剩余 CPU 预算', value: '508 核', color: 'rgb(0,180,42)' },
   { label: '租户剩余内存预算', value: '1,016 GB', color: 'rgb(245,154,35)' },
 ];

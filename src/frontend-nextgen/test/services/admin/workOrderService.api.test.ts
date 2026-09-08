@@ -1,8 +1,8 @@
 /** @jest-environment node */
+import { getCapabilities } from '@/capabilities';
 import { workOrderService } from '@/services/admin/workOrderService';
 import * as notificationController from '@/services/backendApi/admin/notificationController';
 import * as workOrderController from '@/services/backendApi/admin/workOrderController';
-import { getCapabilities } from '@/capabilities';
 import { identityService } from '@/services/workspace/identityService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 

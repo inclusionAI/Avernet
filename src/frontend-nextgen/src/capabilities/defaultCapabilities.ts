@@ -184,6 +184,11 @@ export const defaultCapabilities: AppCapabilities = {
     status: 'available',
     value: false,
   }),
+  // Open Core 不提供组织免审批策略，仅保留无需审批和全部审批。
+  getPartialFriendApprovalEnabled: (): CapabilityResult<boolean> => ({
+    status: 'available',
+    value: false,
+  }),
   // Open Core（阿里云部署）壳层可见性：展示【管理后台】导航项与页头通知中心
   // （adminEntry/notificationBell=true），不展示侧栏空间切换器（spaceSwitcher=false）；
   // 空间数据链路（initSpaceContext / 默认个人空间）与此开关无关，不受本默认值影响。

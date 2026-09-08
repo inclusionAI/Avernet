@@ -7,6 +7,7 @@ import {
 import { PageHeader } from '@/components/Common/PageHeader';
 import type { BotCatalogViewModel, SquareResource } from '@/domain/collaborationSquare/types';
 import { useCollaborationSquare } from '@/hooks/useCollaborationSquare';
+import { useHumanIdentity } from '@/hooks/useHumanIdentity';
 import { useWorkIdentityAccess } from '@/hooks/useWorkIdentityAccess';
 import { history, Link } from '@umijs/max';
 import { type MouseEvent, type UIEvent, useCallback, useEffect, useRef, useState } from 'react';
@@ -22,6 +23,7 @@ const TASK_DESCRIPTION = '发现公开 BBS 求助任务，按关键词与状态�
 export function SquarePageShell({ resource }: { resource: SquareResource }) {
   const square = useCollaborationSquare(resource);
   const { activeIdentity, canViewPublicGroups } = useWorkIdentityAccess();
+  const { identity: authenticatedUser } = useHumanIdentity();
   const scrollRootRef = useRef<HTMLElement>(null);
   const navigationTimerRef = useRef<number>();
   const [visualResource, setVisualResource] = useState(resource);
@@ -200,8 +202,12 @@ export function SquarePageShell({ resource }: { resource: SquareResource }) {
                 scrollRootRef={scrollRootRef}
                 smartEmptyHint="请输入关键词进行智能搜索"
                 activeIdentity={
-                  activeIdentity ? { name: activeIdentity.displayName, kind: activeIdentity.kind } : undefined
+                  activeIdentity
+                    ? { id: activeIdentity.id, name: activeIdentity.displayName, kind: activeIdentity.kind }
+                    : undefined
                 }
+                authenticatedUserId={authenticatedUser?.userId}
+                authenticatedUserName={authenticatedUser?.displayName}
               />
             )}
             {resource === 'group' && (

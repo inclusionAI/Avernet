@@ -43,6 +43,19 @@ it('bot 视角恒显示面板;读取 bot/human 成员 mode', () => {
   expect(result.current.humanName).toBe('章梧');
 });
 
+it('多个 human 成员时只选择与当前认证用户 ID 匹配的成员', () => {
+  const session = makeSession([
+    { actorId: 'human_other', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' },
+  ]);
+  const { result } = renderHook(() =>
+    useCollabPanel(session, botIdentity, updateMemberMode, 'human_1', '认证用户'),
+  );
+
+  expect(result.current.human?.actorId).toBe('human_1');
+  expect(result.current.humanName).toBe('章梧');
+});
+
 it('setBotMode 调用 updateMemberMode 并携带 bot actorId', async () => {
   const session = makeSession([{ actorId: 'b:1', kind: 'bot', name: 'Alpha', role: 'driver', mode: 'auto' }]);
   const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode));

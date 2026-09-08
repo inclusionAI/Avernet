@@ -51,6 +51,10 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   );
 
   const [sessionGroups, setSessionGroups] = useState<GroupView[]>([]);
+  // 记录 sessionGroups 是为哪个身份加载完成的(loadGroups 成功回填时写入):
+  // 供 useSelectedGroupDetail 判定“当前可见列表是否属于当前身份且已加载完成”,
+  // 堵住新开页全新挂载时按初始空列表/上一身份陈旧列表误切 membership 的竞态。
+  const [loadedListIdentity, setLoadedListIdentity] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSearchRef = useRef('');
 
@@ -82,6 +86,11 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
         const res = await groupService.loadGroups(identity, { q, membership });
         if (res.ok) {
           setSessionGroups(res.data);
+          // 仅当这次列表仍属于当前活动身份时才记成“已为该身份加载完成”,
+          // 避免身份切换后旧身份的残留响应把 loadedListIdentity 写成旧值。
+          if (useWorkspaceStore.getState().activeIdentityId === identityId) {
+            setLoadedListIdentity(identityId);
+          }
         } else {
           setGroupsError(res.error.friendlyMessage);
           // 未登录（oauth-provider + 非 authenticated）静默：会话失效后「加载协作群失败」
@@ -125,7 +134,11 @@ export function useGroupWorkspace(): UseGroupWorkspaceResult {
   );
 
   // 深链选中群的成员视角兜底已拆到 useSelectedGroupDetail（控 Hook 体积）。
-  useSelectedGroupDetail(selectedGroupId, sessionGroups, isGroupsLoading);
+  // 当前可见列表是否属于当前身份且已加载完成(loadedListIdentity === activeIdentityId)。
+  // 只有此时 useSelectedGroupDetail 才按漏选纠正 membership,堵住新开页挂载竞态。
+  const listReadyForCurrentIdentity = activeIdentityId !== null && loadedListIdentity === activeIdentityId;
+  // 深链选中群的成员视角兜底已拆到 useSelectedGroupDetail(控 Hook 体积)。
+  useSelectedGroupDetail(selectedGroupId, sessionGroups, isGroupsLoading, listReadyForCurrentIdentity);
 
   const canManageGroup = useMemo<PolicyResult>(
     () => groupService.canManageGroup(selectedGroup, activeIdentityId),

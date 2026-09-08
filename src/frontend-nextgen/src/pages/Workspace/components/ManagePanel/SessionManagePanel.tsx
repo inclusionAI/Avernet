@@ -16,6 +16,8 @@ export interface SessionManagePanelProps {
   groupKind: GroupView['kind'];
   canManage: PolicyResult;
   activeIdentity: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   candidates: IdentityView[];
   onClose: () => void;
   onRename: (sessionId: string, title: string) => Promise<boolean>;
@@ -33,7 +35,18 @@ const GROUP_KIND_LABEL: Record<GroupView['kind'], string> = {
 };
 
 export function SessionManagePanel(props: SessionManagePanelProps) {
-  const { session, groupName, canManage, activeIdentity, onClose, onRename, onDelete, onLeaveSession } = props;
+  const {
+    session,
+    groupName,
+    canManage,
+    activeIdentity,
+    authenticatedUserId,
+    authenticatedUserName,
+    onClose,
+    onRename,
+    onDelete,
+    onLeaveSession,
+  } = props;
   const [title, setTitle] = useState(session.title);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -115,6 +128,8 @@ export function SessionManagePanel(props: SessionManagePanelProps) {
               participants={session.participants}
               participantCount={session.participantCount}
               activeIdentity={activeIdentity}
+              authenticatedUserId={authenticatedUserId}
+              authenticatedUserName={authenticatedUserName}
               canManage={isSessionDriverOrManager}
               disabledReason={canManage.disabledReason}
               emptyText="暂无成员"

@@ -232,3 +232,49 @@ describe('NodeListView bbs 节点带 assignee_name', () => {
     expect(screen.queryByText('BBS执行会话')).toBeNull();
   });
 });
+
+const groupNodeEmptyAssignee: TaskNodeView = {
+  id: 'group_node_no_assignee',
+  name: '数据架构协作分析',
+  sequence: 2,
+  status: 'done',
+  executor: null,
+  executorColor: null,
+  runMode: 'coop_group',
+  // 后端只在 extend_props 下发了 session/group,run_info.assignee 为空(回归点)
+  groupId: 'bcs_grp_empty_assignee',
+  groupName: 'BCS协作群',
+  sessionId: 'bcs_grp_empty_assignee:round1',
+  assignee: null,
+  hasSubTask: false,
+  subTaskId: null,
+  stepTraces: [],
+  acceptanceResult: null,
+  artifacts: [],
+};
+
+describe('NodeListView 协作群节点 assignee 为空', () => {
+  it('群会话即使 assignee 为空也渲染「新开页面查看会话」协作群链接(tab=group)并可下钻', () => {
+    const onOpenGroupSession = jest.fn();
+    const { container } = render(
+      <NodeListView
+        nodes={[groupNodeEmptyAssignee]}
+        ownerBotId="20260826_20rphqo0"
+        onViewNodeDetail={jest.fn()}
+        onOpenGroupSession={onOpenGroupSession}
+      />,
+    );
+    // 执行者按群展示,不再因 assignee 空回退「未分配」
+    expect(screen.getByText('协作群会话')).toBeInTheDocument();
+    expect(screen.queryByText('未分配')).toBeNull();
+    // 新开页面链接:走协作群 URL,带 group=,不因 assignee 空而缺失
+    const link = container.querySelector('a[href*="tab=group"][href*="group=bcs_grp_empty_assignee"]');
+    expect(link).not.toBeNull();
+    expect(link).toHaveAttribute('target', '_blank');
+    // 不走单 bot tab=chat
+    expect(container.querySelector('a[href*="tab=chat"]')).toBeNull();
+    // 副屏下钻仍可用(不被 isUnassigned 关掉)
+    fireEvent.click(screen.getByRole('button', { name: '查看执行会话 协作群会话' }));
+    expect(onOpenGroupSession).toHaveBeenCalledWith(groupNodeEmptyAssignee);
+  });
+});

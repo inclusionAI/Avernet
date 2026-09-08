@@ -3,7 +3,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { FriendApprovalConfig } from '@/domain/collaborationPrivacy/types';
 import { Info } from 'lucide-react';
 
-const modeLabels = { none: '全部申请无需审批', all: '全部申请需审批', partial_exempt: '部分组织免审批' } as const;
+const modeLabels = { none: '无需审批', all: '全部审批', partial_exempt: '部分组织免审批（历史配置）' } as const;
 
 interface RequestListProps {
   config: FriendApprovalConfig;
