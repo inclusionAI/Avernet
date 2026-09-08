@@ -203,7 +203,11 @@ PUT /openapi/v1/bots/source-credentials/oss-artifacts
 - **`endpoint` 在凭证上，`bucket` 在源上**，这个划分本身就是一条安全性质：
   租户的清单决定**读哪个桶**，永远不决定**连到哪台主机**——密钥对是和
   endpoint 一起签发的，属于同一个信任边界。签名那条路上这条性质只能靠
-  `allowed_prefixes` 这条**策略**维持，现在它由**结构**保证。
+  `allowed_prefixes` 这条策略维持；现在它从**清单**里移走了。
+  **但这不等于这个值可信**：凭证本身是租户应用通过 API 写入的，所以
+  endpoint 仍然是租户提供的，只是换了一个面。写入时会按 guarded fetcher
+  的同一套规则校验它（形态、以及解析出的每一个地址），内网对象存储由
+  部署侧的 transport 白名单显式放行——这是唯一的例外口子。
 - 字段与机制**必须对上**：`header` 凭证写 `access_key_id` 或 `endpoint`、
   `oss_aksk` 凭证写 `header_name`，都会被**拒绝**而不是忽略——静默丢弃会让
   调用方以为自己配置了什么。

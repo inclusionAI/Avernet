@@ -110,11 +110,23 @@ mandatory and non-empty (`validate_prefixes` refuses `[]`), and
 `CanonicalPrefix.allows` pins scheme, host and port exactly. So the credential is
 host-constrained today — **by policy**.
 
-Under an SDK client the endpoint is a property of the credential, so the same
-constraint holds **by construction**: there is no tenant-supplied host for a
-policy to have to constrain. That is why `allowed_prefixes` becomes meaningless
-for `oss` (decision D-4 below) — the field it exists to guard no longer exists on
-that road.
+Under an SDK client the endpoint is a property of the credential, so the
+constraint moves off the *document*: an entry chooses a bucket and cannot
+choose a host. That is why `allowed_prefixes` becomes meaningless for `oss`
+(decision D-4 below) — the field it exists to guard no longer exists on that
+road.
+
+**Corrected after review.** An earlier draft of this section said the
+constraint then holds "by construction" and needs no check at all. That was
+wrong, and the review caught it: a credential is written by an authenticated
+tenant application through the API, so *"not from the document"* is not
+*"not from the tenant"*. Without a check, `http://169.254.169.254/` is a
+storable endpoint and the platform connects to it on the next apply. The
+endpoint is therefore validated **at write** by the guarded fetcher's own two
+rules — shape, then every resolved address — with the deployment's transport
+allowlist as the only escape hatch. What moved is *who* declares the host
+(the deployment and the credential's issuer, not the manifest author), not
+whether anyone checks it.
 
 ## The vocabulary
 

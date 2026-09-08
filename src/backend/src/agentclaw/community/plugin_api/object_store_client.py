@@ -46,10 +46,16 @@ class ObjectStoreTarget:
 
     Assembled by the caller from two places that stay separate on purpose: the
     **credential** supplies ``endpoint``, ``region`` and the key pair, and the
-    **source declaration** supplies ``bucket``. A tenant's document therefore
-    cannot choose which host its credential is presented to — the property the
-    signing road had to enforce with an ``allowed_prefixes`` policy, held here
-    by construction instead.
+    **source declaration** supplies ``bucket``. A manifest therefore cannot
+    choose which host its credential reaches — the property the signing road
+    had to enforce per-fetch with an ``allowed_prefixes`` policy.
+
+    **That is about the document, not about trust.** The endpoint is still
+    tenant-supplied, just at a different surface: a credential is written by
+    an authenticated tenant application. It is validated against the guarded
+    fetcher's rules before it is stored, and this type assumes that has
+    already happened — a target built from an unvalidated endpoint points
+    ``boto3`` wherever it says, including at link-local metadata.
     """
 
     endpoint: str
