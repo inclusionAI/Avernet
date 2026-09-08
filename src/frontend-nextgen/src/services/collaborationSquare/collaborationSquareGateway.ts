@@ -4,6 +4,7 @@ import type {
   FriendRequestActor,
   FriendRequestResult,
   HumanBotActionContext,
+  OpenBotConversationOptions,
   OpenBotConversationResult,
   PublicBot,
   PublicBotDiscoveryQuery,
@@ -36,7 +37,11 @@ export interface CollaborationSquareGateway {
     friendRequestBotId?: string,
     fromActor?: FriendRequestActor,
   ): Promise<FriendRequestResult>;
-  openBotConversation(botId: string, context: HumanBotActionContext): Promise<OpenBotConversationResult>;
+  openBotConversation(
+    botId: string,
+    context: HumanBotActionContext,
+    options?: OpenBotConversationOptions,
+  ): Promise<OpenBotConversationResult>;
   listGroupPage(query?: PublicGroupSearchQuery, signal?: AbortSignal): Promise<CollaborationSquarePage<PublicGroup>>;
   listGroups(query?: PublicGroupSearchQuery, signal?: AbortSignal): Promise<PublicGroup[]>;
   listGroupMembers(groupId: string, signal?: AbortSignal): Promise<PublicGroupMember[]>;

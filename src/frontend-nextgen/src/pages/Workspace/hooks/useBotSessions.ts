@@ -64,12 +64,13 @@ export function useBotSessions(
   }, [expandedBotIds, rawByBotId, selectedBotSessionId, selectBotSession]);
   const openSession = useCallback(
     (botId: string, sessionId: string) => {
-      // 确保 bot 已展开
-      if (!useWorkspaceStore.getState().expandedBotIds[botId]) toggleBotExpandedFromMap(botId);
+      if (!useWorkspaceStore.getState().expandedBotIds[botId]) {
+        toggleBotExpandedFromMap(botId, chatBots.find((b) => b.botId === botId)?.isFriendBot ? 'friend' : 'mine');
+      }
       selectBotSession(sessionId);
       useWorkspaceStore.getState().bumpHistoryRefresh();
     },
-    [toggleBotExpandedFromMap, selectBotSession],
+    [chatBots, toggleBotExpandedFromMap, selectBotSession],
   );
   const createSession = useCallback(
     async (bot: ChatBotView, title?: string): Promise<BotChatSessionView | null> => {

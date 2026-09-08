@@ -65,6 +65,15 @@ export function GroupWorkspaceArea({
   const selectedGroup = ws.selectedGroup;
   const canManage = ws.canManageGroup;
 
+  // 管理面板打开期间跟随选中群补拉详情：打开面板（齿轮/「…」菜单）或面板保持打开时切群，
+  // 都会为新选中群拉取 participants 等详情；否则列表项 participants 为空且 participantCount>0，
+  // 「群成员管理」card 会一直停留在「加载中…」。面板关闭时不拉取（保持按需拉取约定）。
+  const { selectedGroupId, reloadSelectedGroup } = ws;
+  React.useEffect(() => {
+    if (activePanel !== 'manage' || !selectedGroupId) return;
+    void reloadSelectedGroup(selectedGroupId);
+  }, [activePanel, selectedGroupId, reloadSelectedGroup]);
+
   const handleDissolve = () => {
     if (!ws.selectedGroupId) return;
     void ws.dissolveGroup(ws.selectedGroupId);
@@ -107,18 +116,13 @@ export function GroupWorkspaceArea({
   const handleShareSession = () => sessionManage.createShare();
   const handleCreateSession = (groupId: string) => void sessions.createSessionIn(groupId);
   const handleCreateGroup = () => createGroupDialog.openModal();
-  // 侧栏「…」菜单：群管理（选中该群并打开管理面板，按需拉取群详情）。
+  // 侧栏「…」菜单：群管理（选中该群并打开管理面板；详情由上方 effect 按需补拉）。
   const handleManageGroup = (groupId: string) => {
     ws.onSelectGroup(groupId);
     setActivePanel('manage');
-    // 列表项不含 participants/owner/driver，打开管理（查看/编辑）时补齐群详情。
-    void ws.reloadSelectedGroup(groupId);
   };
-  // 头部齿轮切面板：打开群管理时按需拉取当前选中群详情。
+  // 头部齿轮切面板：打开群管理时详情由上方 effect 按需补拉。
   const handleTogglePanel = (panel: GroupPanelKind) => {
-    if (panel === 'manage' && activePanel !== 'manage' && ws.selectedGroupId) {
-      void ws.reloadSelectedGroup(ws.selectedGroupId);
-    }
     setActivePanel(panel);
   };
   const handleManageSession = (groupId: string, sessionId: string) => {
@@ -276,9 +280,7 @@ export function GroupWorkspaceArea({
           sessionId={sessions.selectedSession.sessionId}
           sessionName={sessions.selectedSession.title}
           participants={sessions.selectedSession.participants}
-          authenticatedUser={
-            userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null
-          }
+          authenticatedUser={userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null}
           onClose={() => setActivePanel('none')}
         />
       )}

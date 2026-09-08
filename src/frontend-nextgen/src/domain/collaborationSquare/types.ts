@@ -213,6 +213,11 @@ export interface OpenBotConversationResult {
   sessionId: string;
 }
 
+/** 打开 Bot 单聊的附加选项：目标 Bot 归登录用户所有时不传 f_user_id（仅好友 Bot 传）。 */
+export interface OpenBotConversationOptions {
+  isOwnedByLoggedInUser?: boolean;
+}
+
 /** 创建公开协作群会话的表单入参（OpenAPI POST /groups/{group_id}/sessions body）。 */
 export interface CreateGroupSessionPayload {
   /** 会话名称（接口 body.title）。 */

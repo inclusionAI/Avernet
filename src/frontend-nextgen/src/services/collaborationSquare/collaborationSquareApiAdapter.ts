@@ -6,6 +6,7 @@ import type {
   FriendRequestActor,
   FriendRequestResult,
   HumanBotActionContext,
+  OpenBotConversationOptions,
   OpenBotConversationResult,
   PublicBot,
   PublicBotDiscoveryQuery,
@@ -187,7 +188,11 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
     }
   }
 
-  async openBotConversation(botId: string, context: HumanBotActionContext): Promise<OpenBotConversationResult> {
+  async openBotConversation(
+    botId: string,
+    context: HumanBotActionContext,
+    options?: OpenBotConversationOptions,
+  ): Promise<OpenBotConversationResult> {
     try {
       const { realBotId, ownerId } = splitBotId(botId);
       if (!realBotId || !context.userId.trim())
@@ -197,7 +202,8 @@ export class CollaborationSquareApiAdapter implements CollaborationSquareGateway
         {
           user_id: context.userId,
           ...(ownerId ? { owner_id: ownerId } : {}),
-          f_user_id: context.userId,
+          // f_user_id 仅好友 Bot 会话需要；目标 Bot 归登录用户所有（自有 Bot）时不得携带。
+          ...(options?.isOwnedByLoggedInUser ? {} : { f_user_id: context.userId }),
         },
         {},
       );
