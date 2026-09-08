@@ -385,3 +385,99 @@ def test_cli_tools_over_oss_still_requires_a_digest(
     assert response.status_code == 422
     codes = {v["code"] for v in response.json()["data"]["violations"]}
     assert "missing_digest" in codes
+
+
+# ── the published example document (defect D2) ──────────────────────────────
+
+
+def _example_document() -> str:
+    """The manifest out of ``docs/bot-config-manifest/examples.zh-CN.md`` §1.2.
+
+    Read from the file rather than copied here, which is the entire point: a
+    copy would be a second document that agrees with the doc only until someone
+    edits one of them. Defect D2 was exactly that gap — the published example
+    returned 422, and nothing in the suite could notice.
+    """
+    import re
+    from pathlib import Path
+
+    doc = (
+        Path(__file__).parents[3]
+        / "docs"
+        / "bot-config-manifest"
+        / "examples.zh-CN.md"
+    ).read_text(encoding="utf-8")
+    block = re.search(r"### 1\.2 [^\n]*\n\n```yaml\n(.*?)```", doc, re.S)
+    assert block, "examples.zh-CN.md §1.2 no longer carries a yaml block"
+    # The doc elides digests for readability ("sha256:3e7a…"); the validator
+    # rightly refuses a truncated one. Only the elision is filled in — every
+    # other character is the document as published.
+    return re.sub(r"sha256:[0-9a-f]*…", "sha256:" + "0" * 64, block.group(1))
+
+
+def test_the_published_example_document_is_accepted(
+    app_with_testing_modules, world
+):
+    """Defect D2, closed and kept closed.
+
+    The example carried `resources` entries with `from:` that the surface
+    refused, plus a caveat header that was stale in the other direction — it
+    listed constructs as unavailable that had been open for two waves. A
+    document a reader copies out of the manual has to work; this asserts it
+    against the real validator on every run.
+    """
+    _seed(world)
+    client = TestClient(app_with_testing_modules)
+    response = _put(client, _example_document())
+
+    # The document deliberately shows the *complete* v1 shape, which includes
+    # ``engine_config`` — the one construct its own caveat header still names
+    # as unopened, and the one this change leaves out of scope. So the exact
+    # assertion is: that is the only thing wrong with it. Anything else in
+    # these violations is the doc and the code disagreeing again.
+    violations = (
+        [] if response.status_code == 200
+        else response.json().get("data", {}).get("violations", [])
+    )
+    unexpected = [v for v in violations if v["location"] != "manifest.engine_config"]
+    assert not unexpected, "the published example is refused:\n" + "\n".join(
+        f"  {v['location']}: {v['code']} — {v['message']}" for v in unexpected
+    )
+
+    # And with that one section removed — which is what a reader following the
+    # caveat header would write today — it is accepted outright.
+    import re
+
+    without = re.sub(
+        r"\n  engine_config:.*?\n(?=  \w)", "\n", _example_document(), flags=re.S
+    )
+    assert "engine_config" not in without
+    assert _put(client, without).status_code == 200, _put(client, without).json()
+
+
+def test_the_example_document_exercises_both_protocols(
+    app_with_testing_modules, world
+):
+    """And it is worth accepting only if it still shows what it claims to.
+
+    A document trimmed down to whatever passes would satisfy the test above
+    while teaching nothing, so the shape is asserted too: both protocols, a
+    resources entry over git in each of its two forms, and no leftover of the
+    old spelling anywhere in the file.
+    """
+    from pathlib import Path
+
+    document = _example_document()
+    assert "protocol: git" in document
+    assert "protocol: oss" in document
+    # A file entry and a directory entry, both from the git source.
+    assert "path: data/faq.csv" in document
+    assert "path: data/kb/" in document
+
+    whole_doc = (
+        Path(__file__).parents[3]
+        / "docs"
+        / "bot-config-manifest"
+        / "examples.zh-CN.md"
+    ).read_text(encoding="utf-8")
+    assert "\n    git: http" not in whole_doc, "old source spelling survives"

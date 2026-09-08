@@ -81,23 +81,29 @@
 | teclaw | ✅ 全部 | ❌ **写入即拒**（容器内没有执行通道） |
 | desktop bot | 不在本特性范围内 | ❌ |
 
-还有两道与引擎无关的门，**对所有人都关着**：类目 `engine_config`（没有物化器），
-以及 **`resources` 条目用命名源 `from` 或 git 源**（resources 物化器目前只走 URL
-那条路）——写了会在提交时被拒绝，清单见**附录 C**。
+还有一道与引擎无关的门，**对所有人都关着**：类目 `engine_config`（没有物化器）
+——写了会在提交时被拒绝，清单见**附录 C**。
 
-⚠️ **取源形态不是全局开关，逐类目都不一样。**照这张表写：
+**取源支持是「类目 × 协议」的一张矩阵。**源声明它走哪个协议（`protocol: git`
+或 `protocol: oss`），矩阵按协议判：
 
-| 类目 | 内联 `source` URL | 内联 `content` | `from`（命名源） | git 源 |
-| --- | --- | --- | --- | --- |
-| `identity` | ✅ | ✅ | ✅ | ✅ |
-| `skills` | ✅ | ❌ 拒（skill 是一个包，不是一段文本） | ✅ | ✅ |
-| `resources` | ✅ | ✅ | ❌ `PUT` 拒 | ❌ `PUT` 拒 |
-| `cli_tools` | ✅ | ❌ 拒（本类目强制 `digest`，而 `content` 上写 `digest` 非法——两条规则互斥） | ⚠️ **`PUT` 过、apply 失败** | ⚠️ 同左 |
-| `mcp` | —— 它不取源，只写 `server_code` | | | |
+| 类目 | `content`（内联） | `oss` | `git` |
+| --- | --- | --- | --- |
+| `identity` | ✅ | ✅ | ✅ |
+| `resources` | ✅ | ✅ | ✅ |
+| `skills` | ❌ 拒（skill 是一个包，不是一段文本） | ✅（**强制 `digest`**） | ✅ |
+| `cli_tools` | ❌ 拒（它是一个可执行文件） | ✅（**强制 `digest`**） | ✅（**不需要** `digest`） |
+| `mcp` | —— 它不取源，只写 `server_code` | | |
+| `engine_config` | —— 没有物化器，整个类别被拒 | | |
 
-**只有 `identity` 四种形态全通。**其中 `cli_tools` 那两个 ⚠️ 是唯一「提交时不报错、
-运行时才炸」的组合（物化器把 `from` 的源名当成 URL 直接去取），所以 **`cli_tools` 请
-一律写内联 `source` URL**。整张表的理由见**附录 C**。
+**`from`（命名源）不是第三列。**一个命名源声明一个协议，生效的是那个协议
+所在的格子——`cli_tools` 用 `from:` 引用一个 git 源与内联写一个 git 源是同一
+件事，都不需要 `digest`。
+
+> 这张矩阵在代码里是**一张表**（`core/bot_config_manifest/support_matrix.py`）：
+> `PUT` 校验器的拒绝理由与 capabilities 端点发布的理由是同一个字符串对象，
+> 并且有一个测试**逐格发真实 `PUT`** 断言两者一致。此前它散落在各类目的校验
+> 分支、物化器代码与三份互相矛盾的文档里——本手册这张表在上一版就是错的。
 
 **已经有 bot 的人**可以直接问平台，答案与上表同源（同一个函数，所以不会出现
 「这里说支持、`PUT` 却拒绝」）：
@@ -105,6 +111,11 @@
 ```text
 GET /openapi/v1/bots/{bot_id}/config-manifest/capabilities
 ```
+
+该响应除了原有的 `constructs` 数组，还带一个 **`source_matrix`**：上面那张
+矩阵的每一格一行（`category` / `protocol` / `supported` / `reason`）。扁平的
+`constructs` 结构上表达不了「组合」这个问题——而表达不了，正是这张表从前会
+和代码走散的原因。
 
 ### 2.2 路径 A：还没有 bot
 
@@ -757,9 +768,10 @@ skills:
 ```
 
 - **`name` 是标识符，不含位置信息**——装到引擎哪个目录由引擎决定。
-- **非 git 形态 `digest` 强制，没写就拒绝写入。**skill 里有会被 agent 加载执行的
-  脚本，属于「代码」而不是「数据」：git 形态有 commit SHA 天然兜底，URL/制品库
-  形态没有钉子就等于每个 apply 点盲取最新。
+- **`oss` 协议 `digest` 强制，没写就拒绝写入。**skill 里有会被 agent 加载执行的
+  脚本，属于「代码」而不是「数据」：git 有 commit SHA 天然兜底，对象存储没有钉子
+  就等于每个 apply 点盲取最新。这条规则**按协议判、不按写法判**：`from:` 一个 git
+  源与内联写一个 git 源是同一件事。
 - **归档自动识别**：平台按内容类型/扩展名判断要不要解包，`unpack` 只在扩展名不可靠
   时作为显式覆盖。
 - apply 走的是**正规的上传 + 激活**路径，所以装出来的 skill 与你手工上传的**无法
@@ -784,19 +796,24 @@ resources:
     from: content
     subpath: kb/
 
-  # 目录（归档形态：源不在 git 时）
+  # 目录（归档形态：oss 协议）
   - path: data/manuals/
     source: https://cms.example.com/kb/manuals.zip
-    unpack: zip                  # zip | tar.gz
+    unpack: zip                  # zip | tar.gz —— oss 目录条目**必填**
     strip_components: 1          # 可选，默认 0
     auth: cms-token
 ```
 
 **两个「路径」不要混淆**：`path` 是**落点**（写到 workspace 哪里），`subpath` 是
-**源内路径**（从源的哪里取）。一个条目里可以同时出现。
+**源交付物之内的路径**（从源交付的东西里取哪一块）。一个条目里可以同时出现。
 
-- **HTTP 没有目录语义**，所以「文件夹」要么用能枚举目录的协议（git，免打包），
-  要么用归档整体运输。
+- **一次 HTTPS 请求只取一个对象**，所以「文件夹」要么用能枚举目录的协议
+  （`git`，免打包），要么用归档整体运输（`oss`）。
+- **目录条目是递归的**：整棵子树、每一层的每一个文件。
+- `unpack` / `strip_components` **只属于 `oss`**——git 手上已经是一棵真实的树，
+  写在 git 源上会被 `PUT` **拒绝**而不是忽略。
+- **一个 git 源可以服务多个条目**：源上的 `subpath` 与条目上的 `subpath` 拼接
+  （源在前），一次 apply 只 clone 一次。上面两条目录/文件条目引用的就是同一个源。
 - **`strip_components` 不做魔法**：只按你写的层数剥，**不会**自动探测单一顶层目录
   ——同一份声明的行为不取决于归档内部长什么样。业务习惯 `zip -r kb.zip kb/` 打出
   的那层壳目录，就用 `strip_components: 1` 消掉。
@@ -973,10 +990,14 @@ schema 已定稿（见 `manifest-schema.zh-CN.md` §3.4），但**第一期没�
 
 | 场景 | `digest` |
 | --- | --- |
-| git 源的任何条目 | **非法**（commit SHA 就是 digest），写了报错 |
-| `skills` 的非 git 源 | **强制**——skill 是代码 |
-| `cli_tools` 的非 git 源 | **强制**——平台代你分发可执行物 |
-| `resources`、`identity` 的 URL 源 | 可选，是钉版手段 |
+| `git` 协议的任何条目 | **非法**（commit SHA 就是 digest），写了报错 |
+| `skills` + `oss` | **强制**——skill 是代码 |
+| `cli_tools` + `oss` | **强制**——平台代你分发可执行物 |
+| `resources`、`identity` + `oss` | 可选，是钉版手段 |
+
+**这张表按协议判，不按写法判**：`from:` 一个 git 源与内联写一个 git 源是同一个
+源，规则相同。（此前它读的是「来源形态」，于是 `from:` 一个 git 源被归类成
+`named`、被要求出示一个 git 字节流无法承载的钉子，然后在 apply 时照样失败。）
 
 digest 不匹配按 fetch 失败处理，不是「损坏的成功」。
 
@@ -1182,6 +1203,7 @@ bot 也是队列上的一个任务。所以部署里必须满足两个前提：
 | 清单文档总大小 | 64 KiB（`script` 另按 24 KiB） |
 | 每类目条目数 | 50 |
 | 内联 `content` 单条 | 64 KiB |
+| 单个 `source` URL 长度 | 2048 字符（与平台 provenance 列宽一致；`PUT` 时就拒，不是取完才发现） |
 | 单条目取源 | skills zip 100 MiB；resources 文件 100 MiB；identity 1 MiB |
 | resources 目录条目 | 单归档 200 MiB；解包后 500 MiB；单归档文件数 5000 |
 | 单次 apply 取源总量 | 500 MiB（目录条目按解包后算） |
@@ -1196,8 +1218,12 @@ bot 也是队列上的一个任务。所以部署里必须满足两个前提：
 
 1. **secret 不进清单、不进 script、不进 URL。**清单会被原样读回并进审计；script
    的下发链路日志可见。私有源一律走凭证引用。
-2. **凭证是租户级的**：一次注册、整批 bot 复用。一个凭证只装一个 secret——一个
-   凭证装多个 secret 会把轮换周期、权限边界、可出示范围全糊在一起。
+2. **凭证是租户级的**：一次注册、整批 bot 复用；这一组端点也是本特性里唯一
+   **不带 `user_id`** 的。一个凭证只装一个 secret——一个凭证装多个 secret 会把
+   轮换周期、权限边界、可出示范围全糊在一起。
+   （`oss_aksk` 的 `access_key_id` + 密钥半边不是例外：它们是**一份**凭证的两半，
+   而不是两个 secret。`access_key_id` 是标识符、可回读；密钥半边从不上线路、也
+   从不回读——平台用它对每个请求**签名**。）
 3. **`allowed_prefixes` 收到仓库/桶前缀**，别图省事写整个域名。它防的是「有清单
    编辑权的人把 `source` 指向同域名下别人的仓库来套取你的 token」。
 4. **不要用个人 PAT**，也不要用带写权限的 API 令牌（§4.2）。
@@ -2142,24 +2168,31 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 构造 | 为什么 | 什么时候开放 |
 | --- | --- | --- |
 | 类目 `engine_config` | 按跨引擎确认的结论移出第一期，至今没有物化器 | 它的物化器回来时。**在此之前**要写引擎配置，走 `GET`/`PUT /openapi/v1/bots/{bot_id}/engine/config`（附录 B.6），那条路不受清单管辖 |
-| `resources` 条目用 **`from`（命名源）或 git 源** | resources 物化器目前只走 URL 那条路（W6）；接受了会在 apply 时以一条看不懂的错误失败，所以在 `PUT` 就精确拒掉 | resources 接上 git 那条路之后。**在此之前**：resources 条目写内联 `source` URL 或 `content` |
-| `cli_tools` 条目用 **`from`（命名源）或 git 源** | cli_tools 物化器同样不解析命名源：`CliToolDecl.from_entry` 把 `from` 的**源名原样当成 URL**，`resolve` 也不经过取源会话。⚠️ **与上一行不同，这个组合 `PUT` 不会拒——它会在 apply 时失败**，所以它今天是一个「写得出、过得了、跑不通」的陷阱 | cli_tools 接上取源会话之后。**在此之前**：cli_tools 条目一律写内联 `source` URL |
+| `skills` 条目用内联 `content` | skill 是一个**包**（`SKILL.md` 加上它引用的文件），一段内联文本成不了包 | 不计划——改用 `oss` 或 `git` 源 |
+| `cli_tools` 条目用内联 `content` | 同理，它是一个**可执行文件** | 不计划 |
+| `mcp` 条目的任何来源字段 | mcp 条目是注册表引用（`server_code`），根本没有来源轴 | 不计划 |
 
 **已经开放的**（早期版本的本文档曾把它们列在这张表里，现在不是了）：
 
 | 构造 | 状态 |
 | --- | --- |
 | 类目 `cli_tools` | **已开放**（W9），与管理 API `…/cli-tools` 同一个组件（§5.6） |
-| `from` 指向命名源 | **对 `skills` 与 `identity` 已开放**（W7）。`resources` 与 `cli_tools` **不可用**，见上表 |
-| git 源（`sources.<name>.git` 或条目内联的 git 引用） | 同上：**只对 `skills` 与 `identity`** |
+| `from` 指向命名源 | **四个取源类目全部可用**：`identity` / `skills` / `resources` / `cli_tools` |
+| `git` 协议的源 | 同上，**四个类目全部可用**——`resources` 那条路是本轮接通的 |
+| `oss` 协议 + `oss_aksk` 凭证（私有对象存储） | **已开放**：平台用 AK/SK 对每个请求签名，密钥半边从不上线路 |
+
+**这张表以前是错的，而且是两个方向都错。**它把 `cli_tools`、`from` 与 git 源列为
+「未开放」——当时三者都已经开放；同时它漏掉了唯一真正的陷阱。这类漂移正是本轮
+把「类目 × 协议」做成**代码里一张表**（`support_matrix.py`）并配一个逐格发真实
+`PUT` 的测试的原因：现在这张表要么与代码一致，要么 CI 红。
 
 还有一条与引擎有关、不属于「没做完」的拒绝：**`script` 在 teclaw 与 desktop bot 上
 写入即拒**（§2.1）——它不是待开放，是那两类 bot 结构上没有执行通道。
 
 > 一句话给写客户端的人：**能力表是唯一的事实来源**，写之前先
-> `GET …/config-manifest/capabilities`；它与 `PUT` 的判定是同一个函数，不会互相矛盾。
-> 唯一它答不了的是上面 `resources` 那一条——那是「类目 × 源形态」的组合，能力表按
-> 单个构造出结论，所以它由条目校验逐条拒绝，理由里会点名类目。
+> `GET …/config-manifest/capabilities`；它与 `PUT` 的判定是同一个函数，不会互相
+> 矛盾。它现在也答得了「类目 × 协议」的组合——响应里的 `source_matrix` 每格一行，
+> 而且 `reason` 与 `PUT` 的拒绝理由是同一个字符串。
 
 ---
 
@@ -2192,7 +2225,7 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 | 字段 | 必填 | 取值 | 备注 |
 | --- | --- | --- | --- |
 | `schema_version` | ✅ | `1` | 未知版本拒绝写入 |
-| `sources` | ❌ | 命名源字典（§4.1、§6） | **只有 `skills` / `identity` 条目能用 `from` 引用它**；`resources` 写了当场被拒，`cli_tools` 写了 apply 时才失败（附录 C） |
+| `sources` | ❌ | 命名源字典（§4.1、§6） | 每个源声明 `protocol`（`git` \| `oss`）与 `url`；**四个取源类目都能用 `from` 引用它** |
 | `manifest` | ❌ | 六个类目，见下 | 缺省的类目完全不碰 |
 | `script` | ❌ | `{ body: <shell> }` | teclaw / desktop **写入即拒**；≤ 24 KiB |
 
@@ -2200,7 +2233,10 @@ B.2.2 / B.2.3 / B.2.4 与 `GET …/with-manifest/status` 的 `apply` 字段都�
 
 | 字段 | 说明 |
 | --- | --- |
-| `git` + `ref` | git 源；`ref` = tag / branch / commit SHA。**只对 `skills` / `identity` 有效**——`resources`、`cli_tools` 不可用（附录 C） |
+| `protocol` + `url` | 源协议：`git`（交付整棵树）或 `oss`（交付一个对象）。**四个取源类目都可用** |
+| `ref` | **仅 `git`**：tag / branch / commit SHA |
+| `mode` | **仅 `git`**：`strict` \| `non_strict`（默认），裁决 ref 能否移动 |
+| `subpath`（源上） | **仅 `git`**：仓库树内路径；与条目上的 `subpath` 拼接（源在前） |
 | `url` | URL 源；作为前缀，条目的 `subpath` 拼在其后 |
 | `auth` | 凭证名（§4.2）。用 `from` 时凭证声明在**源**上，条目里不写 |
 | `mode` | `strict` / `non_strict`（默认）；只对会动的 `ref` 有意义（§6.2） |

@@ -45,6 +45,7 @@ from typing import Callable, Mapping, Optional, Sequence
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
+    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.cli_tools.context import (
     CliToolContext,
@@ -442,7 +443,16 @@ class CliToolService:
 
         for decl in decls:
             current = existing.get(decl.name)
-            if current is not None and current.convergence_key == decl.convergence_key:
+            # An unpinned (git-sourced) declaration has no convergence key —
+            # the SHA that would be its pin is only known once the ref is
+            # resolved, which is inside ``_record_one`` below. So it always
+            # re-acquires, which is what stops a moved ref from surviving as
+            # "unchanged". See ``CliToolDecl.convergence_key``.
+            if (
+                current is not None
+                and decl.convergence_key is not None
+                and current.convergence_key == decl.convergence_key
+            ):
                 outcomes.append(
                     CliToolOutcome(decl.name, CliToolStatus.UNCHANGED, record=current)
                 )
@@ -599,17 +609,54 @@ class CliToolService:
     # ── the pipeline ─────────────────────────────────────────────────────
 
     async def _acquire(self, ctx: CliToolContext, decl: CliToolDecl) -> bytes:
-        """Fetch, confirm the pin, unpack if declared, select and verify."""
-        fetched = await asyncio.to_thread(
-            self._fetcher.fetch,
-            ctx,
-            source_url=decl.source_url,
-            digest=decl.digest,
-            auth=decl.auth,
-            category=FETCH_CATEGORY,
-            keep_last=decl.keep_last,
-            entry_identity=decl.name,
-        )
+        """Fetch, confirm the pin, unpack if declared, select and verify.
+
+        A declaration that came from a manifest entry goes through
+        ``fetch_declared`` — the same door every other fetching category uses,
+        and the only one that resolves a ``from`` name or a ``protocol: git``
+        source. Reading ``decl.source_url`` instead is what used to put a
+        *source name* on the wire as though it were a URL: accepted at ``PUT``,
+        failed at apply, the one construct that broke "accepted means
+        appliable".
+        """
+        if decl.entry is not None:
+            fetched = await asyncio.to_thread(
+                self._fetcher.fetch_declared,
+                ctx,
+                entry=decl.entry,
+                category=FETCH_CATEGORY,
+                entry_identity=decl.name,
+            )
+        else:
+            # The API-driven install: a plain URL from the caller, no manifest
+            # and no ``sources`` map to resolve against.
+            fetched = await asyncio.to_thread(
+                self._fetcher.fetch,
+                ctx,
+                source_url=decl.source_url,
+                digest=decl.digest,
+                auth=decl.auth,
+                category=FETCH_CATEGORY,
+                keep_last=decl.keep_last,
+                entry_identity=decl.name,
+            )
+        if isinstance(fetched, GitEntrySource):
+            # A repository hands over a tree, and this category wants exactly
+            # one file out of it — which the composed ``subpath`` already
+            # names. No archive is involved, so ``unpack`` has nothing to do
+            # here and the schema refuses it on a git source anyway.
+            data = await asyncio.to_thread(fetched.read_file)
+            await asyncio.to_thread(
+                self._fetcher.file_bytes,
+                ctx,
+                content=data,
+                source_url=fetched.receipt_url(),
+                category=FETCH_CATEGORY,
+                entry_identity=decl.name,
+                credential_name=fetched.auth,
+            )
+            verify_amd64_elf(data, name=decl.name)
+            return data
         if decl.digest and fetched.digest != decl.digest:
             # The fetch pipeline enforces the pin; this compares the content
             # address it already computed, so the belt costs nothing. It is
