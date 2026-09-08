@@ -41,7 +41,6 @@ from agentclaw.community.core.bot_config_manifest.fetch.limits import FetchCateg
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
-    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -171,7 +170,7 @@ class IdentityMaterialiser(Materialiser):
                 # call from a coroutine. It matters on the `dry_run` path,
                 # which the adapter awaits inline; a hung source must not
                 # park every concurrent request.
-                decl = await asyncio.to_thread(
+                delivery = await asyncio.to_thread(
                     self._fetcher.fetch_declared,
                     ctx,
                     entry=entry,
@@ -182,67 +181,43 @@ class IdentityMaterialiser(Materialiser):
                 failures.append(ResolveFailure(file_type, exc.reason))
                 continue
 
-            if isinstance(decl, GitEntrySource):
-                if decl.subpath is None:
-                    # Category knowledge stays here: identity reads exactly
-                    # one file, and the source's subpath is where it is named.
-                    failures.append(
-                        ResolveFailure(
-                            file_type,
-                            "an identity entry from a git source must set "
-                            "the source's 'subpath' to a single file",
-                        )
-                    )
-                    continue
-
-                def _read_and_file() -> bytes:
-                    body = decl.read_file()
-                    # The one file's bytes go through the same store the URL
-                    # road files with — auth included, so the lineage's
-                    # answer to "which credential served this" is the same
-                    # on both roads.
+            def _read_and_file() -> bytes:
+                body = delivery.single()
+                if delivery.needs_receipt():
+                    # The one file's bytes go through the same store the
+                    # object road files with — auth included, so the
+                    # lineage's answer to "which credential served this" is
+                    # the same on both roads.
                     self._fetcher.file_bytes(
                         ctx,
                         content=body,
-                        source_url=decl.receipt_url(),
+                        source_url=delivery.receipt_url(),
                         category=_FETCH_CATEGORY,
                         entry_identity=file_type,
-                        credential_name=decl.auth,
+                        credential_name=delivery.auth(),
                     )
-                    return body
+                return body
 
-                try:
-                    body = await asyncio.to_thread(_read_and_file)
-                except EntryFetchError as exc:
-                    failures.append(ResolveFailure(file_type, exc.reason))
-                    continue
-                text = _decode_utf8(body)
-                if text is None:
-                    failures.append(
-                        ResolveFailure(
-                            file_type,
-                            "the fetched identity source is not UTF-8 text",
-                        )
-                    )
-                    continue
-                intents.append(
-                    Intent(file_type, text, note=decl.moved_note())
-                )
+            try:
+                body = await asyncio.to_thread(_read_and_file)
+            except EntryFetchError as exc:
+                # Includes the "must name a single file" refusal a tree
+                # delivery raises when nothing selected one file out of it.
+                # That check used to live here, worded for this category —
+                # but asking it needed a git-only field on the delivery,
+                # which is the seam leaking to save one sentence.
+                failures.append(ResolveFailure(file_type, exc.reason))
                 continue
-
-            # The URL road, exactly as before: decode what the wire brought.
-            fetched = decl
-            text = _decode_utf8(fetched.content)
+            text = _decode_utf8(body)
             if text is None:
                 failures.append(
                     ResolveFailure(
-                        file_type, "the fetched identity source is not UTF-8 text"
+                        file_type,
+                        "the fetched identity source is not UTF-8 text",
                     )
                 )
                 continue
-            intents.append(
-                Intent(file_type, text, note=fetched.fallback_reason)
-            )
+            intents.append(Intent(file_type, text, note=delivery.note()))
 
         return ResolveResult(intents=tuple(intents), failures=tuple(failures))
 

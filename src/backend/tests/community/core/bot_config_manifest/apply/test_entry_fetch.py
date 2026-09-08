@@ -13,10 +13,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    GitDelivery,
+)
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     EntryFetcher,
-    GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -575,7 +577,7 @@ def test_fetch_declared_serves_a_url_from_a_named_source(rig):
         ctx, entry={"from": "cdn"}, category="identity"
     )
     # The same URL road as 'source', with the source's own auth folded in.
-    assert result.content == BODY
+    assert result.single() == BODY
     assert fetcher.requests[0].url == "https://content.example/named.bin"
 
 
@@ -590,9 +592,9 @@ def test_fetch_declared_gives_the_git_road_a_checkout(rig):
     decl = pipeline.fetch_declared(
         ctx, entry={"from": "app"}, category="skills", entry_identity="s1"
     )
-    assert isinstance(decl, GitEntrySource)
-    assert decl.checkout.sha == _FAKE_SHA
-    assert decl.files() == [("skill.md", b"file-bytes")]
+    assert isinstance(decl, GitDelivery)
+    assert decl.source.checkout.sha == _FAKE_SHA
+    assert decl.source.files() == [("skill.md", b"file-bytes")]
     # No named credential on this source: none was asked of W3, and the
     # session recorded the resolution the report will carry.
     assert credentials.binding_calls == []
@@ -645,9 +647,9 @@ def test_non_strict_records_the_move_in_the_note(rig):
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main"}},
         category="skills",
     )
-    assert isinstance(decl, GitEntrySource)
-    assert decl.moved_note() and "b" * 40 in decl.moved_note()
-    assert "a" * 40 in decl.moved_note()
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() and "b" * 40 in decl.note()
+    assert "a" * 40 in decl.note()
 
 
 def test_strict_on_the_first_apply_has_no_opinion(rig):
@@ -659,8 +661,8 @@ def test_strict_on_the_first_apply_has_no_opinion(rig):
         entry={"source": {"protocol": "git", "url": GIT_URL, "ref": "main", "mode": "strict"}},
         category="skills",
     )
-    assert isinstance(decl, GitEntrySource)
-    assert decl.moved_note() is None
+    assert isinstance(decl, GitDelivery)
+    assert decl.note() is None
 
 
 def test_digest_on_a_git_source_is_refused(rig):
@@ -696,10 +698,10 @@ def test_git_keep_last_falls_back_to_the_baseline_receipt(rig):
         category="skills",
         entry_identity="s1",
     )
-    assert result.from_store is True
-    assert result.content == b"stored-tree-zip"
-    assert result.content_type == "application/zip"
-    assert result.fallback_reason and "keep_last" in result.fallback_reason
+    assert result.from_store() is True
+    assert result.single() == b"stored-tree-zip"
+    assert result.content_type() == "application/zip"
+    assert result.note() and "keep_last" in result.note()
 
 
 def test_git_credentials_reach_the_transport_as_headers(rig):
@@ -798,8 +800,8 @@ def test_entry_subpath_composes_with_the_sources_on_the_git_road(rig):
         ctx, entry={"from": "app", "subpath": "narrow/inner.md"},
         category="skills",
     )
-    assert isinstance(decl, GitEntrySource)
-    assert decl.subpath == "pkg/narrow/inner.md"
+    assert isinstance(decl, GitDelivery)
+    assert decl.source.subpath == "pkg/narrow/inner.md"
     assert git.specs[-1].subpath == "pkg/narrow/inner.md"
 
 
@@ -812,7 +814,7 @@ def test_a_source_with_no_subpath_takes_the_entrys_whole(rig):
     decl = pipeline.fetch_declared(
         ctx, entry={"from": "app", "subpath": "kb/faq.csv"}, category="skills"
     )
-    assert decl.subpath == "kb/faq.csv"
+    assert decl.source.subpath == "kb/faq.csv"
 
 
 def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
@@ -836,12 +838,12 @@ def test_two_entries_off_one_git_source_share_a_checkout_and_a_sha(rig):
         ctx, entry={"from": "app", "subpath": "pricing.csv"},
         category="resources_file",
     )
-    assert (first.subpath, second.subpath) == ("kb/faq.csv", "kb/pricing.csv")
+    assert (first.source.subpath, second.source.subpath) == ("kb/faq.csv", "kb/pricing.csv")
     assert len(git.specs) == 1, "one checkout per (url, ref) per apply"
     records = session.resolution_records()
     assert len(records) == 1
     assert records[0].name == "app"
-    assert first.checkout.sha == second.checkout.sha == records[0].resolved_sha
+    assert first.source.checkout.sha == second.source.checkout.sha == records[0].resolved_sha
 
 
 def test_a_composed_subpath_that_escapes_the_tree_is_refused(rig):
@@ -876,7 +878,7 @@ def test_an_entry_subpath_is_not_appended_to_an_object_stores_url(rig):
         ctx, entry={"from": "cdn", "subpath": "inside/archive.md"},
         category="skills", entry_identity="qc",
     )
-    assert fetched.source_url == "https://content.example/named.bin"
+    assert fetched.source_url() == "https://content.example/named.bin"
 
 
 def test_entry_level_auth_on_an_inline_git_source_is_refused(rig):
@@ -910,12 +912,12 @@ def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
         "app": {"protocol": "git", "url": GIT_URL, "ref": "main", "auth": "ci-token"},
     }))
     decl = pipeline.fetch_declared(ctx, entry={"from": "app"}, category="identity")
-    assert isinstance(decl, GitEntrySource)
+    assert isinstance(decl, GitDelivery)
     # The identity category's per-entry cap rides the source: its reader
     # refuses a member by DECLARED size against the category number, the
     # same vocabulary the URL road's transport enforces.
-    assert decl.file_limit == 1 * 1024 * 1024
-    assert decl.auth == "ci-token"
+    assert decl.source.file_limit == 1 * 1024 * 1024
+    assert decl.auth() == "ci-token"
 
 
 # --- the oss road carries a signing credential (defect D4) ------------------
@@ -947,7 +949,7 @@ def test_an_oss_source_presents_its_credential_through_the_guarded_transport(rig
         ctx, entry={"from": "artifacts"}, category="cli_tools",
         entry_identity="rg",
     )
-    assert result.content == BODY
+    assert result.single() == BODY
     # The SOURCE's auth, not the entry's — the declaration carries the
     # credential (W7), and the binding is what the transport is handed.
     assert credentials.binding_calls == ["oss-artifacts"]
@@ -970,5 +972,5 @@ def test_an_oss_source_without_auth_fetches_anonymously(rig):
     )
     assert pipeline.fetch_declared(
         ctx, entry={"from": "cdn"}, category="identity"
-    ).content == BODY
+    ).single() == BODY
     assert credentials.binding_calls == []

@@ -29,6 +29,7 @@ from agentclaw.community.core.bot_config_manifest.apply.source_session import (
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
+    FetchRefusedError,
 )
 
 from ._fakes import (
@@ -417,6 +418,10 @@ def test_the_real_identity_service_satisfies_the_port():
 # ── resolve: the git road (W7) ──────────────────────────────────────────────
 
 
+def _raise_no_subpath():
+    raise FetchRefusedError("the source's 'subpath' must name a single file")
+
+
 class _StaticGit:
     """A git client that serves one checkout with stable bytes.
 
@@ -424,6 +429,13 @@ class _StaticGit:
     reaches it: ``read_file``/``files`` take the source's subpath argument
     the way the guarded readers do, and the bytes are static so the intent,
     the note and the store filing can be asserted exactly.
+
+    ``read_file`` refuses a ``None`` subpath because the real one does. That
+    fidelity is load-bearing now: the materialiser used to ask "is the
+    subpath set?" itself before reading, so a permissive double still failed
+    the entry. It no longer asks — the question needed a git-only field on
+    the delivery seam — and a double that answered where the real checkout
+    refuses would let this test pass against code that cannot work.
     """
 
     def __init__(self, sha: str = "a" * 40, body: bytes = b"# rules\n") -> None:
@@ -439,7 +451,11 @@ class _StaticGit:
             url=spec.url,
             ref=spec.ref,
             files=lambda subpath=None, file_limit=None: [],
-            read_file=lambda subpath=None, file_limit=None: self.body,
+            read_file=lambda subpath=None, file_limit=None: (
+                self.body
+                if subpath
+                else _raise_no_subpath()
+            ),
         )
 
 

@@ -4,6 +4,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Mapping, Optional
 
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
+    GitDelivery,
+)
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     GitEntrySource,
@@ -273,16 +277,20 @@ class FakeEntryFetcher:
             )
             if self.error is not None:
                 raise self.error
-            return FakeGitEntrySource(self.content, decl, entry)
+            return GitDelivery(FakeGitEntrySource(self.content, decl, entry))
 
-        return self.fetch(
-            ctx,
-            source_url=(decl or {}).get("url") or entry.get("source"),
-            digest=entry.get("digest"),
-            auth=(decl or {}).get("auth", entry.get("auth")),
-            category=category,
-            keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
-            entry_identity=entry_identity,
+        return BlobDelivery(
+            self.fetch(
+                ctx,
+                source_url=(decl or {}).get("url") or entry.get("source"),
+                digest=entry.get("digest"),
+                auth=(decl or {}).get("auth", entry.get("auth")),
+                category=category,
+                keep_last=(
+                    entry.get("on_fetch_failure", "keep_last") == "keep_last"
+                ),
+                entry_identity=entry_identity,
+            )
         )
 
     def file_bytes(self, ctx, **kwargs):

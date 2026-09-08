@@ -436,14 +436,16 @@ class EntryFetcher:
                     "under 'sources'"
                 )
         elif isinstance(inline, str):
-            return self.fetch(
-                ctx,
-                source_url=inline,
-                digest=entry.get("digest"),
-                auth=entry.get("auth"),
-                category=category,
-                keep_last=keep_last,
-                entry_identity=entry_identity,
+            return BlobDelivery(
+                self.fetch(
+                    ctx,
+                    source_url=inline,
+                    digest=entry.get("digest"),
+                    auth=entry.get("auth"),
+                    category=category,
+                    keep_last=keep_last,
+                    entry_identity=entry_identity,
+                )
             )
         elif isinstance(inline, Mapping):
             raw = inline
