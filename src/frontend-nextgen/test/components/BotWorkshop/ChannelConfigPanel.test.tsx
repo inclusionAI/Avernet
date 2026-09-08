@@ -19,6 +19,7 @@ test('已有渠道可进入编辑并回显后端配置', () => {
         {
           id: 1,
           type: 'dingding',
+          bindingMode: 'plugin',
           description: '研发群',
           status: 'active',
           clientId: 'ding-app-1',
@@ -44,4 +45,43 @@ test('已有渠道可进入编辑并回显后端配置', () => {
   expect(screen.getByDisplayValue('ding-app-1')).toBeInTheDocument();
   expect(screen.getByDisplayValue('tpl-1')).toBeInTheDocument();
   expect(screen.getByPlaceholderText('留空则保持原 Secret')).toBeInTheDocument();
+});
+
+test('按绑定方式分栏展示渠道，并在 BCN 表单回显对应配置', () => {
+  render(
+    <ChannelConfigPanel
+      editable
+      channels={[
+        {
+          id: 2,
+          type: 'dingding',
+          bindingMode: 'bcn_gateway',
+          description: '协作群',
+          status: 'inactive',
+          clientId: 'ding-app-2',
+          hasSecret: true,
+          robotCode: 'robot-2',
+          enableStreamingCards: false,
+          dmPolicy: 'open',
+          allowlist: ['*'],
+          replyToMessage: true,
+          aixEnable: true,
+          includeSenderName: true,
+          groupChatScope: 'conversation_shared',
+          outboundVisibility: 'lead_only',
+        },
+      ]}
+      onCreate={jest.fn()}
+      onUpdate={jest.fn()}
+      onToggle={jest.fn()}
+      onDelete={jest.fn()}
+    />,
+  );
+
+  expect(screen.getByRole('tab', { name: '基于开源插件' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('tab', { name: '基于BCN' }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑协作群' }));
+  expect(screen.getByRole('dialog')).toHaveTextContent('基于 BCN');
+  expect(screen.getByDisplayValue('robot-2')).toBeInTheDocument();
+  expect(screen.getByText('群内共享会话')).toBeInTheDocument();
 });

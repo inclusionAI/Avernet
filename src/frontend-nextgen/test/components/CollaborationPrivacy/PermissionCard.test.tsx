@@ -47,7 +47,7 @@ describe('PermissionCard', () => {
     renderCard();
 
     const capabilityHeading = screen.getByRole('heading', { level: 4, name: '协作能力' });
-    const publicationHeading = screen.getByRole('heading', { level: 4, name: '公开范围' });
+    const publicationHeading = screen.getByRole('heading', { level: 4, name: 'Bot 可见性' });
     const cardColumns = capabilityHeading.closest('section')?.parentElement;
 
     expect(capabilityHeading).toHaveClass('text-xs', 'text-muted-foreground', 'tracking-wide');
@@ -60,7 +60,9 @@ describe('PermissionCard', () => {
     expect(capabilityHeading.parentElement).not.toHaveClass('border-b');
     expect(publicationHeading.parentElement).not.toHaveClass('border-b');
     expect(screen.getByText('参与协作群聊')).toHaveClass('text-sm', 'text-foreground');
-    expect(screen.getByText('其他用户可添加为好友')).toHaveClass('text-sm', 'text-foreground');
+    expect(screen.getByText('对用户可见性')).toHaveClass('text-sm', 'text-foreground');
+    expect(screen.getByRole('heading', { level: 4, name: 'Bot 好友审批' })).toBeInTheDocument();
+    expect(screen.getByText('好友审批策略')).toHaveClass('text-sm', 'text-foreground');
   });
 
   it('only shows verified Bot identity fields in the card header', () => {
@@ -71,6 +73,32 @@ describe('PermissionCard', () => {
     expect(screen.getByTitle('bot-1')).toHaveTextContent('bot-1');
     expect(screen.getByRole('button', { name: '复制 协作助手 的 Bot UUID' })).toBeEnabled();
     expect(screen.getByText('OpenClaw')).toBeInTheDocument();
+  });
+
+  it('explains the Bot friend approval entry point', async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    const infoTrigger = screen.getByRole('button', { name: '好友审批策略说明' });
+    await user.hover(infoTrigger);
+
+    expect(
+      await screen.findByText(
+        '统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。审批入口见「工单中心 - 待我处理」，也可通过顶栏铃铛「通知中心」查看。',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('explains that Bot friend approval covers both user and Bot friend requests', async () => {
+    const user = userEvent.setup();
+    renderCard();
+
+    const infoTrigger = screen.getByRole('button', { name: 'Bot 好友审批说明' });
+    await user.hover(infoTrigger);
+
+    expect(
+      await screen.findByText('统一控制其他用户和其他 Bot 申请添加当前 Bot 为好友时的审批方式。'),
+    ).toBeInTheDocument();
   });
 
   it('keeps refresh and copy actions close to their related Bot information', () => {
@@ -119,10 +147,10 @@ describe('PermissionCard', () => {
     expect(screen.getByRole('switch', { name: '关闭参与协作群聊' })).toBeEnabled();
     expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
     expect(screen.getByText('Bot 画像公开')).toBeInTheDocument();
-    expect(screen.getByText('公开范围')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '公开范围说明' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '其他用户可添加为好友说明' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '其他 Bot 可添加为好友说明' })).toBeInTheDocument();
+    expect(screen.getByText('Bot 可见性')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Bot 可见性说明' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '对用户可见性说明' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '对 Bot 可见性说明' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '好友审批策略说明' })).toBeInTheDocument();
     expect(screen.getByText('好友审批策略')).toBeInTheDocument();
   });
@@ -135,9 +163,7 @@ describe('PermissionCard', () => {
     const statusTrigger = screen.getByRole('button', { name: 'Bot 画像公开暂不可用说明' });
     await user.hover(statusTrigger);
 
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      '该Bot暂未设置过允许其他Bot可添加好友，请先调整公开范围',
-    );
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性');
     expect(screen.getByRole('switch', { name: '开启Bot 画像公开' })).toBeDisabled();
   });
 

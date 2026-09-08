@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+import asyncio
+import os
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from engine.community.core.skills.exceptions import (
@@ -21,9 +23,19 @@ from engine.community.core.skills.layout_planner import (
     resolve_filesystem_skill_layout,
     resolve_skill_mappings,
 )
+from engine.community.plugins.skills_pool.center_mount import (
+    CenterMountStatus,
+    inspect_center_mount,
+    inspect_center_version,
+)
 from engine.community.plugins.skills_pool.layout_activation import (
+    MappingApplyMode,
+    MappingApplyResult,
+    MappingItemResult,
+    MappingProjectionStatus,
     MappingSourceLayout,
     SkillMapping,
+    publish_pool_mappings,
 )
 
 _LEGACY_PHYSICAL_FIELDS = frozenset({"source", "target"})
@@ -37,6 +49,227 @@ _LOGICAL_V3_CENTER_FIELDS = frozenset(
 class ResolvedMappingPayload:
     mappings: tuple[SkillMapping, ...]
     resolved_locators: tuple[dict[str, str], ...] = ()
+
+
+def _logical_key(item: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    return tuple(sorted((key, str(value)) for key, value in item.items()))
+
+
+def _deduplicate_logical_payload(payload: object) -> list[dict[str, object]]:
+    if not isinstance(payload, list):
+        raise InvalidPoolMappingRequestError("mappings must be an array")
+    result: list[dict[str, object]] = []
+    seen: set[tuple[tuple[str, str], ...]] = set()
+    for raw in payload:
+        if not isinstance(raw, dict):
+            raise InvalidPoolMappingRequestError("each logical mapping must be an object")
+        key = _logical_key(raw)
+        if key not in seen:
+            seen.add(key)
+            result.append(raw)
+    return result
+
+
+def _aggregate_logical_results(items: Sequence[MappingItemResult]) -> tuple[MappingItemResult, ...]:
+    """One logical outcome may cover several current/historical active roots."""
+
+    severity = {
+        MappingProjectionStatus.CONVERGED: 0,
+        MappingProjectionStatus.PENDING: 1,
+        MappingProjectionStatus.DEGRADED: 2,
+    }
+    grouped: dict[tuple[str, tuple[tuple[str, str], ...]], MappingItemResult] = {}
+    for item in items:
+        assert item.mapping is not None
+        key = (item.action, _logical_key(item.mapping))
+        previous = grouped.get(key)
+        if previous is None:
+            grouped[key] = item
+            continue
+        worst = item if severity[item.status] > severity[previous.status] else previous
+        grouped[key] = replace(worst, retryable=previous.retryable or item.retryable)
+    return tuple(grouped.values())
+
+
+def apply_logical_mapping_payload(
+    *,
+    engine: str,
+    source_layout: MappingSourceLayout,
+    mappings_payload: object,
+    retired_payload: object,
+    additional_retirement_roots: Sequence[Path] = (),
+    home: Path = Path("/home/admin"),
+    center_is_mounted: Callable[[Path], bool] = os.path.ismount,
+) -> MappingApplyResult:
+    """Validate, inspect Center, and BEST_EFFORT apply one logical snapshot."""
+
+    mappings = _deduplicate_logical_payload(mappings_payload)
+    retired = _deduplicate_logical_payload(retired_payload)
+    all_mappings = [*mappings, *retired]
+    contract = (
+        MAPPING_V3_CONTRACT_VERSION
+        if any(item.get("corpus") == "center" for item in all_mappings)
+        else MAPPING_CONTRACT_VERSION
+    )
+    desired_resolved = resolve_mapping_payload(
+        engine=engine,
+        source_layout=source_layout,
+        payload=mappings,
+        mapping_contract_version=contract,
+        home=home,
+    )
+    retired_resolved = resolve_mapping_payload(
+        engine=engine,
+        source_layout=source_layout,
+        payload=retired,
+        mapping_contract_version=contract,
+        additional_retirement_roots=additional_retirement_roots,
+        home=home,
+    )
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity(engine_type=engine, layout_contract_version=LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=home),
+    )
+    pending_center_names: set[str] = set()
+    pending_center_keys: set[tuple[tuple[str, str], ...]] = set()
+    center_failures: list[MappingItemResult] = []
+    center_items = [item for item in mappings if item.get("corpus") == "center"]
+    if center_items:
+        mount = inspect_center_mount(layout.pool_center, is_mounted=center_is_mounted)
+        for item in center_items:
+            failure_code: str | None = None
+            if mount.status is not CenterMountStatus.READY:
+                failure_code = (
+                    "CENTER_MOUNT_NOT_READY"
+                    if mount.status is CenterMountStatus.NOT_READY
+                    else "CENTER_MOUNT_UNAVAILABLE"
+                )
+            else:
+                inspection = inspect_center_version(
+                    layout.pool_center,
+                    skill_uuid=str(item["skill_uuid"]),
+                    version=str(item["sc_version_number"]),
+                )
+                if not inspection.ready:
+                    failure_code = inspection.code or "CENTER_VERSION_NOT_READY"
+            if failure_code is not None:
+                link_name = str(item["link_name"])
+                pending_center_names.add(link_name)
+                pending_center_keys.add(_logical_key(item))
+                center_failures.append(
+                    MappingItemResult(
+                        target="",
+                        source=None,
+                        status=MappingProjectionStatus.PENDING,
+                        code=failure_code,
+                        retryable=True,
+                        action="APPLY",
+                        mapping={key: str(value) for key, value in item.items()},
+                    )
+                )
+    desired_pairs = [
+        (raw, physical)
+        for raw, physical in zip(mappings, desired_resolved.mappings, strict=True)
+        if _logical_key(raw) not in pending_center_keys
+    ]
+    retired_pairs = [
+        (retired[index % len(retired)], physical)
+        for index, physical in enumerate(retired_resolved.mappings)
+        if retired
+        and str(retired[index % len(retired)]["link_name"])
+        not in pending_center_names
+    ]
+    published = publish_pool_mappings(
+        mappings=[physical for _, physical in desired_pairs],
+        retired_mappings=[physical for _, physical in retired_pairs],
+        home=home,
+        engine=engine,
+        source_layout=source_layout,
+        additional_retirement_roots=additional_retirement_roots,
+        apply_mode=MappingApplyMode.BEST_EFFORT,
+    )
+    desired_by_location = {
+        (physical.target, physical.source): {
+            key: str(value) for key, value in raw.items()
+        }
+        for raw, physical in desired_pairs
+    }
+    retired_by_location = {
+        (physical.target, physical.source): {
+            key: str(value) for key, value in raw.items()
+        }
+        for raw, physical in retired_pairs
+    }
+    logical_items: list[MappingItemResult] = [*center_failures]
+    runtime_issues: list[MappingItemResult] = []
+    desired_by_name = {str(raw["link_name"]): raw for raw, _ in desired_pairs}
+    for item in published.items:
+        logical = (
+            retired_by_location.get((item.target, item.source or ""))
+            if item.action == "RETIRE"
+            else desired_by_location.get((item.target, item.source or ""))
+        )
+        action = item.action
+        if logical is not None and action == "RETIRE":
+            replacement = desired_by_name.get(logical["link_name"])
+            if replacement is not None:
+                # The replacement owns retirement at *all* active roots, not
+                # just the canonical target skipped by the physical helper.
+                logical = {key: str(value) for key, value in replacement.items()}
+                action = "APPLY"
+        enriched = MappingItemResult(
+            target=item.target,
+            source=item.source,
+            status=item.status,
+            code=item.code,
+            retryable=item.retryable,
+            action=action if logical is not None else "RUNTIME",
+            mapping=logical,
+        )
+        (logical_items if logical is not None else runtime_issues).append(enriched)
+    statuses = [item.status for item in [*logical_items, *runtime_issues]]
+    status = (
+        MappingProjectionStatus.DEGRADED
+        if MappingProjectionStatus.DEGRADED in statuses
+        else MappingProjectionStatus.PENDING
+        if MappingProjectionStatus.PENDING in statuses
+        else MappingProjectionStatus.CONVERGED
+    )
+    logical_results = _aggregate_logical_results(logical_items)
+    evidence = {**published.evidence, "center_pending": len(center_failures)}
+    if len(logical_results) < len(logical_items):
+        # Keep all per-directory diagnostics when aggregation removes items;
+        # do not duplicate the normal single-root response payload.
+        evidence["physical_items"] = [item.to_data() for item in published.items]
+    return MappingApplyResult(
+        status=status,
+        items=logical_results,
+        issues=tuple(runtime_issues),
+        evidence=evidence,
+    )
+
+
+async def apply_logical_mapping_request(
+    *,
+    params: dict[str, object],
+    engine: str,
+    additional_retirement_roots: Sequence[Path] = (),
+    center_is_mounted: Callable[[Path], bool] = os.path.ismount,
+) -> dict[str, object]:
+    """Run the shared filesystem contract without blocking the HTTP event loop."""
+
+    result = await asyncio.to_thread(
+        apply_logical_mapping_payload,
+        engine=engine,
+        source_layout=MappingSourceLayout(
+            str(params.get("source_layout", MappingSourceLayout.POOL.value))
+        ),
+        mappings_payload=params.get("mappings", []),
+        retired_payload=params.get("retired_mappings", []),
+        additional_retirement_roots=additional_retirement_roots,
+        center_is_mounted=center_is_mounted,
+    )
+    return result.to_data()
 
 
 def _require_mapping_fields(
@@ -216,4 +449,9 @@ def resolve_mapping_payload(
     )
 
 
-__all__ = ["ResolvedMappingPayload", "resolve_mapping_payload"]
+__all__ = [
+    "ResolvedMappingPayload",
+    "apply_logical_mapping_payload",
+    "apply_logical_mapping_request",
+    "resolve_mapping_payload",
+]

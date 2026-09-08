@@ -13,7 +13,7 @@ import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 
 const modes: Array<{ value: FriendApprovalMode; label: string; description: string }> = [
-  { value: 'none', label: '无需审批', description: '符合公开范围的新申请直接建立好友关系' },
+  { value: 'none', label: '无需审批', description: '符合 Bot 可见性限制的新申请直接建立好友关系' },
   { value: 'all', label: '全部审批', description: '所有新好友申请都需要确认' },
   { value: 'partial_exempt', label: '部分组织免审批', description: '指定组织范围直接通过，其余申请需审批' },
 ];
@@ -56,9 +56,7 @@ export function FriendApprovalEditor({
     }
   }, [open, initialConfig, partialExemptEnabled]);
 
-  const availableModes = partialExemptEnabled
-    ? modes
-    : modes.filter((option) => option.value !== 'partial_exempt');
+  const availableModes = partialExemptEnabled ? modes : modes.filter((option) => option.value !== 'partial_exempt');
   const selectedKeys = new Set(selected.map((path) => path.join('\u0000')));
   const activeEntries = selectedEntries.filter((entry) => selectedKeys.has(entry.path.join('\u0000')));
   const exemptDepartmentNos =
@@ -93,9 +91,7 @@ export function FriendApprovalEditor({
             onChange={setMode}
           />
           {!partialExemptEnabled && initialConfig.mode === 'partial_exempt' && mode === null && (
-            <p className="text-xs text-warning">
-              当前策略“部分组织免审批”已下线，请重新选择“无需审批”或“全部审批”。
-            </p>
+            <p className="text-xs text-warning">当前策略“部分组织免审批”已下线，请重新选择“无需审批”或“全部审批”。</p>
           )}
           {partialExemptEnabled && mode === 'partial_exempt' && (
             <section aria-labelledby="friend-exempt-organizations">
@@ -118,11 +114,7 @@ export function FriendApprovalEditor({
           <Button variant="secondary" disabled={loading} onClick={onClose}>
             取消
           </Button>
-          <Button
-            loading={loading}
-            disabled={invalid || unchanged}
-            onClick={() => nextConfig && onSubmit(nextConfig)}
-          >
+          <Button loading={loading} disabled={invalid || unchanged} onClick={() => nextConfig && onSubmit(nextConfig)}>
             保存策略
           </Button>
         </ModalFooter>

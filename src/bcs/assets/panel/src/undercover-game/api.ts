@@ -69,6 +69,9 @@ export async function requestJson<T>(
   if (!response.ok) {
     throw new ApiRequestError(errorMessage(body, response.status), { status: response.status });
   }
+  if (typeof body === 'string') {
+    throw new ApiRequestError('游戏接口未返回 JSON，请检查副屏 API 地址及反向代理配置。', { status: response.status });
+  }
   return unwrapEnvelope<T>(body);
 }
 

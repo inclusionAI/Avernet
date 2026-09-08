@@ -41,7 +41,9 @@ beforeEach(() => {
 it('bot_uuid 命中群固定成员名册 → membership=direct 重定向', async () => {
   mountWith('id=g1&bot_uuid=human_327325&session=s1');
   await waitFor(() =>
-    expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1&membership=direct'),
+    expect(mockedReplace).toHaveBeenCalledWith(
+      '/workspace?tab=group&group=g1&session=s1&bot=human_327325&membership=direct',
+    ),
   );
   expect(svc.loadGroupDetail).toHaveBeenCalledWith('g1');
 });
@@ -49,22 +51,28 @@ it('bot_uuid 命中群固定成员名册 → membership=direct 重定向', async
 it('bot_uuid 不在名册（仅参与临时会话）→ membership=session_only 重定向', async () => {
   mountWith('id=g1&bot_uuid=human_999999&session=s1');
   await waitFor(() =>
-    expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1&membership=session_only'),
+    expect(mockedReplace).toHaveBeenCalledWith(
+      '/workspace?tab=group&group=g1&session=s1&bot=human_999999&membership=session_only',
+    ),
   );
 });
 
 it('bot_uuid 无前缀工号与名册 human_ 前缀归一化匹配 → direct', async () => {
   mountWith('id=g1&bot_uuid=327325&session=s1');
   await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('membership=direct')));
+  expect(mockedReplace).toHaveBeenCalledWith(expect.stringContaining('bot=327325'));
 });
 
 it('群详情接口失败 → 降级为不带 membership（由 workspace 自动纠正）', async () => {
   svc.loadGroupDetail.mockResolvedValue({ ok: false, error: { friendlyMessage: 'x' } });
   mountWith('id=g1&bot_uuid=human_327325&session=s1');
-  await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1'));
+  // membership 降级但 bot= 身份透传不受影响（身份定位与参与方式判定相互独立）。
+  await waitFor(() =>
+    expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1&bot=human_327325'),
+  );
 });
 
-it('缺 bot_uuid → 不调群详情、不带 membership，仍重定向', async () => {
+it('缺 bot_uuid → 不调群详情、不带 membership/bot，仍重定向（workspace 走用户身份路径）', async () => {
   mountWith('id=g1&session=s1');
   await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=g1&session=s1'));
   expect(svc.loadGroupDetail).not.toHaveBeenCalled();
@@ -72,7 +80,9 @@ it('缺 bot_uuid → 不调群详情、不带 membership，仍重定向', async 
 
 it('bcs_grp_ 前缀群 → 不判定参与方式（交由 workspace BCS 路由），直接重定向', async () => {
   mountWith('id=bcs_grp_abc&bot_uuid=human_327325&session=s1');
-  await waitFor(() => expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=bcs_grp_abc&session=s1'));
+  await waitFor(() =>
+    expect(mockedReplace).toHaveBeenCalledWith('/workspace?tab=group&group=bcs_grp_abc&session=s1&bot=human_327325'),
+  );
   expect(svc.loadGroupDetail).not.toHaveBeenCalled();
 });
 

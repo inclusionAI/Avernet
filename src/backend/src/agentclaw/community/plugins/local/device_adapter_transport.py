@@ -136,6 +136,50 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
         *,
         timeout: float | None = None,
     ) -> dict[str, Any]:
+        if path == "/health":
+            return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
+        if path == "/api/skills/mappings/apply":
+            request = body or {}
+            # Mirror the Engine's logical deduplication and replacement-owned
+            # retirement contract, without inventing physical paths locally.
+            desired = {
+                tuple(sorted(item.items())): item
+                for item in request.get("mappings", [])
+            }
+            desired_names = {item["link_name"] for item in desired.values()}
+            retired = {
+                tuple(sorted(item.items())): item
+                for item in request.get("retired_mappings", [])
+                if item["link_name"] not in desired_names
+            }
+            return {
+                "success": True,
+                "data": {
+                    "status": "CONVERGED",
+                    "items": [
+                        {
+                            "mapping": item,
+                            "target": "",
+                            "action": "APPLY",
+                            "status": "CONVERGED",
+                            "retryable": False,
+                        }
+                        for item in desired.values()
+                    ]
+                    + [
+                        {
+                            "mapping": item,
+                            "target": "",
+                            "action": "RETIRE",
+                            "status": "CONVERGED",
+                            "retryable": False,
+                        }
+                        for item in retired.values()
+                    ],
+                    "issues": [],
+                    "evidence": {"simulated": True},
+                },
+            }
         if path == "/api/skills/layout/probe":
             contract_version = (body or {}).get(
                 "layout_contract_version", "skills-pool-p3-v1"

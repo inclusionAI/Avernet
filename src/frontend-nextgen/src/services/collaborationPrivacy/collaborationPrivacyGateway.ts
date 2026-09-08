@@ -1,3 +1,4 @@
+import type { CollaborationPrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
 import type {
   CollaborationBot,
   CollaborationPrivacyOverview,
@@ -36,7 +37,16 @@ export interface FriendApprovalCommand {
 }
 
 export interface CollaborationPrivacyGateway {
-  loadOverview(userId: string, signal?: AbortSignal): Promise<CollaborationPrivacyOverview>;
+  /**
+   * loadScope 决定请求面(不改返回结构与后端合同)：`currentUser` 只解析当前用户，不请求 Bot 列表与
+   * 画像公开配置；`activeBot` 读取 Bot 列表但只对命中 Bot 做部门回显与 BCSFuse config；
+   * 缺省 `allBots` 为遗留全量语义，仅供既有调用与回归测试使用。
+   */
+  loadOverview(
+    userId: string,
+    signal?: AbortSignal,
+    loadScope?: CollaborationPrivacyLoadScope,
+  ): Promise<CollaborationPrivacyOverview>;
   refreshManagedBot(botId: string, signal?: AbortSignal): Promise<CollaborationBot>;
   syncDepartment(userId: string, signal?: AbortSignal): Promise<CurrentUserIdentity>;
   /** 按关键词搜索部门，返回匹配的组织路径列表。keyword 必传。 */

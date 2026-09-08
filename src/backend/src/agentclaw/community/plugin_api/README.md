@@ -27,6 +27,11 @@ internal_dependencies:
 
 Changing a Plugin Protocol signature breaks every local + prod impl + the contract-test suite (Rule 25). `SkillCenterGateway` is separate from the legacy `SkillCenterClient`: its typed request objects carry no endpoint or credential configuration; Team catalogue and publish-submission operations require a request-level Team ID, while publish-status lookup follows SC's globally unique `skill_code` contract. Its adapters do not own publication retries or domain state. Version/download reads require an explicit `PUBLIC` or `TEAM` consumer trust scope; the scope and Team ID are preflight context and are not invented SC wire arguments. Public Reference reads omit Team only after the consumer verifies public visibility. Adding a new Protocol requires updating BOUNDARY_SIGNIFICANT_MODULES if it joins a new module, and adding paired impls (Rule 20).
 
+`DeviceAdapterTransport` keeps a standard unmatched FastAPI 404 distinguishable
+from application-level and proxy 404 responses. Skill logical delivery uses that
+structured fact only together with a same-target `/health` Engine match before
+selecting an older write protocol; other errors retain unknown-result semantics.
+
 `ImmutableObjectStorageCapability` is an optional structural capability beside
 `ObjectStoragePlugin`, rather than a breaking expansion of its corp-facing
 surface. It provides atomic write-once publication and FOUND/NOT_FOUND/FAILED

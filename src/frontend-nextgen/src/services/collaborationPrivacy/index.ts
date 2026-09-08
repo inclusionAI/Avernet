@@ -1,3 +1,4 @@
+export type { CollaborationPrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
 export { collaborationPrivacyApiAdapter, createCollaborationPrivacyApiAdapter } from './collaborationPrivacyApiAdapter';
 export type {
   CollaborationPrivacyApiAdapter,

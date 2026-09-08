@@ -15,10 +15,14 @@ from agentclaw.community.core.skill_center.services.runtime_projections.skill_ru
     SkillRuntimeDelivery,
 )
 from agentclaw.community.core.skills_pool.models import (
+    MappingApplyResult,
+    MappingItemResult,
+    MappingProjectionStatus,
     PoolSkillMapping,
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
 )
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -52,6 +56,9 @@ class _UnusedPoolRuntime:
     async def verify_mappings(self, **_kwargs):
         raise AssertionError("Legacy Local-only delivery must not verify mappings")
 
+    async def apply_mappings(self, **_kwargs):
+        raise LegacyMappingApplyRequired()
+
 
 class _MissingLayoutRepository:
     def get(self, _scope):
@@ -59,8 +66,39 @@ class _MissingLayoutRepository:
 
 
 class _RecordingPoolRuntime:
-    def __init__(self) -> None:
+    def __init__(self, *, fallback: bool = False) -> None:
         self.calls: list[tuple[str, dict]] = []
+        self.fallback = fallback
+
+    async def apply_mappings(self, **kwargs):
+        self.calls.append(("apply", kwargs))
+        if self.fallback:
+            raise LegacyMappingApplyRequired()
+        mappings = [*kwargs["mappings"]]
+        retired = [*kwargs["retired_mappings"]]
+        return MappingApplyResult(
+            status=MappingProjectionStatus.CONVERGED,
+            items=tuple(
+                MappingItemResult(
+                    target="",
+                    source=None,
+                    status=MappingProjectionStatus.CONVERGED,
+                    mapping=mapping,
+                )
+                for mapping in mappings
+            )
+            + tuple(
+                MappingItemResult(
+                    target="",
+                    source=None,
+                    status=MappingProjectionStatus.CONVERGED,
+                    action="RETIRE",
+                    mapping=mapping,
+                )
+                for mapping in retired
+                if mapping.link_name not in {item.link_name for item in mappings}
+            ),
+        )
 
     async def probe(self, **kwargs):
         self.calls.append(("probe", kwargs))
@@ -85,14 +123,22 @@ class _LayoutRepository:
         return self.state
 
 
+class _Factory:
+    def __init__(self, service: _LegacyRuntimeService) -> None:
+        self.service = service
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.service
+
+
 def _plan(
-    service: _LegacyRuntimeService,
     *assets: RegisteredSkillAsset,
 ) -> ResolvedSkillPlan:
     return ResolvedSkillPlan(
         bot_id="bot-1",
         owner_id="owner-1",
-        service=service,
         bot={
             "env": "pre",
             "entity_id": "owner-1",
@@ -113,13 +159,16 @@ async def test_legacy_local_only_delivery_keeps_device_sync_request_and_result()
         name="local-skill",
         git_path="local:///home/admin/.openclaw/workspace/skills/skills-local/local-skill",
     )
-    plan = _plan(service, asset)
+    plan = _plan(asset)
+    factory = _Factory(service)
     delivery = SkillRuntimeDelivery(
         pool_runtime=_UnusedPoolRuntime(),
         pool_layouts=_MissingLayoutRepository(),
     )
 
-    result = await delivery.deliver(plan=plan, retired_mappings=())
+    result = await delivery.deliver(
+        plan=plan, retired_mappings=(), service_factory=factory
+    )
 
     assert result.status is RuntimeProjectionStatus.CONVERGED
     assert result.components == {"skills": RuntimeProjectionStatus.CONVERGED}
@@ -132,6 +181,7 @@ async def test_legacy_local_only_delivery_keeps_device_sync_request_and_result()
             "sc_version_number": None,
         }
     ]
+    assert len(factory.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -142,14 +192,14 @@ async def test_legacy_empty_delivery_keeps_device_sync_cleanup_route() -> None:
         pool_layouts=_MissingLayoutRepository(),
     )
 
-    result = await delivery.deliver(plan=_plan(service))
+    result = await delivery.deliver(plan=_plan(), service_factory=_Factory(service))
 
     assert result.status is RuntimeProjectionStatus.CONVERGED
     assert service.desired_skills == []
 
 
 @pytest.mark.asyncio
-async def test_repo_delivery_keeps_legacy_mapping_wire_and_order() -> None:
+async def test_repo_delivery_uses_one_logical_apply_call() -> None:
     service = _LegacyRuntimeService()
     pool = _RecordingPoolRuntime()
     asset = RegisteredSkillAsset(
@@ -161,18 +211,21 @@ async def test_repo_delivery_keeps_legacy_mapping_wire_and_order() -> None:
         pool_runtime=pool,
         pool_layouts=_MissingLayoutRepository(),
     )
+    factory = _Factory(service)
 
-    result = await delivery.deliver(plan=_plan(service, asset))
+    result = await delivery.deliver(
+        plan=_plan(asset), service_factory=factory
+    )
 
     assert result.status is RuntimeProjectionStatus.CONVERGED
-    assert [name for name, _ in pool.calls] == ["publish", "verify"]
+    assert [name for name, _ in pool.calls] == ["apply"]
     for _, request in pool.calls:
         assert request["bot_id"] == "bot-1"
         assert request["user_id"] == "owner-1"
         assert request["source_layout"] is SkillMappingSourceLayout.LEGACY
-        assert request["mapping_contract_version"] == "skills-pool-mapping-v2"
         assert request["retired_mappings"] == []
     assert service.desired_skills is None
+    assert factory.calls == []
 
 
 @pytest.mark.asyncio
@@ -195,12 +248,15 @@ async def test_cutover_intermediate_state_uses_pool_mapping_sources() -> None:
         name="local-skill",
         git_path="local:///home/admin/.openclaw/workspace/skills/skills-local/local-skill",
     )
-    delivery = SkillRuntimeDelivery(pool_runtime=pool, pool_layouts=layouts)
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=layouts,
+    )
 
-    await delivery.deliver(plan=_plan(service, asset))
+    await delivery.deliver(plan=_plan(asset), service_factory=_Factory(service))
 
     assert layouts.scopes == [scope]
-    assert [name for name, _ in pool.calls] == ["publish", "verify"]
+    assert [name for name, _ in pool.calls] == ["apply"]
     assert all(
         request["source_layout"] is SkillMappingSourceLayout.POOL
         for _, request in pool.calls
@@ -223,13 +279,134 @@ async def test_explicit_retirement_uses_mapping_route_for_empty_legacy_plan() ->
     )
 
     await delivery.deliver(
-        plan=_plan(service),
+        plan=_plan(),
         retired_mappings=(retired,),
+        service_factory=_Factory(service),
     )
 
-    assert [name for name, _ in pool.calls] == ["publish", "verify"]
+    assert [name for name, _ in pool.calls] == ["apply"]
     for _, request in pool.calls:
         assert request["mappings"] == []
         assert request["retired_mappings"] == [retired]
         assert request["source_layout"] is SkillMappingSourceLayout.LEGACY
     assert service.desired_skills is None
+
+
+@pytest.mark.asyncio
+async def test_verified_old_runtime_keeps_legacy_mapping_route() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime(fallback=True)
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    factory = _Factory(service)
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(plan=_plan(asset), service_factory=factory)
+
+    assert result.status is RuntimeProjectionStatus.CONVERGED
+    assert [name for name, _ in pool.calls] == ["apply", "publish", "verify"]
+    assert factory.calls == []
+
+
+@pytest.mark.asyncio
+async def test_missing_logical_item_cannot_report_converged() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime()
+
+    async def incomplete(**kwargs):
+        pool.calls.append(("apply", kwargs))
+        return MappingApplyResult(status=MappingProjectionStatus.CONVERGED)
+
+    pool.apply_mappings = incomplete
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="repo-skill",
+        git_path="git://team/repo-skill",
+    )
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(
+        plan=_plan(asset), service_factory=_Factory(service)
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert [issue.code for issue in result.issues] == [
+        "SKILL_MAPPING_RESULT_INVALID"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_aggregate_degraded_status_survives_empty_items() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime()
+
+    async def aggregate_failure(**kwargs):
+        pool.calls.append(("apply", kwargs))
+        return MappingApplyResult(status=MappingProjectionStatus.DEGRADED)
+
+    pool.apply_mappings = aggregate_failure
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(
+        plan=_plan(),
+        service_factory=_Factory(service),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert result.issues[0].code == "SKILL_MAPPING_RUNTIME_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_logical_issue_preserves_requested_action_and_skill_identity() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime()
+    asset = RegisteredSkillAsset(
+        skill_id=8,
+        name="runtime-name",
+        git_path="git://team/package-name",
+    )
+    mapping = RuntimeProjectionResolver().resolve_skills((asset,)).skill_mappings[0]
+
+    async def pending(**kwargs):
+        pool.calls.append(("apply", kwargs))
+        return MappingApplyResult(
+            status=MappingProjectionStatus.PENDING,
+            items=(
+                MappingItemResult(
+                    target="/diagnostic/not-the-skill-name",
+                    source="/diagnostic/package-name",
+                    status=MappingProjectionStatus.PENDING,
+                    code="MANAGED_SOURCE_MISSING",
+                    retryable=True,
+                    action="APPLY",
+                    mapping=mapping,
+                ),
+            ),
+        )
+
+    pool.apply_mappings = pending
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(
+        plan=_plan(asset),
+        service_factory=_Factory(service),
+    )
+
+    assert result.issues[0].resource_id == "8"
+    assert result.issues[0].name == "runtime-name"
+    assert result.issues[0].requested_action == "APPLY"

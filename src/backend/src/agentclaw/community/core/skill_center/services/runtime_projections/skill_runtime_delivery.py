@@ -15,6 +15,7 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
     RuntimeProjectionIssue,
     RuntimeProjectionResult,
     RuntimeProjectionStatus,
+    RuntimeServiceFactoryBoundary,
 )
 from agentclaw.community.core.skill_center.runtime_resolver import (
     RuntimeSkillProjection,
@@ -25,13 +26,17 @@ from agentclaw.community.core.skills_pool.mapping_intent import (
 )
 from agentclaw.community.core.skills_pool.models import (
     MappingApplyMode,
+    MappingApplyResult,
     MappingProjectionStatus,
     MappingPublishResult,
     MappingVerificationResult,
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
+from agentclaw.community.core.skills_pool.ports import (
+    LegacyMappingApplyRequired,
+    SkillsPoolRuntimeProtocol,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     runtime_uses_pool_paths,
@@ -65,6 +70,7 @@ class SkillRuntimeDelivery:
         *,
         plan: ResolvedSkillPlan,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        service_factory: RuntimeServiceFactoryBoundary,
     ) -> RuntimeProjectionResult:
         """Deliver the already-resolved plan and interpret its Skill result."""
         mappings = list(plan.projection.skill_mappings)
@@ -80,30 +86,58 @@ class SkillRuntimeDelivery:
         pool_owns_runtime = layout_state is not None and runtime_uses_pool_paths(
             layout_state
         )
-        if (
+        uses_legacy_mapping = (
             pool_owns_runtime
             or any(
                 mapping.corpus in {"repo", "center"}
                 for mapping in [*mappings, *retired]
             )
             or retired
-        ):
-            return await self._apply_pool_mappings(
+        )
+        source_layout = (
+            SkillMappingSourceLayout.POOL
+            if pool_owns_runtime
+            else SkillMappingSourceLayout.LEGACY
+        )
+        try:
+            applied = await self._pool_runtime.apply_mappings(
                 bot_id=plan.bot_id,
-                owner_id=plan.owner_id,
-                layout_engine=runtime_layout_engine_for_bot(bot),
+                user_id=plan.owner_id,
+                engine=runtime_layout_engine_for_bot(bot),
                 mappings=mappings,
                 retired_mappings=retired,
-                source_layout=(
-                    SkillMappingSourceLayout.POOL
-                    if pool_owns_runtime
-                    else SkillMappingSourceLayout.LEGACY
-                ),
+                source_layout=source_layout,
             )
+        except LegacyMappingApplyRequired:
+            if uses_legacy_mapping:
+                return await self._apply_pool_mappings(
+                    bot_id=plan.bot_id,
+                    owner_id=plan.owner_id,
+                    layout_engine=runtime_layout_engine_for_bot(bot),
+                    mappings=mappings,
+                    retired_mappings=retired,
+                    source_layout=source_layout,
+                )
+            return await self._apply_legacy_device_sync(plan, service_factory)
+        return self._logical_mapping_result(
+            plan=plan,
+            retired_mappings=retired,
+            applied=applied,
+        )
 
-        # ``project_skills`` owns dispatching its blocking device work off the
-        # event loop, so this compatibility route remains a plain await.
-        if not await plan.service.project_skills(
+    async def _apply_legacy_device_sync(
+        self,
+        plan: ResolvedSkillPlan,
+        service_factory: RuntimeServiceFactoryBoundary,
+    ) -> RuntimeProjectionResult:
+        service = service_factory.create(
+            user_id=plan.owner_id,
+            entity_id=str(plan.bot.get("entity_id") or plan.owner_id),
+            bot_id=plan.bot_id,
+            engine_type=plan.engine,
+            entity_type=plan.bot.get("entity_type") or "staff",
+        )
+        if not await service.project_skills(
             desired_skills=self._desired_skills(plan.projection),
         ):
             return RuntimeProjectionResult.pending(
@@ -112,6 +146,129 @@ class SkillRuntimeDelivery:
             )
         return RuntimeProjectionResult.converged(
             components={"skills": RuntimeProjectionStatus.CONVERGED}
+        )
+
+    @staticmethod
+    def _logical_mapping_result(
+        *,
+        plan: ResolvedSkillPlan,
+        retired_mappings: Sequence[PoolSkillMapping],
+        applied: MappingApplyResult,
+    ) -> RuntimeProjectionResult:
+        expected_apply = set(plan.projection.skill_mappings)
+        desired_names = {mapping.link_name for mapping in expected_apply}
+        expected_retire = {
+            mapping
+            for mapping in retired_mappings
+            if mapping.link_name not in desired_names
+        }
+        seen_apply: dict[PoolSkillMapping, MappingProjectionStatus] = {}
+        seen_retire: dict[PoolSkillMapping, MappingProjectionStatus] = {}
+        issues: list[RuntimeProjectionIssue] = []
+        asset_by_name = {
+            asset.name: asset for asset in plan.projection.skill_assets
+        }
+        all_items = [*applied.items, *applied.issues]
+        invalid = False
+        for item in all_items:
+            mapping = item.mapping
+            if item.action == "APPLY" and mapping is not None:
+                if mapping not in expected_apply or mapping in seen_apply:
+                    invalid = True
+                seen_apply[mapping] = item.status
+            elif item.action == "RETIRE" and mapping is not None:
+                if mapping not in expected_retire or mapping in seen_retire:
+                    invalid = True
+                seen_retire[mapping] = item.status
+            elif item.action != "RUNTIME" or mapping is not None:
+                invalid = True
+            if item.status is MappingProjectionStatus.CONVERGED:
+                continue
+            asset = (
+                asset_by_name.get(mapping.link_name)
+                if mapping is not None
+                else None
+            )
+            code, reason, suggested_action, observed, expected = (
+                SkillRuntimeDelivery._mapping_message(item.code)
+            )
+            issues.append(
+                RuntimeProjectionIssue(
+                    resource_type="SKILL" if mapping is not None else "RUNTIME",
+                    resource_id=str(asset.skill_id) if asset is not None else None,
+                    name=(asset.name if asset is not None else mapping.link_name if mapping else None),
+                    corpus=mapping.corpus.upper() if mapping is not None else None,
+                    requested_action=item.action,
+                    code=code,
+                    reason=reason,
+                    status=(
+                        RuntimeProjectionStatus.PENDING
+                        if item.status is MappingProjectionStatus.PENDING
+                        else RuntimeProjectionStatus.DEGRADED
+                    ),
+                    retryable=item.retryable,
+                    observed_entry_type=observed,
+                    expected_entry_type=expected,
+                    logical_location=(
+                        f"active-skills/{mapping.link_name}" if mapping else None
+                    ),
+                    suggested_action=suggested_action,
+                )
+            )
+        missing = (expected_apply - set(seen_apply)) | (
+            expected_retire - set(seen_retire)
+        )
+        if missing and applied.status is MappingProjectionStatus.CONVERGED:
+            invalid = True
+        item_statuses = {item.status for item in all_items}
+        severity = {
+            MappingProjectionStatus.CONVERGED: 0,
+            MappingProjectionStatus.PENDING: 1,
+            MappingProjectionStatus.DEGRADED: 2,
+        }
+        if item_statuses and severity[applied.status] < max(
+            severity[item_status] for item_status in item_statuses
+        ):
+            invalid = True
+        if (
+            invalid
+            or applied.status is MappingProjectionStatus.DEGRADED
+            or MappingProjectionStatus.DEGRADED in item_statuses
+        ):
+            status = RuntimeProjectionStatus.DEGRADED
+        elif (
+            applied.status is MappingProjectionStatus.PENDING
+            or MappingProjectionStatus.PENDING in item_statuses
+        ):
+            status = RuntimeProjectionStatus.PENDING
+        else:
+            status = RuntimeProjectionStatus.CONVERGED
+        if invalid:
+            issues.append(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code="SKILL_MAPPING_RESULT_INVALID",
+                    reason="Skill 运行时返回的逻辑映射结果不完整或相互矛盾",
+                    status=RuntimeProjectionStatus.DEGRADED,
+                    retryable=False,
+                    suggested_action="请联系管理员并提供错误详情。",
+                )
+            )
+        if not issues and status is not RuntimeProjectionStatus.CONVERGED:
+            issues.append(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code="SKILL_MAPPING_RUNTIME_UNAVAILABLE",
+                    reason="Skill 运行环境当前不可连接，能力状态已保存但尚未同步",
+                    status=status,
+                    retryable=status is RuntimeProjectionStatus.PENDING,
+                    suggested_action="请稍后再次保存能力集；若持续失败，请联系管理员。",
+                )
+            )
+        return RuntimeProjectionResult(
+            status=status,
+            components={"skills": status},
+            issues=tuple(issues),
         )
 
     async def _apply_pool_mappings(
@@ -235,6 +392,10 @@ class SkillRuntimeDelivery:
                 )
             )
         item_statuses = {item.status for item in item_by_target.values()}
+        if not published.items:
+            item_statuses.add(published.status)
+        if not verified.items:
+            item_statuses.add(verified.status)
         status = (
             RuntimeProjectionStatus.DEGRADED
             if MappingProjectionStatus.DEGRADED in item_statuses

@@ -139,6 +139,34 @@ class FakeGateway implements CollaborationPrivacyGateway {
 }
 
 describe('CollaborationPrivacyService', () => {
+  test('较早的加载晚到时不会覆盖 Service 中的最新 overview', async () => {
+    const gateway = new FakeGateway();
+    const staleOverview = createOverview();
+    const latestOverview = createOverview();
+    staleOverview.bots = [{ ...staleOverview.bots[0], id: 'stale' }];
+    latestOverview.bots = [{ ...latestOverview.bots[0], id: 'latest' }];
+    let resolveStale!: (value: CollaborationPrivacyOverview) => void;
+    jest
+      .spyOn(gateway, 'loadOverview')
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+      )
+      .mockResolvedValueOnce(latestOverview);
+    const service = new CollaborationPrivacyService(gateway);
+
+    const staleLoad = service.loadOverview('12345');
+    await Promise.resolve();
+    await service.loadOverview('54321');
+    resolveStale(staleOverview);
+    await staleLoad;
+
+    await expect(
+      service.updateDirectSetting({ botId: 'latest', setting: 'collaborationStatus', value: 'hidden' }),
+    ).resolves.toMatchObject({ id: 'latest' });
+  });
+
   test('按需刷新只替换目标 Bot，不重新加载整个列表', async () => {
     const gateway = new FakeGateway();
     const service = new CollaborationPrivacyService(gateway);
@@ -196,7 +224,7 @@ describe('CollaborationPrivacyService', () => {
         audience: 'bot',
         config: { scope: 'restricted', organizationPaths: [] },
       }),
-    ).rejects.toThrow('至少选择一个公开组织范围');
+    ).rejects.toThrow('选择限定组织可申请时，请至少选择一个组织范围');
     await expect(
       service.updateFriendApproval({
         botId: 'joined',
@@ -217,7 +245,7 @@ describe('CollaborationPrivacyService', () => {
         botId: 'private',
         config: { mode: 'all', exemptOrganizationPaths: [] },
       }),
-    ).rejects.toThrow('至少开放一种公开范围后才能修改好友审批策略');
+    ).rejects.toThrow('至少开启一种 Bot 可见性后，才能修改好友审批策略');
   });
 
   test('同一 audience 存在 pending 时拒绝重复提交', async () => {
@@ -236,7 +264,7 @@ describe('CollaborationPrivacyService', () => {
         audience: 'user',
         config: { scope: 'none', organizationPaths: [] },
       }),
-    ).rejects.toThrow('该公开范围已有待审批变更');
+    ).rejects.toThrow('该可见性已有待审批变更');
     expect(gateway.publicationCommands).toHaveLength(1);
   });
 
@@ -257,7 +285,7 @@ describe('CollaborationPrivacyService', () => {
           ],
         },
       }),
-    ).rejects.toThrow('配置未发生变化，无需提交工单');
+    ).rejects.toThrow('可见性未发生变化，无需提交审批');
     await expect(
       service.updateFriendApproval({
         botId: 'joined',
@@ -313,7 +341,7 @@ describe('CollaborationPrivacyService', () => {
         audience: 'user',
         config: { scope: 'restricted', organizationPaths: [['示例集团']] },
       }),
-    ).rejects.toThrow('该公开范围正在提交，请勿重复操作');
+    ).rejects.toThrow('该可见性正在提交，请勿重复操作');
     const botRequest = service.submitPublication({
       botId: 'joined',
       audience: 'bot',

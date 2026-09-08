@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from unittest.mock import Mock
 
 import httpx
@@ -80,6 +81,7 @@ def test_bcs_catalog_search_maps_current_page_and_parses_exact_address() -> None
                 "bot",
                 bot_uuid=" bot-1 : owner-1 ",
                 actor_kind="bot",
+                name="ignored-by-backend",
             )
         ],
     )
@@ -148,6 +150,10 @@ def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> No
                         "friend_ext": friend_ext,
                         "friend_check_in_strategy": friend_check_in_strategy,
                         "user_visibility": "private",
+                        "name": "BCS Bot",
+                        "summary": "BCS summary",
+                        "created_by": " owner-1 ",
+                        "status": "online",
                     }
                 ]
             },
@@ -172,9 +178,115 @@ def test_bcs_catalog_search_preserves_requested_optional_metadata_fields() -> No
                 friend_ext=friend_ext,
                 friend_check_in_strategy=friend_check_in_strategy,
                 user_visibility="private",
+                name="BCS Bot",
+                summary="BCS summary",
+                created_by="owner-1",
+                status="online",
             )
         ],
     )
+
+
+def test_bcs_catalog_search_redacts_nested_friend_ext_credentials() -> None:
+    service, http = _make_service()
+    http.set_response(
+        "get",
+        _response(
+            200,
+            {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_uuid": "native-bot",
+                        "created_by": "owner-1",
+                        "actor_kind": "bot",
+                        "friend_ext": {
+                            "policy": {
+                                "name": "allowed",
+                                "access_token": "secret",
+                                "api_key": "secret-key",
+                                "session_id": "secret-session",
+                                "token": "secret-token",
+                            },
+                            "authorization": "Bearer secret",
+                        },
+                    }
+                ],
+            },
+        ),
+    )
+
+    result = service.search_public_bot_metadata(
+        search=None,
+        page=1,
+        page_size=20,
+        caller=_caller(),
+        request_id="trace-redaction",
+    )
+
+    assert result.items[0].friend_ext == {
+        "policy": {
+            "name": "allowed",
+            "access_token": None,
+            "api_key": None,
+            "session_id": None,
+            "token": None,
+        },
+        "authorization": None,
+    }
+
+
+def test_bcs_catalog_search_logs_outbound_lifecycle_without_request_values(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, http = _make_service()
+    http.set_response("get", _response(200, {"total": 0, "items": []}))
+
+    with caplog.at_level(logging.INFO, logger="start"):
+        service.search_public_bot_metadata(
+            search="secret-query",
+            page=2,
+            page_size=5,
+            caller=_caller(),
+            request_id="trace-log",
+        )
+
+    assert "event=bcs_catalog_search.request" in caplog.text
+    assert "event=bcs_catalog_search.succeeded" in caplog.text
+    assert "route=/bots/search" in caplog.text
+    assert "http_status=200" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "secret-query" not in caplog.text
+
+
+def test_bcs_catalog_search_failure_log_omits_response_and_credentials(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service, http = _make_service()
+    http.set_response(
+        "get",
+        _response(
+            503,
+            {"authorization": "Bearer leaked", "token": "leaked-token"},
+        ),
+    )
+
+    with caplog.at_level(logging.INFO, logger="start"):
+        with pytest.raises(BotCatalogMetadataUnavailableError):
+            service.search_public_bot_metadata(
+                search=None,
+                page=1,
+                page_size=20,
+                caller=_caller(),
+                request_id="trace-failure-log",
+            )
+
+    assert "event=bcs_catalog_search.failed" in caplog.text
+    assert "route=/bots/search" in caplog.text
+    assert "http_status=503" in caplog.text
+    assert "duration_ms=" in caplog.text
+    assert "Bearer leaked" not in caplog.text
+    assert "leaked-token" not in caplog.text
 
 
 def test_bcs_catalog_search_omits_blank_query_and_keeps_page_boundary() -> None:
@@ -232,7 +344,6 @@ def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
     assert call.kwargs["params"] == {
         "offset": 10,
         "limit": 10,
-        "tc_bot": True,
         "visibility": "public,protected",
         "user_visibility": "private",
         "status": "online",
@@ -241,6 +352,90 @@ def test_bcs_catalog_search_forwards_only_supplied_frontend_filters() -> None:
         "friendship": "non_friends",
     }
     assert "headers" not in call.kwargs
+
+
+def test_bcs_catalog_search_keeps_tc_bot_filter_for_human_viewer() -> None:
+    """A human viewer must not receive BCS-native Bots outside TeamClaw."""
+    service, http = _make_service()
+    http.set_response("get", _response(200, {"total": 0, "items": []}))
+
+    service.search_public_bot_metadata(
+        search=None,
+        page=1,
+        page_size=20,
+        filters=BotCatalogSearchFilters(
+            viewer_actor_type="human",
+            viewer_actor_id="owner-1",
+        ),
+        caller=_caller(),
+        request_id="trace-human",
+    )
+
+    assert http.calls_to("get")[0].kwargs["params"]["tc_bot"] is True
+
+
+def test_bcs_catalog_search_accepts_native_uuid_with_created_by() -> None:
+    """A BCS-native UUID without an owner suffix must remain addressable."""
+    service, http = _make_service()
+    http.set_response(
+        "get",
+        _response(
+            200,
+            {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_uuid": "native-bot",
+                        "actor_kind": "bot",
+                        "created_by": "native-owner",
+                    }
+                ],
+            },
+        ),
+    )
+
+    result = service.search_public_bot_metadata(
+        search=None,
+        page=1,
+        page_size=20,
+        filters=BotCatalogSearchFilters(
+            viewer_actor_type="bot", viewer_actor_id="viewer-bot"
+        ),
+        caller=_caller(),
+        request_id="trace-native",
+    )
+
+    assert result.items[0].address == BotCatalogAddress(
+        "native-bot", "native-owner"
+    )
+
+
+def test_bcs_catalog_search_uses_uuid_suffix_for_blank_created_by() -> None:
+    """A blank optional creator must not erase a valid UUID owner suffix."""
+    service, http = _make_service()
+    http.set_response(
+        "get",
+        _response(
+            200,
+            {
+                "total": 1,
+                "items": [
+                    {
+                        "bot_uuid": "bot-1:owner-1",
+                        "actor_kind": "bot",
+                        "created_by": "  ",
+                    }
+                ],
+            },
+        ),
+    )
+
+    result = service.search_public_bot_metadata(
+        search=None, page=1, page_size=20, caller=_caller(), request_id="trace-blank"
+    )
+
+    assert result.items[0].address == BotCatalogAddress("bot-1", "owner-1")
+    assert result.items[0].created_by is None
 
 
 def test_bcs_catalog_search_forwards_exact_bot_uuid_candidates() -> None:
@@ -278,11 +473,14 @@ def test_bcs_catalog_search_forwards_exact_bot_uuid_candidates() -> None:
     "item",
     [
         {"bot_uuid": "bot-without-owner", "actor_kind": "bot"},
+        {"bot_uuid": "  ", "actor_kind": "bot", "created_by": "owner-1"},
         {"bot_uuid": ":owner-1", "actor_kind": "bot"},
         {"bot_uuid": "bot-1:", "actor_kind": "bot"},
         {"bot_uuid": 1, "actor_kind": "bot"},
         {"bot_uuid": "bot-1:owner-1", "actor_kind": "human"},
         {"bot_uuid": "bot-1:owner-1", "actor_kind": "bot", "is_friend": "false"},
+        {"bot_uuid": "bot-1:owner-1", "actor_kind": "bot", "summary": 1},
+        {"bot_uuid": "bot-1:owner-1", "actor_kind": "bot", "created_by": False},
     ],
 )
 def test_bcs_catalog_search_fails_closed_for_invalid_item(
@@ -367,6 +565,28 @@ def test_bcs_catalog_search_fails_closed_for_http_error() -> None:
         service.search_public_bot_metadata(
             search="agent", page=1, page_size=20, caller=_caller(), request_id="trace-5"
         )
+
+
+def test_bcs_catalog_search_fails_closed_for_unexpected_client_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unexpected client failures must not leak their details or return partial data."""
+    response = Mock()
+    response.raise_for_status.side_effect = RuntimeError("private client detail")
+    service, http = _make_service()
+    http.set_response("get", response)
+
+    with caplog.at_level("WARNING"), pytest.raises(BotCatalogMetadataUnavailableError):
+        service.search_public_bot_metadata(
+            search=None,
+            page=1,
+            page_size=20,
+            caller=_caller(),
+            request_id="trace-unexpected-client",
+        )
+
+    assert "failure=upstream_unavailable" in caplog.text
+    assert "private client detail" not in caplog.text
 
 
 def test_test_profile_binds_catalog_metadata_protocol_to_bcs_adapter() -> None:

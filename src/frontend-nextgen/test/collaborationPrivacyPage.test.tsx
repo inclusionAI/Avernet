@@ -60,6 +60,7 @@ describe('collaboration privacy accessible UI', () => {
   test('操作结果使用全局 Toast，不在页面内容区插入状态提示条', () => {
     const pageSource = readFileSync(path.join(process.cwd(), 'src/pages/CollaborationPrivacy/index.tsx'), 'utf8');
     const hookSource = readFileSync(path.join(process.cwd(), 'src/hooks/useCollaborationPrivacy.ts'), 'utf8');
+    const helperSource = readFileSync(path.join(process.cwd(), 'src/hooks/collaborationPrivacyHelpers.ts'), 'utf8');
 
     expect(pageSource).not.toContain('PageMessage');
     // 错误/成功经统一 notify 入口（全局上方居中、错误 6s、可关），页面 Hook 不单独设置位置。
@@ -67,11 +68,12 @@ describe('collaboration privacy accessible UI', () => {
     expect(hookSource).toContain("from '@/components/ui/notify'");
     expect(hookSource).toContain('notifyError');
     expect(hookSource).toContain('notifySuccess');
-    expect(hookSource).toContain('公开范围已关闭，当前已立即生效');
-    expect(hookSource).toContain('审批申请已提交，当前公开范围保持不变');
+    expect(hookSource).toContain('publicationSuccessMessage(config)');
+    expect(helperSource).toContain('Bot 可见性已更新为不可见，当前立即生效');
+    expect(helperSource).toContain('可见性变更申请已提交，当前可见性保持不变');
     expect(hookSource).toContain('好友审批策略已更新为“无需审批”');
     expect(hookSource).toContain('好友审批策略已更新为“全部审批”');
-    expect(hookSource).toContain("config.scope === 'none'");
+    expect(helperSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');
     expect(hookSource).not.toContain('（Mock）');
@@ -223,7 +225,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('同步用户部门信息');
   });
 
-  test('待审批公开范围只透出审批进度入口', () => {
+  test('待审批可见性只透出审批进度入口', () => {
     const html = renderToStaticMarkup(
       <RelationCard
         audience="user"
@@ -349,7 +351,7 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('A4196');
   });
 
-  test('公开范围编辑器按对象使用易理解的发现与好友申请文案', () => {
+  test('Bot 可见性编辑器按对象使用易理解的发现与好友申请文案', () => {
     const userHtml = renderWithPortals(
       <PublicationEditor
         open
@@ -360,9 +362,9 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(userHtml).toContain('其他用户无法发现当前 Bot');
-    expect(userHtml).toContain('其他用户可发现并申请添加当前 Bot 为好友');
-    expect(userHtml).not.toContain('仅所选组织范围可申请添加当前 Bot 为好友');
+    expect(userHtml).toContain('其他用户以个人身份，无法在协作广场看到当前 Bot，也不能发起申请。');
+    expect(userHtml).toContain('其他用户以个人身份，在协作广场可见当前 Bot 并申请好友');
+    expect(userHtml).not.toContain('其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友');
     expect(userHtml).not.toContain('该受众');
     expect(userHtml).not.toContain('所有主体');
 
@@ -376,9 +378,9 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(botHtml).toContain('其他 Bot 无法发现当前 Bot');
-    expect(botHtml).toContain('其他 Bot 可发现并申请添加当前 Bot 为好友');
-    expect(botHtml).not.toContain('仅所选组织范围可申请添加当前 Bot 为好友');
+    expect(botHtml).toContain('其他 Bot 以 Bot 工作身份，无法在协作广场看到当前 Bot，也不能发起申请。');
+    expect(botHtml).toContain('其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot 并申请好友');
+    expect(botHtml).not.toContain('其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友');
   });
 
   test('Open Core 读取存量限制范围时 fail closed 且不展示组织选择', () => {
@@ -392,8 +394,8 @@ describe('collaboration privacy accessible UI', () => {
         onSubmit={jest.fn()}
       />,
     );
-    expect(html).toContain('不公开');
-    expect(html).not.toContain('限制组织范围');
+    expect(html).toContain('不可见');
+    expect(html).toContain('当前环境支持修改为“不可见”或“全部可见”。');
     expect(html).not.toContain('选择组织范围');
     expect(html).not.toContain('已选组织范围（1）');
     expect(html).not.toContain('示例集团 / 事业部 / 部门 / 团队');
@@ -401,7 +403,20 @@ describe('collaboration privacy accessible UI', () => {
     expect(html).not.toContain('Mock');
   });
 
-  test('公开范围和好友审批编辑器使用单选组语义', () => {
+  test('协作权限页内说明类 Tooltip 统一使用 200ms 延迟', () => {
+    const tooltipSources = [
+      'src/components/CollaborationPrivacy/PermissionCard/index.tsx',
+      'src/components/CollaborationPrivacy/RelationCard/index.tsx',
+      'src/components/CollaborationPrivacy/RequestList/index.tsx',
+    ].map((sourcePath) => readFileSync(path.join(process.cwd(), sourcePath), 'utf8'));
+
+    for (const source of tooltipSources) {
+      expect(source).toContain('collaborationPrivacyTooltipDelayMs');
+      expect(source).not.toContain('<TooltipProvider>');
+    }
+  });
+
+  test('Bot 可见性和好友审批编辑器使用单选组语义', () => {
     const publicationHtml = renderWithPortals(
       <PublicationEditor
         open
@@ -413,7 +428,7 @@ describe('collaboration privacy accessible UI', () => {
       />,
     );
     expect(publicationHtml).toContain('role="radiogroup"');
-    expect(publicationHtml).toContain('aria-label="公开范围"');
+    expect(publicationHtml).toContain('aria-label="Bot 可见性"');
     expect(publicationHtml).toContain('role="radio"');
     expect(publicationHtml).toContain('aria-checked="true"');
 

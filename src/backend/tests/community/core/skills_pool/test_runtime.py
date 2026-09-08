@@ -8,13 +8,23 @@ from types import SimpleNamespace
 import pytest
 
 from agentclaw.community.core.skills_pool.models import (
+    MappingProjectionStatus,
     PoolCutoverStatus,
     PoolSkillMapping,
 )
 from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupStatus,
 )
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.plugins.local.device_adapter_transport import (
+    InMemoryDeviceAdapterTransport,
+)
+from agentclaw.community.plugin_api.device_adapter_transport import (
+    DeviceAdapterEndpointNotFoundError,
+    DeviceAdapterHTTPStatusError,
+    DeviceAdapterTimeoutError,
+)
 from agentclaw.community.core.skill_center.services.runtime_layout_probe import (
     MAPPING_V3_CONTRACT_VERSION,
 )
@@ -73,6 +83,29 @@ class FakeProbe:
         return kwargs
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["retire", "replace"])
+async def test_local_transport_apply_matches_runtime_consumer_contract(replacement: bool) -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(), adapter_transport=InMemoryDeviceAdapterTransport(),
+        probe_service=FakeProbe(),
+    )
+    desired = PoolSkillMapping("local", "package", "writer")
+    retired = PoolSkillMapping("repo", "old-package", "writer" if replacement else "old-writer")
+
+    result = await runtime.apply_mappings(
+        bot_id="bot", user_id="owner", engine="openclaw",
+        mappings=[desired, desired], retired_mappings=[retired, retired],
+    )
+
+    assert result.status is MappingProjectionStatus.CONVERGED
+    expected = [("APPLY", desired)]
+    if not replacement:
+        expected.append(("RETIRE", retired))
+    assert [(item.action, item.mapping) for item in result.items] == expected
+    assert result.evidence == {"simulated": True}
+
+
 class CenterEnsureTransport(FakeTransport):
     async def invoke(self, conn_info, method, path, *, body, timeout):
         if path.endswith("/center/ensure"):
@@ -127,6 +160,258 @@ class QuarantineTransport(FakeTransport):
                 "evidence": {"generation_scoped": True},
             },
         }
+
+
+class ApplyTransport(FakeTransport):
+    def __init__(
+        self,
+        failure: Exception | None = None,
+        *,
+        health_engine: str = "openclaw",
+    ) -> None:
+        super().__init__()
+        self.failure = failure
+        self.health_engine = health_engine
+
+    async def invoke(
+        self, conn_info, method, path, *, body=None, timeout=None
+    ):
+        self.calls.append(
+            {
+                "conn_info": conn_info,
+                "method": method,
+                "path": path,
+                "body": body,
+                "timeout": timeout,
+            }
+        )
+        if path == "/api/skills/mappings/apply":
+            if self.failure is not None:
+                raise self.failure
+            return {
+                "success": True,
+                "data": {
+                    "status": "CONVERGED",
+                    "items": [
+                        {
+                            "mapping": body["mappings"][0],
+                            "target": "",
+                            "action": "APPLY",
+                            "status": "CONVERGED",
+                            "retryable": False,
+                        }
+                    ],
+                    "issues": [],
+                    "evidence": {},
+                },
+            }
+        if path == "/health":
+            return {"status": "ok", "engine": self.health_engine}
+        raise AssertionError(path)
+
+
+@pytest.mark.asyncio
+async def test_daily_apply_uses_one_transport_call_and_parses_logical_item() -> None:
+    transport = ApplyTransport()
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+    mapping = PoolSkillMapping("local", "package", "display-name")
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[mapping],
+    )
+
+    assert result.status is MappingProjectionStatus.CONVERGED
+    assert result.items[0].mapping == mapping
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_standard_route_miss_requires_matching_health_before_fallback() -> None:
+    transport = ApplyTransport(
+        DeviceAdapterEndpointNotFoundError(
+            '{"detail":"Not Found"}', standard_route_missing=True
+        )
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    with pytest.raises(LegacyMappingApplyRequired):
+        await runtime.apply_mappings(
+            bot_id="bot-1",
+            user_id="owner-1",
+            engine="openclaw",
+            mappings=[],
+        )
+
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply",
+        "/health",
+    ]
+    assert transport.calls[0]["conn_info"] is transport.calls[1]["conn_info"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        DeviceAdapterEndpointNotFoundError("application 404"),
+        DeviceAdapterTimeoutError("timeout"),
+    ],
+)
+async def test_unknown_apply_failure_never_switches_write_protocol(
+    failure: Exception,
+) -> None:
+    transport = ApplyTransport(failure)
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 401, 403, 500])
+async def test_http_failure_never_switches_write_protocol(status_code: int) -> None:
+    transport = ApplyTransport(
+        DeviceAdapterHTTPStatusError(status_code, "rejected")
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_health_mismatch_does_not_enable_legacy_write_fallback() -> None:
+    transport = ApplyTransport(
+        DeviceAdapterEndpointNotFoundError(
+            '{"detail":"Not Found"}', standard_route_missing=True
+        ),
+        health_engine="hermes",
+    )
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert [call["path"] for call in transport.calls] == [
+        "/api/skills/mappings/apply",
+        "/health",
+    ]
+
+
+def test_malformed_item_types_are_rejected() -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=ApplyTransport(),
+        probe_service=FakeProbe(),
+    )
+
+    result = runtime._mapping_apply_result(
+        {
+            "success": True,
+            "data": {
+                "status": "CONVERGED",
+                "items": [
+                    {
+                        "mapping": {
+                            "corpus": "local",
+                            "relative_path": "package",
+                            "link_name": "runtime-name",
+                        },
+                        "target": "",
+                        "action": "APPLY",
+                        "status": "CONVERGED",
+                        "retryable": "false",
+                    }
+                ],
+                "issues": [],
+            },
+        }
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence["reason"] == "invalid_runtime_items"
+
+
+@pytest.mark.asyncio
+async def test_contradictory_apply_envelope_cannot_report_converged() -> None:
+    transport = ApplyTransport()
+
+    async def contradictory(conn_info, method, path, *, body=None, timeout=None):
+        transport.calls.append({"path": path})
+        return {
+            "success": False,
+            "data": {
+                "status": "CONVERGED",
+                "items": [],
+                "issues": [],
+                "evidence": {},
+            },
+        }
+
+    transport.invoke = contradictory
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence["reason"] == "contradictory_runtime_response"
 
 
 @pytest.mark.asyncio
