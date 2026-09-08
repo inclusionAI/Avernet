@@ -1733,9 +1733,7 @@ pub async fn get_session_messages(
     };
 
     let resolved_view =
-        match resolve_session_history_view(&state, &sess, &caller, query.view_bot_id.as_deref())
-            .await
-        {
+        match resolve_session_history_view(&sess, &caller, query.view_bot_id.as_deref()) {
             Ok(view) => view,
             Err(response) => return response,
         };
@@ -1745,6 +1743,15 @@ pub async fn get_session_messages(
         .clone()
         .filter(|view| view.scope == MessageViewScope::Participant);
     if group.group_strategy == bcs_service_api::GroupStrategy::StateMachine {
+        // Full keeps the pre-participant-view authorization and history path.
+        // Only an explicitly participant-scoped Human uses the projected
+        // state-machine history API.
+        if participant_human_view.is_none()
+            && let Err(response) =
+                authorize_state_machine_session_history(&state, &sess, &caller).await
+        {
+            return response;
+        }
         let human_view = resolved_view.human_view;
         let history = match human_view {
             Some(view) => {
@@ -1854,8 +1861,7 @@ struct ResolvedSessionHistoryView {
     human_view: Option<HumanMessageView>,
 }
 
-async fn resolve_session_history_view(
-    state: &HttpAppState,
+fn resolve_session_history_view(
     session: &bcs_service_api::Session,
     caller: &bcs_service_api::CallerContext,
     requested_view_actor_id: Option<&str>,
@@ -1873,60 +1879,40 @@ async fn resolve_session_history_view(
 
     match caller {
         bcs_service_api::CallerContext::Human(human) => {
-            let view_actor_id = requested_view_actor_id.unwrap_or(&human.actor_id);
-            if view_actor_id.starts_with("human_") {
-                if view_actor_id != human.actor_id {
+            let participant_view = session
+                .participants
+                .iter()
+                .find(|participant| {
+                    participant.bot_uuid == human.actor_id
+                        && participant.actor_kind == ActorKind::Human
+                        && participant.message_view_scope == MessageViewScope::Participant
+                });
+            if let Some(participant) = participant_view {
+                if requested_view_actor_id.is_some_and(|requested| requested != human.actor_id) {
                     return Err(forbidden());
                 }
-                let participant = session
-                    .participants
-                    .iter()
-                    .find(|participant| participant.bot_uuid == view_actor_id)
-                    .filter(|participant| participant.actor_kind == ActorKind::Human)
-                    .ok_or_else(forbidden)?;
                 return Ok(ResolvedSessionHistoryView {
-                    view_actor_id: Some(view_actor_id.to_string()),
+                    view_actor_id: Some(human.actor_id.clone()),
                     human_view: Some(HumanMessageView {
-                        actor_id: view_actor_id.to_string(),
+                        actor_id: human.actor_id.clone(),
                         scope: participant.message_view_scope,
                         allow_legacy_unclassified_chat: false,
                     }),
                 });
             }
 
-            let owns_view_actor = state
-                .services
-                .registry
-                .list_bots_by_creator(&human.staff_no)
-                .await
-                .iter()
-                .any(|bot| bot.bot_uuid == view_actor_id);
-            let is_bot_participant = session.participants.iter().any(|participant| {
-                participant.bot_uuid == view_actor_id && participant.actor_kind == ActorKind::Bot
-            });
-            if owns_view_actor && is_bot_participant {
-                Ok(ResolvedSessionHistoryView {
-                    view_actor_id: Some(view_actor_id.to_string()),
-                    human_view: None,
-                })
-            } else {
-                Err(forbidden())
-            }
+            // Full is the compatibility mode. Preserve the pre-feature
+            // behavior exactly: do not infer a Human View Actor and leave an
+            // explicitly requested legacy view unchanged.
+            Ok(ResolvedSessionHistoryView {
+                view_actor_id: requested_view_actor_id.map(str::to_string),
+                human_view: None,
+            })
         }
-        bcs_service_api::CallerContext::Bot(bot) => {
-            if requested_view_actor_id.is_some_and(|requested| requested != bot.bot_uuid)
-                || !session.participants.iter().any(|participant| {
-                    participant.bot_uuid == bot.bot_uuid && participant.actor_kind == ActorKind::Bot
-                })
-            {
-                Err(forbidden())
-            } else {
-                Ok(ResolvedSessionHistoryView {
-                    view_actor_id: Some(bot.bot_uuid.clone()),
-                    human_view: None,
-                })
-            }
-        }
+        bcs_service_api::CallerContext::Bot(_) => Ok(ResolvedSessionHistoryView {
+            view_actor_id: requested_view_actor_id.map(str::to_string),
+            human_view: None,
+        }),
         bcs_service_api::CallerContext::Public => Err((
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({
@@ -1940,6 +1926,47 @@ async fn resolve_session_history_view(
             view_actor_id: requested_view_actor_id.map(str::to_string),
             human_view: None,
         }),
+    }
+}
+
+async fn authorize_state_machine_session_history(
+    state: &HttpAppState,
+    session: &bcs_service_api::Session,
+    caller: &bcs_service_api::CallerContext,
+) -> Result<(), Response> {
+    let authorized = match caller {
+        bcs_service_api::CallerContext::Human(human) => {
+            human_has_session_access(state, session, &human.actor_id, &human.staff_no).await
+        }
+        bcs_service_api::CallerContext::Bot(bot) => session
+            .participants
+            .iter()
+            .any(|participant| participant.bot_uuid == bot.bot_uuid),
+        bcs_service_api::CallerContext::Public => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": "unauthorized",
+                    "message": "valid Human identity or Bot token is required for session history"
+                })),
+            )
+                .into_response());
+        }
+        bcs_service_api::CallerContext::Integration(_)
+        | bcs_service_api::CallerContext::Admin(_) => true,
+    };
+
+    if authorized {
+        Ok(())
+    } else {
+        Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "forbidden",
+                "message": "caller is not a session participant and owns no Bot in this session"
+            })),
+        )
+            .into_response())
     }
 }
 

@@ -626,22 +626,6 @@ impl GroupMessageHistoryService for RecordingGroupMessageHistory {
         &self,
         cmd: SessionHistoryCommand,
     ) -> Result<SessionHistoryResult, GroupUseCaseError> {
-        let session_member = match &cmd.caller {
-            CallerContext::Human(human) => cmd
-                .session_participants
-                .iter()
-                .any(|participant| participant.bot_uuid == human.actor_id),
-            CallerContext::Bot(bot) => cmd
-                .session_participants
-                .iter()
-                .any(|participant| participant.bot_uuid == bot.bot_uuid),
-            _ => false,
-        };
-        if !session_member {
-            return Err(GroupUseCaseError::Forbidden(
-                "caller is not a session participant".to_string(),
-            ));
-        }
         self.session_calls.lock().await.push(cmd.clone());
         Ok(SessionHistoryResult {
             session_id: cmd.session_id,
@@ -773,12 +757,18 @@ async fn build_group_app_with_identity(
     Arc<RecordingMessageFlow>,
     Arc<RecordingGroupMessageHistory>,
 ) {
-    build_group_app_with_identity_and_session_status(user_identity, SessionStatus::Running).await
+    build_group_app_with_identity_and_session_status(
+        user_identity,
+        SessionStatus::Running,
+        None,
+    )
+    .await
 }
 
 async fn build_group_app_with_identity_and_session_status(
     user_identity: Arc<dyn UserIdentityPort>,
     session_status: SessionStatus,
+    session_participants: Option<Vec<Participant>>,
 ) -> (
     axum::Router,
     Arc<GroupStore>,
@@ -849,6 +839,13 @@ async fn build_group_app_with_identity_and_session_status(
     let bot_request = Arc::new(RecordingBotRequest::default());
     let message_flow = Arc::new(RecordingMessageFlow::default());
     let group_message_history = Arc::new(RecordingGroupMessageHistory::default());
+    let session_participants = session_participants.unwrap_or_else(|| {
+        vec![
+            Participant::bot("owner-bot", ParticipantRole::Driver),
+            Participant::bot("target-bot", ParticipantRole::Consultant),
+            Participant::human("human_123", ParticipantRole::Observer),
+        ]
+    });
     let group_use_cases = Arc::new(GroupManagement::with_defaults(
         group_store.clone(),
         registry.clone(),
@@ -866,11 +863,7 @@ async fn build_group_app_with_identity_and_session_status(
             test_session_with_status(
                 "group-1:abcdef12",
                 "group-1",
-                vec![
-                    Participant::bot("owner-bot", ParticipantRole::Driver),
-                    Participant::bot("target-bot", ParticipantRole::Consultant),
-                    Participant::human("human_123", ParticipantRole::Observer),
-                ],
+                session_participants,
                 session_status,
             ),
         )))
@@ -956,7 +949,7 @@ async fn session_messages_without_identity_returns_unauthorized() {
 }
 
 #[tokio::test]
-async fn session_messages_authenticated_human_defaults_to_its_own_view() {
+async fn session_messages_authenticated_full_human_preserves_legacy_default_view() {
     let (
         app,
         _group_store,
@@ -982,7 +975,7 @@ async fn session_messages_authenticated_human_defaults_to_its_own_view() {
     assert_eq!(response.status(), StatusCode::OK);
     let session_calls = group_message_history.session_calls.lock().await;
     assert_eq!(session_calls.len(), 1);
-    assert_eq!(session_calls[0].view_bot_id, Some("human_123".to_string()));
+    assert_eq!(session_calls[0].view_bot_id, None);
     assert!(matches!(
         &session_calls[0].caller,
         CallerContext::Human(human)
@@ -991,7 +984,7 @@ async fn session_messages_authenticated_human_defaults_to_its_own_view() {
 }
 
 #[tokio::test]
-async fn session_messages_non_session_human_returns_forbidden() {
+async fn session_messages_full_human_owning_session_bot_preserves_legacy_access() {
     let (
         app,
         _group_store,
@@ -1001,9 +994,14 @@ async fn session_messages_non_session_human_returns_forbidden() {
         _bot_request,
         _message_flow,
         group_message_history,
-    ) = build_group_app_with_identity(Arc::new(ChainUserIdentityPort::new(static_auth_chain(
-        "456", "Intruder",
-    ))))
+    ) = build_group_app_with_identity_and_session_status(
+        Arc::new(ChainUserIdentityPort::new(static_auth_chain("123", "Owner"))),
+        SessionStatus::Running,
+        Some(vec![
+            Participant::bot("owner-bot", ParticipantRole::Driver),
+            Participant::bot("target-bot", ParticipantRole::Consultant),
+        ]),
+    )
     .await;
 
     let response = app
@@ -1017,37 +1015,10 @@ async fn session_messages_non_session_human_returns_forbidden() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    assert!(group_message_history.session_calls.lock().await.is_empty());
-}
-
-#[tokio::test]
-async fn session_messages_non_participant_bot_token_returns_forbidden() {
-    let (
-        app,
-        _group_store,
-        _routing,
-        _bot_delivery,
-        _frontend_delivery,
-        _bot_request,
-        _message_flow,
-        group_message_history,
-    ) = build_group_app_with_identity(Arc::new(NoUserIdentity)).await;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/sessions/group-1:abcdef12/messages")
-                .header("authorization", "Bearer intruder-token")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    assert!(group_message_history.session_calls.lock().await.is_empty());
+    assert_eq!(response.status(), StatusCode::OK);
+    let session_calls = group_message_history.session_calls.lock().await;
+    assert_eq!(session_calls.len(), 1);
+    assert_eq!(session_calls[0].view_bot_id, None);
 }
 
 #[tokio::test]
@@ -1199,6 +1170,7 @@ async fn session_chat_allows_completed_chat_session() {
             "123", "Owner",
         ))),
         SessionStatus::Completed,
+        None,
     )
     .await;
 
@@ -1446,9 +1418,7 @@ async fn state_machine_session_messages_use_runtime_history() {
     );
     drop(calls);
     let views = collaboration_runtime.human_views.lock().await;
-    assert_eq!(views.len(), 1);
-    assert_eq!(views[0].actor_id, "human_123");
-    assert_eq!(views[0].scope, bcs_domain::MessageViewScope::Full);
+    assert!(views.is_empty());
 }
 
 #[tokio::test]
