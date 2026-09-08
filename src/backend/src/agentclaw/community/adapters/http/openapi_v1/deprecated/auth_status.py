@@ -39,7 +39,7 @@ from agentclaw.community.adapters.http.openapi_v1.contracts import (
     BotIdPath,
     Envelope,
 )
-from agentclaw.community.adapters.http.openapi_v1.principal import UserIdDep
+from agentclaw.community.adapters.http.openapi_v1.principal import OwnerNameDep, UserIdDep
 from agentclaw.community.adapters.http.openapi_v1.responses import envelope_errors
 from agentclaw.community.api.bot_service import BotServiceProtocol
 from agentclaw.community.core.bot_inventory.protocols import (
@@ -60,6 +60,7 @@ async def get_bot_auth_status(
     bot_id: BotIdPath,
     request: Request,
     owner_id: UserIdDep,
+    owner_name: OwnerNameDep,
     engine: Annotated[
         str | None,
         Query(
@@ -131,6 +132,7 @@ async def get_bot_auth_status(
         bot_id=bot_id,
         request=request,
         owner_id=owner_id,
+        owner_name=owner_name,
         engine=engine,
         cluster_name=cluster_name,
         bot_name=bot_name,
