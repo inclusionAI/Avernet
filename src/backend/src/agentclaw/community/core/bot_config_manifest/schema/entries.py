@@ -414,7 +414,14 @@ def validate_source_declaration(
         ctx.add(location + violation.suffix, violation.code, violation.message)
     if decl is None:
         return None
-    check_https_url(ctx, f"{location}.url", decl.url)
+    if decl.url is not None:
+        # Only the git road has a URL now. The https/userinfo/length rule
+        # still governs it — a repository address is as capable of carrying a
+        # token in its userinfo as any other URL was — but an oss source has
+        # no URL to judge, and running the check against ``None`` would
+        # answer "source URL must be a string" to a document that correctly
+        # declared none.
+        check_https_url(ctx, f"{location}.url", decl.url)
     if decl.subpath is not None:
         check_relative_path(
             ctx, f"{location}.subpath", decl.subpath, what="subpath"

@@ -130,7 +130,12 @@ class _Recorder:
         ),
         (
             SourceKind.OSS,
-            {"protocol": "oss", "url": "https://objects.example/x.bin"},
+            {
+                "protocol": "oss",
+                "bucket": "objects",
+                "key": "x.bin",
+                "auth": "oss-cred",
+            },
         ),
     ],
 )
@@ -164,7 +169,12 @@ def test_the_request_carries_what_the_front_door_resolved(pipeline):
     pipeline.fetch_declared(
         make_context(source_session=_session()),
         entry={
-            "source": {"protocol": "oss", "url": "https://objects.example/x.bin"},
+            "source": {
+                "protocol": "oss",
+                "bucket": "objects",
+                "key": "x.bin",
+                "auth": "oss-cred",
+            },
             "on_fetch_failure": "fail",
         },
         category="skills",

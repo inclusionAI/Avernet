@@ -116,7 +116,13 @@ class ObjectStoreFetcher:
 
     def fetch(self, request: DeclaredFetch) -> EntryDelivery:
         decl, entry = request.decl, request.entry
+        # ``${BOT_*}`` resolves in the address the same way it did in a source
+        # URL — a per-env bucket and a per-env key prefix are the whole reason
+        # the placeholders exist, and dropping substitution here would have
+        # made them silently inert on the road that replaced that URL.
         key = compose_key(decl.key, entry.get("key"))
+        if key is not None:
+            key = substitute(request.ctx, key)
         if not key:
             raise EntryFetchError(
                 "an object store entry must name the object: declare 'key' on "
@@ -134,7 +140,7 @@ class ObjectStoreFetcher:
         try:
             target = self._owner._credentials.binding(
                 name=decl.auth
-            ).object_store_target(decl.bucket or "")
+            ).object_store_target(substitute(request.ctx, decl.bucket or ""))
         except CredentialError as exc:
             raise EntryFetchError(str(exc)) from exc
         return BlobDelivery(

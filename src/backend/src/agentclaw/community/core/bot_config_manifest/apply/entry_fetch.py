@@ -669,6 +669,7 @@ class EntryFetcher:
             size_bytes=len(content),
             url=address,
             content_type=None,
+            fetched_at=datetime.now(timezone.utc),
         )
         try:
             self._content.store(

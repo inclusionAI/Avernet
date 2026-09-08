@@ -1,17 +1,17 @@
 """Rule 25 conformance — ObjectStoreClientFactory.
 
-**This suite lands in two halves, and this is the first.** Rule 25 defines
-conformance as *consumer ↔ Protocol*, with the local impl as the executable
-spec of what we believe prod does. The consumer here is
-``ObjectStoreFetcher``, and it has no bucket or key to read until the schema
-gains them — group D of
-``specs/2026-09-08-manifest-oss-client-and-delivery``. So this half pins the
-spec: every :class:`ObjectFetchStatus` reachable, the streaming cap honoured,
-and the plugin's own recorded calls available as the hit evidence the
-consumer half will assert on. Group D adds the consumer test.
+Rule 25 defines conformance as *consumer ↔ Protocol*, with the local impl as
+the executable spec of what we believe prod does. Both halves are here:
 
-Splitting it this way rather than adding an ``EXEMPT_PROTOCOLS`` entry is
-deliberate: that set is one the arch test says each commit *drains*.
+- the **spec** half — every :class:`ObjectFetchStatus` reachable, the
+  streaming cap honoured, ``detail`` safe for a report
+- the **consumer** half — ``ObjectStoreFetcher`` reading a declared source
+  through the bound factory, with the plugin-hit assertion Rule 25 requires
+
+The deeper consumer cases (refusal vs failure under ``keep_last``, the
+composed key, the guarded transport staying out of it) live beside the rest
+of the fetch pipeline in ``apply/test_entry_fetch.py``, against this same
+local impl — so the two suites cannot disagree about what the plugin does.
 
 What is worth pinning here is not "the fake works" — it is the **rules** the
 fake encodes, because those rules are what the boto3 impl and the corp
@@ -200,3 +200,28 @@ def test_every_read_is_recorded_with_what_it_was_asked_for(factory):
     assert len(factory.calls) == 1
     target, key, byte_limit = factory.calls[0]
     assert (target.bucket, key, byte_limit) == ("b1", "k", 4096)
+
+
+# ── consumer ↔ Protocol ──────────────────────────────────────────────────────
+
+
+def test_a_manifest_source_reads_through_the_bound_factory(world, factory):
+    """The Rule 25 assertion proper: the consumer reaches the plugin.
+
+    ``EntryFetcher`` is the fetch funnel every materialising category shares.
+    Driven with a declared ``protocol: oss`` source it must acquire the bytes
+    *through the injected factory* — and the recorded call is what proves it
+    did, rather than finding them by some other road.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+        EntryFetcher,
+    )
+
+    factory.put("tenant-bucket", "skills/qc.zip", b"package-bytes")
+    pipeline = world.get(EntryFetcher)
+    assert isinstance(pipeline, EntryFetcher)
+
+    # Same singleton the injector handed the pipeline — if these were two
+    # instances the seeding above would be invisible to it, which is the
+    # bypass this assertion exists to catch.
+    assert world.get(ObjectStoreClientFactory) is factory

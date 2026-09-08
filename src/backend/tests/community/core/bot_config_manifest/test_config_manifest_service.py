@@ -141,7 +141,11 @@ def test_put_accepts_a_git_source_document(service, repository):
         "      from: repo\n"
         "  resources:\n"
         "    - path: assets/logo.png\n"
-        "      source: https://cdn.example.com/logo.png\n"
+        "      source:\n"
+        "        protocol: oss\n"
+        "        bucket: cdn\n"
+        "        key: logo.png\n"
+        "        auth: oss-cred\n"
         "      digest: sha256:" + "0" * 64 + "\n"
     )
     result = service.put(
@@ -220,7 +224,9 @@ def test_warnings_ride_back_with_the_record(service):
         "sources:\n"
         "  assets:\n"
         "    protocol: oss\n"
-        "    url: https://cdn.example.com/assets/\n"
+        "    bucket: cdn\n"
+        "    key: assets/\n"
+        "    auth: oss-cred\n"
         "manifest:\n"
         "  skills: []\n"
     )
