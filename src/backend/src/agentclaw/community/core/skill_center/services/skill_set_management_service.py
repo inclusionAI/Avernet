@@ -27,6 +27,7 @@ from agentclaw.community.core.skill_center.errors import (
 from agentclaw.community.core.mcp.services._defaults import (
     get_default_mcp_server_codes,
 )
+from agentclaw.community.core.skill_center.policies.capability_ownership import require_non_platform_mcp
 from agentclaw.community.plugin_api.mcp_auth import MCPAuthPlugin
 from agentclaw.community.plugin_api.mcp_center import MCPCenterPlugin
 from agentclaw.community.core.skill_center.legacy_skill_set_compatibility import (
@@ -653,6 +654,10 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                     default_engine_types=self._default_engine_types(bot),
                 ),
             )
+        platform_default_codes = self._platform_default_mcp_codes(bot, bot_id)
+        require_non_platform_mcp(
+            server_code=server_code, platform_default_codes=platform_default_codes
+        )
         catalog = self._mcp_catalog_entry(server_code)
         return await self._mutate(
             bot=bot,
@@ -667,6 +672,7 @@ class SkillSetManagementService(SkillSetManagementServiceProtocol):
                 set_id=set_id,
                 server_code=server_code,
                 name=catalog["name"],
+                platform_default_codes=platform_default_codes,
                 description=catalog["description"],
                 icon=catalog["icon"],
                 engine_type=self._engine(bot),

@@ -174,12 +174,20 @@ class CapabilityDesiredStateRepositoryProtocol(Protocol):
         owner_id: str,
         set_id: str,
         server_code: str,
+        platform_default_codes: frozenset[str],
         name: str,
         description: str | None,
         icon: str | None,
         engine_type: str | None = None,
         default_engine_types: tuple[str, ...] | None = None,
-    ) -> DesiredStateMutation: ...
+    ) -> DesiredStateMutation:
+        """Add an ordinary member; reject caller-resolved platform defaults.
+
+        Policy codes include excluded defaults. Resolve with the target Bot's
+        engine/template/ext-info before entering this UoW; lookup errors must
+        propagate rather than being replaced with an empty set.
+        """
+        ...
     @abstractmethod
     def remove_mcp(
         self,
