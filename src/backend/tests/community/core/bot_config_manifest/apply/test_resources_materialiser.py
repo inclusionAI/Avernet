@@ -1765,3 +1765,55 @@ def test_a_real_archive_still_takes_the_unpack_road():
     )
     assert resolved.ok, resolved.failures
     assert "data/kb/faq.csv" in {i.identity for i in resolved.intents}
+
+
+def test_an_oss_directory_entry_is_refused_before_the_network_is_touched():
+    """`resolve`'s contract is that everything which can fail without touching
+    the bot fails first — and a directory fetch can be 200 MiB against this
+    apply's byte budget and its lock TTL. An entry a missing `unpack`
+    guarantees to reject must not spend one."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher()
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            make_context(engine_type="claude_code"),
+            [{"path": "data/kb/", "source": "https://cdn.example.com/kb.zip"}],
+        )
+    )
+    assert not resolved.ok
+    assert "must declare 'unpack" in resolved.failures[0].reason
+    assert stub.calls == [], "a doomed entry paid for a fetch"
+
+
+def test_an_invalid_strip_components_is_also_refused_before_the_fetch():
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher()
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            make_context(engine_type="claude_code"),
+            [{
+                "path": "data/kb/",
+                "source": "https://cdn.example.com/kb.zip",
+                "unpack": "zip",
+                "strip_components": -1,
+            }],
+        )
+    )
+    assert not resolved.ok
+    assert "strip_components" in resolved.failures[0].reason
+    assert stub.calls == []
+
+
+def test_a_git_directory_entry_still_fetches_without_declaring_unpack():
+    """The pre-fetch gate must not leak onto the git road, where `unpack` is
+    refused at PUT and a tree needs no packaging at all."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert resolved.ok, resolved.failures
+    assert stub.calls, "the git road did not fetch"

@@ -777,6 +777,37 @@ class EntryFetcher:
         )
 
 
+def declared_protocol(
+    ctx: "FetchContext", entry: "Mapping[str, Any]"
+) -> Optional[SourceKind]:
+    """Which protocol :meth:`EntryFetcher.fetch_declared` will take, **without
+    fetching anything**.
+
+    A caller needs this when a rule has to be decided *before* the network is
+    touched — the resources materialiser validates an archive's ``unpack``
+    before spending a fetch that a missing one guarantees to waste, and the
+    ``cli_tools`` materialiser asks whether the digest rule applies. Both used
+    to answer it their own way, or after the fact.
+
+    Read through the same parser the ``PUT`` validator and ``fetch_declared``
+    use, so a fourth derivation cannot appear. ``None`` means "cannot say from
+    the declaration alone" — an inline URL string is ``OSS`` and a malformed or
+    undeclared source is ``None``; the caller then falls through to the fetch,
+    which raises the real error with the real message.
+    """
+    inline = entry.get("source")
+    if isinstance(inline, str):
+        return SourceKind.OSS
+    raw: Any = inline
+    if isinstance(entry.get("from"), str):
+        session = ctx.source_session
+        raw = (getattr(session, "sources", None) or {}).get(entry["from"])
+    if not isinstance(raw, Mapping):
+        return None
+    decl, _ = parse_source(raw)
+    return None if decl is None else decl.protocol
+
+
 def _compose_subpath(
     source_subpath: Optional[str], entry_subpath: Any
 ) -> Optional[str]:
@@ -832,6 +863,7 @@ def _substitute(ctx: "FetchContext", source_url: str) -> str:
 
 
 __all__ = [
+    "declared_protocol",
     "EntryFetchError",
     "EntryFetcher",
     "FetchContext",

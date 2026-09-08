@@ -26,7 +26,7 @@ API-installed tool rather than silently overwriting it.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
@@ -55,7 +55,11 @@ from agentclaw.community.core.bot_config_manifest.cli_tools.models import (
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolService,
 )
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    declared_protocol,
+)
 from agentclaw.community.core.bot_config_manifest.schema import placeholders
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
 #: How the service's four outcomes read on a report row. ``REMOVED`` has no
 #: declared entry to attach to — the orchestrator reports removals from the
@@ -153,7 +157,7 @@ class CliToolsMaterialiser(Materialiser):
             seen.add(name)
 
             decl = CliToolDecl.from_entry(entry)
-            if not decl.digest and not _is_git_sourced(ctx, entry):
+            if not decl.digest and declared_protocol(ctx, entry) is not SourceKind.GIT:
                 # The schema refuses this at PUT. Re-asked here because a stored
                 # document can predate a rule or have skipped the validator (a
                 # hand-built apply in W8's lifecycle points), and the platform
@@ -164,7 +168,9 @@ class CliToolsMaterialiser(Materialiser):
                 # the pin — the same exemption ``DIGEST_REQUIRED`` states at
                 # ``PUT``, keyed on the same axis. A belt that refused what the
                 # surface accepts would be the "accepted means appliable" rule
-                # broken by the belt itself.
+                # broken by the belt itself. ``declared_protocol`` answers from
+                # the source declaration through the one parser, so inline and
+                # ``from:`` are the same source — which is the whole of D5.
                 failures.append(
                     ResolveFailure(
                         name,
@@ -290,31 +296,6 @@ class CliToolsMaterialiser(Materialiser):
                 )
             )
         return tuple(results)
-
-
-def _is_git_sourced(ctx: ApplyContext, entry: dict[str, Any]) -> bool:
-    """Whether this entry's source speaks git, however it was written.
-
-    Inline or by name — the protocol is the same fact either way, which is the
-    whole of what defect D5 got wrong. Answered from the source declaration
-    (parsed by the one parser the ``PUT`` validator uses), never from which key
-    the entry happens to carry.
-    """
-    from agentclaw.community.core.bot_config_manifest.schema.sources import (
-        parse_source,
-    )
-    from agentclaw.community.core.bot_config_manifest.support_matrix import (
-        SourceKind,
-    )
-
-    raw = entry.get("source")
-    if isinstance(entry.get("from"), str):
-        session = getattr(ctx, "source_session", None)
-        raw = (getattr(session, "sources", {}) or {}).get(entry["from"])
-    if not isinstance(raw, Mapping):
-        return False
-    decl, _ = parse_source(raw)
-    return decl is not None and decl.protocol is SourceKind.GIT
 
 
 __all__ = ["CliToolsMaterialiser", "context_for"]

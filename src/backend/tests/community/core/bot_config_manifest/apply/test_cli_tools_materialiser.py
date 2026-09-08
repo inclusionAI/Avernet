@@ -462,3 +462,32 @@ async def test_a_git_tool_records_a_real_content_digest() -> None:
     assert row is not None
     assert row.digest.startswith("sha256:")
     assert len(row.digest) == len("sha256:") + 64
+
+
+@pytest.mark.asyncio
+async def test_an_inline_git_source_is_exempt_from_the_digest_belt_too() -> None:
+    """The other spelling of the same source.
+
+    `from:` a git source and an inline `source: {protocol: git, ...}` are one
+    source declared two ways, so the digest exemption has to reach both — which
+    is the whole of D5, and the named road alone would not have proved it.
+    """
+    service, _, _, fetcher = _service()
+    mat = CliToolsMaterialiser(service)
+    resolved, _, results = await _apply(
+        mat,
+        _ctx(source_session=SimpleNamespace(sources={})),
+        [{
+            "name": "mycli",
+            "source": {
+                "protocol": "git",
+                "url": "https://code.example.com/team/tools.git",
+                "ref": "v1.0.0",
+            },
+            "subpath": "bin/mycli",
+        }],
+    )
+    assert resolved.ok, resolved.failures
+    assert [r.reason for r in results] == [None]
+    assert fetcher.calls[0]["source_url"] == "https://code.example.com/team/tools.git"
+    assert fetcher.calls[0].get("git") is True

@@ -57,6 +57,7 @@ from agentclaw.community.core.bot_config_manifest.apply.context import ApplyCont
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     GitEntrySource,
+    declared_protocol,
 )
 from agentclaw.community.core.bot_config_manifest.apply.outcomes import (
     EntryOutcome,
@@ -83,6 +84,7 @@ from agentclaw.community.core.bot_config_manifest.schema._support import (
 from agentclaw.community.core.bot_config_manifest.schema.entries import (
     VALID_UNPACK,
 )
+from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 from agentclaw.community.core.workspace.constants import DEFAULT_ENGINE_TYPE
 
 #: Schema §5 states the two resource forms' fetch widths separately —
@@ -163,6 +165,21 @@ class ResourcesMaterialiser(Materialiser):
                 continue
             seen.add(path)
             if isinstance(path, str) and path.endswith("/"):
+                # The archive fields are checked BEFORE the network, on the one
+                # road where they apply. ``resolve``'s whole contract is that
+                # everything which can fail without touching the bot fails
+                # first — and a fetch here can be 200 MiB against this apply's
+                # byte budget and its lock TTL, spent on an entry a missing
+                # 'unpack' guarantees to reject. The protocol is answered from
+                # the declaration, so no fetch is needed to know which rules
+                # apply. ``None`` (a malformed or undeclared source) falls
+                # through: the fetch below raises the real error.
+                protocol = declared_protocol(ctx, entry)
+                if protocol is SourceKind.OSS:
+                    refusal = _archive_refusal(entry)
+                    if refusal is not None:
+                        failures.append(ResolveFailure(path, refusal))
+                        continue
                 try:
                     fetched = await self._fetch_entry(
                         ctx, entry, path, _FETCH_CATEGORY_ARCHIVE
@@ -200,43 +217,18 @@ class ResourcesMaterialiser(Materialiser):
                         continue
                     note = fetched.moved_note()
                 else:
-                    unpack_kind = entry.get("unpack")
-                    # Str first: ``VALID_UNPACK`` is a frozenset, and an
-                    # unhashable ``unpack`` (a YAML list) would raise on the
-                    # membership test where the belt owes a clean refusal.
-                    if (
-                        not isinstance(unpack_kind, str)
-                        or unpack_kind not in VALID_UNPACK
-                    ):
-                        failures.append(
-                            ResolveFailure(
-                                path,
-                                "a directory entry fetched over 'oss' must "
-                                "declare 'unpack: zip|tar.gz' — one request "
-                                "fetches one object, so the tree travels as "
-                                "an archive",
-                            )
-                        )
-                        continue
-                    strip = entry.get("strip_components", 0)
-                    if (
-                        not isinstance(strip, int)
-                        or isinstance(strip, bool)
-                        or strip < 0
-                    ):
-                        failures.append(
-                            ResolveFailure(
-                                path,
-                                "'strip_components' must be a non-negative "
-                                "integer",
-                            )
-                        )
+                    # Re-asked rather than assumed: ``protocol`` above is
+                    # ``None`` for a source this belt could not parse, and that
+                    # entry still reaches here with bytes in hand.
+                    refusal = _archive_refusal(entry)
+                    if refusal is not None:
+                        failures.append(ResolveFailure(path, refusal))
                         continue
                     members = await asyncio.to_thread(
                         self._unpack_members,
                         fetched.content,
-                        unpack_kind,
-                        strip,
+                        entry["unpack"],
+                        entry.get("strip_components", 0),
                     )
                     if isinstance(members, str):
                         failures.append(ResolveFailure(path, members))
@@ -621,6 +613,29 @@ class ResourcesMaterialiser(Materialiser):
 #: is what lets the framing change later without a stored copy being decoded
 #: under the wrong rules.
 _TREE_MAGIC = b"acm-tree-v1\n"
+
+
+def _archive_refusal(entry: dict[str, Any]) -> str | None:
+    """The archive fields a directory entry over ``oss`` must carry, or why not.
+
+    Pure, and asked twice on purpose: once before the fetch, so a doomed entry
+    costs no network, and once after, for the entry whose protocol this belt
+    could not determine up front. Two calls of one function, never two rules.
+    """
+    unpack_kind = entry.get("unpack")
+    # Str first: ``VALID_UNPACK`` is a frozenset, and an unhashable ``unpack``
+    # (a YAML list) would raise on the membership test where the belt owes a
+    # clean refusal.
+    if not isinstance(unpack_kind, str) or unpack_kind not in VALID_UNPACK:
+        return (
+            "a directory entry fetched over 'oss' must declare "
+            "'unpack: zip|tar.gz' — one request fetches one object, so the "
+            "tree travels as an archive"
+        )
+    strip = entry.get("strip_components", 0)
+    if not isinstance(strip, int) or isinstance(strip, bool) or strip < 0:
+        return "'strip_components' must be a non-negative integer"
+    return None
 
 
 def _canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
