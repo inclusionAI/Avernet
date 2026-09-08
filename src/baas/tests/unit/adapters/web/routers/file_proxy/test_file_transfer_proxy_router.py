@@ -12,7 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 
 from secbaas.community.adapters.web.routers.file_proxy import (
     file_transfer_proxy_router,
@@ -20,6 +20,7 @@ from secbaas.community.adapters.web.routers.file_proxy import (
 from secbaas.community.adapters.web.routers.file_proxy.file_transfer_proxy_router import (
     proxy_oss,
 )
+from secbaas.community.bootstrap._configs import ConfigError
 from secbaas.community.plugins.file_transfer._http_proxy import OssStreamingProxy
 from tests.unit.adapters.web.conftest import iter_api_routes
 
@@ -392,3 +393,94 @@ def test_timeout_pin_freezes_decision_b(proxy_env):
     assert env.proxy._client.timeout == httpx.Timeout(
         connect=10.0, read=600.0, write=600.0, pool=10.0
     )
+
+
+# ==========================================================================
+# WR-01/WR-03/WR-04 fixes — shutdown hook, client-abort ladder, endpoint
+# construction-time validation (fail-closed Host derivation, D-89-01)
+# ==========================================================================
+
+
+@pytest.mark.asyncio
+async def test_aclose_delegates_to_client(proxy_env):
+    """The graceful-shutdown hook closes the wrapped httpx client."""
+    env = proxy_env(ENDPOINT, BUCKET)
+    assert env.proxy is not None
+
+    closed = False
+
+    async def spy_aclose() -> None:
+        nonlocal closed
+        closed = True
+
+    env.proxy._client.aclose = spy_aclose
+
+    await env.proxy.aclose()
+
+    assert closed is True
+
+
+@pytest.mark.asyncio
+async def test_client_abort_mid_upload_maps_to_structured_499(proxy_env):
+    """A client that dies mid-PUT raises ClientDisconnect from the receive
+    channel — which must map to a structured 499, not escape to the generic
+    critical 500 handler."""
+    env = proxy_env(ENDPOINT, BUCKET)
+    put_path = b"/api/v1/file-transfer-proxy/root/f.bin"
+
+    calls = {"served": 0}
+
+    async def dangling_receive() -> dict:
+        """One http.request chunk with more_body, then the client is gone."""
+        calls["served"] += 1
+        if calls["served"] == 1:
+            return {"type": "http.request", "body": b"chunk", "more_body": True}
+        return {"type": "http.disconnect"}
+
+    scope = {
+        "type": "http",
+        "method": "PUT",
+        "path": put_path.decode(),
+        "raw_path": put_path,
+        "query_string": b"",
+        "headers": [(b"host", b"test")],
+    }
+    request = Request(scope, receive=dangling_receive)
+
+    # The relayed upload is drained synchronously inside proxy.forward():
+    # the upstream mock consumes the body stream, whose second read hits the
+    # http.disconnect message and raises starlette ClientDisconnect — the
+    # class the router's new ladder branch maps to the structured 499.
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_oss(request=request, oss_path="root/f.bin", proxy=env.proxy)
+
+    assert exc_info.value.status_code == 499
+    assert exc_info.value.detail["error_code"] == "FILE_PROXY_CLIENT_ABORT"
+    assert calls["served"] > 1  # the disconnect was actually reached
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "bucket", "expect_error"),
+    [
+        ("https://oss-cn-hangzhou.aliyuncs.com:8443", "my-bucket", True),
+        ("https://my-bucket.oss-cn-hangzhou.aliyuncs.com", "my-bucket", True),
+        ("https://oss-cn-hangzhou.aliyuncs.com:443", "my-bucket", False),
+        ("http://127.0.0.1:51234", "my-bucket", False),  # e2e fake-upstream shape
+        ("https://other-bucket.oss-cn-hangzhou.aliyuncs.com", "my-bucket", False),
+    ],
+    ids=[
+        "non-default-port",
+        "bucket-already-in-host",
+        "explicit-443",
+        "loopback-ephemeral-port",
+        "different-bucket-prefix",
+    ],
+)
+def test_endpoint_validation_at_construction(endpoint, bucket, expect_error):
+    """Endpoint shapes that would silently derive a wrong Host fail closed at
+    construction; the loopback harness shape and correct forms are accepted."""
+    if expect_error:
+        with pytest.raises(ConfigError):
+            OssStreamingProxy(endpoint=endpoint, bucket_name=bucket)
+    else:
+        OssStreamingProxy(endpoint=endpoint, bucket_name=bucket)
