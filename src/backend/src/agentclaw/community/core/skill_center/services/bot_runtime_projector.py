@@ -16,6 +16,7 @@ from agentclaw.community.core.mcp.services.cli_passport_scope import (
     build_passport_resource_scope,
 )
 from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilitySnapshot,
     BotCapabilityStateReaderProtocol,
 )
 from agentclaw.community.core.repository.protocols.bot import BotRepository
@@ -271,11 +272,16 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             raise LocalSkillNotFoundError()
         skill_plan_started_at = time.perf_counter()
         try:
+            snapshot = (
+                self._reader.active_capabilities(bot_id=bot_id, owner_id=owner_id, bot=bot)
+                if scope.mcp else None
+            )
             skill_plan = self._build_skill_plan(
                 bot=bot,
                 bot_id=bot_id,
                 owner_id=owner_id,
                 retired_mappings=retired_mappings,
+                snapshot=snapshot,
             )
         except Exception:
             self._log_plan_timing(
@@ -304,7 +310,8 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
             return skill_plan
         capability_plan_started_at = time.perf_counter()
         try:
-            capability_plan = self._build_capability_plan(skill_plan)
+            assert snapshot is not None
+            capability_plan = self._build_capability_plan(skill_plan, snapshot)
         except Exception:
             self._log_plan_timing(
                 stage="build_mcp_plan",
@@ -382,13 +389,15 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         bot_id: str,
         owner_id: str,
         retired_mappings: Sequence[PoolSkillMapping] = (),
+        snapshot: BotCapabilitySnapshot | None = None,
     ) -> ResolvedSkillPlan:
         engine = str(bot.get("active_engine") or "openclaw")
         # The reader flushes before answering, so the plan is always built
         # over Installation that agrees with Set configuration — the lazy
         # flush every read runs, not a projector-only repair.
         skill_assets = tuple(
-            self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
+            snapshot.skills if snapshot is not None
+            else self._reader.active_skill_assets(bot_id=bot_id, owner_id=owner_id, bot=bot)
         )
         # Reject before querying or writing any external MCP, Passport, or
         # runtime boundary. What an engine's runtime cannot carry is the
@@ -406,7 +415,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         )
 
     def _build_capability_plan(
-        self, skill_plan: ResolvedSkillPlan
+        self, skill_plan: ResolvedSkillPlan, snapshot: BotCapabilitySnapshot
     ) -> ResolvedCapabilityPlan:
         bot = skill_plan.bot
         bot_id = skill_plan.bot_id
@@ -415,8 +424,27 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # Resolved here, with the other pre-flight checks, because it can fail:
         # doing it at the Passport call would abort after the device allow-list
         # was already written, and compensation would hit the same failure.
-        identity_modes = self._resolve_mcp_identity_modes(
-            bot=bot, bot_id=bot_id, engine=engine
+        started_at = time.perf_counter()
+        try:
+            identity_modes = self._resolve_mcp_identity_modes(
+                bot=bot, bot_id=bot_id, engine=engine
+            )
+        except Exception:
+            self._log_plan_timing(
+                stage="resolve_mcp_identity_modes",
+                bot_id=bot_id,
+                engine=engine,
+                started_at=started_at,
+                outcome="error",
+            )
+            raise
+        self._log_plan_timing(
+            stage="resolve_mcp_identity_modes",
+            bot_id=bot_id,
+            engine=engine,
+            started_at=started_at,
+            outcome="success",
+            mcp_count=len(identity_modes),
         )
         service = self._factory.create(
             user_id=owner_id,
@@ -429,6 +457,7 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
         # System Defaults during Phase 1. It resolves template presets and
         # applies ac_default_skillset_mcp_exclusion.
         try:
+            started_at = time.perf_counter()
             effective_mcp_entries = service.collect_bot_active_mcps(
                 entity_id=str(bot.get("entity_id") or owner_id),
                 bot_id=bot_id,
@@ -436,34 +465,68 @@ class BotRuntimeProjector(BotRuntimeProjectorProtocol):
                 entity_type=bot.get("entity_type") or "staff",
                 engine_type=engine,
                 strict_policy_context=True,
+                capability_snapshot=snapshot,
             )
         except Exception as exc:
+            self._log_plan_timing(
+                stage="collect_effective_mcps", bot_id=bot_id, engine=engine,
+                started_at=started_at, outcome="error",
+            )
             raise SkillSetRuntimeReconcileError() from exc
+        self._log_plan_timing(
+            stage="collect_effective_mcps", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", mcp_count=len(effective_mcp_entries),
+        )
         effective_default_mcp_codes = frozenset(
             str(item.get("server_code") or item.get("serverCode") or "").strip()
             for item in effective_mcp_entries
             if item.get("server_code") or item.get("serverCode")
         )
         try:
+            started_at = time.perf_counter()
             # Passport is the authority for the effective Default CLI scope.
             effective_cli_items = self._passport.query_passport_clis(bot_id, owner_id)
         except Exception as exc:
-            raise SkillSetRuntimeReconcileError() from exc
-        projection = RuntimeProjectionResolver().resolve(
-            RuntimeDesiredState(
-                skills=skill_plan.projection.skill_assets,
-                installed_mcp_server_codes=frozenset(
-                    self._repository.list_installed_mcps(
-                        bot_id=bot_id, owner_id=owner_id
-                    )
-                ),
-                system_default_mcp_server_codes=effective_default_mcp_codes,
-                system_default_cli_commands=tuple(
-                    str(item["cli_code"])
-                    for item in effective_cli_items
-                    if item.get("cli_code")
-                ),
+            self._log_plan_timing(
+                stage="query_passport_clis", bot_id=bot_id, engine=engine,
+                started_at=started_at, outcome="error",
             )
+            raise SkillSetRuntimeReconcileError() from exc
+        self._log_plan_timing(
+            stage="query_passport_clis", bot_id=bot_id, engine=engine,
+            started_at=started_at, outcome="success", cli_count=len(effective_cli_items),
+        )
+        installed_mcp_codes = snapshot.installed_mcp_server_codes
+        started_at = time.perf_counter()
+        try:
+            projection = RuntimeProjectionResolver().resolve(
+                RuntimeDesiredState(
+                    skills=skill_plan.projection.skill_assets,
+                    installed_mcp_server_codes=installed_mcp_codes,
+                    system_default_mcp_server_codes=effective_default_mcp_codes,
+                    system_default_cli_commands=tuple(
+                        str(item["cli_code"])
+                        for item in effective_cli_items
+                        if item.get("cli_code")
+                    ),
+                )
+            )
+        except Exception:
+            self._log_plan_timing(
+                stage="resolve_effective_capabilities",
+                bot_id=bot_id,
+                engine=engine,
+                started_at=started_at,
+                outcome="error",
+            )
+            raise
+        self._log_plan_timing(
+            stage="resolve_effective_capabilities",
+            bot_id=bot_id,
+            engine=engine,
+            started_at=started_at,
+            outcome="success",
+            mcp_count=len(projection.mcp_server_codes),
         )
 
         return ResolvedCapabilityPlan(

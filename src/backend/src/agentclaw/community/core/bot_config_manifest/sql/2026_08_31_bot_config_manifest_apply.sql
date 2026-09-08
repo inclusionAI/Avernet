@@ -47,23 +47,34 @@
 --     it prevents surfaces as duplicate rows, silently, never as an error.
 --     SQLAlchemy cannot render the modifier, so this file is the only place it
 --     can live.
---   * ``TIMESTAMP`` FOR THE DB-CLOCK COLUMNS, ``DATETIME`` FOR THE REST, and
---     which one a column gets is decided by who fills it, not by taste.
+--   * ``TIMESTAMP`` FOR EVERY TIME COLUMN, because the DDL review standard
+--     (研发规范) that gates provisioning refuses DATETIME outright -- along
+--     with BIT, FLOAT, DOUBLE, ENUM and SET -- and refuses any column whose
+--     name is a SQL keyword. The first draft of this table declared
+--     started_at/finished_at as DATETIME and a column named `trigger`, and
+--     was rejected on exactly those three findings; that is why the record
+--     table never existed in production while the lock table did.
+--
 --     gmt_create and gmt_modified are written by the database itself
 --     (``DEFAULT CURRENT_TIMESTAMP``, and ``func.now()`` from the ORM), so
 --     TIMESTAMP's session-time-zone conversion is a no-op round trip and they
---     match ac_bots and every table added since --
---     skill_center/sql/2026_09_03_align_space_skill_timestamps_with_gmt.sql is
---     the repair that convention exists to avoid repeating.
+--     match ac_bots and every table added since.
 --
---     A column the APPLICATION fills stays DATETIME. TIMESTAMP reads the naive
---     value being bound as session-local wall time and converts it to UTC for
---     storage, so a Python-supplied instant is stored shifted by the session
---     offset -- eight hours under the Asia/Shanghai session assumed here. This
---     was got wrong in the first draft of this change and caught in review; started_at and
---     finished_at are the columns in question here, per their comment below.
+--     started_at and finished_at are filled by the APPLICATION from
+--     datetime.now() (naive). TIMESTAMP binds that as session-local wall time,
+--     stores UTC, and converts back on read through the same session -- so the
+--     value the application wrote is the value it reads back, exactly as with
+--     DATETIME. The one difference is what an out-of-band reader sees when the
+--     process time zone and the session time zone differ (a UTC container
+--     against an Asia/Shanghai session): the stored instant is offset by that
+--     difference. That mismatch existed under DATETIME too, as a wall-clock
+--     disagreement with gmt_create; TIMESTAMP merely makes it visible.
 --
---     The ORM keeps ``DateTime`` for both kinds -- ac_skill_version's
+--     Every TIMESTAMP column carries an explicit DEFAULT (or an explicit NULL)
+--     so the server can never attach an implicit ON UPDATE CURRENT_TIMESTAMP;
+--     test_manifest_ddl_contract.py holds that line.
+--
+--     The ORM keeps ``DateTime`` for all of them -- ac_skill_version's
 --     published_at is the precedent for ``DateTime`` over a TIMESTAMP column.
 --   * NO ``ENGINE`` CLAUSE, and no BLOCK_SIZE / REPLICA_NUM / COMPRESSION /
 --     TABLET_SIZE / PCTFREE / ROW_FORMAT. OceanBase applies its own defaults
@@ -94,7 +105,11 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   -- 'explicit' is the only value this wave writes: W4's single entry point is
   -- the explicit POST. W8 adds 'republish'/'restart' and W13 adds 'create',
   -- neither of which needs a migration.
-  `trigger`        varchar(32)   NOT NULL COMMENT 'What started it: explicit/create/republish/restart',
+  --
+  -- apply_trigger, not `trigger`: TRIGGER is a SQL keyword and the DDL review
+  -- standard refuses keyword column names (see the header). The ORM attribute
+  -- and the API field are still ``trigger``; only the column is prefixed.
+  `apply_trigger`  varchar(32)   NOT NULL COMMENT 'What started it: explicit/create/republish/restart',
   -- RUNNING on insert, terminal on completion — the two-write lifecycle apply's
   -- async shape requires, since the route answers 202 and the work continues on
   -- a background thread.
@@ -111,16 +126,15 @@ CREATE TABLE `ac_bot_config_manifest_apply` (
   -- ("app:7:on-behalf-of:<...>"), so the composed value can legitimately be
   -- long without anything being malformed.
   `actor`          varchar(1024) NOT NULL COMMENT 'Audit: who started it',
-  -- DATETIME, not TIMESTAMP, for both of these: they are filled by the
-  -- application from datetime.now() (process-local, naive), never by the
-  -- database. TIMESTAMP binds a naive value as session-local, so these would
-  -- be stored correctly only where the process time zone happens to equal the
-  -- database session's -- and a container on UTC against an Asia/Shanghai
-  -- session is exactly where that stops being true. gmt_* below are a
-  -- different case: the database fills those itself.
-  `started_at`     datetime      NOT NULL COMMENT 'When the apply began',
+  -- TIMESTAMP because the DDL review standard refuses DATETIME (header note).
+  -- Both are filled by the application from datetime.now(); the round trip
+  -- through one session is the identity, so the application reads back what
+  -- it wrote. The explicit DEFAULT on started_at is what stops the server
+  -- attaching an implicit ON UPDATE CURRENT_TIMESTAMP to it -- the application
+  -- always supplies a value, so the default itself is never used.
+  `started_at`     timestamp     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the apply began',
   -- NULL exactly while status is RUNNING. The two move together.
-  `finished_at`    datetime      NULL     COMMENT 'When it ended; NULL while RUNNING',
+  `finished_at`    timestamp     NULL     DEFAULT NULL COMMENT 'When it ended; NULL while RUNNING',
   `avernet_tenant` varchar(64)   NOT NULL DEFAULT 'teamclaw' COMMENT 'Tenant, for data isolation',
   `gmt_create`     timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Row created',
   `gmt_modified`   timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Row last modified',

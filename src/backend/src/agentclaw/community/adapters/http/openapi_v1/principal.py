@@ -277,6 +277,21 @@ async def require_user_id(
 UserIdDep = Annotated[str, Depends(require_user_id)]
 
 
+async def require_owner_name(
+    user_id: UserIdDep,
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> str:
+    """Use the verified owner's display name, retaining the ID fallback."""
+    user = getattr(principal, "user", None)
+    # COSEC: delegated callers must not lend their identity to another owner.
+    if user is not None and user.id == user_id and user.display_name:
+        return user.display_name.strip() or user_id
+    return user_id
+
+
+OwnerNameDep = Annotated[str, Depends(require_owner_name)]
+
+
 async def require_acting_caller(
     request: Request,
     principal: Annotated[Principal, Depends(require_principal)],
