@@ -283,13 +283,35 @@ class TestDeployTenantOverlay:
         assert config.app_name == "base"
         assert config.workers == 4
 
-    @pytest.mark.parametrize("tenant_value", ["../../evil", "ali^yun"])
-    def test_tenant_value_charset_guard(self, monkeypatch, tmp_path, tenant_value):
+    @pytest.mark.parametrize(
+        ("tenant_value", "bait_files"),
+        [
+            # Charset violation: a valid Linux filename the guard must reject.
+            ("ali^yun", {"application-ali^yun.yaml": "workers: 99\n"}),
+            # Path traversal: an unguarded join resolves
+            # configs/application-../../evil.yaml to configs/evil.yaml, so
+            # plant the literal "application-.." directory plus the evil.yaml
+            # bait — a guard-deleted loader would merge workers: 99.
+            ("../../evil", {"application-..": None, "evil.yaml": "workers: 99\n"}),
+        ],
+    )
+    def test_tenant_value_charset_guard(
+        self, monkeypatch, tmp_path, tenant_value, bait_files
+    ):
         config_dir = tmp_path / "configs"
         config_dir.mkdir()
         (config_dir / "application.yaml").write_text(
             "app_name: base\nworkers: 1\nuser_config: {}\n"
         )
+        # Plant the exact files an UNGUARDED loader needs to load this tenant
+        # overlay: without the charset guard the bait merges and flips workers
+        # to 99, so these assertions pin the guard — not just "no crash".
+        for rel_path, content in bait_files.items():
+            target = config_dir / rel_path
+            if content is None:
+                target.mkdir()
+            else:
+                target.write_text(content)
         monkeypatch.delenv("SOFAPY_CONFIG_OVERLAY", raising=False)
         monkeypatch.setenv("SOFAPY_CONFIG_PATH", str(config_dir))
         monkeypatch.delenv("SERVER_ENV", raising=False)
@@ -297,7 +319,8 @@ class TestDeployTenantOverlay:
         monkeypatch.setenv("BAAS_DEPLOY_TENANT", tenant_value)
         from secbaas.community.config import ConfigLoader
 
-        # No filesystem escape, no error — the invalid tenant is skipped.
+        # The invalid tenant is rejected no matter what bait is planted:
+        # no filesystem escape, no overlay load — base values survive.
         config = ConfigLoader.load()
         assert config.app_name == "base"
         assert config.workers == 1
