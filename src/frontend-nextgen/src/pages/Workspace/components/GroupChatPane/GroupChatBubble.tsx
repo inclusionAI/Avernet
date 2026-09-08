@@ -17,8 +17,10 @@ export interface GroupChatBubbleProps {
   sessionId?: string;
   /** 顶栏当前登录用户头像；用户消息优先复用此头像。 */
   userAvatarUrl?: string;
-  /** 当前登录用户身份 ID，用于区分其他 human 成员。 */
+  /** 当前认证 human 身份 ID，用于区分其他 human 成员。 */
   userIdentityId?: string | null;
+  /** 当前认证 human 名称；仅在 userIdentityId 匹配消息 sender 时使用。 */
+  userIdentityName?: string | null;
   onCopy?: (text: string) => void | boolean | Promise<void | boolean>;
   onEdit?: () => void;
   isEditable?: boolean;
@@ -34,6 +36,7 @@ export function GroupChatBubble({
   sessionId,
   userAvatarUrl,
   userIdentityId,
+  userIdentityName,
   onCopy,
   onEdit,
   isEditable,
@@ -42,7 +45,7 @@ export function GroupChatBubble({
   if (message.role === 'system') {
     return <SystemMessageItem message={message} />;
   }
-  const sender = resolveSender(message, group, participants, userAvatarUrl, userIdentityId);
+  const sender = resolveSender(message, group, participants, userAvatarUrl, userIdentityId, userIdentityName);
   const messageText = getMessageText(message);
   const messageActionsProps = {
     onCopy: () => onCopy?.(messageText),

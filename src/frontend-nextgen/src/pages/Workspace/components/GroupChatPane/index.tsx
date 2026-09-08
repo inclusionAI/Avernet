@@ -2,10 +2,9 @@ import { Button, Empty, Skeleton } from '@/components/ui';
 import { useTaskExecuteFromCard } from '@/hooks/useTaskExecuteFromCard';
 import { useTaskExecution } from '@/hooks/useTaskExecution';
 import { useCollabPanel } from '@/pages/Workspace/hooks/useCollabPanel';
+import { useGroupTaskComposerContext } from '@/pages/Workspace/hooks/useGroupTaskComposerContext';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
 import { buildExplainPrompt, useMessageInteractions } from '@/pages/Workspace/hooks/useMessageInteractions';
-import type { TaskComposerContext } from '@/services/tasks/taskMapper';
-import { resolveUserId } from '@/services/workspace/botSessionService';
 import type { SessionMessageAttachment } from '@/services/workspace/groupChatAttachmentService';
 import type { PanelAction } from '@tc-chat/core';
 import type { MentionConfig } from '@tc-chat/ui';
@@ -53,6 +52,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     chatBridge,
     userAvatarUrl,
     userIdentityId,
+    userIdentityName,
   } = props;
 
   const navigate = useNavigate();
@@ -62,6 +62,8 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     session,
     activeIdentity ?? null,
     updateMemberMode ?? (() => Promise.resolve(false)),
+    userIdentityId,
+    userIdentityName,
   );
 
   const messages = (chat.messages ?? []).filter(
@@ -85,20 +87,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
     [activeIdentity?.id, activeIdentity?.kind, session?.participants],
   );
 
-  const taskComposerContext = useMemo<TaskComposerContext | null>(() => {
-    if (!group || !session || activeIdentity?.kind !== 'user') return null;
-    const ownerBot = group.participants.find((p) => p.kind === 'bot');
-    if (!ownerBot || !activeIdentity?.id) return null;
-    return {
-      sourceType: 'coop_group',
-      ownerUserId: resolveUserId(activeIdentity.id),
-      ownerBotId: ownerBot.actorId,
-      mainSessionId: session.sessionId,
-      mainSessionName: session.title,
-      sourceGroupId: group.groupId,
-      parentTaskId: null,
-    };
-  }, [group, session, activeIdentity]);
+  const taskComposerContext = useGroupTaskComposerContext(group, session, activeIdentity);
 
   const taskExecution = useTaskExecution({ panelRef, context: taskComposerContext, submitPanelMessage });
   useTaskExecuteFromCard({
@@ -133,14 +122,28 @@ export function GroupChatPane(props: GroupChatPaneProps) {
   const quoteSelectedMessage = (text: string) => {
     const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
     if (!selectedMessage) return;
-    const sender = resolveSender(selectedMessage, group, session?.participants, userAvatarUrl, userIdentityId);
+    const sender = resolveSender(
+      selectedMessage,
+      group,
+      session?.participants,
+      userAvatarUrl,
+      userIdentityId,
+      userIdentityName,
+    );
     messageInteractions.quoteMessage(selectedMessage.id, sender?.name ?? '未命名成员', text);
   };
 
   const explainSelectedMessage = (text: string) => {
     const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
     if (!selectedMessage) return;
-    const sender = resolveSender(selectedMessage, group, session?.participants, userAvatarUrl, userIdentityId);
+    const sender = resolveSender(
+      selectedMessage,
+      group,
+      session?.participants,
+      userAvatarUrl,
+      userIdentityId,
+      userIdentityName,
+    );
     setDraft(buildExplainPrompt(sender?.name ?? '未命名成员', text));
     messageInteractions.clearQuote();
     messageInteractions.setSelection(null);
@@ -237,6 +240,7 @@ export function GroupChatPane(props: GroupChatPaneProps) {
                 interactions={messageInteractions}
                 userAvatarUrl={userAvatarUrl}
                 userIdentityId={userIdentityId}
+                userIdentityName={userIdentityName}
                 onQuoteSelected={quoteSelectedMessage}
                 onExplainSelected={explainSelectedMessage}
                 onEditMessage={editMessage}

@@ -1,6 +1,6 @@
 /** @jest-environment node */
-import { ensureUserId, ensureUserName, readUserId, readUserName } from '@/services/admin/userIdentity';
 import { getCapabilities } from '@/capabilities';
+import { ensureUserId, ensureUserName, readUserId, readUserName } from '@/services/admin/userIdentity';
 import { identityService } from '@/services/workspace/identityService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';

@@ -2,6 +2,9 @@
 /**
  * 设计 token —— 反解自 TeamClaw-v3 PRD demo（bundle.js 还原的 12 个色常量）。
  * src/assets 守卫：禁止 antd / 禁止反向 import 业务层；样式只用 styled-components + 这些 token。
+ *
+ * 例外：primary / primaryBg（及 TASK_STATUS_TONES.DEFINED）不再取 PRD demo 的 Arco blue-6，
+ * 已重新锚定平台品牌色 #2563EB，避免副屏与主站出现两种蓝。其余 10 色仍按 demo 原值。
  */
 
 /** 12 色常量 */
@@ -14,8 +17,8 @@ export const C = {
   surface: '#FFFFFF',
   surfaceRaised: '#FBFCFE',
   surfaceAlt: '#F5F7FA',
-  primary: '#165DFF',
-  primaryBg: '#E8F0FF',
+  primary: '#2563EB',
+  primaryBg: '#EAF0FD',
   success: '#00B42A',
   warning: '#FF7D00',
   danger: '#F53F3F',
@@ -30,7 +33,7 @@ export interface StatusTone {
 }
 export const TASK_STATUS_TONES: Record<string, StatusTone> = {
   DRAFTING: { color: '#86909C', bg: '#F2F3F5', label: '定义中' },
-  DEFINED: { color: '#165DFF', bg: '#E8F3FF', label: '待执行' },
+  DEFINED: { color: '#2563EB', bg: '#EAF3FD', label: '待执行' },
   EXECUTING: { color: '#FF7D00', bg: '#FFF7E8', label: '执行中' },
   REVIEWING: { color: '#722ED1', bg: '#F5E8FF', label: '待验收' },
   DONE: { color: '#00B42A', bg: '#E8FFEA', label: '已完成' },

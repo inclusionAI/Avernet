@@ -356,6 +356,11 @@ export interface AppCapabilities {
    */
   getRestrictedPublicationScopeEnabled: () => CapabilityResult<boolean>;
   /**
+   * 好友审批编辑器是否提供“部分组织免审批”。Open Core 默认关闭；internal overlay 保持开启。
+   * 同步签名，组件不得按部署环境自行判断。
+   */
+  getPartialFriendApprovalEnabled: () => CapabilityResult<boolean>;
+  /**
    * 壳层入口可见性（管理后台导航 / 空间切换器 / 通知中心，见 `ShellVisibility`）。
    * Open Core（阿里云部署）默认 `adminEntry=true`、`notificationBell=true`、`spaceSwitcher=false`
    * （defaultCapabilities：展示管理后台与通知中心，不展示侧栏空间切换器）；

@@ -25,6 +25,7 @@ export function GroupWorkspaceArea({
   availableViews,
   userAvatarUrl,
   userIdentityId,
+  userIdentityName,
   mobileListOpen,
   onCloseMobileList,
 }: {
@@ -33,6 +34,7 @@ export function GroupWorkspaceArea({
   availableViews: WorkspaceView[];
   userAvatarUrl?: string;
   userIdentityId?: string | null;
+  userIdentityName?: string | null;
   /** <lg 二级协作群列表抽屉开关（由 Workspace 持有，聊天/协作群视图共用同一开关）。 */
   mobileListOpen: boolean;
   onCloseMobileList: () => void;
@@ -229,6 +231,7 @@ export function GroupWorkspaceArea({
         inputRef={chat.inputRef}
         userAvatarUrl={userAvatarUrl}
         userIdentityId={userIdentityId}
+        userIdentityName={userIdentityName}
       />
       {selectedGroup ? (
         <GroupMembersPanelSlot
@@ -247,6 +250,8 @@ export function GroupWorkspaceArea({
         canManage={canManage}
         identities={ws.identities}
         activeIdentity={ws.activeIdentity}
+        authenticatedUserId={userIdentityId}
+        authenticatedUserName={userIdentityName}
         onClose={() => setActivePanel('none')}
         onUpdateGroup={groupManage.updateGroup}
         onDissolveGroup={handleDissolve}
@@ -270,12 +275,18 @@ export function GroupWorkspaceArea({
         <SessionFilesModal
           sessionId={sessions.selectedSession.sessionId}
           sessionName={sessions.selectedSession.title}
+          participants={sessions.selectedSession.participants}
+          authenticatedUser={
+            userIdentityId ? { userId: userIdentityId, name: userIdentityName } : null
+          }
           onClose={() => setActivePanel('none')}
         />
       )}
       <CreateGroupModal
         open={createGroupDialog.open}
         activeIdentity={ws.activeIdentity}
+        authenticatedUserId={userIdentityId}
+        authenticatedUserName={userIdentityName}
         onClose={createGroupDialog.closeModal}
         onCreated={createGroupDialog.handleCreated}
       />

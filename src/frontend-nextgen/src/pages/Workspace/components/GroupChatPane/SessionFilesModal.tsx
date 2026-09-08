@@ -11,6 +11,8 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
+import type { ParticipantView } from '@/domain/collaboration';
+import type { AuthenticatedUserName } from '@/domain/userIdentity';
 import { useSessionFilePreview } from '@/pages/Workspace/hooks/useSessionFilePreview';
 import { useSessionFileUpload } from '@/pages/Workspace/hooks/useSessionFileUpload';
 import { useSessionFiles } from '@/pages/Workspace/hooks/useSessionFiles';
@@ -28,6 +30,8 @@ export interface SessionFilesModalProps {
   sessionId: string;
   sessionName: string;
   onClose: () => void;
+  participants?: ParticipantView[];
+  authenticatedUser?: AuthenticatedUserName | null;
 }
 
 async function copyText(text: string): Promise<void> {
@@ -43,8 +47,14 @@ async function copyText(text: string): Promise<void> {
   }
 }
 
-export function SessionFilesModal({ sessionId, sessionName, onClose }: SessionFilesModalProps) {
-  const filesState = useSessionFiles(sessionId);
+export function SessionFilesModal({
+  sessionId,
+  sessionName,
+  onClose,
+  participants,
+  authenticatedUser,
+}: SessionFilesModalProps) {
+  const filesState = useSessionFiles(sessionId, participants, authenticatedUser);
   const upload = useSessionFileUpload(sessionId, filesState.prependFile);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);

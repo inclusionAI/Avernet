@@ -22,7 +22,7 @@ function AvatarIcon({ spinning }: { spinning?: boolean }) {
   return (
     <span
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white"
-      style={{ background: 'linear-gradient(135deg, rgb(22,93,255), rgb(64,150,255))' }}
+      style={{ background: 'linear-gradient(135deg, rgb(37,99,235), rgb(59,130,246))' }}
     >
       {spinning ? (
         <Loader2 className={cn('h-4 w-4 animate-spin')} aria-hidden />

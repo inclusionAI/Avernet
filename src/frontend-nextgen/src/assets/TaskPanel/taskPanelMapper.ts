@@ -25,7 +25,7 @@ import type {
 function executorColor(runMode?: string | null): string | null {
   switch (runMode) {
     case 'single_bot':
-      return '#165DFF';
+      return '#2563EB';
     case 'coop_group':
       return '#722ED1';
     case 'bbs':

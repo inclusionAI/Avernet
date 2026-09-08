@@ -69,6 +69,8 @@ describe('collaboration privacy accessible UI', () => {
     expect(hookSource).toContain('notifySuccess');
     expect(hookSource).toContain('公开范围已关闭，当前已立即生效');
     expect(hookSource).toContain('审批申请已提交，当前公开范围保持不变');
+    expect(hookSource).toContain('好友审批策略已更新为“无需审批”');
+    expect(hookSource).toContain('好友审批策略已更新为“全部审批”');
     expect(hookSource).toContain("config.scope === 'none'");
     expect(hookSource).not.toContain('setFeedback');
     expect(hookSource).not.toContain('Mock 审批');

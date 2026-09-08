@@ -128,6 +128,10 @@ describe('Open Core default capabilities', () => {
     expect(defaultCapabilities.getRestrictedPublicationScopeEnabled()).toEqual({ status: 'available', value: false });
   });
 
+  test('getPartialFriendApprovalEnabled 默认 false（Open Core 隐藏部分组织免审批）', () => {
+    expect(defaultCapabilities.getPartialFriendApprovalEnabled()).toEqual({ status: 'available', value: false });
+  });
+
   test('getShellVisibility 默认 adminEntry/notificationBell=true、spaceSwitcher=false（Open Core 展示管理后台与通知中心，不展示空间切换器）', () => {
     const r = defaultCapabilities.getShellVisibility();
     expect(r.status).toBe('available');

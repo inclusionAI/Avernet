@@ -104,19 +104,19 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       }
       return;
     }
-    // 协作群会话（协作广场跳转 / 邀请链接）：identities 就绪后执行一次，后续身份切换
-    // 不应再触发——否则用户手动切到 bot 角色后，URL 残留的 session= 会导致反复切回
-    // 用户身份（isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
+    // 协作群会话（协作广场跳转 / 邀请链接 / 任务节点「新开页面查看会话」）：首次满足条件时执行一次，
+    // 后续身份切换不应再触发——否则用户手动切到 bot 角色后，URL 残留的 session= 会反复切回用户身份
+    // （isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
     const initialGroupUrl = initialGroupUrlRef.current;
     if (isFirstUrlSyncRef.current && initialGroupUrl.session && !initialGroupUrl.bot) {
-      const store = useWorkspaceStore.getState();
-      // identities 由 initWorkspace 异步填充：就绪前不消耗一次性标记，
-      // 否则冷启动外链的身份切换被永久跳过（以持久化的 bot 身份落在外链会话上）。
-      // 本 effect 依赖 identities，加载完成后会自动重试。
-      if (store.identities.length === 0) return;
+      const me = useWorkspaceStore.getState().identities.find((i) => i.kind === 'user');
+      // 全新挂载(target=_blank 新开页面)时身份尚未加载:此刻不能消费首次同步,否则 initWorkspace
+      // 回填的持久化身份(可能是上次用的 Bot)会落定,再也不会切回人类身份 → 以 Bot 身份拉取目标群
+      // 多半不可见 → 协作群会话打不开。等 identities 就绪后(本 effect deps 含 identities)再消费。
+      if (!me) return;
       isFirstUrlSyncRef.current = false;
-      const me = store.identities.find((i) => i.kind === 'user');
-      if (me && store.activeIdentityId !== me.id) store.setActiveIdentityId(me.id);
+      const store = useWorkspaceStore.getState();
+      if (store.activeIdentityId !== me.id) store.setActiveIdentityId(me.id);
       const fresh = useWorkspaceStore.getState();
       fresh.setView('group');
       if (initialGroupUrl.membership === 'session_only' || initialGroupUrl.membership === 'direct') {

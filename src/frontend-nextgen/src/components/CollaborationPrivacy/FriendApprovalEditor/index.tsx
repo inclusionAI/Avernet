@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Button } from '@/components/ui/Button';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { friendApprovalConfigsEqual } from '@/domain/collaborationPrivacy/policies';
@@ -26,6 +27,10 @@ interface FriendApprovalEditorProps {
   onSubmit: (config: FriendApprovalConfig) => void;
 }
 
+function getEditableMode(mode: FriendApprovalMode, partialExemptEnabled: boolean): FriendApprovalMode | null {
+  return !partialExemptEnabled && mode === 'partial_exempt' ? null : mode;
+}
+
 export function FriendApprovalEditor({
   open,
   initialConfig,
@@ -34,38 +39,65 @@ export function FriendApprovalEditor({
   onClose,
   onSubmit,
 }: FriendApprovalEditorProps) {
-  const [mode, setMode] = useState(initialConfig.mode);
+  const partialExemptEnabled = getCapabilities().getPartialFriendApprovalEnabled().value;
+  const [mode, setMode] = useState<FriendApprovalMode | null>(() =>
+    getEditableMode(initialConfig.mode, partialExemptEnabled),
+  );
   const [selected, setSelected] = useState<OrganizationPath[]>(initialConfig.exemptOrganizationPaths);
   const [selectedEntries, setSelectedEntries] = useState<OrganizationSearchEntry[]>(
     initialConfig.exemptOrganizationEntries ?? [],
   );
+
   useEffect(() => {
     if (open) {
-      setMode(initialConfig.mode);
+      setMode(getEditableMode(initialConfig.mode, partialExemptEnabled));
       setSelected(initialConfig.exemptOrganizationPaths);
       setSelectedEntries(initialConfig.exemptOrganizationEntries ?? []);
     }
-  }, [open, initialConfig]);
+  }, [open, initialConfig, partialExemptEnabled]);
+
+  const availableModes = partialExemptEnabled
+    ? modes
+    : modes.filter((option) => option.value !== 'partial_exempt');
   const selectedKeys = new Set(selected.map((path) => path.join('\u0000')));
   const activeEntries = selectedEntries.filter((entry) => selectedKeys.has(entry.path.join('\u0000')));
   const exemptDepartmentNos =
     mode === 'partial_exempt' ? [...new Set(activeEntries.map((entry) => entry.deptNo).filter(Boolean))] : [];
-  const invalid = mode === 'partial_exempt' && selected.length === 0 && exemptDepartmentNos.length === 0;
-  const unchanged = friendApprovalConfigsEqual(initialConfig, {
-    mode,
-    exemptOrganizationPaths: selected,
-    exemptDepartmentNos,
-  });
+  const nextConfig: FriendApprovalConfig | null = mode
+    ? {
+        mode,
+        exemptOrganizationPaths: mode === 'partial_exempt' ? selected : [],
+        exemptDepartmentNos,
+        exemptOrganizationEntries: mode === 'partial_exempt' ? activeEntries : [],
+      }
+    : null;
+  const invalid =
+    nextConfig === null ||
+    (nextConfig.mode === 'partial_exempt' &&
+      nextConfig.exemptOrganizationPaths.length === 0 &&
+      (nextConfig.exemptDepartmentNos ?? []).length === 0);
+  const unchanged = nextConfig !== null && friendApprovalConfigsEqual(initialConfig, nextConfig);
+
   return (
     <Modal open={open} onOpenChange={(next) => !next && !loading && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
-          <ModalTitle>好友申请审批策略</ModalTitle>
+          <ModalTitle>变更好友审批策略</ModalTitle>
           <ModalDescription>该设置只影响新的好友申请，不改变已有好友关系。</ModalDescription>
         </ModalHeader>
         <div className="space-y-5">
-          <ChoiceGroup value={mode} options={modes} ariaLabel="好友审批策略" onChange={setMode} />
-          {mode === 'partial_exempt' && (
+          <ChoiceGroup
+            value={mode ?? ('' as FriendApprovalMode)}
+            options={availableModes}
+            ariaLabel="好友审批策略"
+            onChange={setMode}
+          />
+          {!partialExemptEnabled && initialConfig.mode === 'partial_exempt' && mode === null && (
+            <p className="text-xs text-warning">
+              当前策略“部分组织免审批”已下线，请重新选择“无需审批”或“全部审批”。
+            </p>
+          )}
+          {partialExemptEnabled && mode === 'partial_exempt' && (
             <section aria-labelledby="friend-exempt-organizations">
               <h3 id="friend-exempt-organizations" className="mb-2 text-sm font-medium text-foreground">
                 免审批组织范围
@@ -89,14 +121,7 @@ export function FriendApprovalEditor({
           <Button
             loading={loading}
             disabled={invalid || unchanged}
-            onClick={() =>
-              onSubmit({
-                mode,
-                exemptOrganizationPaths: selected,
-                exemptDepartmentNos,
-                exemptOrganizationEntries: activeEntries,
-              })
-            }
+            onClick={() => nextConfig && onSubmit(nextConfig)}
           >
             保存策略
           </Button>

@@ -1,12 +1,12 @@
-import { normalizeOpenApiUserId } from '@/domain/userIdentity';
+import { normalizeHumanUserId } from '@/domain/userIdentity';
 import type { ChatMessage } from '@tc-chat/core';
 
 /**
- * 仅用于消息区展示的发送者标识归一化：human_123 与 user_id=123 视为同一位用户。
- * 不修改消息 DTO 或领域模型。
+ * 仅用于人类消息发送者展示的标识归一化：human_123 与 user_id=123 视为同一位用户。
+ * Bot 复合 ID 不参与 human 匹配，不修改消息 DTO 或领域模型。
  */
 export function normalizeMessageHumanId(value?: string | null): string {
-  return normalizeOpenApiUserId(value).trim();
+  return normalizeHumanUserId(value, 'human');
 }
 
 /** 生成消息区分组键，供间距计算使用，不参与后端请求或持久化。 */

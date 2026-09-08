@@ -1,15 +1,14 @@
 import { getCapabilities } from '@/capabilities';
 import { BotAccessModal } from '@/components/BotWorkshop/BotAccessModal';
-import BotCard from '@/components/BotWorkshop/BotCard';
+import BotTable from '@/components/BotWorkshop/BotCard';
+import BotTableSkeleton from '@/components/BotWorkshop/BotCard/BotTableSkeleton';
 import BotWorkshopToolbar from '@/components/BotWorkshop/BotWorkshopToolbar';
 import CreateBotModal from '@/components/BotWorkshop/CreateBotModal';
 import { ServicePublicationDrawer } from '@/components/BotWorkshop/ServicePublicationDrawer';
 import { PageHeader } from '@/components/Common/PageHeader';
 import { Button } from '@/components/ui/Button';
-import { Card } from '@/components/ui/Card';
 import { Empty } from '@/components/ui/Empty';
 import { Pagination } from '@/components/ui/Pagination';
-import { Skeleton } from '@/components/ui/Skeleton';
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import type { BotDomain } from '@/services/botWorkshop';
 import React, { useState } from 'react';
@@ -43,13 +42,7 @@ const BotWorkshopPage: React.FC = () => {
           />
         </div>
         {workshop.loading ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {[1, 2, 3, 4, 5, 6].map((item) => (
-              <Card key={item}>
-                <Skeleton.Card />
-              </Card>
-            ))}
-          </div>
+          <BotTableSkeleton />
         ) : workshop.error ? (
           <Empty
             title="Bot 列表加载失败"
@@ -72,31 +65,30 @@ const BotWorkshopPage: React.FC = () => {
           />
         ) : (
           <>
-            <div data-testid="bot-workshop-grid" className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {workshop.items.map((bot) => (
-                <BotCard
-                  key={bot.cardId ?? bot.entityKey}
-                  bot={bot}
-                  onView={() => workshop.openDetail(bot)}
-                  onConversation={workshop.openConversation}
-                  onHealthCheck={workshop.openHealthCheck}
-                  healthCheckAvailability={workshop.getHealthCheckAvailability(bot)}
-                  onEdit={() => workshop.openDetail(bot, 'edit')}
-                  onAction={workshop.runAction}
-                  onClaimLock={workshop.claimLock}
-                  logAction={showBotLogs ? workshop.logActionFor(bot) : undefined}
-                  onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
-                  onChangeSpace={workshop.canChangeSpace(bot) ? workshop.openSpaceChange : undefined}
-                  onAuthorize={workshop.collaborationModeFor(bot) ? workshop.openAuthorize : undefined}
-                  collaborationMode={workshop.collaborationModeFor(bot)}
-                  onManagePublication={setPublicationBot}
-                  inventoryActions={{
-                    view: workshop.inventoryActionFor(bot, 'view'),
-                    chat: workshop.inventoryActionFor(bot, 'chat'),
-                    edit: workshop.inventoryActionFor(bot, 'edit'),
-                  }}
-                />
-              ))}
+            <div data-testid="bot-workshop-table">
+              <BotTable
+                bots={workshop.items}
+                onView={workshop.openDetail}
+                onEdit={(bot) => workshop.openDetail(bot, 'edit')}
+                onConversation={workshop.openConversation}
+                onHealthCheck={workshop.openHealthCheck}
+                getHealthCheckAvailability={workshop.getHealthCheckAvailability}
+                onOpenLogs={showBotLogs ? workshop.openLogs : undefined}
+                getLogAction={showBotLogs ? workshop.logActionFor : undefined}
+                onChangeSpace={(bot) => {
+                  if (workshop.canChangeSpace(bot)) workshop.openSpaceChange(bot);
+                }}
+                onAuthorize={workshop.openAuthorize}
+                getCollaborationMode={workshop.collaborationModeFor}
+                onManagePublication={setPublicationBot}
+                onAction={workshop.runAction}
+                onClaimLock={workshop.claimLock}
+                getInventoryActions={(bot) => ({
+                  view: workshop.inventoryActionFor(bot, 'view'),
+                  chat: workshop.inventoryActionFor(bot, 'chat'),
+                  edit: workshop.inventoryActionFor(bot, 'edit'),
+                })}
+              />
             </div>
             {workshop.total !== undefined ? (
               <Pagination

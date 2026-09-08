@@ -48,12 +48,12 @@ const AdminPage: React.FC = () => {
   };
 
   return (
-    <div className="flex h-full flex-col bg-muted">
+    <div className="flex h-full flex-col">
       {/* 主 tab frosted header 条：白磨砂底 + 发丝下边线 */}
       <div className="z-10 border-b border-border bg-background/80 px-6 backdrop-blur-md">
         <UnderlineTabs<AdminTab> value={tab} options={visibleTabs} onChange={changeTab} />
       </div>
-      {/* 内容区灰底 */}
+      {/* 内容区：白底（同 Bot 工坊，继承 AppShell 的 --color-bg） */}
       <div className="min-h-0 flex-1 overflow-y-auto p-6 pb-10">
         {tab === 'spaces' ? <AdminSpacesView /> : <AdminWorkOrdersView />}
       </div>

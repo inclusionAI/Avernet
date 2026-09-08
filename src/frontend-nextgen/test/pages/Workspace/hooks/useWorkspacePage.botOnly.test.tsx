@@ -141,3 +141,49 @@ it('用户先选 Bot 身份再点击协作群（内部产生 session=）不应�
   expect(state.selectedGroupId).toBe('g1');
   expect(state.selectedSessionId).toBe('s1');
 });
+
+it('target=_blank 新开页面:身份滞后加载时,协作群外链仍能切回人类身份并选中群/会话', async () => {
+  // 模拟全新标签页挂载:身份尚未加载(initWorkspace 未返回),activeIdentityId 为空。
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=group&group=g1&session=s1'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({
+    identities: [],
+    activeIdentityId: null,
+    view: 'group',
+    selectedGroupId: null,
+    selectedSessionId: null,
+  });
+
+  const { rerender } = renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  // 挂载首轮:身份未就绪 → 不应消费首次同步、也不应切到 Bot 身份。
+  let state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBeNull();
+  // 群/会话选中已由 URL→Store 回填(groupParam/sessionParam)先行落地。
+  expect(state.selectedGroupId).toBe('g1');
+  expect(state.selectedSessionId).toBe('s1');
+
+  // 模拟 initWorkspace 回填:identities 到位,且持久化默认身份是上次用的 Bot。
+  await act(async () => {
+    useWorkspaceStore.setState({
+      identities: [
+        { id: 'human_2088', kind: 'user', displayName: '我', online: true },
+        { id: 'bot_old:2088', kind: 'bot', displayName: '旧 Bot', online: true },
+      ],
+      activeIdentityId: 'bot_old:2088',
+    });
+  });
+  // store 变更触发重渲染,使 URL→Store effect 读取新 identities 后重跑首次同步。
+  rerender();
+  await act(async () => Promise.resolve());
+
+  // 首次同步恢复:身份切回人类(非持久化的 Bot),群/会话保持选中。
+  state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBe('human_2088');
+  expect(state.view).toBe('group');
+  expect(state.selectedGroupId).toBe('g1');
+  expect(state.selectedSessionId).toBe('s1');
+});

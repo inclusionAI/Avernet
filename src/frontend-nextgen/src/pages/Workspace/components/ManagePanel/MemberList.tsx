@@ -1,6 +1,7 @@
 import { Badge, Button, Skeleton } from '@/components/ui';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import type { GroupView, IdentityView, ParticipantView } from '@/domain/collaboration';
+import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
 import { Plus, UserMinus } from 'lucide-react';
 import { useState } from 'react';
 import { AddMemberDialog } from './AddMemberDialog';
@@ -11,6 +12,8 @@ export interface MemberListProps {
   participantCount?: number;
   loading?: boolean;
   activeIdentity?: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   canManage: boolean;
   disabledReason?: string;
   emptyText?: string;
@@ -64,6 +67,8 @@ export function MemberList({
   participantCount,
   loading,
   activeIdentity,
+  authenticatedUserId,
+  authenticatedUserName,
   canManage,
   disabledReason,
   emptyText = '暂无成员',
@@ -112,49 +117,55 @@ export function MemberList({
         )
       ) : (
         <div className="space-y-2">
-          {participants.map((participant) => (
-            <div
-              key={participant.actorId}
-              data-testid={`member-${participant.actorId}`}
-              className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
-            >
-              <Avatar participant={participant} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center">
-                  <span className="max-w-full truncate text-sm font-semibold text-foreground">{participant.name}</span>
-                </div>
-                <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                  <Badge className={MEMBER_TAG_CLASS} tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
-                    {participant.kind === 'bot' ? 'Bot' : '用户'}
-                  </Badge>
-                  {getRoleLabel(participant, groupKind) ? (
-                    <Badge className={MEMBER_TAG_CLASS} tone="warning">
-                      {getRoleLabel(participant, groupKind)}
+          {participants.map((participant) => {
+            const displayName = resolveAuthenticatedDisplayName(
+              { id: participant.actorId, kind: participant.kind, name: participant.name },
+              authenticatedUserId ? { userId: authenticatedUserId, name: authenticatedUserName } : null,
+            );
+            return (
+              <div
+                key={participant.actorId}
+                data-testid={`member-${participant.actorId}`}
+                className="flex items-center gap-2 rounded-lg border border-border bg-card p-2 shadow-sm"
+              >
+                <Avatar participant={{ ...participant, name: displayName }} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center">
+                    <span className="max-w-full truncate text-sm font-semibold text-foreground">{displayName}</span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <Badge className={MEMBER_TAG_CLASS} tone={participant.kind === 'bot' ? 'primary' : 'neutral'}>
+                      {participant.kind === 'bot' ? 'Bot' : '用户'}
                     </Badge>
-                  ) : null}
-                  {showMode && getModeLabel(participant) ? (
-                    <Badge className={MEMBER_TAG_CLASS} tone="neutral">
-                      {getModeLabel(participant)}
-                    </Badge>
-                  ) : null}
+                    {getRoleLabel(participant, groupKind) ? (
+                      <Badge className={MEMBER_TAG_CLASS} tone="warning">
+                        {getRoleLabel(participant, groupKind)}
+                      </Badge>
+                    ) : null}
+                    {showMode && getModeLabel(participant) ? (
+                      <Badge className={MEMBER_TAG_CLASS} tone="neutral">
+                        {getModeLabel(participant)}
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
+                {canManage && participant.role !== 'owner' && (
+                  <ConfirmDialog
+                    title={`移除成员 ${displayName}`}
+                    description="移除后将无法参与当前协作。"
+                    confirmText="确认移除"
+                    confirmVariant="destructive"
+                    onConfirm={() => void onRemove(participant.actorId)}
+                  >
+                    <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive">
+                      <UserMinus className="h-4 w-4" />
+                      移除
+                    </Button>
+                  </ConfirmDialog>
+                )}
               </div>
-              {canManage && participant.role !== 'owner' && (
-                <ConfirmDialog
-                  title={`移除成员 ${participant.name}`}
-                  description="移除后将无法参与当前协作。"
-                  confirmText="确认移除"
-                  confirmVariant="destructive"
-                  onConfirm={() => void onRemove(participant.actorId)}
-                >
-                  <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground hover:text-destructive">
-                    <UserMinus className="h-4 w-4" />
-                    移除
-                  </Button>
-                </ConfirmDialog>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

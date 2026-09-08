@@ -1,7 +1,7 @@
 import { Headphones, RefreshCw, Sparkles } from 'lucide-react';
 
 import { getCapabilities } from '@/capabilities';
-import { Avatar, Badge, Empty } from '@/components/ui';
+import { Badge, Empty } from '@/components/ui';
 import { MessageEditBar, MessageQuoteBar } from '@/components/Workspace/MessageInteractionToolbar';
 import type { IdentityView } from '@/domain/collaboration';
 import { useMessageEdit } from '@/pages/Workspace/hooks/useMessageEdit';
@@ -10,9 +10,7 @@ import {
   buildQuotePrompt,
   useMessageInteractions,
 } from '@/pages/Workspace/hooks/useMessageInteractions';
-import { buildMessageBlocks } from '@/services/workspace/messageBlockBuilder';
 import type { ConversationTarget, SupportChatState } from '@/services/workspace/workspaceModel';
-import { formatChatTime } from '@/utils/format';
 import type { ProviderConnectionStatus } from '@tc-chat/adapters';
 import type { ChatBridge, ChatMessage, PanelAction, PanelHandle } from '@tc-chat/core';
 import { ChatLayout } from '@tc-chat/ui/es/ChatLayout';
@@ -20,11 +18,17 @@ import type { CommandConfig, FileChipConfig, SenderRef, SubmitContext } from '@t
 import { Sender, ToolbarButton } from '@tc-chat/ui/es/Sender';
 import { useEffect, type ReactNode, type RefObject } from 'react';
 import { ChatMessageList } from './ChatMessageList';
+import { getMessageBlocks, getMessageTime, resolveSingleSender } from './chatPanelPresentation';
+
+export { resolveSingleSender } from './chatPanelPresentation';
 
 interface Props {
   target: ConversationTarget | null;
   /** 当前查看身份，用于在消息区展示真实发送者名称，避免使用有歧义的「你」。 */
   viewer?: IdentityView | null;
+  /** 当前认证 human，用于按 message senderId 决定用户消息名称。 */
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   /** 顶栏当前登录用户头像；用户消息优先复用此头像，与 Bot 消息保持区分。 */
   userAvatarUrl?: string;
   messages: ChatMessage[];
@@ -59,47 +63,11 @@ interface Props {
   inputRef?: RefObject<SenderRef>;
 }
 
-function getMessageTime(message: ChatMessage) {
-  const displayTime = message.extra?.displayTime;
-  if (displayTime) return formatChatTime(displayTime);
-  return formatChatTime(message.createdAt);
-}
-
-function getMessageBlocks(message: ChatMessage) {
-  return buildMessageBlocks(message);
-}
-
-function renderUserAvatar(name: string, avatarUrl?: string) {
-  return <Avatar name={name} src={avatarUrl} size={32} />;
-}
-
-function renderAvatar(name: string, avatarUrl?: string, fallbackAvatar?: string) {
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={name} className="h-8 w-8 shrink-0 rounded-full object-cover" />;
-  }
-  return (
-    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
-      {fallbackAvatar || name.charAt(0)}
-    </span>
-  );
-}
-
-export function resolveSingleSender(
-  message: ChatMessage,
-  target: ConversationTarget,
-  viewer?: IdentityView | null,
-  userAvatarUrl?: string,
-): { name: string; avatar: ReactNode } {
-  if (message.role === 'assistant') {
-    return { name: target.name || '未命名 Bot', avatar: renderAvatar(target.name || 'Bot', undefined, target.avatar) };
-  }
-  const name = viewer?.displayName || '未命名成员';
-  return { name, avatar: renderUserAvatar(name, userAvatarUrl ?? viewer?.avatarUrl) };
-}
-
 export function ChatPanel({
   target,
   viewer,
+  authenticatedUserId,
+  authenticatedUserName,
   userAvatarUrl,
   messages,
   isRequesting,
@@ -142,7 +110,14 @@ export function ChatPanel({
     if (!target) return;
     const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
     if (!selectedMessage) return;
-    const sender = resolveSingleSender(selectedMessage, target, viewer, userAvatarUrl);
+    const sender = resolveSingleSender(
+      selectedMessage,
+      target,
+      viewer,
+      userAvatarUrl,
+      authenticatedUserId,
+      authenticatedUserName,
+    );
     messageInteractions.quoteMessage(selectedMessage.id, sender.name, text);
   };
 
@@ -150,7 +125,14 @@ export function ChatPanel({
     if (!target) return;
     const selectedMessage = messages.find((message) => message.id === messageInteractions.selection?.messageId);
     if (!selectedMessage) return;
-    const sender = resolveSingleSender(selectedMessage, target, viewer, userAvatarUrl);
+    const sender = resolveSingleSender(
+      selectedMessage,
+      target,
+      viewer,
+      userAvatarUrl,
+      authenticatedUserId,
+      authenticatedUserName,
+    );
     onDraftChange(buildExplainPrompt(sender.name, text));
     messageInteractions.clearQuote();
     messageInteractions.setSelection(null);
@@ -171,9 +153,7 @@ export function ChatPanel({
       <section className="flex min-w-0 flex-1 items-center justify-center bg-background">
         <Empty
           title={`欢迎进入 ${brand.name} 对话现场`}
-          description={`${
-            viewer?.displayName || '未命名成员'
-          }可在这里与用户、Bot进行即时协作沟通。请选择一个对话，开始当前交流。`}
+          description="在这里用户可与Bot及时协作沟通。请选择一个Bot，开始当前对话。"
           icon={<Sparkles className="h-5 w-5" />}
         />
       </section>
@@ -240,7 +220,9 @@ export function ChatPanel({
           onEditMessage={editMessage}
           onQuoteSelected={quoteSelectedMessage}
           onExplainSelected={explainSelectedMessage}
-          resolveSender={(message) => resolveSingleSender(message, target, viewer, userAvatarUrl)}
+          resolveSender={(message) =>
+            resolveSingleSender(message, target, viewer, userAvatarUrl, authenticatedUserId, authenticatedUserName)
+          }
           getMessageTime={getMessageTime}
           getMessageBlocks={getMessageBlocks}
         />

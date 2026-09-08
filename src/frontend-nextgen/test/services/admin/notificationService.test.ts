@@ -1,6 +1,6 @@
 /** @jest-environment node */
-import { notificationService } from '@/services/admin/notificationService';
 import { getCapabilities } from '@/capabilities';
+import { notificationService } from '@/services/admin/notificationService';
 import * as notificationController from '@/services/backendApi/admin/notificationController';
 import { identityService } from '@/services/workspace/identityService';
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';

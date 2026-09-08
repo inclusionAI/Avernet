@@ -38,6 +38,13 @@ it('loadFiles maps dto and resolves owner name from participants', async () => {
   expect(item).toMatchObject({ fileId: 'f1', name: 'a.md', ownerName: '张三', status: 'ready', size: 1024 });
 });
 
+it('loadFiles prefers the authenticated name only for the matching human owner', async () => {
+  c.listSessionFiles.mockResolvedValue({ data: { items: [dto], total: 1 } });
+  const res = await sessionFileService.loadFiles('s1', [], {}, { userId: '2088', name: '风太' });
+  const item = res.ok ? res.data.items[0] : null;
+  expect(item?.ownerName).toBe('风太');
+});
+
 it('loadFiles falls back to cleaned actor_id when no participant matches', async () => {
   c.listSessionFiles.mockResolvedValue({ data: { items: [dto], total: 1 } });
   const res = await sessionFileService.loadFiles('s1', []);

@@ -39,7 +39,7 @@ interface HeroSectionProps {
 /**
  * 欢迎页 Hero:大标题(产品名)+ tagline + 介绍段落 + CTA / GitHub 外链。
  * 产品名与品牌视觉一律经 getProductBrand 插值(design 决策 5);视觉走设计系统 token,
- * CTA `bg-primary` 为品牌蓝(#165dff),不照搬参考稿靛蓝裸色(见 add-avernet-open-core-differentiation)。
+ * CTA `bg-primary` 为品牌蓝(#2563eb),不照搬参考稿靛蓝裸色(见 add-avernet-open-core-differentiation)。
  */
 export function HeroSection({ onEnter }: HeroSectionProps) {
   const brand = getCapabilities().getProductBrand().value;

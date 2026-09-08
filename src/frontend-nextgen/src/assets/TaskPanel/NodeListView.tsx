@@ -82,14 +82,18 @@ export const NodeListView: React.FC<{
         const canOpenSub = Boolean(node.hasSubTask && node.subTaskId && onOpenSubTask);
         // assignee 为空即「未分配」:未派发到任何 bot/group,不回退任务归属 bot 当执行人,也不可下钻。
         const isUnassigned = !node.assignee;
-        const canDrillSession = !isUnassigned && Boolean(node.sessionId) && Boolean(onOpenGroupSession);
+        const isGroupSession = Boolean(node.groupId) || (node.sessionId?.startsWith('bcs_grp_') ?? false);
+        // 下钻/新开页面判定：
+        // - 群会话按物理 session 形态(groupId 或 bcs_grp_ 前缀),不依赖 assignee——
+        //   查看身份由 workspace 按 group=/session= 解析(后端可能只在 extend_props 下发 session/group,run_info.assignee 为空)。
+        // - 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id 才能下钻 + 新开链接。
+        const canDrillSession =
+          Boolean(node.sessionId) && Boolean(onOpenGroupSession) && (isGroupSession || !isUnassigned);
         const runModeLabel = RUN_MODE_LABELS[node.runMode ?? ''];
         // 根节点的执行者可能只由 graph 级 owner_bot_id 兜底到 assignee，名称字段仍为空；
         // 即使没有 executor/groupName，只要存在 sessionId 也要渲染可点击的下钻入口。
-        // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group,真实模式由 actual_run_mode 覆盖到 runMode。
-        // 故「下钻通道」必须按物理 session 形态判定（协作群 session_id 形如 bcs_grp_xxx:round 或存在 groupId），
-        // 不能再据 run_mode 选端点——否则单 bot 绕过群 session 时会错误跳 tab=chat。
-        const isGroupSession = Boolean(node.groupId) || (node.sessionId?.startsWith('bcs_grp_') ?? false);
+        // 因权限绕过,后端可能统一把 run_mode 标记为 coop_group,真实模式由 actual_run_mode 覆盖到 runMode；
+        // 单/群通道统一按物理 session 形态(isGroupSession,见上)判定,不再据 run_mode 选端点。
         // 执行者展示:
         // - coop_group → 群名
         // - single_bot/bbs(绕过群执行,assignee 常为 bcs 群 id):有 assignee_name → 显示 bot 名;否则占位「Bot/BBS 执行会话」。
@@ -97,28 +101,28 @@ export const NodeListView: React.FC<{
         const isSingleOrBbs = node.runMode === 'single_bot' || node.runMode === 'bbs';
         // 执行者展示:assignee_name 全局优先(已分配节点);空时按真实执行模式占位。
         //   - single_bot/bbs → Bot/BBS 执行会话; - coop_group → 协作群会话。
-        const executorLabel = isUnassigned
-          ? '未分配'
-          : node.assigneeName
-          ? node.assigneeName
-          : isSingleOrBbs
-          ? node.runMode === 'single_bot'
-            ? 'Bot执行会话'
-            : 'BBS执行会话'
-          : isCoopGroupDisplay
-          ? '协作群会话'
-          : node.executor ?? node.assignee ?? ownerBotId;
+        const executorLabel =
+          isUnassigned && !isGroupSession
+            ? '未分配'
+            : node.assigneeName
+            ? node.assigneeName
+            : isSingleOrBbs
+            ? node.runMode === 'single_bot'
+              ? 'Bot执行会话'
+              : 'BBS执行会话'
+            : isCoopGroupDisplay
+            ? '协作群会话'
+            : node.executor ?? node.assignee ?? ownerBotId;
         // 会话跳转链接：协作群走 tab=group，单 bot 走 tab=chat。
         // 群节点不依赖 assignee（查看身份由 workspace 按用户自有 bot 决定）；
         // 单 bot 需 assignee/ownerBotId 解析出 bot_id:user_id。
-        const conversationHref =
-          !isUnassigned && node.sessionId
-            ? isGroupSession
-              ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
-              : getConversationBotId(node)
-              ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
-              : null
-            : null;
+        const conversationHref = node.sessionId
+          ? isGroupSession // 群会话不依赖 assignee(注释约定:由 workspace 按 group=/session= 解析成员)
+            ? getCollaborationGroupConversationUrl(node.groupId, node.sessionId)
+            : !isUnassigned && getConversationBotId(node)
+            ? getCollaborationBotConversationUrl(getConversationBotId(node)!, node.sessionId)
+            : null
+          : null;
         const actionLabel = canOpenSub ? `打开子任务 ${node.name}` : `查看节点详情 ${node.name}`;
         const openNode = () => {
           if (canOpenSub && node.subTaskId) {
@@ -187,7 +191,7 @@ export const NodeListView: React.FC<{
                 border: `1px solid ${canOpenSub ? C.primary + '35' : C.border}`,
                 borderRadius: 10,
                 background: canOpenSub ? `linear-gradient(135deg, ${C.primaryBg} 0%, ${C.surface} 72%)` : C.surface,
-                boxShadow: canOpenSub ? '0 2px 10px rgba(22, 93, 255, 0.08)' : '0 1px 3px rgba(29, 33, 41, 0.04)',
+                boxShadow: canOpenSub ? '0 2px 10px rgba(37, 99, 235, 0.08)' : '0 1px 3px rgba(29, 33, 41, 0.04)',
                 cursor: 'pointer',
                 transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out',
               }}
@@ -199,7 +203,7 @@ export const NodeListView: React.FC<{
               onMouseLeave={(event) => {
                 event.currentTarget.style.borderColor = canOpenSub ? C.primary + '35' : C.border;
                 event.currentTarget.style.boxShadow = canOpenSub
-                  ? '0 2px 10px rgba(22, 93, 255, 0.08)'
+                  ? '0 2px 10px rgba(37, 99, 235, 0.08)'
                   : '0 1px 3px rgba(29, 33, 41, 0.04)';
                 event.currentTarget.style.transform = 'translateY(0)';
               }}

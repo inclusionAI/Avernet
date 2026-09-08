@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui';
-import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Modal, ModalContent } from '@/components/ui/Modal';
 import type { GroupView, IdentityView } from '@/domain/collaboration';
+import { resolveAuthenticatedDisplayName } from '@/domain/userIdentity';
 import { GROUP_CREATE_VIA_EXECUTE } from '@/services/workspace/groupCreateConfig';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAllAvailableBots } from '../../hooks/useAllAvailableBots';
@@ -11,6 +12,7 @@ import { useParticipantBinding } from '../../hooks/useParticipantBinding';
 import { BindingSlot, YamlValidateButton } from './BindingSlot';
 import { CollaborationFlowAside } from './CollaborationFlowAside';
 import { CollaborationTemplatePicker } from './CollaborationTemplatePicker';
+import { CreateGroupHeader } from './CreateGroupHeader';
 import { GroupConfigFields, type GroupStrategyKind } from './GroupConfigFields';
 import type { GroupLeaderOption } from './GroupLeaderSelect';
 import { formatAutoGroupName } from './groupNaming';
@@ -21,12 +23,21 @@ export interface CreateGroupModalProps {
   open: boolean;
   /** 当前对话协作身份；决定好友列表与可协作 Bot 列表的查询视角。 */
   activeIdentity?: IdentityView | null;
+  authenticatedUserId?: string | null;
+  authenticatedUserName?: string | null;
   onClose: () => void;
   /** 创建成功后回传群详情及初始 Manager run。 */
   onCreated: (group: GroupView) => void;
 }
 
-export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: CreateGroupModalProps) {
+export function CreateGroupModal({
+  open,
+  activeIdentity,
+  authenticatedUserId,
+  authenticatedUserName,
+  onClose,
+  onCreated,
+}: CreateGroupModalProps) {
   const { run, friendlyError, creating, clearError } = useCreateGroup();
   const picker = useGroupCollaborationPicker(activeIdentity?.id, open, activeIdentity?.kind === 'user');
   const [kind, setKind] = useState<GroupStrategyKind>('free_chat');
@@ -40,6 +51,12 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
   const [enableTaskExecute, setEnableTaskExecute] = useState(GROUP_CREATE_VIA_EXECUTE);
   const wasOpenRef = useRef(false);
   const supportsStateMachine = activeIdentity?.kind === 'bot';
+  const activeIdentityDisplayName = activeIdentity
+    ? resolveAuthenticatedDisplayName(
+        { id: activeIdentity.id, kind: activeIdentity.kind, name: activeIdentity.displayName },
+        authenticatedUserId ? { userId: authenticatedUserId, name: authenticatedUserName } : null,
+      )
+    : '';
   const templates = useCollaborationTemplates(open && kind === 'task_dag', (yaml) => {
     setDefinitionYaml(yaml);
   });
@@ -168,7 +185,8 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
     }
     const participantIds = Array.from(new Set(memberIds));
     const participants = participantIds.map((id) => ({ actor_id: id }));
-    const participantName = (id: string) => (id === activeIdentity?.id ? activeIdentity.displayName : allBotName(id));
+    const participantName = (id: string) =>
+      id === activeIdentity?.id ? activeIdentityDisplayName : allBotName(id);
     const participantBindingsArr = Object.entries(binding.participantBindings)
       .filter(([, botId]) => Boolean(botId))
       .map(([binding, botId]) => ({ binding, actor_ids: [botId] }));
@@ -196,22 +214,7 @@ export function CreateGroupModal({ open, activeIdentity, onClose, onCreated }: C
         closeLabel="关闭发起协作弹窗"
         className="min-w-0 gap-0 overflow-hidden p-0"
       >
-        <ModalHeader className="border-b border-border px-6 pb-4 pt-5">
-          <div className="flex min-w-0 items-center gap-2">
-            <ModalTitle className="m-0 shrink-0 text-base font-semibold text-foreground">发起协作</ModalTitle>
-            {activeIdentity && (
-              <>
-                <span className="text-xs text-muted-foreground">为</span>
-                <span className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
-                  {activeIdentity.kind === 'bot' ? 'Bot' : '用户'}
-                </span>
-                <span className="max-w-44 truncate rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {activeIdentity.displayName}
-                </span>
-              </>
-            )}
-          </div>
-        </ModalHeader>
+        <CreateGroupHeader activeIdentity={activeIdentity} activeIdentityDisplayName={activeIdentityDisplayName} />
 
         <div className="flex min-h-0 min-w-0 max-w-full overflow-x-hidden">
           <div

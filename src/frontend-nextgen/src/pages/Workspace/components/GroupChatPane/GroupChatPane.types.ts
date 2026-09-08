@@ -54,8 +54,10 @@ export interface GroupChatPaneProps {
   inputRef?: RefObject<SenderRef>;
   /** 顶栏当前登录用户头像；用户消息优先复用此头像。 */
   userAvatarUrl?: string;
-  /** 当前登录用户身份 ID，用于保留其他 human 成员自己的头像。 */
+  /** 当前认证 human 身份 ID，用于区分其他 human 成员。 */
   userIdentityId?: string | null;
+  /** 当前认证 human 名称；仅在 userIdentityId 匹配消息 sender 时使用。 */
+  userIdentityName?: string | null;
   /** 主→副事件通道桥（经 <ChatLayout.Panel bridge=...> 注入；不传则不接主→副事件）。 */
   chatBridge?: ChatBridge;
 }

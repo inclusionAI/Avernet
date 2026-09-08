@@ -21,6 +21,21 @@ import type { PanelHandle } from '@tc-chat/core';
 import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
+/**
+ * 任务澄清/已就绪卡片不带 title 字段；按 task-loop 协议 §4.3.1，
+ * `task_spec.metadata.title` 由平台层从 `task.goal` 派生「短摘要」。
+ * 启发式：取首个分句（按换行 / 句末标点 / 中英逗号切），封顶 ≤20 字，超长截 19 字 +「…」。
+ * 纯函数，便于单测；空 goal 兜底「任务执行」。
+ */
+export function deriveTaskTitle(goal: string | undefined | null): string {
+  const raw = (goal ?? '').trim();
+  if (!raw) return '任务执行';
+  const firstClause = raw.split(/[\r\n,，。；;！!？?]/)[0].trim();
+  const base = firstClause || raw;
+  if (base.length <= 20) return base;
+  return base.slice(0, 19) + '…';
+}
+
 /** task_ready 卡片传出的 task JSON（dataSource.task）结构。 */
 interface TaskReadyTask {
   task_type?: 'dynamic' | 'workflow';
@@ -81,7 +96,7 @@ export function useTaskExecuteFromCard({
 
           // task JSON → TaskComposerForm
           const form: TaskComposerForm = {
-            title: (task.goal ?? '').slice(0, 80) || '任务执行',
+            title: deriveTaskTitle(task.goal),
             objective: task.goal ?? '',
             instruction: [
               task.goal ? `目标：${task.goal}` : '',

@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
 
-import BotCard from '@/components/BotWorkshop/BotCard';
+import BotTable from '@/components/BotWorkshop/BotCard';
+import type { BotTableProps } from '@/components/BotWorkshop/BotCard/BotTable';
+import type { BotDomain } from '@/services/botWorkshop';
 import { mapBotDto } from '@/services/botWorkshop/botMapper';
 import '@testing-library/jest-dom';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -24,37 +26,104 @@ beforeEach(() => {
   HTMLElement.prototype.scrollIntoView = jest.fn();
 });
 
-describe('BotCard health check action', () => {
+function renderTable(bot: BotDomain, props: Partial<BotTableProps> = {}) {
+  return render(<BotTable bots={[bot]} onView={noop} {...props} />);
+}
+
+/** 第 0 行是表头,数据行从 1 开始。 */
+function dataRow() {
+  return screen.getAllByRole('row')[1];
+}
+
+/** 版本列是第 4 列(索引 3),标签列是第 5 列(索引 4)。 */
+function cellAt(index: number) {
+  return dataRow().querySelectorAll('td')[index];
+}
+
+function versionCell() {
+  return cellAt(3);
+}
+
+function tagsCell() {
+  return cellAt(4);
+}
+
+describe('BotTable 表格结构', () => {
+  const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
+
+  test('按 7 列顺序渲染表头', () => {
+    renderTable(bot);
+
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toEqual([
+      '机器人信息',
+      '描述',
+      '状态',
+      '版本',
+      'bot 标签',
+      '主要操作',
+      '更多操作',
+    ]);
+  });
+
+  test('数据行固定 h-16 行高并带 hover 反馈', () => {
+    renderTable(bot);
+
+    expect(dataRow().className).toContain('h-16');
+    expect(dataRow().className).toContain('hover:bg-muted/40');
+    expect(dataRow().className).toContain('transition-colors');
+  });
+
+  test('行点击进入详情', () => {
+    const onView = jest.fn();
+    render(<BotTable bots={[bot]} onView={onView} />);
+
+    fireEvent.click(dataRow());
+
+    expect(onView).toHaveBeenCalledWith(bot);
+  });
+
+  test('机器人信息列渲染 20px 圆形首字符头像、名称与 entityKey', () => {
+    renderTable(bot);
+
+    const avatar = screen.getByText('O');
+    expect(avatar).toBeInTheDocument();
+    expect(avatar).toHaveClass('h-5', 'w-5', 'rounded-full');
+    expect(screen.getByText('Openclaw Bot')).toBeInTheDocument();
+    expect(screen.getByText(bot.entityKey)).toBeInTheDocument();
+  });
+
+  test('没有数据时只渲染表头,空态由页面承担', () => {
+    render(<BotTable bots={[]} onView={noop} />);
+
+    expect(screen.getAllByRole('columnheader')).toHaveLength(7);
+    expect(screen.getAllByRole('row')).toHaveLength(1);
+    expect(screen.queryByText('暂无 Bot')).not.toBeInTheDocument();
+  });
+});
+
+describe('BotTable health check action', () => {
   test('renders health check when availability is visible', () => {
     const bot = mapBotDto({ bot_id: 'b1', bot_name: 'Openclaw Bot', engine: 'openclaw', status: 'ACTIVE' }).item;
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onHealthCheck={noop}
-        healthCheckAvailability={{ action: 'health-check', visible: true, enabled: true }}
-      />,
-    );
+    renderTable(bot, {
+      onHealthCheck: noop,
+      getHealthCheckAvailability: () => ({ action: 'health-check', visible: true, enabled: true }),
+    });
 
-    expect(screen.getByRole('button', { name: '健康检查' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Openclaw Bot 健康检查' })).toBeInTheDocument();
   });
 
   test('hides health check when availability is invisible', () => {
     const bot = mapBotDto({ bot_id: 'b2', bot_name: 'TEClaw Bot', engine: 'teclaw', status: 'ACTIVE' }).item;
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onHealthCheck={noop}
-        healthCheckAvailability={{ action: 'health-check', visible: false, enabled: false }}
-      />,
-    );
+    renderTable(bot, {
+      onHealthCheck: noop,
+      getHealthCheckAvailability: () => ({ action: 'health-check', visible: false, enabled: false }),
+    });
 
-    expect(screen.queryByRole('button', { name: '健康检查' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'TEClaw Bot 健康检查' })).not.toBeInTheDocument();
   });
 });
 
-describe('BotCard conversation action', () => {
+describe('BotTable conversation action', () => {
   test('renders the conversation entry and delegates navigation', () => {
     const bot = mapBotDto({
       bot_id: 'b3',
@@ -65,21 +134,17 @@ describe('BotCard conversation action', () => {
     }).item;
     const onConversation = jest.fn();
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onConversation={onConversation}
-        inventoryActions={{ chat: { action: 'chat', visible: true, enabled: true } }}
-      />,
-    );
-    fireEvent.click(screen.getByRole('button', { name: '对话' }));
+    renderTable(bot, {
+      onConversation,
+      getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
+    });
+    fireEvent.click(screen.getByRole('button', { name: '与 Chat Bot 对话' }));
 
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 });
 
-describe('BotCard backend action contract', () => {
+describe('BotTable backend action contract', () => {
   test('does not render chat or edit when backend only allows view', () => {
     const bot = mapBotDto({
       bot_id: 'offline-service',
@@ -90,19 +155,15 @@ describe('BotCard backend action contract', () => {
       actions: ['view'],
     }).item;
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onConversation={noop}
-        onEdit={noop}
-        inventoryActions={{ view: { action: 'view', visible: true, enabled: true } }}
-      />,
-    );
+    renderTable(bot, {
+      onConversation: noop,
+      onEdit: noop,
+      getInventoryActions: () => ({ view: { action: 'view', visible: true, enabled: true } }),
+    });
 
-    expect(screen.getByRole('button', { name: '查看' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '对话' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '查看 Offline Bot 详情' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '与 Offline Bot 对话' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑 Offline Bot' })).not.toBeInTheDocument();
   });
 
   test('renders a disabled edit action with the backend reason', () => {
@@ -116,22 +177,18 @@ describe('BotCard backend action contract', () => {
       disabled_actions: { edit: 'device offline' },
     }).item;
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onEdit={noop}
-        inventoryActions={{
-          edit: { action: 'edit', visible: true, enabled: false, disabledReason: 'device offline' },
-        }}
-      />,
-    );
+    renderTable(bot, {
+      onEdit: noop,
+      getInventoryActions: () => ({
+        edit: { action: 'edit', visible: true, enabled: false, disabledReason: 'device offline' },
+      }),
+    });
 
-    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '编辑 Local Offline Bot' })).toBeDisabled();
   });
 });
 
-describe('BotCard management actions', () => {
+describe('BotTable management actions', () => {
   test('closes the management menu before opening delete confirmation', () => {
     const bot = mapBotDto({
       bot_id: 'b4',
@@ -141,7 +198,7 @@ describe('BotCard management actions', () => {
       actions: ['delete'],
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn()} />);
+    renderTable(bot, { onAction: jest.fn() });
     fireEvent.click(screen.getByRole('button', { name: '管理 Delete Bot' }));
     fireEvent.click(screen.getByRole('button', { name: '删除' }));
 
@@ -165,7 +222,7 @@ describe('BotCard management actions', () => {
       lock: { status: 'other' as const, holderName: '李四', lockedAt: '2026-08-26 10:00' },
     };
 
-    render(<BotCard bot={bot} onView={noop} onClaimLock={onClaimLock} />);
+    renderTable(bot, { onClaimLock });
     fireEvent.click(screen.getByRole('button', { name: '抢占 Locked Service Bot 的编辑锁' }));
 
     const dialog = within(screen.getByRole('alertdialog'));
@@ -174,43 +231,71 @@ describe('BotCard management actions', () => {
     expect(dialog.getByText(/2026-08-26 10:00/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '抢锁并编辑' }));
 
-    expect(onClaimLock).toHaveBeenCalledWith(bot);
+    await waitFor(() => expect(onClaimLock).toHaveBeenCalledWith(bot));
   });
 });
 
-describe('BotCard runtime labels', () => {
-  test('服务 Bot 展示发布版本', () => {
+describe('BotTable runtime labels', () => {
+  test('服务 Bot 版本列只显示发布版本徽章,不再重复显示主版本文字', () => {
     const bot = mapBotDto({
-      bot_id: 'service-version-card',
-      card_id: 'service-version-card:3',
+      bot_id: 'service-version-row',
+      card_id: 'service-version-row:3',
       bot_name: '版本 Bot',
       kind: 'service',
+      live_version: 2,
       publication_version: 3,
       display_state: 'service_online',
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} />);
+    renderTable(bot);
 
-    expect(screen.getByText('V3')).toBeInTheDocument();
+    expect(within(versionCell()).getByText('V3')).toBeInTheDocument();
+    expect(within(versionCell()).queryByText('v2')).not.toBeInTheDocument();
+  });
+
+  test('服务 Bot 缺发布版本时以占位符兜底', () => {
+    const bot = mapBotDto({
+      bot_id: 'no-publication-version',
+      bot_name: '无发布版本 Bot',
+      kind: 'service',
+      display_state: 'service_online',
+    }).item;
+
+    renderTable(bot);
+
+    expect(within(versionCell()).getByText('—')).toBeInTheDocument();
+  });
+
+  test('非服务化 Bot 无版本,以占位符兜底', () => {
+    const bot = mapBotDto({
+      bot_id: 'non-service-version-row',
+      bot_name: '非服务 Bot',
+      engine: 'openclaw',
+      status: 'ACTIVE',
+    }).item;
+
+    renderTable(bot);
+
+    expect(within(versionCell()).getByText('—')).toBeInTheDocument();
   });
 
   test('创建失败展示准确状态', () => {
     const bot = mapBotDto({
-      bot_id: 'failed-card',
+      bot_id: 'failed-row',
       bot_name: '失败 Bot',
       display_state: 'failed',
       status: 'FAILED',
       disabled_actions: { restart: 'bot provisioning failed' },
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} />);
+    renderTable(bot);
 
     expect(screen.getByText('创建失败')).toBeInTheDocument();
   });
 
   test('Coding Bot 展示模板名称而不是 claude_code', () => {
     const bot = mapBotDto({
-      bot_id: 'architect-card',
+      bot_id: 'architect-row',
       bot_name: '架构 Bot 实例',
       engine: 'claude_code',
       template_type: 'generalCC',
@@ -218,7 +303,7 @@ describe('BotCard runtime labels', () => {
       status: 'ACTIVE',
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} />);
+    renderTable(bot);
 
     expect(screen.getByText('架构 Bot')).toBeInTheDocument();
     expect(screen.queryByText('claude_code')).not.toBeInTheDocument();
@@ -226,14 +311,14 @@ describe('BotCard runtime labels', () => {
 
   test('历史个人 Coding Bot 缺少模板名称时展示个人 Coding Bot', () => {
     const bot = mapBotDto({
-      bot_id: 'personal-coding-card',
+      bot_id: 'personal-coding-row',
       bot_name: '个人 Coding Bot 实例',
       engine: 'claude_code',
       template_type: 'personalCoding',
       status: 'ACTIVE',
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} />);
+    renderTable(bot);
 
     expect(screen.getByText('个人 Coding Bot')).toBeInTheDocument();
     expect(screen.queryByText('claude_code')).not.toBeInTheDocument();
@@ -241,20 +326,72 @@ describe('BotCard runtime labels', () => {
 
   test('普通 Claude Code 仍展示引擎标签', () => {
     const bot = mapBotDto({
-      bot_id: 'normal-card',
+      bot_id: 'normal-row',
       bot_name: '普通 CC',
       engine: 'claude_code',
       template_type: 'normalCC',
       status: 'ACTIVE',
     }).item;
 
-    render(<BotCard bot={bot} onView={noop} />);
+    renderTable(bot);
 
     expect(screen.getByText('claude_code')).toBeInTheDocument();
   });
 });
 
-describe('Agent Coding Bot card actions', () => {
+describe('BotTable bot 标签列', () => {
+  test('服务 Bot 展示「服务化」chip', () => {
+    const bot = mapBotDto({
+      bot_id: 'service-tag',
+      bot_name: '发布管理 Bot',
+      kind: 'service',
+      display_state: 'service_online',
+    }).item;
+
+    renderTable(bot);
+
+    expect(screen.getByText('服务化')).toBeInTheDocument();
+  });
+
+  test('非服务 Bot 不显示服务化 chip,标签列不补占位符', () => {
+    const bot = mapBotDto({
+      bot_id: 'non-service-tag',
+      bot_name: '个人 Bot 标签',
+      kind: 'personal',
+      status: 'ACTIVE',
+    }).item;
+
+    renderTable(bot);
+
+    expect(screen.queryByText('服务化')).not.toBeInTheDocument();
+    // 整行只剩版本列一个 `—`:标签列不再贡献第二个占位符
+    expect(screen.getAllByText('—')).toHaveLength(1);
+    expect(within(versionCell()).getByText('—')).toBeInTheDocument();
+  });
+
+  test('标签列三个 chip 统一 outline 描边,不占用蓝/绿/灰填充', () => {
+    const bot = mapBotDto({
+      bot_id: 'tone-tag',
+      bot_name: '配色 Bot',
+      engine: 'openclaw',
+      kind: 'service',
+      display_state: 'service_online',
+    }).item;
+
+    renderTable(bot);
+
+    for (const label of ['openclaw', '云端', '服务化']) {
+      expect(within(tagsCell()).getByText(label)).toHaveClass('border-border', 'text-foreground');
+    }
+    // 蓝(primary)被信息列与操作按钮占用;绿(success)是状态列语义色;灰(neutral)明确排除
+    const html = tagsCell().innerHTML;
+    expect(html).not.toContain('bg-primary/10');
+    expect(html).not.toContain('bg-success/10');
+    expect(html).not.toContain('bg-muted');
+  });
+});
+
+describe('Agent Coding Bot row actions', () => {
   test('Coding Bot 即使没有 chat action 也固定展示去使用', () => {
     const bot = mapBotDto({
       bot_id: 'general-service-draft-without-chat',
@@ -268,16 +405,12 @@ describe('Agent Coding Bot card actions', () => {
     }).item;
     const onConversation = jest.fn();
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onConversation={onConversation}
-        onAction={jest.fn().mockResolvedValue(undefined)}
-      />,
-    );
+    renderTable(bot, {
+      onConversation,
+      onAction: jest.fn().mockResolvedValue(undefined),
+    });
 
-    fireEvent.click(screen.getByRole('button', { name: '去使用' }));
+    fireEvent.click(screen.getByRole('button', { name: '去使用 GeneralCC 草稿 Bot' }));
     expect(onConversation).toHaveBeenCalledWith(bot);
   });
 
@@ -293,16 +426,12 @@ describe('Agent Coding Bot card actions', () => {
       actions: ['chat', 'restart', 'delete'],
     }).item;
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onConversation={noop}
-        onAction={jest.fn().mockResolvedValue(undefined)}
-        onManagePublication={noop}
-        inventoryActions={{ chat: { action: 'chat', visible: true, enabled: true } }}
-      />,
-    );
+    renderTable(bot, {
+      onConversation: noop,
+      onAction: jest.fn().mockResolvedValue(undefined),
+      onManagePublication: noop,
+      getInventoryActions: () => ({ chat: { action: 'chat', visible: true, enabled: true } }),
+    });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 GeneralCC 服务 Bot' }));
     expect(screen.getByText('发布与阶段推进')).toBeInTheDocument();
@@ -320,33 +449,29 @@ describe('Agent Coding Bot card actions', () => {
       actions: ['chat', 'view', 'edit', 'restart', 'engine_restart', 'delete'],
     }).item;
 
-    render(
-      <BotCard
-        bot={bot}
-        onView={noop}
-        onConversation={noop}
-        onEdit={noop}
-        onHealthCheck={noop}
-        healthCheckAvailability={{ action: 'health-check', visible: true, enabled: true }}
-        logAction={{ action: 'logs', visible: true, enabled: true }}
-        onOpenLogs={noop}
-        onChangeSpace={noop}
-        onAuthorize={noop}
-        collaborationMode="authorize"
-        onAction={jest.fn().mockResolvedValue(undefined)}
-        inventoryActions={{
-          chat: { action: 'chat', visible: true, enabled: true },
-          view: { action: 'view', visible: true, enabled: true },
-          edit: { action: 'edit', visible: true, enabled: true },
-        }}
-      />,
-    );
+    renderTable(bot, {
+      onConversation: noop,
+      onEdit: noop,
+      onHealthCheck: noop,
+      getHealthCheckAvailability: () => ({ action: 'health-check', visible: true, enabled: true }),
+      getLogAction: () => ({ action: 'logs', visible: true, enabled: true }),
+      onOpenLogs: noop,
+      onChangeSpace: noop,
+      onAuthorize: noop,
+      getCollaborationMode: () => 'authorize',
+      onAction: jest.fn().mockResolvedValue(undefined),
+      getInventoryActions: () => ({
+        chat: { action: 'chat', visible: true, enabled: true },
+        view: { action: 'view', visible: true, enabled: true },
+        edit: { action: 'edit', visible: true, enabled: true },
+      }),
+    });
 
-    expect(screen.getByRole('button', { name: '去使用' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '查看' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '编辑' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '健康检查' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '日志' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '去使用 Agent Coding 模版 Bot' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 详情' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '编辑 Agent Coding 模版 Bot' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Agent Coding 模版 Bot 健康检查' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '查看 Agent Coding 模版 Bot 日志' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '管理 Agent Coding 模版 Bot' }));
     expect(screen.getByText('开启服务化')).toBeInTheDocument();
@@ -360,7 +485,7 @@ describe('Agent Coding Bot card actions', () => {
   });
 });
 
-describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
+describe('BotTable 管理菜单重启词表（服务卡三动词分裂）', () => {
   const servicePrestableBot = () =>
     mapBotDto({
       bot_id: 'service-prestable-card',
@@ -372,9 +497,9 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       actions: ['view', 'publish_online', 'restart_publish', 'cancel_staging'],
     }).item;
 
-  test('服务预发卡仅提供重启发布入口，不再提供容器/引擎重启', () => {
+  test('服务预发行仅提供重启发布入口，不再提供容器/引擎重启', () => {
     const bot = servicePrestableBot();
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
 
@@ -383,10 +508,10 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
     expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
   });
 
-  test('服务预发卡点击重启发布后经确认弹窗分发 restart_publish 动作', async () => {
+  test('服务预发行点击重启发布后经确认弹窗分发 restart_publish 动作', async () => {
     const bot = servicePrestableBot();
     const onAction = jest.fn().mockResolvedValue(undefined);
-    render(<BotCard bot={bot} onView={noop} onAction={onAction} />);
+    renderTable(bot, { onAction });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
     fireEvent.click(screen.getByRole('button', { name: /重启发布/ }));
@@ -399,7 +524,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart_publish', bot));
   });
 
-  test('服务上线卡提供重启发布并经确认分发', async () => {
+  test('服务上线行提供重启发布并经确认分发', async () => {
     const bot = mapBotDto({
       bot_id: 'service-online-card',
       bot_name: '上线服务 Bot',
@@ -410,7 +535,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       actions: ['view', 'chat', 'restart_publish', 'upgrade', 'offline'],
     }).item;
     const onAction = jest.fn().mockResolvedValue(undefined);
-    render(<BotCard bot={bot} onView={noop} onAction={onAction} />);
+    renderTable(bot, { onAction });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 上线服务 Bot' }));
     expect(screen.getByRole('button', { name: /重启发布/ })).toBeEnabled();
@@ -420,7 +545,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
     await waitFor(() => expect(onAction).toHaveBeenCalledWith('restart_publish', bot));
   });
 
-  test('服务草稿卡保留重启 Bot，不提供重启发布与重启引擎', () => {
+  test('服务草稿行保留重启 Bot，不提供重启发布与重启引擎', () => {
     const bot = mapBotDto({
       bot_id: 'service-draft-card',
       bot_name: '草稿服务 Bot',
@@ -430,7 +555,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       display_state: 'service_draft',
       actions: ['view', 'edit', 'publish_staging', 'restart', 'delete'],
     }).item;
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 草稿服务 Bot' }));
 
@@ -439,7 +564,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
     expect(screen.queryByRole('button', { name: /重启引擎/ })).not.toBeInTheDocument();
   });
 
-  test('服务卡仅 disabled_actions.restart 声明时保留禁用入口（死灰按钮可展示服务端原因）', () => {
+  test('服务行仅 disabled_actions.restart 声明时保留禁用入口（死灰按钮可展示服务端原因）', () => {
     const bot = mapBotDto({
       bot_id: 'service-restart-reason-card',
       bot_name: '禁用原因服务 Bot',
@@ -450,7 +575,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       actions: ['view'],
       disabled_actions: { restart: '草稿机未初始化，无法重启' },
     }).item;
-    render(<BotCard bot={bot} onAction={jest.fn().mockResolvedValue(undefined)} onView={noop} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 禁用原因服务 Bot' }));
 
@@ -468,7 +593,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       actions: ['view'],
       disabled_actions: { restart_publish: '等待发布人授权' },
     }).item;
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 审批中服务 Bot' }));
 
@@ -480,14 +605,14 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       ...servicePrestableBot(),
       lock: { status: 'other' as const, holderName: '王五', lockedAt: '2026-09-07 09:30' },
     };
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 预发服务 Bot' }));
 
     expect(screen.getByRole('button', { name: /重启发布/ })).toBeDisabled();
   });
 
-  test('个人云卡的重启 Bot 与重启引擎不受词表分裂影响', () => {
+  test('个人云行的重启 Bot 与重启引擎不受词表分裂影响', () => {
     const bot = mapBotDto({
       bot_id: 'personal-cloud-card',
       bot_name: '个人云 Bot',
@@ -496,7 +621,7 @@ describe('Bot 管理菜单重启词表（服务卡三动词分裂）', () => {
       display_state: 'running',
       actions: ['chat', 'view', 'restart', 'engine_restart'],
     }).item;
-    render(<BotCard bot={bot} onView={noop} onAction={jest.fn().mockResolvedValue(undefined)} />);
+    renderTable(bot, { onAction: jest.fn().mockResolvedValue(undefined) });
 
     fireEvent.click(screen.getByRole('button', { name: '管理 个人云 Bot' }));
 

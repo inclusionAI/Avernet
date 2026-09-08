@@ -1,4 +1,5 @@
 import type { ParticipantView } from '@/domain/collaboration';
+import type { AuthenticatedUserName } from '@/domain/userIdentity';
 import type { SessionFileView } from '@/services/workspace/sessionFileService';
 
 import { sessionFileService } from '@/services/workspace/sessionFileService';
@@ -17,7 +18,11 @@ export interface UseSessionFilesResult {
   previewFile: (file: SessionFileView) => Promise<void>;
 }
 
-export function useSessionFiles(sessionId: string | null, participants?: ParticipantView[]): UseSessionFilesResult {
+export function useSessionFiles(
+  sessionId: string | null,
+  participants?: ParticipantView[],
+  authenticatedUser?: AuthenticatedUserName | null,
+): UseSessionFilesResult {
   const [files, setFiles] = useState<SessionFileView[]>([]);
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -35,7 +40,7 @@ export function useSessionFiles(sessionId: string | null, participants?: Partici
         limit: 100,
         offset: 0,
         status: 'ready',
-      });
+      }, authenticatedUser);
       if (res.ok) {
         // 文件接口仅返回上传者 actor_id，用 bots/query 批量反查展示名，未命中的回退 actor_id 兜底。
         const nameMap = await sessionFileService.resolveActorNames(res.data.items.map((f) => f.ownerActorId));
@@ -49,7 +54,7 @@ export function useSessionFiles(sessionId: string | null, participants?: Partici
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, participants]);
+  }, [authenticatedUser, participants, sessionId]);
 
   useEffect(() => {
     void refresh();

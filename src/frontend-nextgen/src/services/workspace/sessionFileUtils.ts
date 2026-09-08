@@ -1,3 +1,4 @@
+import { isSameHumanIdentity, type AuthenticatedUserName } from '@/domain/userIdentity';
 import type { SessionFileActorKind } from '@/services/backendApi/collaboration/sessionFileController';
 
 /** 允许上传的扩展名白名单。 */
@@ -212,9 +213,19 @@ export interface OwnerNameSource {
 export function resolveOwnerDisplayName(
   owner: { actor_kind?: SessionFileActorKind; actor_id?: string } | null | undefined,
   participants: readonly OwnerNameSource[] | undefined,
+  authenticatedUser?: AuthenticatedUserName | null,
 ): string {
   if (!owner) return '--';
   const rawId = owner.actor_id || '';
+  if (
+    rawId &&
+    owner.actor_kind === 'human' &&
+    authenticatedUser &&
+    isSameHumanIdentity(rawId, authenticatedUser.userId, 'human') &&
+    authenticatedUser.name?.trim()
+  ) {
+    return authenticatedUser.name.trim();
+  }
   if (rawId && participants?.length) {
     const matched = participants.find(
       (p) => (p.actorId && p.actorId === rawId) || (p.id && p.id === rawId) || (p.botUuid && p.botUuid === rawId),
