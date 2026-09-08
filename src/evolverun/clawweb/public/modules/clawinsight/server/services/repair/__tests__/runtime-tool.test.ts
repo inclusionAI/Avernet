@@ -268,7 +268,7 @@ describe("RepairRuntimeTool", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("routes a legacy ARCA target through the injected owner-relay transport", async () => {
+  it("routes a legacy ARCA target through the injected server transport", async () => {
     const execute = vi.fn(async () => ({
       status: "success" as const,
       exitCode: 0,
@@ -281,7 +281,6 @@ describe("RepairRuntimeTool", () => {
     await expect(tool.inspect(
       runtimeContext("arca"),
       { operation: "process_list", pattern: "openclaw" },
-      { Cookie: "SESSION=owner", "x-user-id": "user-001" },
     )).resolves.toMatchObject({
       status: "success",
       operation: "process_list",
@@ -292,7 +291,6 @@ describe("RepairRuntimeTool", () => {
       environment: "pre",
       bindingId: "binding-001",
       sandboxId: "ARCA-SANDBOX-123",
-      authHeaders: { Cookie: "SESSION=owner", "x-user-id": "user-001" },
     }));
   });
 });

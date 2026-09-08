@@ -5064,7 +5064,7 @@ describe("RepairTaskService execution contract", () => {
       errorCode: "repair_ocb_operation_retired",
     });
   });
-  it("keeps a legacy ARCA runtime inspection pending until the Owner page relays its identity", async () => {
+  it("executes a legacy ARCA runtime inspection on the server without browser identity", async () => {
     const arcaTarget: RepairTarget = {
       ...target(),
       provider: "arca",
@@ -5074,48 +5074,27 @@ describe("RepairTaskService execution contract", () => {
     harness.resolveTarget.mockResolvedValue(arcaTarget);
     const created = await createTask({ diagnosticMode: "deep" });
 
-    const pending = await harness.service.inspectRuntime(created.identity, {
+    const inspected = await harness.service.inspectRuntime(created.identity, {
       clientRequestId: "arca-runtime-read-1",
       purpose: "读取旧 ARCA 容器中的运行进程",
       operation: "process_list",
       pattern: "openclaw",
     });
-    expect(pending).toMatchObject({
-      toolName: "arca_read",
-      operation: "process_list",
-      status: "pending",
-      requiresBrowserRelay: true,
-      targetVersion: 1,
-    });
-    expect(harness.inspectRuntime).not.toHaveBeenCalled();
-
-    await expect(harness.service.fulfillToolCall({
-      actorUserId: "shared-viewer",
-      authHeaders: { Cookie: "SSO=wrong", "x-user-id": "shared-viewer" },
-      taskId: created.taskId,
-      toolCallId: String(pending.toolCallId),
-    })).rejects.toMatchObject({ status: 403, code: "repair_task_forbidden" });
-
-    const fulfilled = await harness.service.fulfillToolCall({
-      actorUserId: ACTOR,
-      authHeaders: { Cookie: "SSO=owner", "x-user-id": ACTOR },
-      taskId: created.taskId,
-      toolCallId: String(pending.toolCallId),
-    });
-    expect(fulfilled).toMatchObject({
-      toolCallId: pending.toolCallId,
-      status: "succeeded",
-      requiresBrowserRelay: false,
+    expect(inspected).toMatchObject({
+      status: "success",
     });
     expect(harness.inspectRuntime).toHaveBeenCalledWith(
       expect.objectContaining({ target: arcaTarget, runtimeTargetVersion: 1 }),
       { operation: "process_list", pattern: "openclaw" },
-      { Cookie: "SSO=owner", "x-user-id": ACTOR },
     );
-    expect(JSON.stringify(await harness.repairRepo.listToolCalls(created.taskId))).not.toContain("SSO=owner");
+    await expect(harness.repairRepo.findToolCall(String(inspected.toolCallId))).resolves.toMatchObject({
+      toolName: "arca_read",
+      operation: "process_list",
+      status: "succeeded",
+    });
   });
 
-  it("relays an approved legacy ARCA container action without accepting a replacement command", async () => {
+  it("executes an approved legacy ARCA container action on the server", async () => {
     const arcaTarget: RepairTarget = {
       ...target(),
       provider: "arca",
@@ -5131,33 +5110,24 @@ describe("RepairTaskService execution contract", () => {
       executionId: applyConfig.execution.executionId,
     };
 
-    const pending = await harness.service.applyAction(applyIdentity, {
+    const applied = await harness.service.applyAction(applyIdentity, {
       clientRequestId: "arca-approved-write-1",
       purpose: "执行已批准的旧 ARCA 容器修复动作",
       actionId: "restart-gateway",
     });
-    expect(pending).toMatchObject({
-      toolName: "arca_write",
-      status: "pending",
-      actionId: "restart-gateway",
-      requiresBrowserRelay: true,
-    });
-    expect(harness.applyApprovedAction).not.toHaveBeenCalled();
-
-    await harness.service.fulfillToolCall({
-      actorUserId: ACTOR,
-      authHeaders: { Cookie: "SSO=owner", "x-user-id": ACTOR },
-      taskId: created.taskId,
-      toolCallId: String(pending.toolCallId),
-    });
+    expect(applied).toMatchObject({ status: "success" });
     expect(harness.applyApprovedAction).toHaveBeenCalledWith(
       expect.objectContaining({ target: arcaTarget, phase: "repair_apply" }),
       expect.objectContaining({
         actionId: "restart-gateway",
         command: "supervisorctl restart gateway",
       }),
-      { Cookie: "SSO=owner", "x-user-id": ACTOR },
     );
+    await expect(harness.repairRepo.findToolCall(String(applied.toolCallId))).resolves.toMatchObject({
+      toolName: "arca_write",
+      actionId: "restart-gateway",
+      status: "succeeded",
+    });
   });
 
   it("keeps an approved restart request idempotent when the server recomputes its context deadline", async () => {
