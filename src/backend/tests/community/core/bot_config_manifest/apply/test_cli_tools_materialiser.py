@@ -413,3 +413,52 @@ async def test_a_pinned_tool_still_plans_unchanged_on_a_repeat_apply() -> None:
     await _apply(mat, ctx, [_entry()])
     _, plan, _ = await _apply(mat, ctx, [_entry()])
     assert plan.is_noop
+
+
+@pytest.mark.asyncio
+async def test_two_revisions_of_a_git_tool_do_not_share_one_object_key() -> None:
+    """The review's P1, closed.
+
+    The store's key embeds a fingerprint of the digest precisely so a new
+    version never overwrites the object a surviving row still points at. A
+    git-sourced declaration carries no digest — the commit SHA is its pin — and
+    an empty digest fingerprints to the constant "0", so every revision of one
+    tool landed on one key. A rejected delivery would then roll the row back to
+    bytes that had already been overwritten, publishing a binary the engine
+    refused. The acquired bytes are hashed instead.
+    """
+    first, oss, _, _ = _service(content=_TOOL)
+    mat = CliToolsMaterialiser(first)
+    entries = [{"name": "mycli", "from": "tools", "subpath": "mycli"}]
+    await _apply(mat, _git_ctx(), entries)
+
+    other = elf(payload=b"a-different-build".ljust(64, b"\x00"))
+    second, _, _, _ = _service(content=other)
+    # Same store, so the two revisions compete for the same keys if they can.
+    second._store = first._store
+    await _apply(CliToolsMaterialiser(second), _git_ctx(), entries)
+
+    keys = [k for k in first._store._oss.puts if "mycli" in k]
+    assert len(keys) == 2
+    assert keys[0] != keys[1], "two different binaries wrote to one object key"
+    assert not any(k.endswith(".0") for k in keys), (
+        "an empty digest fingerprinted to the constant key"
+    )
+    # And both objects survive, so a rollback has real bytes to point back at.
+    assert len({first._store._oss.objects[k] for k in keys}) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_git_tool_records_a_real_content_digest() -> None:
+    """The row's digest is what convergence, the store key and the audit all
+    read. Empty is not a value any of them can use."""
+    service, repo, _, _ = _service()
+    await _apply(
+        CliToolsMaterialiser(service),
+        _git_ctx(),
+        [{"name": "mycli", "from": "tools", "subpath": "mycli"}],
+    )
+    row = service.get(context_for(_git_ctx()), "mycli")
+    assert row is not None
+    assert row.digest.startswith("sha256:")
+    assert len(row.digest) == len("sha256:") + 64

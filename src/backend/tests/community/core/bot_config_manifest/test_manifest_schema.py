@@ -1119,3 +1119,113 @@ manifest:
       from: s
 """
     assert ("sources.s.nonsense", "unknown_field") in _reject(document)
+
+
+# ── subpath must have something to select within ───────────────────────────
+#
+# Found by review. On `git` a subpath always means something — the source
+# delivers a tree. On `oss` it selects a member of an ARCHIVE, so where no
+# archive is unpacked it configures nothing, which is the exact failure this
+# change exists to remove. Refused at PUT rather than ignored at apply.
+
+_OSS_SOURCE = """schema_version: 1
+sources:
+  artifacts:
+    protocol: oss
+    url: https://artifacts.example.com/tools/pkg.zip
+manifest:
+"""
+
+
+def test_subpath_on_an_oss_resources_file_entry_is_refused():
+    """A file entry unpacks nothing, so the whole object would land at `path`
+    and the subpath would silently do nothing."""
+    document = _OSS_SOURCE + """  resources:
+    - path: data/pricing.csv
+      from: artifacts
+      subpath: reference/pricing.csv
+"""
+    assert (
+        "manifest.resources[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_on_an_oss_identity_entry_is_refused():
+    """An identity file is one text body and is never an archive."""
+    document = _OSS_SOURCE + """  identity:
+    - type: SOUL.md
+      from: artifacts
+      subpath: bots/soul.md
+"""
+    assert (
+        "manifest.identity[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_on_an_oss_cli_tool_without_unpack_is_refused_at_put():
+    """The acquisition refused this already — but only once the apply was
+    running, which is the surface accepting what apply rejects."""
+    document = _OSS_SOURCE + f"""  cli_tools:
+    - name: rg
+      from: artifacts
+      subpath: bin/rg
+      digest: "{_DIGEST}"
+"""
+    assert (
+        "manifest.cli_tools[0].subpath",
+        "subpath_without_archive",
+    ) in _reject(document)
+
+
+def test_subpath_is_accepted_wherever_an_archive_is_actually_unpacked():
+    """The other half of the rule, so it narrows nothing it should not."""
+    # cli_tools with an explicit unpack
+    _accept(_OSS_SOURCE + f"""  cli_tools:
+    - name: rg
+      from: artifacts
+      subpath: bin/rg
+      unpack: zip
+      digest: "{_DIGEST}"
+""")
+    # skills always unpack — a skill IS a package
+    _accept(_OSS_SOURCE + f"""  skills:
+    - name: qc
+      from: artifacts
+      subpath: quality-check/
+      digest: "{_DIGEST}"
+""")
+    # a resources directory entry over oss requires unpack, so it has one
+    _accept(_OSS_SOURCE + """  resources:
+    - path: data/kb/
+      from: artifacts
+      subpath: kb/
+      unpack: zip
+""")
+
+
+@pytest.mark.parametrize(
+    ("category", "entry"),
+    [
+        ("identity", "    - type: SOUL.md\n      from: repo\n      subpath: soul.md\n"),
+        (
+            "resources",
+            "    - path: data/faq.csv\n      from: repo\n      subpath: kb/faq.csv\n",
+        ),
+        ("skills", "    - name: qc\n      from: repo\n      subpath: skills/qc/\n"),
+        ("cli_tools", "    - name: rg\n      from: repo\n      subpath: bin/rg\n"),
+    ],
+)
+def test_subpath_is_always_meaningful_on_a_git_source(category, entry):
+    """Git delivers a tree, so there is always something to select within —
+    in every category, with no archive and no `unpack` anywhere."""
+    _accept(
+        "schema_version: 1\n"
+        "sources:\n"
+        "  repo:\n"
+        "    protocol: git\n"
+        "    url: https://code.example.com/team/content.git\n"
+        "    ref: v1.2.0\n"
+        f"manifest:\n  {category}:\n{entry}"
+    )

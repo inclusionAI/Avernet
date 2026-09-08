@@ -81,6 +81,9 @@ class _StubEntryFetcher:
         #: repository url → the whole tree it delivers, path → bytes.
         self.git_trees = git_trees or {}
         self.moved_from = moved_from
+        #: When set, ``fetch_declared`` answers with it verbatim — the way to
+        #: stand in for what ``_git_keep_last`` hands back.
+        self.declared_override = None
 
     def fetch(
         self,
@@ -129,6 +132,8 @@ class _StubEntryFetcher:
         get right. Anything else falls through to the URL road's ``fetch``,
         so every existing case still exercises the code it always did.
         """
+        if getattr(self, "declared_override", None) is not None:
+            return self.declared_override
         decl: dict[str, Any] | None = None
         if isinstance(entry.get("from"), str):
             sources = getattr(ctx, "source_session", None)
@@ -1660,3 +1665,103 @@ def test_an_undeclared_from_fails_the_entry_not_the_process():
     )
     assert not resolved.ok
     assert "nowhere" in resolved.failures[0].reason
+
+
+# ── keep_last for a git-delivered tree (review finding) ────────────────────
+
+
+def test_the_canonical_tree_form_round_trips():
+    """`keep_last` is the DEFAULT, and it promises the bot keeps running what
+    it has. A stored form with no decoder cannot keep that promise, so the
+    canonical bytes are reversible and self-describing."""
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
+        _canonical_tree_bytes,
+        _decode_tree_bytes,
+    )
+
+    members = [
+        ("faq.csv", b"q,a\n"),
+        ("deep/nested/notes.md", b"# nested\n"),
+        # A payload containing the framing characters, and an empty file: both
+        # are why the encoding is length-prefixed rather than delimiter-joined.
+        ("odd:name.txt", b"12:not-a-frame\n"),
+        ("empty", b""),
+    ]
+    blob = _canonical_tree_bytes(members)
+    assert _decode_tree_bytes(blob) == sorted(members)
+
+
+def test_bytes_that_are_not_a_canonical_tree_decode_to_none():
+    """`None` is an answer, not a fault: the caller is asking "tree or
+    archive?", and a truncated receipt must not half-deliver a tree."""
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
+        _canonical_tree_bytes,
+        _decode_tree_bytes,
+    )
+
+    assert _decode_tree_bytes(b"PK\x03\x04 a real zip") is None
+    assert _decode_tree_bytes(b"") is None
+    truncated = _canonical_tree_bytes([("a.md", b"0123456789")])[:-4]
+    assert _decode_tree_bytes(truncated) is None
+
+
+def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
+    """The review's P2, closed.
+
+    A transient git outage used to fail the whole resources category with
+    "a directory entry fetched over 'oss' must declare 'unpack'" — a message
+    about a field a git source may not even carry. The stored copy now comes
+    back as the tree it was.
+    """
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
+        _canonical_tree_bytes,
+    )
+
+    tree = [("faq.csv", b"q,a\n"), ("deep/notes.md", b"# nested\n")]
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher()
+    # What `_git_keep_last` hands back: the baseline receipt's bytes, carrying
+    # the fallback reason the report must state (§9.6).
+    stub.declared_override = FetchedEntry(
+        content=_canonical_tree_bytes(tree),
+        digest="sha256:stub",
+        from_store=True,
+        source_url="git+https://code.example.com/team/content.git@abc/kb",
+        fallback_reason=(
+            "delivered from the platform's stored copy (keep_last): "
+            "the git fetch failed"
+        ),
+    )
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert resolved.ok, resolved.failures
+    assert resolved.intents[0].value is _DECLARED_TREE
+    assert {i.identity: i.value for i in resolved.intents[1:]} == {
+        "data/kb/deep/notes.md": b"# nested\n",
+        "data/kb/faq.csv": b"q,a\n",
+    }
+    # The report must say the source was tried and the stored copy stood in.
+    assert all("keep_last" in i.note for i in resolved.intents[1:])
+
+
+def test_a_real_archive_still_takes_the_unpack_road():
+    """Recognising a stored tree must not swallow the archive case: an oss
+    directory entry with a genuine zip goes on unpacking exactly as before."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(_tgz({"kb/faq.csv": b"q,a\n"}))
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            make_context(engine_type="claude_code"),
+            [{
+                "path": "data/kb/",
+                "source": "https://cdn.example.com/kb.tgz",
+                "unpack": "tar.gz",
+                "strip_components": 1,
+            }],
+        )
+    )
+    assert resolved.ok, resolved.failures
+    assert "data/kb/faq.csv" in {i.identity for i in resolved.intents}

@@ -196,6 +196,19 @@ class CliToolService:
         fetched_at = time.monotonic()
 
         md5 = hashlib.md5(data).hexdigest()
+        # The digest the STORE and the row are keyed by, which is not always
+        # the declared one. A git-sourced declaration carries no digest — the
+        # commit SHA is its pin — and the store's key embeds a fingerprint of
+        # this value precisely so a new version never overwrites the object a
+        # surviving row still points at. An empty digest fingerprints to a
+        # constant, so every revision of one tool would land on one key: a
+        # rejected delivery would then roll the row back to bytes that had
+        # already been overwritten. Hashing the acquired bytes restores the
+        # property for every road — the fetch pipeline has already proved a
+        # *declared* digest, so this only ever fills in the missing case.
+        content_digest = decl.digest or (
+            "sha256:" + hashlib.sha256(data).hexdigest()
+        )
         # Read before the write: a replacement must know which object the
         # surviving row points at, so a failed delivery can discard only what
         # nothing references — and, since rev 8, so the row can be *restored*
@@ -206,7 +219,7 @@ class CliToolService:
                 self._store.put,
                 ctx.scope,
                 name=decl.name,
-                digest=decl.digest,
+                digest=content_digest,
                 data=data,
             )
         except CliToolStoreError as error:
@@ -227,7 +240,7 @@ class CliToolService:
                 bot_id=ctx.bot_id,
                 name=decl.name,
                 source=decl.source_url,
-                digest=decl.digest,
+                digest=content_digest,
                 subpath=decl.subpath,
                 md5=md5,
                 size_bytes=len(data),

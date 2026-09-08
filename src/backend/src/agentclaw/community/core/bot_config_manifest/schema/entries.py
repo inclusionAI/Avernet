@@ -517,6 +517,42 @@ def check_unpack(
             )
 
 
+def check_source_subpath(
+    ctx: Context,
+    location: str,
+    entry: dict[str, Any],
+    *,
+    source: EntrySource,
+    archive_expected: bool,
+) -> None:
+    """``subpath`` must have something to select *within*.
+
+    On ``git`` it always does: the source delivers a tree and ``subpath`` names
+    a path in it. On ``oss`` the source delivers one object, so ``subpath``
+    selects a member of an **archive** — and where no archive is unpacked there
+    is nothing for it to select. Writing it there configures nothing.
+
+    That is the exact failure this change exists to remove, so it is refused at
+    ``PUT`` rather than ignored at apply. Two shapes reached it: a resources or
+    identity entry naming one object (no archive at all), and a ``cli_tools``
+    entry with no ``unpack`` — which the acquisition already refused, but only
+    once the apply was running.
+    """
+    if "subpath" not in entry:
+        return
+    if source.kind is not SourceKind.OSS or archive_expected:
+        return
+    ctx.add(
+        f"{location}.subpath",
+        "subpath_without_archive",
+        "'subpath' selects a member of an archive, and this entry unpacks "
+        "none — an 'oss' source delivers one object, addressed by the source's "
+        "own 'url'. Declare 'unpack' if the object is an archive, point the "
+        "source's 'url' at the object you want, or use 'protocol: git', where "
+        "'subpath' selects within the repository's tree",
+    )
+
+
 def validate_mcp_entry(ctx: Context, location: str, entry: dict[str, Any]) -> None:
     """An MCP entry is a registry reference; it never carries a credential.
 
@@ -548,12 +584,12 @@ def validate_resource_entry(
     # Git carries directory structure natively, so a tree needs no packaging
     # (schema §2.2); only an object store does, because one HTTPS GET fetches
     # one object and a tree has to travel inside it.
+    archive_expected = is_directory and source.kind is SourceKind.OSS
     check_unpack(
-        ctx,
-        location,
-        entry,
-        source=source,
-        archive_expected=is_directory and source.kind is SourceKind.OSS,
+        ctx, location, entry, source=source, archive_expected=archive_expected
+    )
+    check_source_subpath(
+        ctx, location, entry, source=source, archive_expected=archive_expected
     )
     if is_directory and source.kind is SourceKind.OSS and "unpack" not in entry:
         ctx.add(
@@ -574,6 +610,11 @@ def validate_skill_entry(ctx: Context, location: str, entry: dict[str, Any]) -> 
     usable = check_name(ctx, f"{location}.name", name, what="a skill name")
     source = resolve_source(ctx, location, entry, ManifestCategory.SKILLS)
     check_unpack(ctx, location, entry, source=source, archive_expected=True)
+    # A skills entry over ``oss`` always unpacks — a skill IS a package — so
+    # ``subpath`` always has an archive to select within.
+    check_source_subpath(
+        ctx, location, entry, source=source, archive_expected=True
+    )
     # Two rules used to live here and now do not. That a skill cannot be inline
     # text is the ``(skills, content)`` cell of the support matrix; that a skill
     # fetched over ``oss`` must carry a digest is ``DIGEST_REQUIRED``. Both are
@@ -608,7 +649,12 @@ def validate_identity_entry(
             "writes it and never removes it, so a manifest declaring it could "
             "never converge",
         )
-    resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
+    source = resolve_source(ctx, location, entry, ManifestCategory.IDENTITY)
+    # An identity file is one text body and is never an archive, so on ``oss``
+    # there is nothing a ``subpath`` could select within.
+    check_source_subpath(
+        ctx, location, entry, source=source, archive_expected=False
+    )
 
 
 def validate_cli_tool_entry(
@@ -630,6 +676,12 @@ def validate_cli_tool_entry(
     name_ok = check_name(ctx, f"{location}.name", name, what="a tool name")
     source = resolve_source(ctx, location, entry, ManifestCategory.CLI_TOOLS)
     check_unpack(
+        ctx, location, entry, source=source, archive_expected="unpack" in entry
+    )
+    # The acquisition refuses a subpath with no 'unpack' — but only once the
+    # apply is running. Asked here instead: the surface must not accept what
+    # apply will reject.
+    check_source_subpath(
         ctx, location, entry, source=source, archive_expected="unpack" in entry
     )
     if "version" in entry and not isinstance(entry["version"], str):

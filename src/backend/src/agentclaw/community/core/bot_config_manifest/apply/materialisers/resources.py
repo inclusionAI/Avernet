@@ -170,7 +170,21 @@ class ResourcesMaterialiser(Materialiser):
                 except EntryFetchError as exc:
                     failures.append(ResolveFailure(path, exc.reason))
                     continue
-                if isinstance(fetched, GitEntrySource):
+                stored_tree = (
+                    None
+                    if isinstance(fetched, GitEntrySource)
+                    else _decode_tree_bytes(fetched.content)
+                )
+                if stored_tree is not None:
+                    # ``keep_last`` standing in for a failed git fetch. The
+                    # receipt holds the tree this entry last delivered, so the
+                    # members come straight back — without this the entry took
+                    # the archive road, was told to declare an 'unpack' that a
+                    # git source may not carry, and a transient outage failed
+                    # the whole category instead of keeping what the bot has.
+                    members = stored_tree
+                    note = fetched.fallback_reason
+                elif isinstance(fetched, GitEntrySource):
                     # A repository hands over a real tree, so there is no
                     # packaging step: ``files()`` returns exactly the
                     # ``(relative path, bytes)`` pairs ``_unpack_members``
@@ -601,25 +615,69 @@ class ResourcesMaterialiser(Materialiser):
         return tuple(results)
 
 
+#: Marks the stored form of a git-delivered tree. Self-describing on purpose:
+#: ``keep_last`` reads a receipt back as plain bytes with no idea what shape
+#: they are, and "guess from the URL" is not identification. The version digit
+#: is what lets the framing change later without a stored copy being decoded
+#: under the wrong rules.
+_TREE_MAGIC = b"acm-tree-v1\n"
+
+
 def _canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
     """One deterministic byte string standing for a whole delivered tree.
 
-    Its only job is to be a stable content address for the store: the same tree
-    must hash the same on every apply, and two different trees must not collide.
-    So members are sorted by path and each is framed with its path, its length
-    and its bytes — length-prefixed rather than delimiter-joined, because a
-    delimiter is something a *path or a payload* could contain, and a tree that
-    could be made to hash as another tree is a receipt that proves nothing.
+    Two jobs, and the second is why it is **reversible**:
 
-    Never delivered to a bot and never read back: the members themselves are
-    the intents. This is the audit's copy.
+    1. A stable content address for the store — the same tree must hash the
+       same on every apply, and two different trees must not collide. Members
+       are sorted by path and each is framed with its path, its length and its
+       bytes: length-prefixed rather than delimiter-joined, because a delimiter
+       is something a *path or a payload* could contain, and a tree that could
+       be made to hash as another tree is a receipt that proves nothing.
+    2. The bytes ``keep_last`` stands in with when a later git fetch fails.
+       ``on_fetch_failure: keep_last`` is the default and it promises the bot
+       keeps running what it has — a promise an unreadable receipt cannot keep.
+
+    Never delivered to a bot as-is: :func:`_decode_tree_bytes` turns it back
+    into the members, and those are the intents.
     """
-    parts: list[bytes] = []
+    parts: list[bytes] = [_TREE_MAGIC]
     for rel, data in sorted(members):
         encoded = rel.encode("utf-8")
         parts.append(b"%d:%s%d:" % (len(encoded), encoded, len(data)))
         parts.append(data)
     return b"".join(parts)
+
+
+def _decode_tree_bytes(blob: bytes) -> list[tuple[str, bytes]] | None:
+    """The members back out, or ``None`` when these are not a canonical tree.
+
+    ``None`` rather than an exception: the caller is asking "is this a stored
+    git tree or an archive?", and a shape it does not recognise is an answer,
+    not a fault. Truncation and a bad length are the same answer — a receipt
+    that does not decode cleanly must not half-deliver a tree.
+    """
+    if not blob.startswith(_TREE_MAGIC):
+        return None
+    members: list[tuple[str, bytes]] = []
+    at = len(_TREE_MAGIC)
+    try:
+        while at < len(blob):
+            colon = blob.index(b":", at)
+            name_len = int(blob[at:colon])
+            at = colon + 1
+            name = blob[at : at + name_len].decode("utf-8")
+            at += name_len
+            colon = blob.index(b":", at)
+            size = int(blob[at:colon])
+            at = colon + 1
+            if at + size > len(blob):
+                return None
+            members.append((name, blob[at : at + size]))
+            at += size
+    except (ValueError, UnicodeDecodeError):
+        return None
+    return members
 
 
 def _delivery_refusal(identity: str, data: bytes) -> str | None:
