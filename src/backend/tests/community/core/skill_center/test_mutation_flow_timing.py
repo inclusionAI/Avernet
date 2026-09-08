@@ -223,6 +223,7 @@ async def test_apply_plan_validates_retired_mappings_before_runtime_write() -> N
     engine = _Engine()
     projector = object.__new__(BotRuntimeProjector)
     projector._registry = _Registry(engine)
+    projector._factory = object()
     plan = SimpleNamespace(
         engine="openclaw",
         bot_id="bot-1",
