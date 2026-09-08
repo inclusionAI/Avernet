@@ -286,6 +286,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         bot_id: str,
         entity_id: Optional[str] = None,
         engine_type: Optional[str] = None,
+        device_sync: DeviceSync | None = None,
     ) -> dict[str, Any]:
         """把一批已备齐的 MCP 详情推送到**同一个** bot 的设备。
 
@@ -300,6 +301,8 @@ class MCPSyncService(MCPSyncServiceProtocol):
             user_id: 用户 ID。仅用于 ``build_mcp_sync_payload`` 取该用户的 MCP
                 配置(api_key 等),是 per-user 维度。
             mcp_entries: 待推送的 MCP 详情列表;caller 已备齐,本方法不再回查。
+            device_sync: 本次投影已解析的目标；提供时不再解析或切换设备。
+                省略时保持独立调用的原行为。禁止跨请求复用。
             bot_id: 目标 bot ID——列表内所有 MCP 共用。
             entity_id: bot 所属实体 ID,缺省回退到 ``user_id``。
             engine_type: 引擎类型,默认 ``openclaw``。
@@ -313,19 +316,19 @@ class MCPSyncService(MCPSyncServiceProtocol):
             # 无 MCP 可投递:不必解析设备。allow-list 的声明是 caller 的事。
             return {"success": True}
 
-        try:
-            # resolve_for_bot 同步且内含阻塞 ws-info HTTP + DB 查询,放线程池,
-            # 否则会占住 event loop。
-            ctx = await asyncio.to_thread(
-                self._resolver_provider().resolve_for_bot,
-                bot_id,
-                entity_id or user_id,
-            )
-        except (DeviceNotBoundError, UnknownProviderError):
-            error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
-            logger.error("[MCPSyncService] %s", error)
-            return {"success": False, "error": error}
-        plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+        if device_sync is None:
+            try:
+                ctx = await asyncio.to_thread(
+                    self._resolver_provider().resolve_for_bot,
+                    bot_id,
+                    entity_id or user_id,
+                )
+            except (DeviceNotBoundError, UnknownProviderError):
+                error = f"bot={_bot} 缺少设备连接信息，无法推送 MCP 配置"
+                logger.error("[MCPSyncService] %s", error)
+                return {"success": False, "error": error}
+            device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
+        plugin = device_sync
 
         _successes, failures = await fan_out_mcp_details(
             mcps=mcp_entries,
@@ -357,6 +360,7 @@ class MCPSyncService(MCPSyncServiceProtocol):
         server_code: str,
         bot_id: str,
         user_id: str,
+        device_sync: DeviceSync | None = None,
     ) -> dict[str, Any]:
         """从指定 bot 的设备上移除单个 MCP。
 
@@ -368,17 +372,21 @@ class MCPSyncService(MCPSyncServiceProtocol):
             bot_id: 目标 bot ID。
             user_id: 用户 ID。
 
+            device_sync: 本次投影的已解析目标；省略时自行解析，不跨请求缓存。
+
         Returns:
             ``{"success": bool, "error": str|None}`` 格式的结果字典。
         """
         _bot = bot_id or "unknown"
-        try:
-            ctx = self._resolver_provider().resolve_for_bot(bot_id, user_id)
-        except (DeviceNotBoundError, UnknownProviderError):
-            error = f"bot={_bot} 缺少设备连接信息，无法移除 MCP {server_code}"
-            logger.error("[MCPSyncService] %s", error)
-            return {"success": False, "error": error}
-        plugin = self._device_sync_dispatcher_provider().dispatch(ctx)
+        if device_sync is None:
+            try:
+                ctx = self._resolver_provider().resolve_for_bot(bot_id, user_id)
+            except (DeviceNotBoundError, UnknownProviderError):
+                error = f"bot={_bot} 缺少设备连接信息，无法移除 MCP {server_code}"
+                logger.error("[MCPSyncService] %s", error)
+                return {"success": False, "error": error}
+            device_sync = self._device_sync_dispatcher_provider().dispatch(ctx)
+        plugin = device_sync
 
         # teclaw 在 sync_remove_mcp 内部重组并投递整产物（compose 反映删除后的状态），
         # arca/baas 走单条移除请求——由插件按容器类型决定。

@@ -80,6 +80,8 @@ Bot 定位必须携带 `owner_id + bot_id`，并保持 Repository 的 tenant/env
 
 命令通过 `ProjectionScope` 表达变化范围；Skill claim/release 携带 MCP dependency candidates，由投影端结合完整有效集合过滤。不要把每次操作都扩大为 `everything()`。启动恢复等确实需要完整重投影的入口可使用它。
 
+一次 MCP 投影通过 Reader `active_capabilities` 同步一次 Installation，返回精确 Skill 与 installed MCP 的 `BotCapabilitySnapshot`，供 Skill Plan 和唯一 Effective MCP collector 共用。快照不包括 Policy MCP、不保证跨表事务快照隔离，不能跨变更、重试或请求缓存；Skill-only 仍使用独立 Skill 读取。Default/exclusion 与完整回刷模式均保留。MCP 配置、移除和完整白名单下发在同一次 `project_mcps` 内复用一个解析后的 `DeviceSync`；不改变下发顺序、失败处理、POST-conflict-update 或 Passport 语义。
+
 ## 4. Local、Repo、Center 的内容身份
 
 - `local://...`：Bot-owned 可变内容，由 Local upload/delete 服务及文件适配器管理；上传协议保留 raw ZIP，同时提供 multipart `files + file_paths` 文件夹上传。GET Bot Skills 的 `source=LOCAL` 仅列出该 Bot 上传资产，`active` 再筛选 Desired State；省略 source 保留完整可达资产列表。

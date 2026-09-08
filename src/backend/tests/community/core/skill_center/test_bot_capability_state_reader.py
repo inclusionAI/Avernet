@@ -148,6 +148,19 @@ def test_the_implementation_satisfies_the_public_protocol():
     assert isinstance(reader, BotCapabilityStateReaderProtocol)
 
 
+@pytest.mark.parametrize("default_sync_only", [False, True])
+def test_projection_snapshot_synchronizes_once_and_is_not_cached(default_sync_only):
+    reader, repository, pool, bots, versions = _reader(default_sync_only=default_sync_only)
+    first = reader.active_capabilities(bot_id="bot-1", owner_id="owner")
+    assert first.skills[0].skill_id == 1
+    assert first.installed_mcp_server_codes == frozenset({"mcp.weather"})
+    assert len(repository.flush_calls) + len(repository.default_sync_calls) == 1
+    assert len(pool.reads) == len(versions.calls) == len(repository.mcp_reads) == 1
+    second = reader.active_capabilities(bot_id="bot-1", owner_id="owner")
+    assert second == first and second is not first
+    assert len(repository.flush_calls) + len(repository.default_sync_calls) == 2
+
+
 def test_skill_read_flushes_then_answers_from_the_installation_join():
     reader, repository, pool_skills, bots, versions = _reader()
 

@@ -8,7 +8,13 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class MCPSyncServiceProtocol(Protocol):
-    """Service API for syncing MCP details to bot devices."""
+    """Service API for syncing MCP details to bot devices.
+
+    ``sync_mcp_details_for_bot`` and ``remove_mcp_detail`` accept an optional
+    ``device_sync``: a caller-resolved DeviceSync for the same Bot and current
+    projection only. When supplied, do not re-resolve the target. Omission
+    retains standalone resolution. Never cache it across requests/retries.
+    """
 
     async def sync_mcp_details(self, *args: Any, **kwargs: Any) -> Any: ...
 
