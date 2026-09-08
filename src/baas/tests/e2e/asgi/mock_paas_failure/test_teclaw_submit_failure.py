@@ -30,8 +30,8 @@ from secbaas.community.api.device_manage import ErrorCode, PaasError
 from secbaas.community.plugins.bot.teclaw import StubTeClawBotPlugin
 from tests.e2e.asgi.conftest import (
     ASYNC_POLL_TIMEOUT,
-    APITestHelper,
     TEMPLATE_TECLAW,
+    APITestHelper,
     approve_publish,
     create_test_bot,
     get_devices_from_progress,
@@ -61,9 +61,7 @@ class TestTeClawSubmitFailure:
         monkeypatch: pytest.MonkeyPatch,
         unique_id: str,
     ) -> None:
-        monkeypatch.setattr(
-            StubTeClawBotPlugin, "create_bot", _raise_create_bot
-        )
+        monkeypatch.setattr(StubTeClawBotPlugin, "create_bot", _raise_create_bot)
 
         bot = await create_test_bot(
             api, f"teclaw-submit-fail-{unique_id}", template_uuid=TEMPLATE_TECLAW
@@ -74,7 +72,10 @@ class TestTeClawSubmitFailure:
             assert code == 200, f"Approve failed: {code}"
 
             status = await wait_for_publish_status(
-                api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=ASYNC_POLL_TIMEOUT
+                api,
+                publish_id,
+                {"SUCCESS", "FAILED"},
+                timeout_seconds=ASYNC_POLL_TIMEOUT,
             )
             assert status == "FAILED", f"Expected FAILED, got {status}"
 
@@ -107,9 +108,7 @@ class TestTeClawSubmitFailureMultiDevice:
         monkeypatch: pytest.MonkeyPatch,
         unique_id: str,
     ) -> None:
-        monkeypatch.setattr(
-            StubTeClawBotPlugin, "create_bot", _raise_create_bot
-        )
+        monkeypatch.setattr(StubTeClawBotPlugin, "create_bot", _raise_create_bot)
 
         bot = await create_test_bot(
             api,
@@ -123,7 +122,10 @@ class TestTeClawSubmitFailureMultiDevice:
             assert code == 200, f"Approve failed: {code}"
 
             status = await wait_for_publish_status(
-                api, publish_id, {"SUCCESS", "FAILED"}, timeout_seconds=ASYNC_POLL_TIMEOUT
+                api,
+                publish_id,
+                {"SUCCESS", "FAILED"},
+                timeout_seconds=ASYNC_POLL_TIMEOUT,
             )
             assert status == "FAILED", f"Expected FAILED, got {status}"
 

@@ -1140,7 +1140,9 @@ class TestStartDeviceTeClawAsync:
             teclaw_bot_id="teclaw-bot-001",
         )
 
-        with patch(f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"):
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
             result = await service.start_device(
                 tenant="test-tenant",
                 device_uuid="DEVICE-test-001",
@@ -1176,7 +1178,9 @@ class TestStartDeviceTeClawAsync:
             teclaw_tpl
         )
 
-        with patch(f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"):
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
             result = await service.start_device(
                 tenant="test-tenant",
                 device_uuid="DEVICE-test-001",
@@ -1186,10 +1190,13 @@ class TestStartDeviceTeClawAsync:
         assert result.status == DeviceStatus.FAILED.value
 
     def test_resolve_teclaw_callback_url_raises_when_config_missing(self):
-        with patch(
-            f"{DS}.get_config_by_path", return_value=None
-        ), patch(f"{DS}.get_current_env", return_value="dev"):
-            with pytest.raises(ValueError, match="secbaas.callback.host.dev is not configured"):
+        with (
+            patch(f"{DS}.get_config_by_path", return_value=None),
+            patch(f"{DS}.get_current_env", return_value="dev"),
+        ):
+            with pytest.raises(
+                ValueError, match="secbaas.callback.host.dev is not configured"
+            ):
                 from secbaas.community.core.service.device_manage._device_service import (
                     _resolve_teclaw_callback_url,
                 )
@@ -3431,7 +3438,9 @@ class TestUpdateDeviceTeClawAsync:
             teclaw_tpl
         )
 
-        with patch(f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"):
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
             result = await service.update_device(
                 tenant="test-tenant",
                 device_uuid="DEVICE-test-001",
@@ -3481,7 +3490,9 @@ class TestUpdateDeviceTeClawAsync:
             teclaw_tpl
         )
 
-        with patch(f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"):
+        with patch(
+            f"{DS}._resolve_teclaw_callback_url", return_value="http://cb.test/cb"
+        ):
             with pytest.raises(ValueError, match="publish_id is required"):
                 await service.update_device(
                     tenant="test-tenant",

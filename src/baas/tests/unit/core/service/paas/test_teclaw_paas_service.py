@@ -443,9 +443,7 @@ class TestRestartDeviceAsync:
             tenant="t1",
             operator="op1",
         )
-        result = await service.restart_device(
-            "bot-abc123", callback_context=ctx
-        )
+        result = await service.restart_device("bot-abc123", callback_context=ctx)
 
         assert result is True
         mock_plugin.restart_bot.assert_awaited_once_with(

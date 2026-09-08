@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 from secbaas.community.api.device_manage import DeviceCallbackContext
+
 from ._types import (
     BotAsyncTaskResult,
     BotCreateResult,
