@@ -25,6 +25,7 @@ use bcs_service_api::{
     WorkbenchConnectCommand, WorkbenchSessionService, WorkbenchUseCaseError, Workspace,
 };
 use bcs_service_api::types::{MessageViewScope, OpeningMessage};
+use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
 
 #[tokio::test]
 async fn interaction_resolve_uses_current_exact_session_relationships() {
@@ -120,6 +121,42 @@ async fn interaction_resolve_rejects_absent_human_and_non_human_actor() {
 use bcs_group::{GroupConfig, GroupManagement, GroupStore};
 use bcs_test_support::NoopSystemMessageService;
 use tokio::sync::Mutex;
+
+#[derive(Default)]
+struct RecordingParticipantViewBindings {
+    begun: Mutex<Vec<(String, String)>>,
+    finished: Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait]
+impl ParticipantViewBindingPort for RecordingParticipantViewBindings {
+    async fn begin_scope_change(
+        &self,
+        scope_id: &str,
+        human_actor_id: &str,
+    ) -> ServiceResult<ParticipantViewScopeChangeLease> {
+        self.begun
+            .lock()
+            .await
+            .push((scope_id.to_string(), human_actor_id.to_string()));
+        Ok(ParticipantViewScopeChangeLease {
+            scope_id: scope_id.to_string(),
+            human_actor_id: human_actor_id.to_string(),
+            lease_id: 1,
+        })
+    }
+
+    async fn finish_scope_change(
+        &self,
+        lease: ParticipantViewScopeChangeLease,
+    ) -> ServiceResult<()> {
+        self.finished
+            .lock()
+            .await
+            .push((lease.scope_id, lease.human_actor_id));
+        Ok(())
+    }
+}
 
 struct InitialRunSystemMessage;
 
@@ -1974,7 +2011,10 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
     fixture
         .relation
         .insert_creator("human_alice", "member", "dev");
-    let service = fixture.service_with_limits(5, 10, 10);
+    let participant_view_bindings = Arc::new(RecordingParticipantViewBindings::default());
+    let service = fixture
+        .service_with_limits(5, 10, 10)
+        .with_participant_view_bindings(participant_view_bindings.clone());
     service
         .create_group(create_cmd(
             Some("driver"),
@@ -2050,6 +2090,20 @@ async fn participant_mode_update_authorizes_self_or_creator_and_inserts_human() 
         .await
         .unwrap();
     assert_eq!(full_view.message_view_scope, MessageViewScope::Full);
+    assert_eq!(
+        *participant_view_bindings.begun.lock().await,
+        vec![(
+            "group-under-test".to_string(),
+            "human_alice".to_string(),
+        )]
+    );
+    assert_eq!(
+        *participant_view_bindings.finished.lock().await,
+        vec![(
+            "group-under-test".to_string(),
+            "human_alice".to_string(),
+        )]
+    );
 
     let forbidden = service
         .update_participant_mode(GroupParticipantModeCommand {

@@ -1603,6 +1603,7 @@ fn build_openapi_v1_state(
             relation_env: relation_env.clone(),
         },
     )
+    .with_participant_view_bindings(participant_view_bindings.clone())
     .with_collaboration_runtime(collaboration_runtime.clone());
     if config.eventing.enabled {
         group_service =
@@ -2142,6 +2143,7 @@ impl Default for BcsServerState {
                 system_message.clone(),
             )
             .with_channel_binding_cleanup(channel_binding_cleanup.clone())
+            .with_participant_view_bindings(frontend_connections.clone())
             .with_outbound_url_guard(outbound_url_guard.clone())
             .with_bot_runtime(bot_use_cases.clone()),
         );
@@ -2678,6 +2680,7 @@ fn build_use_case_bundle(
     group_message_history: Arc<dyn GroupMessageHistoryService>,
     session_management: Arc<dyn SessionManagementService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    participant_view_bindings: Arc<dyn bcs_service_api::port::ParticipantViewBindingPort>,
     bot_run_context: Arc<dyn BotRunContextPort>,
     user_directory: Option<Arc<dyn UserDirectoryPlugin>>,
     message_repo: Option<Arc<dyn MessageRepoPort>>,
@@ -2750,6 +2753,7 @@ fn build_use_case_bundle(
             system_message.clone(),
         )
         .with_channel_binding_cleanup(channel_binding_cleanup)
+        .with_participant_view_bindings(participant_view_bindings)
         .with_outbound_url_guard(callback_url_guard.clone())
         .with_bot_runtime(bot_use_cases.clone()),
     );
@@ -3720,6 +3724,7 @@ impl BcsServer {
             group_message_history.clone(),
             session_management.clone(),
             channel_binding_cleanup.clone(),
+            frontend_connections.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),
@@ -4566,6 +4571,7 @@ impl BcsServer {
             group_message_history.clone(),
             session_management.clone(),
             channel_binding_cleanup.clone(),
+            frontend_connections.clone(),
             bot_run_context.clone(),
             user_directory.clone(),
             Some(message_repo.clone()),

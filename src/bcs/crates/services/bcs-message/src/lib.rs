@@ -776,14 +776,36 @@ impl GroupMessageHistoryService for MessageService {
 
         // Chat and ManagerWorker use independent cutoffs for the new message store path.
         let group_opt = self.group.get(&cmd.group_id).await;
-        let use_new_path = match group_opt.as_ref() {
-            Some(group) => self.should_use_new_path(group, session.as_ref()),
-            None => false,
-        };
-
         let human_view = group_opt.as_ref().and_then(|group| {
             Self::human_message_view(group, session.as_ref(), cmd.view_bot_id.as_deref())
         });
+        // Legacy provider transcripts do not carry visibility domain/audience
+        // metadata and therefore cannot be projected safely. Participant views
+        // always read the classified durable store, while Full keeps the exact
+        // pre-feature cutoff/fallback behavior.
+        let requires_participant_projection = human_view
+            .as_ref()
+            .is_some_and(|view| view.scope == MessageViewScope::Participant);
+        if requires_participant_projection && session.is_none() {
+            info!(
+                session_id = %session_id,
+                "get_session_history: participant view has no classified session; returning empty history"
+            );
+            return Ok(SessionHistoryResult {
+                session_id,
+                messages: Vec::new(),
+                limit: cmd.limit,
+                before: cmd.before,
+                next_before: None,
+            });
+        }
+        let use_new_path = match group_opt.as_ref() {
+            Some(group) => {
+                requires_participant_projection
+                    || self.should_use_new_path(group, session.as_ref())
+            }
+            None => false,
+        };
         if use_new_path {
             let sess = session.as_ref().unwrap();
             let limit = self.effective_limit(cmd.limit);
@@ -2023,6 +2045,93 @@ mod tests {
         assert_eq!(fallback.session_calls().await, 1);
         assert_eq!(result.messages.len(), 1);
         assert_eq!(result.messages[0].content, "legacy");
+    }
+
+    #[tokio::test]
+    async fn pre_cutoff_participant_reads_only_classified_durable_history() {
+        let (service, repo, sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![fallback_message("unclassified worker reply")],
+        )
+        .await;
+        let mut human = Participant::human("human-1", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        sessions
+            .add_participant(&session_id, human)
+            .await
+            .expect("add participant Human");
+        for (sender_id, content, audience, created_at) in [
+            (
+                "worker-a",
+                "classified worker reply",
+                bcs_domain::MessageAudience::FullOnly,
+                2,
+            ),
+            (
+                "mgr",
+                "public manager announcement",
+                bcs_domain::MessageAudience::Public,
+                3,
+            ),
+        ] {
+            repo.append_message(NewMessage {
+                group_id: "group-1".to_string(),
+                session_id: session_id.clone(),
+                sender_id: sender_id.to_string(),
+                sender_type: SenderType::Bot,
+                message_type: "chat".to_string(),
+                content: serde_json::Value::String(content.to_string()),
+                client_msg_id: None,
+                created_at,
+                run_id: String::new(),
+                owner_bot_id: None,
+                visibility_domain: bcs_domain::MessageVisibilityDomain::ManagerWorker,
+                audience: Some(audience),
+            })
+            .await
+            .expect("append classified history");
+        }
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human-1")))
+            .await
+            .expect("participant history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0].content, "public manager announcement");
+    }
+
+    #[tokio::test]
+    async fn pre_cutoff_participant_without_classified_session_does_not_use_fallback() {
+        let (service, _repo, sessions, fallback, session_id) = service_fixture(
+            GroupStrategy::ManagerWorker,
+            0,
+            u64::MAX,
+            vec![fallback_message("unclassified worker reply")],
+        )
+        .await;
+        let mut human = Participant::human("human-1", ParticipantRole::Observer);
+        human.message_view_scope = MessageViewScope::Participant;
+        service
+            .group
+            .add_participant("group-1", human)
+            .await
+            .expect("add group participant Human");
+        sessions
+            .delete(&session_id)
+            .await
+            .expect("delete classified session");
+
+        let result = service
+            .get_session_history(session_cmd("group-1", &session_id, Some("human-1")))
+            .await
+            .expect("participant history");
+
+        assert_eq!(fallback.session_calls().await, 0);
+        assert!(result.messages.is_empty());
     }
 
     #[tokio::test]

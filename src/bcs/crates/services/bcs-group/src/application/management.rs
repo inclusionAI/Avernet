@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use async_trait::async_trait;
 use bcs_route_security::OutboundUrlGuard;
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 
 use crate::core::validate_service_spec_patch;
 use crate::noop::{
@@ -63,6 +64,7 @@ pub struct GroupManagement {
     system_message: Arc<dyn bcs_service_api::SystemMessageService>,
     session_management: Arc<dyn SessionManagementService>,
     channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
+    participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     bot_runtime: Option<Arc<dyn BotRuntimeConnectionService>>,
     outbound_url_guard: OutboundUrlGuard,
     v1_openapi_create_policy: bool,
@@ -238,6 +240,7 @@ impl GroupManagement {
             system_message,
             session_management,
             channel_binding_cleanup: Arc::new(NoopChannelBindingCleanupPort),
+            participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             bot_runtime: None,
             outbound_url_guard: OutboundUrlGuard::strict(),
             v1_openapi_create_policy: false,
@@ -254,6 +257,14 @@ impl GroupManagement {
         channel_binding_cleanup: Arc<dyn ChannelBindingCleanupPort>,
     ) -> Self {
         self.channel_binding_cleanup = channel_binding_cleanup;
+        self
+    }
+
+    pub fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.participant_view_bindings = participant_view_bindings;
         self
     }
 
@@ -1916,14 +1927,39 @@ impl GroupManagementService for GroupManagement {
         } else {
             return Err(ServiceError::ParticipantNotFound(cmd.actor_id.clone()).into());
         };
-        let updated_group = self
+        let scope_change_lease = if existing_participant.is_some_and(|participant| {
+            participant.actor_kind == ActorKind::Human
+                && cmd.message_view_scope.is_some_and(|scope| {
+                    scope != participant.message_view_scope
+                })
+        }) {
+            Some(
+                self.participant_view_bindings
+                    .begin_scope_change(&cmd.group_id, &cmd.actor_id)
+                    .await
+                    .map_err(GroupUseCaseError::Service)?,
+            )
+        } else {
+            None
+        };
+        let update_result = self
             .group
             .mutate(group_mutation_command(
                 &cmd.group_id,
                 &cmd.caller_actor_id,
                 mutation,
             ))
-            .await?;
+            .await;
+        let release_result = if let Some(lease) = scope_change_lease {
+            self.participant_view_bindings
+                .finish_scope_change(lease)
+                .await
+                .map_err(GroupUseCaseError::Service)
+        } else {
+            Ok(())
+        };
+        let updated_group = update_result?;
+        release_result?;
         let message_view_scope = updated_group
             .participants
             .iter()

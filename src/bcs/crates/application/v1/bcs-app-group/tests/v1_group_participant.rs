@@ -5,8 +5,9 @@
 //! `BotCore`, `FriendCore`, `RelationCore`, `SessionManagementServiceImpl`,
 //! `GroupManagement`) and seeds a Chat group managed by a Human originator.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
 use bcs_bot::BotCore;
 use bcs_friend::FriendCore;
 use bcs_group::{GroupConfig, GroupCore, GroupManagement, MemoryGroupRepo};
@@ -17,8 +18,10 @@ use bcs_service_api::application::v1::{
 };
 use bcs_service_api::{
     BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
-    ParticipantMode, SystemMessageService,
+    ParticipantMode, ServiceResult, SystemMessageService,
 };
+use bcs_service_api::port::{ParticipantViewBindingPort, ParticipantViewScopeChangeLease};
+use bcs_service_api::types::MessageViewScope;
 use bcs_session::SessionManagementServiceImpl;
 use bcs_session_store::MemorySessionRepo;
 use bcs_test_support::NoopSystemMessageService;
@@ -31,6 +34,43 @@ struct Fixture {
     service: GroupServiceImpl,
     groups: Arc<GroupCore>,
     bots: Arc<BotCore>,
+    participant_view_bindings: Arc<RecordingParticipantViewBindings>,
+}
+
+#[derive(Default)]
+struct RecordingParticipantViewBindings {
+    begun: Mutex<Vec<(String, String)>>,
+    finished: Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait]
+impl ParticipantViewBindingPort for RecordingParticipantViewBindings {
+    async fn begin_scope_change(
+        &self,
+        scope_id: &str,
+        human_actor_id: &str,
+    ) -> ServiceResult<ParticipantViewScopeChangeLease> {
+        self.begun
+            .lock()
+            .expect("binding begin lock")
+            .push((scope_id.to_string(), human_actor_id.to_string()));
+        Ok(ParticipantViewScopeChangeLease {
+            scope_id: scope_id.to_string(),
+            human_actor_id: human_actor_id.to_string(),
+            lease_id: 1,
+        })
+    }
+
+    async fn finish_scope_change(
+        &self,
+        lease: ParticipantViewScopeChangeLease,
+    ) -> ServiceResult<()> {
+        self.finished
+            .lock()
+            .expect("binding finish lock")
+            .push((lease.scope_id, lease.human_actor_id));
+        Ok(())
+    }
 }
 
 impl Fixture {
@@ -45,6 +85,8 @@ impl Fixture {
             group_repo,
         ));
         let system_message: Arc<dyn SystemMessageService> = Arc::new(NoopSystemMessageService);
+        let participant_view_bindings =
+            Arc::new(RecordingParticipantViewBindings::default());
         let management = Arc::new(
             GroupManagement::new(
                 groups.clone(),
@@ -67,11 +109,13 @@ impl Fixture {
             GroupServiceConfig {
                 relation_env: "dev".to_string(),
             },
-        );
+        )
+        .with_participant_view_bindings(participant_view_bindings.clone());
         Self {
             service,
             groups,
             bots,
+            participant_view_bindings,
         }
     }
 
@@ -488,6 +532,40 @@ async fn participant_can_update_own_mode() {
         .expect("plain participant can update own mode");
     assert_eq!(updated.actor_id, "human_staff-member");
     assert_eq!(updated.mode, ParticipantMode::Absent);
+}
+
+#[tokio::test]
+async fn participant_scope_update_invalidates_group_binding() {
+    let fixture = seed().await;
+    let updated = fixture
+        .service
+        .update_participant(UpdateGroupParticipant {
+            caller: human_caller("staff-member"),
+            group_id: GROUP_ID.into(),
+            actor_id: "human_staff-member".into(),
+            mode: None,
+            message_view_scope: Some(MessageViewScope::Participant),
+        })
+        .await
+        .expect("participant can update own scope");
+
+    assert_eq!(updated.message_view_scope, MessageViewScope::Participant);
+    assert_eq!(
+        *fixture
+            .participant_view_bindings
+            .begun
+            .lock()
+            .expect("binding begin lock"),
+        vec![(GROUP_ID.to_string(), "human_staff-member".to_string())]
+    );
+    assert_eq!(
+        *fixture
+            .participant_view_bindings
+            .finished
+            .lock()
+            .expect("binding finish lock"),
+        vec![(GROUP_ID.to_string(), "human_staff-member".to_string())]
+    );
 }
 
 #[tokio::test]

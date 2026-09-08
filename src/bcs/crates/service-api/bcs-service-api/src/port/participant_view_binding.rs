@@ -1,8 +1,9 @@
 //! Runtime binding barrier for Human participant message-scope mutations.
 //!
-//! Session Application services acquire a lease before changing a persisted
-//! scope. The adapter must reject new bindings for the same Session/Human and
-//! invalidate existing bindings before returning the lease.
+//! Group and Session Application services acquire a lease before changing a
+//! persisted scope. The adapter must reject new bindings for the same
+//! Group-or-Session/Human and invalidate existing bindings before returning
+//! the lease.
 
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -11,7 +12,7 @@ use crate::core::ServiceResult;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParticipantViewScopeChangeLease {
-    pub session_id: String,
+    pub scope_id: String,
     pub human_actor_id: String,
     pub lease_id: u64,
 }
@@ -20,7 +21,7 @@ pub struct ParticipantViewScopeChangeLease {
 pub trait ParticipantViewBindingPort: Send + Sync {
     async fn begin_scope_change(
         &self,
-        session_id: &str,
+        scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease>;
 
@@ -39,11 +40,11 @@ static NEXT_NOOP_LEASE_ID: AtomicU64 = AtomicU64::new(1);
 impl ParticipantViewBindingPort for NoopParticipantViewBindingPort {
     async fn begin_scope_change(
         &self,
-        session_id: &str,
+        scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease> {
         Ok(ParticipantViewScopeChangeLease {
-            session_id: session_id.to_string(),
+            scope_id: scope_id.to_string(),
             human_actor_id: human_actor_id.to_string(),
             lease_id: NEXT_NOOP_LEASE_ID.fetch_add(1, Ordering::Relaxed),
         })

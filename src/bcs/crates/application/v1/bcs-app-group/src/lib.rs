@@ -21,6 +21,7 @@ use bcs_service_api::application::v1::{
     require_authenticated_user, require_human, select_principal,
 };
 use bcs_service_api::core::{GroupMutationCommand, GroupMutationKind};
+use bcs_service_api::port::{NoopParticipantViewBindingPort, ParticipantViewBindingPort};
 use bcs_service_api::types::{EventActor, EventActorType, OpeningMessageScope};
 use bcs_service_api::{
     ActorKind, ActorStatus, AuthenticatedHumanCaller, BotRegistryCoreService,
@@ -56,6 +57,7 @@ pub struct GroupServiceImpl {
     relation: Arc<dyn RelationCoreService>,
     sessions: Arc<dyn SessionManagementService>,
     management: Arc<dyn GroupManagementService>,
+    participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
     collaboration_runtime: Option<Arc<dyn CollaborationRuntimeService>>,
     event_subscription_provisioner: Option<Arc<dyn GroupEventSubscriptionProvisioner>>,
     config: GroupServiceConfig,
@@ -372,6 +374,7 @@ impl GroupServiceImpl {
             relation,
             sessions,
             management,
+            participant_view_bindings: Arc::new(NoopParticipantViewBindingPort),
             collaboration_runtime: None,
             event_subscription_provisioner: None,
             config,
@@ -383,6 +386,14 @@ impl GroupServiceImpl {
         collaboration_runtime: Arc<dyn CollaborationRuntimeService>,
     ) -> Self {
         self.collaboration_runtime = Some(collaboration_runtime);
+        self
+    }
+
+    pub fn with_participant_view_bindings(
+        mut self,
+        participant_view_bindings: Arc<dyn ParticipantViewBindingPort>,
+    ) -> Self {
+        self.participant_view_bindings = participant_view_bindings;
         self
     }
 
@@ -2357,7 +2368,19 @@ impl GroupService for GroupServiceImpl {
                     "Bot participants must use full message_view_scope",
                 ));
             }
-            group = self
+            let scope_change_lease = if target.actor_kind == ActorKind::Human
+                && target.message_view_scope != message_view_scope
+            {
+                Some(
+                    self.participant_view_bindings
+                        .begin_scope_change(&command.group_id, &command.actor_id)
+                        .await
+                        .map_err(map_service_error)?,
+                )
+            } else {
+                None
+            };
+            let update_result = self
                 .groups
                 .mutate(GroupMutationCommand {
                     group_id: command.group_id.clone(),
@@ -2371,7 +2394,17 @@ impl GroupService for GroupServiceImpl {
                     },
                 })
                 .await
-                .map_err(map_service_error)?;
+                .map_err(map_service_error);
+            let release_result = if let Some(lease) = scope_change_lease {
+                self.participant_view_bindings
+                    .finish_scope_change(lease)
+                    .await
+                    .map_err(map_service_error)
+            } else {
+                Ok(())
+            };
+            group = update_result?;
+            release_result?;
         }
         group
             .participants

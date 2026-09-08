@@ -104,8 +104,8 @@ impl WorkbenchConnectionRegistry {
         if let Some(view) = human_view.as_ref()
             && barriers
                 .iter()
-                .any(|(blocked_session_id, blocked_actor_id, _)| {
-                    blocked_session_id == &session_id && blocked_actor_id == &view.actor_id
+                .any(|(blocked_scope_id, blocked_actor_id, _)| {
+                    blocked_scope_id == &session_id && blocked_actor_id == &view.actor_id
                 })
         {
             return Err(ServiceError::Conflict(
@@ -171,8 +171,8 @@ impl WorkbenchConnectionRegistry {
             .lock()
             .await
             .iter()
-            .any(|(blocked_session_id, blocked_actor_id, _)| {
-                blocked_session_id == session_id && blocked_actor_id == actor_id
+            .any(|(blocked_scope_id, blocked_actor_id, _)| {
+                blocked_scope_id == session_id && blocked_actor_id == actor_id
             })
     }
 
@@ -294,7 +294,7 @@ impl WorkbenchConnectionRegistry {
 impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
     async fn begin_scope_change(
         &self,
-        session_id: &str,
+        scope_id: &str,
         human_actor_id: &str,
     ) -> ServiceResult<ParticipantViewScopeChangeLease> {
         if self.scope_changes_disabled {
@@ -307,18 +307,18 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         let mut barriers = self.scope_change_barriers.lock().await;
         if barriers
             .iter()
-            .any(|(blocked_session_id, blocked_actor_id, _)| {
-                blocked_session_id == session_id && blocked_actor_id == human_actor_id
+            .any(|(blocked_scope_id, blocked_actor_id, _)| {
+                blocked_scope_id == scope_id && blocked_actor_id == human_actor_id
             })
         {
             return Err(ServiceError::Conflict(
                 "view_scope_change_in_progress".to_string(),
             ));
         }
-        barriers.insert((session_id.to_string(), human_actor_id.to_string(), lease_id));
+        barriers.insert((scope_id.to_string(), human_actor_id.to_string(), lease_id));
 
         let mut sessions = self.sessions.write().await;
-        if let Some(connections) = sessions.get_mut(session_id) {
+        if let Some(connections) = sessions.get_mut(scope_id) {
             let close_event = serde_json::json!({
                 "type": "event",
                 "event": "close",
@@ -343,7 +343,7 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         drop(barriers);
 
         Ok(ParticipantViewScopeChangeLease {
-            session_id: session_id.to_string(),
+            scope_id: scope_id.to_string(),
             human_actor_id: human_actor_id.to_string(),
             lease_id,
         })
@@ -354,7 +354,7 @@ impl ParticipantViewBindingPort for WorkbenchConnectionRegistry {
         lease: ParticipantViewScopeChangeLease,
     ) -> ServiceResult<()> {
         let removed = self.scope_change_barriers.lock().await.remove(&(
-            lease.session_id,
+            lease.scope_id,
             lease.human_actor_id,
             lease.lease_id,
         ));
