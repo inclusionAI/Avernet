@@ -155,6 +155,72 @@ class TestProxyUnavailableGuard:
         assert "deploy_tenant=aliyun" in exc_info.value.reason
 
 
+class TestProxyBaseUrlConstructionValidation:
+    """WR-02/89: a malformed non-empty proxy_base_url for the aliyun tenant
+    fails closed at construction (the schema ``pattern`` never sees YAML
+    override values) instead of emitting a relative client URL."""
+
+    @pytest.mark.parametrize(
+        "malformed",
+        [
+            "bff.example.com",  # missing scheme
+            "https://",  # empty authority
+            "ftp://bff.example.com",  # non-http scheme
+            "/just/a/path",  # scheme-less relative
+        ],
+    )
+    def test_aliyun_malformed_base_raises_at_construction(self, malformed):
+        with pytest.raises(SessionFileTransferProxyUnavailableError) as exc_info:
+            AliyunAckSessionFileUrlProjector(
+                proxy_base_url=malformed,
+                deploy_tenant="aliyun",
+            )
+
+        assert (
+            exc_info.value.error_code == "SESSION_FILE_TRANSFER_PROXY_UNAVAILABLE"
+        )
+        assert "proxy_base_url" in exc_info.value.reason
+        assert "not a valid absolute http(s) URL" in exc_info.value.reason
+
+    def test_aliyun_empty_base_still_constructs(self):
+        """D-06: the request-time 503 for the empty base is preserved."""
+        projector = AliyunAckSessionFileUrlProjector(
+            proxy_base_url="",
+            deploy_tenant="aliyun",
+        )
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError):
+            projector.project(_ORIGINAL_UPLOAD_URL)
+
+    def test_aliyun_valid_base_constructs(self):
+        projector = AliyunAckSessionFileUrlProjector(
+            proxy_base_url="https://bff.example.com",
+            deploy_tenant="aliyun",
+        )
+
+        assert projector._proxy_base_url == "https://bff.example.com"
+
+    @pytest.mark.parametrize("deploy_tenant", ["", "SIGMA"])
+    def test_non_aliyun_malformed_base_passthrough_unchanged(
+        self, deploy_tenant, caplog
+    ):
+        """D-01: non-aliyun tenants never read the base — constructing with
+        a malformed one must not fail main-site-like deployments."""
+        projector = AliyunAckSessionFileUrlProjector(
+            proxy_base_url="bff.example.com",
+            deploy_tenant=deploy_tenant,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            result = projector.project(_ORIGINAL_UPLOAD_URL)
+
+        assert result == _ORIGINAL_UPLOAD_URL
+        assert any(
+            "SESSION_URL_PROJECTOR_PASSTHROUGH" in record.getMessage()
+            for record in caplog.records
+        )
+
+
 class TestNoopSessionFileUrlProjector:
     """Noop matrix rows: identity passthrough for every non-aliyun
     tenant (row 1), and the D-06 refusal when the stub projector is
