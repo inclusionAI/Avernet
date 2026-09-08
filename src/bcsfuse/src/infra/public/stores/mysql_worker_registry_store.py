@@ -325,6 +325,36 @@ class MySQLWorkerRegistryStore:
         finally:
             conn.close()
 
+    def batch_get_configs(self, worker_ids: list[str]) -> tuple[dict[str, WorkerConfig], list[str]]:
+        """Fetch worker configs in one query for fusion eligibility checks."""
+        if not worker_ids:
+            return {}, []
+
+        placeholders = ",".join("%s" for _ in worker_ids)
+        conn = self._pool.get_connection()
+        try:
+            cursor = conn.cursor(dictionary=True)
+            try:
+                cursor.execute(
+                    f"SELECT id, config FROM bcsfuse_workers WHERE id IN ({placeholders})",
+                    tuple(worker_ids),
+                )
+                rows = cursor.fetchall()
+            finally:
+                cursor.close()
+        finally:
+            conn.close()
+
+        configs: dict[str, WorkerConfig] = {}
+        for row in rows:
+            config_data = row["config"]
+            if config_data:
+                parsed = json.loads(config_data) if isinstance(config_data, str) else config_data
+                configs[row["id"]] = WorkerConfig(**parsed)
+            else:
+                configs[row["id"]] = WorkerConfig()
+        return configs, [worker_id for worker_id in worker_ids if worker_id not in configs]
+
     def get(self, worker_id: str) -> Optional[Worker]:
         return self.get_by_id(worker_id)
 
