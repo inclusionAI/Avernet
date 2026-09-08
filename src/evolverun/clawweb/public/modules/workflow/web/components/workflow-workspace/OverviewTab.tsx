@@ -119,6 +119,12 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
   } = useWorkflowHealth(workflowId, days)
   const pageSize = 20
   const windowStart = windowEnd - days * 86400
+  const { data: metricsData } = useFlowRuns({
+    workflowId,
+    limit: 1,
+    from: String(windowStart),
+    to: String(windowEnd),
+  })
   const {
     data,
     isLoading,
@@ -130,15 +136,13 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
     workflowId,
     limit: pageSize,
     offset: page * pageSize,
-    from: String(windowStart),
-    to: String(windowEnd),
   })
 
   const runs = useMemo(() => data?.runs ?? [], [data?.runs])
   const totalCount = data?.total ?? 0
 
   const stats = useMemo(() => {
-    const counts = data?.statusCounts ?? {}
+    const counts = metricsData?.statusCounts ?? {}
     const succeededRuns = counts.succeeded ?? 0
     const abnormalRuns = (counts.failed ?? 0) + (counts.aborted ?? 0) + (counts.cancelled ?? 0) + (counts.canceled ?? 0)
     const terminalRuns = succeededRuns + abnormalRuns
@@ -152,7 +156,7 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
       blockedRuns: counts.blocked ?? 0,
       queuedRuns: counts.queued ?? 0,
     }
-  }, [data?.statusCounts])
+  }, [metricsData?.statusCounts])
 
   const currentSuccessRate = stats.terminalRuns > 0 ? `${stats.successRate}%` : '—'
   const currentDetail = `${stats.succeededRuns} / ${stats.terminalRuns} 个终态运行`
@@ -161,7 +165,6 @@ export default function OverviewTab({ workflow }: OverviewTabProps) {
 
   const changeDays = (nextDays: 7 | 30) => {
     setDays(nextDays)
-    setPage(0)
   }
 
   return (

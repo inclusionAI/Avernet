@@ -81,13 +81,11 @@ describe('task escort overview layout', () => {
     }))
   })
 
-  it('can switch the page window and paginate through all matching runs', async () => {
+  it('keeps history pagination independent of the metric window', async () => {
     mockQueries()
     render(<MemoryRouter><OverviewTab workflow={workflow} /></MemoryRouter>)
 
-    await userEvent.click(screen.getByRole('button', { name: '30天' }))
-    expect(mocks.useWorkflowHealth).toHaveBeenLastCalledWith('tech-research', 30)
-    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({ workflowId: 'tech-research', limit: 20, offset: 0 }))
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith({ workflowId: 'tech-research', limit: 20, offset: 0 })
 
     await userEvent.click(screen.getByRole('button', { name: '下一页' }))
     await waitFor(() => expect(mocks.useFlowRuns).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -95,5 +93,10 @@ describe('task escort overview layout', () => {
       limit: 20,
       offset: 20,
     })))
+    await userEvent.click(screen.getByRole('button', { name: '30天' }))
+    expect(mocks.useWorkflowHealth).toHaveBeenLastCalledWith('tech-research', 30)
+    expect(mocks.useFlowRuns).toHaveBeenLastCalledWith({ workflowId: 'tech-research', limit: 20, offset: 20 })
+    const metricParams = mocks.useFlowRuns.mock.calls.at(-2)?.[0]
+    expect(Number(metricParams.to) - Number(metricParams.from)).toBe(30 * 86400)
   })
 })
