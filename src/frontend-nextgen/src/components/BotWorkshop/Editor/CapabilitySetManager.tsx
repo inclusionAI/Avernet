@@ -1,3 +1,4 @@
+import { getCapabilities } from '@/capabilities';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -26,7 +27,11 @@ export interface CapabilitySetManagerProps {
   onSkillCenterReferences: (setId: string, skillCodes: string[]) => Promise<void>;
   onUploadSkillFolder: (files: File[]) => Promise<BotEditorSkill>;
   onMcp: (setId: string, serverCode: string, active: boolean) => Promise<void>;
-  onLoadCandidates: () => Promise<void>;
+  onLoadCandidates: (
+    kind: 'skill' | 'mcp',
+    mcpQuery?: { source: 'internal' | 'open-platform'; keyword?: string },
+  ) => Promise<void>;
+  candidatesLoading?: boolean;
   mcpCallTypes?: Record<string, 'caller' | 'owner'>;
   callerContextEditable?: boolean;
   updatingCallType?: string;
@@ -57,6 +62,11 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
   const [picker, setPicker] = useState<Picker>();
+  const canAddMcp = getCapabilities().getBotMcpPickerEnabled().value;
+  const openPicker = (set: BotCapabilitySet, kind: Picker['kind']) => {
+    setPicker({ set, kind });
+    if (kind === 'skill') void onLoadCandidates(kind);
+  };
   useEffect(() => {
     if (sets[0]) setExpanded((current) => (current.length ? current : [sets[0].id]));
   }, [sets]);
@@ -135,11 +145,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       kind="skill"
                       items={set.skills}
                       editable={editable}
-                      onAdd={
-                        set.isDefault
-                          ? undefined
-                          : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'skill' }))
-                      }
+                      onAdd={set.isDefault ? undefined : () => openPicker(set, 'skill')}
                       onRemove={(id) => onSkill(set.id, id, false)}
                     />
                     <CapabilityMembers
@@ -150,11 +156,7 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
                       identityEditable={props.callerContextEditable}
                       updatingIdentityId={props.updatingCallType}
                       onIdentity={props.onMcpCallType}
-                      onAdd={
-                        set.isDefault
-                          ? undefined
-                          : () => void onLoadCandidates().then(() => setPicker({ set, kind: 'mcp' }))
-                      }
+                      onAdd={set.isDefault || !canAddMcp ? undefined : () => openPicker(set, 'mcp')}
                       onRemove={(id) => onMcp(set.id, id, false)}
                     />
                     {set.clis.length ? <CapabilityMembers kind="cli" items={set.clis} editable={false} /> : null}
@@ -203,6 +205,8 @@ export function CapabilitySetManager(props: CapabilitySetManagerProps) {
               ? picker.set.skills.map((item) => item.id)
               : picker.set.mcps.map((item) => item.serverCode)
           }
+          loading={props.candidatesLoading}
+          onSearchMcp={(source, keyword) => onLoadCandidates('mcp', { source, keyword })}
           onOpenChange={(open) => {
             if (!open) setPicker(undefined);
           }}

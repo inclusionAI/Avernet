@@ -2,6 +2,7 @@
 import { useBotWorkshop } from '@/hooks/useBotWorkshop';
 import { useBotWorkshopRequestIdentity } from '@/hooks/useBotWorkshopEditorIdentity';
 import { useSpaceContext } from '@/hooks/useSpaceContext';
+import { BackendRequestError } from '@/services/backendApi/httpClient';
 import type { BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService } from '@/services/botWorkshop';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
@@ -29,6 +30,7 @@ jest.mock('@/services/botWorkshop/agentCodingTemplateService', () => ({
 jest.mock('@/services/botWorkshop', () => ({
   botWorkshopService: {
     list: jest.fn(),
+    remove: jest.fn(),
     getCreateSpaces: jest.fn(() => []),
     restartPublish: jest.fn(),
   },
@@ -299,4 +301,44 @@ describe('runAction restart_publish（重启发布）', () => {
     expect(toast.error).toHaveBeenCalledWith('发布人在审批中');
     expect(mockedList).toHaveBeenCalledTimes(1);
   });
+});
+
+it('删除失败优先展示后端返回的明确错误信息', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const remove = botWorkshopService.remove as jest.Mock;
+  remove.mockRejectedValue(
+    new BackendRequestError('该 Bot 存在运行中的发布任务，暂时无法删除', {
+      status: 409,
+      apiPath: '/openapi/v1/bots/bot-1',
+      data: { code: 409000, message: '该 Bot 存在运行中的发布任务，暂时无法删除' },
+    }),
+  );
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  await expect(act(async () => result.current.runAction('delete', { id: 'bot-1' } as BotDomain))).rejects.toThrow(
+    '该 Bot 存在运行中的发布任务，暂时无法删除',
+  );
+  expect(toast.error).toHaveBeenCalledWith('该 Bot 存在运行中的发布任务，暂时无法删除');
+});
+
+it('删除接口返回不支持操作时展示中文提示', async () => {
+  mockedIdentity.mockReturnValue({ ready: true, loading: false, error: undefined });
+  mockedList.mockResolvedValue({ items: [], page: 1, pageSize: 20, warnings: [] });
+  const remove = botWorkshopService.remove as jest.Mock;
+  remove.mockRejectedValue(
+    new BackendRequestError('Operation not supported for this bot', {
+      status: 409,
+      apiPath: '/openapi/v1/bots/bot-1',
+      data: { code: 409000, message: 'Operation not supported for this bot' },
+    }),
+  );
+  const { result } = renderHook(() => useBotWorkshop());
+  await waitFor(() => expect(mockedList).toHaveBeenCalledTimes(1));
+
+  await expect(act(async () => result.current.runAction('delete', { id: 'bot-1' } as BotDomain))).rejects.toThrow(
+    'Operation not supported for this bot',
+  );
+  expect(toast.error).toHaveBeenCalledWith('该 Bot 不允许删除');
 });

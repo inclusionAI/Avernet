@@ -8,6 +8,7 @@ jest.mock('@/services/backendApi/bots/botEditorController', () => ({
     listSkillSetResources: jest.fn(),
     listBotMcps: jest.fn(),
     listMcpServers: jest.fn(),
+    searchMarketMcpServers: jest.fn(),
     listRepositorySkills: jest.fn(),
     listSkillCenterSkills: jest.fn(),
     listConsumableSpaceSkills: jest.fn(),
@@ -39,6 +40,7 @@ beforeEach(() => {
   });
   controller.listBotMcps.mockResolvedValue({ data: [] });
   controller.listMcpServers.mockResolvedValue({ data: { total: 0, items: [] } });
+  controller.searchMarketMcpServers.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listRepositorySkills.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listSkillCenterSkills.mockResolvedValue({ data: { total: 0, items: [] } });
   controller.listConsumableSpaceSkills.mockResolvedValue({ data: { total: 0, items: [] } });
@@ -94,14 +96,14 @@ it('首屏不加载市场候选，用户打开添加能力时再一次性加载'
 
   await botEditorService.load('bot-1');
 
-  expect(controller.listMcpServers).not.toHaveBeenCalled();
+  expect(controller.searchMarketMcpServers).not.toHaveBeenCalled();
   expect(controller.listRepositorySkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
 
-  await botEditorService.loadCapabilityCandidates('bot-1', '12');
+  await botEditorService.loadCapabilityCandidates('bot-1', '12', 'skill');
 
-  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
-  expect(controller.listMcpServers).toHaveBeenCalledTimes(1);
+  expect(controller.listBotMcps).not.toHaveBeenCalled();
+  expect(controller.searchMarketMcpServers).not.toHaveBeenCalled();
   expect(controller.listRepositorySkills).toHaveBeenCalledTimes(1);
   expect(controller.listSkillCenterSkills).not.toHaveBeenCalled();
   expect(controller.listConsumableSpaceSkills).toHaveBeenCalledWith('12', 1, 100);
@@ -122,7 +124,7 @@ it('工坊可消费 Skill 超过单页时加载全部分页', async () => {
       },
     });
 
-  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12');
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', 'skill');
 
   expect(controller.listConsumableSpaceSkills).toHaveBeenNthCalledWith(1, '12', 1, 100);
   expect(controller.listConsumableSpaceSkills).toHaveBeenNthCalledWith(2, '12', 2, 100);
@@ -143,7 +145,7 @@ it('按 SkillCenter、TeamClaw 和工坊可消费接口分类候选 Skill', asyn
     },
   });
 
-  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12');
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', 'skill');
 
   expect(result.marketSkills).toEqual([expect.objectContaining({ id: 'repo-1', source: 'teamclaw-market' })]);
   expect((await botEditorService.searchSkillCenterSkills('', 1)).items).toEqual([
@@ -152,6 +154,23 @@ it('按 SkillCenter、TeamClaw 和工坊可消费接口分类候选 Skill', asyn
   expect(result.workshopSkills).toEqual([
     expect.objectContaining({ id: 'space-1', source: 'workshop', version: 'V2' }),
   ]);
+});
+
+it('打开添加 MCP 时只按需加载市场 MCP，不加载 Skill 候选接口', async () => {
+  controller.searchMarketMcpServers.mockResolvedValue({
+    data: { total: 1, items: [{ server_code: 'mcp.weather', name: '天气 MCP' }] },
+  });
+
+  const result = await botEditorService.loadCapabilityCandidates('bot-1', '12', 'mcp', {
+    source: 'open-platform',
+    keyword: '天气',
+  });
+
+  expect(result.availableMcps).toEqual([expect.objectContaining({ serverCode: 'mcp.weather' })]);
+  expect(controller.listBotMcps).toHaveBeenCalledWith('bot-1');
+  expect(controller.searchMarketMcpServers).toHaveBeenCalledWith({ keyword: '天气', tenants: ['THIRD_PARTNER'] });
+  expect(controller.listRepositorySkills).not.toHaveBeenCalled();
+  expect(controller.listConsumableSpaceSkills).not.toHaveBeenCalled();
 });
 
 it('通过 Bot OpenAPI 加载并注册副屏 CDN', async () => {

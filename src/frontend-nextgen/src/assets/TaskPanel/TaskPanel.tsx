@@ -14,6 +14,7 @@ import { TaskSubTaskPanel } from './TaskSubTaskPanel';
 import { GlobalKeyframes, Empty as StateEmpty } from './theme';
 import { C } from './tokens';
 import type { TaskNodeView, TaskView } from './types';
+import { useResizableRail } from './useResizableRail';
 
 const TABS = [
   { key: 'info', label: '任务信息' },
@@ -25,11 +26,10 @@ type TabKey = (typeof TABS)[number]['key'];
 const leftRailStyle: React.CSSProperties = {
   width: 360,
   minWidth: 300,
-  maxWidth: '46%',
+  maxWidth: '70%',
   flexShrink: 0,
   height: '100%',
   minHeight: 0,
-  borderRight: `1px solid ${C.border}`,
   background: C.surface,
   display: 'flex',
   flexDirection: 'column',
@@ -72,6 +72,17 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
   const [activeGroupDrillId, setActiveGroupDrillId] = useState<string | null>(null);
   const [subTaskIds, setSubTaskIds] = useState<string[]>([]);
   const [activeSubTaskId, setActiveSubTaskId] = useState<string | null>(null);
+
+  // 节点下钻左侧 rail 与主面板之间可拖拽调节宽度(nil 为关闭时);宽度持久化、键盘可达。
+  const {
+    railWidth,
+    setRailWidth,
+    containerRef,
+    startResize,
+    min: railMin,
+    maxRatio: railMaxRatio,
+    defaultWidth: railDefaultWidth,
+  } = useResizableRail();
 
   const openSubTask = useCallback(
     (subTaskId: string) => {
@@ -118,8 +129,38 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
                 finishedAt: task.finishedAt || taskInfoFallback?.finishedAt || null,
               }
             : null;
+          // 节点下钻左侧 rail：协作群下钻优先,其次子任务下钻;两者均无时不渲染 rail 与分隔条。
+          const drillPanel =
+            activeGroupDrillId && groupDrillNodes.length > 0 ? (
+              <GroupDrillDownPanel
+                nodes={groupDrillNodes}
+                activeNodeId={activeGroupDrillId}
+                bcsBaseUrl={bcsBaseUrl}
+                apiBaseUrl={apiBaseUrl}
+                userId={userId}
+                onSelect={setActiveGroupDrillId}
+                onClose={closeGroupSession}
+              />
+            ) : activeSubTaskId && subTaskIds.length > 0 ? (
+              <TaskSubTaskPanel
+                apiBaseUrl={apiBaseUrl}
+                taskApiBase={taskApiBase}
+                taskIds={subTaskIds}
+                activeTaskId={activeSubTaskId}
+                onSelect={setActiveSubTaskId}
+                onClose={closeSubTask}
+              />
+            ) : null;
+          // 当前下钻副屏选中的节点 id:协作群下钻即被选中节点 id,子任务下钻则取 subTaskId 命中的节点。
+          // 用于主副屏节点视图高亮显示当前下钻的是哪个节点任务。
+          const activeDrillNodeId =
+            activeGroupDrillId ??
+            (activeSubTaskId && resolvedTask
+              ? resolvedTask.nodes.find((n) => n.subTaskId === activeSubTaskId)?.id ?? null
+              : null);
           return (
             <div
+              ref={containerRef}
               className={className}
               style={{
                 display: 'flex',
@@ -131,30 +172,41 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
                 ...style,
               }}
             >
-              {activeGroupDrillId && groupDrillNodes.length > 0 ? (
-                <aside style={leftRailStyle}>
-                  <GroupDrillDownPanel
-                    nodes={groupDrillNodes}
-                    activeNodeId={activeGroupDrillId}
-                    bcsBaseUrl={bcsBaseUrl}
-                    apiBaseUrl={apiBaseUrl}
-                    userId={userId}
-                    onSelect={setActiveGroupDrillId}
-                    onClose={closeGroupSession}
+              {drillPanel && (
+                <>
+                  <aside style={{ ...leftRailStyle, width: railWidth }}>{drillPanel}</aside>
+                  <div
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="拖动调节下钻面板宽度，双击恢复默认"
+                    tabIndex={0}
+                    title="拖动调节下钻面板宽度，双击恢复"
+                    onPointerDown={startResize}
+                    onDoubleClick={() => setRailWidth(railDefaultWidth)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'ArrowLeft') {
+                        event.preventDefault();
+                        setRailWidth((w) => Math.max(railMin, w - 24));
+                      } else if (event.key === 'ArrowRight') {
+                        event.preventDefault();
+                        const rect = containerRef.current?.getBoundingClientRect();
+                        const max = rect ? Math.floor(rect.width * railMaxRatio) : railDefaultWidth;
+                        setRailWidth((w) => Math.min(max, w + 24));
+                      }
+                    }}
+                    style={{
+                      width: 6,
+                      flexShrink: 0,
+                      alignSelf: 'stretch',
+                      cursor: 'col-resize',
+                      background: C.border,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(event) => (event.currentTarget.style.background = C.primary)}
+                    onMouseLeave={(event) => (event.currentTarget.style.background = C.border)}
                   />
-                </aside>
-              ) : activeSubTaskId && subTaskIds.length > 0 ? (
-                <aside style={leftRailStyle}>
-                  <TaskSubTaskPanel
-                    apiBaseUrl={apiBaseUrl}
-                    taskApiBase={taskApiBase}
-                    taskIds={subTaskIds}
-                    activeTaskId={activeSubTaskId}
-                    onSelect={setActiveSubTaskId}
-                    onClose={closeSubTask}
-                  />
-                </aside>
-              ) : null}
+                </>
+              )}
 
               <div
                 style={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}
@@ -243,6 +295,7 @@ export const TaskPanel: React.FC<TaskPanelProps> = ({
                         <TaskProgressTab
                           task={resolvedTask}
                           userId={userId}
+                          activeDrillNodeId={activeDrillNodeId}
                           onOpenSubTask={openSubTask}
                           onOpenGroupSession={openGroupSession}
                         />

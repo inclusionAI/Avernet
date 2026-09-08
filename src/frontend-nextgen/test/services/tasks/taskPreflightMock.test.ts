@@ -36,7 +36,7 @@ describe('taskPreflightMock', () => {
     expect(result.matched).toBe(true);
     expect(result.message).toContain('我已收到任务需求，正在进行分析。');
     expect(result.message).toContain('当前 Bot 无法独立完成该需求');
-    expect(result.message).toContain('未发现');
+    expect(result.message).toContain('经搜推发现「店主Bot」');
     expect(result.message).toContain('现将该任务指派给「店主Bot」执行');
   });
 });

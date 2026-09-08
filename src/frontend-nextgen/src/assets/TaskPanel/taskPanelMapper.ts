@@ -83,8 +83,10 @@ function resolveOutputRender(output: unknown, outputSummary: string | null | und
   return renderableSource(output);
 }
 
-/** 将根节点 output 的顶层对象拆成多个产出维度，优先读取每个维度下的 summary；非结构化输出返回空数组。 */
-function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
+/** 将根节点 output 的顶层对象拆成多个产出维度，优先读取每个维度下的 summary；非结构化输出返回空数组。
+ *  onlyResult=true 时仅保留 `result` 维度(投放实施·执行BOT 产物定制):其 output 顶层除 result 外的
+ *  handoff/implementation_result/random 等均为内部/重复字段,不应作为最终产物输出。 */
+function resolveOutputDimensions(output: unknown, opts?: { onlyResult?: boolean }): TaskOutputDimension[] {
   let payload: unknown = output;
   if (typeof payload === 'string') {
     try {
@@ -97,6 +99,7 @@ function resolveOutputDimensions(output: unknown): TaskOutputDimension[] {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return [];
 
   return Object.entries(payload as Record<string, unknown>)
+    .filter(([key]) => !opts?.onlyResult || key === 'result')
     .map(([key, value]) => {
       // 维度内容解析（兼容多种契约）:
       //  1) $.<key>.output（字符串/对象）→ 取 output 内容;
@@ -552,8 +555,15 @@ export function mapDashboard(d: TaskDashboardResponse): TaskView {
   // OKR/多节点任务若存在已完成的「投放实施」节点，产物 Tab 绑定该节点 output；否则回退根节点 output。
   const implementationNode = nodes.find((node) => node.name.includes('投放实施') || node.name.includes('实施投放'));
   const selectedOutputNode = implementationNode?.status === 'done' ? implementationNode : undefined;
-  const rootOutputRender = selectedOutputNode?.outputRender ?? defaultRootOutputRender;
-  const rootDimensions = resolveOutputDimensions(selectedOutputNode?.output ?? rootRunInfo?.output);
+  // 投放实施节点产物定制:仅取该节点 output 的 `result` 维度作为最终产物,
+  // 过滤掉 handoff/implementation_result 等非 result 顶层字段;无投放实施节点时回退根节点 output 并保留全部维度。
+  const implNodeOutput = selectedOutputNode ? selectedOutputNode.output : undefined;
+  const implDimensions = implNodeOutput ? resolveOutputDimensions(implNodeOutput, { onlyResult: true }) : [];
+  // 整块渲染源也收敛到 `result` 维度内容,确保维度为空走渲染兜底时也不会带出 handoff 等。
+  const rootOutputRender = implNodeOutput
+    ? implDimensions[0]?.content ?? null
+    : selectedOutputNode?.outputRender ?? defaultRootOutputRender;
+  const rootDimensions = implNodeOutput ? implDimensions : resolveOutputDimensions(rootRunInfo?.output);
   const rootOutputDimensions = rootDimensions.length ? rootDimensions : undefined;
 
   const graphOwnerBotId = getExtendString(graphExtProps, 'owner_bot_id') ?? d.owner_bot_id ?? '';

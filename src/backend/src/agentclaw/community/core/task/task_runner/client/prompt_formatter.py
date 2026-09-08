@@ -7,7 +7,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from agentclaw.community.core.task.domain.prompt_constants import NO_WEB_SEARCH_CONSTRAINT
+from agentclaw.community.core.task.domain.prompt_constants import (
+    NO_WEB_SEARCH_CONSTRAINT,
+    OUTPUT_LANGUAGE_CONSTRAINT,
+)
 
 from agentclaw.community.core.task.domain.models import TaskNode
 from agentclaw.community.core.task.task_runner.client.ports import (
@@ -66,6 +69,28 @@ def _no_callback_instruction() -> str:
     return "本节点结果由平台接口负责回收；不要主动调用 /callback/report，不要构造或发送节点级 Push 请求。"
 
 
+def _static_relay_closure() -> str:
+    """Static-plan relay closure instruction.
+
+    Static-plan node results are collected by the platform (StaticPlanRuntime
+    fallback report), so the bot must NOT call the report interface or send
+    node-level pushes. Web search stays banned, but the shared
+    NO_WEB_SEARCH_CONSTRAINT is not reused verbatim because it mandates calling
+    the report interface. Wording avoids any 'mock'/demo marker so the bot's
+    visible execution output reflects genuine relay capability.
+    """
+    return "\n".join([
+        "【执行闭环·三步缺一不可,顺序为承接→执行→交接】",
+        "严格按上方【接力执行】顺序逐步完成,不得跳过、合并或只用一句话概括代替:",
+        "- 接力上下文:承接时复述接自谁、上游规划交你执行的下一步任务是什么、你的承接边界;",
+        "- 执行产出:真正推理完成本节点任务指令,给出完整执行结论与产出,不得只复述任务不产出;",
+        "- gap与交接:获取上方最新统一上下文(上游产出正文+本步产出),自己对照目标计算 gap、规划下一步任务,并按问题智能匹配能力、交接派发给下一步执行 bot;本链路终点节点则在此声明接力终结、不再派发。",
+        "输出要求:回复以连贯叙述成文呈现,不要使用任何步骤编号或分步小标题来组织内容,也不要把承接、执行、交接拆成带标题的分点清单;让读者读到的是一段自然的承接→产出→交接陈述,而非分步清单。",
+        "执行约束:禁止调用联网搜索/web_search/联网检索工具或浏览外部网页、外部 API 等外部网络资源获取信息,仅依据上方给定上下文与自身知识产出结论。",
+        "本节点执行结果由平台统一回收,无需你主动调用上报接口或构造节点级 Push;你在群内给出完整执行产出即可,产出内容只呈现本步执行结论与下一步交接。",
+    ])
+
+
 class PromptFormatterImpl(PromptFormatter):
     def format_execute(self, context: dict[str, Any], node: TaskNode) -> str:
         instr = context.get("node_instruction") or node.task_spec.metadata.instruction
@@ -74,16 +99,11 @@ class PromptFormatterImpl(PromptFormatter):
         # bot 收到的是"从 X 接过来一个任务,情况是…",不再套派单/目标/验收/回收协议/字段要求/禁联网;
         # 结果回收与验收由各 bot 的 skill/rule 和平台回收机制承托。
         if str(instr).lstrip().startswith("# 接自"):
-            protocol = (
-                _skill_report_instruction(
-                    context,
-                    task_id=str(context.get("task_id") or node.task_id),
-                    node_id=str(context.get("node_id") or node.node_id),
-                )
-                if context.get("skill_report_enabled", True)
-                else _no_callback_instruction()
-            )
-            return f"{instr.rstrip()}\n{protocol}"
+            # static_plan 接力交接:节点结果由平台统一回收(StaticPlanRuntime 兜底回投),
+            # 不在 prompt 注入 HTTP 上报协议/回调地址/请求体,避免 bot 真去调 /callback/report。
+            # 仅保留接力执行约束(禁联网,但不强制上报)+ 平台回收声明 + 中文输出;
+            # 措辞不出现 mock/演示等字眼,产出体感为真实接力能力。
+            return f"{instr.rstrip()}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
         goal = node.task_spec.goal.objective
         siblings = context.get("sibling_outputs") or {}
         acceptances = [
@@ -93,6 +113,7 @@ class PromptFormatterImpl(PromptFormatter):
         parts = [
             "[task-execute]",
             NO_WEB_SEARCH_CONSTRAINT.rstrip(),
+            OUTPUT_LANGUAGE_CONSTRAINT,
             "请严格按以下阶段执行，执行、校验、验收、上报均不可跳过。",
             f"目标:{goal}",
             f"指令:{instr}",

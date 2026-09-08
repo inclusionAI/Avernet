@@ -216,6 +216,7 @@ const BotWorkshopDetailPage: React.FC = () => {
               onSkillCenterReferences={editor.addSkillCenterReferences}
               onUploadSkillFolder={editor.uploadSkillFolder}
               onLoadCandidates={editor.loadCapabilityCandidates}
+              candidatesLoading={editor.candidatesLoading}
               onMcp={editor.setSkillSetMcp}
               mcpCallTypes={editor.mcpCallTypes}
               callerContextEditable={editor.callerContextEditable}

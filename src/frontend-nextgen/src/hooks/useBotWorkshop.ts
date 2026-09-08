@@ -9,6 +9,7 @@ import type { BotCreateInput, BotDomain } from '@/services/botWorkshop';
 import { botWorkshopService, getBotActionAvailability, getInventoryActionAvailability } from '@/services/botWorkshop';
 import { botManagementService } from '@/services/botWorkshop/botManagementService';
 import { resolveBotRuntimeStage } from '@/services/botWorkshop/botRuntimeStage';
+import { getBotManagementErrorMessage } from '@/services/botWorkshop/botWorkshopErrorPolicy';
 import { useBotWorkshopStore } from '@/stores/botWorkshopStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { history } from '@umijs/max';
@@ -166,7 +167,8 @@ export function useBotWorkshop() {
         toast.success(RUN_ACTION_SUCCESS_TOAST[action]);
         await load();
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '操作失败');
+        const fallback = action === 'delete' ? 'Bot 删除失败，请稍后重试' : '操作失败';
+        toast.error(getBotManagementErrorMessage(action, error, fallback));
         throw error;
       }
     },

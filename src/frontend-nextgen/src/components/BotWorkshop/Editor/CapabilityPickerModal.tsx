@@ -8,23 +8,13 @@ import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
 import { Check, ExternalLink, FolderUp, Plug, Search, Shapes } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { readDirectoryFiles, type DirectoryHandle } from './capabilityPickerDirectory';
 
 type Source = 'mine' | 'market' | 'workshop';
 type MarketSource = 'skillcenter-market' | 'teamclaw-market';
+type McpMarketSource = 'internal' | 'open-platform';
 type PickerItem = BotEditorSkill | BotEditorMcp;
-
-type DirectoryEntry =
-  | {
-      kind: 'file';
-      name: string;
-      getFile: () => Promise<File>;
-    }
-  | {
-      kind: 'directory';
-      name: string;
-      values: () => AsyncIterable<DirectoryEntry>;
-    };
 
 interface CapabilityPickerModalProps {
   kind: 'skill' | 'mcp';
@@ -34,31 +24,14 @@ interface CapabilityPickerModalProps {
   workshopItems: PickerItem[];
   myItems: PickerItem[];
   existingIds: string[];
+  loading?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: (ids: string[], source: Source | MarketSource) => Promise<void>;
+  onSearchMcp?: (source: McpMarketSource, keyword: string) => Promise<void>;
   onUploadFolder?: (files: File[]) => Promise<BotEditorSkill>;
 }
 
 const itemId = (item: PickerItem) => ('serverCode' in item ? item.serverCode : item.id);
-
-async function readDirectoryFiles(handle: DirectoryEntry & { kind: 'directory' }, prefix = ''): Promise<File[]> {
-  const files: File[] = [];
-  for await (const entry of handle.values() as AsyncIterable<DirectoryEntry>) {
-    if (entry.kind === 'file') {
-      const file = await entry.getFile();
-      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
-      Object.defineProperty(file, 'webkitRelativePath', {
-        configurable: true,
-        value: relativePath,
-      });
-      files.push(file);
-      continue;
-    }
-    const nextPrefix = prefix ? `${prefix}/${entry.name}` : entry.name;
-    files.push(...(await readDirectoryFiles(entry, nextPrefix)));
-  }
-  return files;
-}
 
 export function CapabilityPickerModal({
   kind,
@@ -67,19 +40,23 @@ export function CapabilityPickerModal({
   workshopItems,
   myItems,
   existingIds,
+  loading = false,
   onOpenChange,
   onConfirm,
+  onSearchMcp,
   onUploadFolder,
 }: CapabilityPickerModalProps) {
   const skillSources = getCapabilities().getBotSkillPickerSources().value;
-  const sources: Source[] = kind === 'skill' ? skillSources : ['market', 'workshop'];
+  const sources: Source[] = kind === 'skill' ? skillSources : ['market'];
   const [source, setSource] = useState<Source>(() => sources[0] ?? 'mine');
   const [marketSource, setMarketSource] = useState<MarketSource>('skillcenter-market');
+  const [mcpMarketSource, setMcpMarketSource] = useState<McpMarketSource>('internal');
   const [keyword, setKeyword] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
+  const remoteMcpSearch = kind === 'mcp';
   const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
   const items =
     source === 'mine'
@@ -90,12 +67,19 @@ export function CapabilityPickerModal({
         : marketItems
       : workshopItems;
   const visibleItems = useMemo(() => {
-    if (remoteSearch) return items;
+    if (remoteSearch || remoteMcpSearch) return items;
     const normalized = keyword.trim().toLowerCase();
     return items.filter(
       (item) => !normalized || `${item.name} ${item.description ?? ''}`.toLowerCase().includes(normalized),
     );
-  }, [items, keyword, remoteSearch]);
+  }, [items, keyword, remoteMcpSearch, remoteSearch]);
+  useEffect(() => {
+    if (!open || kind !== 'mcp' || !onSearchMcp) return;
+    const timer = setTimeout(() => {
+      void onSearchMcp(mcpMarketSource, keyword.trim()).catch(() => undefined);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [kind, keyword, mcpMarketSource, onSearchMcp, open]);
   const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
   const close = () => {
     setSelected([]);
@@ -116,7 +100,7 @@ export function CapabilityPickerModal({
     setUploading(true);
     try {
       const pickerWindow = window as Window & {
-        showDirectoryPicker?: (options?: { mode?: 'read' }) => Promise<DirectoryEntry & { kind: 'directory' }>;
+        showDirectoryPicker?: (options?: { mode?: 'read' }) => Promise<DirectoryHandle>;
       };
       const directoryHandle = await pickerWindow.showDirectoryPicker?.({ mode: 'read' });
       if (!directoryHandle) return;
@@ -139,7 +123,9 @@ export function CapabilityPickerModal({
         <ModalHeader>
           <ModalTitle>添加 {kind === 'skill' ? 'Skill' : 'MCP'}</ModalTitle>
           <ModalDescription>
-            {kind === 'skill' && sources.length === 1
+            {kind === 'mcp'
+              ? '从 MCP 市场选择，可按来源分类和搜索后一次添加多个能力。'
+              : kind === 'skill' && sources.length === 1
               ? '从我的 Skill 中选择，可一次添加多个能力。'
               : '从市场或能力工坊选择，可一次添加多个能力。'}
           </ModalDescription>
@@ -153,11 +139,7 @@ export function CapabilityPickerModal({
           }}
           options={[
             { value: 'market', label: kind === 'skill' ? '引用市场 Skill' : '引用市场 MCP' },
-            {
-              value: 'workshop',
-              label: kind === 'skill' ? '引用工坊 Skill' : '引用工坊 MCP',
-              disabledReason: kind === 'mcp' ? '后端暂未提供能力工坊 MCP 独立列表 OpenAPI' : undefined,
-            },
+            ...(kind === 'skill' ? [{ value: 'workshop' as const, label: '引用工坊 Skill' }] : []),
             ...(kind === 'skill' ? [{ value: 'mine' as const, label: '我的 Skill' }] : []),
           ].filter((option) => sources.includes(option.value as Source))}
           className="w-fit"
@@ -173,6 +155,21 @@ export function CapabilityPickerModal({
             options={[
               { value: 'skillcenter-market', label: 'SkillCenter' },
               { value: 'teamclaw-market', label: 'TeamClaw' },
+            ]}
+            className="w-fit"
+          />
+        ) : null}
+        {kind === 'mcp' ? (
+          <Segmented
+            value={mcpMarketSource}
+            onChange={(value) => {
+              setMcpMarketSource(value);
+              setSelected([]);
+              setKeyword('');
+            }}
+            options={[
+              { value: 'internal', label: '内部 MCP' },
+              { value: 'open-platform', label: '开放平台' },
             ]}
             className="w-fit"
           />
@@ -218,7 +215,11 @@ export function CapabilityPickerModal({
           </div>
         ) : null}
         <div className="app-scrollbar grid max-h-[420px] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
-          {visibleItems.length ? (
+          {loading ? (
+            <div className="col-span-full py-10 text-center text-xs text-muted-foreground" role="status">
+              正在加载可引用的 {kind === 'skill' ? 'Skill' : 'MCP'}…
+            </div>
+          ) : visibleItems.length ? (
             visibleItems.map((item) => {
               const id = itemId(item);
               const active = selected.includes(id);

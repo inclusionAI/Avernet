@@ -328,6 +328,8 @@ export interface AppCapabilities {
   getBotEngineOptions: () => CapabilityResult<BotEngineOption[]>;
   /** Open Core/阿里云仅本地 Skill；internal overlay 可开放市场和能力工坊来源。 */
   getBotSkillPickerSources: () => CapabilityResult<BotSkillPickerSource[]>;
+  /** Bot 编辑页添加 MCP 仅属于 Internal Overlay；Open Core / 阿里云不展示入口也不请求市场接口。 */
+  getBotMcpPickerEnabled: () => CapabilityResult<boolean>;
   /**
    * 产品品牌语义（名称/页头 Logo/登录视觉，见 `ProductBrand`）。
    * Open Core 默认 `Avernet` + 横版 wordmark；internal overlay 覆盖为 `TeamClaw` +
