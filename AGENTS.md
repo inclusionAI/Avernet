@@ -297,13 +297,24 @@ If you cannot run a required test, state exactly what was not run and why.
 ## Common Commands
 
 ```bash
-# Root Python workspace
+# Root coordination project only (does not install module dependencies)
 uv sync
+
+# Independent Python module environments; run from the repository root
+uv sync --project src/backend --frozen
+uv sync --project src/baas --frozen
+uv sync --project src/engine --frozen
 
 # BCS
 cd src/bcs
 cargo test --workspace
 ```
+
+Backend, BaaS community, and Engine each use a module-local `pyproject.toml`,
+`uv.lock`, and `.venv`. Read [`docs/dependencies.md`](docs/dependencies.md) before
+preparing or smoke-testing one of these Python environments; it lists their
+Python constraints, environment-specific verification commands, and Engine's
+separate test-tool setup.
 
 Frontend public setup is still being finalized. Do not replace unresolved
 public setup gaps with private registry or company-network assumptions.

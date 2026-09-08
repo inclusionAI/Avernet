@@ -24,6 +24,39 @@
 
 运行 `singlebox.sh` 时也会安装仓库级 pre-push hook，即设置 `core.hooksPath=.githooks`。如果某次命令需要跳过 hook 安装，可以设置 `OCB_SKIP_GIT_HOOKS=1`。
 
+## Python 模块环境
+
+根目录 `pyproject.toml` 是一个空的协调项目：依赖列表和 uv workspace
+member 列表都为空。因此，在仓库根目录执行 `uv sync` 只会准备根目录
+`.venv`，**不会**安装 Backend、BaaS community 或 Engine 的依赖。
+
+每个 Python 模块都是独立的 uv 项目，各自拥有 `pyproject.toml`、`uv.lock`
+和 `.venv`。以下命令均从仓库根目录执行。使用 `uv run --project ...`
+可确保验证时使用模块环境而非系统 Python；`--frozen` 则确保按已提交的
+lockfile 安装，不更新 lockfile。
+
+| 模块 | 项目路径 | Python 要求 | 安装与最小验证 |
+| --- | --- | --- | --- |
+| Backend | `src/backend` | `>=3.12,<3.13` | `uv sync --project src/backend --frozen`<br>`uv run --project src/backend --no-sync python -c "import fastapi, pytest; import agentclaw.community; print(pytest.__version__)"` |
+| BaaS community | `src/baas` | `>=3.12.0,<3.13.0` | `uv sync --project src/baas --frozen`<br>`uv run --project src/baas --no-sync python -c "import fastapi, pytest; import secbaas.community; print(pytest.__version__)"` |
+| Engine | `src/engine` | `>=3.12`（CI 使用 3.12） | `uv sync --project src/engine --frozen`<br>`uv run --project src/engine --no-sync python -c "import fastapi; import engine.community; print(fastapi.__version__)"` |
+
+Backend 和 BaaS 已在锁定的 `dev` 依赖组中声明测试工具，`uv sync` 默认会
+安装该依赖组。Engine 只声明了运行时依赖；它的 lockfile 不包含 pytest
+或其他测试工具。所以 Engine sync 成功只表示运行时环境已就绪，不代表完整
+测试环境已就绪。Engine CI 会临时提供测试工具；如需在不运行全量测试的
+情况下复现该工具环境，请执行：
+
+```bash
+uv run --project src/engine --no-sync \
+  --with pytest-cov --with pytest-asyncio --with socksio \
+  python -c "import pytest, pytest_asyncio, pytest_cov, socksio; print(pytest.__version__)"
+```
+
+`--with` 包会在命令执行时解析，不会写入 `src/engine/uv.lock`。如需运行完整的
+模块测试与覆盖率门禁，请使用模块自身的 `scripts/ci_test.sh`；这些门禁特意不属于
+本环境冒烟验证的范围。
+
 ## 安全规则
 
 - 除上文已说明的 `install-tools` Node.js / uv 自动安装路径外，执行 `sudo`、全局安装、`brew link --force`、`curl | sh` 或等价的系统级写入前，必须停下确认。

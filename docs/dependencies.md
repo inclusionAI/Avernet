@@ -51,6 +51,43 @@ Running `singlebox.sh` also installs the repo-local pre-push hook by setting
 `core.hooksPath=.githooks`. Set `OCB_SKIP_GIT_HOOKS=1` if you need to skip hook
 installation for a one-off command.
 
+## Python module environments
+
+The root `pyproject.toml` is an empty coordination project: its dependency list
+and uv workspace member list are both empty. Consequently, `uv sync` at the
+repository root only prepares the root `.venv`; it does **not** install the
+Backend, BaaS community, or Engine dependencies.
+
+Each Python module is an independent uv project with its own `pyproject.toml`,
+`uv.lock`, and `.venv`. Run the commands below from the repository root. Using
+`uv run --project ...` ensures that verification uses the module environment
+instead of a system Python. `--frozen` also ensures that installation uses the
+committed lockfile without updating it.
+
+| Module | Project path | Python requirement | Install and minimal verification |
+| --- | --- | --- | --- |
+| Backend | `src/backend` | `>=3.12,<3.13` | `uv sync --project src/backend --frozen`<br>`uv run --project src/backend --no-sync python -c "import fastapi, pytest; import agentclaw.community; print(pytest.__version__)"` |
+| BaaS community | `src/baas` | `>=3.12.0,<3.13.0` | `uv sync --project src/baas --frozen`<br>`uv run --project src/baas --no-sync python -c "import fastapi, pytest; import secbaas.community; print(pytest.__version__)"` |
+| Engine | `src/engine` | `>=3.12` (CI uses 3.12) | `uv sync --project src/engine --frozen`<br>`uv run --project src/engine --no-sync python -c "import fastapi; import engine.community; print(fastapi.__version__)"` |
+
+Backend and BaaS declare their test tools in the locked `dev` dependency group,
+which `uv sync` installs by default. Engine declares runtime dependencies only:
+its lockfile does not include pytest or the other test tools. A successful
+Engine sync therefore prepares the runtime environment, not a complete test
+environment. Engine CI supplies its test tools ephemerally; to reproduce that
+tool setup without running the full suite, use:
+
+```bash
+uv run --project src/engine --no-sync \
+  --with pytest-cov --with pytest-asyncio --with socksio \
+  python -c "import pytest, pytest_asyncio, pytest_cov, socksio; print(pytest.__version__)"
+```
+
+The `--with` packages are resolved when the command runs and are not recorded
+in `src/engine/uv.lock`. For full module test and coverage gates, use the
+module-local `scripts/ci_test.sh`; those gates are intentionally outside this
+environment smoke check.
+
 ## Safety rules
 
 - Outside the disclosed `install-tools` Node.js and uv auto-install paths, stop
