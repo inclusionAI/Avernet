@@ -11,10 +11,12 @@ import type { DagNodeView, TaskNodeView, TaskView } from './types';
 export const TaskProgressTab: React.FC<{
   task: TaskView;
   userId?: string;
+  /** 当前已下钻副屏的节点 id(用于高亮主副屏对应节点) */
+  activeDrillNodeId?: string | null;
   onOpenSubTask?: (subTaskId: string) => void;
-  /** 打开群会话视图（左侧并列下钻面板） */
+  /** 打开群会话视图(左侧并列下钻面板) */
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ task, userId, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ task, userId, activeDrillNodeId, onOpenSubTask, onOpenGroupSession }) => {
   const [view, setView] = useState<'node' | 'dag'>('node');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -77,6 +79,7 @@ export const TaskProgressTab: React.FC<{
             nodes={task.nodes}
             ownerBotId={task.ownerBotId}
             userId={userId}
+            activeDrillNodeId={activeDrillNodeId}
             onViewNodeDetail={openDetail}
             onOpenSubTask={onOpenSubTask}
             onOpenGroupSession={onOpenGroupSession}
@@ -86,6 +89,7 @@ export const TaskProgressTab: React.FC<{
             dagNodes={task.dagNodes}
             dagEdges={task.dagEdges}
             selectedNodeId={selectedNodeId}
+            drilledNodeId={activeDrillNodeId}
             onViewNodeDetail={openDagNodeDetail}
           />
         )}

@@ -11,6 +11,7 @@ import type {
   BotRenderScreen,
   BotRenderScreenInput,
 } from '@/domain/botEditor';
+import { useBotEditorCandidates } from '@/hooks/useBotEditorCandidates';
 import { useBotLocalSkillUpload } from '@/hooks/useBotLocalSkillUpload';
 import { botEditorService } from '@/services/botWorkshop/botEditorService';
 import { useCallback, useEffect, useState } from 'react';
@@ -27,10 +28,7 @@ export function useBotEditor(
   const uploadSkillFolder = useBotLocalSkillUpload(botId, setSkills);
   const [skillSets, setSkillSets] = useState<BotCapabilitySet[]>([]);
   const [mcps, setMcps] = useState<BotEditorMcp[]>([]);
-  const [availableMcps, setAvailableMcps] = useState<BotEditorMcp[]>([]);
-  const [marketSkills, setMarketSkills] = useState<BotEditorSkill[]>([]);
-  const [skillCenterSkills, setSkillCenterSkills] = useState<BotEditorSkill[]>([]);
-  const [workshopSkills, setWorkshopSkills] = useState<BotEditorSkill[]>([]);
+  const candidates = useBotEditorCandidates(botId, spaceId);
   const [resources, setResources] = useState<BotEditorResource[]>([]);
   const [resourceLoadingPaths, setResourceLoadingPaths] = useState<string[]>([]);
   const [screens, setScreens] = useState<BotRenderScreen[]>([]);
@@ -73,25 +71,8 @@ export function useBotEditor(
     }
   }, [botId, enabled, serviceBot, spaceId, ownerId]);
   useEffect(() => {
-    setAvailableMcps([]);
-    setMarketSkills([]);
-    setSkillCenterSkills([]);
-    setWorkshopSkills([]);
     void load();
   }, [botId, load]);
-  const loadCapabilityCandidates = useCallback(async () => {
-    if (!botId) return;
-    try {
-      const candidates = await botEditorService.loadCapabilityCandidates(botId, spaceId);
-      setAvailableMcps(candidates.availableMcps);
-      setMarketSkills(candidates.marketSkills);
-      setSkillCenterSkills(candidates.skillCenterSkills);
-      setWorkshopSkills(candidates.workshopSkills);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '可选能力加载失败');
-      throw error;
-    }
-  }, [botId, spaceId]);
   const act = useCallback(
     async (work: () => Promise<unknown>, message: string) => {
       try {
@@ -109,11 +90,7 @@ export function useBotEditor(
     skills,
     skillSets,
     mcps,
-    availableMcps,
-    marketSkills,
-    skillCenterSkills,
-    workshopSkills,
-    loadCapabilityCandidates,
+    ...candidates,
     resources,
     screens,
     routines,

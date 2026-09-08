@@ -58,10 +58,12 @@ export const NodeListView: React.FC<{
   nodes: TaskView['nodes'];
   ownerBotId?: string | null;
   userId?: string;
+  /** 当前已下钻副屏的节点 id(用于高亮主副屏对应的节点卡片) */
+  activeDrillNodeId?: string | null;
   onViewNodeDetail: (node: TaskNodeView) => void;
   onOpenSubTask?: (subTaskId: string) => void;
   onOpenGroupSession?: (node: TaskNodeView) => void;
-}> = ({ nodes, ownerBotId, userId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
+}> = ({ nodes, ownerBotId, userId, activeDrillNodeId, onViewNodeDetail, onOpenSubTask, onOpenGroupSession }) => {
   if (!nodes.length) {
     return <Empty description="暂无执行节点" />;
   }
@@ -132,6 +134,21 @@ export const NodeListView: React.FC<{
           }
         };
 
+        // 该节点已下钻到副屏:主副屏对应节点卡片高亮(更实的主色描边 + 更强阴影 + 更亮的主色底纹),
+        // 让用户在打开下钻副屏时一眼看出选中的是哪个节点任务。
+        const isActiveDrill =
+          activeDrillNodeId !== null && activeDrillNodeId !== undefined && node.id === activeDrillNodeId;
+        const restBorder = isActiveDrill ? C.primary : canOpenSub ? C.primary + '35' : C.border;
+        const restBackground = isActiveDrill
+          ? `linear-gradient(135deg, ${C.primary}1A 0%, ${C.primaryBg} 50%, ${C.surface} 100%)`
+          : canOpenSub
+          ? `linear-gradient(135deg, ${C.primaryBg} 0%, ${C.surface} 72%)`
+          : C.surface;
+        const restBoxShadow = isActiveDrill
+          ? `inset 4px 0 0 0 ${C.primary}, 0 6px 16px rgba(37, 99, 235, 0.26)`
+          : canOpenSub
+          ? '0 2px 10px rgba(37, 99, 235, 0.08)'
+          : '0 1px 3px rgba(29, 33, 41, 0.04)';
         return (
           <div
             key={node.id}
@@ -188,23 +205,23 @@ export const NodeListView: React.FC<{
                 marginLeft: 8,
                 marginBottom: 0,
                 padding: '12px 12px 11px',
-                border: `1px solid ${canOpenSub ? C.primary + '35' : C.border}`,
+                border: `1px solid ${restBorder}`,
                 borderRadius: 10,
-                background: canOpenSub ? `linear-gradient(135deg, ${C.primaryBg} 0%, ${C.surface} 72%)` : C.surface,
-                boxShadow: canOpenSub ? '0 2px 10px rgba(37, 99, 235, 0.08)' : '0 1px 3px rgba(29, 33, 41, 0.04)',
+                background: restBackground,
+                boxShadow: restBoxShadow,
                 cursor: 'pointer',
                 transition: 'border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out',
               }}
               onMouseEnter={(event) => {
-                event.currentTarget.style.borderColor = canOpenSub ? C.primary : C.primary + '80';
-                event.currentTarget.style.boxShadow = '0 6px 18px rgba(29, 33, 41, 0.09)';
+                event.currentTarget.style.borderColor = C.primary;
+                event.currentTarget.style.boxShadow = isActiveDrill
+                  ? `inset 4px 0 0 0 ${C.primary}, 0 8px 20px rgba(37, 99, 235, 0.3)`
+                  : '0 6px 18px rgba(37, 99, 235, 0.18)';
                 event.currentTarget.style.transform = 'translateY(-1px)';
               }}
               onMouseLeave={(event) => {
-                event.currentTarget.style.borderColor = canOpenSub ? C.primary + '35' : C.border;
-                event.currentTarget.style.boxShadow = canOpenSub
-                  ? '0 2px 10px rgba(37, 99, 235, 0.08)'
-                  : '0 1px 3px rgba(29, 33, 41, 0.04)';
+                event.currentTarget.style.borderColor = restBorder;
+                event.currentTarget.style.boxShadow = restBoxShadow;
                 event.currentTarget.style.transform = 'translateY(0)';
               }}
             >
