@@ -195,3 +195,56 @@ def test_omitted_entity_type_keeps_staff_default(local_build):
     assert (
         Path(artifact.ext["build_target_path"]) / "identity.md"
     ).read_text() == "staff Bot"
+
+
+@pytest.mark.parametrize("engine", ["openclaw", "hermes"])
+def test_local_producer_builds_real_snapshot_without_remote_services(
+    local_build, monkeypatch, engine
+):
+    """Exercise the real build and rsync path, including its local-only branches."""
+    from agentclaw.community.core.service_bot.services import bot_build_service
+
+    producer, base = local_build
+    source = base / f"staff_owner-a/bot-a/{engine}"
+    source.mkdir(parents=True)
+    (source / "identity.md").write_text("selected Bot")
+    (source / "logs").mkdir()
+    (source / "logs/runtime.log").write_text("not a deployable file")
+    (source / "openclaw.json").write_text('{"name": "selected Bot"}')
+    if engine == "openclaw":
+        (source / "openclaw.json.asback_123").write_text("transient backup")
+
+    def unexpected_remote_call(*args, **kwargs):
+        pytest.fail("local snapshot must not access NAS, MCP generation, or remote sync")
+
+    service = bot_build_service.BotBuildService.__new__(bot_build_service.BotBuildService)
+    service._sandbox_registry = producer._sandbox_registry
+    service._device_service = Mock(exec_shell_new=unexpected_remote_call)
+    monkeypatch.setattr(bot_build_service, "get_bot_nas_dir", unexpected_remote_call)
+    monkeypatch.setattr(service, "_generate_mcp_config", unexpected_remote_call)
+    # Stage configuration belongs to the channel service, not the snapshot copy.
+    monkeypatch.setattr(service, "_generate_openclaw_stage_configs", lambda **kwargs: True)
+    monkeypatch.setattr(
+        service, "_get_migration_path_base", lambda **kwargs: "/artifacts/bot-a"
+    )
+    producer._build_service = service
+    bot = _bot()
+    bot.update(active_engine=engine, device_id="local-device")
+
+    artifact = _publish(producer, bot)
+
+    assert artifact.success
+    target = base / f"staff_owner-a/bot-a/1/{engine}"
+    assert Path(artifact.ext["build_target_path"]) == target
+    assert artifact.ext["migration_path"] == f"/artifacts/bot-a/1/{engine}"
+    assert (target / "identity.md").read_text() == "selected Bot"
+    assert (target / "openclaw.json").read_text() == '{"name": "selected Bot"}'
+    assert not (target / "logs").exists()
+    assert not (target / "openclaw.json.asback_123").exists()
+
+
+def test_local_producer_rejects_missing_publish_version(local_build):
+    producer, _ = local_build
+    request = ArtifactBuildRequest.create(bot=_bot(), version=None)
+    with pytest.raises(ValueError, match="requires a publish version"):
+        producer.produce_artifact(request)
