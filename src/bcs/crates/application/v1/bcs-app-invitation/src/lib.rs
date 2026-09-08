@@ -11,8 +11,9 @@
 //! V1 invitation divergence from the legacy `InviteService`:
 //! - Tokens are minted directly with `target_type: Some(Group|Session)` via
 //!   `bcs_domain::invite_token_encode`, so the accept path can route without
-//!   inspecting a join URL. Legacy tokens carry `target_type: None` and are
-//!   rejected by V1 accept.
+//!   inspecting a join URL. The legacy `bcs-http` invite routes also mint
+//!   typed tokens now, so their links are accepted here; only pre-field
+//!   tokens (`target_type: None`) remain rejected by V1 accept.
 //! - V1 `create_*_invitation` mirrors the legacy DM/active-group guards but
 //!   mints tokens directly (the legacy `create_*_invite_token` paths are not
 //!   reused because they emit legacy join URLs).
