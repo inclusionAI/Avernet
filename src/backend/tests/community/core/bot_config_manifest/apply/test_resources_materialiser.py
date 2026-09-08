@@ -18,9 +18,11 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
-from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
     EntryFetchError,
     FetchedEntry,
+    GitDelivery,
     GitEntrySource,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
@@ -133,7 +135,7 @@ class _StubEntryFetcher:
         so every existing case still exercises the code it always did.
         """
         if getattr(self, "declared_override", None) is not None:
-            return self.declared_override
+            return BlobDelivery(self.declared_override)
         decl: dict[str, Any] | None = None
         if isinstance(entry.get("from"), str):
             sources = getattr(ctx, "source_session", None)
@@ -161,23 +163,29 @@ class _StubEntryFetcher:
                     "auth": decl.get("auth"),
                 }
             )
-            return _stub_git_source(
-                tree,
-                subpath=_compose(decl.get("subpath"), entry.get("subpath")),
-                auth=decl.get("auth"),
-                url=key,
-                moved=self.moved_from,
+            return GitDelivery(
+                _stub_git_source(
+                    tree,
+                    subpath=_compose(decl.get("subpath"), entry.get("subpath")),
+                    auth=decl.get("auth"),
+                    url=key,
+                    moved=self.moved_from,
+                )
             )
 
         url = decl["url"] if decl is not None else entry.get("source")
-        return self.fetch(
-            ctx,
-            source_url=url,
-            digest=entry.get("digest"),
-            auth=(decl or {}).get("auth", entry.get("auth")),
-            category=category,
-            keep_last=(entry.get("on_fetch_failure", "keep_last") == "keep_last"),
-            entry_identity=entry_identity,
+        return BlobDelivery(
+            self.fetch(
+                ctx,
+                source_url=url,
+                digest=entry.get("digest"),
+                auth=(decl or {}).get("auth", entry.get("auth")),
+                category=category,
+                keep_last=(
+                    entry.get("on_fetch_failure", "keep_last") == "keep_last"
+                ),
+                entry_identity=entry_identity,
+            )
         )
 
     def file_bytes(
@@ -1629,16 +1637,16 @@ def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
     assert len(stub.filed) == 1
     assert stub.filed[0]["entry_identity"] == "data/kb/"
     # The canonical form is deterministic and injective: same tree, same bytes.
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
-        _canonical_tree_bytes,
+    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+        canonical_tree_bytes,
     )
 
-    assert _canonical_tree_bytes([("a", b"bc")]) == _canonical_tree_bytes(
+    assert canonical_tree_bytes([("a", b"bc")]) == canonical_tree_bytes(
         [("a", b"bc")]
     )
     # A path/payload pair that a delimiter-joined encoding would confuse.
-    assert _canonical_tree_bytes([("a", b"b"), ("c", b"d")]) != (
-        _canonical_tree_bytes([("a", b"b\nc"), ("", b"d")])
+    assert canonical_tree_bytes([("a", b"b"), ("c", b"d")]) != (
+        canonical_tree_bytes([("a", b"b\nc"), ("", b"d")])
     )
 
 
@@ -1674,9 +1682,9 @@ def test_the_canonical_tree_form_round_trips():
     """`keep_last` is the DEFAULT, and it promises the bot keeps running what
     it has. A stored form with no decoder cannot keep that promise, so the
     canonical bytes are reversible and self-describing."""
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
-        _canonical_tree_bytes,
-        _decode_tree_bytes,
+    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+        canonical_tree_bytes,
+        decode_tree_bytes,
     )
 
     members = [
@@ -1687,22 +1695,22 @@ def test_the_canonical_tree_form_round_trips():
         ("odd:name.txt", b"12:not-a-frame\n"),
         ("empty", b""),
     ]
-    blob = _canonical_tree_bytes(members)
-    assert _decode_tree_bytes(blob) == sorted(members)
+    blob = canonical_tree_bytes(members)
+    assert decode_tree_bytes(blob) == sorted(members)
 
 
 def test_bytes_that_are_not_a_canonical_tree_decode_to_none():
     """`None` is an answer, not a fault: the caller is asking "tree or
     archive?", and a truncated receipt must not half-deliver a tree."""
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
-        _canonical_tree_bytes,
-        _decode_tree_bytes,
+    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+        canonical_tree_bytes,
+        decode_tree_bytes,
     )
 
-    assert _decode_tree_bytes(b"PK\x03\x04 a real zip") is None
-    assert _decode_tree_bytes(b"") is None
-    truncated = _canonical_tree_bytes([("a.md", b"0123456789")])[:-4]
-    assert _decode_tree_bytes(truncated) is None
+    assert decode_tree_bytes(b"PK\x03\x04 a real zip") is None
+    assert decode_tree_bytes(b"") is None
+    truncated = canonical_tree_bytes([("a.md", b"0123456789")])[:-4]
+    assert decode_tree_bytes(truncated) is None
 
 
 def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
@@ -1713,8 +1721,8 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
     about a field a git source may not even carry. The stored copy now comes
     back as the tree it was.
     """
-    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
-        _canonical_tree_bytes,
+    from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (  # noqa: E501
+        canonical_tree_bytes,
     )
 
     tree = [("faq.csv", b"q,a\n"), ("deep/notes.md", b"# nested\n")]
@@ -1723,7 +1731,7 @@ def test_keep_last_delivers_a_stored_git_tree_instead_of_failing():
     # What `_git_keep_last` hands back: the baseline receipt's bytes, carrying
     # the fallback reason the report must state (§9.6).
     stub.declared_override = FetchedEntry(
-        content=_canonical_tree_bytes(tree),
+        content=canonical_tree_bytes(tree),
         digest="sha256:stub",
         from_store=True,
         source_url="git+https://code.example.com/team/content.git@abc/kb",

@@ -1,502 +1,451 @@
-"""What a source delivered, and how a category reads it.
+"""How a manifest reaches a bot, per engine family (W8, #1476).
 
-One return type for the fetch layer. ``fetch_declared`` used to answer with
-``FetchedEntry | GitEntrySource`` and every consumer opened with "which one did
-I get?" — eight ``isinstance`` sites across four files, all asking that question
-to answer a different one: *what did this entry deliver?*
+Two engine families deliver a bot's configuration by opposite mechanisms, and
+the apply engine must not know which it is running for:
 
-:class:`EntryDelivery` is that question's home. Two implementations satisfy it:
-:class:`BlobDelivery` wraps the bytes one HTTPS GET or one object read produced,
-:class:`GitDelivery` wraps a proven checkout. The caller asks for members or for
-a single file and is answered on either road.
+* **ARCA** boots from a start command and takes everything else as writes into
+  a live container. ``script`` is baked into the start command, so it is the
+  one construct that must exist *before* the container; every other construct
+  resolves a device and can only land *after* it.
+* **teclaw** boots from a composed artifact and applies it in full before it
+  reports ready (W12 contract, A4). The platform is the source of truth for
+  what a manifest applies (spec D-3): every construct is materialised into
+  platform state — database rows, and the bot-data object store for files —
+  and the artifact is the delivery. Nothing needs the container, so nothing
+  waits for it. ``script`` is unsupported on teclaw.
 
-**The category keeps its authority.** ``members()`` takes ``unpack`` and
-``strip_components`` as *arguments* — the materialiser reads them off the entry
-and passes them down. The delivery is told what to do with what it holds; it
-never reads the entry, never learns which category called, and never decides
-what "the entry's bytes" are. That rule is the reason the union existed in the
-first place, and it survives intact:
+A :class:`DeliveryStrategy` owns exactly the four things that differ: the phase
+each construct belongs to, the write ports the materialisers are handed, the
+creation sequence the W13 job runs, and the step that closes an apply. The
+orchestrator sees phases and the materialisers see ports; neither learns the
+family. Adding a family is a strategy, not a fork of five materialisers.
 
-    what "the entry's bytes" are (a file? a package? a canonical zip?) is a
-    *category* question the fetch layer must not answer.
-
-**Reads are pure — nothing here files a receipt.** That is deliberate, and
-``skills`` is why: its deliverable is a *canonical zip* that only exists after
-validation, so the bytes worth a receipt are not the bytes that arrived. Filing
-therefore belongs to whoever decides what the receipt stands for, which is the
-caller. :meth:`EntryDelivery.receipt_url` and :meth:`EntryDelivery.auth` are
-here so that caller can file under the right identity on either road.
-
-**One discriminator survives, and it is not a type check.** ``skills`` runs two
-validators by design — a fetched zip with no ``subpath`` goes byte-for-byte
-through ``validate_zip``, the same validator the manual upload service runs so
-that limits and layout stay one rule, while a git tree goes through
-``validate_directory``. Collapsing those would discard the byte-for-byte road.
-So :meth:`EntryDelivery.is_tree` asks what *arrived*, where the old code asked
-what *class* it was. A third protocol that delivers a tree slots into the
-existing branch instead of adding an arm to it.
+**The switch.** Until the teclaw engine supports the artifact's ``ownership``
+map, the platform-managed path is behind
+``user_config.bot_config_manifest.teclaw_platform_managed`` (default off). Off,
+teclaw runs the shape it ran before W8: every non-script construct after the
+container, through the same device-backed ports ARCA uses. The switch is read
+here, by the factory, and nowhere else.
 """
 from __future__ import annotations
 
-import tempfile
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional, Protocol, runtime_checkable
+from dataclasses import dataclass, replace
+from enum import StrEnum
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
-from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
-    GitCheckout,
-    git_receipt_url,
+from agentclaw.community.core.ports.activation_port import (
+    ActivationPort,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
-    FetchRefusedError,
+from agentclaw.community.core.bot_config_manifest.apply.context import ApplyContext
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import EntryFetcher
+from agentclaw.community.core.ports.identity_file_port import (
+    IdentityFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.unpack import (
-    UnpackError,
-    unpack_archive,
+from agentclaw.community.core.ports.resource_file_port import (
+    ResourceFilePort,
 )
-from agentclaw.community.core.bot_config_manifest.schema.entries import (
-    VALID_UNPACK,
+from agentclaw.community.core.ports.skill_package_upload_port import (
+    SkillPackageUploadPort,
 )
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestCategory
+from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
+    CliToolService,
+)
+from agentclaw.community.core.bot_startup_script.bot_startup_script_service_protocol import (
+    BotStartupScriptServiceProtocol,
+)
+from agentclaw.community.core.mcp.mcp_auth_service_protocol import MCPAuthServiceProtocol
+from agentclaw.community.core.skill_center.capability_state_contract import (
+    BotCapabilityStateReaderProtocol,
+)
+from agentclaw.community.core.skill_center.skill_package import SkillPackageValidator
+from agentclaw.community.core.bot_config_manifest.apply.order import (
+    ALL_PHASES,
+    APPLY_ORDER,
+    ApplyPhase,
+    ApplyStep,
+)
+from agentclaw.community.core.bot_config_manifest.apply.outcomes import ApplyReport
+from agentclaw.community.core.bot_config_manifest.capabilities import ManifestSection
+
+#: The yaml key under ``user_config.bot_config_manifest``.
+TECLAW_PLATFORM_MANAGED_KEY = "teclaw_platform_managed"
 
 
-class EntryFetchError(Exception):
-    """One entry's bytes could not be acquired, with a report-safe reason.
+class CreationSequence(StrEnum):
+    """The order a W13 creation runs its steps in, per family.
 
-    The reason is built from the transport's and the credential service's own
-    words — W2 refuses before sending anything that would carry caller or
-    source data, and W3's error family names credentials without ever carrying
-    the value — so a secret cannot ride out of this module inside an
-    exception. Materialisers hand ``reason`` to ``ResolveFailure`` verbatim.
+    Each value names its steps in the order they run; the two differ in
+    *where the container is created* relative to the manifest phases.
     """
 
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(reason)
-
-
-# ── the payloads a delivery wraps ────────────────────────────────────────────
-
-
-@dataclass(frozen=True)
-class FetchedEntry:
-    """One entry's bytes, their content address, and where they came from."""
-
-    content: bytes
-    digest: str
-    #: True when the platform's own copy answered — no network was touched.
-    from_store: bool
-    content_type: Optional[str] = None
-    #: Set only when the platform's copy answered as a ``keep_last``
-    #: FALLBACK — the source was fetched and failed, the stored bytes stood
-    #: in. The report must say so (schema §9.6's published contract: a
-    #: keep_last entry's report row states the fallback), so this carries
-    #: the human-readable reason for the materialiser to surface as the
-    #: entry's note. A plain store-hit (from_store, no note) is the
-    #: legitimate pinned fast path and stays silent.
-    fallback_reason: Optional[str] = None
-    #: The URL the bytes came by, when the caller needs it for shape
-    #: inference (the skills materialiser's archive-kind detection). ``None``
-    #: on the roads that never knew one.
-    source_url: Optional[str] = None
+    #: pre-container phase → create the bot **and provision it** → wait for
+    #: ``ACTIVE`` → post-container phase. The manifest is applied in two
+    #: halves around the container. ARCA's sequence, and teclaw's while the
+    #: platform-managed switch is off.
+    CREATE_BETWEEN_PHASES = "create_between_phases"
+    #: create the bot **record only** → the single pre-container phase writes
+    #: platform state against it → provision (which composes the first
+    #: artifact from that state) → wait for ``ACTIVE``. No post-container
+    #: phase: everything was delivered before the container existed. teclaw
+    #: with the platform-managed switch on.
+    RECORD_APPLY_PROVISION = "record_apply_provision"
 
 
 @dataclass(frozen=True)
-class GitEntrySource:
-    """A fresh git checkout for one entry to consume — files, not bytes.
+class MaterialiserPorts:
+    """The write targets a strategy hands ``build_materialisers``.
 
-    The object road hands back bytes because there was exactly one blob to
-    read; the git road hands back a proven tree and lets the materialiser read
-    it, because what "the entry's bytes" are is a *category* question this
-    layer must not answer.
-
-    ``file_limit`` is the category's per-entry byte cap (the same
-    ``FETCH_ENTRY_LIMITS`` number the object road enforces at the transport) —
-    the tree's readers refuse a member by its *declared* size against it.
-    ``auth`` is the credential **name** the acquisition rode, threaded to the
-    receipts so W11's lineage attributes git-sourced bytes the way it does
-    object-sourced ones.
+    Field for field the keyword arguments that function takes; a strategy
+    differs from another by which objects sit behind these names, never by
+    which materialisers exist. Each field is typed by the narrow port the
+    materialiser calls through, so a device-backed service and a store-backed
+    port are interchangeable by shape.
     """
 
-    checkout: GitCheckout
-    source_url: str
-    subpath: Optional[str]
-    moved_from: Optional[str]
-    auth: Optional[str] = None
-    file_limit: Optional[int] = None
+    script_service: BotStartupScriptServiceProtocol
+    activation_service: ActivationPort
+    mcp_auth_service: MCPAuthServiceProtocol
+    identity_service: IdentityFilePort
+    upload_service: SkillPackageUploadPort
+    capability_reader: BotCapabilityStateReaderProtocol
+    package_validator: SkillPackageValidator
+    entry_fetcher: EntryFetcher
+    resource_service: ResourceFilePort
+    #: W9. One field for a whole category, because the service already holds
+    #: the family's delivery port — so the ``cli_tools`` materialiser takes one
+    #: dependency and the family difference stays here, where W6 put it.
+    cli_tool_service: CliToolService
 
-    def files(self) -> list[tuple[str, bytes]]:
-        try:
-            return self.checkout.files(self.subpath, file_limit=self.file_limit)
-        except FetchRefusedError as exc:
-            raise EntryFetchError(str(exc)) from exc
-
-    def read_file(self) -> bytes:
-        try:
-            return self.checkout.read_file(self.subpath, file_limit=self.file_limit)
-        except FetchRefusedError as exc:
-            raise EntryFetchError(str(exc)) from exc
-
-    def receipt_url(self) -> str:
-        """The W11 identity for this entry's git-sourced bytes."""
-        return git_receipt_url(self.source_url, self.checkout.sha, self.subpath)
-
-    def moved_note(self) -> Optional[str]:
-        """The non-strict road's report line about a moved ref."""
-        if self.moved_from is None:
-            return None
-        return (
-            f"ref moved: the last apply recorded {self.moved_from}, "
-            f"this one resolved {self.checkout.sha}"
-        )
+    def as_kwargs(self) -> dict[str, Any]:
+        return {
+            "script_service": self.script_service,
+            "activation_service": self.activation_service,
+            "mcp_auth_service": self.mcp_auth_service,
+            "identity_service": self.identity_service,
+            "upload_service": self.upload_service,
+            "capability_reader": self.capability_reader,
+            "package_validator": self.package_validator,
+            "entry_fetcher": self.entry_fetcher,
+            "resource_service": self.resource_service,
+            "cli_tool_service": self.cli_tool_service,
+        }
 
 
-# ── the seam ─────────────────────────────────────────────────────────────────
+class DeliveryStrategy(Protocol):
+    """What differs between engine families, and nothing else.
 
-
-@runtime_checkable
-class EntryDelivery(Protocol):
-    """What one entry's source delivered, read on the category's terms.
-
-    Every member below has exactly one caller family, named in its docstring.
-    The surface is wide because the four fetching categories genuinely want
-    different things out of one delivery — but it is not *open*: a member with
-    no caller does not belong here, the same discipline
-    ``plugin_api/object_storage.py`` states for its own protocol.
+    Implemented by ``ArcaDelivery`` and ``TeclawDelivery`` below, which
+    subclass it explicitly so the implementations are one jump away.
     """
 
-    def is_tree(self) -> bool:
-        """Did the source deliver a tree, or a single object?
+    @property
+    def family(self) -> str:
+        """The engine family's name: ``"arca"`` or ``"teclaw"``.
 
-        ``skills`` alone asks, to pick its validator. A capability question,
-        deliberately, rather than a class check: what matters is the shape
-        that arrived, not which implementation produced it.
+        The key the factory selects a strategy by and the word a report or a
+        log uses for it. Example: ``ArcaDelivery().family == "arca"``;
+        ``DeliveryStrategyFactory.for_engine("teclaw").family == "teclaw"``.
         """
         ...
 
-    def members(
-        self, *, unpack: object, strip_components: object
-    ) -> list[tuple[str, bytes]] | str:
-        """The delivered files as ``(relative path, bytes)``, or a refusal.
+    @property
+    def creation_sequence(self) -> CreationSequence: ...
 
-        ``resources``' directory road. A refusal comes back as its reason
-        *string* rather than an exception, keeping every failure in
-        ``resolve``'s currency and the bot's tree untouched.
-
-        ``unpack`` and ``strip_components`` are the entry's declared values,
-        passed in unvalidated — this method validates them (one rule, see
-        :func:`archive_refusal`) because a delivery that trusted them would be
-        a second, weaker gate.
-        """
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        """Which phase this family delivers the step's construct in."""
         ...
 
-    def single(self) -> bytes:
-        """The one file this entry delivers.
-
-        ``resources``' file road, ``identity``, and ``cli_tools``. Raises
-        :class:`EntryFetchError` when the source cannot name a single file —
-        on the git road that is a checkout whose ``subpath`` names a directory
-        or nothing.
-        """
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        """The steps in the requested phases, in position order."""
         ...
 
-    def note(self) -> Optional[str]:
-        """The report line this delivery owes, or ``None``.
-
-        A ``keep_last`` fallback's reason on the object road, a moved ref's
-        note on the git road. Both answer "what should the entry's report row
-        say about how these bytes arrived", which is why they share a name.
-        """
+    def needs_container(self) -> bool:
+        """Whether any construct of this family lands only after the container."""
         ...
 
-    def digest(self) -> Optional[str]:
-        """The content address of what arrived, when one was computed.
-
-        ``cli_tools``' declared-pin belt. ``None`` on a road that computed
-        none, which the belt reads as "nothing to compare".
-        """
+    def ports(self) -> MaterialiserPorts:
+        """The write targets for this family's materialisers."""
         ...
 
-    def receipt_url(self) -> Optional[str]:
-        """The W11 identity to file this entry's bytes under."""
-        ...
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        """Close an apply after every category is written.
 
-    def auth(self) -> Optional[str]:
-        """The credential **name** the acquisition rode, for the receipt.
-
-        Never a value. The lineage's answer to "which credential served this"
-        is the same on both roads because both thread this.
-        """
-        ...
-
-    def source_url(self) -> Optional[str]:
-        """Where the bytes came from, for callers that infer shape from it.
-
-        ``skills``' archive-kind detection (``.tar.gz`` vs ``.zip``).
-        """
-        ...
-
-    def content_type(self) -> Optional[str]:
-        """What the source said the bytes are, when it said anything.
-
-        ``skills``' archive-kind detection again, as the second signal.
-        """
-        ...
-
-    def from_store(self) -> bool:
-        """True when the platform's own copy answered and no network moved.
-
-        ``skills`` carries it onto ``_SkillPackage`` so the report can tell a
-        pinned fast path from a fresh fetch.
+        Returns a note for the report (a failure that must not raise — §2.7),
+        or ``None`` when there is nothing to say.
         """
         ...
 
 
-@dataclass(frozen=True)
-class BlobDelivery:
-    """One object's bytes, however they were acquired."""
-
-    fetched: FetchedEntry
-
-    def is_tree(self) -> bool:
-        return False
-
-    def members(
-        self, *, unpack: object, strip_components: object
-    ) -> list[tuple[str, bytes]] | str:
-        """A stored git tree decoded, or an archive unpacked.
-
-        The magic check comes **first**, and it is not an optimisation: when
-        ``keep_last`` stands in for a failed *git* fetch, the store hands back
-        the canonical tree as plain bytes with no idea what shape they are.
-        Considering ``unpack`` before asking would send that entry down the
-        archive road, where it would be told to declare an ``unpack`` a git
-        source may not carry — turning a transient outage into a category
-        failure instead of keeping what the bot has.
-        """
-        stored = decode_tree_bytes(self.fetched.content)
-        if stored is not None:
-            return stored
-        refusal = archive_refusal(unpack, strip_components)
-        if refusal is not None:
-            return refusal
-        assert isinstance(unpack, str)  # archive_refusal proved it
-        assert isinstance(strip_components, int)
-        return unpack_members(self.fetched.content, unpack, strip_components)
-
-    def single(self) -> bytes:
-        return self.fetched.content
-
-    def note(self) -> Optional[str]:
-        return self.fetched.fallback_reason
-
-    def digest(self) -> Optional[str]:
-        return self.fetched.digest
-
-    def receipt_url(self) -> Optional[str]:
-        return self.fetched.source_url
-
-    def auth(self) -> Optional[str]:
-        # The object road files its own receipt inside the fetch, credential
-        # and all, so nothing downstream needs to re-file under a name.
-        return None
-
-    def source_url(self) -> Optional[str]:
-        return self.fetched.source_url
-
-    def content_type(self) -> Optional[str]:
-        return self.fetched.content_type
-
-    def from_store(self) -> bool:
-        return self.fetched.from_store
+def _steps(
+    phase_of: Callable[[ApplyStep], ApplyPhase],
+    phases: frozenset[ApplyPhase] | None,
+) -> tuple[ApplyStep, ...]:
+    wanted = ALL_PHASES if phases is None else phases
+    return tuple(
+        step
+        for step in sorted(APPLY_ORDER, key=lambda s: s.position)
+        if phase_of(step) in wanted
+    )
 
 
-@dataclass(frozen=True)
-class GitDelivery:
-    """A checked-out tree, read on the category's terms."""
+class ArcaDelivery(DeliveryStrategy):
+    """Today's behaviour, named: the phase table is ``APPLY_ORDER``'s own."""
 
-    source: GitEntrySource
+    family = "arca"
+    creation_sequence = CreationSequence.CREATE_BETWEEN_PHASES
 
-    def is_tree(self) -> bool:
+    def __init__(self, ports: Callable[[], MaterialiserPorts]) -> None:
+        self._ports = ports
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        return step.phase
+
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phases)
+
+    def needs_container(self) -> bool:
         return True
 
-    def members(
-        self, *, unpack: object, strip_components: object
-    ) -> list[tuple[str, bytes]] | str:
-        """Every file under the composed subpath.
+    def ports(self) -> MaterialiserPorts:
+        return self._ports()
 
-        ``unpack`` and ``strip_components`` are ignored, and provably safely:
-        ``ARCHIVE_FIELDS_BY_KIND[SourceKind.GIT]`` is empty, so a git source
-        carrying either was refused at ``PUT`` and cannot reach here. A
-        repository hands over a real tree, so there is no packaging step —
-        these are exactly the ``(relative path, bytes)`` pairs
-        :func:`unpack_members` produces from an archive, which is what lets
-        every caller downstream be one code path.
-        """
-        return self.source.files()
-
-    def single(self) -> bytes:
-        return self.source.read_file()
-
-    def note(self) -> Optional[str]:
-        return self.source.moved_note()
-
-    def digest(self) -> Optional[str]:
-        # Git bytes are addressed by their commit, not by a declared content
-        # hash — the schema refuses ``digest`` on a git source — so there is
-        # nothing here for the pin belt to compare and ``None`` says so.
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        # The owning services project as they write (device writes land,
+        # activation reconciles); there is nothing left to close.
         return None
 
-    def receipt_url(self) -> Optional[str]:
-        return self.source.receipt_url()
 
-    def auth(self) -> Optional[str]:
-        return self.source.auth
-
-    def source_url(self) -> Optional[str]:
-        return self.source.source_url
-
-    def content_type(self) -> Optional[str]:
-        return None
-
-    def from_store(self) -> bool:
-        return False
+#: The closing step for a platform-managed teclaw apply: one whole-artifact
+#: redeliver to the running container, or nothing when the bot has no live
+#: binding (provisioning composes the first artifact instead). Returns a note
+#: on failure.
+Redeliver = Callable[[ApplyContext], Awaitable[Optional[str]]]
 
 
-# ── the shared mechanics ─────────────────────────────────────────────────────
+@dataclass(frozen=True)
+class TeclawPlatformBindings:
+    """What the platform-managed teclaw path needs bound, as one DI value.
 
-
-def archive_refusal(unpack: object, strip_components: object) -> Optional[str]:
-    """The archive fields a directory entry over ``oss`` must carry, or why not.
-
-    Pure, and asked twice on purpose: once by ``resources`` **before** the
-    fetch, so a doomed entry costs no network against this apply's byte budget
-    and lock TTL, and once by :meth:`BlobDelivery.members` after, for the entry
-    whose protocol that belt could not determine up front. Two calls of one
-    function, never two rules — which is why it takes the two *values* rather
-    than the entry: the pre-fetch caller has an entry, the delivery does not.
+    The store-backed ports and the closing redeliver are built in the
+    manifest-fetch graph (beside the store they write) and handed to the apply
+    service, whose own module is at its size cap, as a single parameter.
     """
-    # Str first: ``VALID_UNPACK`` is a frozenset, and an unhashable ``unpack``
-    # (a YAML list) would raise on the membership test where this owes a
-    # clean refusal.
-    if not isinstance(unpack, str) or unpack not in VALID_UNPACK:
-        return (
-            "a directory entry fetched over 'oss' must declare "
-            "'unpack: zip|tar.gz' — one request fetches one object, so the "
-            "tree travels as an archive"
+
+    platform_ports: Callable[[], MaterialiserPorts]
+    redeliver: Redeliver
+
+
+class TeclawDelivery(DeliveryStrategy):
+    """The artifact family.
+
+    With ``platform_managed`` on, every non-script construct is
+    ``PRE_CONTAINER``: it writes platform state and needs no container. The
+    apply is closed by one redeliver. Off, the strategy reproduces the shape
+    teclaw ran before W8 — every non-script construct ``ON_CONTAINER`` through
+    the device-backed ports — so nothing regresses while the engine catches up.
+    """
+
+    family = "teclaw"
+
+    def __init__(
+        self,
+        *,
+        platform_managed: bool,
+        platform_ports: Callable[[], MaterialiserPorts],
+        device_ports: Callable[[], MaterialiserPorts],
+        redeliver: Optional[Redeliver] = None,
+        cli_tool_service: Optional[CliToolService] = None,
+    ) -> None:
+        self._platform_managed = platform_managed
+        self._platform_ports = platform_ports
+        self._device_ports = device_ports
+        # W9. ``cli_tools`` is always platform-managed on this family, so its
+        # port cannot be whichever the switch selects: with the switch off the
+        # device bundle carries the *ARCA* port, which would call ARCA-only
+        # engine endpoints on a teclaw bot — and, since ``phase_of`` puts this
+        # category before the container, would run with no container to call at
+        # all. Substituted into whichever bundle ``ports`` returns, so the
+        # invariant holds in one place instead of depending on two wiring sites
+        # agreeing.
+        #
+        # ``mcp`` is always platform-managed too and needs none of this,
+        # because it has no port in ``MaterialiserPorts`` at all: on both
+        # families its delivery *is* the artifact, so there is nothing
+        # family-specific to select. ``cli_tools`` is the one category that is
+        # always platform-managed and still has a per-family delivery step —
+        # ARCA installs into a live container over an engine endpoint, teclaw
+        # does nothing — so it owns a port, and a port selected by a switch
+        # this category ignores is the exact mismatch corrected here.
+        self._cli_tool_service = cli_tool_service
+        self._redeliver = redeliver
+
+    @property
+    def platform_managed(self) -> bool:
+        return self._platform_managed
+
+    @property
+    def creation_sequence(self) -> CreationSequence:
+        if self._platform_managed:
+            return CreationSequence.RECORD_APPLY_PROVISION
+        return CreationSequence.CREATE_BETWEEN_PHASES
+
+    def phase_of(self, step: ApplyStep) -> ApplyPhase:
+        if step.construct == ManifestSection.SCRIPT:
+            # Unsupported on teclaw (the capability resolver refuses it); the
+            # phase is kept as the table says so a declared script still walks
+            # the orchestrator's no-support path and is reported, not skipped.
+            return step.phase
+        if step.construct == ManifestCategory.CLI_TOOLS:
+            # The artifact is teclaw's delivery and it is composed before
+            # provisioning, so this category is PRE_CONTAINER whatever the
+            # switch says. It has to be stated per category rather than left to
+            # the generic re-phasing below, because that keys on the switch and
+            # this one is always platform-managed — like ``mcp``, and for the
+            # same reason (spec D-6, D-8). The distinction is invisible on an
+            # existing bot, where the two phases run back to back; it decides
+            # something on exactly one path, the W13 creation whose
+            # switch-on sequence has no phase B at all.
+            return ApplyPhase.PRE_CONTAINER
+        if self._platform_managed:
+            return ApplyPhase.PRE_CONTAINER
+        return ApplyPhase.ON_CONTAINER
+
+    def steps_for(
+        self, phases: frozenset[ApplyPhase] | None = None
+    ) -> tuple[ApplyStep, ...]:
+        return _steps(self.phase_of, phases)
+
+    def needs_container(self) -> bool:
+        return not self._platform_managed
+
+    def ports(self) -> MaterialiserPorts:
+        bundle = (
+            self._platform_ports() if self._platform_managed else self._device_ports()
         )
-    if (
-        not isinstance(strip_components, int)
-        or isinstance(strip_components, bool)
-        or strip_components < 0
-    ):
-        return "'strip_components' must be a non-negative integer"
-    return None
+        if self._cli_tool_service is None:
+            return bundle
+        return replace(bundle, cli_tool_service=self._cli_tool_service)
+
+    async def finish(self, ctx: ApplyContext, report: ApplyReport) -> Optional[str]:
+        if not self._platform_managed or self._redeliver is None:
+            return None
+        return await self._redeliver(ctx)
 
 
-def unpack_members(
-    archive: bytes, kind: str, strip_components: int
-) -> list[tuple[str, bytes]] | str:
-    """The guarded unpack, platform-side, into a throwaway directory.
+_TRUE_SCALARS = frozenset({"true", "yes", "on", "1"})
+_FALSE_SCALARS = frozenset({"false", "no", "off", "0"})
 
-    The bot is never a scratch space: ``unpack_archive`` writes only into a
-    fresh temporary directory, so a bad or oversized archive (W1's member /
-    unpacked-size limits live inside it) fails before anything is delivered.
-    Returned members are ``(relative path, bytes)`` with ``strip_components``
-    already applied — the bytes are read back before the throwaway dir goes
-    away; a refusal comes back as its reason string rather than an exception,
-    keeping every failure in ``resolve``'s currency and the bot's tree
-    untouched.
+
+def teclaw_platform_managed_from_config(tree: Mapping[str, Any] | None) -> bool:
+    """The switch, read from the ``user_config`` tree. Absent is off.
+
+    Strict, and the strictness is the point: YAML may hand back a string, and
+    ``bool("false")`` is ``True``. A switch that turns a delivery path on
+    because someone quoted ``"off"`` would fail every teclaw apply in a
+    deployment whose engine has not shipped the map. So only a boolean, the
+    usual boolean spellings, or 0/1 are accepted; anything else raises at
+    boot, where a config mistake belongs. A block that is not a mapping is
+    read as absent, the way the sibling readers treat a missing block.
     """
-    try:
-        with tempfile.TemporaryDirectory(prefix="manifest-resources-") as tmp:
-            tree = unpack_archive(
-                archive,
-                kind,
-                Path(tmp) / "tree",
-                strip_components=strip_components,
+    block = (tree or {}).get("bot_config_manifest") or {}
+    if not isinstance(block, Mapping) or TECLAW_PLATFORM_MANAGED_KEY not in block:
+        return False
+    raw = block[TECLAW_PLATFORM_MANAGED_KEY]
+    if raw is None:
+        # ``teclaw_platform_managed:`` with nothing after it — the likeliest
+        # spelling of "not set" — reads as absent, not as a malformed value.
+        return False
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in _TRUE_SCALARS:
+            return True
+        if text in _FALSE_SCALARS:
+            return False
+        raise ValueError(
+            f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
+            f"not a boolean: {raw!r}"
+        )
+    if isinstance(raw, (int, float)) and raw in (0, 1):
+        return bool(raw)
+    raise ValueError(
+        f"user_config.bot_config_manifest.{TECLAW_PLATFORM_MANAGED_KEY}: "
+        f"not a boolean: {raw!r}"
+    )
+
+
+class DeliveryStrategyFactory:
+    """Pick the strategy for a bot. The one reader of the switch."""
+
+    def __init__(
+        self,
+        *,
+        is_teclaw: Callable[[Optional[str]], bool],
+        teclaw_platform_managed: bool,
+        arca_ports: Callable[[], MaterialiserPorts],
+        teclaw_platform_ports: Optional[Callable[[], MaterialiserPorts]] = None,
+        redeliver: Optional[Redeliver] = None,
+        teclaw_cli_tool_service: Optional[Callable[[], CliToolService]] = None,
+    ) -> None:
+        self._is_teclaw = is_teclaw
+        self._platform_managed = teclaw_platform_managed
+        self._arca_ports = arca_ports
+        # The platform-managed path needs its own ports. With the switch on and
+        # none bound, ``for_engine`` refuses rather than silently writing into
+        # a container through the device ports — a misconfiguration should be
+        # loud, not a quiet fallback.
+        self._teclaw_platform_ports = teclaw_platform_ports
+        self._redeliver = redeliver
+        # W9: the teclaw-bound CLI service, handed to every teclaw strategy
+        # whatever the switch says. A lazy callable for the reason every other
+        # port here is lazy — it reaches the device graph.
+        self._teclaw_cli_tool_service = teclaw_cli_tool_service
+
+    @property
+    def teclaw_platform_managed(self) -> bool:
+        return self._platform_managed
+
+    def for_engine(self, engine_type: Optional[str]) -> DeliveryStrategy:
+        if not self._is_teclaw(engine_type):
+            return ArcaDelivery(self._arca_ports)
+        platform_managed = self._platform_managed
+        if platform_managed and self._teclaw_platform_ports is None:
+            raise RuntimeError(
+                "teclaw_platform_managed is on but no platform ports are bound"
             )
-            # ``UnpackedTree.members`` are the tree's files only — directories
-            # are structural — relative to ``root``.
-            return [(name, (tree.root / name).read_bytes()) for name in tree.members]
-    except UnpackError as exc:
-        return str(exc)
+        return TeclawDelivery(
+            platform_managed=platform_managed,
+            # With the switch off the platform ports are never consulted;
+            # ``_arca_ports`` stands in only so the constructor has a callable.
+            platform_ports=self._teclaw_platform_ports or self._arca_ports,
+            device_ports=self._arca_ports,
+            redeliver=self._redeliver,
+            cli_tool_service=(
+                self._teclaw_cli_tool_service()
+                if self._teclaw_cli_tool_service is not None
+                else None
+            ),
+        )
 
-
-#: Marks the stored form of a git-delivered tree. Self-describing on purpose:
-#: ``keep_last`` reads a receipt back as plain bytes with no idea what shape
-#: they are, and "guess from the URL" is not identification. The version digit
-#: is what lets the framing change later without a stored copy being decoded
-#: under the wrong rules.
-TREE_MAGIC = b"acm-tree-v1\n"
-
-
-def canonical_tree_bytes(members: list[tuple[str, bytes]]) -> bytes:
-    """One deterministic byte string standing for a whole delivered tree.
-
-    Two jobs, and the second is why it is **reversible**:
-
-    1. A stable content address for the store — the same tree must hash the
-       same on every apply, and two different trees must not collide. Members
-       are sorted by path and each is framed with its path, its length and its
-       bytes: length-prefixed rather than delimiter-joined, because a delimiter
-       is something a *path or a payload* could contain, and a tree that could
-       be made to hash as another tree is a receipt that proves nothing.
-    2. The bytes ``keep_last`` stands in with when a later git fetch fails.
-       ``on_fetch_failure: keep_last`` is the default and it promises the bot
-       keeps running what it has — a promise an unreadable receipt cannot keep.
-
-    Never delivered to a bot as-is: :func:`decode_tree_bytes` turns it back
-    into the members, and those are the intents.
-    """
-    parts: list[bytes] = [TREE_MAGIC]
-    for rel, data in sorted(members):
-        encoded = rel.encode("utf-8")
-        parts.append(b"%d:%s%d:" % (len(encoded), encoded, len(data)))
-        parts.append(data)
-    return b"".join(parts)
-
-
-def decode_tree_bytes(blob: bytes) -> Optional[list[tuple[str, bytes]]]:
-    """The members back out, or ``None`` when these are not a canonical tree.
-
-    ``None`` rather than an exception: the caller is asking "is this a stored
-    git tree or an archive?", and a shape it does not recognise is an answer,
-    not a fault. Truncation and a bad length are the same answer — a receipt
-    that does not decode cleanly must not half-deliver a tree.
-    """
-    if not blob.startswith(TREE_MAGIC):
-        return None
-    members: list[tuple[str, bytes]] = []
-    at = len(TREE_MAGIC)
-    try:
-        while at < len(blob):
-            colon = blob.index(b":", at)
-            name_len = int(blob[at:colon])
-            at = colon + 1
-            name = blob[at : at + name_len].decode("utf-8")
-            at += name_len
-            colon = blob.index(b":", at)
-            size = int(blob[at:colon])
-            at = colon + 1
-            if at + size > len(blob):
-                return None
-            members.append((name, blob[at : at + size]))
-            at += size
-    except (ValueError, UnicodeDecodeError):
-        return None
-    return members
+    def for_bot(self, bot: Mapping[str, Any]) -> DeliveryStrategy:
+        return self.for_engine(bot.get("active_engine"))
 
 
 __all__ = [
-    "BlobDelivery",
-    "EntryDelivery",
-    "EntryFetchError",
-    "FetchedEntry",
-    "GitDelivery",
-    "GitEntrySource",
-    "TREE_MAGIC",
-    "archive_refusal",
-    "canonical_tree_bytes",
-    "decode_tree_bytes",
-    "unpack_members",
+    "ArcaDelivery",
+    "CreationSequence",
+    "DeliveryStrategy",
+    "DeliveryStrategyFactory",
+    "MaterialiserPorts",
+    "Redeliver",
+    "TECLAW_PLATFORM_MANAGED_KEY",
+    "TeclawDelivery",
+    "TeclawPlatformBindings",
+    "teclaw_platform_managed_from_config",
 ]

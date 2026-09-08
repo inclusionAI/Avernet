@@ -69,12 +69,19 @@ be charged the object-store pin (D5).
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
 
 import httpx
 
+from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
+    BlobDelivery,
+    EntryDelivery,
+    EntryFetchError,
+    FetchedEntry,
+    GitDelivery,
+    GitEntrySource,
+)
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
 )
@@ -93,7 +100,6 @@ from agentclaw.community.core.bot_config_manifest.credentials.policy import (
     PrefixAuthorizationError,
 )
 from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
-    GitCheckout,
     GitSourceSpec,
     git_receipt_url,
 )
@@ -129,94 +135,6 @@ if TYPE_CHECKING:
     )
 
 logger = get_logger()
-
-
-class EntryFetchError(Exception):
-    """One entry's bytes could not be acquired, with a report-safe reason.
-
-    The reason is built from the transport's and the credential service's own
-    words — W2 refuses before sending anything that would carry caller or
-    source data, and W3's error family names credentials without ever carrying
-    the value — so a secret cannot ride out of this module inside an
-    exception. Materialisers hand ``reason`` to ``ResolveFailure`` verbatim.
-    """
-
-    def __init__(self, reason: str) -> None:
-        self.reason = reason
-        super().__init__(reason)
-
-
-@dataclass(frozen=True)
-class FetchedEntry:
-    """One entry's bytes, their content address, and where they came from."""
-
-    content: bytes
-    digest: str
-    #: True when the platform's own copy answered — no network was touched.
-    from_store: bool
-    content_type: Optional[str] = None
-    #: Set only when the platform's copy answered as a ``keep_last``
-    #: FALLBACK — the source was fetched and failed, the stored bytes stood
-    #: in. The report must say so (schema §9.6's published contract: a
-    #: keep_last entry's report row states the fallback), so this carries
-    #: the human-readable reason for the materialiser to surface as the
-    #: entry's note. A plain store-hit (from_store, no note) is the
-    #: legitimate pinned fast path and stays silent.
-    fallback_reason: Optional[str] = None
-    #: The URL the bytes came by, when the caller needs it for shape
-    #: inference (the skills materialiser's archive-kind detection). ``None``
-    #: on the roads that never knew one.
-    source_url: Optional[str] = None
-
-
-@dataclass(frozen=True)
-class GitEntrySource:
-    """A fresh git checkout for one entry to consume — files, not bytes.
-
-    The URL road hands back bytes because there was exactly one blob on the
-    wire; the git road hands back a proven tree and lets the materialiser
-    read it, because what "the entry's bytes" are (a file? a package? a
-    canonical zip?) is a *category* question the fetch layer must not answer.
-
-    ``file_limit`` is the category's per-entry byte cap (the same
-    ``FETCH_ENTRY_LIMITS`` number the URL road enforces at the transport) —
-    the tree's readers refuse a member by its *declared* size against it.
-    ``auth`` is the credential **name** the acquisition rode, threaded to the
-    receipts so W11's lineage attributes git-sourced bytes the way it does
-    URL-sourced ones.
-    """
-
-    checkout: GitCheckout
-    source_url: str
-    subpath: Optional[str]
-    moved_from: Optional[str]
-    auth: Optional[str] = None
-    file_limit: Optional[int] = None
-
-    def files(self) -> list[tuple[str, bytes]]:
-        try:
-            return self.checkout.files(self.subpath, file_limit=self.file_limit)
-        except FetchRefusedError as exc:
-            raise EntryFetchError(str(exc)) from exc
-
-    def read_file(self) -> bytes:
-        try:
-            return self.checkout.read_file(self.subpath, file_limit=self.file_limit)
-        except FetchRefusedError as exc:
-            raise EntryFetchError(str(exc)) from exc
-
-    def receipt_url(self) -> str:
-        """The W11 identity for this entry's git-sourced bytes."""
-        return git_receipt_url(self.source_url, self.checkout.sha, self.subpath)
-
-    def moved_note(self) -> Optional[str]:
-        """The non-strict road's report line about a moved ref."""
-        if self.moved_from is None:
-            return None
-        return (
-            f"ref moved: the last apply recorded {self.moved_from}, "
-            f"this one resolved {self.checkout.sha}"
-        )
 
 
 @runtime_checkable
@@ -471,7 +389,7 @@ class EntryFetcher:
         entry: Mapping[str, Any],
         category: str,
         entry_identity: Optional[str] = None,
-    ) -> "FetchedEntry | GitEntrySource":
+    ) -> EntryDelivery:
         """Resolve one entry's declared source — inline, or by ``from`` name —
         and acquire it. Raises :class:`EntryFetchError`.
 
@@ -556,14 +474,16 @@ class EntryFetcher:
             # object, which the materialiser applies after unpacking. One rule,
             # both protocols — ``subpath`` selects within what the source
             # delivered; git delivers a tree, oss delivers an object.
-            return self.fetch(
-                ctx,
-                source_url=decl.url,
-                digest=entry.get("digest"),
-                auth=decl.auth,
-                category=category,
-                keep_last=keep_last,
-                entry_identity=entry_identity,
+            return BlobDelivery(
+                self.fetch(
+                    ctx,
+                    source_url=decl.url,
+                    digest=entry.get("digest"),
+                    auth=decl.auth,
+                    category=category,
+                    keep_last=keep_last,
+                    entry_identity=entry_identity,
+                )
             )
 
         if entry.get("digest") is not None:
@@ -616,7 +536,7 @@ class EntryFetcher:
                 keep_last=keep_last,
             )
             if fallback is not None:
-                return fallback
+                return BlobDelivery(fallback)
             raise EntryFetchError(str(exc)) from exc
 
         if fresh:
@@ -650,15 +570,17 @@ class EntryFetcher:
             display=display, spec=spec, checkout=checkout, auth_name=auth
         )
         moved = baseline if (baseline is not None and baseline != checkout.sha) else None
-        return GitEntrySource(
-            checkout=checkout,
-            source_url=spec.url,
-            subpath=spec.subpath,
-            moved_from=moved,
-            auth=auth,
-            file_limit=FETCH_ENTRY_LIMITS.get(
-                category, FETCH_ENTRY_LIMITS["resources_file"]
-            ),
+        return GitDelivery(
+            GitEntrySource(
+                checkout=checkout,
+                source_url=spec.url,
+                subpath=spec.subpath,
+                moved_from=moved,
+                auth=auth,
+                file_limit=FETCH_ENTRY_LIMITS.get(
+                    category, FETCH_ENTRY_LIMITS["resources_file"]
+                ),
+            )
         )
 
     def _git_keep_last(
