@@ -127,13 +127,14 @@ pub async fn observe_request(
     request.headers_mut().insert("x-request-id", header.clone());
     let route = request.extensions().get::<axum::extract::MatchedPath>()
         .map(|route| route.as_str()).unwrap_or("unmatched").to_owned();
+    let method = request.method().clone();
     let mut observation = RequestObservation {
         request_id: request_id.clone(), route,
         started: std::time::Instant::now(), completed: false,
     };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
         route = %observation.route,
-        method = %request.method(), "http.request.started");
+        method = %method, "http.request.started");
     let mut response = bcs_observability::with_request_context(request_id, next.run(request)).await;
     let elapsed = observation.started.elapsed();
     response.headers_mut().insert("x-request-id", header);
@@ -142,7 +143,7 @@ pub async fn observe_request(
         "upgraded"
     } else if response.status().is_success() { "success" } else { "http_error" };
     tracing::info!(target: "bcs_http_access", request_id = %observation.request_id,
-        route = %observation.route,
+        route = %observation.route, method = %method,
         status = response.status().as_u16(), duration_ms = elapsed.as_secs_f64() * 1000.0,
         outcome,
         "http.request.response_ready");
