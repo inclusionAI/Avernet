@@ -45,6 +45,7 @@ from agentclaw.community.adapters.http.openapi_v1.dependencies import (
 from agentclaw.community.adapters.http.openapi_v1.log_safe import for_log
 from agentclaw.community.adapters.http.openapi_v1.admission import ActingCaller
 from agentclaw.community.adapters.http.openapi_v1.principal import (
+    OwnerNameDep,
     ActingCallerDep,
     UserIdDep,
     refuse_app_only_caller,
@@ -529,6 +530,7 @@ async def create_bot(
     body: BotCreate,
     request: Request,
     owner_id: UserIdDep,
+    owner_name: OwnerNameDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     bot_repo: BotRepository = Injected(BotRepository),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
@@ -576,7 +578,7 @@ async def create_bot(
     bot_id = generate_bot_id(owner_id, bot_repo)
     outcome = create_bot_with_authorization(
         user_id=owner_id,
-        nick_name=owner_id,
+        nick_name=owner_name,
         bot_id=bot_id,
         spec=BotCreateSpec(
             entity_id=owner_id,
@@ -1160,6 +1162,7 @@ def _complete_auth_status(
     bot_id: str,
     request: Request,
     owner_id: str,
+    owner_name: str,
     engine: str | None,
     cluster_name: ClusterName | None,
     bot_name: str | None,
@@ -1208,7 +1211,7 @@ def _complete_auth_status(
     try:
         result = complete_bot_authorization(
             user_id=owner_id,
-            nick_name=owner_id,
+            nick_name=owner_name,
             bot_id=bot_id,
             spec=BotCreateSpec(
                 entity_id=owner_id,
@@ -1272,6 +1275,7 @@ async def poll_bot_auth_status(
     body: BotAuthStatusPoll,
     request: Request,
     owner_id: UserIdDep,
+    owner_name: OwnerNameDep,
     bot_service: BotServiceProtocol = Injected(BotServiceProtocol),
     passport_plugin: PassportPlugin = Injected(PassportPlugin),
     auth_rel_plugin: AuthRelationshipPlugin = Injected(AuthRelationshipPlugin),
@@ -1306,6 +1310,7 @@ async def poll_bot_auth_status(
         bot_id=bot_id,
         request=request,
         owner_id=owner_id,
+        owner_name=owner_name,
         engine=body.engine,
         cluster_name=body.cluster_name,
         bot_name=body.bot_name,
