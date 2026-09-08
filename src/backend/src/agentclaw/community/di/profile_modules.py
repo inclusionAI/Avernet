@@ -173,6 +173,9 @@ def modules_for(profile: DeployProfile) -> list[Module]:
             from agentclaw.community.core.devices.services.singlebox_device_sync import (
                 SingleboxDeviceSyncService,
             )
+            from agentclaw.community.di.modules.singlebox_service_bot_module import (
+                SingleboxServiceBotModule,
+            )
 
             column.extend([
                 SingleboxDevicesModule(),
@@ -181,6 +184,10 @@ def modules_for(profile: DeployProfile) -> list[Module]:
                 ),
                 SingleboxAccessModule(),
                 SingleboxCallerIdentityModule(),
+                # Route the publish build producer to the local engine
+                # source (LocalBuildProducer) instead of the NAS-backed
+                # ArcaSnapshotProducer — singlebox has no ARCA/NAS sandbox.
+                SingleboxServiceBotModule(),
             ])
 
         return column

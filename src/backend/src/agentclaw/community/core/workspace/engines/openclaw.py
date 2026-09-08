@@ -37,6 +37,15 @@ _OPENCLAW_RSYNC_EXCLUDES = [
     "session_user_map.json",
     "cron/runs/",
     "identity/device.json",
+    # Atomic-write temp backups of openclaw.json (the engine writes
+    # openclaw.json.asback_<ts> then renames over openclaw.json). These are
+    # transient write-side residue owned by whichever uid the engine ran
+    # under (root under sudo/docker) and are not part of the stable source
+    # tree. Excluding them keeps the build snapshot to the real working
+    # directory and lets a non-privileged rsync (singlebox, no sudo) succeed
+    # even when a leftover backup is mode 0600 and unreadable to the host
+    # user — which is exactly what aborted the singlebox publish build.
+    "openclaw.json.asback*",
 ]
 
 

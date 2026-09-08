@@ -228,6 +228,7 @@ class BotBuildService:
         *,
         shared_corpora: tuple[ResolvedSharedCorpusDelivery, ...] = (),
         active_runtime_path: str | None = None,
+        local_source_root: Path | None = None,
     ) -> Dict[str, Any]:
         """执行 Bot 构建迁移。
 
@@ -292,19 +293,36 @@ class BotBuildService:
 
         try:
             # ============================================================
-            # Step 1: 计算源目录和目标目录（统一走 NAS 存储）
+            # Step 1: 计算源目录和目标目录
+            #   - local 模式（local_source_root 给定，singlebox/本地开发）: 源取
+            #     引擎本地工作目录根（provider.get_base_path()，如 ~/.openclaw）
+            #     不走 NAS、不执行 sudo chmod / sudo rsync（target 已是本地可写）。
+            #   - 其它（prod/ARCA）: 维持原 NAS 行为，per-bot NAS merge 路径作源。
             # ============================================================
-            source_nas_engine_type = bot.get("active_engine") or engine_type
-            nas_storage_id = get_bot_nas_dir(
-                entity_id=entity_id,
-                bot_id=bot_id,
-                engine_type=source_nas_engine_type,
-                entity_type=entity_type,
-            )
-            source_dir = nas_storage_id / build_plan.source_root_name
-            logger.info(
-                f"[BotBuildService.build] using NAS source_dir={source_dir}"
-            )
+            is_local = local_source_root is not None
+            nas_storage_id: Path | str | None = None
+            if is_local:
+                # provider.get_base_path() itself is the engine working dir
+                # (e.g. ~/.openclaw already contains openclaw.json/agents/...),
+                # so do NOT append build_plan.source_root_name here — that
+                # concatenation is specific to the NAS per-bot merge layout.
+                source_dir = Path(local_source_root)
+                logger.info(
+                    f"[BotBuildService.build] using local source_dir="
+                    f"{source_dir} (local_source_root)"
+                )
+            else:
+                source_nas_engine_type = bot.get("active_engine") or engine_type
+                nas_storage_id = get_bot_nas_dir(
+                    entity_id=entity_id,
+                    bot_id=bot_id,
+                    engine_type=source_nas_engine_type,
+                    entity_type=entity_type,
+                )
+                source_dir = nas_storage_id / build_plan.source_root_name
+                logger.info(
+                    f"[BotBuildService.build] using NAS source_dir={source_dir}"
+                )
 
             target_dir = get_bot_dir(
                 entity_id=entity_id,
@@ -333,8 +351,8 @@ class BotBuildService:
                 source_dir=source_dir,
                 target_dir=target_dir,
                 version_str=version_str,
-                is_nas=True,
-                nas_storage_id=nas_storage_id,
+                is_nas=not is_local,
+                nas_storage_id=nas_storage_id if not is_local else None,
                 build_plan=build_plan,
                 provider=provider,
             )
@@ -347,12 +365,26 @@ class BotBuildService:
             # Claude Code active root is already covered by extra_sync.
 
             # 2.2 生成 MCP 配置（使用 bot 的 device_id）
+            # Local build (singlebox / local dev): the OpenClaw engine runtime
+            # has no mcporter CLI, so it never maintains
+            # the engine's in-container mcporter.json — `cat` returns empty and
+            # fails the build. This is the same root cause
+            # ``SingleboxDeviceSyncService.sync_all_mcp_servers`` already defers
+            # ("skip MCP whitelist sync: the Singlebox Engine requires mcporter,
+            # which is unavailable"). Defer here too: the build snapshot does
+            # not need a host-regenerated mcporter.json because singlebox routes
+            # MCP through the channel runtime, not the mcporter process file.
             mcp_success = True
-            if device_id and migration_success:
+            if device_id and migration_success and not is_local:
                 mcp_success = self._generate_mcp_config(
                     device_id=device_id,
                     target_dir=target_dir,
                     build_plan=build_plan,
+                )
+            elif is_local:
+                logger.info(
+                    "[BotBuildService.build] skipping MCP config generation "
+                    "(local source root; singlebox has no mcporter.json)"
                 )
 
             # 2.3 生成多阶段 OpenClaw 配置
@@ -1212,18 +1244,33 @@ class BotBuildService:
         )
 
         if not is_nas:
-            try:
-                # 重启 sync 服务确保构建前强制同步
-                self._device_service.exec_shell_new(
-                    device_id=device_id,
-                    shell_cmd="supervisorctl restart sync",
+            # ARCA/BaaS remote source path: the source bot rowns its files
+            # inside a container, so nudge its in-place sync supervisor before
+            # the rsync capture. Local builds (local_source_root set) have no
+            # remote container — any unit 'exec_shell_new' against a local
+            # simulator is a no-op and the sleep(10) only stalls the publish.
+            # Local build: build() set local_source_root and passed
+            # is_nas=False + nas_storage_id=None. Distinguish that from the
+            # genuine BaaS/ARCA remote path (which is also is_nas=False).
+            _is_local_source = nas_storage_id is None
+            if _is_local_source:
+                logger.info(
+                    "[BotBuildService._migrate_bot_instance] "
+                    "skipping BaaS sync restart (local source root)"
                 )
-                time.sleep(10)
-            except Exception as e:
-                logger.error(
-                    f"[BotBuildService._migrate_bot_instance] exec shell cmd supervisorctl restart sync"
-                    f"Unexpected error: {e}"
-                )
+            else:
+                try:
+                    # 重启 sync 服务确保构建前强制同步
+                    self._device_service.exec_shell_new(
+                        device_id=device_id,
+                        shell_cmd="supervisorctl restart sync",
+                    )
+                    time.sleep(10)
+                except Exception as e:
+                    logger.error(
+                        f"[BotBuildService._migrate_bot_instance] exec shell cmd supervisorctl restart sync"
+                        f"Unexpected error: {e}"
+                    )
 
         try:
             # 确保目标目录存在
@@ -1235,9 +1282,11 @@ class BotBuildService:
                 excludes.append(f"--exclude={pattern}")
 
             # 构建 rsync 命令
+            # 本地源(is_nas=False)时无需 sudo:源是引擎本地工作目录(开发者机可读),
+            # 目标是 LOCAL_AIDESKTOP_ROOT 下可写路径;提权只在 NAS 属主模型下需要。
+            rsync_prefix = ["sudo", "rsync"] if is_nas else ["rsync"]
             cmd = [
-                "sudo",
-                "rsync",
+                *rsync_prefix,
                 "-av",           # 归档模式 + 详细输出
                 "--delete",       # 删除目标目录中不存在于源目录的文件
                 # The versioned target is reused when the same publish version
@@ -1289,8 +1338,7 @@ class BotBuildService:
                     extra_target.mkdir(parents=True, exist_ok=True)
 
                     extra_cmd = [
-                        "sudo",
-                        "rsync",
+                        *rsync_prefix,
                         "-av",
                         "--delete",
                         "--delete-excluded",
