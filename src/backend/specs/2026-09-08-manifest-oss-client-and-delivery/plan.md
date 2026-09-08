@@ -7,15 +7,15 @@ Spec: `spec.md` in this directory. Tasks: `tasks.md`.
 Four groups, ordered so **each one is runnable and verifiable on its own**.
 A, B and C change no behaviour — their correctness claim is that every existing
 test passes untouched. D is where the published contract moves, and it lands
-atomically because a half-applied vocabulary split would publish a matrix row
-nothing serves.
+atomically because a half-applied change would publish a `SourceForm` the
+validator no longer accepts.
 
 | | group | behaviour change | how it is verified |
 |---|---|---|---|
 | A | `EntryDelivery` replaces the union | none | existing materialiser tests, unchanged |
 | B | one fetcher per protocol | none | existing fetch tests, unchanged |
 | C | the object-store client plugin | none (nothing consumes it yet) | new conformance test |
-| D | the vocabulary split + `oss` on the plugin | **yes** | new tests + the matrix cell test |
+| D | `oss` on the plugin + the URL road removed | **yes** | new tests + the matrix cell test |
 | E | documentation | — | — |
 | F | verification | — | full suite, lint, type check |
 
@@ -75,20 +75,20 @@ class SourceFetcher(Protocol):
               entry_identity) -> EntryDelivery: ...
 
 _FETCHERS: Mapping[SourceKind, SourceFetcher] = MappingProxyType({
-    SourceKind.GIT:   GitSourceFetcher(),
-    SourceKind.HTTPS: HttpsSourceFetcher(),      # group D renames it
-    SourceKind.OSS:   ObjectStoreFetcher(),      # group D adds it
+    SourceKind.GIT: GitSourceFetcher(),
+    SourceKind.OSS: ObjectStoreFetcher(),
 })
 ```
 
-In group B the table has two rows and `SourceKind.OSS` still means "URL", so the
-`HttpsSourceFetcher` body is exactly today's non-git branch. The rename lands in
-D. Exhaustiveness gets the same treatment the support matrix already has: a
-module-level check that `set(_FETCHERS) == set(SourceKind) - {CONTENT}`, so a
-protocol added without a fetcher raises at import rather than `KeyError`-ing at
-apply time.
+Two rows, and they stay two rows — `SourceKind` does not grow. In group B
+`ObjectStoreFetcher`'s body is exactly today's non-git branch (a guarded fetch by
+URL); group D swaps that body for a plugin read by bucket and key, and nothing
+above it moves. Exhaustiveness gets the same treatment the support matrix already
+has: a module-level check that `set(_FETCHERS) == set(SourceKind) - {CONTENT}`,
+so a protocol added without a fetcher raises at import rather than `KeyError`-ing
+at apply time.
 
-The shared preamble stays in `fetch_declared` where all three fetchers need it:
+The shared preamble stays in `fetch_declared` where both fetchers need it:
 session lookup, the `needs_session` refusal, `keep_last` resolution, budget
 checks, and `declared_protocol`'s no-fetch gate.
 
@@ -128,27 +128,24 @@ and the status, never from the SDK's message (which echoes endpoints and
 sometimes request signatures) — the same ruling `git_source.py` applies to git's
 stderr.
 
-## ④ The vocabulary split and the `oss` road (group D)
+## ④ The `oss` road, and the URL road removed (group D)
 
 The atomic behaviour change.
 
-**`support_matrix.py`** — `SourceKind` gains `HTTPS`. `_VERDICTS` gains six
-rows; the matrix becomes 24 cells, still built by iterating both enums.
-`DIGEST_REQUIRED` gains `(SKILLS, HTTPS)` and `(CLI_TOOLS, HTTPS)` — today's
-`(…, OSS)` pairs follow the URL road and move with it; the new `oss` road keeps
-them too (a bucket read is as digest-worthy as a URL read).
-`ARCHIVE_FIELDS_BY_KIND` gains `HTTPS: {unpack, strip_components}` and keeps the
-same for `OSS`.
+**`support_matrix.py`** — `SourceKind` is **unchanged** (three members, 18
+cells). `DIGEST_REQUIRED` keeps `(SKILLS, OSS)` and `(CLI_TOOLS, OSS)` — a bucket
+read is as digest-worthy as a URL read was. `ARCHIVE_FIELDS_BY_KIND[OSS]` keeps
+`{unpack, strip_components}`. Nothing in this file moves except its docstrings,
+which describe `oss` as a URL road today.
 
 **`schema/sources.py`** — the key tables become per-protocol:
 
 ```python
 _KEYS_BY_PROTOCOL = {
-    GIT:   {"protocol", "url", "auth", "ref", "mode", "subpath"},
-    HTTPS: {"protocol", "url", "auth"},
-    OSS:   {"protocol", "auth", "bucket", "key"},
+    GIT: {"protocol", "url", "auth", "ref", "mode", "subpath"},
+    OSS: {"protocol", "auth", "bucket", "key"},
 }
-_REQUIRED_BY_PROTOCOL = {GIT: {"url"}, HTTPS: {"url"}, OSS: {"bucket"}}
+_REQUIRED_BY_PROTOCOL = {GIT: {"url"}, OSS: {"bucket"}}
 ```
 
 `SourceDecl.url` becomes `str | None`; `bucket` and `key` are added. The
@@ -157,37 +154,52 @@ not-valid-for-protocol suppresses its own shape check, so one mistake yields one
 violation. `url` on an `oss` source gets a message naming `bucket`/`key`
 explicitly — this is the refusal a migrating author will actually hit.
 
-`DECLARABLE_PROTOCOLS` gains `HTTPS`. The inline string form
-(`source: "https://…"`) resolves to `HTTPS`.
+**`schema/entries.py`** — three changes:
 
-**`schema/entries.py`** — entry-level `key`, composed source-first by a
-`_compose_key` that is `_compose_subpath` generalised (same
-`relative_path_refusal` re-check). Refused on a non-`oss` entry, with the
-existing per-protocol-field message shape.
+- the **bare-string** branch (`:370-376`) is replaced by a refusal naming the two
+  protocols and the mapping form. `check_https_url` loses its manifest caller.
+- `form = SourceForm.GIT if decl.is_git else SourceForm.URL` becomes
+  `… else SourceForm.OSS`.
+- entry-level `key`, composed source-first by a `_compose_key` that is
+  `_compose_subpath` generalised (same `relative_path_refusal` re-check). Refused
+  on a non-`oss` entry. `subpath` keeps its shipped meaning on both roads.
+
+**`capabilities.py`** — `SourceForm.URL` → `SourceForm.OSS` in the enum and in
+the `constructs` verdict map. A published rename; its test asserts the full
+construct set rather than a subset.
 
 **`credentials/`** — `endpoint` added to the row, the record, the repository
 protocol and impl, and `REQUIRED_FIELDS_BY_TYPE[OSS_AKSK]`.
 `EXCLUSIVE_FIELDS_BY_TYPE` gains it so a `header` credential carrying `endpoint`
-is refused rather than silently dropped — the rule
-`_check_mechanism_fields` already enforces both ways.
-`allowed_prefixes` becomes **optional and ignored** for `oss_aksk` (spec D-4)
-and stays mandatory for `header`; `validate_prefixes`' non-empty rule moves
-behind that branch.
+is refused rather than silently dropped — the rule `_check_mechanism_fields`
+already enforces both ways. `allowed_prefixes` becomes **optional and ignored**
+for `oss_aksk` and stays mandatory for `header`; `validate_prefixes`' non-empty
+rule moves behind that branch.
 
-`headers_for` loses its `oss_aksk` branch and returns to one line.
-`signing.py` and its test are deleted.
+`headers_for` loses its `oss_aksk` branch and returns to one line. `signing.py`
+and its test are deleted.
 
 **DDL** — `sql/2026_09_09_source_credential_endpoint.sql`:
 `ALTER TABLE ac_source_credential ADD COLUMN endpoint varchar(512) NULL`.
-Nullable, no backfill — the same shape as the `access_key_id`/`region` migration,
-and the DDL contract test already parses `ALTER TABLE … ADD COLUMN` since #2019.
+Nullable, no backfill — the same shape as the `access_key_id`/`region`
+migration, and the DDL contract test already parses `ALTER TABLE … ADD COLUMN`
+since #2019.
 
-**`capabilities.py`** — `source_matrix` publishes 24 cells. This is a visible API
-change; its test asserts the full cell set, not a subset.
+**The test migration** — ~77 usages of a bare-string https source across 8 files
+(41 in `test_resources_materialiser.py`, 26 in `test_manifest_schema.py`, the
+rest in ones and threes). Each becomes either an `oss` bucket/key source or, where
+the test is *about* the URL form, a refusal assertion. This is the bulk of group
+D's diff and it is mechanical; it is called out here so its size is expected
+rather than alarming in review.
+
+**`cli_tools/service.py` is not part of that migration.** Its API-driven install
+takes a URL from an API caller with no manifest behind it, keeps calling
+`EntryFetcher.fetch` directly, and keeps the guarded fetcher. Removing the URL
+*source protocol* does not touch the URL *transport*.
 
 ## Files
 
-**New (9)**
+**New (8)**
 
 ```
 plugin_api/object_store_client.py
@@ -195,7 +207,7 @@ plugins/community/object_store_client.py
 plugins/local/object_store_client.py
 di/modules/infrastructure/community/object_store_client.py
 core/bot_config_manifest/apply/delivery.py
-core/bot_config_manifest/apply/fetchers/{__init__,git,https,oss}.py
+core/bot_config_manifest/apply/fetchers/{__init__,git,oss}.py
 sql/2026_09_09_source_credential_endpoint.sql
 ```
 
@@ -220,11 +232,12 @@ core/repository/{protocols,implementations}/bot/source_credential.py
 |---|---|---|
 | delivery seam | `apply/test_delivery.py` | both impls satisfy `EntryDelivery`; `GitDelivery` ignores `unpack`; `BlobDelivery` decodes `_TREE_MAGIC` before unpacking |
 | fetcher table | `apply/test_entry_fetch.py` | `set(_FETCHERS) == set(SourceKind) - {CONTENT}`; dispatch picks by protocol |
+| the URL transport survives | `cli_tools/test_service.py` | the API-driven install still fetches a plain URL through the guarded fetcher |
 | **no fetch on the oss road** | `apply/test_entry_fetch.py` | guarded-fetcher stub `.calls == []` when protocol is `oss` — the #2019 discipline |
 | plugin conformance | `tests/…/plugin_api/test_object_store_client.py` | five statuses; cap enforced without draining |
 | status → outcome | `apply/test_entry_fetch.py` | `keep_last` stands in for `UNAVAILABLE` only; the other three are refusals |
-| matrix | `test_support_matrix.py`, `test_capabilities.py` | 24 cells; exhaustive-by-construction still raises on a missing/stale verdict |
-| schema | `schema/test_sources.py` | `url` on `oss` refused naming `bucket`; missing `bucket` refused; one mistake → one violation |
+| matrix | `test_support_matrix.py`, `test_capabilities.py` | still 18 cells, still exhaustive by construction; `constructs` publishes `oss`, not `url` |
+| schema | `schema/test_sources.py` | `url` on `oss` refused naming `bucket`/`key`; missing `bucket` refused; a bare-string source refused naming the two protocols; one mistake → one violation |
 | credential | `credentials/test_service.py` | `endpoint` required for `oss_aksk`, refused on `header`; readable back; secret still absent from the record |
 | regression | the whole existing suite | groups A–C change nothing |
 
@@ -241,11 +254,17 @@ by landing it first and alone, with the claim that *no existing test changes*.
 Any test that needs editing in group A is a behaviour change that was not
 supposed to happen — treat it as a finding, not as churn.
 
-**R3 — `allowed_prefixes` becoming conditional is a validation rule that now
+**R3 — removing the URL source road is a capability removal, not a rename.** A
+deployment with no git remote and no object store can no longer fetch manifest
+content. Accepted deliberately (spec D-7): the road's threat surface was being
+paid for with no traffic. The migration cost lands almost entirely in tests, and
+`cli_tools`' install API keeps the URL transport for callers who need it.
+
+**R4 — `allowed_prefixes` becoming conditional is a validation rule that now
 branches on credential type.** The `_check_mechanism_fields` precedent already
 handles per-mechanism fields in both directions; this follows it rather than
 adding a second mechanism-shaped rule elsewhere.
 
-**R4 — corp binds the real client, so nothing in CI proves `oss2` works.** The
+**R5 — corp binds the real client, so nothing in CI proves `oss2` works.** The
 conformance test is the contract; the corp binding is tested corp-side. Called
 out so it is a known boundary rather than an assumed coverage.

@@ -29,7 +29,8 @@ lands atomically.
 ## Group B — one fetcher per protocol (no behaviour change)
 
 - [ ] **B1** — `apply/fetchers/`: `SourceFetcher` Protocol, `GitSourceFetcher`
-      (today's git branch), `HttpsSourceFetcher` (today's non-git branch).
+      (today's git branch), `ObjectStoreFetcher` (today's non-git branch, still
+      a guarded fetch by URL — group D swaps its body).
 - [ ] **B2** — `fetch_declared` becomes parse → look up → call. The shared
       preamble stays: session lookup, the `needs_session` refusal, `keep_last`
       resolution, budget checks, `declared_protocol`'s no-fetch gate.
@@ -55,36 +56,45 @@ lands atomically.
       bucket + key + status, never from the SDK message.
 - [ ] **C5** — DI module; factory singleton, clients **not** singletons.
 
-## Group D — the vocabulary split and the `oss` road (behaviour change, atomic)
+## Group D — the `oss` road, and the URL road removed (behaviour change, atomic)
 
-- [ ] **D1** — `support_matrix.py`: `SourceKind.HTTPS`; six new verdict rows;
-      24 cells; `DIGEST_REQUIRED` and `ARCHIVE_FIELDS_BY_KIND` extended.
-- [ ] **D2** — `schema/sources.py`: `_KEYS_BY_PROTOCOL` / `_REQUIRED_BY_PROTOCOL`
-      per protocol; `SourceDecl.url` → `str | None`, `+bucket`, `+key`;
-      `DECLARABLE_PROTOCOLS` gains `HTTPS`; inline string → `HTTPS`.
+- [ ] **D1** — `schema/sources.py`: `_KEYS_BY_PROTOCOL` / `_REQUIRED_BY_PROTOCOL`
+      per protocol; `SourceDecl.url` → `str | None`, `+bucket`, `+key`.
       `url` on `oss` refused with a message naming `bucket`/`key`. Keep the
       `misplaced`-set discipline: one mistake, one violation.
-- [ ] **D3** — `schema/entries.py`: entry-level `key`, composed source-first,
-      re-checked by `relative_path_refusal`. Refused on a non-`oss` entry.
-      `subpath` keeps its shipped meaning on both roads.
+      `SourceKind` and the 18-cell matrix are **unchanged** — only the docstrings
+      that describe `oss` as a URL road.
+- [ ] **D2** — `schema/entries.py`: the bare-string `source: "https://…"` branch
+      becomes a refusal naming the two protocols and the mapping form;
+      `SourceForm.URL` → `SourceForm.OSS`; entry-level `key`, composed
+      source-first and re-checked by `relative_path_refusal`, refused on a
+      non-`oss` entry. `subpath` keeps its shipped meaning on both roads.
+- [ ] **D3** — `capabilities.py`: `SourceForm.URL` → `SourceForm.OSS` in the enum
+      and the `constructs` verdict map. The test asserts the full construct set.
 - [ ] **D4** — DDL `sql/2026_09_09_source_credential_endpoint.sql`
       (`ADD COLUMN endpoint varchar(512) NULL`); row, record, repository protocol
       and impl; `REQUIRED_FIELDS_BY_TYPE` / `EXCLUSIVE_FIELDS_BY_TYPE`.
 - [ ] **D5** — `allowed_prefixes` optional-and-ignored for `oss_aksk`, still
-      mandatory for `header`.
-- [ ] **D6** — `ObjectStoreFetcher` in the table; reads via the plugin; status →
-      outcome per the spec table; sha256 + declared-digest stays in the fetcher.
+      mandatory for `header` (the mechanism git sources use).
+- [ ] **D6** — `ObjectStoreFetcher`'s body swaps to the plugin: reads by bucket +
+      composed key; status → outcome per the spec table; sha256 +
+      declared-digest stays in the fetcher.
 - [ ] **D7** — **delete** `credentials/signing.py` and its test; `headers_for`
       back to one line.
-- [ ] **D8** — `capabilities.py` publishes 24 cells; the cell test drives a real
-      request per cell and asserts observed == table.
+- [ ] **D8** — migrate ~77 bare-string source usages across 8 test files
+      (41 `test_resources_materialiser.py`, 26 `test_manifest_schema.py`, the rest
+      in ones and threes) to `oss` bucket/key, or to refusal assertions where the
+      test is *about* the URL form.
 - [ ] **D9** — the guarded fetcher is **not called** on the `oss` road
-      (`stub.calls == []`).
+      (`stub.calls == []`) — and a test that it **is** still called by
+      `cli_tools`' API-driven install, which keeps the URL transport.
 
 ## Group E — documentation
 
-- [ ] **E1** — `manifest-schema.zh-CN.md`: the four protocols; bucket/key
-      addressing; `key` vs `subpath` on an `oss` entry.
+- [ ] **E1** — `manifest-schema.zh-CN.md`: two declarable protocols (`git`,
+      `oss`); bucket/key addressing; `key` vs `subpath` on an `oss` entry; the
+      bare-string source form is gone. Say plainly that HTTPS remains the wire
+      for both roads and stops being a source protocol.
 - [ ] **E2** — `examples.zh-CN.md`: an `oss` example that is actually accepted;
       refresh the stale caveat header.
 - [ ] **E3** — credential docs: `oss_aksk` now stores `endpoint`; no

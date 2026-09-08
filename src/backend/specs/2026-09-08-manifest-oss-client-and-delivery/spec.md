@@ -17,10 +17,11 @@ already has:
 2. **The fetch layer returns one type.** `FetchedEntry | GitEntrySource` becomes
    `EntryDelivery`, an interface with two implementations, and every
    `isinstance` branch in every materialiser goes with it.
-3. **One fetcher per protocol.** The `if decl.protocol is not SourceKind.GIT:`
-   branch in `fetch_declared` becomes a table of `SourceFetcher`
-   implementations, and `SourceKind` gains **`https`** so the object-store road
-   and the plain-URL road stop sharing a name.
+3. **One fetcher per protocol**, and **the plain-URL source road is removed.**
+   The `if decl.protocol is not SourceKind.GIT:` branch in `fetch_declared`
+   becomes a table of `SourceFetcher` implementations. A manifest may declare
+   exactly two protocols — `git` and `oss` — and can no longer hand the
+   platform a raw URL to GET.
 
 (1) is the user-visible fix — the shipped `oss` road cannot reach the object
 store it was built for. (2) and (3) are what make (1) a small change rather than
@@ -80,9 +81,9 @@ if decl.protocol is not SourceKind.GIT:
 Adding a protocol means editing that branch *and* every `isinstance` chain
 downstream. D2 and D3 are the same defect seen from two ends.
 
-**D4 — `oss` names two different things.** Today `SourceKind.OSS` covers both
-"a plain HTTPS GET of a URL the tenant wrote" and "a read from a private object
-store". They do not share a threat model:
+**D4 — `oss` names two different things, and one of them has no users.**
+Today `SourceKind.OSS` covers both "a plain HTTPS GET of a URL the tenant wrote"
+and "a read from a private object store". They do not share a threat model:
 
 | | plain URL | object store |
 |---|---|---|
@@ -95,8 +96,12 @@ store". They do not share a threat model:
 
 Four of the guarded fetcher's six protections exist *because* the tenant supplies
 the URL. Collapsing both roads into one name means either the object-store road
-carries machinery it does not need, or the URL road loses machinery it does. The
-matrix cannot express the difference because the vocabulary has no word for it.
+carries machinery it does not need, or the URL road loses machinery it does.
+
+Two resolutions were available: split the name (add an `https` protocol), or drop
+the road. **The road is dropped** — no end user fetches manifest content from a
+plain URL, so the capability is paying for its threat model with no traffic. See
+decision D-7.
 
 **D5 — the endpoint is derived from the manifest, not from the credential.**
 `headers_for(url)` signs whatever URL it is handed, and that URL comes from the
@@ -113,19 +118,30 @@ that road.
 
 ## The vocabulary
 
-`SourceKind` grows one member. `SourceForm` (the published `constructs` spelling
-— `url`/`git`/`named`/`content`) is untouched.
+`SourceKind` is **unchanged** — `content`, `oss`, `git` — and the support matrix
+stays 6×3 = 18 cells. What changes is what `oss` means and how it is spelled.
 
 | | before | after |
 |---|---|---|
 | `content` | inline text on the entry | unchanged |
 | `git` | repository over HTTPS | unchanged |
-| `oss` | **an HTTPS GET, optionally signed** | **a bucket + key read through an object-store client** |
-| `https` | — | **new**: an HTTPS GET of a tenant-supplied URL, optional `header` credential |
+| `oss` | an HTTPS GET of a URL, optionally signed | **a bucket + key read through an object-store client** |
 
-Everything that works today as `oss` keeps working as `https`, with the guarded
-fetcher unchanged behind it. The support matrix grows from 6×3 to **6×4 = 24
-cells**, still exhaustive by construction.
+**HTTPS does not disappear from the wire** — the git CLI still speaks HTTPS to a
+remote, and the object-store SDK still speaks HTTPS to an endpoint. What goes
+away is HTTPS as a *source protocol*: a manifest can no longer hand the platform
+a raw URL to GET.
+
+`SourceForm` (the published `constructs` spelling) loses `url` and gains `oss`,
+because the spelling it named no longer exists: an `oss` source is now written as
+a mapping or referenced by name, never as a bare string.
+
+**The guarded fetcher stays.** It has a second consumer that is not a manifest
+source at all: `cli_tools/service.py`'s API-driven install takes a plain URL from
+an API *caller* — "no manifest and no `sources` map to resolve against". That
+road keeps the fetcher, its DI wiring, `FetchedObject` and the content service
+exactly as they are. Removing the URL *source protocol* is not removing the URL
+*transport*.
 
 ## Behaviour changes
 
@@ -242,12 +258,27 @@ manifest:
   picks inside the archive it unpacks to. `check_source_subpath`'s
   `subpath_without_archive` refusal is unchanged.
 
-### `https` becomes its own protocol
+### The plain-URL source road is removed
 
-`protocol: https` with a `url`, the guarded fetcher behind it unchanged, a
-`header` credential optional. The inline string form `source: "https://…"` now
-classifies as `https` rather than `oss` — the same road it has always actually
-taken.
+A manifest declares `git` or `oss`. Everything else is refused at `PUT`:
+
+- the **bare-string form** `source: "https://example.com/x.tar.gz"` — today's
+  `entries.py:370-376`, which classifies a string as `SourceForm.URL` /
+  `SourceKind.OSS`. It is refused with a message naming the two protocols and
+  the mapping form.
+- `url:` on an `oss` source, refused with a message naming `bucket`/`key`.
+
+`url` remains a required field on a **git** source — that is a repository
+address, not a fetch target.
+
+Consequences, stated rather than discovered later:
+
+- `SourceForm.URL` → `SourceForm.OSS`, a published `constructs` rename.
+- Roughly 77 usages across 8 test files move to bucket/key or become refusal
+  assertions. Mechanical, but it is the bulk of the diff in group D.
+- A deployment with no git remote and no object store can no longer fetch
+  manifest content at all. That is the intended trade: the URL road's threat
+  surface was being paid for with no traffic (D4).
 
 ### The fetch layer returns one type
 
@@ -289,7 +320,7 @@ class SourceFetcher(Protocol):
     def fetch(self, ctx, *, decl, entry, category,
               entry_identity) -> EntryDelivery: ...
 
-_FETCHERS: Mapping[SourceKind, SourceFetcher]   # git | oss | https
+_FETCHERS: Mapping[SourceKind, SourceFetcher]   # git | oss
 ```
 
 `fetch_declared` parses the declaration, looks up the fetcher, and calls it. No
@@ -314,11 +345,13 @@ one new class; no materialiser changes.
    remains in any materialiser. Every existing materialiser test passes
    unchanged — this is a refactor, and its correctness claim is that behaviour
    did not move.
-6. `SourceKind.HTTPS` exists; the matrix is 24 cells, still exhaustive by
+6. `SourceKind` is unchanged and the matrix is still 18 cells, exhaustive by
    construction (a missing verdict raises at import, a stale one raises
-   `RuntimeError`); the capabilities endpoint publishes the `https` row.
+   `RuntimeError`). `SourceForm.URL` is gone and `SourceForm.OSS` is published
+   in its place.
 7. An `oss` source declaring `url` is refused at `PUT` with a message naming
-   `bucket`. An `oss` source with no `bucket` is refused. Entry-level `key`
+   `bucket`/`key`. An `oss` source with no `bucket` is refused. A bare-string
+   `source: "https://…"` is refused, naming the two protocols. Entry-level `key`
    composes and is re-checked by `relative_path_refusal`.
 8. The credential surface: `endpoint` is required for `oss_aksk`, stored, and
    readable back (it is an identifier, not a secret — the same ruling
@@ -353,8 +386,8 @@ one new class; no materialiser changes.
   commonly reads several buckets in one account, and the bucket is the part a
   manifest author legitimately chooses.
 - **D-4: no `allowed_prefixes` for `oss`.** With no tenant-supplied host there is
-  nothing for a prefix to constrain. Settled with the user. The field stays
-  mandatory for `header` credentials, whose road still takes tenant URLs.
+  nothing for a prefix to constrain. Settled with the user; see D-8 for where
+  the constraint lands instead.
 - **D-5: `schema_version` stays `1`, and the old `oss` spelling is refused
   rather than translated.** Same reasoning #2019 recorded: the feature is
   pre-release, so no installed base is protected by a compatibility road, and a
@@ -362,3 +395,13 @@ one new class; no materialiser changes.
 - **D-6: `EntryDelivery` is a `Protocol`, not a base class.** It is a seam two
   unrelated things satisfy, matching how `FetchContext` and the plugin
   capabilities are already declared in this module.
+- **D-7: no `https` protocol, and the plain-URL source road is removed.** The
+  alternative was to split the name so the two threat models stopped sharing
+  one; the road is dropped instead because no end user fetches manifest content
+  from a plain URL. Settled with the user. The URL *transport* survives for
+  `cli_tools`' API-driven install, which is not a manifest source.
+- **D-8: `allowed_prefixes` is mandatory for `header` credentials only.** Stated
+  by protocol it is "required when the source is git", which is the same rule:
+  after D-7, `header` is the mechanism git sources use and `oss_aksk` is the
+  mechanism object stores use. The constraint moves rather than being forced
+  onto a road it does not fit. Settled with the user.
