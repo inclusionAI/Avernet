@@ -21,6 +21,10 @@ from typing import Any
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetchError,
     FetchedEntry,
+    GitEntrySource,
+)
+from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
+    FetchRefusedError,
 )
 from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (
     _DECLARED_TREE,
@@ -152,8 +156,8 @@ class _StubEntryFetcher:
                     "auth": decl.get("auth"),
                 }
             )
-            return _StubGitSource(
-                members=tree,
+            return _stub_git_source(
+                tree,
                 subpath=_compose(decl.get("subpath"), entry.get("subpath")),
                 auth=decl.get("auth"),
                 url=key,
@@ -205,54 +209,57 @@ def _compose(source_subpath: str | None, entry_subpath: str | None) -> str | Non
     return source_subpath.rstrip("/") + "/" + entry_subpath.lstrip("/")
 
 
-class _StubGitSource:
-    """A ``GitEntrySource``'s shape: a tree the entry reads, not bytes.
+class _StubCheckout:
+    """A ``GitCheckout``'s shape where a consumer reaches it.
 
-    ``files()`` returns every member under ``subpath`` with the prefix
-    stripped — the recursive walk a real checkout does — so a directory entry's
-    nesting behaviour is genuinely exercised rather than assumed.
+    ``files``/``read_file`` take the subpath and the per-entry byte cap the way
+    the guarded readers do, and refuse in the transport's own currency
+    (``FetchRefusedError``) so ``GitEntrySource`` performs the translation it
+    performs in production rather than the double doing it for it.
     """
 
-    def __init__(self, *, members, subpath, auth, url, moved=None) -> None:
+    def __init__(self, members: dict[str, bytes], sha: str = "b" * 40) -> None:
         self._members = members
-        self.subpath = subpath
-        self.auth = auth
-        self.source_url = url
-        self.moved_from = moved
+        self.sha = sha
+        self.root = None
+        self.tree_bytes = sum(len(v) for v in members.values())
 
-    def _under(self):
-        if not self.subpath:
-            return list(self._members.items())
-        prefix = self.subpath.rstrip("/") + "/"
-        return [
+    def files(self, subpath=None, *, file_limit=None):
+        if not subpath:
+            return sorted(self._members.items())
+        prefix = subpath.rstrip("/") + "/"
+        found = sorted(
             (name[len(prefix):], data)
             for name, data in self._members.items()
             if name.startswith(prefix)
-        ]
-
-    def files(self):
-        found = self._under()
+        )
         if not found:
-            raise EntryFetchError(
-                f"the source's subpath {self.subpath!r} selects nothing"
-            )
-        return sorted(found)
+            raise FetchRefusedError(f"subpath {subpath!r} selects nothing")
+        return found
 
-    def read_file(self):
+    def read_file(self, subpath=None, *, file_limit=None):
         try:
-            return self._members[self.subpath]
+            return self._members[subpath]
         except KeyError:
-            raise EntryFetchError(
-                f"the source's subpath {self.subpath!r} is not a file in the tree"
+            raise FetchRefusedError(
+                f"subpath {subpath!r} is not a file in the tree"
             ) from None
 
-    def receipt_url(self):
-        return f"git+{self.source_url}@stubsha/{self.subpath or ''}"
 
-    def moved_note(self):
-        if self.moved_from is None:
-            return None
-        return f"ref moved: the last apply recorded {self.moved_from}"
+def _stub_git_source(members, *, subpath, auth, url, moved=None):
+    """A **real** :class:`GitEntrySource` over a fake checkout.
+
+    Not a look-alike: the materialiser dispatches on the type, exactly as the
+    identity and skills materialisers do, and a duck-typed double would let a
+    change to that dispatch pass its own tests while failing in production.
+    """
+    return GitEntrySource(
+        checkout=_StubCheckout(members),
+        source_url=url,
+        subpath=subpath,
+        moved_from=moved,
+        auth=auth,
+    )
 
 
 def _tgz(member: dict[str, bytes]) -> bytes:
@@ -1431,3 +1438,225 @@ def test_an_unhashable_unpack_kind_is_refused_not_raised():
     )
     assert not resolved.ok
     assert "zip|tar.gz" in resolved.failures[0].reason
+
+
+# --- resources over git (defect D1) -----------------------------------------
+#
+# The category that could not name a source. Every case below is a shape the
+# URL road already had and ``resources`` could not reach, plus the one shape
+# only git gives: a tree that arrives as a tree.
+
+_REPO = "https://code.example.com/team/content.git"
+
+_TREE = {
+    "kb/faq.csv": b"q,a\n",
+    "kb/pricing.csv": b"sku,price\n",
+    "kb/deep/nested/notes.md": b"# nested\n",
+    "elsewhere/ignore.md": b"not selected\n",
+}
+
+
+def _git_ctx(*, subpath=None, auth=None):
+    """An apply context whose session declares one git source named ``content``."""
+    decl = {"protocol": "git", "url": _REPO, "ref": "v1.2.0"}
+    if subpath is not None:
+        decl["subpath"] = subpath
+    if auth is not None:
+        decl["auth"] = auth
+    return make_context(
+        engine_type="claude_code",
+        source_session=type("_S", (), {"sources": {"content": decl}})(),
+    )
+
+
+def test_a_file_entry_reads_one_file_out_of_a_git_source():
+    """D1's simplest half: ``from:`` resolves, and one file lands at ``path``."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            _git_ctx(),
+            [{"path": "data/faq.csv", "from": "content", "subpath": "kb/faq.csv"}],
+        )
+    )
+    assert resolved.ok
+    assert [(i.identity, i.value) for i in resolved.intents] == [
+        ("data/faq.csv", b"q,a\n")
+    ]
+
+
+def test_a_directory_entry_over_git_takes_the_tree_recursively():
+    """Every file at every depth, and nothing outside the selected subtree.
+
+    The nesting is the point: ``kb/deep/nested/notes.md`` is three levels below
+    the selected root and must arrive, while ``elsewhere/`` — outside the
+    source's subpath — must not. A shallow walk would pass a one-level fixture
+    and quietly truncate real trees.
+    """
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            _git_ctx(subpath="kb"),
+            [{"path": "data/kb/", "from": "content"}],
+        )
+    )
+    assert resolved.ok
+    # The declared-tree marker rides first so the write stage replaces the tree
+    # before any member uploads.
+    assert resolved.intents[0].identity == "data/kb/"
+    assert resolved.intents[0].value is _DECLARED_TREE
+    assert {i.identity: i.value for i in resolved.intents[1:]} == {
+        "data/kb/deep/nested/notes.md": b"# nested\n",
+        "data/kb/faq.csv": b"q,a\n",
+        "data/kb/pricing.csv": b"sku,price\n",
+    }
+
+
+def test_a_directory_entry_over_git_declares_no_unpack():
+    """``unpack`` exists because one HTTPS GET fetches one object. Git hands
+    over a real tree, so requiring it here would be asking the caller to
+    configure a packaging step that does not happen."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert resolved.ok, resolved.failures
+
+
+def test_a_file_removed_upstream_disappears_on_the_next_apply():
+    """A directory entry owns its tree: the declared area is replaced wholesale,
+    not merged. Modelled as two applies over a shrinking repository."""
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: _TREE}))
+    first = _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert "data/kb/pricing.csv" in {i.identity for i in first.intents}
+
+    shrunk = {k: v for k, v in _TREE.items() if k != "kb/pricing.csv"}
+    m2 = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: shrunk}))
+    second = _run(
+        m2.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    identities = {i.identity for i in second.intents}
+    assert "data/kb/pricing.csv" not in identities
+    # The tree marker is still declared, which is what makes the removal happen
+    # on the bot rather than only in this list.
+    assert second.intents[0].value is _DECLARED_TREE
+
+
+def test_a_member_refused_by_admission_aborts_with_the_tree_still_standing():
+    """The gate runs before the marker that promises the tree. One undeliverable
+    member must fail the category *without* a delete — otherwise every re-apply
+    deterministically deletes the tree and then fails to refill it."""
+    svc = FakeResourceFileService()
+    oversized = {"kb/ok.md": b"fine\n", "kb/bad.exe": b"\x00" * 8}
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: oversized}))
+    resolved = _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert not resolved.ok
+    assert resolved.intents == ()
+    assert "bad.exe" in resolved.failures[0].reason
+
+
+def test_two_entries_share_one_declared_git_source():
+    """The declare-once-reference-many mechanism, which ``resources`` was
+    excluded from: one source block, two entries, two different subpaths."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            _git_ctx(subpath="kb"),
+            [
+                {"path": "data/faq.csv", "from": "content", "subpath": "faq.csv"},
+                {
+                    "path": "data/pricing.csv",
+                    "from": "content",
+                    "subpath": "pricing.csv",
+                },
+            ],
+        )
+    )
+    assert resolved.ok, resolved.failures
+    assert [(i.identity, i.value) for i in resolved.intents] == [
+        ("data/faq.csv", b"q,a\n"),
+        ("data/pricing.csv", b"sku,price\n"),
+    ]
+
+
+def test_a_git_sourced_entry_files_its_bytes_with_the_platform_store():
+    """§2.8: audit and ``keep_last`` read one log, whichever road served the
+    bytes. The credential **name** rides with it — never a value — so the
+    lineage answers "which credential distributed this" on both roads."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    _run(
+        m.resolve(
+            _git_ctx(auth="corp-git"),
+            [{"path": "data/faq.csv", "from": "content", "subpath": "kb/faq.csv"}],
+        )
+    )
+    assert len(stub.filed) == 1
+    filed = stub.filed[0]
+    assert filed["content"] == b"q,a\n"
+    assert filed["entry_identity"] == "data/faq.csv"
+    assert filed["credential_name"] == "corp-git"
+    assert filed["source_url"].startswith("git+")
+
+
+def test_a_git_sourced_tree_files_one_receipt_not_one_per_member():
+    """A 5000-file tree is one delivery. One receipt per member would make the
+    audit log describe the transport instead of the entry."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE})
+    m = ResourcesMaterialiser(svc, stub)
+    _run(
+        m.resolve(_git_ctx(subpath="kb"), [{"path": "data/kb/", "from": "content"}])
+    )
+    assert len(stub.filed) == 1
+    assert stub.filed[0]["entry_identity"] == "data/kb/"
+    # The canonical form is deterministic and injective: same tree, same bytes.
+    from agentclaw.community.core.bot_config_manifest.apply.materialisers.resources import (  # noqa: E501
+        _canonical_tree_bytes,
+    )
+
+    assert _canonical_tree_bytes([("a", b"bc")]) == _canonical_tree_bytes(
+        [("a", b"bc")]
+    )
+    # A path/payload pair that a delimiter-joined encoding would confuse.
+    assert _canonical_tree_bytes([("a", b"b"), ("c", b"d")]) != (
+        _canonical_tree_bytes([("a", b"b\nc"), ("", b"d")])
+    )
+
+
+def test_a_moved_ref_rides_into_the_entrys_note():
+    """§9.6: a non-strict source that moved reports the move on the entry."""
+    svc = FakeResourceFileService()
+    stub = _StubEntryFetcher(git_trees={_REPO: _TREE}, moved_from="deadbeef")
+    m = ResourcesMaterialiser(svc, stub)
+    resolved = _run(
+        m.resolve(
+            _git_ctx(),
+            [{"path": "data/faq.csv", "from": "content", "subpath": "kb/faq.csv"}],
+        )
+    )
+    assert resolved.ok
+    assert "deadbeef" in resolved.intents[0].note
+
+
+def test_an_undeclared_from_fails_the_entry_not_the_process():
+    svc = FakeResourceFileService()
+    m = ResourcesMaterialiser(svc, _StubEntryFetcher(git_trees={_REPO: _TREE}))
+    resolved = _run(
+        m.resolve(_git_ctx(), [{"path": "data/x.md", "from": "nowhere"}])
+    )
+    assert not resolved.ok
+    assert "nowhere" in resolved.failures[0].reason

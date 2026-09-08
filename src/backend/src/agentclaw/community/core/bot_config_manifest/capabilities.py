@@ -149,9 +149,14 @@ _DESKTOP_BOT_TYPE = "desktop"
 # shipped code can act on it. Anyone adding to the vocabulary adds a line here
 # or adds the code that applies it — "let this surface accept something nothing
 # applies" is never the third option.
-_REASON_ENGINE_CONFIG = (
+#: Public because the support matrix's ``engine_config`` cells carry it too.
+#: One string, not two agreeing ones: the category row and the cell describe the
+#: same fact, and a caller who reads both must not have to reconcile two
+#: wordings — which is precisely the drift this feature's matrix exists to end.
+REASON_ENGINE_CONFIG = (
     "engine_config was moved out of the first wave, so no materializer writes it"
 )
+_REASON_ENGINE_CONFIG = REASON_ENGINE_CONFIG
 _REASON_TECLAW_SCRIPT = (
     "teclaw bots are provisioned without a start sequence, so a script would "
     "never execute"

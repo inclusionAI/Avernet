@@ -40,6 +40,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from agentclaw.community.core.bot_config_manifest.capabilities import (
+    REASON_ENGINE_CONFIG,
     ManifestCategory,
 )
 
@@ -80,10 +81,13 @@ _MCP_HAS_NO_SOURCE = SourceRefusal(
     "source; there is nothing for a protocol to fetch",
 )
 
+#: The whole category is refused, so every one of its cells is — and carries the
+#: category's own reason rather than a second wording of it. The capabilities
+#: endpoint intersects the two verdicts and would otherwise publish a cell whose
+#: message disagreed with the ``unsupported_category`` violation the very same
+#: document earns at ``PUT``.
 _ENGINE_CONFIG_HAS_NO_MATERIALISER = SourceRefusal(
-    _UNSUPPORTED_SOURCE,
-    "engine_config has no materialiser in this build, so nothing is "
-    "delivered for it from any source",
+    _UNSUPPORTED_SOURCE, REASON_ENGINE_CONFIG
 )
 
 _SKILL_IS_A_PACKAGE = SourceRefusal(
