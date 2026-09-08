@@ -55,7 +55,7 @@ export function toPublicationRequest(command: {
     command.config.scope === 'restricted' &&
     (!viewDepts?.length || viewDepts.some((entry) => !entry.deptNo.trim()))
   ) {
-    throw new Error('组织范围缺少部门编码，无法提交公开范围变更');
+    throw new Error('组织范围缺少部门编码，无法提交 Bot 可见性变更');
   }
 
   return {
@@ -67,7 +67,7 @@ export function toPublicationRequest(command: {
 
 export function assertPublicationResponse(response: BackendApiEnvelope<BcsPublishResult>): BcsPublishResult {
   if (isEnvelopeFailure(response) || !response.data || !response.data.success) {
-    throw new Error(response.data?.error_msg || response.message || '公开范围变更提交失败');
+    throw new Error(response.data?.error_msg || response.message || 'Bot 可见性变更提交失败');
   }
   return response.data;
 }
@@ -104,10 +104,10 @@ export function createPublicationResult(
     return { status: 'completed', config: { scope: 'none', organizationPaths: [] } };
   }
   if (result.state !== 'COMPLETED') {
-    throw new Error('公开范围接口返回了无法识别的终态');
+    throw new Error('Bot 可见性接口返回了无法识别的终态');
   }
   if (result.last_operate === 'DISAGREE' || result.last_operate === 'CANCEL') {
-    throw new Error('公开范围变更未通过，当前生效配置保持不变');
+    throw new Error('Bot 可见性变更未通过，当前可见性保持不变');
   }
 
   const config: PublicConfig =

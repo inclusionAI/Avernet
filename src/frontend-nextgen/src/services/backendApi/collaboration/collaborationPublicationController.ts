@@ -34,7 +34,7 @@ export interface BcsPublishResult {
   visibility_field?: string | null;
 }
 
-/** 提交 Bot 公开范围变更（审批工单或快速收回）。 */
+/** 提交 Bot 可见性变更（审批工单或快速收回）。 */
 export function publishBotPublic(botUuid: string, userId: string, body: BcsPublicRequest, signal?: AbortSignal) {
   return backendRequest<BackendApiEnvelope<BcsPublishResult>>(COLLABORATION_PUBLICATION_ENDPOINTS.publish(botUuid), {
     method: 'POST',

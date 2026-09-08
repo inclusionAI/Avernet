@@ -15,6 +15,15 @@ describe('OrganizationScopeSearch', () => {
     jest.useRealTimers();
   });
 
+  it('uses the unified organization scope vocabulary', () => {
+    render(<OrganizationScopeSearch value={[]} onChange={jest.fn()} onSearch={jest.fn()} />);
+
+    expect(screen.getByPlaceholderText('请输入组织范围')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '搜索组织范围' })).toBeInTheDocument();
+    expect(screen.getByText('已选组织范围（0）')).toBeInTheDocument();
+    expect(screen.getByText('可搜索组织范围，并连续添加多个范围。')).toBeInTheDocument();
+  });
+
   it('waits for input to settle and searches only the final department keyword', async () => {
     jest.useFakeTimers();
     const onSearch = jest.fn(async (keyword: string, signal?: AbortSignal) => {
@@ -24,7 +33,7 @@ describe('OrganizationScopeSearch', () => {
     });
     render(<OrganizationScopeSearch value={[]} onChange={jest.fn()} onSearch={onSearch} />);
 
-    const input = screen.getByRole('textbox', { name: '搜索组织团队范围' });
+    const input = screen.getByRole('textbox', { name: '搜索组织范围' });
     fireEvent.change(input, { target: { value: '技' } });
     await act(async () => {
       jest.advanceTimersByTime(350);
@@ -60,7 +69,7 @@ describe('OrganizationScopeSearch', () => {
     });
     render(<OrganizationScopeSearch value={[]} onChange={jest.fn()} onSearch={onSearch} />);
 
-    const input = screen.getByRole('textbox', { name: '搜索组织团队范围' });
+    const input = screen.getByRole('textbox', { name: '搜索组织范围' });
     fireEvent.change(input, { target: { value: '技术' } });
     await act(async () => {
       jest.advanceTimersByTime(1000);
@@ -91,7 +100,7 @@ describe('OrganizationScopeSearch', () => {
       <OrganizationScopeSearch value={[]} onChange={jest.fn()} onSearch={jest.fn(async () => [entry, slashEntry])} />,
     );
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织团队范围' }), { target: { value: '技术' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), { target: { value: '技术' } });
     await act(async () => {
       jest.advanceTimersByTime(1000);
       await Promise.resolve();
@@ -111,7 +120,7 @@ describe('OrganizationScopeSearch', () => {
       <OrganizationScopeSearch value={[]} onChange={onChange} onEntriesChange={onEntriesChange} onSearch={onSearch} />,
     );
 
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织团队范围' }), { target: { value: '技术部' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), { target: { value: '技术部' } });
     await act(async () => {
       jest.advanceTimersByTime(1000);
       await Promise.resolve();

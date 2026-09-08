@@ -30,8 +30,9 @@ async function resolveMembership(groupId: string, botUuid: string | null): Promi
 /**
  * useBcnChatDetailRedirect —— BCN 外链落地（/workspace/bcn/chat/detail?id=&bot_uuid=&session=）：
  * 判定参与方式后 history.replace 到 workspace 协作群深链
- * （?tab=group&group=&session=[&membership=]），身份定位（切回用户身份）由 workspace
- * 既有一次性外链同步承担（session= 无 bot= 分支）。落地页不进历史栈（replace）。
+ * （?tab=group&group=&session=[&bot=][&membership=]）。bot_uuid 透传为 bot= 参数，
+ * 由 workspace 首次外链同步按其定位视角身份（Bot/用户均可，未命中退回用户身份）。
+ * 落地页不进历史栈（replace）。
  */
 export function useBcnChatDetailRedirect(): { status: BcnChatDetailStatus } {
   const [searchParams] = useSearchParams();
@@ -45,6 +46,9 @@ export function useBcnChatDetailRedirect(): { status: BcnChatDetailStatus } {
     let cancelled = false;
     void (async () => {
       const params = new URLSearchParams({ tab: 'group', group: groupId, session: sessionId });
+      // bot_uuid 透传为 bot=：workspace 群深链首次同步按它定位视角身份（命中 store 身份则
+      // 以该身份打开，含 Bot 角色；未命中退回用户身份）。缺失时不带 bot=，走原用户身份路径。
+      if (botUuid) params.set('bot', botUuid);
       const membership = await resolveMembership(groupId, botUuid);
       if (membership) params.set('membership', membership);
       if (cancelled) return;

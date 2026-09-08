@@ -1,3 +1,4 @@
+import type { CollaborationPrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
 import {
   friendApprovalConfigsEqual,
   normalizePublicConfig,
@@ -20,12 +21,19 @@ import { createCollaborationPrivacyRuntimeAdapter } from './collaborationPrivacy
 
 export class CollaborationPrivacyService {
   private overview?: CollaborationPrivacyOverview;
+  private latestLoadId = 0;
   private readonly inFlightActions = new Set<string>();
   constructor(private readonly gateway: CollaborationPrivacyGateway) {}
 
-  async loadOverview(userId: string, signal?: AbortSignal) {
-    this.overview = await this.gateway.loadOverview(userId, signal);
-    return structuredClone(this.overview);
+  async loadOverview(
+    userId: string,
+    signal?: AbortSignal,
+    loadScope: CollaborationPrivacyLoadScope = { target: 'allBots' },
+  ) {
+    const loadId = ++this.latestLoadId;
+    const overview = await this.gateway.loadOverview(userId, signal, loadScope);
+    if (loadId === this.latestLoadId) this.overview = overview;
+    return structuredClone(overview);
   }
 
   private requireBot(botId: string): CollaborationBot {
@@ -105,11 +113,12 @@ export class CollaborationPrivacyService {
 
   async submitPublication(command: PublicationCommand, signal?: AbortSignal) {
     const bot = this.requireWritableBot(command.botId);
-    if (bot.pendingPublications[command.audience]) throw new Error('该公开范围已有待审批变更');
+    if (bot.pendingPublications[command.audience]) throw new Error('该可见性已有待审批变更');
     const config = validatePublicConfig(normalizePublicConfig(command.config));
-    if (publicConfigsEqual(bot.publication[command.audience], config)) throw new Error('配置未发生变化，无需提交工单');
+    if (publicConfigsEqual(bot.publication[command.audience], config))
+      throw new Error('可见性未发生变化，无需提交审批');
     const actionKey = `publication:${command.botId}:${command.audience}`;
-    if (this.inFlightActions.has(actionKey)) throw new Error('该公开范围正在提交，请勿重复操作');
+    if (this.inFlightActions.has(actionKey)) throw new Error('该可见性正在提交，请勿重复操作');
     this.inFlightActions.add(actionKey);
     try {
       const result = await this.gateway.submitPublication(
@@ -131,7 +140,7 @@ export class CollaborationPrivacyService {
   async updateFriendApproval(command: FriendApprovalCommand, signal?: AbortSignal) {
     const bot = this.requireWritableBot(command.botId);
     if (bot.publication.user.scope === 'none' && bot.publication.bot.scope === 'none') {
-      throw new Error('至少开放一种公开范围后才能修改好友审批策略');
+      throw new Error('至少开启一种 Bot 可见性后，才能修改好友审批策略');
     }
     const config = validateFriendApproval(command.config);
     if (friendApprovalConfigsEqual(bot.friendApproval, config)) throw new Error('配置未发生变化，无需保存');

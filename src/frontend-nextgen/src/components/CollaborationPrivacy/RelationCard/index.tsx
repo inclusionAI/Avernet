@@ -3,12 +3,16 @@ import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { PendingPublication, PublicAudience, PublicConfig } from '@/domain/collaborationPrivacy/types';
 import { Info } from 'lucide-react';
+import { visibilityAudience, visibilityScopeLabels } from '../botVisibilityCopy';
+import { collaborationPrivacyTooltipDelayMs } from '../interaction';
 
-const scopeLabels = { none: '不公开', all: '全部公开', restricted: '限制公开范围' } as const;
-const audienceLabels: Record<PublicAudience, string> = { user: '其他用户可添加为好友', bot: '其他 Bot 可添加为好友' };
+const audienceLabels: Record<PublicAudience, string> = {
+  user: visibilityAudience.user.label,
+  bot: visibilityAudience.bot.label,
+};
 const audienceDescriptions: Record<PublicAudience, string> = {
-  user: '控制网络中的其他用户身份，是否可发现并添加此 Bot 为好友。',
-  bot: '控制网络中的其他 Bot 身份，是否可发现并添加此 Bot 为好友。',
+  user: visibilityAudience.user.description,
+  bot: visibilityAudience.bot.description,
 };
 
 interface RelationCardProps {
@@ -27,7 +31,7 @@ export function RelationCard({ audience, config, pending, disabled, onEdit, onVi
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <div className="flex items-center gap-1.5">
             <p className="m-0 text-sm font-medium text-foreground">{audienceLabels[audience]}</p>
-            <TooltipProvider>
+            <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -53,7 +57,7 @@ export function RelationCard({ audience, config, pending, disabled, onEdit, onVi
           )}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
-          当前生效：{scopeLabels[config.scope]}
+          当前可见性：{visibilityScopeLabels[config.scope]}
           {config.scope === 'restricted' ? ` · ${config.organizationPaths.length} 个组织范围` : ''}
           {config.scope === 'restricted' && (
             <Button
@@ -68,7 +72,7 @@ export function RelationCard({ audience, config, pending, disabled, onEdit, onVi
         </p>
       </div>
       <Button variant="secondary" size="sm" disabled={disabled || Boolean(pending)} onClick={onEdit}>
-        {pending ? '审批中' : '编辑范围'}
+        {pending ? '审批中' : '修改可见性'}
       </Button>
     </div>
   );

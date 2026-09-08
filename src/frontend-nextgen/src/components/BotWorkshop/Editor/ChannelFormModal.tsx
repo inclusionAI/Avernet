@@ -1,13 +1,13 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select';
-import { Switch } from '@/components/ui/Switch';
-import type { BotChannel, BotChannelInput } from '@/domain/botAdvancedConfig';
+import type { BotChannel, BotChannelInput, ChannelBindingMode } from '@/domain/botAdvancedConfig';
 import { Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { BcnChannelFields, ChannelSwitch, PluginChannelFields } from './ChannelModeFields';
 
 export const emptyChannelInput: BotChannelInput = {
+  bindingMode: 'plugin',
   description: '',
   clientId: '',
   clientSecret: '',
@@ -19,9 +19,13 @@ export const emptyChannelInput: BotChannelInput = {
   replyToMessage: true,
   aixEnable: true,
   includeSenderName: true,
+  robotCode: '',
+  groupChatScope: 'per_sender',
+  outboundVisibility: 'full_transcript',
 };
 
 const fromChannel = (channel: BotChannel): BotChannelInput => ({
+  bindingMode: channel.bindingMode,
   description: channel.description ?? '',
   clientId: channel.clientId,
   clientSecret: '',
@@ -33,49 +37,33 @@ const fromChannel = (channel: BotChannel): BotChannelInput => ({
   replyToMessage: channel.replyToMessage,
   aixEnable: channel.aixEnable,
   includeSenderName: channel.includeSenderName,
+  robotCode: channel.robotCode ?? '',
+  groupChatScope: channel.groupChatScope ?? 'per_sender',
+  outboundVisibility: channel.outboundVisibility ?? 'full_transcript',
 });
-
-function ChannelSwitch({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <label className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-xs">
-      <span>
-        <span className="block font-medium">{label}</span>
-        <span className="mt-1 block text-muted-foreground">{description}</span>
-      </span>
-      <Switch checked={checked} onCheckedChange={onChange} />
-    </label>
-  );
-}
 
 export function ChannelFormModal({
   open,
   channel,
+  bindingMode,
   onOpenChange,
   onSubmit,
 }: {
   open: boolean;
   channel?: BotChannel;
+  bindingMode: ChannelBindingMode;
   onOpenChange: (open: boolean) => void;
   onSubmit: (input: BotChannelInput) => Promise<void>;
 }) {
   const [form, setForm] = useState(emptyChannelInput);
   const [saving, setSaving] = useState(false);
   useEffect(() => {
-    if (open) setForm(channel ? fromChannel(channel) : emptyChannelInput);
-  }, [channel, open]);
+    if (open) setForm(channel ? fromChannel(channel) : { ...emptyChannelInput, bindingMode });
+  }, [bindingMode, channel, open]);
   const valid =
     form.clientId.trim() &&
     (Boolean(channel?.hasSecret) || form.clientSecret.trim()) &&
+    (form.bindingMode !== 'bcn_gateway' || form.robotCode?.trim()) &&
     (!form.enableStreamingCards || form.cardTemplateId.trim());
   const submit = async () => {
     setSaving(true);
@@ -90,9 +78,16 @@ export function ChannelFormModal({
     <Modal open={open} onOpenChange={onOpenChange}>
       <ModalContent size="lg">
         <ModalHeader>
-          <ModalTitle>{channel ? '编辑钉钉渠道' : '绑定钉钉渠道'}</ModalTitle>
+          <ModalTitle>{channel ? '编辑钉钉渠道' : '新建钉钉机器人配置'}</ModalTitle>
           <ModalDescription>渠道配置仅修改当前草稿，随 Bot 发布流程进入后续阶段。</ModalDescription>
         </ModalHeader>
+        <div className="rounded-md border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+          绑定方式：
+          <span className="font-medium text-foreground">
+            {form.bindingMode === 'plugin' ? '基于开源插件' : '基于 BCN'}
+          </span>
+          {channel ? '。已创建的渠道不可切换绑定方式，如需切换请删除后重建。' : ''}
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-1.5 text-xs font-medium sm:col-span-2">
             场景描述
@@ -115,49 +110,11 @@ export function ChannelFormModal({
               onChange={(event) => setForm({ ...form, clientSecret: event.target.value })}
             />
           </label>
-          <label className="space-y-1.5 text-xs font-medium">
-            私聊策略
-            <Select
-              value={form.dmPolicy}
-              onValueChange={(dmPolicy: 'open' | 'disabled') => setForm({ ...form, dmPolicy })}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="open">允许私聊</SelectItem>
-                <SelectItem value="disabled">禁止私聊</SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-          <label className="space-y-1.5 text-xs font-medium">
-            用户白名单
-            <Input
-              value={form.allowlist.join(',')}
-              placeholder="* 或多个用户 ID，以逗号分隔"
-              onChange={(event) =>
-                setForm({ ...form, allowlist: event.target.value.split(',').map((value) => value.trim()) })
-              }
-            />
-          </label>
-          <ChannelSwitch
-            label="回复原消息"
-            description="回复与来源消息保持关联"
-            checked={form.replyToMessage}
-            onChange={(replyToMessage) => setForm({ ...form, replyToMessage })}
-          />
-          <ChannelSwitch
-            label="包含发送者名称"
-            description="将发送者名称加入 Bot 上下文"
-            checked={form.includeSenderName}
-            onChange={(includeSenderName) => setForm({ ...form, includeSenderName })}
-          />
-          <ChannelSwitch
-            label="启用 AIX"
-            description="开启钉钉 AI 卡片扩展"
-            checked={form.aixEnable}
-            onChange={(aixEnable) => setForm({ ...form, aixEnable })}
-          />
+          {form.bindingMode === 'plugin' ? (
+            <PluginChannelFields form={form} onChange={setForm} />
+          ) : (
+            <BcnChannelFields form={form} onChange={setForm} />
+          )}
           <ChannelSwitch
             label="流式输出"
             description="使用互动卡片持续更新回复"

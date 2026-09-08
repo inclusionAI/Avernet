@@ -7,6 +7,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import type { CollaborationBot, PublicAudience } from '@/domain/collaborationPrivacy/types';
 import type { DirectSetting } from '@/services/collaborationPrivacy';
 import { Copy, Info, RefreshCw } from 'lucide-react';
+import { botFriendApprovalSection, botVisibilitySection } from '../botVisibilityCopy';
+import { collaborationPrivacyTooltipDelayMs } from '../interaction';
 import { RelationCard } from '../RelationCard';
 import { RequestList } from '../RequestList';
 
@@ -40,7 +42,7 @@ function SettingRow({ label, description, checked, disabled, busy, status, statu
         <div className="flex flex-wrap items-center gap-2">
           <p className="m-0 text-sm font-medium text-foreground">{label}</p>
           {status && (
-            <TooltipProvider delayDuration={0}>
+            <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -150,7 +152,7 @@ export function PermissionCard({
                 status={bot.profilePublicStatus === 'unavailable' ? '暂不可用' : undefined}
                 statusReason={
                   bot.profilePublicStatus === 'unavailable'
-                    ? '该Bot暂未设置过允许其他Bot可添加好友，请先调整公开范围'
+                    ? '该 Bot 尚未对其他 Bot 开放可见，请先调整 Bot 可见性'
                     : undefined
                 }
                 onChange={(checked) => onToggleDirect(bot, 'profilePublic', checked)}
@@ -176,20 +178,22 @@ export function PermissionCard({
           <div className="min-w-0 space-y-6 lg:border-l lg:border-border lg:pl-6">
             <section>
               <div className="mb-3 flex items-center gap-1.5">
-                <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">公开范围</h4>
-                <TooltipProvider>
+                <h4 className="m-0 text-xs font-semibold tracking-wide text-muted-foreground">
+                  {botVisibilitySection.title}
+                </h4>
+                <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-5 w-5 text-muted-foreground"
-                        aria-label="公开范围说明"
+                        aria-label="Bot 可见性说明"
                       >
                         <Info className="h-3.5 w-3.5" aria-hidden />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent>控制其他用户和其他 Bot 是否可发现并添加当前 Bot 为好友。</TooltipContent>
+                    <TooltipContent>{botVisibilitySection.description}</TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
               </div>
@@ -212,15 +216,38 @@ export function PermissionCard({
                 />
               </div>
             </section>
-            <RequestList
-              config={bot.friendApproval}
-              disabled={!bot.joinedBcn || friendDisabledByScope}
-              disabledReason={
-                disabledReason ?? (friendDisabledByScope ? '至少开放一种公开范围后才能修改好友审批策略' : undefined)
-              }
-              onEdit={() => onEditFriendApproval(bot)}
-              onViewScope={() => onViewFriendApprovalScope(bot)}
-            />
+            <section className="border-t border-border pt-5">
+              <div className="mb-3 flex items-center gap-1.5">
+                <h4 className="text-xs font-semibold tracking-wide text-muted-foreground">
+                  {botFriendApprovalSection.title}
+                </h4>
+                <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5 text-muted-foreground"
+                        aria-label="Bot 好友审批说明"
+                      >
+                        <Info className="h-3.5 w-3.5" aria-hidden />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{botFriendApprovalSection.description}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <RequestList
+                config={bot.friendApproval}
+                disabled={!bot.joinedBcn || friendDisabledByScope}
+                disabledReason={
+                  disabledReason ??
+                  (friendDisabledByScope ? botVisibilitySection.disabledFriendApprovalReason : undefined)
+                }
+                onEdit={() => onEditFriendApproval(bot)}
+                onViewScope={() => onViewFriendApprovalScope(bot)}
+              />
+            </section>
           </div>
         </div>
       </CardContent>

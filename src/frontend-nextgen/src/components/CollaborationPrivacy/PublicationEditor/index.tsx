@@ -11,30 +11,30 @@ import type {
 } from '@/domain/collaborationPrivacy/types';
 import { history } from '@umijs/max';
 import { type MouseEvent, useEffect, useState } from 'react';
+import {
+  organizationScopeCopy,
+  visibilityAudience,
+  visibilityEditorDescription,
+  visibilityScopeLabels,
+} from '../botVisibilityCopy';
 import { ChoiceGroup } from '../ChoiceGroup';
 import { OrganizationScopeSearch } from '../OrganizationScopeSearch';
 
-const scopeOptions: Array<{ value: PublicScope; label: string }> = [
-  { value: 'none', label: '不公开' },
-  { value: 'all', label: '全部公开' },
-  { value: 'restricted', label: '限制组织范围' },
-];
-const audienceTitles: Record<PublicAudience, string> = { user: '对其他用户公开', bot: '对其他 Bot 公开' };
-const audienceDescriptionPrefixes: Record<PublicAudience, string> = {
-  user: '公开后，其他用户可在',
-  bot: '公开后，其他 Bot 可在',
+const audienceTitles: Record<PublicAudience, string> = {
+  user: visibilityAudience.user.editorTitle,
+  bot: visibilityAudience.bot.editorTitle,
 };
 const collaborationSquareBotsPath = '/collaboration-square/bots';
 const scopeDescriptions: Record<PublicAudience, Record<PublicScope, string>> = {
   user: {
-    none: '其他用户无法发现当前 Bot',
-    all: '其他用户可发现并申请添加当前 Bot 为好友',
-    restricted: '仅所选组织范围可申请添加当前 Bot 为好友',
+    none: '其他用户以个人身份，无法在协作广场看到当前 Bot，也不能发起申请。',
+    all: '其他用户以个人身份，在协作广场可见当前 Bot 并申请好友。',
+    restricted: '其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友。',
   },
   bot: {
-    none: '其他 Bot 无法发现当前 Bot',
-    all: '其他 Bot 可发现并申请添加当前 Bot 为好友',
-    restricted: '仅所选组织范围可申请添加当前 Bot 为好友',
+    none: '其他 Bot 以 Bot 工作身份，无法在协作广场看到当前 Bot，也不能发起申请。',
+    all: '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot 并申请好友。',
+    restricted: '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot，但仅选中组织范围的 Bot 可申请好友。',
   },
 };
 
@@ -81,9 +81,11 @@ export function PublicationEditor({
     }
   }, [open, initialConfig, restrictedScopeEnabled]);
 
-  const availableScopeOptions = restrictedScopeEnabled
-    ? scopeOptions
-    : scopeOptions.filter((option) => option.value !== 'restricted');
+  const availableScopeOptions: Array<{ value: PublicScope; label: string }> = [
+    { value: 'none', label: visibilityScopeLabels.none },
+    { value: 'all', label: visibilityScopeLabels.all },
+    ...(restrictedScopeEnabled ? [{ value: 'restricted' as const, label: visibilityScopeLabels.restricted }] : []),
+  ];
 
   const wrappedSearch = async (keyword: string, signal?: AbortSignal): Promise<OrganizationSearchEntry[]> => {
     const entries = await onSearch(keyword, signal);
@@ -124,15 +126,14 @@ export function PublicationEditor({
         <ModalHeader>
           <ModalTitle>{audienceTitles[audience]}</ModalTitle>
           <ModalDescription>
-            {audienceDescriptionPrefixes[audience]}{' '}
+            {visibilityEditorDescription}
             <a
               href={collaborationSquareBotsPath}
               className="font-medium text-primary hover:opacity-80"
               onClick={handleCollaborationSquareClick}
             >
               [协作广场/公开Bot]
-            </a>{' '}
-            中发现当前 Bot，并申请添加为好友。
+            </a>
           </ModalDescription>
         </ModalHeader>
         <div className="space-y-5">
@@ -142,14 +143,19 @@ export function PublicationEditor({
               ...option,
               description: scopeDescriptions[audience][option.value],
             }))}
-            ariaLabel="公开范围"
+            ariaLabel="Bot 可见性"
             onChange={setScope}
             className={restrictedScopeEnabled ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}
           />
+          {!restrictedScopeEnabled && initialConfig.scope === 'restricted' && (
+            <p className="text-xs text-muted-foreground">
+              当前可见性为“限定组织可申请”。当前环境支持修改为“不可见”或“全部可见”。
+            </p>
+          )}
           {scope === 'restricted' && (
             <section aria-labelledby="publication-organizations">
               <h3 id="publication-organizations" className="mb-2 text-sm font-medium text-foreground">
-                选择组织范围
+                {organizationScopeCopy.editorTitle}
               </h3>
               <OrganizationScopeSearch
                 value={selected}
@@ -158,10 +164,10 @@ export function PublicationEditor({
                 selectedEntries={selectedEntries}
                 onEntriesChange={setSelectedEntries}
               />
-              {invalid && <p className="mt-2 text-xs text-destructive">限制开放时，请至少选择一个团队范围</p>}
+              {invalid && <p className="mt-2 text-xs text-destructive">选择限定组织可申请时，请至少选择一个组织范围</p>}
             </section>
           )}
-          {unchanged && !invalid && <p className="text-xs text-muted-foreground">配置未发生变化，无需提交审批</p>}
+          {unchanged && !invalid && <p className="text-xs text-muted-foreground">可见性未发生变化，无需提交审批</p>}
         </div>
         <ModalFooter>
           <Button variant="secondary" disabled={loading} onClick={onClose}>

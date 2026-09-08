@@ -44,34 +44,32 @@ describe('PublicationEditor', () => {
     };
     const { rerender } = render(<PublicationEditor {...props} audience="user" />);
 
-    expect(screen.getByRole('heading', { name: '对其他用户公开' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bot 可见性：对用户' })).toBeInTheDocument();
     const squareLink = screen.getByRole('link', { name: '[协作广场/公开Bot]' });
     expect(squareLink).toHaveAttribute('href', '/collaboration-square/bots');
     expect(squareLink).not.toHaveClass('underline');
     expect(squareLink.parentElement).toHaveTextContent(
-      '公开后，其他用户可在 [协作广场/公开Bot] 中发现当前 Bot，并申请添加为好友。',
+      '选择当前 Bot 在协作广场中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。[协作广场/公开Bot]',
     );
     fireEvent.click(squareLink);
     expect(history.push).toHaveBeenCalledWith('/collaboration-square/bots');
-    expect(screen.getByRole('radio', { name: /限制组织范围/ })).toHaveTextContent(
-      '仅所选组织范围可申请添加当前 Bot 为好友',
+    expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveTextContent(
+      '其他用户以个人身份，在协作广场可见当前 Bot，但仅选中组织范围的用户可申请好友。',
     );
-    expect(
-      screen.queryByText('可分别搜索集团、事业部、部门或团队，并连续添加多个范围。提交后将进入审批流程。'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText('可搜索组织范围，并连续添加多个范围。')).not.toBeInTheDocument();
 
     rerender(<PublicationEditor {...props} audience="bot" />);
 
-    expect(screen.getByRole('heading', { name: '对其他 Bot 公开' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Bot 可见性：对 Bot' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '[协作广场/公开Bot]' }).parentElement).toHaveTextContent(
-      '公开后，其他 Bot 可在 [协作广场/公开Bot] 中发现当前 Bot，并申请添加为好友。',
+      '选择当前 Bot 在协作广场中的可见性，以及其他用户或 Bot 能否申请当前 Bot 为好友。[协作广场/公开Bot]',
     );
-    expect(screen.getByRole('radio', { name: /限制组织范围/ })).toHaveTextContent(
-      '仅所选组织范围可申请添加当前 Bot 为好友',
+    expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveTextContent(
+      '其他 Bot 以 Bot 工作身份，在协作广场可见当前 Bot，但仅选中组织范围的 Bot 可申请好友。',
     );
   });
 
-  it('Open Core 对用户和 Bot 公开窗口均隐藏限制组织范围', () => {
+  it('Open Core 对用户和 Bot 可见性窗口均隐藏限定组织可申请', () => {
     mockRestrictedPublicationScopeEnabled = false;
     const props = {
       open: true,
@@ -82,14 +80,14 @@ describe('PublicationEditor', () => {
     };
     const { rerender } = render(<PublicationEditor {...props} audience="user" />);
 
-    expect(screen.queryByRole('radio', { name: /限制组织范围/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /不公开/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('radio', { name: /限定组织可申请/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /不可见/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
 
     rerender(<PublicationEditor {...props} audience="bot" />);
 
-    expect(screen.queryByRole('radio', { name: /限制组织范围/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /不公开/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByRole('radio', { name: /限定组织可申请/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /不可见/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.queryByText('选择组织范围')).not.toBeInTheDocument();
   });
 
@@ -111,11 +109,11 @@ describe('PublicationEditor', () => {
       />,
     );
 
-    expect(screen.getByRole('radiogroup', { name: '公开范围' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /全部公开/ })).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('radio', { name: /限制组织范围/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radiogroup', { name: 'Bot 可见性' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /全部可见/ })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('radio', { name: /限定组织可申请/ })).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByText('示例集团-技术事业部-平台团队')).toBeInTheDocument();
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织团队范围' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索组织范围' }), {
       target: { value: '产品' },
     });
     await act(async () => {

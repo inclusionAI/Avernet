@@ -141,7 +141,7 @@ export function mapBotDtoToDomain(dto: CollaborationBotDto): CollaborationBot {
     engine: mapEngineLabel(dto.engine, dto.provider?.name),
     joinedBcn: true,
     collaborationStatus: dto.status === 'online' || dto.status === 'hidden' ? dto.status : 'offline',
-    profilePublic: false, // Bot 画像公开由 BCSFuse fusion_enable 独立控制，不能从协作公开范围 visibility 推断。
+    profilePublic: false, // Bot 画像公开由 BCSFuse fusion_enable 独立控制，不能从 Bot 可见性 visibility 推断。
     taskClaimingEnabled: dto.task_claim_mode ?? false,
     taskClaimStatus: dto.task_claim_mode ?? false ? 'authorized' : 'unauthorized',
     dreamModelEnabled: dto.task_dream_mode ?? false,

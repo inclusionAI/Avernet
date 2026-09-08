@@ -530,12 +530,12 @@ export const GroupSessionView: React.FC<{
         const effectiveUserId = resolveCurrentUserId(userId);
         const ownedViewBot = isGroup ? resolveOwnedViewBot(g?.participants ?? [], effectiveUserId) : null;
         const groupViewBotId = isGroup ? ownedViewBot?.actor_id ?? null : null;
-        // 单聊会话归属人(session_id 里的 :user:xxx,即 bot owner);与当前登录人不符 → 跨用户,无权查看。
-        const singleSessionUser = !isGroup ? sessionId.match(/:user:([^:]+)$/)?.[1] ?? '' : '';
-        const crossUserSingle =
-          !isGroup && singleSessionUser !== '' && Boolean(effectiveUserId) && singleSessionUser !== effectiveUserId;
+        // 消息可见性统一交后端裁决,不在客户端凭 session_id 的 :user: 与登录人做预判:
+        // session_id 的 :user: 段是 engine 会话归属(BaaS bot owner 侧 id),与当前登录人工号
+        // 不一定同名(同属一人但 id 编码可能不同);static_plan 根节点等单聊会话虽为本人 Bot 所有,
+        // :user: 段也常 ≠ 登录工号 → 旧预判会误判跨用户、拒看本人会话消息(根节点下钻无法查看 bug)。
         // 协作群:有本人 bot → 带 view_bot_id;无本人 bot 但有登录人(Human 视角) → 省略 view_bot_id 仍尝试。
-        const canViewMessages = isGroup ? Boolean(groupViewBotId) || Boolean(effectiveUserId) : !crossUserSingle;
+        const canViewMessages = isGroup ? Boolean(groupViewBotId) || Boolean(effectiveUserId) : true;
         let msgs: GroupMessage[] = [];
         let noMessagePerm = !canViewMessages;
         if (canViewMessages) {
@@ -550,11 +550,20 @@ export const GroupSessionView: React.FC<{
           } catch (err) {
             if (cancelled) return;
             const msg = err instanceof Error ? err.message : '会话消息请求失败';
-            // Human 非该 Session participant → 403;转为无权限提示,群成员仍展示;其余错误外抛为加载失败。
-            if (isGroup && /（403）|forbidden/i.test(msg)) {
-              noMessagePerm = true;
+            // 后端按会话归属人圈定可见性:群为 participant 名册校验、单聊为按 owner 圈定的 bot 查找范围。
+            // 登录人无权 → 403;单聊跨用户他人 Bot → 404。统一转无权限提示(群成员/执行者仍展示);其余错误外抛。
+            if (isGroup) {
+              if (/（403）|forbidden/i.test(msg)) {
+                noMessagePerm = true;
+              } else {
+                throw err;
+              }
             } else {
-              throw err;
+              if (/（403）|（404）|forbidden|not found/i.test(msg)) {
+                noMessagePerm = true;
+              } else {
+                throw err;
+              }
             }
           }
         }

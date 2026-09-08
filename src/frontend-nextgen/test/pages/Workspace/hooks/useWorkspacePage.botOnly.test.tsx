@@ -215,3 +215,40 @@ it('target=_blank 新开页面:身份滞后加载时,协作群外链仍能切回
   expect(state.selectedGroupId).toBe('g1');
   expect(state.selectedSessionId).toBe('s1');
 });
+
+it('群深链带 bot= 且命中 Bot 身份：以该 Bot 身份打开群/会话（不强制切回用户）', async () => {
+  // BCN 外链落地透传 bot={bot_uuid}：指定视角身份。持久化身份是人类时也应切到该 Bot。
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=group&group=g1&session=s1&bot=bot_old:2088&membership=session_only'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({ activeIdentityId: 'human_2088', view: 'chat' });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  const state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBe('bot_old:2088');
+  expect(state.view).toBe('group');
+  expect(state.selectedGroupId).toBe('g1');
+  expect(state.selectedSessionId).toBe('s1');
+  expect(state.membership).toBe('session_only');
+  expect(sessionService.getSessionDetail).not.toHaveBeenCalled();
+});
+
+it('群深链带 bot= 但未命中任何身份：退回用户身份打开（等价旧行为）', async () => {
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=group&group=g1&session=s1&bot=stranger_bot&membership=direct'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({ activeIdentityId: 'bot_old:2088', view: 'chat' });
+
+  renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+
+  const state = useWorkspaceStore.getState();
+  expect(state.activeIdentityId).toBe('human_2088');
+  expect(state.view).toBe('group');
+  expect(state.selectedGroupId).toBe('g1');
+  expect(state.selectedSessionId).toBe('s1');
+});

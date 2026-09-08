@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/Input';
 import type { OrganizationSearchEntry } from '@/domain/collaborationPrivacy/types';
 import { Check, Loader2, Search, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { organizationScopeCopy } from '../botVisibilityCopy';
 
 type OrgPath = string[];
 
@@ -150,9 +151,9 @@ export function OrganizationScopeSearch({
           value={keyword}
           onChange={(e) => handleInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="请输入集团、事业部、部门或团队名称（1~128 字符）"
+          placeholder={organizationScopeCopy.searchPlaceholder}
           maxLength={128}
-          aria-label="搜索组织团队范围"
+          aria-label={organizationScopeCopy.searchAriaLabel}
           className="pl-9 pr-8"
         />
         {keyword && (
@@ -178,7 +179,7 @@ export function OrganizationScopeSearch({
       {error && !searching && <p className="text-xs text-destructive">{error}</p>}
 
       {!waitingToSearch && !searching && !error && keyword.trim() && results.length === 0 && (
-        <p className="text-xs text-muted-foreground">未找到匹配的组织团队</p>
+        <p className="text-xs text-muted-foreground">{organizationScopeCopy.notFound}</p>
       )}
 
       {!searching && !error && results.length > 0 && (
@@ -206,7 +207,9 @@ export function OrganizationScopeSearch({
 
       <div className="border-t border-border pt-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="m-0 text-xs font-medium text-foreground">已选组织范围（{value.length}）</p>
+          <p className="m-0 text-xs font-medium text-foreground">
+            {organizationScopeCopy.selectedTitle}（{value.length}）
+          </p>
           {value.length > 0 && (
             <Button variant="ghost" size="sm" onClick={handleClearSelected}>
               清空
@@ -214,9 +217,7 @@ export function OrganizationScopeSearch({
           )}
         </div>
         {value.length === 0 ? (
-          <p className="mb-0 mt-2 text-xs text-muted-foreground">
-            可分别搜索集团、事业部、部门或团队，并连续添加多个范围。
-          </p>
+          <p className="mb-0 mt-2 text-xs text-muted-foreground">{organizationScopeCopy.emptyHelp}</p>
         ) : (
           <ul className="mb-0 mt-2 space-y-1 p-0">
             {value.map((path) => (

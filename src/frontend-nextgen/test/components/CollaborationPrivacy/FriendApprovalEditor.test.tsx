@@ -1,8 +1,8 @@
 /** @jest-environment jsdom */
 import { FriendApprovalEditor } from '@/components/CollaborationPrivacy/FriendApprovalEditor';
 import type { OrganizationSearchEntry } from '@/domain/collaborationPrivacy/types';
-import '@testing-library/jest-dom';
 import { describe, expect, it, jest } from '@jest/globals';
+import '@testing-library/jest-dom';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 let mockPartialFriendApprovalEnabled = false;
@@ -32,10 +32,12 @@ describe('FriendApprovalEditor', () => {
     );
 
     expect(screen.getByRole('radiogroup', { name: '好友审批策略' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: '无需审批 符合公开范围的新申请直接建立好友关系' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('radio', { name: '无需审批 符合 Bot 可见性限制的新申请直接建立好友关系' }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: '全部审批 所有新好友申请都需要确认' })).toBeInTheDocument();
     expect(screen.queryByText('部分组织免审批')).not.toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: '搜索组织团队范围' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '搜索组织范围' })).not.toBeInTheDocument();
   });
 
   it('requires selecting an open-core strategy for legacy partial configuration', () => {
@@ -85,6 +87,6 @@ describe('FriendApprovalEditor', () => {
     );
 
     expect(screen.getByRole('radio', { name: /部分组织免审批/ })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('textbox', { name: '搜索组织团队范围' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '搜索组织范围' })).toBeInTheDocument();
   });
 });
