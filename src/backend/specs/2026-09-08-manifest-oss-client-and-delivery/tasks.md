@@ -23,8 +23,14 @@ lands atomically.
       `GitEntrySource` become internal payloads.
 - [ ] **A5** — remove all eight `isinstance(…, GitEntrySource)` sites:
       `resources.py` ×4, `skills.py` ×2, `identity.py` ×1, `cli_tools/service.py` ×1.
-- [ ] **A6** — `apply/test_delivery.py`. **Gate: the existing suite passes with
-      no test edited.** A test that needs changing here is a finding (R2).
+      `skills` keeps **one** branch, on `is_tree()` — it runs two validators by
+      design. The other three end with no branch.
+- [ ] **A6** — drop `identity`'s own git-without-subpath check (spec D-9);
+      `GitCheckout.read_file` already refuses the case. Update the one test whose
+      expected message changes.
+- [ ] **A7** — `apply/test_delivery.py`. **Gate: the existing suite passes with
+      exactly one test edited (A6).** Any other test needing a change is a
+      finding (R2), not churn.
 
 ## Group B — one fetcher per protocol (no behaviour change)
 

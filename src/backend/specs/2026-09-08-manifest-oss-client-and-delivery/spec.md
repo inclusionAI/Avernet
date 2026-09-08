@@ -290,9 +290,14 @@ class EntryDelivery(Protocol):
                 strip_components: int) -> list[tuple[str, bytes]] | str: ...
     def single(self) -> bytes: ...
     def note(self) -> str | None: ...
-    def source_url(self) -> str | None: ...
-    def receipt_url(self) -> str: ...
     def digest(self) -> str: ...
+    def source_url(self) -> str | None: ...
+    def content_type(self) -> str | None: ...
+    def receipt_url(self) -> str: ...
+    #: Did the source deliver a *tree* or a single object? See below — this
+    #: is the one discriminator that survives, and it is a capability
+    #: question, not a type check.
+    def is_tree(self) -> bool: ...
 ```
 
 | | `GitDelivery` (wraps a checkout) | `BlobDelivery` (wraps bytes) |
@@ -300,6 +305,7 @@ class EntryDelivery(Protocol):
 | `members()` | walk the tree under the composed subpath, file the canonical blob, return pairs | `_TREE_MAGIC` → decode a stored tree; else unpack the archive |
 | `single()` | `read_file()` off the checkout | the bytes |
 | `note()` | `moved_note()` | `fallback_reason` |
+| `is_tree()` | `True` | `False` |
 
 `GitDelivery.members()` ignores `unpack`/`strip_components` — legitimately, and
 provably: `ARCHIVE_FIELDS_BY_KIND[GIT]` is empty, so a git source carrying either
@@ -312,6 +318,26 @@ category question the fetch layer must not answer* — is preserved exactly. Wha
 changes is that the mechanism moves behind the seam: `_unpack_members`,
 `_git_members`, `_git_file` and `_decode_tree_bytes` move out of `resources.py`,
 which fixes D2's split obligation as a side effect.
+
+**One branch survives, and `skills` is why.** Reading all four callers, three of
+them (`resources`, `identity`, `cli_tools`) reduce to `members()` / `single()`
+with no branch at all. `skills` does not, and the reason is deliberate design
+rather than accident: its two roads run **two different validators**. A fetched
+zip with no `subpath` goes byte-for-byte through `validate_zip` — the same
+validator the manual upload service runs, *so that limits and layout are one
+rule* (`skills.py:437-441`) — while a git tree goes through `validate_directory`.
+Forcing those into one `members()` call would either discard the byte-for-byte
+zip road or make `members()` mean two things.
+
+So `skills` keeps one branch, on `is_tree()` rather than
+`isinstance(…, GitEntrySource)`. That is a smaller thing than it looks: a class
+check names *this* implementation, while `is_tree()` names a property of what
+arrived, so a third protocol that delivers a tree slots into the existing branch
+instead of adding a third arm to it.
+
+**Net: 8 `isinstance` sites become 1 `is_tree()` branch**, not zero. Stated
+honestly here because the earlier draft of this spec claimed zero, and reading
+`skills._build_package` is what corrected it.
 
 ### One fetcher per protocol
 
@@ -342,9 +368,10 @@ one new class; no materialiser changes.
    an oversized object returns `TOO_LARGE` having read no more than the cap plus
    one chunk.
 5. `fetch_declared` returns `EntryDelivery`. No `isinstance(..., GitEntrySource)`
-   remains in any materialiser. Every existing materialiser test passes
-   unchanged — this is a refactor, and its correctness claim is that behaviour
-   did not move.
+   remains in any materialiser; `skills` carries the one surviving branch, on
+   `is_tree()`. Every existing materialiser test passes unchanged **except**
+   `identity`'s git-without-subpath message (see D-9) — this is a refactor, and
+   its correctness claim is that behaviour did not move.
 6. `SourceKind` is unchanged and the matrix is still 18 cells, exhaustive by
    construction (a missing verdict raises at import, a stale one raises
    `RuntimeError`). `SourceForm.URL` is gone and `SourceForm.OSS` is published
@@ -392,6 +419,14 @@ one new class; no materialiser changes.
   rather than translated.** Same reasoning #2019 recorded: the feature is
   pre-release, so no installed base is protected by a compatibility road, and a
   dual spelling is two vocabularies to keep honest forever.
+- **D-9: `identity` loses its own git-without-subpath message.** Today
+  `identity.py:185-196` checks `decl.subpath is None` before reading and emits a
+  category-worded refusal. Asking that question requires exposing a git-only
+  field on the delivery, which is the seam leaking. `GitCheckout.read_file`
+  already refuses the same case with *"read_file: the source's subpath must name
+  a single file"*, so the check is dropped and the generic message stands. One
+  existing test's expected string changes — the single sanctioned test edit in
+  group A, and it is a wording change, not a behaviour change.
 - **D-6: `EntryDelivery` is a `Protocol`, not a base class.** It is a seam two
   unrelated things satisfy, matching how `FetchContext` and the plugin
   capabilities are already declared in this module.
