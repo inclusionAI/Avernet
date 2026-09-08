@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bcs_service_api::{
     ActorKind, BotRegistryCoreService, GroupCoreService, GroupKind, GroupStatus,
-    Participant, ParticipantMode, ParticipantRole,
+    InviteTargetType, Participant, ParticipantMode, ParticipantRole,
     SessionManagementService,
     SystemMessageEvent, SystemMessageService,
     CreateInviteTokenCommand, InviteService, InviteTokenResult,
@@ -103,7 +103,12 @@ impl InviteServiceImpl {
         ))
     }
 
-    fn make_token(&self, target_id: &str, ttl_seconds: Option<u64>) -> (String, u64) {
+    fn make_token(
+        &self,
+        target_id: &str,
+        ttl_seconds: Option<u64>,
+        target_type: InviteTargetType,
+    ) -> (String, u64) {
         let ttl = ttl_seconds.unwrap_or(self.default_ttl_seconds);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -114,13 +119,39 @@ impl InviteServiceImpl {
             v: 1,
             id: target_id.to_string(),
             exp,
-            // Legacy tokens carry no target_type; the field is omitted from the
-            // payload JSON so the HMAC and on-wire form stay byte-identical to
-            // pre-field tokens. V1 invite minting overrides this with Some(...).
-            target_type: None,
+            // Newly minted legacy tokens carry target_type so the join
+            // endpoints can reject a token presented to the wrong path and V1
+            // `acceptInvitation` can route without a lookup. Tokens minted
+            // before this field existed decode to `None` and stay accepted by
+            // the legacy join paths (the JSON key is `serde(default)`).
+            target_type: Some(target_type),
         };
         let token = invite_token_encode(&payload, &self.token_secret);
         (token, exp)
+    }
+
+    /// Reject a token whose `target_type` contradicts the join endpoint it is
+    /// presented to (e.g. a session token on `POST /groups/join/{token}`).
+    /// Pre-field legacy tokens decode to `None` and pass: they predate the
+    /// distinction and remain honored on both endpoints as before.
+    fn ensure_target_type(
+        payload: &InviteTokenPayload,
+        expected: InviteTargetType,
+    ) -> Result<(), InviteUseCaseError> {
+        match &payload.target_type {
+            Some(actual) if *actual != expected => Err(InviteUseCaseError::InvalidToken(format!(
+                "invite token targets a {}, not a {}",
+                match actual {
+                    InviteTargetType::Group => "group",
+                    InviteTargetType::Session => "session",
+                },
+                match expected {
+                    InviteTargetType::Group => "group",
+                    InviteTargetType::Session => "session",
+                },
+            ))),
+            _ => Ok(()),
+        }
     }
 
     fn decode_token(&self, token: &str) -> Result<InviteTokenPayload, InviteUseCaseError> {
@@ -186,7 +217,8 @@ impl InviteService for InviteServiceImpl {
         }
 
         self.authorize_group_invite(&cmd, &group).await?;
-        let (token, exp) = self.make_token(&cmd.target_id, cmd.ttl_seconds);
+        let (token, exp) =
+            self.make_token(&cmd.target_id, cmd.ttl_seconds, InviteTargetType::Group);
         let join_url = match &self.group_link_url {
             Some(url) => format!("{}/{}", url.trim_end_matches('/'), token),
             None => {
@@ -221,7 +253,8 @@ impl InviteService for InviteServiceImpl {
         }
 
         self.ensure_session_member(&cmd, &session).await?;
-        let (token, exp) = self.make_token(&cmd.target_id, cmd.ttl_seconds);
+        let (token, exp) =
+            self.make_token(&cmd.target_id, cmd.ttl_seconds, InviteTargetType::Session);
         let join_url = match &self.session_link_url {
             Some(url) => format!("{}/{}", url.trim_end_matches('/'), token),
             None => {
@@ -241,6 +274,7 @@ impl InviteService for InviteServiceImpl {
         cmd: JoinByInviteCommand,
     ) -> Result<JoinByInviteResult, InviteUseCaseError> {
         let payload = self.decode_token(&cmd.token)?;
+        Self::ensure_target_type(&payload, InviteTargetType::Group)?;
         let group_id = &payload.id;
         let group = self.group.get(group_id).await
             .ok_or_else(|| InviteUseCaseError::NotFound(format!("group not found: {}", group_id)))?;
@@ -292,6 +326,7 @@ impl InviteService for InviteServiceImpl {
         cmd: JoinByInviteCommand,
     ) -> Result<JoinByInviteResult, InviteUseCaseError> {
         let payload = self.decode_token(&cmd.token)?;
+        Self::ensure_target_type(&payload, InviteTargetType::Session)?;
         let session_id = &payload.id;
         let session = self.session
             .get(session_id)

@@ -17,7 +17,7 @@ use bcs_friend::{FriendCore, FriendRequestCore};
 use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_relation::RelationCore;
-use bcs_service_api::application::invite::InviteService;
+use bcs_service_api::application::invite::{CreateInviteTokenCommand, InviteService};
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::application::v1::{
     AcceptFriendRequest, AcceptInvitation, ApplicationError, AuthenticatedCaller,
@@ -889,6 +889,88 @@ async fn accept_invitation_legacy_token_without_target_type_rejected() {
         .expect_err("legacy token rejected");
 
     assert_code(error, "invalid_request");
+}
+
+#[tokio::test]
+async fn accept_invitation_accepts_legacy_route_group_token() {
+    // Compatibility: the legacy `bcs-http` invite routes now mint tokens that
+    // carry `target_type`, so a token from `create_group_invite_link` is
+    // accepted and routed by V1 `acceptInvitation`.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_group("grp-1", "bot-a").await;
+
+    let legacy = fx
+        .invite
+        .create_group_invite_token(CreateInviteTokenCommand {
+            caller_actor_id: Some("bot-a".to_string()),
+            caller_staff_no: None,
+            target_id: "grp-1".to_string(),
+            ttl_seconds: None,
+        })
+        .await
+        .expect("legacy group invite link");
+
+    let result = fx
+        .service
+        .accept_invitation(AcceptInvitation {
+            caller: Fixture::human_principal("staff-9"),
+            token: legacy.invite_token,
+        })
+        .await
+        .expect("V1 accepts the legacy-route group token");
+
+    assert_eq!(result.target_type, InvitationTargetType::Group);
+    assert_eq!(result.target_id, "grp-1");
+    assert!(result.joined);
+
+    let group = fx.groups.get("grp-1").await.expect("group present");
+    let actor = Fixture::human_actor_id("staff-9");
+    assert!(group.participants.iter().any(|p| p.bot_uuid == actor));
+}
+
+#[tokio::test]
+async fn accept_invitation_accepts_legacy_route_session_token() {
+    // Compatibility: a token from the legacy `create_session_invite_link`
+    // route carries `target_type: session` and is accepted by V1
+    // `acceptInvitation`, joining the human to the session.
+    let fx = Fixture::new().await;
+    fx.add_bot("bot-a").await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx.create_session("grp-1", "bot-a").await;
+
+    let legacy = fx
+        .invite
+        .create_session_invite_token(CreateInviteTokenCommand {
+            caller_actor_id: Some("bot-a".to_string()),
+            caller_staff_no: None,
+            target_id: session_id.clone(),
+            ttl_seconds: None,
+        })
+        .await
+        .expect("legacy session invite link");
+
+    let result = fx
+        .service
+        .accept_invitation(AcceptInvitation {
+            caller: Fixture::human_principal("staff-9"),
+            token: legacy.invite_token,
+        })
+        .await
+        .expect("V1 accepts the legacy-route session token");
+
+    assert_eq!(result.target_type, InvitationTargetType::Session);
+    assert_eq!(result.target_id, session_id);
+    assert!(result.joined);
+
+    let session = fx
+        .sessions
+        .get(&session_id)
+        .await
+        .expect("session lookup")
+        .expect("session present");
+    let actor = Fixture::human_actor_id("staff-9");
+    assert!(session.participants.iter().any(|p| p.bot_uuid == actor));
 }
 
 #[tokio::test]

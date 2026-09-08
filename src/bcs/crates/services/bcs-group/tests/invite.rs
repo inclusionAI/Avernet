@@ -13,12 +13,13 @@ use bcs_bot::BotCore;
 use bcs_group::application::invite::InviteServiceImpl;
 use bcs_group::{GroupCore, MemoryGroupRepo};
 use bcs_service_api::application::invite::{
-    CreateInviteTokenCommand, InviteService, InviteUseCaseError,
+    CreateInviteTokenCommand, InviteService, InviteUseCaseError, JoinByInviteCommand,
 };
 use bcs_service_api::application::session::{CreateOrReactivateCommand, SessionManagementService};
 use bcs_service_api::port::repo::{GroupRepoPort, NewSessionParams, SessionRepoPort};
 use bcs_service_api::{
-    BotCapabilities, BotRegistryCoreService, Group, GroupCoreService, GroupStrategy, Participant,
+    invite_token_decode_no_expiry, invite_token_encode, BotCapabilities, BotRegistryCoreService,
+    Group, GroupCoreService, GroupStrategy, InviteTargetType, InviteTokenPayload, Participant,
     ParticipantRole, SessionKind,
 };
 use bcs_session::SessionManagementServiceImpl;
@@ -312,4 +313,210 @@ async fn session_invite_token_rejects_human_without_participant_bot() {
         matches!(error, InviteUseCaseError::Forbidden(_)),
         "expected Forbidden, got {error:?}",
     );
+}
+
+#[tokio::test]
+async fn minted_tokens_carry_target_type() {
+    // Newly minted legacy tokens are self-describing: the payload carries
+    // `target_type` so the split join endpoints can reject a token presented
+    // to the wrong path, and V1 `acceptInvitation` can route it directly.
+    let fx = Fixture::new().await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        )
+        .await;
+
+    let group_token = fx
+        .service
+        .create_group_invite_token(fx.cmd("grp-1", Some("bot-a")))
+        .await
+        .expect("driver may mint a group token");
+    let group_payload =
+        invite_token_decode_no_expiry(&group_token.invite_token, SECRET).expect("decodes");
+    assert_eq!(group_payload.target_type, Some(InviteTargetType::Group));
+
+    let session_token = fx
+        .service
+        .create_session_invite_token(fx.cmd(&session_id, Some("bot-a")))
+        .await
+        .expect("participant may mint a session token");
+    let session_payload =
+        invite_token_decode_no_expiry(&session_token.invite_token, SECRET).expect("decodes");
+    assert_eq!(session_payload.target_type, Some(InviteTargetType::Session));
+}
+
+#[tokio::test]
+async fn session_token_rejected_on_group_join() {
+    // A session invite token presented to `POST /groups/join/{token}` is
+    // rejected instead of being treated as a group id.
+    let fx = Fixture::new().await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        )
+        .await;
+    let token = fx
+        .service
+        .create_session_invite_token(fx.cmd(&session_id, Some("bot-a")))
+        .await
+        .expect("mint session token");
+
+    let error = fx
+        .service
+        .join_group_by_invite(JoinByInviteCommand {
+            token: token.invite_token,
+            staff_no: "staff-9".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect_err("session token must not join via the group path");
+
+    assert!(
+        matches!(error, InviteUseCaseError::InvalidToken(_)),
+        "expected InvalidToken, got {error:?}",
+    );
+}
+
+#[tokio::test]
+async fn group_token_rejected_on_session_join() {
+    // A group invite token presented to `POST /sessions/join/{token}` is
+    // rejected instead of being treated as a session id.
+    let fx = Fixture::new().await;
+    fx.store_group("grp-1", "bot-a").await;
+    let token = fx
+        .service
+        .create_group_invite_token(fx.cmd("grp-1", Some("bot-a")))
+        .await
+        .expect("mint group token");
+
+    let error = fx
+        .service
+        .join_session_by_invite(JoinByInviteCommand {
+            token: token.invite_token,
+            staff_no: "staff-9".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect_err("group token must not join via the session path");
+
+    assert!(
+        matches!(error, InviteUseCaseError::InvalidToken(_)),
+        "expected InvalidToken, got {error:?}",
+    );
+}
+
+#[tokio::test]
+async fn typed_token_joins_matching_target() {
+    // Happy path: the typed tokens still join through their own endpoint.
+    let fx = Fixture::new().await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        )
+        .await;
+
+    let group_token = fx
+        .service
+        .create_group_invite_token(fx.cmd("grp-1", Some("bot-a")))
+        .await
+        .expect("mint group token");
+    let joined = fx
+        .service
+        .join_group_by_invite(JoinByInviteCommand {
+            token: group_token.invite_token,
+            staff_no: "staff-9".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect("group token joins via the group path");
+    assert!(joined.joined);
+    assert_eq!(joined.target_type, "group");
+
+    let session_token = fx
+        .service
+        .create_session_invite_token(fx.cmd(&session_id, Some("bot-a")))
+        .await
+        .expect("mint session token");
+    let joined = fx
+        .service
+        .join_session_by_invite(JoinByInviteCommand {
+            token: session_token.invite_token,
+            staff_no: "staff-8".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect("session token joins via the session path");
+    assert!(joined.joined);
+    assert_eq!(joined.target_type, "session");
+}
+
+#[tokio::test]
+async fn pre_field_legacy_token_still_joins_both_paths() {
+    // Tokens minted before `target_type` existed decode to `None` and keep
+    // working on both legacy join endpoints (already-distributed links must
+    // not break). V1 `acceptInvitation` still rejects them by contract.
+    let fx = Fixture::new().await;
+    fx.store_group("grp-1", "bot-a").await;
+    let session_id = fx
+        .create_session_with_participants(
+            "grp-1",
+            "bot-a",
+            vec![Participant::bot("bot-a", ParticipantRole::Driver)],
+        )
+        .await;
+    let exp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock")
+        .as_secs()
+        + 3600;
+
+    let group_token = invite_token_encode(
+        &InviteTokenPayload {
+            v: 1,
+            id: "grp-1".to_string(),
+            exp,
+            target_type: None,
+        },
+        SECRET,
+    );
+    let joined = fx
+        .service
+        .join_group_by_invite(JoinByInviteCommand {
+            token: group_token,
+            staff_no: "staff-9".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect("pre-field token still joins the group path");
+    assert!(joined.joined);
+
+    let session_token = invite_token_encode(
+        &InviteTokenPayload {
+            v: 1,
+            id: session_id,
+            exp,
+            target_type: None,
+        },
+        SECRET,
+    );
+    let joined = fx
+        .service
+        .join_session_by_invite(JoinByInviteCommand {
+            token: session_token,
+            staff_no: "staff-8".to_string(),
+            nick_name: None,
+        })
+        .await
+        .expect("pre-field token still joins the session path");
+    assert!(joined.joined);
 }
