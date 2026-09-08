@@ -26,3 +26,22 @@ user_config:
       role: "Searches sources"
     - name: "summarizer"
       role: "Summarizes findings"
+  # AvernetAgent configuration. Requires gateway access and a signed
+  # X-Avernet-Principal JWT. Replace the placeholder values below with real
+  # credentials before using Avernet-backed executors.
+  avernet:
+    gateway_base_url: "https://gateway.avernet.example.com"
+    principal_token: "<signed X-Avernet-Principal JWT>"
+    user_id: "owner-user-id"
+    manifest_template: |
+      name: {role}
+      instructions: {instructions}
+      goal: {goal}
+    poll_timeout: 300
+    poll_interval: 1
+    http_timeout: 60
+    http_retries: 2
+    chat_stream_path: "/openapi/v1/chat/stream"
+    create_bot_path: "/openapi/v1/bots/with-manifest"
+    delete_bot_path: "/openapi/v1/bots/{bot_id}"
+    status_path: "/openapi/v1/bots/{bot_id}/with-manifest/status"

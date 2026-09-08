@@ -227,6 +227,21 @@ class Agent(ABC):
 Executors are created via the container's `plugins().agent(name)` and are torn
 down in a `finally` block, guaranteeing per-node lifecycle.
 
+### Concrete implementations
+
+- **`LLMBackedAgent`** — stateless; calls an OpenAI-compatible `/chat/completions`
+  endpoint in `execute()`. `setup()` and `teardown()` are no-ops.
+- **`AvernetAgent`** — stateful; manages a remote Avernet bot lifecycle through
+  the gateway. `setup()` creates a bot via `POST /openapi/v1/bots/with-manifest`
+  and polls until `READY`. `execute()` streams chat output via
+  `POST /openapi/v1/chat/stream` (SSE). `teardown()` deletes the bot via
+  `DELETE /openapi/v1/bots/{bot_id}`. This is the first implementation that
+  actually exercises the full lifecycle contract for remote state management.
+
+Dispatch is by `AgentSpec.metadata["type"]`:
+`"avernet"` → `AvernetAgent`; anything else (or unset) → `LLMBackedAgent`.
+A single DAG run can mix both agent classes.
+
 ## Test
 
 ```bash
@@ -271,6 +286,53 @@ summary = run(goal, agents, provider="openai", llm_options={
 ```
 
 Swapping the provider requires no change to the planner, driver, or agents.
+
+### Avernet agent configuration
+
+The `AvernetAgent` reads its gateway connection and manifest template from the
+`avernet` config block (under `user_config.plugins.avernet` in `application.yaml`):
+
+```yaml
+user_config:
+  plugins:
+    avernet:
+      gateway_base_url: "https://gateway.avernet.example.com"
+      principal_token: "<signed X-Avernet-Principal JWT>"
+      user_id: "owner-user-id"
+      manifest_template: |
+        name: {role}
+        instructions: {instructions}
+        goal: {goal}
+      poll_timeout: 300
+      poll_interval: 1
+      http_timeout: 60
+      http_retries: 2
+      chat_stream_path: "/openapi/v1/chat/stream"
+      create_bot_path: "/openapi/v1/bots/with-manifest"
+      delete_bot_path: "/openapi/v1/bots/{bot_id}"
+      status_path: "/openapi/v1/bots/{bot_id}/with-manifest/status"
+```
+
+To use an Avernet-backed executor in a DAG run, set `metadata.type` on the agent
+spec:
+
+```python
+from agentcompute.community.spi import AgentSpec
+
+specs = [
+    AgentSpec(name="searcher", role="Searches the web"),  # LLMBackedAgent
+    AgentSpec(
+        name="avernet-bot",
+        role="Deep researcher",
+        metadata={"type": "avernet"},  # → AvernetAgent
+    ),
+]
+```
+
+The manifest template supports `{role}`, `{instructions}`, and `{goal}`
+placeholders — substituted at runtime, leaving unknown `{...}` literals
+intact. The manifest YAML is treated as an opaque string; the gateway owns
+validation.
 
 ## Parallel execution
 

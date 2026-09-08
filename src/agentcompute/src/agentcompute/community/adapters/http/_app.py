@@ -38,6 +38,7 @@ class AgentSpecModel(BaseModel):
     name: str
     role: str
     instructions: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunRequest(BaseModel):
@@ -157,6 +158,7 @@ def _config_from(app_config: ApplicationConfig) -> Config:
         options={
             "llm": app_config.get("user_config.plugins.llm", {}) or {},
             "database": app_config.get("user_config.database", {}) or {},
+            "avernet": app_config.get("user_config.plugins.avernet", {}) or {},
         },
     )
 
@@ -187,7 +189,10 @@ def _execute(
     job: Job | None = None,
     repository: RunRepository | None = None,
 ) -> dict[str, Any]:
-    specs = [AgentSpec(name=a.name, role=a.role, instructions=a.instructions) for a in req.agents]
+    specs = [
+        AgentSpec(name=a.name, role=a.role, instructions=a.instructions, metadata=a.metadata)
+        for a in req.agents
+    ]
     from agentcompute.community.plugins import register_plugins
 
     from ...plugins import register_agents
@@ -203,6 +208,7 @@ def _execute(
     options: dict[str, Any] = {
         "llm": req.llm_options,
         "database": base_config.options.get("database", {}),
+        "avernet": base_config.options.get("avernet", {}),
     }
     if req.driver_options:
         options["driver"] = req.driver_options

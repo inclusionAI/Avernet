@@ -63,11 +63,18 @@ def register_agents(specs: list[AgentSpec]) -> None:
     from .agents._base import LLMBackedAgent
 
     for spec in specs:
-        register_plugin_option(
-            "agent",
-            spec.name,
-            lambda spec=spec: _agent(LLMBackedAgent, spec),
-        )
+        if spec.metadata.get("type") == "avernet":
+            register_plugin_option(
+                "agent",
+                spec.name,
+                lambda spec=spec: _avernet_agent(spec),
+            )
+        else:
+            register_plugin_option(
+                "agent",
+                spec.name,
+                lambda spec=spec: _agent(LLMBackedAgent, spec),
+            )
 
 
 def _stub_provider() -> LLMProviderPlugin:
@@ -113,6 +120,36 @@ def _sqlite_database() -> DatabasePlugin:
 def _agent(agent_cls: Any, spec: AgentSpec) -> Any:
     provider = get_container().plugins().llm_provider()
     return agent_cls(spec=spec, provider=provider)
+
+
+def _avernet_agent(spec: AgentSpec) -> Any:
+    from .agents._avernet import AvernetAgent, AvernetClient
+
+    options = get_container().config.get("avernet", {}) or {}
+    required = ["gateway_base_url", "principal_token", "user_id", "manifest_template"]
+    missing = [k for k in required if not options.get(k)]
+    if missing:
+        raise ValueError(f"AvernetAgent requires config.avernet keys: {', '.join(missing)}")
+    client = AvernetClient(
+        gateway_base_url=str(options["gateway_base_url"]),
+        principal_token=str(options["principal_token"]),
+        user_id=str(options["user_id"]),
+        create_bot_path=str(options.get("create_bot_path", "/openapi/v1/bots/with-manifest")),
+        chat_stream_path=str(options.get("chat_stream_path", "/openapi/v1/chat/stream")),
+        delete_bot_path=str(options.get("delete_bot_path", "/openapi/v1/bots/{bot_id}")),
+        status_path=str(
+            options.get("status_path", "/openapi/v1/bots/{bot_id}/with-manifest/status")
+        ),
+        http_timeout=float(options.get("http_timeout", 60.0)),
+        http_retries=int(options.get("http_retries", 2)),
+    )
+    return AvernetAgent(
+        spec=spec,
+        client=client,
+        manifest_template=str(options["manifest_template"]),
+        poll_timeout=float(options.get("poll_timeout", 300.0)),
+        poll_interval=float(options.get("poll_interval", 1.0)),
+    )
 
 
 def _static_planner() -> Planner:
