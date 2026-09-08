@@ -97,10 +97,23 @@ class BotStartupScriptModel(Base):
     #: Written by the repository, never by a caller. Hex sha256 is 64 ASCII
     #: characters, and the tenant is carried alongside rather than hashed in, so
     #: the isolation boundary stays visible in the key itself.
+    #:
+    #: Declared 256 to match the deployed column, which is ``varchar(256)`` --
+    #: wider than the 64 characters that can ever be written here. The width is
+    #: mirrored rather than tightened because this declaration's job is to say
+    #: what the table *is*; the value's real width is stated above, and the
+    #: repository is what holds it to 64 by only ever writing a hex digest.
     script_key = Column(
-        String(64), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
+        String(256), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
     )
 
+    # ``DateTime`` here, ``timestamp`` in the DDL, and the two are not in
+    # conflict: these types only shape the local-mode ``create_all`` schema,
+    # and SQLite has no TIMESTAMP/DATETIME distinction to shape. The column
+    # type that matters is the one in the .sql file, which states the rule --
+    # database-filled times are TIMESTAMP. Every sibling model in this repo is
+    # declared the same way; switching this one to ``TIMESTAMP`` would make it
+    # the outlier without changing a single byte of behaviour.
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
@@ -112,11 +125,19 @@ class BotStartupScriptModel(Base):
         comment="修改时间",
     )
 
+    # ``_v2`` because the plain name is occupied in the deployed environments
+    # by a key on (avernet_tenant, env, entity_id, bot_id) -- this key's name
+    # carrying the pre-surrogate design's columns -- which cannot be dropped
+    # there, so the surrogate key is added alongside it. The suffix is not a
+    # second constraint: the two enforce the same logical uniqueness, because
+    # script_key is injective over the three columns it hashes. Declared here
+    # under the name the deployed key actually has, so create_all, the .sql
+    # file and every environment agree on one name.
     __table_args__ = (
         UniqueConstraint(
             "avernet_tenant",
             "script_key",
-            name="uk_tenant_script_key",
+            name="uk_tenant_script_key_v2",
         ),
     )
 
