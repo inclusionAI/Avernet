@@ -140,4 +140,5 @@ __all__ = [
     "is_set_managed",
     "require_can_join_set",
     "require_direct_mcp_control_allowed",
+    "require_non_platform_mcp",
 ]
