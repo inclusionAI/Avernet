@@ -781,7 +781,7 @@ function CreateRepair({
             <h2 className="text-sm font-semibold text-gray-900">诊断权限</h2>
             <label className={`mt-3 flex cursor-pointer items-start gap-3 rounded-xl border p-4 ${deepDiagnostics ? 'border-amber-400 bg-amber-50' : 'border-gray-200 bg-gray-50'}`}>
               <input aria-label="允许深度诊断 Shell" type="checkbox" checked={deepDiagnostics} onChange={(event) => setDeepDiagnostics(event.target.checked)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600" />
-              <span><span className="block text-sm font-medium text-gray-900">允许目标 Bot 深度诊断 Shell</span><span className="mt-1 block text-xs leading-5 text-gray-600">开启后，Repair Agent 可在本任务固定的 Bot 和环境中执行任意诊断命令，包括读取、联网和临时实验；这等价于授予该容器当前用户的命令执行权限。不开启时仍可广泛读取运行态，但不能提交原始 Shell。</span></span>
+              <span><span className="block text-sm font-medium text-gray-900">允许目标 Bot 深度诊断 Shell</span><span className="mt-1 block text-xs leading-5 text-gray-600">开启后，Repair Agent 可在本任务固定的 Bot 和环境中以 admin 用户执行任意诊断命令，包括读取、联网和临时实验；无法切换到 admin 时将拒绝执行。不开启时仍可广泛读取运行态，但不能提交原始 Shell。</span></span>
             </label>
           </section>
 

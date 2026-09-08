@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedBaasConfig } from "@avernet/clawweb-shared/server/db";
 import type { RepairTaskContext } from "../contracts.js";
-import { buildRepairRuntimeCommand, RepairRuntimeTool } from "../runtime-tool.js";
+import {
+  buildRepairRuntimeCommand,
+  buildRepairRuntimeUserCommand,
+  RepairRuntimeTool,
+} from "../runtime-tool.js";
 import type { ArcaCommandTransport } from "../arca-command-transport.js";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -113,6 +117,19 @@ describe("buildRepairRuntimeCommand", () => {
   });
 });
 
+describe("buildRepairRuntimeUserCommand", () => {
+  it("runs root transports as admin and rejects every other inherited user", () => {
+    const command = buildRepairRuntimeUserCommand("id -un && touch /tmp/repair-owned");
+
+    expect(command).toContain('if [ "$repair_uid" = "0" ]');
+    expect(command).toContain("su admin -c");
+    expect(command).toContain('test "$(id -un)" = admin');
+    expect(command).toContain("HOME=/home/admin");
+    expect(command).toContain("umask 077");
+    expect(command).toContain("id -un && touch /tmp/repair-owned");
+  });
+});
+
 describe("RepairRuntimeTool", () => {
   it("executes an approved container-local Engine API call through the generic command transport", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
@@ -147,6 +164,8 @@ describe("RepairRuntimeTool", () => {
     const body = JSON.parse(String(init?.body));
     expect(body.cmd).toContain(Buffer.from(command, "utf8").toString("base64"));
     expect(body.cmd).toContain("base64 -d | bash");
+    expect(body.cmd).toContain("su admin -c");
+    expect(body.cmd).toContain("HOME=/home/admin");
   });
 
   it("executes once through the logical Bot route without resolving physical instances", async () => {
@@ -173,7 +192,11 @@ describe("RepairRuntimeTool", () => {
     );
     expect(String(url)).not.toContain("/devices");
     expect(init?.method).toBe("POST");
-    expect(JSON.parse(String(init?.body))).toEqual({ cmd: "ps -ef", timeout_seconds: 30 });
+    const body = JSON.parse(String(init?.body));
+    expect(body.timeout_seconds).toBe(30);
+    expect(body.cmd).toContain("ps -ef");
+    expect(body.cmd).toContain("su admin -c");
+    expect(body.cmd).toContain('test "$(id -un)" = admin');
     expect(result).toMatchObject({
       status: "success",
       operation: "process_list",
@@ -291,6 +314,7 @@ describe("RepairRuntimeTool", () => {
       environment: "pre",
       bindingId: "binding-001",
       sandboxId: "ARCA-SANDBOX-123",
+      command: expect.stringContaining("su admin -c"),
     }));
   });
 });
