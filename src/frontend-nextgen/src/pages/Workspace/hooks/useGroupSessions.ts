@@ -50,6 +50,7 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
     errorByGroupId,
     loadMoreErrorByGroupId,
     identityEpochRef,
+    rawByGroupIdRef,
   } = useSessionMap(groupId, expandedGroupIds, activeIdentityId);
 
   // 会话成员详情补齐与 mode 更新(从本 Hook 拆出以控体积,详见 useSessionMemberSync)。
@@ -72,9 +73,12 @@ export function useGroupSessions(groupId: string | null, expandedGroupIds: strin
   useEffect(() => {
     if (!groupId || sessionViews.length === 0) return;
     if (useWorkspaceStore.getState().selectedSessionId) return;
-    const first = sessionViews[0];
+    // 以 ref 为准消费最新缓存：点击群 tab 触发的重拉会在同一 commit 内先清掉陈旧缓存
+    //（ref 同步更新、state 下一帧才到），闭包里的 sessionViews 可能仍是旧列表，
+    // 直接消费会自动选中当前角色已离开的会话，导致右栏对其发起请求而报错。
+    const first = (rawByGroupIdRef.current[groupId] ?? [])[0];
     if (first) selectSession(first.sessionId);
-  }, [groupId, sessionViews, selectSession]);
+  }, [groupId, rawByGroupIdRef, sessionViews, selectSession]);
 
   // 收藏状态来源于后端 sessions 列表返回的 collected 字段（映射为 SessionView.favorite）。
   // 收藏过滤已下沉到 GroupItem（每群独立 tab），这里仅暴露收藏 ID 给组件层。

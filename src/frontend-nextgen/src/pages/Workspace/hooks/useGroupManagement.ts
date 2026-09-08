@@ -5,6 +5,7 @@ import { groupMemberService } from '@/services/workspace/groupMemberService';
 import { groupService } from '@/services/workspace/groupService';
 import type { DomainResult } from '@/services/workspace/identityService';
 import { invitationService } from '@/services/workspace/invitationService';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -115,6 +116,12 @@ export function useGroupManagement(
         return false;
       }
       toast.success('已退出协作群');
+      // 退出后群对当前身份不再可见：选中仍指向它时清空（对齐 dissolveGroup 收尾）。
+      // 否则群列表刷新后 useSelectedGroupDetail 会把「选中群不在 direct 列表」误判为
+      // 深链临时视角场景，把侧栏筛选错切到「仅参与临时会话」（session_only）。
+      if (useWorkspaceStore.getState().selectedGroupId === groupId) {
+        useWorkspaceStore.getState().selectGroup(null);
+      }
       return true;
     },
     [groupId],

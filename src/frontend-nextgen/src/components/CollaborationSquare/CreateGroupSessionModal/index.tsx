@@ -1,8 +1,10 @@
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { Modal, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle } from '@/components/ui/Modal';
+import { Modal, ModalContent, ModalHeader, ModalTitle } from '@/components/ui/Modal';
 import { Textarea } from '@/components/ui/Textarea';
 import type { PublicGroup } from '@/domain/collaborationSquare/types';
+import { MessagesSquare } from 'lucide-react';
+import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 
 /** 创建公开协作群会话的表单值（对应接口 body：title + input.query）。 */
@@ -23,6 +25,8 @@ export interface CreateGroupSessionModalProps {
  * 「公开协作群 → 创建新会话」表单弹窗：收集「会话名称」(title) 与「协作目标」(input.query)，
  * 提交后由上层 Hook 调 POST /openapi/v1/collaboration/groups/{group_id}/sessions 并跳转。
  *
+ * 表单样式对齐「创建云端 Bot」（CreateBotModal）：图标题头 + label 包裹字段 +
+ * 必填星号 + 字数计数器 + 行内 secondary 取消/primary 提交；不再展示描述提示文案。
  * 仅 UI：表单状态本地维护，提交与跳转编排交给 Hook（Component → Hook → Service 分层）。
  */
 export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmit }: CreateGroupSessionModalProps) {
@@ -41,56 +45,69 @@ export function CreateGroupSessionModal({ open, group, loading, onClose, onSubmi
   const trimmedQuery = query.trim();
   const canSubmit = !loading && trimmedTitle !== '' && trimmedQuery !== '';
 
-  const handleSubmit = () => {
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
     if (!canSubmit) return;
     onSubmit({ title: trimmedTitle, query: trimmedQuery });
   };
 
   return (
     <Modal open={open} onOpenChange={(next) => !next && onClose()}>
-      <ModalContent size="sm">
-        <ModalHeader>
-          <ModalTitle>{group ? `在「${group.name}」创建新会话` : '创建新会话'}</ModalTitle>
-          <ModalDescription>填写会话名称与协作目标，创建后跳转到该会话。</ModalDescription>
+      <ModalContent size="sm" aria-describedby={undefined} className="p-4">
+        <ModalHeader className="flex-row items-center gap-2.5 space-y-0">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <MessagesSquare aria-hidden className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <ModalTitle className="text-base leading-6">
+              {group ? `在「${group.name}」创建新会话` : '创建新会话'}
+            </ModalTitle>
+          </div>
         </ModalHeader>
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="create-session-title" className="m-0 text-sm font-medium text-foreground">
-              会话名称
-            </label>
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          <label className="block space-y-2 text-xs font-medium text-foreground">
+            <span className="flex items-center justify-between gap-2">
+              <span>
+                会话名称 <span className="text-destructive">*</span>
+              </span>
+              <span className="text-[10px] font-normal text-muted-foreground">{title.length}/100</span>
+            </span>
             <Input
-              id="create-session-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="请输入会话名称"
-              maxLength={100}
-              disabled={loading}
               autoFocus
-            />
-          </div>
-          <div className="space-y-2">
-            <label htmlFor="create-session-query" className="m-0 text-sm font-medium text-foreground">
-              协作目标
-            </label>
-            <Textarea
-              id="create-session-query"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="请描述本会话希望达成的协作目标"
-              rows={4}
-              maxLength={2000}
+              value={title}
+              maxLength={100}
+              placeholder="请输入会话名称"
               disabled={loading}
+              className="focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+              onChange={(event) => setTitle(event.target.value)}
             />
+          </label>
+          <label className="block space-y-2 text-xs font-medium text-foreground">
+            <span className="flex items-center justify-between gap-2">
+              <span>
+                协作目标 <span className="text-destructive">*</span>
+              </span>
+              <span className="text-[10px] font-normal text-muted-foreground">{query.length}/2000</span>
+            </span>
+            <Textarea
+              rows={4}
+              value={query}
+              maxLength={2000}
+              placeholder="请描述本会话希望达成的协作目标"
+              disabled={loading}
+              className="focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/30 focus-visible:ring-offset-0"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="secondary" disabled={loading} onClick={onClose}>
+              取消
+            </Button>
+            <Button type="submit" loading={loading} disabled={!canSubmit}>
+              创建会话
+            </Button>
           </div>
-        </div>
-        <ModalFooter>
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
-            取消
-          </Button>
-          <Button onClick={handleSubmit} loading={loading} disabled={!canSubmit}>
-            创建会话
-          </Button>
-        </ModalFooter>
+        </form>
       </ModalContent>
     </Modal>
   );

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import * as sessionController from '@/services/backendApi/collaboration/sessionController';
 import { sessionService } from '@/services/workspace/sessionService';
+import { useErrorNotifyStore } from '@/stores/errorNotifyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { beforeEach, expect, it, jest } from '@jest/globals';
 
@@ -260,4 +261,20 @@ it('leaveSession maps 409 to friendly conflict', async () => {
   const res = await sessionService.leaveSession('s1', 'human_1');
   expect(res.ok).toBe(false);
   expect(!res.ok && res.error.code).toBe('SESSION_CONFLICT');
+});
+
+it('getSessionDetail 失败：取消协议层全局错误提示（读侧静默用途，调用方均自行处理失败）', async () => {
+  // 协议层（backendRequest）失败时会 enqueue 默认提示并抛出携带 toastKey 的错误；
+  // 会话详情查询的调用方（成员补齐/陈旧选中兜底探测/深链反查）全部自行静默处理失败，
+  // 已退出/已删除会话的反查「必然失败」不应变成用户可见报错。
+  useErrorNotifyStore.getState().reset();
+  useErrorNotifyStore.getState().enqueue({ toastKey: 'k-detail-1', message: 'boom', apiPath: '/sessions/s1' });
+  sc.getSession.mockRejectedValue(Object.assign(new Error('boom'), { toastKey: 'k-detail-1' }));
+
+  const res = await sessionService.getSessionDetail('s1');
+
+  expect(res.ok).toBe(false);
+  const items = useErrorNotifyStore.getState().drain();
+  expect(items.some((it) => it.toastKey === 'k-detail-1' && it.cancelled)).toBe(true);
+  useErrorNotifyStore.getState().reset();
 });
