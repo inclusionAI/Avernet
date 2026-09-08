@@ -55,7 +55,10 @@ async fn failed_run_delivery_and_full_frontend_queue_remain_observable_without_f
     drop(rx);
     let frontends = WorkbenchConnectionRegistry::new();
     let (tx, mut rx) = mpsc::channel(1);
-    let connection_id = frontends.subscribe("session-diagnostic".into(), tx, None).await;
+    let connection_id = frontends
+        .subscribe("session-diagnostic".into(), tx, None, None)
+        .await
+        .unwrap();
     assert_eq!(frontends.broadcast("session-diagnostic", "first-event").await, 1);
     let (_, logs) = bcs_test_support::capture_request_logs("full-queue-request", async {
         assert!(!runs.send_event("failed-run", "event".into()).await);
