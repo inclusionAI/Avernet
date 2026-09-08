@@ -267,12 +267,8 @@ def test_downloaded_repo_cutover_leaves_corpus_outside_active_root(
         layout.pool_repo / "business/reviewer"
     )
     assert external.is_symlink()
-    if engine in {"openclaw", "claude_code"}:
-        assert not layout.repo_bridge.exists()
-        assert not layout.repo_bridge.is_symlink()
-    else:
-        assert layout.repo_bridge.is_symlink()
-        assert _target(layout.repo_bridge) == layout.pool_repo
+    assert not layout.repo_bridge.exists()
+    assert not layout.repo_bridge.is_symlink()
 
     refreshed = tmp_path / f"{engine}-repo-refresh"
     (refreshed / "business/reviewer").mkdir(parents=True)

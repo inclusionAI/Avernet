@@ -450,6 +450,53 @@ def _retire_bridge(path: Path, *, allowed_targets: tuple[Path, ...]) -> None:
     path.unlink()
 
 
+def _settle_hermes_repo_bridge(layout: _Layout) -> None:
+    """Retire the obsolete platform bridge while preserving unowned objects."""
+
+    path = layout.repo_bridge
+    try:
+        entry_stat = path.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool could not inspect obsolete repo bridge path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    if not stat.S_ISLNK(entry_stat.st_mode):
+        logger.warning("Hermes Pool retained unowned Legacy repo object path=%s", path)
+        return
+    try:
+        target = _lexical_target(path)
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool retained unreadable Legacy repo symlink path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    expected = Path(os.path.abspath(layout.pool_repo))
+    if target != expected:
+        logger.warning(
+            "Hermes Pool retained unexpected Legacy repo symlink path=%s target=%s",
+            path,
+            target,
+        )
+        return
+    try:
+        path.unlink()
+    except OSError as error:
+        logger.warning(
+            "Hermes Pool could not retire obsolete repo bridge path=%s error=%s",
+            path,
+            type(error).__name__,
+        )
+        return
+    logger.info("Hermes Pool retired obsolete repo bridge path=%s", path)
+
+
 def _publish_structural_bridge(path: Path, target: Path) -> None:
     """Atomically publish a descriptor-owned directory symlink."""
 
@@ -582,8 +629,10 @@ def _finalize_active_root(
         allowed_targets=(layout.legacy_local, layout.pool_local),
     )
     repo_delivery = current_repo_delivery()
-    if repo_delivery is RepoDelivery.DOWNLOAD and engine in {"aicoding", "hermes"}:
+    if repo_delivery is RepoDelivery.DOWNLOAD and engine == "aicoding":
         _publish_structural_bridge(layout.repo_bridge, layout.pool_repo)
+    if engine == "hermes":
+        _settle_hermes_repo_bridge(layout)
     if engine in {"openclaw", "claude_code"}:
         _retire_bridge(
             layout.repo_bridge,
@@ -607,7 +656,7 @@ def _finalize_active_root(
                 "paths": sorted(remaining_storage_entries),
             },
         )
-    if engine in {"aicoding", "hermes"}:
+    if engine == "aicoding":
         try:
             stable_repo_bridge_valid = (
                 layout.repo_bridge.is_symlink()
@@ -1087,8 +1136,7 @@ def _mapping_target_invalid(
 ) -> bool:
     return (
         not target.is_absolute()
-        or target.parent
-        not in {layout.active_root, *additional_retirement_roots}
+        or target.parent not in {layout.active_root, *additional_retirement_roots}
         or target
         in {
             layout.legacy_local,
@@ -1424,7 +1472,9 @@ def _best_effort_mapping_results(
                         target=str(target),
                         source=str(source),
                         status=MappingProjectionStatus.DEGRADED,
-                        code="TARGET_NOT_SYMLINK" if not target.is_symlink() else "TARGET_MISMATCH",
+                        code="TARGET_NOT_SYMLINK"
+                        if not target.is_symlink()
+                        else "TARGET_MISMATCH",
                     )
                 )
             else:
