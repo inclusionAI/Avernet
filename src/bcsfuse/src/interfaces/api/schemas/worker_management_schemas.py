@@ -410,12 +410,18 @@ class WorkerConfigResponse(BaseModel):
     Worker config response.
 
     Attributes:
+        success: Whether the configuration request succeeded
         worker_id: Worker ID
         fusion_enable: Whether fusion is enabled
         config: Full configuration
         version: Config version
         updated_at: Last update timestamp
     """
+
+    success: bool = Field(
+        default=True,
+        description="Whether the configuration request succeeded",
+    )
 
     worker_id: str = Field(
         description="Worker ID",

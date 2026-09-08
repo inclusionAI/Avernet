@@ -17,6 +17,25 @@ import pytest
 from pydantic import ValidationError
 
 
+@pytest.mark.parametrize("fusion_enable", [True, False])
+def test_worker_config_response_includes_success(fusion_enable):
+    """GET/PUT config responses must satisfy the frontend Worker config contract."""
+    from src.interfaces.api.schemas.worker_management_schemas import WorkerConfigResponse
+
+    response = WorkerConfigResponse(
+        worker_id="test-bot:test-owner",
+        fusion_enable=fusion_enable,
+        config={"fusion_enable": fusion_enable},
+        version=9,
+    ).model_dump(mode="json")
+
+    assert response["success"] is True
+    assert response["fusion_enable"] is fusion_enable
+    assert response["config"] == {"fusion_enable": fusion_enable}
+    assert response["worker_id"] == "test-bot:test-owner"
+    assert response["version"] == 9
+
+
 class TestSchemaModuleImports:
     """Test that all schema modules import successfully."""
 
