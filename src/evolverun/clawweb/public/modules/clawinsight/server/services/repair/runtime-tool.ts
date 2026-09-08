@@ -174,7 +174,6 @@ export class RepairRuntimeTool {
   async inspect(
     context: RepairTaskContext,
     request: RepairRuntimeInspectInput,
-    authHeaders: Record<string, string> = {},
   ): Promise<Record<string, unknown>> {
     const requestFields = request as RepairRuntimeInspectInput & { path?: unknown };
     const requestLocators = STRUCTURED_FILESYSTEM_OPERATIONS.has(request.operation)
@@ -185,14 +184,12 @@ export class RepairRuntimeTool {
       request.operation,
       buildRepairRuntimeCommand(request),
       requestLocators,
-      authHeaders,
     );
   }
 
   async applyApprovedAction(
     context: RepairTaskContext,
     action: RepairPlanAction,
-    authHeaders: Record<string, string> = {},
   ): Promise<Record<string, unknown>> {
     if (action.type !== "container_command" || !action.command) {
       repairValidation("unsupported_repair_action", "当前只支持执行获批的 container_command");
@@ -206,7 +203,6 @@ export class RepairRuntimeTool {
       `apply_action:${action.actionId}`,
       `printf %s ${shellQuote(encoded)} | base64 -d | bash`,
       evidenceLocatorsFromText(action.command),
-      authHeaders,
     );
   }
 
@@ -215,7 +211,6 @@ export class RepairRuntimeTool {
     operation: string,
     command: string,
     requestLocators: readonly string[],
-    authHeaders: Record<string, string>,
   ): Promise<Record<string, unknown>> {
     const target = context.target;
     if (target.provider === "arca") {
@@ -229,7 +224,6 @@ export class RepairRuntimeTool {
         sandboxId: target.sandboxId,
         arcaInstanceId: target.arcaInstanceId,
         command,
-        authHeaders,
       });
       const stdout = safeOutput(result.stdout);
       const stderr = safeOutput(result.stderr);
