@@ -22,6 +22,7 @@ from secbaas.community.api.session_file_sharing import (
     SessionCompleteUploadResponse,
     SessionDeleteTransferResponse,
     SessionFileSharingDispatcher,
+    SessionFileTransferProxyUnavailableError,
     SessionGetTransferStatusResponse,
     SessionGetUploadUrlResponse,
     SessionShareLinkResponse,
@@ -191,17 +192,44 @@ class DefaultSessionFileSharingDispatcher(SessionFileSharingDispatcher):
                 part_count,
             )
 
-            parts_data = [
-                {
-                    "part_number": p.part_number,
-                    "upload_url": self._session_file_url_projector.project(
-                        p.upload_url
-                    ),
-                    "http_method": "PUT",
-                    "expires_at": expires_at,
-                }
-                for p in multipart_session.parts
-            ]
+            # Project after initiation, fail-safe: a D-06 refusal must abort
+            # the just-initiated OSS multipart session — otherwise the
+            # uploadId leaks (no ticket exists yet, so cancel/delete cannot
+            # reach it).
+            try:
+                parts_data = [
+                    {
+                        "part_number": p.part_number,
+                        "upload_url": self._session_file_url_projector.project(
+                            p.upload_url
+                        ),
+                        "http_method": "PUT",
+                        "expires_at": expires_at,
+                    }
+                    for p in multipart_session.parts
+                ]
+            except SessionFileTransferProxyUnavailableError as proj_err:
+                logger.warning(
+                    "MULTIPART URL projection refused (transfer_id=%s) — "
+                    "aborting OSS multipart session %s",
+                    transfer_id,
+                    multipart_session.session_id,
+                )
+                try:
+                    await asyncio.to_thread(
+                        self._file_transfer_backend.abort_multipart_upload,
+                        staging_path,
+                        multipart_session.session_id,
+                    )
+                except Exception:
+                    # The client must still receive the original 503 even if
+                    # the cleanup roundtrip fails; log for operator review.
+                    logger.exception(
+                        "Aborting leaked multipart session %s failed (transfer_id=%s)",
+                        multipart_session.session_id,
+                        transfer_id,
+                    )
+                raise proj_err
 
             # Create ticket AFTER OSS success — DB/OSS consistency
             await asyncio.to_thread(

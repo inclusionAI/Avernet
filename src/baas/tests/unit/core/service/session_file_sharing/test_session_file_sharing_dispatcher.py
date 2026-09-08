@@ -1105,3 +1105,90 @@ class TestSessionFileUrlProjection:
             )
 
         ticket_repo.create_ticket.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_multipart_projection_failure_aborts_session(
+        self, file_backend, ticket_repo
+    ):
+        """WR-03 (88): a D-06 refusal on the MULTIPART path aborts the
+        just-initiated OSS multipart session so no uploadId leaks."""
+        unfilled = DefaultSessionFileSharingDispatcher(
+            file_transfer_backend=file_backend,
+            ticket_repo=ticket_repo,
+            session_file_url_projector=AliyunAckSessionFileUrlProjector(
+                proxy_base_url="",
+                deploy_tenant="ALIYUN_ACK",
+            ),
+        )
+        mock_parts = [
+            MagicMock(
+                part_number=1,
+                upload_url=(
+                    "https://bucket.internal-oss.example.com/part/1"
+                    "?uploadId=MP-SESS&partNumber=1&Signature=sig1"
+                ),
+            )
+        ]
+        mock_session = MagicMock()
+        mock_session.session_id = "mp-sess-leak"
+        mock_session.parts = mock_parts
+        file_backend.initiate_multipart_upload.return_value = mock_session
+        file_backend.build_session_staging_path.return_value = (
+            "file-transfers/test/t1/sess-001/tf-leak/big.zip"
+        )
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError):
+            await unfilled.dispatch_get_upload_url(
+                tenant="test-tenant",
+                session_id="sess-001",
+                filename="big.zip",
+                file_size=104_857_600,  # 100MB -> MULTIPART
+            )
+
+        file_backend.abort_multipart_upload.assert_called_once_with(
+            "file-transfers/test/t1/sess-001/tf-leak/big.zip",
+            "mp-sess-leak",
+        )
+        ticket_repo.create_ticket.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_multipart_projection_failure_abort_error_preserved(
+        self, file_backend, ticket_repo
+    ):
+        """WR-03 (88): even when the abort roundtrip fails, the client still
+        receives the original 503 (the cleanup error never masks it)."""
+        unfilled = DefaultSessionFileSharingDispatcher(
+            file_transfer_backend=file_backend,
+            ticket_repo=ticket_repo,
+            session_file_url_projector=AliyunAckSessionFileUrlProjector(
+                proxy_base_url="",
+                deploy_tenant="ALIYUN_ACK",
+            ),
+        )
+        mock_parts = [
+            MagicMock(part_number=1, upload_url="https://oss.example.com/part/1")
+        ]
+        mock_session = MagicMock()
+        mock_session.session_id = "mp-sess-leak2"
+        mock_session.parts = mock_parts
+        file_backend.initiate_multipart_upload.return_value = mock_session
+        file_backend.build_session_staging_path.return_value = (
+            "file-transfers/test/t1/sess-001/tf-leak2/big.zip"
+        )
+        file_backend.abort_multipart_upload.side_effect = Exception(
+            "NoSuchUpload: upload session not found"
+        )
+
+        with pytest.raises(SessionFileTransferProxyUnavailableError):
+            await unfilled.dispatch_get_upload_url(
+                tenant="test-tenant",
+                session_id="sess-001",
+                filename="big.zip",
+                file_size=104_857_600,  # 100MB -> MULTIPART
+            )
+
+        file_backend.abort_multipart_upload.assert_called_once_with(
+            "file-transfers/test/t1/sess-001/tf-leak2/big.zip",
+            "mp-sess-leak2",
+        )
+        ticket_repo.create_ticket.assert_not_called()
