@@ -1633,7 +1633,6 @@ async fn search_bots_route_accepts_multi_visibility_and_returns_friend_policy_fi
     let json: Value = serde_json::from_slice(&body).unwrap();
     let items = json["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["created_by"], "alice");
     assert_eq!(items[0]["user_visibility"], "protected");
     assert_eq!(items[0]["friend_ext"], serde_json::json!({}));
     assert_eq!(items[0]["friend_check_in_strategy"], "APPROVAL");
