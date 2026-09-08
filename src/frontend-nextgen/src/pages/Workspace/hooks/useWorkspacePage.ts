@@ -39,7 +39,8 @@ export function useWorkspacePage(): UseWorkspacePageResult {
   // URL 残留 session= 导致反复切回用户身份。
   const isFirstUrlSyncRef = useRef(true);
 
-  // 挂载时一次性快照协作群外链参数。外链/邀请直达（session= 且无 bot=）才需要把身份切回用户；
+  // 挂载时一次性快照协作群外链参数。外链/邀请直达（session= 无 bot=）切回用户身份；
+  // 带 bot=（BCN 落地透传 bot_uuid）则按它定位视角身份，未命中退回用户身份。
   // 用户后续手动点击协作群产生的 session= 属于内部选中，不应切身份，否则会把手动选中的 bot 身份切回用户。
   const initialGroupUrlRef = useRef({
     session: sessionParam,
@@ -108,19 +109,27 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       }
       return;
     }
-    // 协作群会话（协作广场跳转 / 邀请链接 / 任务节点「新开页面查看会话」）：首次满足条件时执行一次，
-    // 后续身份切换不应再触发——否则用户手动切到 bot 角色后，URL 残留的 session= 会反复切回用户身份
-    // （isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
+    // 协作群会话（协作广场跳转 / 邀请链接 / 任务节点「新开页面查看会话」/ BCN 外链落地）：
+    // 首次满足条件时执行一次，后续身份切换不应再触发——否则用户手动切到 bot 角色后，
+    // URL 残留的 session= 会反复切回用户身份（isFirstUrlSyncRef 守卫，与下方 isFirstIdentityRef 同构）。
     const initialGroupUrl = initialGroupUrlRef.current;
-    if (isFirstUrlSyncRef.current && initialGroupUrl.session && !initialGroupUrl.bot) {
-      const me = useWorkspaceStore.getState().identities.find((i) => i.kind === 'user');
+    if (isFirstUrlSyncRef.current && initialGroupUrl.session) {
+      const all = useWorkspaceStore.getState().identities;
       // 全新挂载(target=_blank 新开页面)时身份尚未加载:此刻不能消费首次同步,否则 initWorkspace
-      // 回填的持久化身份(可能是上次用的 Bot)会落定,再也不会切回人类身份 → 以 Bot 身份拉取目标群
-      // 多半不可见 → 协作群会话打不开。等 identities 就绪后(本 effect deps 含 identities)再消费。
-      if (!me) return;
+      // 回填的持久化身份会落定,再也不会按外链切换 → 等 identities 就绪后(本 effect deps 含
+      // identities)再消费。
+      if (all.length === 0) return;
+      // bot= 为外链指定的视角身份（BCN 落地透传 bot_uuid）：命中 store 身份（含 Bot 角色）
+      // 则以其打开；未命中（链接身份不在当前账号名下）退回用户身份，等价旧行为。
+      // 无 bot= 时（邀请链接/协作广场跳转）保持原语义：强制切回用户身份——否则持久化的
+      // 上次 Bot 身份拉取目标群多半不可见 → 协作群会话打不开。
+      const target =
+        (initialGroupUrl.bot ? all.find((i) => i.id === initialGroupUrl.bot) : undefined) ??
+        all.find((i) => i.kind === 'user');
+      if (!target) return;
       isFirstUrlSyncRef.current = false;
       const store = useWorkspaceStore.getState();
-      if (store.activeIdentityId !== me.id) store.setActiveIdentityId(me.id);
+      if (store.activeIdentityId !== target.id) store.setActiveIdentityId(target.id);
       const fresh = useWorkspaceStore.getState();
       fresh.setView('group');
       if (initialGroupUrl.membership === 'session_only' || initialGroupUrl.membership === 'direct') {

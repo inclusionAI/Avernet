@@ -2,7 +2,7 @@
 
 import { CapabilityPickerModal } from '@/components/BotWorkshop/Editor/CapabilityPickerModal';
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 jest.mock('@/capabilities', () => ({
@@ -104,4 +104,30 @@ test('MCP 按内部和开放平台分 Tab，并将搜索交给服务端查询', 
   await userEvent.click(screen.getByRole('button', { name: '开放平台' }));
   await userEvent.type(screen.getByPlaceholderText('搜索市场中的 MCP'), '天气');
   await waitFor(() => expect(searchMcp).toHaveBeenLastCalledWith('open-platform', '天气'));
+});
+
+test('父组件重渲染并更换回调引用时不会重复查询 MCP', async () => {
+  jest.useFakeTimers();
+  const firstSearch = jest.fn().mockResolvedValue(undefined);
+  const secondSearch = jest.fn().mockResolvedValue(undefined);
+  const commonProps = {
+    kind: 'mcp' as const,
+    open: true,
+    marketItems: [],
+    skillCenterItems: [],
+    workshopItems: [],
+    myItems: [],
+    existingIds: [],
+    onOpenChange: jest.fn(),
+    onConfirm: jest.fn(),
+  };
+  const { rerender } = render(<CapabilityPickerModal {...commonProps} onSearchMcp={firstSearch} />);
+
+  await act(async () => jest.advanceTimersByTime(300));
+  expect(firstSearch).toHaveBeenCalledTimes(1);
+
+  rerender(<CapabilityPickerModal {...commonProps} onSearchMcp={secondSearch} />);
+  await act(async () => jest.advanceTimersByTime(300));
+  expect(secondSearch).not.toHaveBeenCalled();
+  jest.useRealTimers();
 });

@@ -1,4 +1,5 @@
 import { notifyError, notifySuccess } from '@/components/ui/notify';
+import { matchesBotIdentity, resolvePrivacyLoadScope } from '@/domain/collaborationPrivacy/loadScope';
 import type {
   CollaborationBot,
   FriendApprovalConfig,
@@ -6,7 +7,6 @@ import type {
   PublicConfig,
 } from '@/domain/collaborationPrivacy/types';
 import { useHumanIdentity } from '@/hooks/useHumanIdentity';
-import { useCopyBotId } from './useCopyBotId';
 import { collaborationPrivacyService, type DirectSetting } from '@/services/collaborationPrivacy';
 import { useCollaborationPrivacyStore } from '@/stores/collaborationPrivacyStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -15,11 +15,12 @@ import {
   buildDirectConfirmation,
   directSettingLabel,
   errorMessage,
-  matchesBotIdentity,
+  publicationSuccessMessage,
   type Confirmation,
   type PublicationEditorState,
   type ScopeViewerState,
 } from './collaborationPrivacyHelpers';
+import { useCopyBotId } from './useCopyBotId';
 
 export function useCollaborationPrivacy() {
   const store = useCollaborationPrivacyStore();
@@ -32,9 +33,14 @@ export function useCollaborationPrivacy() {
   const [scopeViewer, setScopeViewer] = useState<ScopeViewerState | null>(null);
   const [friendEditorBotId, setFriendEditorBotId] = useState<string | null>(null);
   const previousActiveIdentityId = useRef(activeIdentityId);
-
+  const latestLoadId = useRef(0);
+  const activeIdentity = useMemo(
+    () => identityViews.find((item) => item.id === activeIdentityId) ?? null,
+    [activeIdentityId, identityViews],
+  );
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      const loadId = ++latestLoadId.current;
       if (!userId) {
         store.setLoading(false);
         store.setError(identityError ?? '当前用户身份未就绪，无法加载协作权限');
@@ -43,16 +49,18 @@ export function useCollaborationPrivacy() {
       store.setLoading(true);
       store.setError(null);
       try {
-        store.setOverview(await collaborationPrivacyService.loadOverview(userId, signal));
+        const loadScope = resolvePrivacyLoadScope(activeIdentity);
+        const overview = await collaborationPrivacyService.loadOverview(userId, signal, loadScope);
+        if (loadId === latestLoadId.current && !signal?.aborted) store.setOverview(overview);
       } catch (error) {
-        if ((error as Error).name !== 'AbortError') store.setError(errorMessage(error));
+        if (loadId === latestLoadId.current && (error as Error).name !== 'AbortError')
+          store.setError(errorMessage(error));
       } finally {
-        store.setLoading(false);
+        if (loadId === latestLoadId.current) store.setLoading(false);
       }
     },
-    [identityError, store.setError, store.setLoading, store.setOverview, userId],
+    [activeIdentity, identityError, store.setError, store.setLoading, store.setOverview, userId],
   );
-
   useEffect(() => {
     const controller = new AbortController();
     if (identityStatus !== 'loading') void load(controller.signal);
@@ -61,7 +69,6 @@ export function useCollaborationPrivacy() {
       useCollaborationPrivacyStore.getState().reset();
     };
   }, [identityStatus, load]);
-
   const runBotAction = useCallback(
     async (actionKey: string, task: () => Promise<CollaborationBot>, success: string) => {
       if (store.busyAction) return false;
@@ -124,7 +131,6 @@ export function useCollaborationPrivacy() {
     const succeeded = await executeDirect(confirmation.bot, confirmation.setting, confirmation.value);
     if (succeeded) setConfirmation(null);
   }, [confirmation, executeDirect]);
-
   const submitPublication = useCallback(
     async (config: PublicConfig, deptEntries?: Array<{ deptNo: string; deptName: string }>) => {
       if (!publicationEditor) return;
@@ -139,7 +145,7 @@ export function useCollaborationPrivacy() {
             config,
             deptEntries,
           }),
-        config.scope === 'none' ? '公开范围已关闭，当前已立即生效' : '审批申请已提交，当前公开范围保持不变',
+        publicationSuccessMessage(config),
       );
       if (succeeded) setPublicationEditor(null);
     },
@@ -196,10 +202,6 @@ export function useCollaborationPrivacy() {
   const scopeViewerBot = useMemo(
     () => store.overview?.bots.find((bot) => bot.id === scopeViewer?.botId),
     [scopeViewer?.botId, store.overview],
-  );
-  const activeIdentity = useMemo(
-    () => identityViews.find((item) => item.id === activeIdentityId) ?? null,
-    [activeIdentityId, identityViews],
   );
   useEffect(() => {
     if (previousActiveIdentityId.current === activeIdentityId) return;

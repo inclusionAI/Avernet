@@ -2,6 +2,8 @@ import { Button } from '@/components/ui/Button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/Tooltip';
 import type { FriendApprovalConfig } from '@/domain/collaborationPrivacy/types';
 import { Info } from 'lucide-react';
+import { botFriendApprovalSection } from '../botVisibilityCopy';
+import { collaborationPrivacyTooltipDelayMs } from '../interaction';
 
 const modeLabels = { none: '无需审批', all: '全部审批', partial_exempt: '部分组织免审批（历史配置）' } as const;
 
@@ -16,12 +18,12 @@ interface RequestListProps {
 export function RequestList({ config, disabled, disabledReason, onEdit, onViewScope }: RequestListProps) {
   const exemptScopeCount = config.exemptOrganizationPaths.length || config.exemptDepartmentNos?.length || 0;
   return (
-    <section className="flex flex-wrap items-start justify-between gap-3 border-t border-border pt-5">
+    <section className="flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <div className="flex items-center gap-1.5">
             <p className="m-0 text-sm font-medium text-foreground">好友审批策略</p>
-            <TooltipProvider>
+            <TooltipProvider delayDuration={collaborationPrivacyTooltipDelayMs}>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -33,7 +35,7 @@ export function RequestList({ config, disabled, disabledReason, onEdit, onViewSc
                     <Info className="h-3.5 w-3.5" aria-hidden />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>控制好友申请是否进入管理后台工单中心，并由用户确认后通过。</TooltipContent>
+                <TooltipContent>{botFriendApprovalSection.policyDescription}</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>

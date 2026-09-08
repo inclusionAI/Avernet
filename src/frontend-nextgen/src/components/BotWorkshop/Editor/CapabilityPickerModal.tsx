@@ -8,7 +8,7 @@ import { Segmented } from '@/components/ui/Segmented';
 import type { BotEditorMcp, BotEditorSkill } from '@/domain/botEditor';
 import { useSkillCenterPicker } from '@/hooks/useSkillCenterPicker';
 import { Check, ExternalLink, FolderUp, Plug, Search, Shapes } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { readDirectoryFiles, type DirectoryHandle } from './capabilityPickerDirectory';
 
 type Source = 'mine' | 'market' | 'workshop';
@@ -55,6 +55,8 @@ export function CapabilityPickerModal({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const searchMcpRef = useRef(onSearchMcp);
+  searchMcpRef.current = onSearchMcp;
   const remoteSearch = kind === 'skill' && source === 'market' && marketSource === 'skillcenter-market';
   const remoteMcpSearch = kind === 'mcp';
   const skillCenter = useSkillCenterPicker(open && remoteSearch, keyword);
@@ -74,12 +76,12 @@ export function CapabilityPickerModal({
     );
   }, [items, keyword, remoteMcpSearch, remoteSearch]);
   useEffect(() => {
-    if (!open || kind !== 'mcp' || !onSearchMcp) return;
+    if (!open || kind !== 'mcp' || !searchMcpRef.current) return;
     const timer = setTimeout(() => {
-      void onSearchMcp(mcpMarketSource, keyword.trim()).catch(() => undefined);
+      void searchMcpRef.current?.(mcpMarketSource, keyword.trim()).catch(() => undefined);
     }, 300);
     return () => clearTimeout(timer);
-  }, [kind, keyword, mcpMarketSource, onSearchMcp, open]);
+  }, [kind, keyword, mcpMarketSource, open]);
   const canPickDirectory = typeof window !== 'undefined' && 'showDirectoryPicker' in window;
   const close = () => {
     setSelected([]);

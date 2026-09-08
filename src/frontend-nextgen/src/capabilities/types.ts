@@ -353,7 +353,7 @@ export interface AppCapabilities {
    */
   getGroupAdvancedConfigEnabled: () => CapabilityResult<boolean>;
   /**
-   * 公开范围编辑器是否提供“限制组织范围”。Open Core 默认关闭；internal overlay 保持开启。
+   * Bot 可见性编辑器是否提供“限定组织可申请”。Open Core 默认关闭；internal overlay 保持开启。
    * 同步签名，两个 audience 共用，组件不得按部署环境自行判断。
    */
   getRestrictedPublicationScopeEnabled: () => CapabilityResult<boolean>;

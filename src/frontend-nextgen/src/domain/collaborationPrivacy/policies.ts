@@ -53,7 +53,7 @@ export function publicConfigsEqual(left: PublicConfig, right: PublicConfig): boo
 export function validatePublicConfig(config: PublicConfig): PublicConfig {
   const normalized = normalizePublicConfig(config);
   if (normalized.scope === 'restricted' && normalized.organizationPaths.length === 0) {
-    throw new Error('至少选择一个公开组织范围');
+    throw new Error('选择限定组织可申请时，请至少选择一个组织范围');
   }
   return normalized;
 }
