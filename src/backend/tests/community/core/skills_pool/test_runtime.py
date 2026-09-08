@@ -17,6 +17,9 @@ from agentclaw.community.core.skills_pool.quarantine import (
 )
 from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
+from agentclaw.community.plugins.local.device_adapter_transport import (
+    InMemoryDeviceAdapterTransport,
+)
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterHTTPStatusError,
@@ -78,6 +81,29 @@ class FakeTransport:
 class FakeProbe:
     async def probe_bot(self, **kwargs):
         return kwargs
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacement", [False, True], ids=["retire", "replace"])
+async def test_local_transport_apply_matches_runtime_consumer_contract(replacement: bool) -> None:
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(), adapter_transport=InMemoryDeviceAdapterTransport(),
+        probe_service=FakeProbe(),
+    )
+    desired = PoolSkillMapping("local", "package", "writer")
+    retired = PoolSkillMapping("repo", "old-package", "writer" if replacement else "old-writer")
+
+    result = await runtime.apply_mappings(
+        bot_id="bot", user_id="owner", engine="openclaw",
+        mappings=[desired, desired], retired_mappings=[retired, retired],
+    )
+
+    assert result.status is MappingProjectionStatus.CONVERGED
+    expected = [("APPLY", desired)]
+    if not replacement:
+        expected.append(("RETIRE", retired))
+    assert [(item.action, item.mapping) for item in result.items] == expected
+    assert result.evidence == {"simulated": True}
 
 
 class CenterEnsureTransport(FakeTransport):

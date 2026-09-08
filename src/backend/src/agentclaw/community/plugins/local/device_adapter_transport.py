@@ -140,6 +140,18 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
             return {"status": "ok", "engine": conn_info.get("engine", "openclaw")}
         if path == "/api/skills/mappings/apply":
             request = body or {}
+            # Mirror the Engine's logical deduplication and replacement-owned
+            # retirement contract, without inventing physical paths locally.
+            desired = {
+                tuple(sorted(item.items())): item
+                for item in request.get("mappings", [])
+            }
+            desired_names = {item["link_name"] for item in desired.values()}
+            retired = {
+                tuple(sorted(item.items())): item
+                for item in request.get("retired_mappings", [])
+                if item["link_name"] not in desired_names
+            }
             return {
                 "success": True,
                 "data": {
@@ -147,20 +159,22 @@ class InMemoryDeviceAdapterTransport(MockSeam, DeviceAdapterTransport):
                     "items": [
                         {
                             "mapping": item,
+                            "target": "",
                             "action": "APPLY",
                             "status": "CONVERGED",
                             "retryable": False,
                         }
-                        for item in request.get("mappings", [])
+                        for item in desired.values()
                     ]
                     + [
                         {
                             "mapping": item,
+                            "target": "",
                             "action": "RETIRE",
                             "status": "CONVERGED",
                             "retryable": False,
                         }
-                        for item in request.get("retired_mappings", [])
+                        for item in retired.values()
                     ],
                     "issues": [],
                     "evidence": {"simulated": True},

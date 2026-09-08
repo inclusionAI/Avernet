@@ -25,6 +25,104 @@ def _layout(home: Path):
     )
 
 
+def test_retirement_across_active_roots_returns_one_logical_result(tmp_path: Path) -> None:
+    historical_root = tmp_path / ".claude_code/workspace/skills"
+    retired = {"corpus": "local", "relative_path": "package", "link_name": "writer"}
+
+    result = apply_logical_mapping_payload(
+        engine="claude_code", source_layout=MappingSourceLayout.LEGACY,
+        mappings_payload=[], retired_payload=[retired],
+        additional_retirement_roots=[historical_root], home=tmp_path,
+    )
+
+    assert result.status is MappingProjectionStatus.CONVERGED
+    assert len(result.items) == 1
+    assert result.items[0].mapping == retired
+    assert result.items[0].action == "RETIRE"
+
+
+@pytest.mark.parametrize("replacement", [False, True], ids=["retire", "replace"])
+@pytest.mark.parametrize("occupied", [False, True], ids=["managed", "user-directory"])
+def test_historical_root_outcome_is_aggregated_without_hiding_failures(
+    tmp_path: Path, replacement: bool, occupied: bool,
+) -> None:
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity("claude_code", LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=tmp_path),
+    )
+    historical_root = tmp_path / ".claude_code/workspace/skills"
+    old = {"corpus": "local", "relative_path": "old", "link_name": "writer"}
+    new = {"corpus": "local", "relative_path": "new", "link_name": "writer"}
+    for package in ("old", "new"):
+        (layout.legacy_local / package).mkdir(parents=True)
+    layout.active_root.mkdir(parents=True, exist_ok=True)
+    current = layout.active_root / "writer"
+    historical = historical_root / "writer"
+    current.symlink_to(layout.legacy_local / "old", target_is_directory=True)
+    if occupied:
+        historical.mkdir()
+    else:
+        historical.symlink_to(layout.legacy_local / "old", target_is_directory=True)
+
+    result = apply_logical_mapping_payload(
+        engine="claude_code", source_layout=MappingSourceLayout.LEGACY,
+        mappings_payload=[new] if replacement else [], retired_payload=[old],
+        additional_retirement_roots=[historical_root], home=tmp_path,
+    )
+
+    expected = MappingProjectionStatus.DEGRADED if occupied else MappingProjectionStatus.CONVERGED
+    assert result.status is expected
+    assert len(result.items) == 1
+    assert result.items[0].mapping == (new if replacement else old)
+    assert result.items[0].action == ("APPLY" if replacement else "RETIRE")
+    assert result.items[0].status is expected
+    assert len(result.evidence["physical_items"]) == 2
+    if occupied:
+        assert historical.is_dir()
+        assert result.items[0].code == "UNMANAGED_ACTIVE_ENTRY_RETAINED"
+    else:
+        assert not historical.is_symlink()
+    if replacement:
+        assert current.readlink() == layout.legacy_local / "new"
+    else:
+        assert not current.is_symlink()
+
+
+def test_aggregated_retirement_keeps_pending_retry_alongside_degradation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity("claude_code", LAYOUT_CONTRACT_VERSION),
+        RuntimeLayoutContext(home=tmp_path),
+    )
+    historical_root = tmp_path / ".claude_code/workspace/skills"
+    source = layout.legacy_local / "package"
+    source.mkdir(parents=True)
+    (layout.active_root / "writer").mkdir(parents=True)
+    historical = historical_root / "writer"
+    historical.symlink_to(source, target_is_directory=True)
+    unlink = Path.unlink
+
+    def deny_historical_unlink(path: Path, *args, **kwargs):
+        if path == historical:
+            raise PermissionError("test denied unlink")
+        return unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", deny_historical_unlink)
+    result = apply_logical_mapping_payload(
+        engine="claude_code", source_layout=MappingSourceLayout.LEGACY,
+        mappings_payload=[],
+        retired_payload=[{"corpus": "local", "relative_path": "package", "link_name": "writer"}],
+        additional_retirement_roots=[historical_root], home=tmp_path,
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0].status is MappingProjectionStatus.DEGRADED
+    assert result.items[0].retryable is True
+    assert {item["status"] for item in result.evidence["physical_items"]} == {"DEGRADED", "PENDING"}
+    assert historical.is_symlink()
+
+
 def test_apply_uses_logical_identity_when_package_name_differs(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     source = layout.legacy_local / "package-on-disk"
@@ -53,10 +151,14 @@ def test_apply_uses_logical_identity_when_package_name_differs(tmp_path: Path) -
     }
 
 
+@pytest.mark.parametrize("engine", ["openclaw", "claude_code"])
 def test_unavailable_center_replacement_keeps_old_link_and_applies_other_items(
-    tmp_path: Path,
+    tmp_path: Path, engine: str,
 ) -> None:
-    layout = _layout(tmp_path)
+    layout = resolve_filesystem_skill_layout(
+        LayoutIdentity(engine, LAYOUT_CONTRACT_VERSION), RuntimeLayoutContext(home=tmp_path),
+    )
+    historical_roots = [tmp_path / ".claude_code/workspace/skills"] if engine == "claude_code" else []
     old_source = layout.pool_center / "00000000-0000-4000-8000-000000000001" / "1"
     old_source.mkdir(parents=True)
     (old_source / "SKILL.md").write_text("old", encoding="utf-8")
@@ -65,9 +167,11 @@ def test_unavailable_center_replacement_keeps_old_link_and_applies_other_items(
     layout.active_root.mkdir(parents=True, exist_ok=True)
     replacement = layout.active_root / "writer"
     replacement.symlink_to(old_source, target_is_directory=True)
+    for root in historical_roots:
+        (root / "writer").symlink_to(old_source, target_is_directory=True)
 
     result = apply_logical_mapping_payload(
-        engine="openclaw",
+        engine=engine,
         source_layout=MappingSourceLayout.LEGACY,
         mappings_payload=[
             {
@@ -91,11 +195,14 @@ def test_unavailable_center_replacement_keeps_old_link_and_applies_other_items(
             }
         ],
         home=tmp_path,
+        additional_retirement_roots=historical_roots,
         center_is_mounted=lambda _path: True,
     )
 
     assert result.status is MappingProjectionStatus.PENDING
     assert replacement.readlink() == old_source
+    for root in historical_roots:
+        assert (root / "writer").readlink() == old_source
     assert (layout.active_root / "local-writer").readlink() == local_source
     assert any(
         item.mapping

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from engine.community.core.skills.exceptions import (
@@ -68,6 +68,27 @@ def _deduplicate_logical_payload(payload: object) -> list[dict[str, object]]:
             seen.add(key)
             result.append(raw)
     return result
+
+
+def _aggregate_logical_results(items: Sequence[MappingItemResult]) -> tuple[MappingItemResult, ...]:
+    """One logical outcome may cover several current/historical active roots."""
+
+    severity = {
+        MappingProjectionStatus.CONVERGED: 0,
+        MappingProjectionStatus.PENDING: 1,
+        MappingProjectionStatus.DEGRADED: 2,
+    }
+    grouped: dict[tuple[str, tuple[tuple[str, str], ...]], MappingItemResult] = {}
+    for item in items:
+        assert item.mapping is not None
+        key = (item.action, _logical_key(item.mapping))
+        previous = grouped.get(key)
+        if previous is None:
+            grouped[key] = item
+            continue
+        worst = item if severity[item.status] > severity[previous.status] else previous
+        grouped[key] = replace(worst, retryable=previous.retryable or item.retryable)
+    return tuple(grouped.values())
 
 
 def apply_logical_mapping_payload(
@@ -181,19 +202,28 @@ def apply_logical_mapping_payload(
     }
     logical_items: list[MappingItemResult] = [*center_failures]
     runtime_issues: list[MappingItemResult] = []
+    desired_by_name = {str(raw["link_name"]): raw for raw, _ in desired_pairs}
     for item in published.items:
         logical = (
             retired_by_location.get((item.target, item.source or ""))
             if item.action == "RETIRE"
             else desired_by_location.get((item.target, item.source or ""))
         )
+        action = item.action
+        if logical is not None and action == "RETIRE":
+            replacement = desired_by_name.get(logical["link_name"])
+            if replacement is not None:
+                # The replacement owns retirement at *all* active roots, not
+                # just the canonical target skipped by the physical helper.
+                logical = {key: str(value) for key, value in replacement.items()}
+                action = "APPLY"
         enriched = MappingItemResult(
             target=item.target,
             source=item.source,
             status=item.status,
             code=item.code,
             retryable=item.retryable,
-            action=item.action if logical is not None else "RUNTIME",
+            action=action if logical is not None else "RUNTIME",
             mapping=logical,
         )
         (logical_items if logical is not None else runtime_issues).append(enriched)
@@ -205,14 +235,17 @@ def apply_logical_mapping_payload(
         if MappingProjectionStatus.PENDING in statuses
         else MappingProjectionStatus.CONVERGED
     )
+    logical_results = _aggregate_logical_results(logical_items)
+    evidence = {**published.evidence, "center_pending": len(center_failures)}
+    if len(logical_results) < len(logical_items):
+        # Keep all per-directory diagnostics when aggregation removes items;
+        # do not duplicate the normal single-root response payload.
+        evidence["physical_items"] = [item.to_data() for item in published.items]
     return MappingApplyResult(
         status=status,
-        items=tuple(logical_items),
+        items=logical_results,
         issues=tuple(runtime_issues),
-        evidence={
-            **published.evidence,
-            "center_pending": len(center_failures),
-        },
+        evidence=evidence,
     )
 
 
