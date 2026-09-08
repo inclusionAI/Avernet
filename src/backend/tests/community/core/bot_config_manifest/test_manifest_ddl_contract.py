@@ -64,20 +64,49 @@ def _tables(path: Path) -> dict[str, dict[str, str]]:
         if line.strip() and not line.lstrip().startswith("--")
     )
     starts = [
-        (match.group(1), match.start())
-        for match in re.finditer(r"CREATE TABLE\s+`(\w+)`", body)
+        (match.group(1), match.start(), match.group(0).startswith("ALTER"))
+        for match in re.finditer(
+            r"(?:CREATE|ALTER) TABLE\s+`(\w+)`", body
+        )
     ]
-    assert starts, f"{path.name}: no CREATE TABLE found"
+    assert starts, f"{path.name}: no CREATE TABLE or ALTER TABLE found"
 
-    bounds = [start for _, start in starts] + [len(body)]
-    return {
-        name: {
+    bounds = [start for _, start, _ in starts] + [len(body)]
+    tables: dict[str, dict[str, str]] = {}
+    for index, (name, _, is_alter) in enumerate(starts):
+        segment = body[bounds[index] : bounds[index + 1]]
+        # An ALTER's columns are introduced by ADD COLUMN; a CREATE's are the
+        # bare backticked declarations. Both are checked, and that is the
+        # point of handling ALTER at all: a migration adding a gmt_ column
+        # would otherwise slip past every rule in this file — precisely the
+        # kind of "consistency tidy-up" these tests exist to catch.
+        pattern = (
+            r"ADD COLUMN\s+`(\w+)`\s+(.+?),?$"
+            if is_alter
+            else r"^\s*`(\w+)`\s+(.+?),?$"
+        )
+        found = {
             column: rest.strip()
-            for column, rest in re.findall(
-                r"^\s*`(\w+)`\s+(.+?),?$", body[bounds[i] : bounds[i + 1]], flags=re.M
-            )
+            for column, rest in re.findall(pattern, segment, flags=re.M)
         }
-        for i, (name, _) in enumerate(starts)
+        tables.setdefault(name, {}).update(found)
+    return tables
+
+
+def _created_tables(path: Path) -> set[str]:
+    """The tables this file *creates*, as opposed to alters.
+
+    The audit-column rules split on exactly this. "Every table declares
+    gmt_create and gmt_modified" is a statement about a table's creation — an
+    ALTER adding one unrelated column cannot satisfy it and must not be asked
+    to. The *type* rules do apply to both: a migration that added a gmt_
+    column as a bare DATETIME, or as a TIMESTAMP that picks up MySQL's
+    implicit ON UPDATE, is the same corruption arriving by a different door.
+    """
+    body = path.read_text(encoding="utf-8")
+    return {
+        match.group(1)
+        for match in re.finditer(r"CREATE TABLE\s+`(\w+)`", body)
     }
 
 
@@ -128,9 +157,14 @@ def test_database_filled_times_are_timestamp() -> None:
     file, which is what the per-file version of this silently skipped.
     """
     for path in _sql_files():
+        created = _created_tables(path)
         for table, declarations in _tables(path).items():
             for column in _DB_FILLED:
-                assert column in declarations, f"{table}: {column} is missing"
+                if column not in declarations:
+                    # A migration file touching other columns says nothing
+                    # about these; the file that created the table did.
+                    assert table not in created, f"{table}: {column} is missing"
+                    continue
                 declared_type = declarations[column].split()[0].lower()
                 assert declared_type == "timestamp", (
                     f"{table}.{column} is declared {declared_type}, not timestamp"

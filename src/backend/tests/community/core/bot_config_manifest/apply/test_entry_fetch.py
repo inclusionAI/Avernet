@@ -916,3 +916,59 @@ def test_the_git_road_carries_the_auth_and_the_category_limit(rig):
     # same vocabulary the URL road's transport enforces.
     assert decl.file_limit == 1 * 1024 * 1024
     assert decl.auth == "ci-token"
+
+
+# --- the oss road carries a signing credential (defect D4) ------------------
+
+
+def test_an_oss_source_presents_its_credential_through_the_guarded_transport(rig):
+    """One fetch road, whichever mechanism the credential uses.
+
+    The signing credential is a header *injector*, not a second transport, so
+    an ``oss`` source reaches the wire through the same guarded fetcher — with
+    its ceilings, its timeout budget, its redirect policy and its per-hop
+    re-authorization — and the only difference is which headers the binding
+    computes. A parallel signed transport would be a second copy of every one
+    of those limits to keep in step with the first.
+    """
+    _, fetcher, credentials, pipeline = rig
+    target = "https://artifacts.example-corp.com/tools/rg"
+    fetcher.responses[target] = fetched_object(BODY, url=target)
+    ctx = make_context(
+        source_session=_session(_ScriptedGit(), sources={
+            "artifacts": {
+                "protocol": "oss",
+                "url": target,
+                "auth": "oss-artifacts",
+            },
+        })
+    )
+    result = pipeline.fetch_declared(
+        ctx, entry={"from": "artifacts"}, category="cli_tools",
+        entry_identity="rg",
+    )
+    assert result.content == BODY
+    # The SOURCE's auth, not the entry's — the declaration carries the
+    # credential (W7), and the binding is what the transport is handed.
+    assert credentials.binding_calls == ["oss-artifacts"]
+    request = fetcher.requests[0]
+    assert request.url == target
+    assert request.injector is not None and request.policy is not None
+
+
+def test_an_oss_source_without_auth_fetches_anonymously(rig):
+    """``oss`` covers a public CDN object too: the protocol is the same, and
+    the credential's absence is the only difference. Asking for one here would
+    make a public file unreachable through the vocabulary that describes it."""
+    _, fetcher, credentials, pipeline = rig
+    target = "https://cdn.example.com/public/notes.md"
+    fetcher.responses[target] = fetched_object(BODY, url=target)
+    ctx = make_context(
+        source_session=_session(_ScriptedGit(), sources={
+            "cdn": {"protocol": "oss", "url": target},
+        })
+    )
+    assert pipeline.fetch_declared(
+        ctx, entry={"from": "cdn"}, category="identity"
+    ).content == BODY
+    assert credentials.binding_calls == []

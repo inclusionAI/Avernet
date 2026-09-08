@@ -38,10 +38,12 @@ class SourceCredentialServiceProtocol(Protocol):
         self,
         *,
         name: str,
-        header_name: str,
         secret: str,
         allowed_prefixes: list[str],
         owner_app_id: int,
+        header_name: str | None = None,
+        access_key_id: str | None = None,
+        region: str | None = None,
         credential_type: CredentialType = "header",
         modifier: str = "",
     ) -> SourceCredentialRecord:

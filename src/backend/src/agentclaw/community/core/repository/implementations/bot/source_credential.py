@@ -71,12 +71,16 @@ class SourceCredentialRepository(
         secret_ciphertext: str,
         owner_app_id: int,
         modifier: str,
+        access_key_id: str | None = None,
+        region: str | None = None,
     ) -> SourceCredentialRow:
         try:
             return self._upsert_once(
                 name=name,
                 credential_type=credential_type,
                 header_name=header_name,
+                access_key_id=access_key_id,
+                region=region,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
                 owner_app_id=owner_app_id,
@@ -94,6 +98,8 @@ class SourceCredentialRepository(
                 name=name,
                 credential_type=credential_type,
                 header_name=header_name,
+                access_key_id=access_key_id,
+                region=region,
                 allowed_prefixes=allowed_prefixes,
                 secret_ciphertext=secret_ciphertext,
                 owner_app_id=owner_app_id,
@@ -110,6 +116,8 @@ class SourceCredentialRepository(
         secret_ciphertext: str,
         owner_app_id: int,
         modifier: str,
+        access_key_id: str | None = None,
+        region: str | None = None,
     ) -> SourceCredentialRow:
         with self._db.orm_session() as db:
             row = (
@@ -122,6 +130,8 @@ class SourceCredentialRepository(
                     name=name,
                     credential_type=credential_type,
                     header_name=header_name,
+                    access_key_id=access_key_id,
+                    region=region,
                     allowed_prefixes=_encode_prefixes(allowed_prefixes),
                     secret_ciphertext=secret_ciphertext,
                     owner_app_id=owner_app_id,
@@ -131,6 +141,11 @@ class SourceCredentialRepository(
             else:
                 row.credential_type = credential_type
                 row.header_name = header_name
+                # Whole-row replace, both directions: rotating a credential
+                # from one mechanism to another must not leave the old
+                # mechanism's fields behind, half-configuring the new one.
+                row.access_key_id = access_key_id
+                row.region = region
                 row.allowed_prefixes = _encode_prefixes(allowed_prefixes)
                 row.secret_ciphertext = secret_ciphertext
                 # ``owner_app_id`` is deliberately NOT re-stamped on the

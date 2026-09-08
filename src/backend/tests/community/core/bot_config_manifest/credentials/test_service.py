@@ -202,15 +202,18 @@ def test_error_messages_never_carry_the_secret(service):
 # --- validation order and shape --------------------------------------------------
 
 
-@pytest.mark.parametrize("bad_type", ["oss_aksk", "basic"])
+@pytest.mark.parametrize("bad_type", ["basic"])
 def test_reserved_types_are_refused_at_write(service, bad_type):
+    """``oss_aksk`` has left this list — it is the object store's real road
+    now. ``basic`` stays: still a name in the vocabulary with nothing behind
+    it, so a caller sending it is refused *by name* rather than as garbage."""
     with pytest.raises(CredentialError, match="reserved"):
         _put(service, credential_type=bad_type)
     assert service._repository.get(name="corp-git") is None
 
 
 def test_unknown_types_are_refused_too(service):
-    with pytest.raises(CredentialError, match="only header"):
+    with pytest.raises(CredentialError, match="unknown credential type"):
         _put(service, credential_type="digest")
     assert service._repository.get(name="corp-git") is None
 
@@ -296,3 +299,176 @@ def test_modifier_and_rotation_stamp_the_audit_row(service):
     row = service._repository.get(name="corp-git")
     assert row.modifier == "carol"
     assert row.gmt_modified > aged
+
+
+# --- the oss_aksk mechanism (defect D4) --------------------------------------
+#
+# The vocabulary named this type from day one and the write path refused it, so
+# a private object store was unreachable: every non-git source was an HTTPS GET
+# with an optional header, and a bucket requiring request signing had no road at
+# all. These pin the mechanism as a whole — storage, redaction, refusal of
+# mismatched shapes, and what actually goes on the wire.
+
+_AKSK_PREFIXES = ["https://artifacts.example-corp.com/tools"]
+_AK = "LTAI5tExampleKeyId"
+_SK = "an-object-store-secret-key"
+
+
+def _put_aksk(service, name="oss-artifacts", **overrides):
+    kwargs = dict(
+        name=name,
+        credential_type="oss_aksk",
+        access_key_id=_AK,
+        secret=_SK,
+        allowed_prefixes=_AKSK_PREFIXES,
+        owner_app_id=OWNER_APP,
+        modifier="alice",
+        header_name=None,
+    )
+    kwargs.update(overrides)
+    return service.put(**kwargs)
+
+
+def test_an_aksk_credential_registers_with_both_values(service):
+    public = _put_aksk(service)
+    assert public.credential_type == "oss_aksk"
+    assert public.access_key_id == _AK
+    assert public.has_secret is True
+    # No header is presented by this mechanism, and the read says so rather
+    # than answering with the empty string storage happens to hold.
+    assert public.header_name is None
+
+
+def test_the_secret_key_is_stored_ciphered_and_never_read_back(service):
+    """The half of the pair that must never come back, in every read path."""
+    _put_aksk(service)
+    row = service._repository.get(name="oss-artifacts")
+    assert row.secret_ciphertext.startswith(CIPHER_PREFIX)
+    assert _SK not in row.secret_ciphertext
+
+    for record in (service.get(name="oss-artifacts"), *service.list_credentials()):
+        assert _SK not in repr(record)
+        assert not hasattr(record, "secret")
+        # The key id is the deliberate exception: an identifier, not a secret,
+        # and rotation cannot be verified without seeing which one is installed.
+        assert record.access_key_id == _AK
+
+
+def test_a_region_is_optional_and_rides_the_record(service):
+    assert _put_aksk(service).region is None
+    assert _put_aksk(service, region="cn-hangzhou").region == "cn-hangzhou"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        # Each is one mechanism's field on the other mechanism, or a required
+        # field missing. The second kind fails loudly on first use anyway; the
+        # FIRST kind is the one that matters — silently dropping it would leave
+        # a caller believing they had configured signing.
+        (dict(access_key_id=None), "requires 'access_key_id'"),
+        (dict(access_key_id=""), "requires 'access_key_id'"),
+        (dict(secret=""), "secret must not be empty"),
+        (dict(header_name="PRIVATE-TOKEN"), "belongs to a 'header' credential"),
+        (dict(access_key_id="x" * 257), "access_key_id over"),
+        (dict(region="r" * 65), "region over"),
+    ],
+)
+def test_a_mismatched_aksk_shape_is_refused_not_ignored(service, overrides, match):
+    with pytest.raises(CredentialError, match=match):
+        _put_aksk(service, **overrides)
+    assert service._repository.get(name="oss-artifacts") is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("access_key_id", _AK), ("region", "cn-hangzhou")],
+)
+def test_a_signing_field_on_a_header_credential_is_refused(service, field, value):
+    """The other direction of the same rule. A header credential that quietly
+    accepted an access key id would report it back on every read, describing a
+    mechanism it does not use."""
+    with pytest.raises(CredentialError, match="belongs to a 'oss_aksk' credential"):
+        _put(service, **{field: value})
+    assert service._repository.get(name="corp-git") is None
+
+
+def test_a_header_credential_still_requires_its_header_name(service):
+    with pytest.raises(CredentialError, match="requires 'header_name'"):
+        _put(service, header_name=None)
+
+
+def test_an_aksk_binding_signs_the_request_and_never_presents_the_key(service):
+    """What actually goes on the wire.
+
+    A header credential puts its secret there; this one must not. The signature
+    is derived from the secret key and the request, so the wire carries the key
+    *id* (inside the credential scope) and a signature — and nothing an
+    interceptor could replay against another URL.
+    """
+    _put_aksk(service)
+    target = "https://artifacts.example-corp.com/tools/rg"
+    headers = service.binding(name="oss-artifacts").headers_for(target)
+
+    assert set(headers) == {"Authorization", "X-Amz-Date"}
+    joined = " ".join(headers.values())
+    assert _SK not in joined
+    assert _AK in joined  # the id is public by design; the secret key is not
+    assert "AWS4-HMAC-SHA256" in headers["Authorization"]
+
+
+def test_two_urls_do_not_share_a_signature(service):
+    """A signature is bound to the request. Reusing one across URLs would be
+    the platform authenticating a request nobody signed."""
+    _put_aksk(service)
+    binding = service.binding(name="oss-artifacts")
+    first = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
+    second = binding.headers_for("https://artifacts.example-corp.com/tools/fd")
+    assert first["Authorization"] != second["Authorization"]
+
+
+def test_rotating_an_aksk_credential_lands_on_the_next_signature(service):
+    """Rotation has no signal — the binding re-reads the row per call, which is
+    the observable contract the header mechanism already has."""
+    _put_aksk(service)
+    binding = service.binding(name="oss-artifacts")
+    before = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
+    _put_aksk(service, access_key_id="LTAI5tRotated")
+    after = binding.headers_for("https://artifacts.example-corp.com/tools/rg")
+    assert "LTAI5tRotated" in after["Authorization"]
+    assert before["Authorization"] != after["Authorization"]
+
+
+def test_rotating_from_one_mechanism_to_the_other_clears_the_old_fields(service):
+    """A whole-row replace, in both directions: a row that kept the previous
+    mechanism's fields would half-describe two mechanisms, and every read would
+    report configuration that governs nothing."""
+    _put(service)  # header
+    assert service.get(name="corp-git").header_name == "PRIVATE-TOKEN"
+    _put_aksk(service, name="corp-git")
+    rotated = service.get(name="corp-git")
+    assert rotated.credential_type == "oss_aksk"
+    assert rotated.header_name is None
+    assert rotated.access_key_id == _AK
+
+    _put(service, name="corp-git")  # back to header
+    back = service.get(name="corp-git")
+    assert back.access_key_id is None
+    assert back.header_name == "PRIVATE-TOKEN"
+
+
+def test_the_prefix_boundary_applies_to_a_signing_credential_too(service):
+    """``allowed_prefixes`` bounds where a credential may be presented, and a
+    signing credential is presented by being *used to sign*. The match is on
+    whole path segments, so a sibling with a longer name is outside — the case
+    that a naive startswith would authorize."""
+    _put_aksk(service)
+    binding = service.binding(name="oss-artifacts")
+    binding.reauthorize("https://artifacts.example-corp.com/tools/rg")
+    for outside in (
+        "https://artifacts.example-corp.com/tools-secret/rg",
+        "https://artifacts.example-corp.com/other/rg",
+        "https://elsewhere.example.com/tools/rg",
+    ):
+        with pytest.raises(PrefixAuthorizationError, match="oss-artifacts"):
+            binding.reauthorize(outside)

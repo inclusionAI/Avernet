@@ -31,9 +31,11 @@ class CredentialType(_DocumentedEnum):
     # value -> caller-facing meaning; the schema-documentation gate reads it.
     __descriptions__ = {
         "header": "The platform presents the secret in an HTTP header "
-        "(header_name) while fetching — the only implemented mechanism.",
-        "oss_aksk": "Reserved for a future OSS AK/SK mechanism; refused at "
-        "write today so the stored type is real from day one.",
+        "(header_name) while fetching. The secret itself travels on the wire.",
+        "oss_aksk": "The platform signs each request with an access key pair "
+        "(access_key_id plus the secret key). The secret key never leaves the "
+        "platform — what travels is a signature over that one request — so "
+        "this is the mechanism for a private object store.",
         "basic": "Reserved for a future HTTP Basic mechanism; refused at "
         "write today so the stored type is real from day one.",
     }
@@ -86,20 +88,34 @@ class SourceCredentialWrite(BaseModel):
 
     type: CredentialType = Field(
         default=CredentialType.HEADER,
-        description="Authentication mechanism for presenting the secret. "
-        "'header' is the only implemented mechanism; 'oss_aksk' and 'basic' "
-        "are reserved for future support and are refused at write.",
+        description="Authentication mechanism. 'header' presents the secret "
+        "in a header; 'oss_aksk' signs each request with a key pair. 'basic' "
+        "is reserved for future support and is refused at write.",
     )
     header_name: str | None = Field(
         default=None,
         description="Header the secret is presented under, required when "
         "type is 'header' (e.g. PRIVATE-TOKEN for a git host token, "
-        "Authorization for bearer-style tokens).",
+        "Authorization for bearer-style tokens). Not valid on other types.",
+    )
+    access_key_id: str | None = Field(
+        default=None,
+        description="Access key id, required when type is 'oss_aksk'. This "
+        "half is an identifier, not a secret: it travels inside every signed "
+        "request and is readable back so a rotation can be verified. Not "
+        "valid on other types.",
+    )
+    region: str | None = Field(
+        default=None,
+        description="Signing region for an 'oss_aksk' credential. Omit to "
+        "take the signer's default (us-east-1), which S3-compatible stores "
+        "that do not enforce a region accept. Not valid on other types.",
     )
     secret: str = Field(
-        description="The secret value itself — stored encrypted, never "
-        "readable back through the API, never shown in logs or apply "
-        "reports (only the credential name appears there).",
+        description="The secret value itself — the header token, or the "
+        "secret key of an 'oss_aksk' pair. Stored encrypted, never readable "
+        "back through the API, never shown in logs or apply reports (only "
+        "the credential name appears there).",
     )
     allowed_prefixes: list[str] = Field(
         description=_PREFIX_DESC,
@@ -129,8 +145,21 @@ class SourceCredentialDetail(SourceCredential):
 
     type: CredentialType = Field(description="Authentication mechanism.")
     header_name: str | None = Field(
+        default=None,
         description="Header the secret presents under; null if the "
-        "mechanism does not use one."
+        "mechanism does not use one.",
+    )
+    access_key_id: str | None = Field(
+        default=None,
+        description="The access key id of an 'oss_aksk' credential; null for "
+        "every other mechanism. Returned in full: it is an identifier, not a "
+        "secret. Its partner — the secret key — has no representation in any "
+        "response.",
+    )
+    region: str | None = Field(
+        default=None,
+        description="The signing region of an 'oss_aksk' credential; null "
+        "when the signer's default applies.",
     )
     allowed_prefixes: list[str] = Field(
         description="Absolute HTTPS prefixes this credential's "

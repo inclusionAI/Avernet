@@ -119,6 +119,8 @@ def _detail(record) -> SourceCredentialDetail:
         has_secret=record.has_secret,
         type=record.credential_type,
         header_name=record.header_name,
+        access_key_id=record.access_key_id,
+        region=record.region,
         allowed_prefixes=record.allowed_prefixes,
         owner_app_id=record.owner_app_id,
         updated_at=record.updated_at,
@@ -195,7 +197,9 @@ async def put_source_credential(
     app_id = _owner_app_id(principal)
     record = service.put(
         name=name,
-        header_name=body.header_name or "",
+        header_name=body.header_name,
+        access_key_id=body.access_key_id,
+        region=body.region,
         secret=body.secret,
         allowed_prefixes=body.allowed_prefixes,
         owner_app_id=app_id,
