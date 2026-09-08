@@ -39,12 +39,27 @@ BUCKET = "my-bucket"
 EXPECTED_HOST = "my-bucket.oss-cn-hangzhou.aliyuncs.com"
 
 
+def streamed_response(status_code: int, content: bytes) -> httpx.Response:
+    """Build an upstream response shaped as a live async stream.
+
+    httpx materializes plain-byte responses eagerly and marks their stream
+    consumed, which maps to a fully buffered ``send()`` — not the
+    ``stream=True`` shape the proxy drives.  Wrapping the body in an async
+    generator reproduces a live upstream stream for ``aiter_raw()``.
+    """
+
+    async def body():
+        yield content
+
+    return httpx.Response(status_code, content=body())
+
+
 class OutboundCapture:
     """Mutable per-test holder for the upstream request/response state."""
 
     def __init__(self) -> None:
         self.request: httpx.Request | None = None
-        self.response: httpx.Response = httpx.Response(200)
+        self.response: httpx.Response = streamed_response(200, b"")
         self.proxy: OssStreamingProxy | None = None
 
 
@@ -108,7 +123,7 @@ async def _streamed_body(capture: OutboundCapture) -> bytes:
 async def test_put_upload_round_trip_keeps_raw_path_query_and_body(proxy_env):
     """A PUT upload streams byte-faithfully to the configured OSS upstream."""
     env = proxy_env(ENDPOINT, BUCKET)
-    env.response = httpx.Response(200, content=b"ok")
+    env.response = streamed_response(200, b"ok")
     body = b"\x00\x01upload-payload\xff\xfe"
 
     response = await _request(
@@ -133,7 +148,7 @@ async def test_put_upload_round_trip_keeps_raw_path_query_and_body(proxy_env):
 async def test_get_download_round_trip_relays_status_and_body(proxy_env):
     """A GET download returns the upstream status and body untouched."""
     env = proxy_env(ENDPOINT, BUCKET)
-    env.response = httpx.Response(200, content=b"chunk1")
+    env.response = streamed_response(200, b"chunk1")
 
     response = await _request(env, "GET", PROXIED_URI)
 
@@ -160,7 +175,7 @@ async def test_di_shape_injects_override_through_provide_cell(proxy_env):
     """Overriding the ``proxy`` dependency via iter_api_routes injects the
     test instance — proving the Provide cell resolves through the container."""
     env = proxy_env(ENDPOINT, BUCKET)
-    env.response = httpx.Response(200, content=b"chunk1")
+    env.response = streamed_response(200, b"chunk1")
 
     route = next(iter_api_routes(app))
     assert [dep.name for dep in route.dependant.dependencies] == ["proxy"]

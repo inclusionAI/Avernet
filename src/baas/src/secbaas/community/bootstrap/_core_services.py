@@ -302,6 +302,8 @@ class CoreServiceContainer(containers.DeclarativeContainer):
 
     session_file_url_projector = providers.Dependency()
 
+    oss_streaming_proxy = providers.Dependency()
+
     paas_facade = providers.Singleton(
         PaasServiceFacade,
         device_repository=device_repo,

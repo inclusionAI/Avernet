@@ -39,6 +39,7 @@ from secbaas.community.plugins.file_transfer import (
     NoopFileTransferBackend,
     NoopSessionFileUrlProjector,
 )
+from secbaas.community.plugins.file_transfer._http_proxy import OssStreamingProxy
 from secbaas.community.plugins.file_transfer.aliyun_ack import (
     AliyunAckSessionFileUrlProjector,
 )
@@ -191,6 +192,12 @@ class PluginContainer(containers.DeclarativeContainer):
             proxy_base_url=config.session_file_url_proxy.proxy_base_url,
             deploy_tenant=config.env.deploy_tenant,
         ),
+    )
+
+    oss_streaming_proxy = providers.Singleton(
+        OssStreamingProxy,
+        endpoint=config.file_transfer_oss_aliyun.endpoint,
+        bucket_name=config.file_transfer_oss_aliyun.bucket_name,
     )
 
     eval_binding_resolver = providers.Selector(

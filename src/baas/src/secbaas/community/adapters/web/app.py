@@ -38,6 +38,9 @@ from secbaas.community.adapters.web.routers.config_management import (
     system_config_router,
     tenant_router,
 )
+from secbaas.community.adapters.web.routers.file_proxy import (
+    file_transfer_proxy_router,
+)
 from secbaas.community.adapters.web.routers.gateway import (
     gateway_message_router,
     gateway_session_router,
@@ -268,6 +271,7 @@ def create_app() -> FastAPI:
     app.include_router(bot_file_transfer_router)
     app.include_router(bot_transfer_query_router)
     app.include_router(session_file_sharing_router)
+    app.include_router(file_transfer_proxy_router)
     app.include_router(bot_qpm_router)
     app.include_router(tenant_router)
     app.include_router(paas_facade_router)
