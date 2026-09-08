@@ -922,6 +922,7 @@ async fn accept_invitation_accepts_legacy_route_group_token() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-9"),
             token: legacy.invite_token,
+            message_view_scope: None,
         })
         .await
         .expect("V1 accepts the legacy-route group token");
@@ -961,6 +962,7 @@ async fn accept_invitation_accepts_legacy_route_session_token() {
         .accept_invitation(AcceptInvitation {
             caller: Fixture::human_principal("staff-9"),
             token: legacy.invite_token,
+            message_view_scope: None,
         })
         .await
         .expect("V1 accepts the legacy-route session token");
