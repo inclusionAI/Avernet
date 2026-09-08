@@ -29,6 +29,10 @@ from agentclaw.community.core.task.task_runner.client.open_api_bot_adapter impor
 )
 from agentclaw.community.core.task.task_runner.client.prompt_formatter import (
     _no_callback_instruction,
+    _static_relay_closure,
+)
+from agentclaw.community.core.task.domain.prompt_constants import (
+    OUTPUT_LANGUAGE_CONSTRAINT,
 )
 from agentclaw.community.core.task.task_runner.modal_executor.task_executor_result_poller import (
     BcsGroupHandle,
@@ -788,17 +792,21 @@ class TaskExecutor(TaskExecutorBbsMixin):
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
             if str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群(static_plan):任务正文 + 执行闭环(禁联网/平台回收/接力交接)已由
-                # format_execute 的 # 接自 分支注入(_static_relay_closure,不含 HTTP 上报协议——
-                # static_plan 节点结果由平台统一回收,不让 bot 真去调 /callback/report);此处只补
-                # "driver/reporter 定位"这一条 group 语义脚注,不再重复 目标/验收标准/任务上下文——
-                # 静态接力 Goal.acceptances=[] 会打印空 验收标准:[],末尾偏置误导 bot 跳过验收。
+                # 接力协作群(static_plan):## 本群任务 正文(含 step1/step2/step3)已具备。但真正多 bot
+                # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
+                # 缺 _static_relay_closure(step1→step2→step3 硬约束)+ 中文输出约束——导致协作群 bot 塌缩
+                # 只做 step2、跳过 step1 接自/step3 gap 与派发。此处按需(以 '三步缺一不可' 标记判定,避免
+                # singlebot_2_group 的 task_instruction 已含 closure 而重复注入)补齐 closure+中文,
+                # 再补 driver/reporter 定位脚注;不再重复 目标/验收标准(静态接力 acceptances=[] 会打印空)。
+                _ctx_body = _task_instruction.rstrip()
+                if "三步缺一不可" not in _ctx_body:
+                    _ctx_body = f"{_ctx_body}\n{_static_relay_closure()}\n{OUTPUT_LANGUAGE_CONSTRAINT}"
                 _rfooter = [
                     "---",
                     "[协作群分工 — driver/reporter bot 负责汇总本群产出,其它成员只提供产出,不重复汇总]",
                     f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}",
                 ]
-                req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)
+                req_kwargs["context"] = f"{_ctx_body}\n" + "\n".join(_rfooter)
             else:
                 # 非接力协作群:保留原 [task-execute] reporter/目标/指令/验收/任务上下文/回投体验收信封。
                 req_kwargs["context"] = (
