@@ -18,6 +18,25 @@ class NotifyRequest(BaseModel):
     user_ids: Optional[list[str]] = Field(default=None, description="通知目标用户 ID 列表")
 
 
+class EngineProperties(BaseModel):
+    """引擎特有参数配置。
+
+    每个引擎级开关都必须在此声明为显式具名字段（非开放 bag），确保契约有版本、
+    有校验、随变更一并评审。当前唯一字段：
+
+    - ``reuse_session``（aicoding agentTurn）是否复用已有会话：默认 True 复用；
+      False=每次触发新开一个会话。
+
+    消费方：corp aicoding 引擎（``corp/engines/aicoding``，仅在内部全量 checkout，
+    不在 GitHub 社区版内）。社区版引擎（openclaw / claude_code）不读取本对象——
+    这是显式 no-op-by-design，而非静默丢弃（详见 ``plugin_api/cron/README.md``）。
+    """
+    reuse_session: Optional[bool] = Field(
+        default=None,
+        description="（aicoding agentTurn）是否复用已有会话：默认 True 复用；False=每次触发新开会话",
+    )
+
+
 class CreateTaskRequest(BaseModel):
     """创建任务请求（HTTP）"""
     name: str = Field(..., description="任务名称")
@@ -32,6 +51,10 @@ class CreateTaskRequest(BaseModel):
     runtime: Optional[str] = Field(default=None, description="执行运行的 runtime，透传给 aicoding 创建会话时使用")
     kind: Optional[str] = Field(default=None, description="任务类型，如autoInitiate、agentTurn等，不指定时由引擎根据命令内容自动检测")
     append_message: Optional[str] = Field(default=None, description="autoInitiate任务的补充说明，执行时拼接在发起消息末尾")
+    engine_properties: Optional[EngineProperties] = Field(
+        default=None,
+        description="引擎专属属性，仅由对应引擎处理；例如 aicoding agentTurn 的 reuse_session（是否复用已有会话）",
+    )
     notify: Optional[NotifyRequest] = Field(default=None, description="通知配置")
 
 
@@ -51,6 +74,10 @@ class UpdateTaskRequest(BaseModel):
     timeout_secs: Optional[int] = Field(default=None, description="任务执行超时时间（秒）")
     model: Optional[str] = Field(default=None, description="执行任务的AI模型")
     runtime: Optional[str] = Field(default=None, description="执行运行的 runtime")
+    engine_properties: Optional[EngineProperties] = Field(
+        default=None,
+        description="引擎专属属性，仅由对应引擎处理；更新时整体替换该 bag",
+    )
     notify: Optional[NotifyUpdateRequest] = Field(default=None, description="通知配置（支持部分更新）")
 
 
@@ -66,6 +93,7 @@ class RunSingleAutoInitiateRequest(BaseModel):
 
 __all__ = [
     "NotifyRequest",
+    "EngineProperties",
     "CreateTaskRequest",
     "NotifyUpdateRequest",
     "UpdateTaskRequest",
