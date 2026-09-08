@@ -792,10 +792,10 @@ class TaskExecutor(TaskExecutorBbsMixin):
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
             if str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群(static_plan):## 本群任务 正文(含 step1/step2/step3)已具备。但真正多 bot
+                # 接力协作群(static_plan):## 本群任务 正文(承接/执行/gap交接三步)已具备。但真正多 bot
                 # 协作群的 task_instruction 由 engine 直取 raw metadata.instruction,未走 format_execute,
-                # 缺 _static_relay_closure(step1→step2→step3 硬约束)+ 中文输出约束——导致协作群 bot 塌缩
-                # 只做 step2、跳过 step1 接自/step3 gap 与派发。此处按需(以 '三步缺一不可' 标记判定,避免
+                # 缺 _static_relay_closure(承接→执行→交接三步硬约束)+ 中文输出约束——导致协作群 bot 塌缩
+                # 只做执行、跳过接力接自/gap与派发。此处按需(以 '三步缺一不可' 标记判定,避免
                 # singlebot_2_group 的 task_instruction 已含 closure 而重复注入)补齐 closure+中文,
                 # 再补 driver/reporter 定位脚注;不再重复 目标/验收标准(静态接力 acceptances=[] 会打印空)。
                 _ctx_body = _task_instruction.rstrip()

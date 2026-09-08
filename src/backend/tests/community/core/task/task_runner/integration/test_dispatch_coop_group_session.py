@@ -126,18 +126,18 @@ def test_form_coop_group_relay_footer_only_reporter_no_duplicate_protocol():
 
 def test_form_coop_group_relay_appends_closure_for_raw_instruction():
     """# 真正多 bot 协作群(static_plan):task_instruction 由 engine 直取 raw metadata.instruction
-    (未走 format_execute,无 _static_relay_closure/中文约束),form_coop_group 按需补 step1→step2→step3
-    硬约束 + 中文约束,避免协作群 bot 塌缩只做 step2、跳过 step1 接自/step3 gap 与派发。"""
+    (未走 format_execute,无 _static_relay_closure/中文约束),form_coop_group 按需补承接→执行→交接
+    三步硬约束 + 中文约束,避免协作群 bot 塌缩只做执行、跳过接力接自/gap与派发。"""
     bcs = _Bcs()
     fmt = PromptFormatterImpl()
     raw_relay = (
         "# 接自:营销Bot(营销Bot 执行完计算 gap 后规划的下一步任务=商场与平台侧评审,其交付=完整营销方案见上方\"## 上游产出正文\")\n"
         "## 群组成\n- 商场运营Bot(driver/总结者)\n- 线上平台Bot\n"
         "## 上游产出正文\n营销方案:新客体验券+护理套餐+会员机制。\n"
-        "## 本群任务\n【接力执行·三步闭环】\n"
-        "step1 接力上下文:接自营销Bot,承接评审任务。职责边界:给修订条件,默认不打回。\n"
-        "step2 执行产出:逐项给修订条件——商场:展位报批;平台:券有效期明示。\n"
-        "step3 gap 与交接:对照合规计算 gap,定下一步任务=利润核算,经搜推命中店主Bot,派发执行。\n"
+        "## 本群任务\n【接力执行】\n"
+        "接力上下文:接自营销Bot,承接评审任务。职责边界:给修订条件,默认不打回。\n"
+        "执行产出:逐项给修订条件——商场:展位报批;平台:券有效期明示。\n"
+        "gap与交接:对照合规计算 gap,定下一步任务=利润核算,经搜推命中店主Bot,派发执行。\n"
     )
     exe = TaskExecutor(bot=None, bcs=bcs, formatter=fmt, context=_Ctx(), sink=None,
                        poller=_Poller(), identity_resolver=_DoubleBcsBotIdentityResolver())
@@ -146,7 +146,7 @@ def test_form_coop_group_relay_appends_closure_for_raw_instruction():
         extend_props={"manager_bot_id": "mgr", "loop_task_id": "t1::n1", "task_instruction": raw_relay},
     )))
     ctx = bcs.created[0].context
-    # raw 指令(无 closure)按需补 step1→step2→step3 硬约束 + 中文约束
+    # raw 指令(无 closure)按需补承接→执行→交接三步硬约束 + 中文约束
     assert "三步缺一不可" in ctx
     assert "获取上方最新统一上下文" in ctx and "按问题智能匹配能力" in ctx
     assert "必须使用中文" in ctx

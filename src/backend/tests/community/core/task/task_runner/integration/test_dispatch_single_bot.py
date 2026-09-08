@@ -264,9 +264,10 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
     # 注入执行闭环(禁联网 + 平台统一回收 + 接力执行),无 mock/演示字样
     assert "执行约束" in s and "平台统一回收" in s and "无需你主动调用上报接口" in s
     assert "mock" not in s and "演示" not in s
-    # 强制 step1→step2→step3 顺序标注产出,三步缺一不可
-    assert "step1" in s and "step2" in s and "step3" in s
+    # 强制承接→执行→交接三步顺序,三步缺一不可;回复不得标 step 编号
     assert "三步缺一不可" in s
+    assert "接力上下文" in s and "执行产出" in s and "gap与交接" in s
+    assert "step1" not in s and "step2" not in s and "step3" not in s
     assert "获取上方最新统一上下文" in s and "按问题智能匹配能力" in s
     # 中文输出约束
     assert "必须使用中文" in s
