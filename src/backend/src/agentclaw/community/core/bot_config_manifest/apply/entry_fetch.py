@@ -468,7 +468,7 @@ class EntryFetcher:
         self,
         ctx: "FetchContext",
         *,
-        entry: "Mapping[str, Any]",
+        entry: Mapping[str, Any],
         category: str,
         entry_identity: Optional[str] = None,
     ) -> "FetchedEntry | GitEntrySource":
@@ -507,7 +507,7 @@ class EntryFetcher:
 
         keep_last = entry.get("on_fetch_failure", "keep_last") == "keep_last"
         name: Optional[str] = None
-        raw: Optional["Mapping[str, Any]"] = None
+        raw: Optional[Mapping[str, Any]] = None
 
         if isinstance(entry.get("from"), str):
             name = entry["from"]
@@ -778,7 +778,7 @@ class EntryFetcher:
 
 
 def declared_protocol(
-    ctx: "FetchContext", entry: "Mapping[str, Any]"
+    ctx: "FetchContext", entry: Mapping[str, Any]
 ) -> Optional[SourceKind]:
     """Which protocol :meth:`EntryFetcher.fetch_declared` will take, **without
     fetching anything**.

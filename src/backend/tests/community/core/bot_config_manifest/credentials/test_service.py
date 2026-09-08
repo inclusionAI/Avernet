@@ -410,7 +410,12 @@ def test_an_aksk_binding_signs_the_request_and_never_presents_the_key(service):
     target = "https://artifacts.example-corp.com/tools/rg"
     headers = service.binding(name="oss-artifacts").headers_for(target)
 
-    assert set(headers) == {"Authorization", "X-Amz-Date"}
+    # Presence, not an exact set: the signer decides which headers its own
+    # signature covers, and an equality here would pin today's list and block
+    # the day it legitimately grows — which is precisely what it did for
+    # ``x-amz-content-sha256``. The exact set is not this test's subject; what
+    # travels and what does not is.
+    assert {"authorization", "x-amz-date"} <= {n.lower() for n in headers}
     joined = " ".join(headers.values())
     assert _SK not in joined
     assert _AK in joined  # the id is public by design; the secret key is not
@@ -472,3 +477,21 @@ def test_the_prefix_boundary_applies_to_a_signing_credential_too(service):
     ):
         with pytest.raises(PrefixAuthorizationError, match="oss-artifacts"):
             binding.reauthorize(outside)
+
+
+def test_the_signature_carries_every_header_s3_requires(service):
+    """`x-amz-content-sha256` is mandatory on an S3 SigV4 request.
+
+    The generic `SigV4Auth` does not emit it, and an allowlist over the
+    signer's output would drop it — either way the request fails as an opaque
+    403 with nothing pointing at the cause. A signature covers a specific set
+    of headers, so presenting a subset is not a weaker request, it is an
+    invalid one; the signer is the authority on what its own signature needs.
+    """
+    _put_aksk(service)
+    headers = service.binding(name="oss-artifacts").headers_for(
+        "https://artifacts.example-corp.com/tools/rg"
+    )
+    lowered = {name.lower() for name in headers}
+    assert {"authorization", "x-amz-date", "x-amz-content-sha256"} <= lowered
+    assert _SK not in " ".join(headers.values())

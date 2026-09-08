@@ -24,7 +24,7 @@ message naming the replacement.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from agentclaw.community.core.bot_config_manifest.support_matrix import SourceKind
 
@@ -86,7 +86,25 @@ class SourceDecl:
     ref: str | None = None
     #: git only — the part of the repository's tree this declaration
     #: addresses. Composes with an entry's own ``subpath`` (source's first,
-    #: then the entry's), which is what lets one source serve many entries.
+    #: then the entry's), which is what lets one source serve many entries::
+    #:
+    #:     sources:
+    #:       content:
+    #:         protocol: git
+    #:         url: https://code.example.com/team/content.git
+    #:         ref: v1.2.0
+    #:         subpath: kb          # ← this field
+    #:     manifest:
+    #:       resources:
+    #:         - path: data/faq.csv
+    #:           from: content
+    #:           subpath: faq.csv   # ← composes to "kb/faq.csv"
+    #:         - path: data/prices/
+    #:           from: content
+    #:           subpath: prices    # ← composes to "kb/prices", a whole subtree
+    #:
+    #: Both entries read one checkout of one commit: the composition changes
+    #: which path is read out of the tree, never which tree is fetched.
     subpath: str | None = None
     #: The **name** of a stored credential. Never a value — the manifest has no
     #: vocabulary for one, at any depth.
@@ -113,9 +131,15 @@ class SourceViolation:
 
 
 def parse_source(
-    raw: Any,
+    raw: object,
 ) -> tuple[SourceDecl | None, tuple[SourceViolation, ...]]:
     """Read one source declaration. Returns the model, or ``None`` and reasons.
+
+    ``raw`` is ``object`` rather than a mapping type, and rather than ``Any``:
+    it is whatever ``yaml.safe_load`` produced at that position in a
+    caller-authored document — a string, a list, ``None``, anything. ``Any``
+    would silence the checker; ``object`` makes the narrowing below mandatory,
+    which is exactly the contract this function has with its callers.
 
     Every problem that can be found is found — the whole document's violations
     are answered at once, so a caller fixes their source in one pass rather
@@ -127,6 +151,7 @@ def parse_source(
 
     def add(suffix: str, code: str, message: str) -> None:
         violations.append(SourceViolation(suffix, code, message))
+
 
     if not isinstance(raw, Mapping):
         add("", "invalid_source", "a source must be a mapping")
@@ -225,7 +250,9 @@ def parse_source(
     )
 
 
-def _parse_protocol(raw: Mapping[str, Any], add: Any) -> SourceKind | None:
+def _parse_protocol(
+    raw: Mapping[str, Any], add: Callable[[str, str, str], None]
+) -> SourceKind | None:
     """``protocol:``, or the message that names what to write instead."""
     declared = raw.get("protocol")
     if declared is None:

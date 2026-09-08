@@ -35,11 +35,6 @@ DEFAULT_REGION = "us-east-1"
 #: store, which is the whole of what this build signs for.
 _SERVICE = "s3"
 
-#: Headers the signer produces and this module returns. Named rather than
-#: "whatever botocore added", so a future botocore that starts adding a header
-#: we did not intend to present cannot slip it into the request unnoticed.
-_SIGNED_HEADERS = ("Authorization", "X-Amz-Date", "X-Amz-Security-Token")
-
 
 def sign_headers(
     *,
@@ -67,23 +62,32 @@ def sign_headers(
         method: The HTTP method being signed. The fetcher issues ``GET``.
 
     Returns:
-        Only the headers the signature actually needs.
+        Every header the signature covers — ``Authorization``, ``X-Amz-Date``
+        and ``X-Amz-Content-SHA256`` — to be presented together.
     """
     # Imported at call time: botocore is a heavy import, and a module-scope
     # import would pay it on every process that touches the credentials
     # package — including the ``PUT`` validator, which never signs anything.
-    from botocore.auth import SigV4Auth
+    #
+    # ``S3SigV4Auth``, not the generic ``SigV4Auth``: S3 requires
+    # ``x-amz-content-sha256`` on every SigV4 request, and only the S3 variant
+    # emits it. The generic one produces a signature AWS S3 rejects.
+    from botocore.auth import S3SigV4Auth
     from botocore.awsrequest import AWSRequest
     from botocore.credentials import Credentials
 
     request = AWSRequest(method=method, url=url, headers={})
-    SigV4Auth(
+    S3SigV4Auth(
         Credentials(access_key_id, secret_access_key),
         _SERVICE,
         region or DEFAULT_REGION,
     ).add_auth(request)
-    signed = dict(request.headers)
-    return {name: signed[name] for name in _SIGNED_HEADERS if name in signed}
+    # Everything the signer added, and no allowlist. A signature covers a
+    # specific set of headers; presenting a subset of them is not a weaker
+    # request, it is an invalid one — and it would fail as an opaque 403 with
+    # nothing pointing at the filter that caused it. The signer is the
+    # authority on what its own signature needs.
+    return dict(request.headers)
 
 
 __all__ = ["DEFAULT_REGION", "sign_headers"]
