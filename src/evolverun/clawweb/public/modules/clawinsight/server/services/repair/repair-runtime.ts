@@ -1605,7 +1605,7 @@ type BrowserToolConclusion = {
 const BUSINESS_AUDIT_TOOLS = new Set([
   "antlogs", "baas_read", "baas_write", "arca_read", "arca_write", "ocb_read", "ocb_write",
 ]);
-const OWNER_BROWSER_RELAY_TOOLS = new Set(["arca_read", "arca_write", "ocb_read", "ocb_write"]);
+const OWNER_BROWSER_RELAY_TOOLS = new Set(["ocb_read", "ocb_write"]);
 
 function requiresOwnerBrowserRelay(call: RepairToolCall): boolean {
   return call.status === "pending" && OWNER_BROWSER_RELAY_TOOLS.has(call.toolName);
@@ -3302,7 +3302,7 @@ export class RepairTaskService {
           expectedStatuses: ["created", "dispatched", "running"],
           status: "interrupted",
           errorCode: "REPAIR_CONTEXT_TIMEOUT",
-          errorMessage: "等待浏览器补充运行态或 OCB context 超时，可恢复",
+          errorMessage: "等待浏览器补充 OCB context 超时，可恢复",
           retryable: true,
           output: body.output && typeof body.output === "object" && !Array.isArray(body.output)
             ? body.output as Record<string, unknown> : undefined,
@@ -3462,16 +3462,14 @@ export class RepairTaskService {
     delete request.clientRequestId;
     delete request.purpose;
     if (context.target.provider === "arca") {
-      const created = await this.beginToolCall(identity, {
+      return this.runServerTool(identity, {
         clientRequestId: requestId,
         toolName: "arca_read",
         operation: input.operation,
         purpose: input.purpose,
         request,
         isWrite: false,
-        deadlineAt: this.now() + this.deps.config.contextWaitSeconds,
-      });
-      return publicToolCall(created.call);
+      }, () => this.deps.runtimeTool.inspect(context, request as RepairRuntimeInspectInput));
     }
     return this.runServerTool(identity, {
       clientRequestId: requestId,
@@ -3499,7 +3497,7 @@ export class RepairTaskService {
     const requestId = clientRequestId(input.clientRequestId, `baas-action:${randomUUID()}`);
     await this.assertExplicitRetry(task.task_id, context.stepId, actionId, boolean(input.retry));
     if (context.target.provider === "arca") {
-      const created = await this.beginToolCall(identity, {
+      return this.runServerTool(identity, {
         clientRequestId: requestId,
         toolName: "arca_write",
         operation: `apply_action:${actionId}`,
@@ -3507,9 +3505,7 @@ export class RepairTaskService {
         actionId,
         request: { actionId, retry: boolean(input.retry), planDigest: config.approvedPlan?.artifactDigest },
         isWrite: true,
-        deadlineAt: this.now() + this.deps.config.contextWaitSeconds,
-      });
-      return publicToolCall(created.call);
+      }, () => this.deps.runtimeTool.applyApprovedAction(context, action));
     }
     return this.runServerTool(identity, {
       clientRequestId: requestId,
@@ -3906,64 +3902,6 @@ export class RepairTaskService {
       const requestObject = request && typeof request === "object" && !Array.isArray(request)
         ? request as Record<string, unknown>
         : {};
-      if (claimed.toolName === "arca_read" || claimed.toolName === "arca_write") {
-        if (requestEnvelope.targetVersion == null
-          || requestEnvelope.targetVersion !== config.runtimeTarget.version) {
-          throw new RepairError(
-            409,
-            "repair_runtime_target_changed",
-            "ARCA 运行目标已变化，必须在当前目标上重新发起调用",
-          );
-        }
-        if (config.runtimeTarget.target.provider !== "arca" || !config.runtimeTarget.target.sandboxId) {
-          throw new RepairError(409, "repair_runtime_target_changed", "当前运行目标已不再是可访问的 ARCA sandbox");
-        }
-        const runtimeContext: RepairTaskContext = {
-          schemaVersion: REPAIR_CONTRACT_VERSION,
-          taskId: task.task_id,
-          stepId: claimed.stepId,
-          attempt: config.current.attempt,
-          phase: config.current.phase,
-          issue: config.issue,
-          authorizationScope: config.authorizationScope,
-          authorizationScopeDigest: config.authorizationScopeDigest,
-          target: config.runtimeTarget.target,
-          targetFingerprint: config.runtimeTarget.fingerprint,
-          runtimeTargetVersion: config.runtimeTarget.version,
-        };
-        let runtimeResult: Record<string, unknown>;
-        if (claimed.toolName === "arca_write") {
-          const actionId = claimed.actionId;
-          const plan = await this.loadApprovedPlan(config);
-          const action = actionId ? plan.actions.find((item) => item.actionId === actionId) : null;
-          if (!action || action.type !== "container_command") {
-            repairNotFound("repair_action_not_approved", "ARCA action 不在当前获批方案内");
-          }
-          runtimeResult = await this.deps.runtimeTool.applyApprovedAction(runtimeContext, action, input.authHeaders);
-        } else {
-          if (requestObject.operation !== claimed.operation) {
-            repairValidation("repair_tool_request_mismatch", "ARCA 只读调用与已登记 operation 不一致");
-          }
-          runtimeResult = await this.deps.runtimeTool.inspect(
-            runtimeContext,
-            requestObject as RepairRuntimeInspectInput,
-            input.authHeaders,
-          );
-        }
-        const terminalStatus: RepairToolCallTerminalStatus = claimed.isWrite && runtimeResult.status === "unknown"
-          ? "unknown"
-          : claimed.isWrite && runtimeResult.status === "failed" ? "failed" : "succeeded";
-        const completed = await this.deps.repairRepo.completeToolCall({
-          callId: claimed.callId,
-          executionId: claimed.executionId,
-          authorizationScopeDigest: claimed.authorizationScopeDigest,
-          leaseOwner,
-          status: terminalStatus,
-          result: runtimeResult,
-          now: this.now(),
-        });
-        return browserToolCall(completed!.call, { canViewDetails: true, canExecute: true });
-      }
       if (claimed.toolName !== "ocb_write" || !claimed.isWrite || claimed.operation !== "restart_bot") {
         throw new RepairError(
           409,

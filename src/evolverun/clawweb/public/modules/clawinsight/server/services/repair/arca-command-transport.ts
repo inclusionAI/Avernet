@@ -16,7 +16,6 @@ export interface ArcaConnectionProvider {
     sandboxId: string;
     arcaInstanceId?: string;
     ttlSeconds: number;
-    authHeaders: Record<string, string>;
   }): Promise<{ target: string; token: string }>;
 }
 
@@ -97,7 +96,6 @@ export class DirectArcaConnectionProvider implements ArcaConnectionProvider {
     sandboxId: string;
     arcaInstanceId?: string;
     ttlSeconds: number;
-    authHeaders: Record<string, string>;
   }): Promise<{ target: string; token: string }> {
     if (!Number.isSafeInteger(input.ttlSeconds) || input.ttlSeconds < 30 || input.ttlSeconds > 600) {
       repairValidation("invalid_arca_connection_ttl", "ARCA 连接凭据 TTL 必须在 30 到 600 秒之间");
@@ -113,14 +111,6 @@ export class DirectArcaConnectionProvider implements ArcaConnectionProvider {
     const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
     return { target, token: `${header}.${payload}.${signature}` };
   }
-}
-
-function requiredRelayHeader(authHeaders: Record<string, string>, name: string): string {
-  const found = Object.entries(authHeaders).find(([key]) => key.toLowerCase() === name)?.[1]?.trim();
-  if (!found) {
-    throw new RepairError(401, "repair_arca_identity_required", "ARCA 运行态访问需要当前 Owner 登录身份");
-  }
-  return found;
 }
 
 function finiteNumber(value: unknown): number | null {
@@ -188,12 +178,8 @@ export class ArcaCommandTransport {
     sandboxId: string;
     arcaInstanceId?: string;
     command: string;
-    authHeaders: Record<string, string>;
   }): Promise<ArcaCommandResult> {
     const sandboxId = normalizeArcaSandboxId(input.sandboxId);
-    const cookie = requiredRelayHeader(input.authHeaders, "cookie");
-    const userId = requiredRelayHeader(input.authHeaders, "x-user-id");
-    const ownerAuthHeaders = { Cookie: cookie, "x-user-id": userId };
     const connection = validateArcaProxyConnection(
       await this.options.connectionProvider.getConnection({
         environment: input.environment,
@@ -201,7 +187,6 @@ export class ArcaCommandTransport {
         sandboxId,
         arcaInstanceId: input.arcaInstanceId,
         ttlSeconds: this.tokenTtlSeconds,
-        authHeaders: ownerAuthHeaders,
       }),
       sandboxId,
     );
@@ -217,8 +202,6 @@ export class ArcaCommandTransport {
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
-          Cookie: cookie,
-          "x-user-id": userId,
           "x-proxypass-token": connection.token,
           "x-agent-sandbox-id": sandboxId,
         },
@@ -227,7 +210,7 @@ export class ArcaCommandTransport {
       });
       const body = await response.json().catch(() => ({})) as ArcaTerminalResponse;
       if (body.buserviceErrorCode === "USER_NOT_LOGIN") {
-        throw new RepairError(401, "repair_arca_identity_required", "ARCA 运行态访问需要当前 Owner 登录身份");
+        throw new RepairError(502, "repair_arca_proxy_rejected", "ARCA 代理拒绝了短期连接凭据");
       }
       if (response.status === 401 || response.status === 403) {
         throw new RepairError(502, "repair_arca_proxy_rejected", "ARCA 代理拒绝了短期连接凭据");
