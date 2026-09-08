@@ -788,15 +788,14 @@ class TaskExecutor(TaskExecutorBbsMixin):
         _task_instruction = str(gf.extend_props.get("task_instruction") or "")
         if _task_objective or _task_instruction or _loop_task_id:
             if str(_task_instruction).lstrip().startswith("# 接自"):
-                # 接力协作群:任务正文 + 回投协议(回调地址/请求体/自检/阶段闭环)已由 format_execute
-                # 的 # 接自 分支完整注入(_skill_report_instruction);此处只补"上报者定位"这一条
-                # group 语义脚注,不再重复 目标/验收标准/任务上下文/回投请求体——避免与上方权威协议
-                # 重复且冲突(静态接力 Goal.acceptances=[] 会打印空 验收标准:[],末尾偏置误导 bot 跳过
-                # 验收;旧 回投请求体 acceptance_result:{} 与权威 acceptance_result:
-                # {verdict,acceptances_metric,gaps} 不一致,导致协议形态记错)。
+                # 接力协作群(static_plan):任务正文 + 执行闭环(禁联网/平台回收/接力交接)已由
+                # format_execute 的 # 接自 分支注入(_static_relay_closure,不含 HTTP 上报协议——
+                # static_plan 节点结果由平台统一回收,不让 bot 真去调 /callback/report);此处只补
+                # "driver/reporter 定位"这一条 group 语义脚注,不再重复 目标/验收标准/任务上下文——
+                # 静态接力 Goal.acceptances=[] 会打印空 验收标准:[],末尾偏置误导 bot 跳过验收。
                 _rfooter = [
                     "---",
-                    "[协作群回投协议 — 仅 driver/reporter bot 上报回投,其它成员只提供产出,不得重复回调]",
+                    "[协作群分工 — driver/reporter bot 负责汇总本群产出,其它成员只提供产出,不重复汇总]",
                     f"reporter_bot_id={_reporter_bot_id}; reporter_role={_reporter_role}",
                 ]
                 req_kwargs["context"] = f"{_task_instruction.rstrip()}\n" + "\n".join(_rfooter)

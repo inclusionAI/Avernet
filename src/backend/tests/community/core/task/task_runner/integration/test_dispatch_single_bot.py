@@ -244,7 +244,7 @@ def test_prompt_formatter_skill_report_on_uses_http_post():
     assert '"acceptances_metric"' in s
 
 def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
-    """# 接自 接力分支:交接正文 + skill 回投协议(回调地址/请求体/自检/阶段闭环)+ 中文输出约束。"""
+    """# 接自 接力分支(static_plan):交接正文 + 执行闭环(禁联网/平台回收/接力交接,不含 HTTP 上报协议)+ 中文输出约束。"""
     from agentclaw.community.core.task.domain.models import (
         Goal, Metadata, Context, TaskSpec, TaskNode, RuntimeInfo, Status,
     )
@@ -258,10 +258,12 @@ def test_prompt_formatter_relay_appends_protocol_and_chinese_constraint():
         "skill_report_enabled": True, "backend": "http://b", "task_id": "t1", "node_id": "n1",
     }, n)
     assert "# 接自:上游Bot" in s and "执行投放" in s
-    # 接力分支仍注入权威回投协议(回调地址/请求体/自检)
-    assert "回调地址" in s and "callback/report" in s
-    assert '"task_id": "t1"' in s and '"node_id": "n1"' in s
-    assert '"verdict": "DONE"' in s and '"acceptances_metric"' in s
+    # static_plan 接力分支不注入 HTTP 上报协议(结果由平台统一回收,不让 bot 真去调上报接口)
+    assert "回调地址" not in s and "callback/report" not in s
+    assert '"task_id": "t1"' not in s and '"verdict": "DONE"' not in s
+    # 注入执行闭环(禁联网 + 平台统一回收 + 接力执行),无 mock/演示字样
+    assert "执行约束" in s and "平台统一回收" in s and "无需你主动调用上报接口" in s
+    assert "mock" not in s and "演示" not in s
     # 中文输出约束
     assert "必须使用中文" in s
 
