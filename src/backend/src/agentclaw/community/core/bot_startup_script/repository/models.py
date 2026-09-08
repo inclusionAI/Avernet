@@ -97,10 +97,35 @@ class BotStartupScriptModel(Base):
     #: Written by the repository, never by a caller. Hex sha256 is 64 ASCII
     #: characters, and the tenant is carried alongside rather than hashed in, so
     #: the isolation boundary stays visible in the key itself.
+    #:
+    #: Declared 256 to match the deployed column, which is ``varchar(256)`` --
+    #: wider than the 64 characters that can ever be written here. The width is
+    #: mirrored rather than tightened because this declaration's job is to say
+    #: what the table *is*; the value's real width is stated above, and the
+    #: repository is what holds it to 64 by only ever writing a hex digest.
     script_key = Column(
-        String(64), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
+        String(256), nullable=False, comment="唯一键代理：sha256(env|entity_id|bot_id)"
     )
 
+    # ``DateTime`` here, ``timestamp`` in the DDL. Deliberate, and the same
+    # split apply_models.py states for the same reason.
+    #
+    # It cannot disagree with the deployed column, because it never describes
+    # it: the OceanBase schema is operator-provisioned (``create_schema:
+    # false``), so the .sql file creates these and the ORM emits no DDL there.
+    # For reads and writes the declaration makes no difference either --
+    # SQLAlchemy's ``TIMESTAMP`` is a subclass of ``DateTime``, both bind and
+    # return ``datetime``, and the driver hands back a ``datetime`` for a
+    # TIMESTAMP column whichever is declared.
+    #
+    # Where it is NOT a no-op, and this is the part worth knowing: a community
+    # deployment on MySQL with ``create_schema: true`` bootstraps through
+    # ``create_all(mysql=True)``, which emits DATETIME from this declaration.
+    # That gap is repo-wide rather than this table's -- every model here is
+    # declared this way -- and switching this one column would only half-close
+    # it, since ``default=``/``onupdate=`` are client-side constructs: the
+    # bootstrap emits neither DEFAULT CURRENT_TIMESTAMP nor ON UPDATE
+    # CURRENT_TIMESTAMP for any table here, whatever the type says.
     gmt_create = Column(
         DateTime, default=func.now(), nullable=False, comment="创建时间"
     )
@@ -112,11 +137,19 @@ class BotStartupScriptModel(Base):
         comment="修改时间",
     )
 
+    # ``_v2`` because the plain name is occupied in the deployed environments
+    # by a key on (avernet_tenant, env, entity_id, bot_id) -- this key's name
+    # carrying the pre-surrogate design's columns -- which cannot be dropped
+    # there, so the surrogate key is added alongside it. The suffix is not a
+    # second constraint: the two enforce the same logical uniqueness, because
+    # script_key is injective over the three columns it hashes. Declared here
+    # under the name the deployed key actually has, so create_all, the .sql
+    # file and every environment agree on one name.
     __table_args__ = (
         UniqueConstraint(
             "avernet_tenant",
             "script_key",
-            name="uk_tenant_script_key",
+            name="uk_tenant_script_key_v2",
         ),
     )
 
