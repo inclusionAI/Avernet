@@ -15,10 +15,8 @@ from agentclaw.community.core.skills_pool.models import (
 from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupStatus,
 )
-from agentclaw.community.core.skills_pool.runtime import (
-    LegacyMappingApplyRequired,
-    OpenClawSkillsPoolRuntime,
-)
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
+from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
     DeviceAdapterTimeoutError,
@@ -259,6 +257,40 @@ async def test_unknown_apply_failure_never_switches_write_protocol(
     assert [call["path"] for call in transport.calls] == [
         "/api/skills/mappings/apply"
     ]
+
+
+@pytest.mark.asyncio
+async def test_contradictory_apply_envelope_cannot_report_converged() -> None:
+    transport = ApplyTransport()
+
+    async def contradictory(conn_info, method, path, *, body=None, timeout=None):
+        transport.calls.append({"path": path})
+        return {
+            "success": False,
+            "data": {
+                "status": "CONVERGED",
+                "items": [],
+                "issues": [],
+                "evidence": {},
+            },
+        }
+
+    transport.invoke = contradictory
+    runtime = OpenClawSkillsPoolRuntime(
+        resolver=FakeResolver(),
+        adapter_transport=transport,
+        probe_service=FakeProbe(),
+    )
+
+    result = await runtime.apply_mappings(
+        bot_id="bot-1",
+        user_id="owner-1",
+        engine="openclaw",
+        mappings=[],
+    )
+
+    assert result.status is MappingProjectionStatus.PENDING
+    assert result.evidence["reason"] == "contradictory_runtime_response"
 
 
 @pytest.mark.asyncio

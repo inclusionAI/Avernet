@@ -29,7 +29,7 @@ from engine.community.plugins.claude_code.symlinks import LocalSkillSymlinks
 from engine.community.plugins.skills_pool.layout_quarantine import cleanup_quarantine
 from engine.community.plugins.skills_pool.mapping_contract import (
     ResolvedMappingPayload,
-    apply_logical_mapping_payload,
+    apply_logical_mapping_request,
     resolve_mapping_payload,
 )
 
@@ -168,19 +168,12 @@ class _SkillsPortMixin:
         return data
 
     async def apply_pool_mappings(self, params: dict[str, Any]) -> dict[str, Any]:
-        source_layout = MappingSourceLayout(
-            params.get("source_layout", MappingSourceLayout.POOL.value)
-        )
-        result = await asyncio.to_thread(
-            apply_logical_mapping_payload,
+        return await apply_logical_mapping_request(
+            params=params,
             engine="claude_code",
-            source_layout=source_layout,
-            mappings_payload=params.get("mappings", []),
-            retired_payload=params.get("retired_mappings", []),
             additional_retirement_roots=claude_code_retirement_active_roots(),
             center_is_mounted=self._skills_center_is_mounted,
         )
-        return result.to_data()
 
     async def verify_pool_mappings(
         self,

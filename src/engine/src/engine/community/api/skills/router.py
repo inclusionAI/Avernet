@@ -74,6 +74,7 @@ from engine.community.core.skills.models import (
 from engine.community.core.skills.models import (
     PoolQuarantineCleanupRequest as PoolQuarantineCleanupCommand,
 )
+from engine.community.core.skills.protocol import SkillsService
 
 router = APIRouter(prefix="/api/skills", tags=["skills"])
 log = logging.getLogger("api-skills")
@@ -124,7 +125,8 @@ async def apply_runtime_skill_mappings(
 
     plugin = _skills_plugin()
     apply = getattr(plugin, "apply_pool_mappings", None)
-    if apply is None:
+    inherited_stub = getattr(type(plugin), "apply_pool_mappings", None)
+    if apply is None or inherited_stub is SkillsService.apply_pool_mappings:
         raise HTTPException(
             status_code=501,
             detail={

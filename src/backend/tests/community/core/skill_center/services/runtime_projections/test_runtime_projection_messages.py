@@ -40,7 +40,7 @@ class _MappingResultRuntime:
         )
 
     async def apply_mappings(self, **_kwargs):
-        from agentclaw.community.core.skills_pool.runtime import (
+        from agentclaw.community.core.skills_pool.ports import (
             LegacyMappingApplyRequired,
         )
 

@@ -22,7 +22,7 @@ from agentclaw.community.core.skills_pool.models import (
     RegisteredSkillAsset,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.runtime import LegacyMappingApplyRequired
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     BotSkillLayoutState,
@@ -342,3 +342,27 @@ async def test_missing_logical_item_cannot_report_converged() -> None:
     assert [issue.code for issue in result.issues] == [
         "SKILL_MAPPING_RESULT_INVALID"
     ]
+
+
+@pytest.mark.asyncio
+async def test_aggregate_degraded_status_survives_empty_items() -> None:
+    service = _LegacyRuntimeService()
+    pool = _RecordingPoolRuntime()
+
+    async def aggregate_failure(**kwargs):
+        pool.calls.append(("apply", kwargs))
+        return MappingApplyResult(status=MappingProjectionStatus.DEGRADED)
+
+    pool.apply_mappings = aggregate_failure
+    delivery = SkillRuntimeDelivery(
+        pool_runtime=pool,
+        pool_layouts=_MissingLayoutRepository(),
+    )
+
+    result = await delivery.deliver(
+        plan=_plan(),
+        service_factory=_Factory(service),
+    )
+
+    assert result.status is RuntimeProjectionStatus.DEGRADED
+    assert result.issues[0].code == "SKILL_MAPPING_RUNTIME_UNAVAILABLE"

@@ -33,8 +33,10 @@ from agentclaw.community.core.skills_pool.models import (
     PoolSkillMapping,
     SkillMappingSourceLayout,
 )
-from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
-from agentclaw.community.core.skills_pool.runtime import LegacyMappingApplyRequired
+from agentclaw.community.core.skills_pool.ports import (
+    LegacyMappingApplyRequired,
+    SkillsPoolRuntimeProtocol,
+)
 from agentclaw.community.core.skills_pool.types import (
     BotSkillLayoutScope,
     runtime_uses_pool_paths,
@@ -227,7 +229,11 @@ class SkillRuntimeDelivery:
             severity[item_status] for item_status in item_statuses
         ):
             invalid = True
-        if invalid or MappingProjectionStatus.DEGRADED in item_statuses:
+        if (
+            invalid
+            or applied.status is MappingProjectionStatus.DEGRADED
+            or MappingProjectionStatus.DEGRADED in item_statuses
+        ):
             status = RuntimeProjectionStatus.DEGRADED
         elif (
             applied.status is MappingProjectionStatus.PENDING

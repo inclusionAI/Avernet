@@ -21,6 +21,10 @@ from agentclaw.community.core.skills_pool.quarantine import RuntimeQuarantineCle
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
 
 
+class LegacyMappingApplyRequired(RuntimeError):
+    """The verified target is an older Engine without the daily apply route."""
+
+
 @runtime_checkable
 class SkillsPoolRuntimeProtocol(Protocol):
     """当前运行环境上的探测、切换和 mapping 边界。"""
@@ -100,6 +104,7 @@ class SkillsPoolRuntimeProtocol(Protocol):
 
 
 __all__ = [
+    "LegacyMappingApplyRequired",
     "SkillsPoolRuntimeProtocol",
     "SkillsPoolSkillRepositoryProtocol",
 ]

@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import pytest
+
+from engine.community.core.skills.exceptions import InvalidPoolMappingRequestError
 from engine.community.core.skills.layout_planner import (
     LAYOUT_CONTRACT_VERSION,
     LayoutIdentity,
@@ -120,3 +123,40 @@ def test_empty_intent_does_not_clear_unknown_active_entries(tmp_path: Path) -> N
     assert result.status is MappingProjectionStatus.CONVERGED
     assert user_entry.is_dir()
     assert result.items == ()
+
+
+def test_conflicting_retired_identities_fail_before_filesystem_mutation(
+    tmp_path: Path,
+) -> None:
+    layout = _layout(tmp_path)
+    first_source = layout.legacy_repo / "old/first"
+    second_source = layout.legacy_repo / "old/second"
+    first_source.mkdir(parents=True)
+    second_source.mkdir(parents=True)
+    layout.active_root.mkdir(parents=True, exist_ok=True)
+    target = layout.active_root / "shared-name"
+    target.symlink_to(second_source, target_is_directory=True)
+
+    with pytest.raises(
+        InvalidPoolMappingRequestError, match="duplicate active Skill target"
+    ):
+        apply_logical_mapping_payload(
+            engine="openclaw",
+            source_layout=MappingSourceLayout.LEGACY,
+            mappings_payload=[],
+            retired_payload=[
+                {
+                    "corpus": "repo",
+                    "relative_path": "old/first",
+                    "link_name": "shared-name",
+                },
+                {
+                    "corpus": "repo",
+                    "relative_path": "old/second",
+                    "link_name": "shared-name",
+                },
+            ],
+            home=tmp_path,
+        )
+
+    assert target.readlink() == second_source

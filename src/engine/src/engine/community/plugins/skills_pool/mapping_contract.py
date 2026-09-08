@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -117,7 +118,11 @@ def apply_logical_mapping_payload(
         for item in center_items:
             failure_code: str | None = None
             if mount.status is not CenterMountStatus.READY:
-                failure_code = "CENTER_MOUNT_NOT_READY"
+                failure_code = (
+                    "CENTER_MOUNT_NOT_READY"
+                    if mount.status is CenterMountStatus.NOT_READY
+                    else "CENTER_MOUNT_UNAVAILABLE"
+                )
             else:
                 inspection = inspect_center_version(
                     layout.pool_center,
@@ -146,12 +151,12 @@ def apply_logical_mapping_payload(
         for raw, physical in zip(mappings, desired_resolved.mappings, strict=True)
         if _logical_key(raw) not in pending_center_keys
     ]
-    retired_by_name = {str(raw["link_name"]): raw for raw in retired}
     retired_pairs = [
-        (retired_by_name[Path(physical.target).name], physical)
-        for physical in retired_resolved.mappings
-        if Path(physical.target).name in retired_by_name
-        and Path(physical.target).name not in pending_center_names
+        (retired[index % len(retired)], physical)
+        for index, physical in enumerate(retired_resolved.mappings)
+        if retired
+        and str(retired[index % len(retired)]["link_name"])
+        not in pending_center_names
     ]
     published = publish_pool_mappings(
         mappings=[physical for _, physical in desired_pairs],
@@ -162,21 +167,25 @@ def apply_logical_mapping_payload(
         additional_retirement_roots=additional_retirement_roots,
         apply_mode=MappingApplyMode.BEST_EFFORT,
     )
-    desired_by_target = {
-        physical.target: {key: str(value) for key, value in raw.items()}
+    desired_by_location = {
+        (physical.target, physical.source): {
+            key: str(value) for key, value in raw.items()
+        }
         for raw, physical in desired_pairs
     }
-    retired_by_target = {
-        physical.target: {key: str(value) for key, value in raw.items()}
+    retired_by_location = {
+        (physical.target, physical.source): {
+            key: str(value) for key, value in raw.items()
+        }
         for raw, physical in retired_pairs
     }
     logical_items: list[MappingItemResult] = [*center_failures]
     runtime_issues: list[MappingItemResult] = []
     for item in published.items:
         logical = (
-            retired_by_target.get(item.target)
+            retired_by_location.get((item.target, item.source or ""))
             if item.action == "RETIRE"
-            else desired_by_target.get(item.target)
+            else desired_by_location.get((item.target, item.source or ""))
         )
         enriched = MappingItemResult(
             target=item.target,
@@ -205,6 +214,29 @@ def apply_logical_mapping_payload(
             "center_pending": len(center_failures),
         },
     )
+
+
+async def apply_logical_mapping_request(
+    *,
+    params: dict[str, object],
+    engine: str,
+    additional_retirement_roots: Sequence[Path] = (),
+    center_is_mounted: Callable[[Path], bool] = os.path.ismount,
+) -> dict[str, object]:
+    """Run the shared filesystem contract without blocking the HTTP event loop."""
+
+    result = await asyncio.to_thread(
+        apply_logical_mapping_payload,
+        engine=engine,
+        source_layout=MappingSourceLayout(
+            str(params.get("source_layout", MappingSourceLayout.POOL.value))
+        ),
+        mappings_payload=params.get("mappings", []),
+        retired_payload=params.get("retired_mappings", []),
+        additional_retirement_roots=additional_retirement_roots,
+        center_is_mounted=center_is_mounted,
+    )
+    return result.to_data()
 
 
 def _require_mapping_fields(
@@ -387,5 +419,6 @@ def resolve_mapping_payload(
 __all__ = [
     "ResolvedMappingPayload",
     "apply_logical_mapping_payload",
+    "apply_logical_mapping_request",
     "resolve_mapping_payload",
 ]

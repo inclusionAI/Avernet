@@ -751,7 +751,7 @@ class _RuntimePool:
         raise AssertionError("non-Center projection must keep the legacy adapter")
 
     async def apply_mappings(self, **kwargs):
-        from agentclaw.community.core.skills_pool.runtime import (
+        from agentclaw.community.core.skills_pool.ports import (
             LegacyMappingApplyRequired,
         )
 

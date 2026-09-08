@@ -33,6 +33,7 @@ from agentclaw.community.core.skills_pool.quarantine import (
     RuntimeQuarantineCleanupResult,
     RuntimeQuarantineCleanupStatus,
 )
+from agentclaw.community.core.skills_pool.ports import LegacyMappingApplyRequired
 from agentclaw.community.log import get_logger
 from agentclaw.community.plugin_api.device_adapter_transport import (
     DeviceAdapterEndpointNotFoundError,
@@ -40,10 +41,6 @@ from agentclaw.community.plugin_api.device_adapter_transport import (
 )
 
 logger = get_logger()
-
-
-class LegacyMappingApplyRequired(RuntimeError):
-    """The verified target is an older Engine without the daily apply route."""
 
 
 class SkillsPoolRuntime:
@@ -147,6 +144,11 @@ class SkillsPoolRuntime:
             status = MappingProjectionStatus(str(raw_status))
         except ValueError:
             return self._unavailable_apply_result("invalid_runtime_status")
+        success = response.get("success")
+        if not isinstance(success, bool):
+            return self._unavailable_apply_result("invalid_runtime_response")
+        if success is False and status is MappingProjectionStatus.CONVERGED:
+            return self._unavailable_apply_result("contradictory_runtime_response")
         raw_items = data.get("items")
         raw_issues = data.get("issues")
         if not isinstance(raw_items, list) or not isinstance(raw_issues, list):
@@ -179,9 +181,25 @@ class SkillsPoolRuntime:
         if raw_mapping is not None:
             if not isinstance(raw_mapping, dict):
                 return None
+            corpus = raw_mapping.get("corpus")
+            expected_fields = (
+                {"corpus", "skill_uuid", "sc_version_number", "link_name"}
+                if corpus == "center"
+                else {"corpus", "relative_path", "link_name"}
+            )
+            if (
+                corpus not in {"local", "repo", "center"}
+                or set(raw_mapping) != expected_fields
+                or any(
+                    not isinstance(raw_mapping[field], str)
+                    or not raw_mapping[field]
+                    for field in expected_fields
+                )
+            ):
+                return None
             try:
                 mapping = PoolSkillMapping(
-                    corpus=str(raw_mapping["corpus"]),
+                    corpus=str(corpus),
                     relative_path=(
                         str(raw_mapping["relative_path"])
                         if raw_mapping.get("relative_path") is not None
@@ -201,6 +219,8 @@ class SkillsPoolRuntime:
                 )
                 mapping.to_dict()
             except (KeyError, TypeError, ValueError):
+                return None
+            if any(not value for value in mapping.to_dict().values()):
                 return None
         try:
             status = MappingProjectionStatus(str(raw["status"]))
@@ -703,7 +723,6 @@ OpenClawSkillsPoolRuntime = SkillsPoolRuntime
 
 
 __all__ = [
-    "LegacyMappingApplyRequired",
     "OpenClawSkillsPoolRuntime",
     "SkillsPoolRuntime",
 ]

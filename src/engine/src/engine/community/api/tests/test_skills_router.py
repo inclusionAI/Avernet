@@ -53,6 +53,7 @@ from engine.community.core.skills.models import (
     SymlinkItem,
     SyncSymlinksResult,
 )
+from engine.community.core.skills.protocol import SkillsService
 from engine.community.manager import EngineManager
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
@@ -703,6 +704,23 @@ def test_daily_mapping_apply_rejects_missing_plugin_capability_before_write(
     assert response.status_code == 501
     assert response.json()["detail"]["code"] == "SKILL_MAPPINGS_APPLY_UNSUPPORTED"
     publish.assert_not_awaited()
+
+
+def test_daily_mapping_apply_rejects_inherited_protocol_stub_before_write(
+    client, rich_manager
+):
+    class LegacySkills(SkillsService):
+        pass
+
+    rich_manager._active_engine._skills = LegacySkills()
+
+    response = client.post(
+        "/api/skills/mappings/apply",
+        json={"mappings": [], "retired_mappings": [], "source_layout": "legacy"},
+    )
+
+    assert response.status_code == 501
+    assert response.json()["detail"]["code"] == "SKILL_MAPPINGS_APPLY_UNSUPPORTED"
 
 
 def test_daily_mapping_apply_rejects_physical_wire_shape(client, rich_manager):
