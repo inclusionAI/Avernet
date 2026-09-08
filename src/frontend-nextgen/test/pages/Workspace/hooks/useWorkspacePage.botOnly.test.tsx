@@ -46,6 +46,34 @@ it('bot-only 单聊 URL 恢复用户身份并展开对应 Bot', async () => {
   expect(sessionService.getSessionDetail).not.toHaveBeenCalled();
 });
 
+it('已展开的好友 bot：URL 回写触发回填时不得把分区归属覆盖成 mine（否则好友行折叠、会话列表不可见）', async () => {
+  // 复现链路：点击好友 bot（分区 'friend'）→ 自动选中首会话 → useChatUrlSync 写回 ?bot=&session=
+  // → URL→Store effect 因 botParam 变化重跑。旧实现无条件 setBotExpandedSection(bot,'mine')
+  // → 好友分区 expanded 判定（需 ==='friend'）失败 → 行折叠、已加载的会话列表消失。
+  mockedUseSearchParams.mockReturnValue([
+    new URLSearchParams('tab=chat&bot=fr:9&session=s1'),
+    jest.fn(),
+  ] as unknown as ReturnType<typeof useSearchParams>);
+  useWorkspaceStore.setState({
+    identities: [{ id: 'human_2088', kind: 'user', displayName: '我', online: true }],
+    activeIdentityId: 'human_2088',
+    view: 'chat',
+    expandedBotIds: { 'fr:9': true },
+    expandedBotSectionKey: { 'fr:9': 'friend' },
+  });
+
+  const { rerender } = renderHook(() => useWorkspacePage());
+  await act(async () => Promise.resolve());
+  // 模拟 URL 回写后的重渲染（searchParams 变化 → effect 重跑）。
+  rerender();
+  await act(async () => Promise.resolve());
+
+  const state = useWorkspaceStore.getState();
+  expect(state.expandedBotIds['fr:9']).toBe(true);
+  expect(state.expandedBotSectionKey['fr:9']).toBe('friend');
+  expect(state.selectedBotSessionId).toBe('s1');
+});
+
 it('协作群外链 session= 仍会把身份切回用户并选中群/会话（保留邀请/外链直达行为）', async () => {
   mockedUseSearchParams.mockReturnValue([
     new URLSearchParams('tab=group&group=g1&session=s1'),

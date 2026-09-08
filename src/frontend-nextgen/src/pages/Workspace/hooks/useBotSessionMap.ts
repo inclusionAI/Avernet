@@ -2,10 +2,11 @@ import { appendUnique } from '@/services/workspace/botSessionHelpers';
 import type { BotChatSessionView, ChatBotView } from '@/services/workspace/botSessionService';
 import { BOT_SESSION_PAGE_SIZE, botSessionService } from '@/services/workspace/botSessionService';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 
 import type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
 import { errorBotPageMeta, hasMoreForPage, successBotPageMeta } from './useBotSessionMap.utils';
+import { useExpandedBotLoader } from './useExpandedBotLoader';
 export type { BotSessionPageMeta, UseBotSessionMapResult } from './useBotSessionMap.types';
 
 /** 以 botId 键控缓存各 bot 会话；首屏及追加均使用 10 条，身份切换清缓存。 */
@@ -78,19 +79,8 @@ export function useBotSessionMap(
     [syncLoadingState],
   );
 
-  useEffect(() => {
-    if (!activeIdentityId) return;
-    for (const bot of chatBots) {
-      if (
-        !bot.chatable ||
-        bot.isAgentCodingBot ||
-        !expandedBotIds.includes(bot.botId) ||
-        loadedRef.current.has(bot.botId)
-      )
-        continue;
-      void loadFirstPage(bot, activeIdentityId);
-    }
-  }, [activeIdentityId, chatBots, expandedBotIds, loadFirstPage]);
+  // 展开 transition 必重拉最新会话列表；持续展开按 loadedRef 去重（实现见 useExpandedBotLoader）。
+  useExpandedBotLoader(chatBots, expandedBotIds, activeIdentityId, loadFirstPage, loadedRef);
 
   const updateBotSessions = useCallback(
     (botId: string, fn: (list: BotChatSessionView[]) => BotChatSessionView[]) =>

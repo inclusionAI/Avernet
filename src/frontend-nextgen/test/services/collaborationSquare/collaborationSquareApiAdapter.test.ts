@@ -754,6 +754,20 @@ describe('CollaborationSquareApiAdapter', () => {
     );
   });
 
+  it('omits f_user_id when the target Bot is owned by the logged-in user', async () => {
+    mockedCreateBotSession.mockResolvedValue({
+      code: 200000,
+      data: { session_id: 'session-owned' } as never,
+    });
+
+    await expect(
+      new CollaborationSquareApiAdapter().openBotConversation('bot-1:2088', humanContext, {
+        isOwnedByLoggedInUser: true,
+      }),
+    ).resolves.toEqual({ sessionId: 'session-owned' });
+    expect(mockedCreateBotSession).toHaveBeenCalledWith('bot-1', { user_id: '327325', owner_id: '2088' }, {});
+  });
+
   it('rejects a session response without session_id as a protocol error', async () => {
     mockedCreateBotSession.mockResolvedValue({ code: 200000, data: {} as never });
 

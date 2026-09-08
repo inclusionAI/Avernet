@@ -3,6 +3,7 @@ import type { ChatBotView } from '@/services/workspace/botSessionService';
 import { splitBotId } from '@/services/workspace/botSessionService';
 import { collaborationCandidateService } from '@/services/workspace/collaborationCandidateService';
 import { useCallback, useEffect, useState } from 'react';
+import { useFriendBotSectionSync } from './useFriendBotSectionSync';
 
 export interface UseFriendBotsResult {
   friendBots: ChatBotView[];
@@ -92,6 +93,9 @@ export function useFriendBots(
   }, [activeIdentityId, isUserIdentity, enabled, reloadNonce]);
 
   const reload = useCallback(() => setReloadNonce((current) => current + 1), []);
+
+  // 列表就绪后纠正已展开好友 bot 的分区归属（冷启动深链缺省记 'mine' 会让好友行折叠、列表不可见）。
+  useFriendBotSectionSync(friendBots);
 
   return { friendBots, isLoading, error, reload };
 }

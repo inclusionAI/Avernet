@@ -2,6 +2,7 @@ import type {
   BotCatalogViewer,
   FriendRequestActor,
   HumanBotActionContext,
+  OpenBotConversationOptions,
   PublicBotDiscoveryQuery,
   PublicBotSearchQuery,
   PublicGroupSearchQuery,
@@ -118,8 +119,10 @@ export class CollaborationSquareService {
     );
   }
 
-  openBotConversation(botId: string, context: HumanBotActionContext) {
-    return this.runTargetAction(`conversation:${botId}`, () => this.gateway.openBotConversation(botId, context));
+  openBotConversation(botId: string, context: HumanBotActionContext, options?: OpenBotConversationOptions) {
+    return this.runTargetAction(`conversation:${botId}`, () =>
+      this.gateway.openBotConversation(botId, context, options),
+    );
   }
 
   createGroupSession(groupId: string, context?: HumanBotActionContext, options?: { title?: string; query?: string }) {

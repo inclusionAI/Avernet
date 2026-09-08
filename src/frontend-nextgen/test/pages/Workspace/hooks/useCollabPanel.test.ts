@@ -48,12 +48,26 @@ it('多个 human 成员时只选择与当前认证用户 ID 匹配的成员', ()
     { actorId: 'human_other', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
     { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'absent' },
   ]);
-  const { result } = renderHook(() =>
-    useCollabPanel(session, botIdentity, updateMemberMode, 'human_1', '认证用户'),
-  );
+  const { result } = renderHook(() => useCollabPanel(session, botIdentity, updateMemberMode, 'human_1', '认证用户'));
 
   expect(result.current.human?.actorId).toBe('human_1');
   expect(result.current.humanName).toBe('章梧');
+});
+
+it('用户身份视角 + 多个 human 成员：LeaveBar 显示当前用户名而非其他成员', () => {
+  useWorkspaceStore.getState().setActiveIdentity(humanIdentity.id);
+  // 群里两个 human：其他成员排在前且 present，当前用户排在后且 present。
+  const session = makeSession([
+    { actorId: 'human_other', kind: 'human', name: '其他成员', role: 'member', mode: 'present' },
+    { actorId: 'human_1', kind: 'human', name: '章梧', role: 'member', mode: 'present' },
+  ]);
+  const { result } = renderHook(() => useCollabPanel(session, humanIdentity, updateMemberMode, 'human_1', '章梧'));
+  // 用户视角 present → 渲染 LeaveBar（isHumanViewer），显示的必须是当前用户，而非数组首个 human。
+  expect(result.current.human?.actorId).toBe('human_1');
+  expect(result.current.humanName).toBe('章梧');
+  expect(result.current.humanJoined).toBe(true);
+  expect(result.current.humanAbsentOnly).toBe(false);
+  expect(result.current.botActorId).toBeNull();
 });
 
 it('setBotMode 调用 updateMemberMode 并携带 bot actorId', async () => {

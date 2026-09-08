@@ -94,8 +94,12 @@ export function useWorkspacePage(): UseWorkspacePageResult {
       if (user && store.activeIdentityId !== user.id) store.setActiveIdentityId(user.id);
       const workspace = useWorkspaceStore.getState();
       workspace.setView('chat');
+      // 已展开时保留 store 的分区归属（侧栏点击路径已写入 'friend'/'mine'）：本 effect 会在
+      // URL 回写（useChatUrlSync）后随 botParam 变化重跑，无条件覆盖 'mine' 会让好友 bot 行
+      // 被好友分区判定为折叠（expanded 需 sectionKey==='friend'），已加载的会话列表随之消失。
+      // 冷启动深链新展开走 store 缺省 'mine'，好友 bot 由 useFriendBotSectionSync 在列表就绪后纠正。
       if (!workspace.expandedBotIds[botParam]) workspace.toggleBotExpanded(botParam);
-      workspace.setBotExpandedSection(botParam, 'mine');
+      else if (!workspace.expandedBotSectionKey[botParam]) workspace.setBotExpandedSection(botParam, 'mine');
       if (sessionParam && workspace.selectedBotSessionId !== sessionParam) {
         workspace.selectBotSession(sessionParam);
         workspace.bumpHistoryRefresh();
