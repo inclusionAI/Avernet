@@ -1879,12 +1879,15 @@ dependencies = [
  "bcs-domain",
  "bcs-human-notify-api",
  "bcs-llm-api",
+ "bcs-observability",
  "bcs-service-api",
  "bcs-session",
  "bcs-session-file",
  "serde_json",
  "sha2",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

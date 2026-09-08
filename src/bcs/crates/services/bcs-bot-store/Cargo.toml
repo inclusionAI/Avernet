@@ -23,7 +23,7 @@ uuid = { workspace = true }
 [dev-dependencies]
 bcs-cache-local = { workspace = true }
 bcs-db-local = { workspace = true }
-bcs-test-support = { workspace = true }
+bcs-test-support = { workspace = true, features = ["diagnostic-logs"] }
 tempfile = { workspace = true }
 tokio-test = "0.4"
 
