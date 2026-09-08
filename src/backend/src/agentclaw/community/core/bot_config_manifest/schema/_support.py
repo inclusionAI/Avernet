@@ -21,6 +21,9 @@ from agentclaw.community.core.bot_config_manifest.schema.limits import (
 from agentclaw.community.core.bot_config_manifest.schema.placeholders import (
     unknown_placeholders,
 )
+from agentclaw.community.core.bot_config_manifest.schema.sources import (
+    SourceDecl,
+)
 from agentclaw.community.core.bot_config_manifest.schema.violations import Violation
 
 #: ``sha256:`` + 64 lowercase hex. One form, because a digest that can be
@@ -52,8 +55,15 @@ class Context:
     violations: list[Violation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     #: Names declared under top-level ``sources``, for ``from`` to resolve
-    #: against. Populated before any entry is walked.
+    #: against. Populated before any entry is walked. Every declared name is
+    #: here, including one whose declaration failed to parse — so a ``from``
+    #: naming it is not *also* reported as undeclared, which would be one
+    #: mistake answered as two.
     source_names: set[str] = field(default_factory=set)
+    #: The declarations that parsed, by name. An entry's ``from`` reads its
+    #: protocol from here, which is what makes a named source resolve to a
+    #: support-matrix cell rather than needing a column of its own.
+    sources: dict[str, SourceDecl] = field(default_factory=dict)
     #: Named sources actually referenced, so an unused one can be reported —
     #: schema §2.3 makes that a hint, not an error.
     referenced_sources: set[str] = field(default_factory=set)

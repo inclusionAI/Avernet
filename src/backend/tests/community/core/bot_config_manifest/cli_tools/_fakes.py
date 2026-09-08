@@ -1,7 +1,13 @@
 """Fakes shared by the CLI-tools tests (W9)."""
 from __future__ import annotations
 
-from typing import Optional
+from types import SimpleNamespace
+from typing import Mapping, Optional
+
+from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
+    EntryFetchError,
+    GitEntrySource,
+)
 
 
 class FakeObjectStorage:
@@ -184,6 +190,38 @@ class FakeFetchedEntry:
         self.source_url = None
 
 
+class FakeGitEntrySource(GitEntrySource):
+    """A **real** ``GitEntrySource`` over a one-file fake checkout.
+
+    Real, not a look-alike: the service dispatches on the type, and a duck-typed
+    double would let a change to that dispatch pass its own tests.
+    """
+
+    def __new__(cls, content: bytes, decl, entry):
+        subpath = decl.get("subpath")
+        if entry.get("subpath"):
+            subpath = (
+                f"{subpath.rstrip('/')}/{entry['subpath'].lstrip('/')}"
+                if subpath
+                else entry["subpath"]
+            )
+        return GitEntrySource(
+            checkout=SimpleNamespace(
+                sha="c" * 40,
+                root=None,
+                tree_bytes=len(content),
+                files=lambda subpath=None, file_limit=None: [
+                    (subpath or "tool", content)
+                ],
+                read_file=lambda subpath=None, file_limit=None: content,
+            ),
+            source_url=decl["url"],
+            subpath=subpath,
+            moved_from=None,
+            auth=decl.get("auth"),
+        )
+
+
 class FakeEntryFetcher:
     """Answers with canned bytes; records the keyword arguments it was given."""
 
@@ -192,12 +230,64 @@ class FakeEntryFetcher:
         self.digest = digest
         self.error = error
         self.calls: list[dict] = []
+        self.filed: list[dict] = []
 
     def fetch(self, ctx, **kwargs):
         self.calls.append(kwargs)
         if self.error is not None:
             raise self.error
         return FakeFetchedEntry(self.content, self.digest or kwargs.get("digest") or "")
+
+    def fetch_declared(self, ctx, *, entry, category, entry_identity=None):
+        """The declared-source door, in the double.
+
+        A manifest-sourced declaration comes through here rather than through
+        ``fetch``, so the double resolves the entry the way the real fetcher
+        does — an inline URL, a ``from`` name against the session's ``sources``,
+        or a git source answering with a tree — and records the *resolved*
+        address. A double that just forwarded to ``fetch`` would have kept
+        passing while a source name went on the wire as a URL, which is the
+        defect this door closes.
+        """
+        decl = None
+        if isinstance(entry.get("from"), str):
+            session = getattr(ctx, "source_session", None)
+            declared = getattr(session, "sources", {}) if session else {}
+            decl = declared.get(entry["from"])
+            if decl is None:
+                raise EntryFetchError(
+                    f"'from' names source {entry['from']!r}, which is not "
+                    "declared under 'sources'"
+                )
+        elif isinstance(entry.get("source"), Mapping):
+            decl = entry["source"]
+
+        if decl is not None and decl.get("protocol") == "git":
+            self.calls.append(
+                {
+                    "source_url": decl["url"],
+                    "category": category,
+                    "entry_identity": entry_identity,
+                    "git": True,
+                }
+            )
+            if self.error is not None:
+                raise self.error
+            return FakeGitEntrySource(self.content, decl, entry)
+
+        return self.fetch(
+            ctx,
+            source_url=(decl or {}).get("url") or entry.get("source"),
+            digest=entry.get("digest"),
+            auth=(decl or {}).get("auth", entry.get("auth")),
+            category=category,
+            keep_last=entry.get("on_fetch_failure", "keep_last") == "keep_last",
+            entry_identity=entry_identity,
+        )
+
+    def file_bytes(self, ctx, **kwargs):
+        self.filed.append(kwargs)
+        return "sha256:filed"
 
 
 def code_of(module) -> str:

@@ -45,6 +45,8 @@ class SourceCredentialRepositoryProtocol(Protocol):
         secret_ciphertext: str,
         owner_app_id: int,
         modifier: str,
+        access_key_id: str | None = None,
+        region: str | None = None,
     ) -> SourceCredentialRow:
         """Insert, or whole-replace the row with the same name (rotation).
 
@@ -63,6 +65,11 @@ class SourceCredentialRepositoryProtocol(Protocol):
           the service's, which reads the row first.
         - ``modifier`` — the audit actor the router composed off the
           verified principal (``app:<id>`` / ``app:<id>:on-behalf-of:<user>``).
+        - ``access_key_id`` / ``region`` — the ``oss_aksk`` mechanism's
+          non-secret halves, ``None`` for every other type. Written on both
+          branches, including with ``None``: a rotation from one mechanism to
+          another must clear the fields the old one used, or the row would
+          half-describe two mechanisms at once.
         """
         ...
 
