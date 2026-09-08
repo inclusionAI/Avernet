@@ -72,15 +72,18 @@ import hashlib
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Protocol, runtime_checkable
 
-import httpx
 
 from agentclaw.community.core.bot_config_manifest.apply.entry_delivery import (
     BlobDelivery,
     EntryDelivery,
     EntryFetchError,
     FetchedEntry,
-    GitDelivery,
     GitEntrySource,
+)
+from agentclaw.community.core.bot_config_manifest.apply.source_fetchers import (
+    DeclaredFetch,
+    build_fetchers,
+    substitute,
 )
 from agentclaw.community.core.bot_config_manifest.apply.source_session import (
     SourceSession,
@@ -103,19 +106,12 @@ from agentclaw.community.core.bot_config_manifest.fetch.git_source import (
     GitSourceSpec,
     git_receipt_url,
 )
-from agentclaw.community.core.bot_config_manifest.fetch.limits import (
-    FETCH_ENTRY_LIMITS,
-)
 from agentclaw.community.core.bot_config_manifest.fetch.guarded_fetcher import (
     FetchFailedError,
     FetchRefusedError,
     FetchedObject,
     GuardedFetcher,
     FetchRequest,
-)
-from agentclaw.community.core.bot_config_manifest.schema import placeholders
-from agentclaw.community.core.bot_config_manifest.schema._support import (
-    relative_path_refusal,
 )
 from agentclaw.community.core.bot_config_manifest.schema.sources import (
     parse_source,
@@ -199,6 +195,10 @@ class EntryFetcher:
         self._fetcher = fetcher
         self._content = content
         self._credentials = credentials
+        # Bound once, to this pipeline: the fetchers are strategies over these
+        # same collaborators, so every road files receipts under one policy
+        # and W11's lineage cannot answer differently by protocol.
+        self._fetchers = build_fetchers(self)
 
     def fetch(
         self,
@@ -237,7 +237,7 @@ class EntryFetcher:
             # the reaper handing a live apply's lock to a second one.
             raise EntryFetchError(expired)
 
-        target = _substitute(ctx, source_url)
+        target = substitute(ctx, source_url)
         scope = scope_of(ctx)
         try:
             receipt = self._content.latest_receipt(scope, source_url=target)
@@ -393,15 +393,21 @@ class EntryFetcher:
         """Resolve one entry's declared source — inline, or by ``from`` name —
         and acquire it. Raises :class:`EntryFetchError`.
 
-        The URL roads (inline string ``source``, or a ``from`` source that
-        declares ``url``) delegate to :meth:`fetch` unchanged, fold in the
-        *source's* ``auth``, and inherit its pinned/keep_last policy. The git
-        road resolves the ref once per ``(url, ref)`` per apply through the
-        context's source session, enforces ``mode`` against the last apply's
-        resolved SHA, and hands back a :class:`GitEntrySource` — the tree is
-        the entry's to interpret, and ``keep_last`` falls back to the
-        baseline-SHA receipt with the same keep_last-only ruling as wire
-        failures.
+        **The front door does what every road shares, then dispatches.** The
+        budget check, the source-session requirement, ``keep_last``, the
+        ``from`` lookup and parsing the declaration happen once, here; the
+        protocol's own fetcher does the rest. Resolving them centrally is
+        what keeps the roads from drifting — two fetchers each deciding what
+        ``keep_last`` means would both look correct and disagree.
+
+        One road never reaches a fetcher: a bare-string ``source`` is a URL
+        with no declaration to parse, so it goes straight to :meth:`fetch`.
+        (Group D of this change removes that spelling; until then it is the
+        road most documents take.)
+
+        Every road answers with an :class:`EntryDelivery` — see
+        ``apply/entry_delivery.py`` for why the caller does not branch on
+        which one it got.
         """
         expired = ctx.budget.expired() if ctx.budget is not None else None
         if expired is not None:
@@ -468,120 +474,25 @@ class EntryFetcher:
                 + "; ".join(v.message for v in violations)
             )
 
-        if decl.protocol is not SourceKind.GIT:
-            # An object store: one request, one object, addressed by the
-            # source's own ``url``. The source carries the credential (W7 — the
-            # declaration, not the entry). An entry's ``subpath`` is NOT part
-            # of the address here: on this road it selects inside the fetched
-            # object, which the materialiser applies after unpacking. One rule,
-            # both protocols — ``subpath`` selects within what the source
-            # delivered; git delivers a tree, oss delivers an object.
-            return BlobDelivery(
-                self.fetch(
-                    ctx,
-                    source_url=decl.url,
-                    digest=entry.get("digest"),
-                    auth=decl.auth,
-                    category=category,
-                    keep_last=keep_last,
-                    entry_identity=entry_identity,
-                )
-            )
-
-        if entry.get("digest") is not None:
-            # v1 narrowing, documented: a pin against git-sourced bytes has no
-            # stable meaning across the fresh-tree/canonical-zip roads. A
-            # SHA-pinned ref is the pin this source speaks.
+        fetcher = self._fetchers.get(decl.protocol)
+        if fetcher is None:
+            # Unreachable by construction — ``source_fetchers`` refuses at
+            # import to leave a declarable protocol unserved, and ``parse_source``
+            # only yields declarable ones. Stated rather than assumed: a
+            # ``KeyError`` here would surface as an apply crash, not a refusal.
             raise EntryFetchError(
-                "digest pinning is not supported on a git source in v1 — "
-                "pin by writing the commit SHA as the source's ref"
+                f"no fetcher serves protocol {decl.protocol.value!r}"
             )
-        if entry.get("auth") is not None:
-            # Schema already refuses this next to 'from'; an inline git
-            # source reaches here with it, and the fetch must not quietly
-            # fetch anonymously under a credential the caller believes rode.
-            raise EntryFetchError(
-                "entry-level 'auth' is not supported on a git source in v1 — "
-                "declare 'auth' inside the source object; the credential "
-                "applies to the fetch the source names"
-            )
-
-        subpath = _compose_subpath(decl.subpath, entry.get("subpath"))
-
-        spec = GitSourceSpec(
-            url=_substitute(ctx, decl.url),
-            ref=decl.ref or "HEAD",
-            subpath=subpath,
-            mode=decl.mode,
-        )
-        display = name if name is not None else spec.url
-        auth = decl.auth
-
-        try:
-            headers: dict[str, str] = {}
-            if auth:
-                binding = self._credentials.binding(name=auth)
-                binding.reauthorize(httpx.URL(spec.url))
-                headers = dict(binding.headers_for(httpx.URL(spec.url)))
-            checkout, fresh = session.checkout(
-                spec, headers=headers, display=display
-            )
-        except CredentialError as exc:
-            raise EntryFetchError(str(exc)) from exc
-        except PrefixAuthorizationError as exc:
-            raise EntryFetchError(str(exc)) from exc
-        except FetchRefusedError as exc:
-            raise EntryFetchError(str(exc)) from exc
-        except FetchFailedError as exc:
-            fallback = self._git_keep_last(
-                ctx, session=session, spec=spec, display=display,
+        return fetcher.fetch(
+            DeclaredFetch(
+                ctx=ctx,
+                decl=decl,
+                entry=entry,
+                category=category,
+                entry_identity=entry_identity,
                 keep_last=keep_last,
-            )
-            if fallback is not None:
-                return BlobDelivery(fallback)
-            raise EntryFetchError(str(exc)) from exc
-
-        if fresh:
-            # The wire really moved for this (url, ref) in THIS apply — the
-            # tree's declared bytes are what the ledger that bounds one
-            # apply's total download must count. A cached checkout (another
-            # entry sharing the source) answers a read, not a fetch, so it is
-            # free — the same ruling the URL road's store fast path records.
-            if ctx.budget is not None:
-                ctx.budget.charge(checkout.tree_bytes)
-                expired = ctx.budget.expired()
-                if expired is not None:
-                    raise EntryFetchError(expired)
-
-        baseline = session.baseline(display)
-        if (
-            spec.mode == "strict"
-            and baseline is not None
-            and baseline != checkout.sha
-        ):
-            raise EntryFetchError(
-                f"strict source {display!r} moved: the last apply recorded "
-                f"{baseline}, this one resolved {checkout.sha} — the entry "
-                "is refused and the bot keeps running what it has"
-            )
-        # Adopted AFTER the strict gate: a refused move must not write the
-        # moved SHA into this apply's report, because the next apply reads
-        # its baseline from there — adopting here would turn strict mode
-        # into "refuse each move exactly once, then deliver it".
-        session.adopt(
-            display=display, spec=spec, checkout=checkout, auth_name=auth
-        )
-        moved = baseline if (baseline is not None and baseline != checkout.sha) else None
-        return GitDelivery(
-            GitEntrySource(
-                checkout=checkout,
-                source_url=spec.url,
-                subpath=spec.subpath,
-                moved_from=moved,
-                auth=auth,
-                file_limit=FETCH_ENTRY_LIMITS.get(
-                    category, FETCH_ENTRY_LIMITS["resources_file"]
-                ),
+                session=session,
+                name=name,
             )
         )
 
@@ -730,60 +641,6 @@ def declared_protocol(
         return None
     decl, _ = parse_source(raw)
     return None if decl is None else decl.protocol
-
-
-def _compose_subpath(
-    source_subpath: Optional[str], entry_subpath: Any
-) -> Optional[str]:
-    """The source's ``subpath``, then the entry's — one path, re-checked.
-
-    **This is what lets one source serve many entries.** Before it, an entry
-    ``subpath`` beside a git source was refused at apply time (defect D3), so a
-    source addressed exactly one file and a second file from the same
-    repository needed a second source block carrying duplicate ``url``, ``ref``
-    and ``auth`` — reintroducing precisely the drift named sources exist to
-    remove. ``resources`` over git is not useful without it: a resources entry
-    names a workspace ``path`` *and* a source path, and those differ per entry
-    by construction.
-
-    The composed value is re-checked by the schema's own pure predicate rather
-    than by a local rule. Two safe segments can compose into an unsafe path
-    (``a/b`` under ``..``-free halves is fine, but the join is what the
-    checkout is finally asked to read), and a second, weaker rule here is
-    exactly how a traversal gets through one layer by satisfying the other.
-    """
-    if entry_subpath is None:
-        return source_subpath
-    if not isinstance(entry_subpath, str) or not entry_subpath:
-        raise EntryFetchError("entry 'subpath' must be a non-empty string")
-    joined = (
-        entry_subpath
-        if not source_subpath
-        else source_subpath.rstrip("/") + "/" + entry_subpath.lstrip("/")
-    )
-    refusal = relative_path_refusal(joined, what="subpath")
-    if refusal is not None:
-        raise EntryFetchError(
-            f"the source's subpath and the entry's compose to {joined!r}, "
-            f"which is refused: {refusal[1]}"
-        )
-    return joined
-
-
-def _substitute(ctx: "FetchContext", source_url: str) -> str:
-    """``${BOT_*}`` in a source URL, against this apply's deployment context.
-
-    Unknown names are left untouched by the resolver itself — they cannot
-    reach here through a stored document, because the write path refuses
-    them — and a visible leftover in a fetch URL makes that bug findable
-    instead of fetching something plausible-looking.
-    """
-    return placeholders.resolve(
-        source_url,
-        engine_type=ctx.engine_type,
-        env=ctx.env,
-        tenant=ctx.tenant,
-    )
 
 
 __all__ = [
