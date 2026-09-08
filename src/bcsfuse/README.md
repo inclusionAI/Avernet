@@ -178,6 +178,10 @@ export LLM_REASONING_MODEL="claude-3-5-sonnet-20241022"
 
 BCSFuse requires MySQL 8.0+ for runtime mode. The schema is auto-created on startup.
 
+Profile fusion reads the `worker_profile_content_store` registered in the application
+context, sharing the same MySQL provider as profile CRUD and activation. A missing
+provider is an error; fusion must not fall back to a separate SQLite profile store.
+
 ```sql
 -- Tables auto-created:
 -- - workers (worker profiles)
