@@ -120,6 +120,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
+        # Close the eagerly-resolved OssStreamingProxy's httpx client before
+        # the rest of the tear-down: it is built at startup in every
+        # deployment (even with an empty endpoint) and is not a Lifecycle,
+        # so without this its pooled sockets outlive graceful shutdown.
+        try:
+            oss_proxy = container.services().oss_streaming_proxy()
+            aclose = getattr(oss_proxy, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        except Exception as exc:  # noqa: BLE001 — the teardown must never mask the user code error
+            logger.warning("oss_streaming_proxy close failed on shutdown: %s", exc)
         await shutdown_services(container)
         logger.info("Application shutdown complete")
 

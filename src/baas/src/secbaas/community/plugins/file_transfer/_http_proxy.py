@@ -19,6 +19,17 @@ so an unconfigured deployment is never an open relay (D-89-01).
 Timeout semantics: per-operation ``httpx.Timeout(connect=10.0, read=600.0,
 write=600.0, pool=10.0)`` replaces the httpx 5s default, so total transfer
 duration is unbounded while dead peers are detected (D-89-03).
+
+Config validation: a non-empty endpoint is validated at construction so a
+misconfigured operator value (non-default port, bucket already prefixed in
+the host) fails closed at container resolution with a :class:`ConfigError`
+instead of surfacing as a confusing upstream 403/404 at first request
+(D-89-01).  Loopback endpoints are exempt: the e2e fake-upstream harness
+binds an ephemeral port on 127.0.0.1.
+
+The component wraps an ``httpx.AsyncClient``: call :meth:`aclose` on
+shutdown (the app lifespan's finally block) so pooled keep-alive sockets
+are released during graceful shutdown.
 """
 
 from collections.abc import AsyncIterable, AsyncIterator
@@ -28,9 +39,14 @@ import httpx
 from secbaas.community.api.session_file_sharing import (
     SessionFileTransferProxyUnavailableError,
 )
+from secbaas.community.bootstrap._configs import ConfigError
 from secbaas.community.logger import get_logger
 
 log = get_logger("plugin-file-transfer")
+
+# Hosts the endpoint validation exempts (test harness fake-upstream binds an
+# ephemeral port here); every production OSS endpoint is non-loopback.
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 
 _CONNECT_TIMEOUT = 10.0
 _READ_TIMEOUT = 600.0
@@ -78,6 +94,7 @@ class OssStreamingProxy:
     ) -> None:
         self._endpoint = endpoint
         self._bucket_name = bucket_name
+        self._validate_endpoint_config()
         # E501-ignored (project ruff config): the pin is a single semantic
         # unit and the acceptance grep matches the literal on one line.
         self._timeout = httpx.Timeout(
@@ -87,6 +104,43 @@ class OssStreamingProxy:
             pool=_POOL_TIMEOUT,
         )
         self._client = httpx.AsyncClient(timeout=self._timeout, transport=transport)
+
+    def _validate_endpoint_config(self) -> None:
+        """Fail closed at construction on endpoint shapes that would produce
+        a silently wrong outbound Host (D-89-01).
+
+        An empty endpoint is legal here — the proxy then raises
+        :class:`SessionFileTransferProxyUnavailableError` per request — so the
+        main-site container (empty config) still resolves.  Only non-loopback
+        hosts are validated: the e2e fake-upstream runs on an ephemeral
+        loopback port, and no production OSS endpoint is loopback.
+        """
+        endpoint = (self._endpoint or "").strip()
+        if not endpoint:
+            return
+        url = httpx.URL(endpoint)
+        if url.host is None:
+            raise ConfigError(
+                "file_transfer_oss_aliyun.endpoint is not a valid absolute "
+                f"URL: {endpoint!r}"
+            )
+        if url.host in _LOOPBACK_HOSTS:
+            return
+        if url.port is not None and url.port not in (80, 443):
+            raise ConfigError(
+                "file_transfer_oss_aliyun.endpoint must not carry a "
+                f"non-default port: {endpoint!r}"
+            )
+        if self._bucket_name and url.host.startswith(f"{self._bucket_name}."):
+            raise ConfigError(
+                "file_transfer_oss_aliyun.endpoint host already carries the "
+                f"bucket prefix {self._bucket_name!r}: {endpoint!r} — the "
+                "outbound Host is derived as {bucket}.{endpoint_host}"
+            )
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client (graceful-shutdown hook)."""
+        await self._client.aclose()
 
     async def forward(
         self,
