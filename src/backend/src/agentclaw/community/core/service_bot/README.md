@@ -62,6 +62,7 @@ internal_dependencies:
   - agentclaw.community.plugin_api.approval_workflow           # antprocess approval workflow for publish approval
   - agentclaw.community.core.devices.services.device_filesystem    # teclaw build-time file promotion (TeclawFilePromotion)
   - agentclaw.community.plugin_api.engine_ext_client
+  - agentclaw.community.plugin_api.eval_env             # DYNAMIC_ENV_TAG_KEY injected into eval container extra_envs
   - agentclaw.community.plugin_api.http_client
   - agentclaw.community.plugin_api.models
   - agentclaw.community.plugin_api.object_storage           # teclaw promotion stages files to OSS

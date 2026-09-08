@@ -14,6 +14,7 @@ from agentclaw.community.core.service_bot.services.deploy.service_publish_env im
     service_publish_extra_envs,
     service_publish_template_config,
 )
+from agentclaw.community.plugin_api.eval_env import DYNAMIC_ENV_TAG_KEY
 from agentclaw.community.core.service_bot.services.publish_flow.errors import (
     PublishFlowServiceError,
 )
@@ -110,6 +111,11 @@ class EvalPublishMixin:
         )
 
         async def _issue():
+            # 注入评测环境容器环境变量，使容器内进程可通过 os.environ 感知区标识
+            eval_envs = dict(service_publish_extra_envs(publish_record.ext, bot))
+            if default_tag:
+                eval_envs[DYNAMIC_ENV_TAG_KEY] = default_tag
+
             release_kwargs: dict[str, Any] = dict(
                 bot=bot,
                 user_id=owner_id,
@@ -119,7 +125,7 @@ class EvalPublishMixin:
                 version=str(publish_record.version or 1),
                 delivery=delivery,
                 ext_info=ext_info,
-                extra_envs=service_publish_extra_envs(publish_record.ext, bot),
+                extra_envs=eval_envs,
                 docker_image=image_pin.docker_image,
                 template_config=service_publish_template_config(bot),
             )
