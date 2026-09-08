@@ -6,7 +6,10 @@
 -- "no script" are the same state.
 --
 -- Key is (avernet_tenant, script_key), where script_key is a sha256 of the
--- logical key (env, entity_id, bot_id). The tenant is in the key because
+-- logical key (env, entity_id, bot_id). The table also carries an older unique
+-- key over those three columns directly -- both are declared below, both are
+-- really in the deployed table, and they are equivalent; only the surrogate is
+-- indexed the way the repository reads. The tenant is in the key because
 -- ac_bots is itself tenant-scoped, so a bot_id is unique only within a tenant —
 -- legacy "default" bots carry documented residual cross-tenant collision on
 -- that identifier. Without the tenant here, two such bots would share one
@@ -76,20 +79,34 @@ CREATE TABLE `ac_bot_startup_script` (
   `gmt_create`    timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `gmt_modified`  timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '修改时间',
   PRIMARY KEY (`id`),
-  -- The index every read uses: the repository filters on script_key rather
-  -- than on the three columns it hashes, so there is no second lookup key here
-  -- to drift out of step with the ORM model.
+  -- TWO UNIQUE KEYS, AND BOTH ARE REALLY THERE. They enforce the same logical
+  -- uniqueness -- script_key is injective over (env, entity_id, bot_id), so a
+  -- row accepted by one is accepted by the other, and either may be the one
+  -- that raises the IntegrityError the repository's upsert retries on. Nothing
+  -- depends on which.
   --
-  -- WHY THE ``_v2`` SUFFIX ON A TABLE THAT HAS NO v1. The name a fresh table
-  -- would want, ``uk_tenant_script_key``, is occupied in the already-deployed
-  -- environments by a key on (avernet_tenant, env, entity_id, bot_id) -- the
-  -- pre-surrogate design, carrying this key's name but not its columns -- and
-  -- that key cannot be dropped there. So the surrogate key is added alongside
-  -- it under this name, and this file uses the same name so that ONE name is
-  -- correct in every environment and in the ORM model. A fresh table gets only
-  -- this key; a migrated one carries the legacy key too, which is redundant
-  -- rather than wrong: script_key is injective over (env, entity_id, bot_id),
-  -- so both enforce the same logical uniqueness, and either may be the one
-  -- that raises the IntegrityError the repository's upsert retries on.
+  -- The first is the ORIGINAL key under the name the second one wants. It was
+  -- provisioned with this key's name and the pre-surrogate design's columns,
+  -- and dropping an index is not available in the deployed environments, so it
+  -- stays. It is declared here rather than quietly omitted because this file's
+  -- whole contract is that it reads back identically to ``SHOW CREATE TABLE``:
+  -- an index that exists in the database and not in this file is the same
+  -- invisible drift as a column type that does, and it is how the mediumint /
+  -- mediumtext transcription error stayed hidden.
+  --
+  -- ITS KEY IS 5456 utf8mb4 BYTES (64+20+1024+256 chars), past InnoDB's
+  -- 3072-byte cap. OceanBase accepts it; stock MySQL/InnoDB would refuse this
+  -- CREATE TABLE outright. That makes this file OceanBase-targeted, which it
+  -- already was in practice -- and it is exactly the constraint that made the
+  -- surrogate necessary in the first place. A fresh environment on InnoDB must
+  -- omit this first key; it loses nothing by doing so, because the second one
+  -- enforces the same rule within the cap.
+  UNIQUE KEY `uk_tenant_script_key` (`avernet_tenant`, `env`, `entity_id`, `bot_id`),
+  -- The second is the key EVERY READ USES: ``get``, ``upsert`` and ``delete``
+  -- all filter on script_key alone, so without this one each of them is a full
+  -- scan -- on a table ``_build_create_bot_payload`` reads on every payload it
+  -- composes. The ``_v2`` suffix is not a version of anything: it is simply the
+  -- name left over once the key above took the obvious one, and it is the name
+  -- the ORM model declares too, so one name is correct everywhere.
   UNIQUE KEY `uk_tenant_script_key_v2` (`avernet_tenant`, `script_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Bot 启动脚本';
