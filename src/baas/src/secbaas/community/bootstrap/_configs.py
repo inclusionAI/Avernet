@@ -286,10 +286,19 @@ class SessionFileUrlProxyConfigSchema(ConfigSchema):
     ``proxy_base_url`` is the BaaS-domain base the ALIYUN_ACK projector
     rewrites client-visible URLs onto. Empty in main-site deployments
     (the Noop projector never reads it).
+
+    WR-04 (88): a non-empty value must be a scheme+host(+optional port)
+    authority. Malformed values previously passed the emptiness guard and
+    emitted protocol-relative or scheme-less client URLs with no signal;
+    the ``pattern`` rejects them loudly at config load instead — same
+    fail-closed stance as D-06.
     """
 
     config_section = "session_file_url_proxy"
-    proxy_base_url: str = Field(default="")
+    proxy_base_url: str = Field(
+        default="",
+        pattern=r"^(|https?://[A-Za-z0-9.-]+(:\d+)?/?)$",
+    )
 
 
 class DeployEnvConfig(ConfigSchema):

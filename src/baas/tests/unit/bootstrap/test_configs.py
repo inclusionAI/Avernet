@@ -317,6 +317,46 @@ class TestSessionFileUrlProxyConfigSchema:
         proxy_defaults = _schema_defaults()["session_file_url_proxy"]
         assert proxy_defaults["proxy_base_url"] == ""
 
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "",  # main site: projector disabled
+            "https://bff.example.com",
+            "https://bff.example.com/",  # trailing slash tolerated
+            "http://10.0.0.1:8080",
+            "https://bff.example.com:8080",
+        ],
+    )
+    def test_proxy_base_url_valid_values_accepted(self, value):
+        from secbaas.community.bootstrap._configs import (
+            SessionFileUrlProxyConfigSchema,
+        )
+
+        cfg = SessionFileUrlProxyConfigSchema(proxy_base_url=value)
+        assert cfg.proxy_base_url == value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "baas.aliyun.com",  # no scheme -> protocol-relative URL
+            "https://host/base",  # path component is silently dropped
+            " ",  # whitespace-only (truthy, pre-phase-88 accepted it)
+            "ftp://bff.example.com",  # non-http scheme
+            "https://",  # empty authority
+        ],
+    )
+    def test_proxy_base_url_invalid_values_rejected(self, value):
+        # pattern guard — a malformed non-empty value must fail LOUDLY at
+        # config load (WR-04/88) instead of emitting broken client URLs.
+        import pydantic
+
+        from secbaas.community.bootstrap._configs import (
+            SessionFileUrlProxyConfigSchema,
+        )
+
+        with pytest.raises(pydantic.ValidationError):
+            SessionFileUrlProxyConfigSchema(proxy_base_url=value)
+
 
 class TestDeployEnvConfig:
     """env.deploy_tenant default and section registration (D-01)."""
