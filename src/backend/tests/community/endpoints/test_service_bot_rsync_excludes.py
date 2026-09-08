@@ -22,8 +22,8 @@ class TestRsyncExcludesLogic:
     """Test rsync excludes configuration logic."""
 
     def test_openclaw_default_excludes_count(self):
-        """OpenClaw引擎默认有25条rsync排除规则"""
-        assert len(_OPENCLAW_RSYNC_EXCLUDES) == 25
+        """OpenClaw引擎默认有26条rsync排除规则（含原子写备份）"""
+        assert len(_OPENCLAW_RSYNC_EXCLUDES) == 26
 
     def test_claude_code_default_excludes_count(self):
         """ClaudeCode引擎默认有31条rsync排除规则"""
@@ -91,6 +91,7 @@ class TestRsyncExcludesLogic:
         assert "workspace/memory/" in _OPENCLAW_RSYNC_EXCLUDES
         assert "logs/" in _OPENCLAW_RSYNC_EXCLUDES
         assert "agents/*/sessions/" in _OPENCLAW_RSYNC_EXCLUDES
+        assert "openclaw.json.asback*" in _OPENCLAW_RSYNC_EXCLUDES
 
     def test_claude_code_default_excludes_content(self):
         """验证ClaudeCode默认排除规则包含关键目录"""
