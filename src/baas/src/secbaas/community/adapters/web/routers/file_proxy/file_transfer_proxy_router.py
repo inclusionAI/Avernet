@@ -21,7 +21,7 @@ from secbaas.community.api.session_file_sharing import (
 )
 from secbaas.community.bootstrap import ApplicationContainer
 from secbaas.community.logger import get_logger
-from secbaas.community.plugins.file_transfer._http_proxy import OssStreamingProxy
+from secbaas.community.plugins.file_transfer import OssStreamingProxy
 
 logger = get_logger("router")
 
@@ -56,7 +56,7 @@ async def proxy_oss(
                 "message": "unexpected proxy path prefix",
             },
         )
-    tail = raw_path[len(_PREFIX):]
+    tail = raw_path[len(_PREFIX) :]
     headers = dict(request.headers)
     content_length = request.headers.get("content-length")
     body_stream = request.stream() if request.method == "PUT" else None

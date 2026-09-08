@@ -80,7 +80,12 @@ class OssStreamingProxy:
         self._bucket_name = bucket_name
         # E501-ignored (project ruff config): the pin is a single semantic
         # unit and the acceptance grep matches the literal on one line.
-        self._timeout = httpx.Timeout(connect=_CONNECT_TIMEOUT, read=_READ_TIMEOUT, write=_WRITE_TIMEOUT, pool=_POOL_TIMEOUT)
+        self._timeout = httpx.Timeout(
+            connect=_CONNECT_TIMEOUT,
+            read=_READ_TIMEOUT,
+            write=_WRITE_TIMEOUT,
+            pool=_POOL_TIMEOUT,
+        )
         self._client = httpx.AsyncClient(timeout=self._timeout, transport=transport)
 
     async def forward(

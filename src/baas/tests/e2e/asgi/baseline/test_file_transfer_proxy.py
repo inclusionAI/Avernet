@@ -87,9 +87,7 @@ class _FakeUpstream:
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _Recorder)
         self.port = self._server.server_address[1]
-        self._thread = threading.Thread(
-            target=self._server.serve_forever, daemon=True
-        )
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         return self
 
@@ -182,8 +180,9 @@ async def test_get_download_round_trip_relays_bytes(
     """GET download returns the upstream status, body, and Content-Type
     untouched, with the raw presigned query byte-identical upstream."""
     payload = b"download-payload-via-proxy"
-    upstream = proxy_to_fake_upstream(status=200, content=payload,
-                                      content_type="text/plain")
+    upstream = proxy_to_fake_upstream(
+        status=200, content=payload, content_type="text/plain"
+    )
 
     response = await api.client.get(PROXIED_URI)
 
@@ -205,8 +204,9 @@ async def test_tampered_signature_fails_at_upstream_403(
         b"<Message>The request signature we calculated does not match"
         b"</Message></Error>"
     )
-    upstream = proxy_to_fake_upstream(status=403, content=oss_error,
-                                      content_type="application/xml")
+    upstream = proxy_to_fake_upstream(
+        status=403, content=oss_error, content_type="application/xml"
+    )
     tampered = PROXIED_URI.replace("Signature=s%2B%2F", "Signature=s%2B%2E")
 
     response = await api.client.get(tampered)

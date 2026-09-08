@@ -77,9 +77,7 @@ def oss():
 
 @pytest.fixture
 def backend(oss):
-    return AliyunOssFileTransferBackend(
-        config=_config(), credentials=("AK", "SK")
-    )
+    return AliyunOssFileTransferBackend(config=_config(), credentials=("AK", "SK"))
 
 
 # ── Constructor: three-state AK/SK resolution ─────────────────────────
@@ -87,9 +85,7 @@ def backend(oss):
 
 def test_constructor_uses_credentials_tuple(oss):
     auth, bucket = oss
-    backend = AliyunOssFileTransferBackend(
-        config=_config(), credentials=("AK", "SK")
-    )
+    backend = AliyunOssFileTransferBackend(config=_config(), credentials=("AK", "SK"))
     auth.assert_called_once_with("AK", "SK")
     internal_call, sign_call = bucket.call_args_list
     assert internal_call.args == (auth.return_value, ENDPOINT, BUCKET)
@@ -128,9 +124,7 @@ def test_build_staging_path_shape(backend):
 
 
 def test_build_staging_path_with_subdir(backend):
-    path = backend.build_staging_path(
-        "tenant-a", "tf-1", "file.txt", subdir="sub"
-    )
+    path = backend.build_staging_path("tenant-a", "tf-1", "file.txt", subdir="sub")
     assert path == "baas-file-transfer/tenant-a/sub/tf-1/file.txt"
 
 
@@ -145,16 +139,12 @@ def test_build_staging_path_rstrips_staging_root(oss):
 def test_build_staging_path_rejects_traversal(backend, component):
     kwargs = {"tenant": "t", "transfer_id": "tf-1", "filename": "f.txt", "subdir": None}
     kwargs[component] = ".."
-    with pytest.raises(
-        ValueError, match=f"Path traversal detected in {component}"
-    ):
+    with pytest.raises(ValueError, match=f"Path traversal detected in {component}"):
         backend.build_staging_path(**kwargs)
 
 
 def test_build_session_staging_path_shape(backend):
-    path = backend.build_session_staging_path(
-        "tenant-a", "sess-1", "tf-1", "file.txt"
-    )
+    path = backend.build_session_staging_path("tenant-a", "sess-1", "tf-1", "file.txt")
     assert path == "baas-file-transfer/tenant-a/sess-1/tf-1/file.txt"
 
 
@@ -177,9 +167,7 @@ def test_build_session_staging_path_rejects_traversal(backend, component):
         "subdir": None,
     }
     kwargs[component] = ".."
-    with pytest.raises(
-        ValueError, match=f"Path traversal detected in {component}"
-    ):
+    with pytest.raises(ValueError, match=f"Path traversal detected in {component}"):
         backend.build_session_staging_path(**kwargs)
 
 
@@ -198,9 +186,7 @@ def test_build_staging_prefix_with_subdir(backend):
 def test_build_staging_prefix_rejects_traversal(backend, component):
     kwargs = {"tenant": "t", "subdir": None}
     kwargs[component] = ".."
-    with pytest.raises(
-        ValueError, match=f"Path traversal detected in {component}"
-    ):
+    with pytest.raises(ValueError, match=f"Path traversal detected in {component}"):
         backend.build_staging_prefix(**kwargs)
 
 
@@ -407,7 +393,9 @@ def test_list_objects_maps_items_and_marker(backend):
 
 def test_list_objects_truncated_next_marker(backend):
     backend._bucket.list_objects.return_value = SimpleNamespace(
-        object_list=[SimpleNamespace(key="k", size=1, last_modified=datetime(2026, 1, 1))],
+        object_list=[
+            SimpleNamespace(key="k", size=1, last_modified=datetime(2026, 1, 1))
+        ],
         is_truncated=True,
         next_marker="next-page",
     )

@@ -34,9 +34,7 @@ PROXIED_URI = (
     "?OSSAccessKeyId=k&Signature=s%2B%2F&Expires=1"
 )
 
-EXPECTED_RAW_PATH = (
-    b"/root/ten%2Ffile.bin?OSSAccessKeyId=k&Signature=s%2B%2F&Expires=1"
-)
+EXPECTED_RAW_PATH = b"/root/ten%2Ffile.bin?OSSAccessKeyId=k&Signature=s%2B%2F&Expires=1"
 
 ENDPOINT = "https://oss-cn-hangzhou.aliyuncs.com"
 BUCKET = "my-bucket"
@@ -223,9 +221,7 @@ async def test_di_shape_injects_override_through_provide_cell(proxy_env):
         "empty-query",
     ],
 )
-async def test_raw_path_query_byte_fidelity(
-    proxy_env, tail, query, expected_raw_path
-):
+async def test_raw_path_query_byte_fidelity(proxy_env, tail, query, expected_raw_path):
     """Every raw path/query fragment reaches the upstream byte-identical —
     no decode/re-encode step may ever touch it (OSS V1 signature binding)."""
     env = proxy_env(ENDPOINT, BUCKET)
@@ -314,9 +310,7 @@ async def test_put_without_content_length_still_streams(proxy_env):
 
     captured = env.request
     assert captured is not None
-    assert "content-length" not in {
-        name.lower() for name in captured.headers.keys()
-    }
+    assert "content-length" not in {name.lower() for name in captured.headers.keys()}
     assert await _streamed_body(env) == b"first-second"
 
 

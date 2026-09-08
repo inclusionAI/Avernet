@@ -234,9 +234,7 @@ class TestFileTransferBackendSelector:
         set_container(container)
         return container
 
-    def test_real_aliyun_branch_builds_env_credential_backend(
-        self, monkeypatch
-    ):
+    def test_real_aliyun_branch_builds_env_credential_backend(self, monkeypatch):
         """Aliyun tenant with the env AK/SK pair builds the real backend."""
         from secbaas.community.plugins.file_transfer import (
             AliyunOssFileTransferBackend,
@@ -260,9 +258,7 @@ class TestFileTransferBackendSelector:
         assert isinstance(backend, AliyunOssFileTransferBackend)
         assert backend._config.endpoint == "https://oss-cn-hangzhou.aliyuncs.com"
 
-    def test_real_aliyun_branch_missing_env_raises_config_error(
-        self, monkeypatch
-    ):
+    def test_real_aliyun_branch_missing_env_raises_config_error(self, monkeypatch):
         """Aliyun tenant without the env pair fails fast with ConfigError."""
         from secbaas.community.bootstrap._configs import ConfigError
 
@@ -328,9 +324,7 @@ class TestFileTransferBackendSelector:
             calls.append(secret_name)
             return ("AK-ID", "AK-SECRET")
 
-        monkeypatch.setattr(
-            StubSecretStorePlugin, "get_kv_secret", fake_get_kv_secret
-        )
+        monkeypatch.setattr(StubSecretStorePlugin, "get_kv_secret", fake_get_kv_secret)
 
         backend = container.plugins().file_transfer_backend()
 

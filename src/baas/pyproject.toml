@@ -83,6 +83,9 @@ select = ["E", "F", "I", "N", "UP", "ASYNC"] # 激活：错误、逻辑、导入
     "F401",    # side-effect 导入在测试中常见且有意义
     "F841",    # 测试中变量"赋值给返回值但后续仅用 .assert_called_once_with 验证 mock 调用的模式很常见
 ]
+"src/secbaas/community/plugins/file_transfer/_aliyun_oss.py" = [
+    "I001",    # byte-identical port of the enterprise backend (phase-89 diff==0 contract); import spelling is inherited provenance and must not be reformatted
+]
 
 [tool.ruff.format]
 # 开启自动格式化（类似 Black 的行为）

@@ -514,9 +514,7 @@ class TestAliyunOverlayStrictContract:
         assert config.user_config["env"]["deploy_tenant"] == "aliyun"
         oss = config.user_config["file_transfer_oss_aliyun"]
         assert oss["endpoint"] == "https://oss-cn-hangzhou.aliyuncs.com"
-        assert (
-            oss["external_endpoint"] == "https://oss-cn-hangzhou-ext.aliyuncs.com"
-        )
+        assert oss["external_endpoint"] == "https://oss-cn-hangzhou-ext.aliyuncs.com"
         assert oss["bucket_name"] == "my-bucket"
         assert oss["staging_root_path"] == "baas-file-transfer"
         assert (

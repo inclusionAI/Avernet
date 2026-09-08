@@ -40,8 +40,8 @@ from secbaas.community.plugins.eval_env import (
 from secbaas.community.plugins.file_transfer import (
     NoopFileTransferBackend,
     NoopSessionFileUrlProjector,
+    OssStreamingProxy,
 )
-from secbaas.community.plugins.file_transfer._http_proxy import OssStreamingProxy
 from secbaas.community.plugins.file_transfer.aliyun_ack import (
     AliyunAckSessionFileUrlProjector,
 )
@@ -100,12 +100,13 @@ def _real_file_transfer():
     environment and the main site goes through the secret plugin.
     """
     from secbaas.community.bootstrap import get_container
-    from secbaas.community.bootstrap._configs import (
-        ConfigError,
-        FileTransferOssConfigSchema,
-    )
     from secbaas.community.plugins.file_transfer import (
         AliyunOssFileTransferBackend,
+    )
+
+    from .._configs import (
+        ConfigError,
+        FileTransferOssConfigSchema,
     )
 
     container = get_container()
@@ -143,12 +144,9 @@ def _real_file_transfer():
     ):
         if not getattr(oss_config, field):
             raise ConfigError(
-                f"{section}.{field} is required when "
-                f"plugins.file_transfer is 'real'"
+                f"{section}.{field} is required when plugins.file_transfer is 'real'"
             )
-    return AliyunOssFileTransferBackend(
-        config=oss_config, secret_store=secret_plugin
-    )
+    return AliyunOssFileTransferBackend(config=oss_config, secret_store=secret_plugin)
 
 
 class PluginContainer(containers.DeclarativeContainer):
