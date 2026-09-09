@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
+import shutil
+import tempfile
 import time
 import zipfile
 
@@ -61,24 +64,90 @@ class _Resolver:
         return _Secret()
 
 
-class _Storage:
-    async def prepare(self) -> None:
-        return None
+_RAW_UPLOAD_FILES = {
+    "SKILL.md": b"name: raw-upload\ndescription: raw endpoint coverage\n",
+    "docs/notes.txt": "plain text\n".encode(),
+    "assets/icon.png": b"\x89PNG\r\n\x1a\n\xff\x00",
+    "assets/nonutf8.bin": b"\xff\x00\x80\xfe",
+    "assets/empty.txt": b"",
+}
+_FOLDER_UPLOAD_FILES = {
+    "SKILL.md": b"name: folder-upload\ndescription: folder coverage\n",
+    "docs/notes.txt": "plain text\n".encode(),
+    "assets/icon.png": b"\x89PNG\r\n\x1a\n\xff\x00",
+    "assets/nonutf8.bin": b"\xff\x00\x80\xfe",
+    "assets/empty.txt": b"",
+}
 
-    async def write(self, _files: list[tuple[str, bytes]]) -> None:
-        return None
 
-    async def cleanup(self) -> bool:
+class _Filesystem:
+    """Small Local-device fixture backed by a real temporary directory."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    def _path(self, device_path: str) -> Path:
+        relative = Path(device_path.lstrip("/"))
+        target = self._root / relative
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or not target.resolve().is_relative_to(self._root.resolve())
+        ):
+            raise OSError("invalid Local Skill test path")
+        return target
+
+    async def write_file(self, path: str, content: bytes) -> None:
+        target = self._path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+
+    async def read_file(self, path: str) -> bytes | None:
+        target = self._path(path)
+        return target.read_bytes() if target.is_file() else None
+
+    async def list_dir(self, path: str, *, recursive: bool = False):
+        directory = self._path(path)
+        if not directory.is_dir():
+            return None
+        entries = directory.rglob("*") if recursive else directory.iterdir()
+        return [
+            {
+                "relative_path": entry.relative_to(directory).as_posix(),
+                "is_dir": entry.is_dir(),
+            }
+            for entry in entries
+        ]
+
+    async def delete_tree(self, path: str) -> bool:
+        directory = self._path(path)
+        if directory.exists():
+            shutil.rmtree(directory)
         return True
+
+    async def exists(self, path: str) -> bool:
+        return self._path(path).exists()
 
 
 class _StorageFactory:
+    def __init__(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self._root = Path(self._temporary_directory.name)
+        self._filesystem = _Filesystem(self._root)
+
     def local_skill_package_storage(
-        self, **_kwargs
+        self, *, name: str, directory_name: str | None = None, **_kwargs
     ) -> tuple[str, LocalSkillPackageStorage]:
-        # HTTP, tenant, and Core persistence are real here; filesystem faults
-        # belong to the Core fault-injection matrix.
-        return "test-local/raw-upload", _Storage()  # type: ignore[return-value]
+        directory = f"test-local/{directory_name or name}"
+        return directory, LocalSkillPackageStorage(self._filesystem, directory)
+
+    def files_for(self, name: str) -> dict[str, bytes]:
+        directory = self._root / "test-local" / name
+        return {
+            path.relative_to(directory).as_posix(): path.read_bytes()
+            for path in directory.rglob("*")
+            if path.is_file()
+        }
 
 
 class _RuntimeFactory:
@@ -114,10 +183,8 @@ class _Cleanup:
 def _package() -> bytes:
     payload = io.BytesIO()
     with zipfile.ZipFile(payload, "w") as archive:
-        archive.writestr(
-            "SKILL.md", "name: raw-upload\ndescription: raw endpoint coverage\n"
-        )
-        archive.writestr("scripts/main.py", "print('ok')\n")
+        for path, content in _RAW_UPLOAD_FILES.items():
+            archive.writestr(path, content)
     return payload.getvalue()
 
 
@@ -165,6 +232,7 @@ def _seed_uploadable_bot(world) -> None:
     init_principal_verifier_config(_Resolver(), "test-key", strict=False)
     storage_factory = _StorageFactory()
     world.injector.binder.bind(SkillServiceFactory, to=storage_factory, scope=None)
+    world.injector.binder.bind(_StorageFactory, to=storage_factory, scope=None)
     with avernet_tenant_scope(_TENANT):
         world.get(BotRepository).insert(
             {
@@ -232,6 +300,16 @@ def _assert_created_inactive_without_default_membership(response, world) -> None
         assert skill is not None and skill["active"] is False
 
 
+def _assert_raw_zip_bytes_reach_the_local_filesystem(response, world) -> None:
+    _assert_created_inactive_without_default_membership(response, world)
+    assert world.get(_StorageFactory).files_for("raw-upload") == _RAW_UPLOAD_FILES
+
+
+def _assert_folder_bytes_reach_the_local_filesystem(response, world) -> None:
+    _assert_created_inactive_without_default_membership(response, world)
+    assert world.get(_StorageFactory).files_for("folder-upload") == _FOLDER_UPLOAD_FILES
+
+
 @endpoint_test(
     method="POST",
     path="/openapi/v1/bots/{bot_id}/skills",
@@ -243,7 +321,7 @@ def _assert_created_inactive_without_default_membership(response, world) -> None
         raw_body=_package(),
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_created_inactive_without_default_membership,),
+    extra_assertions=(_assert_raw_zip_bytes_reach_the_local_filesystem,),
     expect=ExpectSuccess(
         status=201,
         json_contains={
@@ -284,16 +362,15 @@ def multipart_upload_is_an_explicit_error_case():
         path_params={"bot_id": _BOT_ID},
         query_params={"user_id": _OWNER},
         headers={PRINCIPAL_HEADER: _principal()},
-        form_data={"file_paths": '["SKILL.md"]'},
+        form_data={
+            "file_paths": '["SKILL.md", "docs/notes.txt", "assets/icon.png", "assets/nonutf8.bin", "assets/empty.txt"]'
+        },
         files=[
-            (
-                "files",
-                ("SKILL.md", b"name: folder-upload\ndescription: folder coverage\n"),
-            )
+            ("files", (path, content)) for path, content in _FOLDER_UPLOAD_FILES.items()
         ],
     ),
     seed=_seed_uploadable_bot,
-    extra_assertions=(_assert_created_inactive_without_default_membership,),
+    extra_assertions=(_assert_folder_bytes_reach_the_local_filesystem,),
     expect=ExpectSuccess(
         status=201,
         json_contains={

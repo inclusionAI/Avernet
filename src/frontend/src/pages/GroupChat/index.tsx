@@ -317,7 +317,7 @@ const GroupChat: React.FC<GroupChatProps> = ({
     setShowServiceInvocationSessionModal,
   ] = useState(false);
   const [pendingSessionMessageViewScope, setPendingSessionMessageViewScope] =
-    useState<MessageViewScope>('full');
+    useState<MessageViewScope>();
   const [groupListCollapsed, setGroupListCollapsed] = useState(false);
   const [sessionListCollapsed, setSessionListCollapsed] = useState(false);
   const [showSessionDrawer, setShowSessionDrawer] = useState(false);
@@ -681,7 +681,7 @@ const GroupChat: React.FC<GroupChatProps> = ({
   );
 
   const handleCreateSession = useCallback(
-    async (messageViewScope: MessageViewScope = 'full') => {
+    async (messageViewScope?: MessageViewScope) => {
       if (!groupId) return;
       if (currentGroup?.groupStrategy === 'state_machine') {
         setPendingSessionMessageViewScope(messageViewScope);
