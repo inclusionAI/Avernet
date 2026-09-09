@@ -25,4 +25,4 @@
 # Task goal-driven execution framework — dedicated owners.
 /src/backend/**/community/**/task/               @totalfrank @regrecall @msjbear @jiangj0627
 /src/backend/specs/*task*/                       @totalfrank @regrecall @msjbear @jiangj0627
-/src/backend/src/agentclaw/community/**/task*.py @totalfrank @regrecall @msjbear @jiangj0627
+/src/backend/src/agentclaw/community/**/{task*.py, *_task_*.py} @totalfrank @regrecall @msjbear @jiangj0627
