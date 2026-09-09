@@ -289,14 +289,6 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           >
             版本历史
           </button>
-          <button
-            type="button"
-            onClick={() => setShowDeployGuide(true)}
-            disabled={!selectedWorkflowId}
-            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
-          >
-            部署
-          </button>
           {!embedded && <div className="relative">
             <button type="button" aria-label="更多操作" aria-expanded={showMore} onClick={() => setShowMore((open) => !open)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">更多 ···</button>
             {showMore && <><button type="button" aria-label="关闭更多操作" className="fixed inset-0 z-40 cursor-default" onClick={() => setShowMore(false)} /><div role="menu" className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.16)]">
@@ -312,6 +304,14 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
             className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-40"
           >
             {saveToDbMutation.isPending ? '保存中…' : '保存'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeployGuide(true)}
+            disabled={!selectedWorkflowId}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
+          >
+            部署
           </button>
         </div>
       </div>
@@ -563,16 +563,10 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
             <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
-            <p className="mt-2 text-sm leading-6 text-gray-600">
-              部署会把最近一次保存的快照打 Git tag，并准备对应的只读 Pack。该操作需要 ClawMind 的 Git 凭据，网页端不会只写数据库来伪造一次发布。
-            </p>
             <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">在对应 Bot 对话中执行</div>
               <code className="mt-1 block select-all font-mono text-sm text-slate-800">/workflow deploy {selectedWorkflowId}</code>
             </div>
-            <p className="mt-3 text-xs leading-5 text-slate-500">
-              如果尚未保存过快照，请先执行 <code>/workflow save {selectedWorkflowId}</code>。
-            </p>
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setShowDeployGuide(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">关闭</button>
               <button onClick={() => void handleCopyDeployCommand()} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
