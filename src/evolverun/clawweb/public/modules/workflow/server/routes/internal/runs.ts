@@ -58,14 +58,21 @@ export function createInternalRunsRouter(
         user_id?: string;
         plugin_version?: string;
         engine?: string;
-        workflow_version?: number;
-        workflow_deploy_number?: number;
+        workflow_version?: number | null;
+        workflow_deploy_number?: number | null;
       };
 
       if (!flow_id || !workflow_id || !status) {
         apiLog("WRITE", "/runs", { httpStatus: 400, error: "Missing required fields", flow_id, workflow_id, runStatus: status });
         res.status(400).json({ success: false, error: "Bad Request", message: "Missing required fields: flow_id, workflow_id, status" });
         return;
+      }
+
+      for (const [field, value] of Object.entries({ workflow_version, workflow_deploy_number })) {
+        if (value != null && (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647)) {
+          res.status(400).json({ success: false, error: "Bad Request", message: `${field} must be a positive integer or null` });
+          return;
+        }
       }
 
       const ok = await flowRunRepo.insert({
