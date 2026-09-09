@@ -60,7 +60,9 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
     setError(null)
     api.workflows
       .getHistory(workflowId)
-      .then((r) => setHistory(r.history ?? []))
+      // `edit` rows are from the old browser-save flow. They have no Git tag and
+      // cannot run as a version, so do not present them as release history.
+      .then((r) => setHistory((r.history ?? []).filter((item) => item.action !== 'edit')))
       .catch((err) => setError(err instanceof Error ? err.message : '加载历史失败'))
       .finally(() => setLoading(false))
   }, [workflowId])
@@ -158,7 +160,7 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
       {loading ? (
         <div className="p-4 text-sm text-gray-500">加载中…</div>
       ) : history.length === 0 ? (
-        <div className="p-8 text-center text-sm text-gray-400">暂无部署记录</div>
+        <div className="p-8 text-center text-sm text-gray-400">暂无已发布版本</div>
       ) : (
         <div className="flex flex-1 overflow-hidden">
           {/* History list */}

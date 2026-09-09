@@ -282,7 +282,7 @@ export function useDbWorkflow(workflowId: string) {
 export function useSaveWorkflowToDb() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ workflowId, spec, packId, facade, originalWorkflowId, botOwnerId, botId }: {
+    mutationFn: ({ workflowId, spec, packId, facade, originalWorkflowId, botOwnerId, botId, skipDeployHistory }: {
       workflowId: string
       spec: WorkflowSpec
       packId?: string
@@ -290,8 +290,9 @@ export function useSaveWorkflowToDb() {
       originalWorkflowId?: string
       botOwnerId?: string
       botId?: string
+      skipDeployHistory?: boolean
     }) =>
-      api.workflows.save(workflowId, spec, { packId, facade, originalWorkflowId, botOwnerId, botId }),
+      api.workflows.save(workflowId, spec, { packId, facade, originalWorkflowId, botOwnerId, botId, skipDeployHistory }),
     onSuccess: (_data, variables) => {
       void queryClient.invalidateQueries({ queryKey: ['db-workflows'] })
       void queryClient.invalidateQueries({ queryKey: ['facade-bindings'] })

@@ -1422,6 +1422,8 @@ export const api = {
         originalWorkflowId?: string
         botOwnerId?: string
         botId?: string
+        /** Save the DB draft only; the caller owns any separately recorded release history. */
+        skipDeployHistory?: boolean
       },
     ): Promise<WorkflowSpec> {
       return fetchJson<WorkflowSpec>(`${BASE}/workflows/save`, {
@@ -1434,6 +1436,7 @@ export const api = {
           originalWorkflowId: options?.originalWorkflowId,
           botOwnerId: options?.botOwnerId,
           botId: options?.botId,
+          skipDeployHistory: options?.skipDeployHistory,
         }),
       })
     },

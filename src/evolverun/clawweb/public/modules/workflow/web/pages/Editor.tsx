@@ -85,9 +85,9 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     }
     let cancelled = false
     api.workflows
-      .getHistory(selectedWorkflowId, 1)
+      .getHistory(selectedWorkflowId, 50)
       .then((r) => {
-        if (!cancelled) setLatestDeploy(r.history?.[0] ?? null)
+        if (!cancelled) setLatestDeploy(r.history?.find((item) => item.action !== 'edit') ?? null)
       })
       .catch(() => {
         if (!cancelled) setLatestDeploy(null)
@@ -138,6 +138,8 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         facade,
         originalWorkflowId: originalId,
         botOwnerId: user.userId,
+        // A browser edit is a DB draft. Git-backed save/deploy history is written by ClawMind.
+        skipDeployHistory: true,
       })
       if (id !== spec.id || title !== spec.title) {
         useEditorStore.getState().updateSpecField('id', id)
