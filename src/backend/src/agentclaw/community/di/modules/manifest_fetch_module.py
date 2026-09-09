@@ -26,6 +26,13 @@ from agentclaw.community.plugin_api.object_store_client import (
 from agentclaw.community.core.bot_config_manifest.apply.entry_fetch import (
     EntryFetcher,
 )
+from agentclaw.community.core.bot_config_manifest.credentials.service import (
+    SourceCredentialService,
+)
+from agentclaw.community.core.bot_management.token_vault import TokenVault
+from agentclaw.community.core.repository.protocols.bot.source_credential import (
+    SourceCredentialRepositoryProtocol,
+)
 from agentclaw.community.core.bot_config_manifest.cli_tools.service import (
     CliToolPurger,
     CliToolService,
@@ -144,6 +151,47 @@ class ManifestFetchModule(Module):
         )
 
     # ── the machine parts ──────────────────────────────────────────────────
+
+    @singleton
+    @provider
+    @inject
+    def source_credential_service(
+        self,
+        repository: SourceCredentialRepositoryProtocol,
+        vault: TokenVault,
+        manifest_config: cfg.BotConfigManifestConfig,
+    ) -> SourceCredentialServiceProtocol:
+        """W3 (#1471): the profile decides the fail-closed posture.
+
+        Production columns (corp, community) refuse credential writes when the
+        vault has no master key — TokenVault's plaintext passthrough is right
+        for local, catastrophic for tenant tokens at rest. The local/test
+        columns keep the permissive default; corp_test runs the Mist-backed
+        vault anyway and benefits from the same guard.
+
+        **It binds here, next to the config it reads.** The service takes the
+        deployment's transport allowlist — the SAME value ``GuardedFetcher``
+        takes, off the same ``user_config.bot_config_manifest`` block — because
+        the endpoint guard refuses a host resolving to a private address, which
+        is exactly what an internal object store endpoint does. That escape
+        hatch existed on the service and nothing passed through it while the
+        provider lived a module away from the config: an internal endpoint was
+        unregistrable by any configuration, and the one place a deployment
+        declares such a host governed the fetch road alone. The repository it
+        reads through still binds with its siblings in ``bot_management_module``.
+        """
+        from agentclaw.community.di.profile import DeployProfile
+
+        fail_closed = DeployProfile.detect() in (
+            DeployProfile.CORP,
+            DeployProfile.COMMUNITY,
+        )
+        return SourceCredentialService(
+            repository,
+            vault,
+            fail_closed=fail_closed,
+            endpoint_allow_hosts=manifest_config.fetch_transport_allowlist,
+        )
 
     @singleton
     @provider
