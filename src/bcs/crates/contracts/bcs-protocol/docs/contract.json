@@ -2,8 +2,33 @@
   "magic_key": "__bcs_coordination__",
   "version": 1,
   "tools": {
-    "bcs_assign_task": ["target_bot", "message", "response_mode?"],
-    "bcs_send_task_message": ["message"],
-    "bcs_task_complete": ["summary"]
+    "bcs_assign_task": [
+      "target_bot",
+      "message",
+      "response_mode?"
+    ],
+    "bcs_send_task_message": [
+      "message"
+    ],
+    "bcs_task_complete": [
+      "summary"
+    ]
+  },
+  "echo_versions": [
+    1,
+    2
+  ],
+  "reference_v2": {
+    "required_fields": [
+      "__bcs_coordination__",
+      "v",
+      "tool",
+      "intent_id",
+      "status"
+    ],
+    "status": "stored",
+    "intent_id_pattern": "^bcs_intent_[0-9a-f]{32}$",
+    "arguments_in_echo": false,
+    "resolver_api_version": 1
   }
 }

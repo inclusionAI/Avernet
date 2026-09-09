@@ -2,6 +2,7 @@
 
 ## Provides
 
+- `CoordinationIntentPort` with authenticated consumer identity and immutable execution receipts.
 - Application, core, and port trait contracts for BCS.
 - Shared contract-level DTOs, error types, and service container types.
 - Default `Noop*` implementations used to keep contract boundaries explicit in tests and local wiring.

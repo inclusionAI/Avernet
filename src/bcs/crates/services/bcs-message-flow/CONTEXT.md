@@ -2,6 +2,7 @@
 
 ## Provides
 
+- Inline v1 and reference v2 coordination consumption through an injected resolver port.
 - `MessageFlowService` implementation for Workbench/Web group send, bot event relay, chat abort, and master-slave task flow.
 - `A2aChatService` implementation for direct bot chat and async chat run APIs.
 

@@ -1,3 +1,4 @@
+use bcs_service_api::port::CoordinationIntentPort;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
@@ -56,6 +57,7 @@ pub struct BcsMessageFlow {
     pub bot_relay_turn_limit: i64,
     pub interceptors: Arc<InterceptorChain>,
     pub session_management: Option<Arc<dyn SessionManagementService>>,
+    pub(crate) coordination_intents: Option<Arc<dyn CoordinationIntentPort>>,
     pub bot_run_context: Option<Arc<dyn BotRunContextPort>>,
     pub provider_chat_run_timeout_ms: u64,
     pub system_message: Option<Arc<dyn SystemMessageService>>,
@@ -89,6 +91,7 @@ impl BcsMessageFlow {
             bot_relay_turn_limit: 0,
             interceptors: Arc::new(InterceptorChain::new()),
             session_management: None,
+            coordination_intents: None,
             bot_run_context: None,
             provider_chat_run_timeout_ms: DEFAULT_PROVIDER_CALLBACK_TIMEOUT_MS,
             system_message: None,
@@ -101,6 +104,11 @@ impl BcsMessageFlow {
             bot_terminal_observer: Arc::new(NoopBotTerminalObserver),
             human_mention_notify: None,
         }
+    }
+
+    pub fn with_coordination_intents(mut self, port: Option<Arc<dyn CoordinationIntentPort>>) -> Self {
+        self.coordination_intents = port;
+        self
     }
 
     pub fn channel_slot(&self) -> Arc<OnceLock<Arc<dyn ChannelService>>> {

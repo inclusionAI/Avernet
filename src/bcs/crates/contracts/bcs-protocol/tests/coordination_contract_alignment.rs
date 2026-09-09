@@ -55,3 +55,13 @@ fn contract_alignment_locks_tool_argument_shapes() {
         Some(&["summary".to_string()][..])
     );
 }
+
+#[test]
+fn reference_v2_is_additive_to_native_v1_contract() {
+    let body = include_str!("../docs/contract.json");
+    let value: serde_json::Value = serde_json::from_str(body).unwrap();
+    assert_eq!(value["version"], 1);
+    assert_eq!(value["echo_versions"], serde_json::json!([1, 2]));
+    assert_eq!(value["reference_v2"]["status"], "stored");
+    assert_eq!(value["reference_v2"]["arguments_in_echo"], false);
+}

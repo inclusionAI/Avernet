@@ -2,6 +2,7 @@
 
 ## Provides
 
+- Authenticated provider coordination callbacks share reference claims with stream intake.
 - Bot service implementations for BCS, including the independent Bot
   control-plane Core.
 - Bot onboarding, discovery, status, connectivity, and binding metadata behavior.
