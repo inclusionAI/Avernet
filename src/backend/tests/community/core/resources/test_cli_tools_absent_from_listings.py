@@ -70,15 +70,8 @@ def test_a_tools_object_key_is_not_under_a_workspace_namespace() -> None:
         assert "/identity/" not in key
 
 
-def test_the_hidden_dirname_filter_was_not_used_and_is_unchanged() -> None:
-    """Recorded because it was the obvious wrong answer.
-
-    ``_HIDDEN_DIRNAMES`` guards the **root listing only** — the check is
-    ``if is_dir and not path and name in _HIDDEN_DIRNAMES`` — so a name hidden
-    there is still reachable one directory down. Relying on it would have made
-    the isolation a filter with a hole rather than a property. W9 added nothing
-    to it.
-    """
+def test_archive_hidden_dirnames_do_not_include_cli_tools() -> None:
+    """CLI-tool isolation stays structural, not part of archive filtering."""
     assert "cli" not in resource_file_service._HIDDEN_DIRNAMES
     assert "cli-tools" not in resource_file_service._HIDDEN_DIRNAMES
     assert "cli_tools" not in resource_file_service._HIDDEN_DIRNAMES

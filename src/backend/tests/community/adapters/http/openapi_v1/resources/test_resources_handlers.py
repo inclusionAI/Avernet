@@ -333,6 +333,8 @@ async def test_list_returns_workspace_entries():
     """Entries come from the workspace. A record-backed listing could not see a
     file the bot produced itself — it has no record and never will."""
     file_svc = _StubListFileService([
+        _listed(".env", rel=".env", size=3),
+        _listed("state", rel="state", is_dir=True),
         _listed("notes.md", rel="notes.md", size=12),
         _listed("docs", rel="docs", is_dir=True),
     ])
@@ -348,8 +350,10 @@ async def test_list_returns_workspace_entries():
         request=_request_without_trace(),
     )
 
-    assert env.data.total == 2
+    assert env.data.total == 4
     by_name = {i.name: i for i in env.data.items}
+    assert by_name[".env"].type == OpenapiType.FILE
+    assert by_name["state"].type == OpenapiType.FOLDER
     assert by_name["notes.md"].type == OpenapiType.FILE
     assert by_name["notes.md"].path == "notes.md"
     assert by_name["notes.md"].size == 12
