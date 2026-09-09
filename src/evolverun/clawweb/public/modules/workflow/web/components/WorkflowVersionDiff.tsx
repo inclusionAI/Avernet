@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { VersionDiffResult } from '@avernet/clawweb-shared/web/types'
 
@@ -71,6 +72,33 @@ export function unifiedDiff(fromText: string, toText: string): DiffLine[] {
   return lines
 }
 
+/** Turn stored JSON (or the legacy { content: yaml } wrapper) into readable YAML.
+ * The history API deliberately returns the original snapshot; formatting it here
+ * keeps the raw snapshot lossless while making line-level diff useful. */
+export function formatSpecForDiff(specJson: string): string {
+  try {
+    const parsed = JSON.parse(specJson)
+    if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
+      return parsed.content
+    }
+    return stringifyYaml(parsed, { lineWidth: 0 })
+  } catch {
+    return specJson
+  }
+}
+
+function topLevelChanges(fromText: string, toText: string): string[] {
+  try {
+    const from = parseYaml(fromText) as Record<string, unknown>
+    const to = parseYaml(toText) as Record<string, unknown>
+    if (!from || !to || Array.isArray(from) || Array.isArray(to)) return []
+    return [...new Set([...Object.keys(from), ...Object.keys(to)])]
+      .filter((key) => JSON.stringify(from[key]) !== JSON.stringify(to[key]))
+  } catch {
+    return []
+  }
+}
+
 function formatTime(epochSec: number): string {
   if (!epochSec) return '-'
   return new Date(epochSec * 1000).toLocaleString()
@@ -118,9 +146,12 @@ export default function WorkflowVersionDiff({
     return null
   }
 
-  const diffLines = unifiedDiff(result.from.specJson ?? '', result.to.specJson ?? '')
+  const fromText = formatSpecForDiff(result.from.specJson ?? '')
+  const toText = formatSpecForDiff(result.to.specJson ?? '')
+  const diffLines = unifiedDiff(fromText, toText)
   const additions = diffLines.filter((l) => l.type === 'add').length
   const deletions = diffLines.filter((l) => l.type === 'del').length
+  const changedFields = topLevelChanges(fromText, toText)
 
   return (
     <div className="flex h-full flex-col">
@@ -144,6 +175,17 @@ export default function WorkflowVersionDiff({
           <span className="text-red-500">-{deletions}</span>
         </div>
       </div>
+
+      {changedFields.length > 0 && (
+        <div className="border-b border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
+          <span className="mr-2 font-medium text-slate-700">变更字段</span>
+          {changedFields.map((field) => (
+            <span key={field} className="mr-1 inline-block rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-blue-700">
+              {field}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Unified diff body */}
       <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs leading-relaxed">

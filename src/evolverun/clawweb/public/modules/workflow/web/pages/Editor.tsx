@@ -40,6 +40,8 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [showMore, setShowMore] = useState(false)
   const [viewMode, setViewMode] = useState<ViewMode>('visual')
   const [showHistory, setShowHistory] = useState(false)
+  const [showDeployGuide, setShowDeployGuide] = useState(false)
+  const [deployCommandCopied, setDeployCommandCopied] = useState(false)
   const [latestDeploy, setLatestDeploy] = useState<DeployHistoryItem | null>(null)
 
   const { spec, isDirty, selectedNodeId, validationErrors, loadSpec, createNew, importYaml, selectNode, markClean } = useEditorStore()
@@ -83,9 +85,9 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     }
     let cancelled = false
     api.workflows
-      .getHistory(selectedWorkflowId, 1)
+      .getHistory(selectedWorkflowId, 50, true)
       .then((r) => {
-        if (!cancelled) setLatestDeploy(r.history?.[0] ?? null)
+        if (!cancelled) setLatestDeploy(r.history?.find((item) => item.action !== 'edit') ?? null)
       })
       .catch(() => {
         if (!cancelled) setLatestDeploy(null)
@@ -136,6 +138,8 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
         facade,
         originalWorkflowId: originalId,
         botOwnerId: user.userId,
+        // A browser edit is a DB draft. Git-backed save/deploy history is written by ClawMind.
+        skipDeployHistory: true,
       })
       if (id !== spec.id || title !== spec.title) {
         useEditorStore.getState().updateSpecField('id', id)
@@ -212,6 +216,17 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     setSelectedWorkflowId(null)
   }, [newId, newTitle, createNew])
 
+  const handleCopyDeployCommand = useCallback(async () => {
+    if (!selectedWorkflowId) return
+    try {
+      await navigator.clipboard.writeText(`/workflow deploy ${selectedWorkflowId}`)
+      setDeployCommandCopied(true)
+      setTimeout(() => setDeployCommandCopied(false), 2000)
+    } catch {
+      setSaveMessage({ type: 'error', text: '复制发布命令失败，请手动复制。' })
+    }
+  }, [selectedWorkflowId])
+
   // Keyboard shortcut: Ctrl/Cmd+S saves the current workflow.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -266,17 +281,31 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               YAML
             </button>
           </div>
-          <div className="relative">
+          <button
+            type="button"
+            onClick={() => setShowHistory(true)}
+            disabled={!selectedWorkflowId}
+            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:text-slate-300"
+          >
+            版本历史
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowDeployGuide(true)}
+            disabled={!selectedWorkflowId}
+            className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:text-slate-300"
+          >
+            部署
+          </button>
+          {!embedded && <div className="relative">
             <button type="button" aria-label="更多操作" aria-expanded={showMore} onClick={() => setShowMore((open) => !open)} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">更多 ···</button>
             {showMore && <><button type="button" aria-label="关闭更多操作" className="fixed inset-0 z-40 cursor-default" onClick={() => setShowMore(false)} /><div role="menu" className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_16px_40px_rgba(15,23,42,0.16)]">
               <button role="menuitem" onClick={() => { setShowNewDialog(true); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">新建工作流</button>
               <button role="menuitem" onClick={() => { setShowYamlImport(true); setYamlInput(''); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">粘贴 YAML</button>
               <button role="menuitem" onClick={() => { handleImportFile(); setShowMore(false) }} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">导入 YAML 文件</button>
               <button role="menuitem" onClick={() => { handleYamlExport(); setShowMore(false) }} disabled={!spec} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">导出 YAML</button>
-              <div className="my-1 border-t border-slate-100" />
-              <button role="menuitem" onClick={() => { setShowHistory(true); setShowMore(false) }} disabled={!selectedWorkflowId} className="block w-full rounded-lg px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50 disabled:text-slate-300">版本历史</button>
             </div></>}
-          </div>
+          </div>}
           <button
             onClick={handleOpenSaveDialog}
             disabled={!spec}
@@ -525,6 +554,31 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
               workflowId={selectedWorkflowId}
               onClose={() => setShowHistory(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Publishing owns a remote Git tag and read-only Pack, which are created by ClawMind rather than this browser. */}
+      {showDeployGuide && selectedWorkflowId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
+          <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-gray-900">部署工作流</h3>
+            <p className="mt-2 text-sm leading-6 text-gray-600">
+              部署会把最近一次保存的快照打 Git tag，并准备对应的只读 Pack。该操作需要 ClawMind 的 Git 凭据，网页端不会只写数据库来伪造一次发布。
+            </p>
+            <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">在对应 Bot 对话中执行</div>
+              <code className="mt-1 block select-all font-mono text-sm text-slate-800">/workflow deploy {selectedWorkflowId}</code>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-slate-500">
+              如果尚未保存过快照，请先执行 <code>/workflow save {selectedWorkflowId}</code>。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setShowDeployGuide(false)} className="rounded-md border border-gray-300 px-4 py-1.5 text-sm text-gray-700 hover:bg-gray-50">关闭</button>
+              <button onClick={() => void handleCopyDeployCommand()} className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
+                {deployCommandCopied ? '已复制' : '复制部署命令'}
+              </button>
+            </div>
           </div>
         </div>
       )}

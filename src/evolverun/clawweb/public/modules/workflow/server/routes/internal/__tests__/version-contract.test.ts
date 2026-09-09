@@ -79,4 +79,20 @@ describe("ClawMind workflow version wire contract", () => {
     const response = await fetch(`${baseUrl}/deploy-history/other/versions/2/snapshot`);
     expect(await response.json()).toEqual({ found: false });
   });
+
+  it("activates the rollback target when the caller sends isActive", async () => {
+    const response = await fetch(`${baseUrl}/deploy-history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        packId: "pack", workflowId: "demo", deployNumber: 6, version: 1,
+        tagName: "deploy/demo/#1", action: "rollback", fromDeployNumber: 5,
+        specJson: '{"id":"demo","version":1}', isActive: true,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(raw.prepare("SELECT version, is_active FROM workflow_deploy_history WHERE workflow_id = 'demo' ORDER BY deploy_number").all())
+      .toEqual([{ version: 2, is_active: 0 }, { version: 1, is_active: 1 }]);
+  });
 });
