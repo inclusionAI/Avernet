@@ -2,8 +2,8 @@
 
 The service addresses every file by ``workspace/<rel>`` and lets the dispatcher's
 per-provider mapper compose the real address. These tests pin: logical addressing of
-each op, the logic-view ``absolute_path``, file-browser filtering, the
-``skills-local`` root injection (non-teclaw), and the arca download size guard.
+each op, the logic-view ``absolute_path``, exact directory-listing projection, and
+the arca download size guard.
 """
 from __future__ import annotations
 
@@ -111,169 +111,48 @@ async def test_path_falls_back_to_name_without_relative_path():
     assert items[0]["path"] == "sub/x.csv"
 
 
-# ── browser filtering ────────────────────────────────────────────────────────
+# ── exact directory projection ────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_root_listing_filters_hidden_and_dotfiles():
+@pytest.mark.parametrize("provider", ["arca", "local", "baas", "teclaw"])
+async def test_root_listing_preserves_real_entries_without_synthetic_nodes(provider: str):
     device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [  # workspace root
-            {"name": ".hidden", "is_dir": False},
-            {"name": "state", "is_dir": True},
-            {"name": "skills", "is_dir": True},
-            {"name": "AGENTS.md", "is_dir": False},
-            {"name": "data", "is_dir": True},
-            {"name": "report.csv", "is_dir": False, "size": 10},
-        ],
-        [],  # workspace/skills probe → nothing to inject
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": ".hidden", "is_dir": False},
+        {"name": "state", "is_dir": True},
+        {"name": "skills", "is_dir": True},
+        {"name": "skills-pool", "is_dir": True},
+        {"name": "AGENTS.md", "is_dir": False},
+        {"name": "data", "is_dir": True},
+        {"name": "report.csv", "is_dir": False, "size": 10},
     ])
-    svc, _ = _svc(provider="arca", device_fs=device_fs)
+    svc, _ = _svc(provider=provider, device_fs=device_fs)
+
     items = await svc.list_dir(**_COORDS, path="")
-    names = {i["name"] for i in items}
-    assert names == {"data", "report.csv"}
+
+    assert [item["name"] for item in items] == [
+        ".hidden",
+        "state",
+        "skills",
+        "skills-pool",
+        "AGENTS.md",
+        "data",
+        "report.csv",
+    ]
+    device_fs.list_dir.assert_awaited_once_with("workspace")
 
 
 @pytest.mark.asyncio
-async def test_subdir_listing_does_not_filter_hidden_names():
-    # hidden-name filtering only applies at the workspace root.
+async def test_subdir_listing_preserves_hidden_names():
     device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(return_value=[{"name": "state", "is_dir": True}])
+    device_fs.list_dir = AsyncMock(return_value=[
+        {"name": ".cache", "is_dir": True},
+        {"name": "state", "is_dir": True},
+    ])
     svc, _ = _svc(provider="arca", device_fs=device_fs)
     items = await svc.list_dir(**_COORDS, path="sub")
-    assert [i["name"] for i in items] == ["state"]
-
-
-# ── skills-local injection ───────────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_skills_local_injected_for_arca_when_present():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [{"name": "data", "is_dir": True}],          # root
-        [{"name": "skills-local", "is_dir": True,    # workspace/skills probe
-          "path": "/home/admin/.openclaw/workspace/skills/skills-local"}],
-    ])
-    svc, _ = _svc(provider="arca", device_fs=device_fs)
-    items = await svc.list_dir(**_COORDS, path="")
-    injected = [i for i in items if i["path"] == "skills/skills-local"]
-    assert len(injected) == 1
-    assert injected[0]["is_dir"] is True
-    # absolute_path comes from the probed entry's own path
-    assert injected[0]["absolute_path"] == "/home/admin/.openclaw/workspace/skills/skills-local"
-
-
-@pytest.mark.asyncio
-async def test_pool_skills_local_is_injected_when_legacy_bridge_is_retired():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [
-            {"name": "skills-pool", "is_dir": True},
-            {"name": "data", "is_dir": True},
-        ],
-        [],
-        [
-            {
-                "name": "skills-local",
-                "is_dir": True,
-                "path": (
-                    "/home/admin/.openclaw/workspace/"
-                    "skills-pool/skills-local"
-                ),
-            }
-        ],
-    ])
-    svc, _ = _svc(provider="arca", device_fs=device_fs)
-
-    items = await svc.list_dir(**_COORDS, path="")
-
-    assert {item["name"] for item in items} == {"data", "skills-local"}
-    injected = next(item for item in items if item["name"] == "skills-local")
-    assert injected["path"] == "skills-pool/skills-local"
-    assert injected["absolute_path"].endswith("/skills-pool/skills-local")
-
-
-@pytest.mark.asyncio
-async def test_root_returns_only_one_skills_local_when_both_layouts_exist():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [{"name": "data", "is_dir": True}],
-        [
-            {
-                "name": "skills-local",
-                "is_dir": True,
-                "path": (
-                    "/home/admin/.openclaw/workspace/skills/skills-local"
-                ),
-            }
-        ],
-        [
-            {
-                "name": "skills-local",
-                "is_dir": True,
-                "path": (
-                    "/home/admin/.openclaw/workspace/"
-                    "skills-pool/skills-local"
-                ),
-            }
-        ],
-    ])
-    svc, _ = _svc(provider="arca", device_fs=device_fs)
-
-    items = await svc.list_dir(**_COORDS, path="")
-
-    injected = [item for item in items if item["name"] == "skills-local"]
-    assert len(injected) == 1
-    assert injected[0]["path"] == "skills/skills-local"
-    assert device_fs.list_dir.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_skills_local_not_injected_for_teclaw():
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(return_value=[{"name": "skills-local", "is_dir": True}])
-    svc, _ = _svc(provider="teclaw", device_fs=device_fs)
-    items = await svc.list_dir(**_COORDS, path="")
-    # teclaw lists skills-local naturally; no synthetic "skills/skills-local" entry,
-    # and no second probe call.
-    assert all(i["path"] != "skills/skills-local" for i in items)
-    assert device_fs.list_dir.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_skills_local_injected_for_baas_when_present():
-    # openclaw runs on the baas provider and nests skills-local under the hidden
-    # "skills" dir (like arca), so baas must probe workspace/skills and inject it.
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [{"name": "data", "is_dir": True}],          # root
-        [{"name": "skills-local", "is_dir": True,    # workspace/skills probe
-          "path": "/home/admin/.openclaw/workspace/skills/skills-local"}],
-    ])
-    svc, _ = _svc(provider="baas", device_fs=device_fs)
-    items = await svc.list_dir(**_COORDS, path="")
-    injected = [i for i in items if i["path"] == "skills/skills-local"]
-    assert len(injected) == 1
-    assert injected[0]["is_dir"] is True
-    assert device_fs.list_dir.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_root_listing_survives_skills_probe_404():
-    # container without a "skills" dir → engine 404 → device raises. the optional
-    # skills-local probe must be swallowed so the root listing returns instead of 500.
-    device_fs = MagicMock()
-    device_fs.list_dir = AsyncMock(side_effect=[
-        [{"name": "data", "is_dir": True}],                 # root → 200
-        FileNotFoundError("workspace/skills not found"),    # skills probe → 404
-        FileNotFoundError("workspace/skills-pool not found"),
-    ])
-    svc, _ = _svc(provider="baas", device_fs=device_fs)
-    items = await svc.list_dir(**_COORDS, path="")
-    assert [i["name"] for i in items] == ["data"]
-    assert all(i["path"] != "skills/skills-local" for i in items)
-    assert device_fs.list_dir.await_count == 3
+    assert [i["name"] for i in items] == [".cache", "state"]
 
 
 # ── read / download-limit forwarding ─────────────────────────────────────────
@@ -384,9 +263,7 @@ async def test_delete_falls_back_to_the_file_branch_when_the_listing_fails():
 
 @pytest.mark.asyncio
 async def test_delete_still_reaches_hidden_system_names():
-    """The probe uses the raw device listing rather than this class's filtered
-    ``list_dir``, which drops dotfiles and the hidden system directories — those
-    stay as deletable as they were before."""
+    """Directory probing continues to address hidden system names directly."""
     device_fs = _fs_listing({"name": "state", "is_dir": True})
     svc, _ = _svc(provider="arca", device_fs=device_fs)
 
