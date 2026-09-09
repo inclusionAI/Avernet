@@ -208,3 +208,8 @@ def test_http_center_content_union_maps_each_state_to_core() -> None:
     assert [
         _center_content_package(package).state.value for package in packages
     ] == ["READY", "PENDING", "UNAVAILABLE"]
+
+    with pytest.raises(AssertionError, match="Pydantic must reject unknown"):
+        _center_content_package(
+            SimpleNamespace(model_dump=lambda: {"state": "BROKEN"})
+        )
