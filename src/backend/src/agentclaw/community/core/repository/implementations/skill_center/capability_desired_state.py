@@ -83,6 +83,19 @@ class CapabilityDesiredStateRepository(
     def __init__(self, db: DatabasePlugin) -> None:
         self._db = db
 
+    def purge_bot_installations(
+        self, *, bot_id: str, owner_id: str, env: str
+    ) -> dict[str, int]:
+        """Explicit Bot-lifecycle removal; never used by Asset Deletion."""
+        with self._db.transactional_orm_session() as session:
+            skills = skill_installations.uninstall_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=env
+            )
+            mcps = mcp_installations.uninstall_all(
+                session, bot_id=bot_id, owner_id=owner_id, env=env
+            )
+            return {"skills": skills, "mcps": mcps}
+
     @staticmethod
     def _as_item(row: SkillSet) -> dict:
         return _item(row)

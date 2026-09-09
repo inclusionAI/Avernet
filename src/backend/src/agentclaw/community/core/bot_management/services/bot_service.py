@@ -4201,6 +4201,8 @@ class BotService(BotServiceProtocol):
             "skills_deleted": 0,
             "skill_sets_deleted": 0,
             "resources_deleted": 0,
+            "skill_installations_deleted": 0,
+            "mcp_installations_deleted": 0,
             "errors": []
         }
 
@@ -4211,12 +4213,27 @@ class BotService(BotServiceProtocol):
             result["skills_deleted"] = cleanup_result.get("skills_deleted", 0)
             result["skill_sets_deleted"] = cleanup_result.get("skill_sets_deleted", 0)
             result["resources_deleted"] = cleanup_result.get("resources_deleted", 0)
-
-            logger.info(
-                f"[bot_service._cleanup_bot_associated_data] Cleanup completed for bot {bot_id}: "
-                f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}, "
-                f"resources={result['resources_deleted']}"
+            result["skill_installations_deleted"] = cleanup_result.get(
+                "skill_installations_deleted", 0
             )
+            result["mcp_installations_deleted"] = cleanup_result.get(
+                "mcp_installations_deleted", 0
+            )
+            result["errors"].extend(cleanup_result.get("errors", []))
+
+            if result["errors"]:
+                logger.warning(
+                    "[bot_service._cleanup_bot_associated_data] Cleanup incomplete "
+                    "for bot %s: errors=%s",
+                    bot_id,
+                    result["errors"],
+                )
+            else:
+                logger.info(
+                    f"[bot_service._cleanup_bot_associated_data] Cleanup completed for bot {bot_id}: "
+                    f"skills={result['skills_deleted']}, skill_sets={result['skill_sets_deleted']}, "
+                    f"resources={result['resources_deleted']}"
+                )
 
         except Exception as e:
             error_msg = f"Cleanup error for bot {bot_id}: {e}"

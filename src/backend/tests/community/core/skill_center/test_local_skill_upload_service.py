@@ -19,6 +19,7 @@ from agentclaw.community.core.skill_center.errors import (
     LocalSkillNotReadyError,
     LocalSkillRuntimeSyncError,
     LocalSkillStorageError,
+    SkillAssetInUseError,
 )
 from agentclaw.community.core.skill_center.factories import LocalSkillPackageStorage
 from agentclaw.community.core.skill_center.runtime_projection_contract import (
@@ -1031,6 +1032,24 @@ async def test_failed_rollback_step_does_not_stop_package_cleanup():
     assert service._skill_service_factory._filesystem.deleted == [
         "/private/skills-local/upload-skill"
     ]
+
+
+@pytest.mark.asyncio
+async def test_compensation_preserves_package_when_asset_gained_a_reference():
+    package = _zip({"SKILL.md": _skill_md()})
+    repo = _Repo()
+    repo.delete = lambda *_args: (_ for _ in ()).throw(
+        SkillAssetInUseError({"membership": 1})
+    )
+    service = _service(_Filesystem(), repo=repo, audit=_FailAudit())
+
+    with pytest.raises(SkillAssetInUseError):
+        await service.upload_local_skill(
+            bot_id="bot", owner_id="owner", actor_id="owner", package=package
+        )
+
+    assert repo.created
+    assert service._skill_service_factory._filesystem.deleted == []
 
 
 @pytest.mark.asyncio

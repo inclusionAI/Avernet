@@ -241,7 +241,7 @@ def test_delete_first_draft_removes_the_whole_unreferenced_skill_aggregate():
         )
 
 
-def test_delete_first_draft_after_failed_publication_removes_whole_skill():
+def test_failed_publication_lineage_prevents_whole_skill_deletion():
     db = _Database()
     space_id, skill_id = _seed(db, space_type="TEAM")
     with db.orm_session() as session:
@@ -267,23 +267,18 @@ def test_delete_first_draft_after_failed_publication_removes_whole_skill():
         env="test",
     )
 
-    assert result["deleted_scope"] == "SKILL"
+    assert result["deleted_scope"] == "DRAFT"
     with db.orm_session() as session:
-        assert session.query(Skill).filter_by(id=skill_id).one_or_none() is None
+        skill = session.query(Skill).filter_by(id=skill_id).one()
+        assert skill.draft_status is None
         assert (
             session.query(SkillPublicationAttempt)
             .filter_by(skill_id=skill_id)
             .count()
-            == 0
+            == 1
         )
-        assert (
-            session.query(SkillDraftEditLease).filter_by(skill_id=skill_id).count()
-            == 0
-        )
-        assert session.query(SkillGrant).filter_by(skill_id=skill_id).count() == 0
-        assert (
-            session.query(SkillSpaceBinding).filter_by(skill_id=skill_id).count() == 0
-        )
+        assert session.query(SkillGrant).filter_by(skill_id=skill_id).count() == 1
+        assert session.query(SkillSpaceBinding).filter_by(skill_id=skill_id).count() == 1
 
 
 def test_delete_upgrade_draft_preserves_published_skill_history():

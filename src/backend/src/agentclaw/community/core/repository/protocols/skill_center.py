@@ -473,6 +473,11 @@ class SkillRepository(Protocol):
     def delete(self, skill_id: str) -> bool: ...
 
     @abstractmethod
+    def require_unreferenced_for_delete(self, skill_id: str) -> None:
+        """Fail closed before a caller performs external deletion work."""
+        ...
+
+    @abstractmethod
     def list_skill_set_references(
         self,
         skill_id: str,
@@ -501,8 +506,11 @@ class SkillRepository(Protocol):
 
     @abstractmethod
     def delete_by_name_with_cascade(self, name: str, env: str | None = None) -> dict:
-        """Delete the skill by name and cascade related rows; returns a
-        summary dict of what was removed."""
+        """Delete zero-reference same-name assets without removing references.
+
+        The legacy method name and summary keys remain wire-compatible; the
+        cleaned-reference counts are always zero under Asset Deletion rules.
+        """
         ...
 
     @abstractmethod
@@ -521,11 +529,12 @@ class SkillRepository(Protocol):
         ...
 
     @abstractmethod
-    def delete_by_bot_id(self, bot_id: str) -> int:
+    def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         """Delete all skills associated with a bot.
 
         Args:
             bot_id: Bot ID (maps to bolt_id column)
+            owner_id: Exact Bot owner; ``bot_id`` is not globally unique.
 
         Returns:
             Number of deleted records
@@ -754,7 +763,7 @@ class SkillSetRepository(Protocol):
     def get_all_user_mcps(self, user_id: str) -> list[dict]: ...
 
     @abstractmethod
-    def delete_by_bot_id(self, bot_id: str) -> int:
+    def delete_by_bot_id(self, bot_id: str, owner_id: str) -> int:
         """Delete all skill sets and their associations for a bot.
 
         Deletes from junction tables (skill_set_skill, skill_set_mcp_server)
@@ -762,6 +771,7 @@ class SkillSetRepository(Protocol):
 
         Args:
             bot_id: Bot ID (maps to bolt_id column)
+            owner_id: Exact Bot owner; ``bot_id`` is not globally unique.
 
         Returns:
             Number of deleted skill set records
@@ -954,8 +964,6 @@ class SkillCategoryRepository(Protocol):
     def list_descendant_codes(self, path: str) -> list[str]:
         """列出 path 前缀匹配的所有启用类目的 code（含自身）。"""
         ...
-        ...
-
 
 @runtime_checkable
 class SkillCenterSyncLogRepository(Protocol):
