@@ -2070,8 +2070,7 @@ impl Default for BcsServerState {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let coordination_intents = create_coordination_intents(&config)
-            .expect("invalid coordination resolver configuration");
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
             coordination_intents.clone(),
             bot_registry.clone(),
@@ -2915,12 +2914,8 @@ impl BotTerminalObserverPort for DeferredStateMachineTerminalObserver {
     }
 }
 
-fn create_coordination_intents(config: &BcsConfig) -> bcs_service_api::ServiceResult<Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>>> {
-    let Some(resolver) = &config.coordination_resolver else { return Ok(None); };
-    let token = std::env::var(&resolver.token_env).map_err(|_|
-        bcs_service_api::ServiceError::InternalError("coordination resolver credential is missing".into()))?;
-    let client = bcs_coordination_client::CoordinationHttpClient::new(&resolver.base_url, token)?;
-    Ok(Some(Arc::new(client)))
+fn create_coordination_intents(cache: Arc<dyn bcs_cache_api::CachePlugin>) -> Option<Arc<dyn bcs_service_api::port::CoordinationIntentPort>> {
+    Some(Arc::new(bcs_coordination_store::CoordinationCacheStore::new(cache)))
 }
 
 fn create_message_flow_builder(
@@ -3660,8 +3655,7 @@ impl BcsServer {
                  use BcsServer::new_with_storage to enable human mention notifications"
             );
         }
-        let coordination_intents = create_coordination_intents(&config)
-            .expect("invalid coordination resolver configuration");
+        let coordination_intents = create_coordination_intents(Arc::new(bcs_cache_local::InMemoryCachePlugin::new()));
         let message_flow_builder = create_message_flow_builder(
             coordination_intents.clone(),
             bot_registry.clone(),
@@ -4494,8 +4488,7 @@ impl BcsServer {
             ]));
         let state_machine_terminal_observer =
             Arc::new(DeferredStateMachineTerminalObserver::new(terminal_observer));
-        let coordination_intents = create_coordination_intents(&config)
-            .expect("invalid coordination resolver configuration");
+        let coordination_intents = create_coordination_intents(cache_plugin.clone());
         let message_flow_builder = create_message_flow_builder(
             coordination_intents.clone(),
             bot_registry.clone(),

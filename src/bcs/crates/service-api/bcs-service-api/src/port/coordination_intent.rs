@@ -1,4 +1,4 @@
-//! Optional external coordination payload resolution. Identity is supplied by
+//! Shared-cache coordination payload resolution. Identity is supplied by
 //! the authenticated run, never by the tool's arguments.
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

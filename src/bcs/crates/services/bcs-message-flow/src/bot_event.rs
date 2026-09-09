@@ -1675,7 +1675,7 @@ async fn maybe_handle_coordination_echo(
     };
     if let Some(intent_id) = call.intent_id.as_deref() {
         let port = flow.coordination_intents.as_ref()
-            .ok_or_else(|| ServiceError::InternalError("coordination_resolver_disabled".into()))?;
+            .ok_or_else(|| ServiceError::InternalError("coordination_store_unavailable".into()))?;
         let context = match &flow.bot_run_context {
             Some(runs) => runs.get_context(&cmd.run_id).await,
             None => None,

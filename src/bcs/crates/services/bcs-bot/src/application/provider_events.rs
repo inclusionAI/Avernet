@@ -837,7 +837,7 @@ impl ProviderBotEventService for ProviderBotEvents {
 
         if let Some(intent_id) = call.intent_id.as_deref() {
             let port = self.coordination_intents.as_ref().ok_or_else(||
-                ProviderBotEventError::Internal("coordination_resolver_disabled".into()))?;
+                ProviderBotEventError::Internal("coordination_store_unavailable".into()))?;
             let consumer = CoordinationContext { bot_id: context.bot_id.clone(),
                 group_id: context.group_id.clone(), session_id: context.bcs_session_id.clone(),
                 run_id: context.run_id.clone(), tool_call_id: command.tool_call_id.trim().to_string() };

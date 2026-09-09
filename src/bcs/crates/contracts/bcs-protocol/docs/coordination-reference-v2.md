@@ -16,32 +16,38 @@ contains no arguments, task dispatch ID, consumer identity, or resolver URL.
 `intent_id` identifies a stored request; an actual `task_id` exists only after
 successful dispatch. A compact response fits within 512 bytes.
 
-## Resolver Service API v1
+## Shared cache contract v2
 
-Bootstrap injects `CoordinationIntentPort`. Public BCS has no cache vendor SDK.
-The HTTP adapter uses only its configured base URL and bearer token, disables
-redirects and idle connection reuse, bounds response size to 2 MiB, and never logs payloads or credentials.
+Bootstrap injects `CoordinationIntentPort` implemented by `bcs-coordination-store`
+using the already selected `CachePlugin`. MCP and BCS access the same physical
+cache. Environment isolation is owned by deployment and plugin selection. No
+resolver endpoint, service token, or coordination environment setting is used.
+The cache plugin contract is unchanged; vendor SDKs stay outside public BCS.
 
-All paths begin `/internal/bcs-coordination/v1/intents/{intent_id}`:
+Keys are `bcs:coordination:v2:{intent_id}:{suffix}` with no environment prefix.
+Values at the CachePlugin boundary are UTF-8 JSON bytes. The producer writes
+raw UTF-8 JSON; plugins must read that format. Plugin-specific encoding of
+consumer-owned claim/result records stays inside the plugin:
 
-| Method / suffix | Request | Response |
-| --- | --- | --- |
-| GET | none | `{payload, claimed, result}` |
-| POST `/claim` | `{context}` | `{acquired, claim_token, result}` |
-| POST `/finish` | `{context, claim_token, result}` | immutable `result` |
+| Suffix | Writer | JSON value | TTL |
+| --- | --- | --- | --- |
+| `payload` | MCP | `{intent_id,v:2,tool,arguments,created_at_ms,expires_at_ms}` | 86400 seconds |
+| `claim` | BCS | `{context,claim_token,claimed_at_ms}` | 172800 seconds |
+| `result` | BCS | `{status,task_id,error_code}` | 172800 seconds |
 
-`payload` has `intent_id`, `v:2`, `tool`, `arguments`, `created_at_ms`,
-`expires_at_ms`. `context` has authenticated `bot_id`, `group_id`, nullable
-`session_id`, `run_id`, `tool_call_id`. It must be identical across both intake
-paths. `result` has `status: applied|failed|unknown`, nullable `task_id`, and a
-nullable bounded `error_code`. The token is returned only on the first successful
-claim, never via GET or duplicate claims. `acquired:false` with no result is an
-uncertain earlier execution and never grants execution permission.
+All writes use atomic insert-only semantics with TTL (`SET NX EX`). Reads do not
+refresh TTL. The producer confirms payload creation before returning a reference.
+Payload arguments are limited to 1 MiB; consumer JSON reads are limited to 2 MiB.
 
-Missing/expired/evicted payloads are unavailable (404; known expired metadata
-410). Cache failures are 503, mismatched claims/receipts 409. Authentication and
-schema errors reject the request. Claim and result records outlive payloads;
-finish may complete after payload expiry, if the claim still exists.
+`context` has authenticated `bot_id`, `group_id`, nullable `session_id`, `run_id`
+and `tool_call_id`, identical across both intake paths. `claim_token` is a random
+32-character ownership token, local to the claim protocol, not a deployment
+credential. `result.status` is `applied|failed|unknown`; `task_id` and `error_code`
+are nullable. Only an acknowledged successful insert grants execution. A duplicate
+claim without a receipt represents uncertain execution and never grants a lease.
+Conflicting context or receipt values fail. Finish can run after payload expiry
+while its claim still exists. Missing/expired payloads and cache failures fail
+without falling back to inline arguments.
 
 ## Consumption
 
@@ -52,35 +58,33 @@ validate roles, targets, sessions and pending workers. Record actual dispatch
 `task_id` only on success. Execution errors can follow partial side effects and
 therefore receive `unknown`; a run terminated before execution receives `failed`.
 
-GET retries transient failures up to three attempts, each at most 3 seconds,
-with 200/500 ms backoff bounded by the remaining run deadline. Claim is a single
-attempt. An ambiguous acknowledgement causes a status read and an error, never
-execution or claim reclamation. Finish alone may retry three times; it never
-repeats dispatch. Applied duplicates succeed without execution, while missing,
-failed or unknown receipts surface an error. Stream intake also emits a visible
-notification when system messaging is configured.
+Cache reads retry backend failures up to three attempts, each at most 3 seconds,
+with 200/500 ms backoff bounded by the run deadline. Claim is a single attempt;
+an ambiguous acknowledgement causes an error, never execution or reclamation.
+Finish may retry three times and only repeats the immutable receipt write.
+Applied duplicates succeed without execution; missing, failed or unknown receipts
+surface an error. Stream intake emits a visible notification when configured.
 
-## Configuration and rollout
+## Deployment and rollout
 
-Absent `coordination_resolver` disables reference consumption. Example BCS TOML
-(the credential is injected through the named environment variable):
+Select the existing environment cache plugin so its physical cache, key mapping
+and byte encoding match the MCP producer. No new BCS configuration is required.
+Storage-backed startup passes the selected cache instance into the coordination
+store; memory-only development/test constructors use a local in-memory cache.
 
-```toml
-[coordination_resolver]
-base_url = "http://127.0.0.1:8888"
-token_env = "BCS_COORDINATION_TOKEN"
-```
+Deploy the BCS cache consumer before enabling producer v2. The producer ships
+with v2 enabled. Rollback the producer to v1 and retain consumer v2 support until
+existing references expire. Old HTTP resolver configuration must be removed when
+upgrading from the earlier resolver implementation.
 
-Deploy the authenticated resolver API first, with tools still returning v1.
-Deploy BCS with the resolver configured, then enable producer v2. Rollback only
-the producer to v1 and retain BCS v2 resolution until existing references expire.
-The producer's distributed cache retains payloads for 24 hours and claim/result
-records for 48 hours. Reads do not refresh TTLs. Atomic NX creates prevent
-concurrent claims while records persist. Cache eviction/loss is not durable
-exactly-once delivery; a lost tool-end event does not trigger redispatch.
+Cache eviction/loss is not durable exactly-once delivery. A lost tool-end event
+does not trigger redispatch, and an uncertain claim is never reclaimed.
 
 ## Validation
 
-Protocol parsing, HTTP retry/uncertainty tests, and dual-intake contract tests
-cover long Chinese text, pretty printing, native mapping, both arrival orders,
-failed reads, immutable receipts, and no re-execution after receipt loss.
+Protocol parsing and dual-intake compatibility tests preserve v1 and v2 behavior.
+Cache-store conformance tests cover long Chinese text, concurrent consumers,
+shared keys, immutable receipts, transient failures and lost acknowledgements.
+Deployment-specific cache plugins must pass the existing CachePlugin contract,
+including atomic insert-only writes with TTL. Real cross-process connectivity
+and vendor byte encoding require deployment integration verification.
