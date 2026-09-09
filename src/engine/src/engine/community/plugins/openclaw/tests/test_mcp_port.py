@@ -15,6 +15,8 @@ import subprocess
 
 import pytest
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -29,7 +31,7 @@ def cfg_path(tmp_path):
 @pytest.fixture
 def impl(cfg_path, monkeypatch):
     """OpenClawPluginImpl with _mcporter_config_path monkeypatched to tmp_path."""
-    inst = OpenClawPluginImpl()
+    inst = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     monkeypatch.setattr(inst, "_mcporter_config_path", lambda: cfg_path)
     return inst
 

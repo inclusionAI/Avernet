@@ -172,7 +172,7 @@ class _SkillsPortMixin:
             params=params,
             engine="claude_code",
             additional_retirement_roots=claude_code_retirement_active_roots(),
-            center_is_mounted=self._skills_center_is_mounted,
+            content_adapter=self._center_content_adapter,
         )
 
     async def verify_pool_mappings(
@@ -313,13 +313,19 @@ class _SkillsPortMixin:
             return resp.payload if isinstance(resp.payload, dict) else {"success": True}
         return _resp_dict(resp)
 
-    async def skills_sync_symlinks(self, params: dict, token: str | None = None) -> dict:
+    async def skills_sync_symlinks(
+        self, params: dict, token: str | None = None
+    ) -> dict:
         return await asyncio.to_thread(self._local_symlinks.sync_relative, params)
 
-    async def skills_sync_bindpaths(self, params: dict, token: str | None = None) -> dict:
+    async def skills_sync_bindpaths(
+        self, params: dict, token: str | None = None
+    ) -> dict:
         return await asyncio.to_thread(self._local_symlinks.sync, params)
 
-    async def skills_clean_symlinks(self, params: dict, token: str | None = None) -> dict:
+    async def skills_clean_symlinks(
+        self, params: dict, token: str | None = None
+    ) -> dict:
         return await asyncio.to_thread(self._local_symlinks.clean, params)
 
     async def skills_ensure_center(self, token: str | None = None) -> dict:

@@ -4,10 +4,12 @@ Provides __init__, pool property, _pooled_client, and _default_client.
 All per-domain mixin classes inherit (transitively) from this base via
 OpenClawPluginImpl's MRO.
 """
+
 from __future__ import annotations
 
 import logging
 
+from engine.community.kernel.center_content import CenterContentAdapter
 from engine.community.openclaw.client.gateway_client import (
     OpenClawGatewayClient,
     get_client,
@@ -24,9 +26,12 @@ class OpenClawPortBase:
         self,
         client: OpenClawGatewayClient | None = None,
         pool: TokenClientPool | None = None,
+        *,
+        center_content_adapter: CenterContentAdapter,
     ) -> None:
         self._client = client
         self._pool = pool if pool is not None else TokenClientPool()
+        self._center_content_adapter = center_content_adapter
         # Lifetime cache: `providers.available` is global config (doesn't vary
         # per tenant), so we build the map at most once per process lifetime.
         self._model_provider_map: dict[str, str] | None = None

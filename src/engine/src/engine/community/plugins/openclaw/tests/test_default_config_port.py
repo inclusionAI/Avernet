@@ -11,6 +11,8 @@ import json
 
 import pytest
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 _ENV = "OPENCLAW_DEFAULT_CONFIG_PATH"
@@ -21,7 +23,7 @@ async def test_reads_and_returns_path_and_config(tmp_path, monkeypatch):
     cfg = tmp_path / "openclaw.json"
     cfg.write_text(json.dumps({"model": "gpt-4", "nested": {"a": 1}}), encoding="utf-8")
     monkeypatch.setenv(_ENV, str(cfg))
-    out = await OpenClawPluginImpl().get_default_config()
+    out = await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()
     assert out["path"] == str(cfg)
     assert out["config"] == {"model": "gpt-4", "nested": {"a": 1}}
 
@@ -34,7 +36,7 @@ async def test_uses_singlebox_model_config_source_when_default_path_is_unset(
     monkeypatch.delenv(_ENV, raising=False)
     monkeypatch.setenv(_MODEL_SOURCE_ENV, str(cfg))
 
-    out = await OpenClawPluginImpl().get_default_config()
+    out = await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()
 
     assert out == {"path": str(cfg), "config": {"models": {"mode": "merge"}}}
 
@@ -42,13 +44,13 @@ async def test_uses_singlebox_model_config_source_when_default_path_is_unset(
 async def test_missing_file_raises_filenotfound(tmp_path, monkeypatch):
     monkeypatch.setenv(_ENV, str(tmp_path / "nope.json"))
     with pytest.raises(FileNotFoundError):
-        await OpenClawPluginImpl().get_default_config()
+        await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()
 
 
 async def test_directory_path_raises_isadirectory(tmp_path, monkeypatch):
     monkeypatch.setenv(_ENV, str(tmp_path))  # a directory, not a file
     with pytest.raises(IsADirectoryError):
-        await OpenClawPluginImpl().get_default_config()
+        await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()
 
 
 async def test_bad_json_raises_valueerror(tmp_path, monkeypatch):
@@ -56,7 +58,7 @@ async def test_bad_json_raises_valueerror(tmp_path, monkeypatch):
     cfg.write_text("{not valid json", encoding="utf-8")
     monkeypatch.setenv(_ENV, str(cfg))
     with pytest.raises(ValueError):
-        await OpenClawPluginImpl().get_default_config()
+        await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()
 
 
 async def test_non_object_top_level_raises_valueerror(tmp_path, monkeypatch):
@@ -64,4 +66,4 @@ async def test_non_object_top_level_raises_valueerror(tmp_path, monkeypatch):
     cfg.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
     monkeypatch.setenv(_ENV, str(cfg))
     with pytest.raises(ValueError):
-        await OpenClawPluginImpl().get_default_config()
+        await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).get_default_config()

@@ -33,6 +33,7 @@ from engine.community.core.adapters.openclaw.node import OpenClawNodeAdapter
 from engine.community.core.adapters.openclaw.relay import OpenClawRelayAdapter
 from engine.community.core.adapters.openclaw.session import OpenClawSessionAdapter
 from engine.community.core.adapters.openclaw.skills import OpenClawSkillsAdapter
+from engine.community.engines.center_content import build_center_content_adapter
 from engine.community.core.adapters.openclaw.web_shell import OpenClawWebShellAdapter
 from engine.community.core.bash.base import BaseBashService
 from engine.community.core.engine.base import BaseEngine
@@ -169,7 +170,11 @@ class OpenClawEngine(BaseEngine):
         self._injected_pool = pool  # None in production
 
         # The single production transport impl shared by every adapter.
-        self._port = OpenClawPluginImpl(client=client, pool=pool)
+        self._port = OpenClawPluginImpl(
+            client=client,
+            pool=pool,
+            center_content_adapter=build_center_content_adapter(),
+        )
 
         # ACL adapters implementing the core *Service protocols.
         self._session = OpenClawSessionAdapter(self._port)

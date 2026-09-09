@@ -75,6 +75,8 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 )
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.repository.protocols.skills_pool import SkillsPoolSkillRepositoryProtocol
+from agentclaw.community.core.devices.services.device_context_resolver import DeviceContextResolver
+from agentclaw.community.core.skill_center.center_content_distribution import CenterContentDistribution
 from agentclaw.community.core.skills_pool.runtime import OpenClawSkillsPoolRuntime
 from agentclaw.community.di import DeployProfile, build_injector
 from agentclaw.community.di.modules.skill_center_module import SkillCenterModule
@@ -85,10 +87,14 @@ from agentclaw.community.core.repository.implementations.skill_center.skill impo
 def test_skill_runtime_delivery_is_wired_only_into_per_domain_projection() -> None:
     pool_runtime = MagicMock(spec=SkillsPoolRuntimeProtocol)
     pool_layouts = MagicMock(spec=SkillsPoolLayoutRepositoryProtocol)
+    device_contexts = MagicMock(spec=DeviceContextResolver)
+    center_content = MagicMock(spec=CenterContentDistribution)
 
     registry = SkillCenterModule().engine_runtime_projection_registry(
         pool_runtime=pool_runtime,
         pool_layouts=pool_layouts,
+        device_contexts=device_contexts,
+        center_content=center_content,
     )
 
     per_domain = registry.for_engine("openclaw")
@@ -96,6 +102,8 @@ def test_skill_runtime_delivery_is_wired_only_into_per_domain_projection() -> No
     assert isinstance(per_domain._skill_delivery, SkillRuntimeDelivery)
     assert per_domain._skill_delivery._pool_runtime is pool_runtime
     assert per_domain._skill_delivery._pool_layouts is pool_layouts
+    assert per_domain._skill_delivery._device_contexts is device_contexts
+    assert per_domain._skill_delivery._center_content is center_content
     assert isinstance(registry.for_engine("teclaw"), WholeArtifactRuntimeProjection)
 
 

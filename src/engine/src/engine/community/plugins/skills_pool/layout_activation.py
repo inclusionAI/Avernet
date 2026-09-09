@@ -781,6 +781,22 @@ def _canonical_pool_source(layout: _Layout, source: Path) -> Path | None:
     return None
 
 
+def _same_center_skill_identity(layout: _Layout, first: Path, second: Path) -> bool:
+    """Match exact-version paths only by their shared managed Center identity."""
+
+    root = Path(os.path.abspath(layout.pool_center))
+    try:
+        first_parts = Path(os.path.abspath(first)).relative_to(root).parts
+        second_parts = Path(os.path.abspath(second)).relative_to(root).parts
+    except ValueError:
+        return False
+    return (
+        len(first_parts) == 2
+        and len(second_parts) == 2
+        and first_parts[0] == second_parts[0]
+    )
+
+
 def _managed_source_failure(
     source: Path,
     *,
@@ -1365,7 +1381,9 @@ def _best_effort_retire(
             )
             continue
         current = _lexical_target(target)
-        if current != source:
+        if current != source and not _same_center_skill_identity(
+            layout, current, source
+        ):
             outcomes.append(
                 MappingItemResult(
                     target=str(target),

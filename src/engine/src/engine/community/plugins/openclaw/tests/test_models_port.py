@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from engine.community.kernel.frames import ResponseFrame
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -30,7 +31,7 @@ class _FakeClient:
 
 def _impl(responses) -> tuple[OpenClawPluginImpl, _FakeClient]:
     client = _FakeClient(responses)
-    return OpenClawPluginImpl(client=client), client
+    return OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), client=client), client
 
 
 async def test_models_list_returns_models_when_present():

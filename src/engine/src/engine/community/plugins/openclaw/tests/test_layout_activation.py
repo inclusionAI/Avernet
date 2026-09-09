@@ -43,6 +43,7 @@ from engine.community.plugins.openclaw.layout_sync import (
     mirror_local_tree,
     write_baseline_manifest,
 )
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 from engine.community.plugins.skills_pool import layout_atomic
 from engine.community.plugins.skills_pool.layout_activation import (
@@ -1947,7 +1948,7 @@ async def test_openclaw_port_runs_pool_filesystem_operations_off_loop(
         "verify_skill_mappings",
         lambda **_kwargs: MappingVerificationResult(True, {"checked": 1}),
     )
-    port = OpenClawPluginImpl()
+    port = OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), )
     params = {
         "migration_generation": "generation-1",
         "preparation_id": PREPARATION_ID,
@@ -1981,7 +1982,7 @@ async def test_openclaw_port_resolves_logical_mapping_and_returns_evidence(
         return MappingPublishResult(True, {"total": 1})
 
     monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
-    result = await OpenClawPluginImpl().publish_pool_mappings(
+    result = await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).publish_pool_mappings(
         {
             "mapping_contract_version": MAPPING_CONTRACT_VERSION,
             "mappings": [
@@ -2037,8 +2038,8 @@ async def test_openclaw_port_forwards_best_effort_apply_mode(
         "mappings": [{"source": "/pool/a", "target": "/skills/a"}],
     }
 
-    await OpenClawPluginImpl().publish_pool_mappings(params)
-    await OpenClawPluginImpl().verify_pool_mappings(params)
+    await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).publish_pool_mappings(params)
+    await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).verify_pool_mappings(params)
 
     assert [kwargs["apply_mode"].value for kwargs in received] == [
         "BEST_EFFORT",
@@ -2081,7 +2082,7 @@ async def test_openclaw_port_rejects_nul_before_publish(
     monkeypatch.setattr(_skills, "publish_pool_mappings", publish)
 
     with pytest.raises(InvalidPoolMappingRequestError):
-        await OpenClawPluginImpl().publish_pool_mappings(
+        await OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), ).publish_pool_mappings(
             {
                 "mapping_contract_version": MAPPING_CONTRACT_VERSION,
                 "mappings": mappings,

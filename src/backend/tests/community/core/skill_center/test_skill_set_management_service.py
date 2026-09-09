@@ -526,6 +526,25 @@ def _registry(*, pool_runtime, pool_layouts):
     from agentclaw.community.core.skill_center.services.runtime_projections.whole_artifact import (
         WholeArtifactRuntimeProjection,
     )
+    from agentclaw.community.core.devices.services.device_context import DeviceContext
+
+    class _Contexts:
+        def resolve_for_bot(self, bot_id: str, user_id: str) -> DeviceContext:
+            return DeviceContext(
+                provider="local",
+                conn_info={},
+                binding_id=1,
+                bot_id=bot_id,
+                user_id=user_id,
+                bot_type="personal",
+            )
+
+    class _UnusedCenterContent:
+        def lookup(self, _identity):
+            raise AssertionError("cloud test projection must not resolve downloads")
+
+        def prepare(self, _identity):
+            raise AssertionError("foreground projection must not prepare downloads")
 
     # The same routing the DI provider builds. If these two drift, these tests
     # stop describing production.
@@ -534,6 +553,8 @@ def _registry(*, pool_runtime, pool_layouts):
             skill_delivery=SkillRuntimeDelivery(
                 pool_runtime=pool_runtime,
                 pool_layouts=pool_layouts,
+                device_contexts=_Contexts(),
+                center_content=_UnusedCenterContent(),
             ),
         ),
         by_engine={"teclaw": WholeArtifactRuntimeProjection()},

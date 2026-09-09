@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from agentclaw.community.core.devices.services.device_context_resolver import (
+    DeviceContextResolver,
+)
+from agentclaw.community.core.skill_center.canonical_center_store import (
+    CanonicalCenterVersionIdentity,
+)
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentDistribution,
+    CenterContentRequest,
+)
 from agentclaw.community.core.repository.protocols.skills_pool import (
     SkillsPoolLayoutRepositoryProtocol,
 )
@@ -34,6 +44,7 @@ from agentclaw.community.core.skills_pool.models import (
     SkillMappingSourceLayout,
 )
 from agentclaw.community.core.skills_pool.ports import (
+    CenterContentContractUnsupported,
     LegacyMappingApplyRequired,
     SkillsPoolRuntimeProtocol,
 )
@@ -61,9 +72,13 @@ class SkillRuntimeDelivery:
         *,
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        device_contexts: DeviceContextResolver,
+        center_content: CenterContentDistribution,
     ) -> None:
         self._pool_runtime = pool_runtime
         self._pool_layouts = pool_layouts
+        self._device_contexts = device_contexts
+        self._center_content = center_content
 
     async def deliver(
         self,
@@ -99,16 +114,25 @@ class SkillRuntimeDelivery:
             if pool_owns_runtime
             else SkillMappingSourceLayout.LEGACY
         )
+        context = self._device_contexts.resolve_for_bot(plan.bot_id, plan.owner_id)
+        content_request = self._center_content_request(
+            mappings=mappings,
+            needs_download=context.bot_type == "desktop",
+        )
         try:
             applied = await self._pool_runtime.apply_mappings(
-                bot_id=plan.bot_id,
-                user_id=plan.owner_id,
+                context=context,
                 engine=runtime_layout_engine_for_bot(bot),
                 mappings=mappings,
                 retired_mappings=retired,
                 source_layout=source_layout,
+                center_content=content_request,
             )
+        except CenterContentContractUnsupported:
+            return self._unsupported_center_content_result()
         except LegacyMappingApplyRequired:
+            if content_request is not None:
+                return self._unsupported_center_content_result()
             if uses_legacy_mapping:
                 return await self._apply_pool_mappings(
                     bot_id=plan.bot_id,
@@ -123,7 +147,51 @@ class SkillRuntimeDelivery:
             plan=plan,
             retired_mappings=retired,
             applied=applied,
+            requires_center_content=content_request is not None,
         )
+
+    @staticmethod
+    def _unsupported_center_content_result() -> RuntimeProjectionResult:
+        return RuntimeProjectionResult(
+            status=RuntimeProjectionStatus.DEGRADED,
+            components={"skills": RuntimeProjectionStatus.DEGRADED},
+            issues=(
+                RuntimeProjectionIssue(
+                    resource_type="RUNTIME",
+                    code="CENTER_CONTENT_CONTRACT_UNSUPPORTED",
+                    reason="Desktop Engine 版本不支持 Skill Center 精确内容交付，请升级后重试",
+                    status=RuntimeProjectionStatus.DEGRADED,
+                    retryable=False,
+                    suggested_action="请升级 Desktop 客户端及 Engine 后重试。",
+                ),
+            ),
+        )
+
+    def _center_content_request(
+        self,
+        *,
+        mappings: Sequence[PoolSkillMapping],
+        needs_download: bool,
+    ) -> CenterContentRequest | None:
+        if not needs_download:
+            return None
+        packages = []
+        seen: set[tuple[str, str]] = set()
+        for mapping in mappings:
+            if mapping.corpus != "center":
+                continue
+            if mapping.skill_uuid is None or mapping.sc_version_number is None:
+                raise ValueError("center mapping requires structured identity")
+            key = (mapping.skill_uuid, mapping.sc_version_number)
+            if key in seen:
+                continue
+            seen.add(key)
+            packages.append(
+                self._center_content.lookup(
+                    CanonicalCenterVersionIdentity(*key)
+                )
+            )
+        return CenterContentRequest(tuple(packages)) if packages else None
 
     async def _apply_legacy_device_sync(
         self,
@@ -154,6 +222,7 @@ class SkillRuntimeDelivery:
         plan: ResolvedSkillPlan,
         retired_mappings: Sequence[PoolSkillMapping],
         applied: MappingApplyResult,
+        requires_center_content: bool = False,
     ) -> RuntimeProjectionResult:
         expected_apply = set(plan.projection.skill_mappings)
         desired_names = {mapping.link_name for mapping in expected_apply}
@@ -170,6 +239,11 @@ class SkillRuntimeDelivery:
         }
         all_items = [*applied.items, *applied.issues]
         invalid = False
+        center_evidence = (
+            applied.evidence.get("center_content")
+            if requires_center_content
+            else None
+        )
         for item in all_items:
             mapping = item.mapping
             if item.action == "APPLY" and mapping is not None:
@@ -219,6 +293,12 @@ class SkillRuntimeDelivery:
             expected_retire - set(seen_retire)
         )
         if missing and applied.status is MappingProjectionStatus.CONVERGED:
+            invalid = True
+        if requires_center_content and not SkillRuntimeDelivery._valid_center_evidence(
+            expected_apply=expected_apply,
+            seen_apply=seen_apply,
+            evidence=center_evidence,
+        ):
             invalid = True
         item_statuses = {item.status for item in all_items}
         severity = {
@@ -270,6 +350,63 @@ class SkillRuntimeDelivery:
             components={"skills": status},
             issues=tuple(issues),
         )
+
+    @staticmethod
+    def _valid_center_evidence(
+        *,
+        expected_apply: set[PoolSkillMapping],
+        seen_apply: dict[PoolSkillMapping, MappingProjectionStatus],
+        evidence: object,
+    ) -> bool:
+        if not (
+            isinstance(evidence, dict)
+            and evidence.get("contract_version") == 1
+            and evidence.get("mode") == "DOWNLOAD"
+            and isinstance(evidence.get("packages"), list)
+        ):
+            return False
+        expected = {
+            (mapping.skill_uuid, mapping.sc_version_number): mapping
+            for mapping in expected_apply
+            if mapping.corpus == "center"
+        }
+        observed: dict[tuple[object, object], str] = {}
+        for raw in evidence["packages"]:
+            if (
+                not isinstance(raw, dict)
+                or set(raw) != {"skill_uuid", "sc_version_number", "status"}
+                or raw.get("status") not in {"READY", "PENDING", "UNAVAILABLE"}
+            ):
+                return False
+            key = (raw.get("skill_uuid"), raw.get("sc_version_number"))
+            if key in observed:
+                return False
+            observed[key] = str(raw["status"])
+        if set(observed) != set(expected):
+            return False
+        counts = {
+            "ready": sum(status == "READY" for status in observed.values()),
+            "pending": sum(status == "PENDING" for status in observed.values()),
+            "unavailable": sum(
+                status == "UNAVAILABLE" for status in observed.values()
+            ),
+        }
+        if any(evidence.get(name) != count for name, count in counts.items()):
+            return False
+        for key, mapping in expected.items():
+            mapping_status = seen_apply.get(mapping)
+            if mapping_status is None:
+                return False
+            content_status = observed[key]
+            if (
+                content_status == "PENDING"
+                and mapping_status is not MappingProjectionStatus.PENDING
+            ) or (
+                content_status == "UNAVAILABLE"
+                and mapping_status is not MappingProjectionStatus.DEGRADED
+            ):
+                return False
+        return True
 
     async def _apply_pool_mappings(
         self,

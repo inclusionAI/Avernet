@@ -13,9 +13,17 @@ from engine.community.plugins.skills_pool.layout_activation import (
     MappingProjectionStatus,
     MappingSourceLayout,
 )
-from engine.community.plugins.skills_pool.mapping_contract import (
-    apply_logical_mapping_payload,
+from engine.community.plugins.skills_pool.center_content import (
+    MountedCenterContentAdapter,
 )
+from engine.community.plugins.skills_pool.mapping_contract import (
+    apply_logical_mapping_payload as _apply_logical_mapping_payload,
+)
+
+
+def apply_logical_mapping_payload(**kwargs):
+    kwargs.setdefault("content_adapter", MountedCenterContentAdapter())
+    return _apply_logical_mapping_payload(**kwargs)
 
 
 def _layout(home: Path):
@@ -196,7 +204,7 @@ def test_unavailable_center_replacement_keeps_old_link_and_applies_other_items(
         ],
         home=tmp_path,
         additional_retirement_roots=historical_roots,
-        center_is_mounted=lambda _path: True,
+        content_adapter=MountedCenterContentAdapter(is_mounted=lambda _path: True),
     )
 
     assert result.status is MappingProjectionStatus.PENDING

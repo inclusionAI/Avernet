@@ -46,6 +46,7 @@ class DeviceAdapterHTTPStatusError(ValueError):
 
     def __init__(self, status_code: int, response_text: str) -> None:
         self.status_code = status_code
+        self.response_text = response_text
         super().__init__(
             f"Adapter returned HTTP {status_code}: {response_text}"
         )

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from engine.community.plugins.skills_pool.center_content import MountedCenterContentAdapter
+
 from engine.community.plugins.openclaw.plugin_impl import OpenClawPluginImpl
 
 
@@ -32,7 +34,7 @@ class _FakePool:
 
 def _impl(events: list[dict[str, Any]]) -> tuple[OpenClawPluginImpl, _FakeClient]:
     client = _FakeClient(events)
-    return OpenClawPluginImpl(pool=_FakePool(client)), client
+    return OpenClawPluginImpl(center_content_adapter=MountedCenterContentAdapter(), pool=_FakePool(client)), client
 
 
 async def test_inject_runid_final_does_not_stop_stream():

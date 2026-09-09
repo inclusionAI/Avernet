@@ -116,6 +116,9 @@ from agentclaw.community.core.skill_center.runtime_projection_contract import (
 from agentclaw.community.core.skill_center.services.runtime_projections.registry import (
     EngineRuntimeProjectionRegistry,
 )
+from agentclaw.community.core.skill_center.center_content_distribution import (
+    CenterContentDistribution,
+)
 from agentclaw.community.core.skills_pool.ports import SkillsPoolRuntimeProtocol
 from agentclaw.community.core.skill_center.policies.platform_default_mcp import (
     PlatformDefaultMcpPolicy,
@@ -562,6 +565,8 @@ class SkillCenterModule(
         self,
         pool_runtime: SkillsPoolRuntimeProtocol,
         pool_layouts: SkillsPoolLayoutRepositoryProtocol,
+        device_contexts: DeviceContextResolver,
+        center_content: CenterContentDistribution,
     ) -> EngineRuntimeProjectionRegistry:
         """Which runtime contract each engine's projection obeys.
 
@@ -591,6 +596,8 @@ class SkillCenterModule(
                 skill_delivery=SkillRuntimeDelivery(
                     pool_runtime=pool_runtime,
                     pool_layouts=pool_layouts,
+                    device_contexts=device_contexts,
+                    center_content=center_content,
                 ),
             ),
             by_engine={"teclaw": WholeArtifactRuntimeProjection()},
