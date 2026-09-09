@@ -77,6 +77,10 @@ def _install_test_hook(developer: Path) -> Path:
     hook.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HOOK_PATH, hook)
     hook.chmod(0o755)
+    scanner = developer / "scripts/ci/check_secrets.py"
+    scanner.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(REPO_ROOT / "scripts/ci/check_secrets.py", scanner)
+    scanner.chmod(0o755)
     dispatcher = developer / "scripts/ci/pre_push.sh"
     dispatcher.parent.mkdir(parents=True, exist_ok=True)
     dispatcher.write_text(
@@ -193,6 +197,107 @@ class PrePushHookTest(unittest.TestCase):
                 self.fail(f"test hook installation must be idempotent: {error}")
 
             self.assertEqual(second_hook, first_hook)
+
+    def test_plaintext_secret_blocks_push_before_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            remote, _, developer = _create_repositories(root)
+            _git(developer, "switch", "-c", "feature")
+            # Build the synthetic credential from fragments so this test source
+            # does not itself contain a contiguous credential-like value.
+            fake_value = "Q7x!m2#P9v@L4sN8qZ6r"
+            _write(
+                developer,
+                "config/local.env",
+                "SERVICE_API_KEY=" + fake_value + "\n",
+            )
+            _git(developer, "add", ".")
+            _git(developer, "commit", "-m", "add local credential")
+            feature_sha = _git(developer, "rev-parse", "HEAD")
+
+            hook = _install_test_hook(developer)
+            result = _invoke_hook(
+                developer,
+                remote,
+                hook,
+                feature_sha,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("plaintext secret-like content detected", result.stderr)
+            self.assertIn("config/local.env:1", result.stderr)
+            self.assertIn("added line: SERVICE_API_KEY=Q7***Z6r", result.stderr)
+            self.assertNotIn("dispatch-base:", result.stdout)
+            self.assertNotIn(fake_value, result.stderr)
+
+    def test_alibaba_cloud_access_keys_block_push_with_masked_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            remote, _, developer = _create_repositories(root)
+            _git(developer, "switch", "-c", "feature")
+            # Build synthetic Alibaba Cloud credentials from fragments so this
+            # test source does not contain contiguous credential-like values.
+            fake_access_key_id = "LTAI" + "5x7Y9z2Q4w6E8r0T1u3I"
+            fake_access_key_secret_parts = (
+                "aB3dE5gH7jK9mN2pQ4sT6",
+                "vW8xY0z",
+            )
+            fake_access_key_secret = "".join(fake_access_key_secret_parts)
+            fake_sts_access_key_id = "STS." + "a1B2c3D4e5F6g7H8"
+            fake_security_token = "CAIS" + "aB3dE5gH7jK9mN2pQ4sT6"
+            _write(
+                developer,
+                "config/alibaba.env",
+                "ALIBABA_CLOUD_ACCESS_KEY_ID="
+                + fake_access_key_id
+                + "\nALIBABA_CLOUD_ACCESS_KEY_SECRET="
+                + fake_access_key_secret
+                + "\nALIBABA_CLOUD_STS_ACCESS_KEY_ID="
+                + fake_sts_access_key_id
+                + "\nALIBABA_CLOUD_SECURITY_TOKEN="
+                + fake_security_token
+                + "\n",
+            )
+            _git(developer, "add", ".")
+            _git(developer, "commit", "-m", "add Alibaba Cloud credentials")
+            feature_sha = _git(developer, "rev-parse", "HEAD")
+
+            hook = _install_test_hook(developer)
+            result = _invoke_hook(
+                developer,
+                remote,
+                hook,
+                feature_sha,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Alibaba Cloud AccessKey ID", result.stderr)
+            self.assertIn("Alibaba Cloud STS AccessKey ID", result.stderr)
+            self.assertIn("Alibaba Cloud security token", result.stderr)
+            self.assertIn("Alibaba Cloud credential-like assignment", result.stderr)
+            self.assertIn(
+                "added line: ALIBABA_CLOUD_ACCESS_KEY_ID=LT***u3I",
+                result.stderr,
+            )
+            self.assertIn(
+                "added line: ALIBABA_CLOUD_ACCESS_KEY_SECRET=aB***Y0z",
+                result.stderr,
+            )
+            self.assertIn(
+                "added line: ALIBABA_CLOUD_STS_ACCESS_KEY_ID=ST***7H8",
+                result.stderr,
+            )
+            self.assertIn(
+                "added line: ALIBABA_CLOUD_SECURITY_TOKEN=CA***sT6",
+                result.stderr,
+            )
+            self.assertNotIn(fake_access_key_id, result.stderr)
+            self.assertNotIn(fake_access_key_secret, result.stderr)
+            self.assertNotIn(fake_sts_access_key_id, result.stderr)
+            self.assertNotIn(fake_security_token, result.stderr)
+            self.assertNotIn("dispatch-base:", result.stdout)
 
     def test_refreshes_stale_default_target_before_selecting_modules(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
