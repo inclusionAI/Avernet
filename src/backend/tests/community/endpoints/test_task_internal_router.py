@@ -12,9 +12,6 @@ from agentclaw.community.api.task.task_grant_service import (
     RevokeResult,
     TaskClaimGrantServiceProtocol,
 )
-from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
-    TaskClaimJoinGateProtocol,
-)
 from agentclaw.community.core.task.domain.errors import TaskError
 from agentclaw.community.core.task.domain.models import (
     NodeOpResult,
@@ -538,18 +535,6 @@ def _seed_grant_service(world) -> None:
     bind_overrides(world, TaskClaimGrantServiceProtocol, {"grant": grant, "revoke": revoke})
 
 
-def _seed_claim_join_gate(world) -> None:
-    bind_overrides(
-        world,
-        TaskClaimJoinGateProtocol,
-        {
-            "is_enabled": lambda _self: False,
-            "get_enabled": lambda _self, *, env: False,
-            "set_enabled": lambda _self, *, enabled, env, operator=None: bool(enabled),
-        },
-    )
-
-
 @endpoint_test(
     method="POST",
     path=f"{_BASE}/grant",
@@ -593,50 +578,4 @@ def internal_revoke_happy():
     expect=ExpectError(status=401),
 )
 def internal_revoke_unauthenticated():
-    pass
-
-
-@endpoint_test(
-    method="GET",
-    path=f"{_BASE}/claim-join-filter",
-    scenario="happy_ok",
-    seed=_seed_claim_join_gate,
-    input=CaseInput(headers=_STAFF_COOKIE),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": False}}),
-)
-def internal_claim_join_filter_get_happy():
-    pass
-
-
-@endpoint_test(
-    method="GET",
-    path=f"{_BASE}/claim-join-filter",
-    scenario="err_unauthenticated",
-    input=CaseInput(),
-    expect=ExpectError(status=401),
-)
-def internal_claim_join_filter_get_unauthenticated():
-    pass
-
-
-@endpoint_test(
-    method="POST",
-    path=f"{_BASE}/claim-join-filter",
-    scenario="happy_ok",
-    seed=_seed_claim_join_gate,
-    input=CaseInput(headers=_STAFF_COOKIE, json_body={"enabled": True}),
-    expect=ExpectSuccess(status=200, json_contains={"code": 200000, "data": {"enabled": True}}),
-)
-def internal_claim_join_filter_post_happy():
-    pass
-
-
-@endpoint_test(
-    method="POST",
-    path=f"{_BASE}/claim-join-filter",
-    scenario="err_unauthenticated",
-    input=CaseInput(json_body={"enabled": True}),
-    expect=ExpectError(status=401),
-)
-def internal_claim_join_filter_post_unauthenticated():
     pass

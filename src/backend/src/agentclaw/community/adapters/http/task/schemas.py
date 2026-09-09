@@ -825,18 +825,3 @@ class TaskSettingStateDTO(BaseModel):
     )
     enabled: bool = Field(..., description="当前开关状态")
     env: str = Field(..., description="生效环境(prod/pre/dev)")
-
-
-class TaskClaimJoinFilterRequestDTO(BaseModel):
-    """Legacy request DTO for the hidden compatibility route."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(..., description="是否启用 claim_join_filter")
-
-
-class TaskClaimJoinFilterStateDTO(BaseModel):
-    """Legacy response DTO for the hidden compatibility route."""
-
-    enabled: bool = Field(..., description="当前开关状态")
-    env: str = Field(..., description="生效环境(prod/pre/dev)")

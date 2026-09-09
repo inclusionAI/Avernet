@@ -63,8 +63,6 @@ from agentclaw.community.adapters.http.task.schemas import (
     op_result_to_dto,
     TaskSettingRequestDTO,
     TaskSettingStateDTO,
-    TaskClaimJoinFilterRequestDTO,
-    TaskClaimJoinFilterStateDTO,
     TaskGrantRequestDTO,
     TaskGrantResultDTO,
     TaskRevokeRequestDTO,
@@ -93,7 +91,6 @@ from agentclaw.community.core.task.task_dispatch.claim_join_gate import (
     HARNESS_POLLER,
     SEARCH_SKILL,
     SKILL_REPORT,
-    TaskClaimJoinGateProtocol,
     TaskSettingsServiceProtocol,
 )
 from agentclaw.community.api.task.task_grant_service import (
@@ -360,45 +357,6 @@ async def set_task_setting(
     )
     return envelope(
         TaskSettingStateDTO(setting_type=body.setting_type, enabled=enabled, env=env),
-        request,
-    )
-
-
-# 旧路径保留为隐藏兼容入口，新的调用方应使用 /settings?setting_type=...。
-@router.get(
-    "/claim-join-filter",
-    response_model=Envelope[TaskClaimJoinFilterStateDTO],
-    include_in_schema=False,
-)
-@envelope_errors
-async def get_task_claim_join_filter(
-    request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
-) -> Envelope[TaskClaimJoinFilterStateDTO]:
-    env = get_current_env()
-    return envelope(
-        TaskClaimJoinFilterStateDTO(enabled=service.get_enabled(env=env), env=env),
-        request,
-    )
-
-
-@router.post(
-    "/claim-join-filter",
-    response_model=Envelope[TaskClaimJoinFilterStateDTO],
-    include_in_schema=False,
-)
-@envelope_errors
-async def set_task_claim_join_filter(
-    body: TaskClaimJoinFilterRequestDTO,
-    request: Request,
-    user: AuthenticatedUser = Depends(get_current_user),
-    service: TaskClaimJoinGateProtocol = Injected(TaskClaimJoinGateProtocol),  # noqa: B008
-) -> Envelope[TaskClaimJoinFilterStateDTO]:
-    env = get_current_env()
-    enabled = service.set_enabled(enabled=body.enabled, env=env, operator=user.id)
-    return envelope(
-        TaskClaimJoinFilterStateDTO(enabled=enabled, env=env),
         request,
     )
 
