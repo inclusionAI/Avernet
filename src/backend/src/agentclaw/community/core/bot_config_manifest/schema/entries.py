@@ -321,7 +321,7 @@ def _refusal_location(
 def _classify(
     ctx: Context, location: str, entry: dict[str, Any], selector: str
 ) -> SourceDecl | None:
-    """Name the source form, resolve its protocol, and gate it on this build.
+    """Resolve which protocol an entry's content travels by.
 
     Three roads reach a protocol. Inline ``content`` *is* one. An inline
     ``source:`` string is an object over https, so ``oss``. Everything else —

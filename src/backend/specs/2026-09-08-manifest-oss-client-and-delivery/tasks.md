@@ -204,6 +204,24 @@ double had to learn the same thing — `getaddrinfo` answers a numeric host from
 the string, and a double returning `[]` there would have reported the guard
 passing a case the real resolver refuses.
 
+**Both source vocabularies were deleted after review, not just renamed.**
+This spec planned `SourceForm.URL` → `SourceForm.OSS`, a rename on a published
+`constructs` axis, and said the axis "stays exactly as it is" otherwise. The
+author asked twice why `SourceForm` and `SourceKind` both existed, and I
+defended the split twice before measuring it. Measured: across all 50
+engine/bot-type/teclaw configurations no source *form* ever carries a verdict
+the other forms don't — the only refusal is bot-wide and hits all four
+identically — and because the category gate deliberately does not
+short-circuit, the per-entry form check restated the category's own refusal in
+identical words. `SourceForm` is gone, its four rows off the published
+`constructs` array, and `EntrySource` with it: `resolve_source` answers
+`SourceDecl | None`, since `SourceDecl.protocol` was always a `SourceKind`
+that includes `CONTENT`. One vocabulary where the plan kept two.
+
+The lesson is the one this file keeps recording: I argued from the design I
+had written rather than from what the code did, and the reviewer was right
+both times. The measurement took one script.
+
 **The prose correction claimed four places and changed three.** `03acbc72`
 listed `spec.md`, the DDL comment, the Chinese schema doc and the
 `ObjectStoreTarget` docstring; its diff touched three files, leaving the DDL

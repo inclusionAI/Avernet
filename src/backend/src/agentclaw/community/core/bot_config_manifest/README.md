@@ -35,10 +35,10 @@ services that own each area and passes no secret of its own.
 
 W1 parses the *whole* v1 vocabulary while only part of it has code behind it. So
 anything the schema can express but nothing can act on is reported unsupported
-and refused at `PUT` — and the gap is **not confined to categories**: a *source
-form* with no resolver fails in exactly the same way. That is why
-`capabilities.py` answers per **construct** (category, section, source form)
-rather than per bot or per category.
+and refused at `PUT` — and the gap is **not confined to categories**: a
+*(category, protocol) pair* with no resolver fails in exactly the same way.
+That is why `capabilities.py` answers per **construct** (category, section)
+rather than per bot, and publishes `source_matrix` for the pairs.
 
 As of the first wave the unsupported constructs are (`cli_tools` left this
 table when W9 materialised it — the surface accepts it because something now
@@ -616,7 +616,6 @@ provides:
   - ConstructKind
   - ManifestCategory
   - ManifestSection
-  - SourceForm
   - kind_of
   - parse_category
   - ManifestWriteResult

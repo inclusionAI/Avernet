@@ -393,7 +393,7 @@ def resolve_capabilities(
 
 
 def _all_constructs() -> Iterable[Construct]:
-    """Every construct, categories first, then sections, then source forms."""
+    """Every construct, categories first, then sections."""
     yield from ManifestCategory
     yield from ManifestSection
 
