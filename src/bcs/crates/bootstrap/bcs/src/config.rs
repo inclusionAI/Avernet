@@ -573,20 +573,10 @@ fn default_group_session_ws_signing_key_secret() -> String {
     "bcn-group-session-ws-jwt".to_string()
 }
 
-/// Optional resolver; the bearer secret is loaded only in the composition root.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CoordinationResolverConfig {
-    pub base_url: String,
-    pub token_env: String,
-}
-
 /// BCS configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BcsConfig {
-    #[serde(default)]
-    pub coordination_resolver: Option<CoordinationResolverConfig>,
     /// Address to bind to.
     #[serde(default = "default_bind")]
     pub bind: String,
@@ -1145,7 +1135,6 @@ fn validate_http_base_url(value: &str, field_name: &str) -> Result<(), String> {
 impl Default for BcsConfig {
     fn default() -> Self {
         Self {
-            coordination_resolver: None,
             bind: default_bind(),
             port: default_port(),
             bots_base_dir: PathBuf::from("/bots"),
@@ -3256,26 +3245,5 @@ enabled = true
         .expect("config parses");
         assert_eq!(config.human_notify.provider.as_deref(), Some("dummy"));
         assert!(config.human_notify.enabled_provider("dummy"));
-    }
-}
-
-#[cfg(test)]
-mod coordination_resolver_tests {
-    use super::*;
-
-    #[test]
-    fn coordination_resolver_is_disabled_by_default() {
-        assert!(BcsConfig::default().coordination_resolver.is_none());
-    }
-
-    #[test]
-    fn coordination_resolver_requires_endpoint_and_secret_selector() {
-        assert!(serde_json::from_value::<CoordinationResolverConfig>(serde_json::json!({
-            "base_url": "http://127.0.0.1:8888"
-        })).is_err());
-        assert!(serde_json::from_value::<CoordinationResolverConfig>(serde_json::json!({
-            "base_url": "http://127.0.0.1:8888", "token_env": "BCS_COORDINATION_TOKEN",
-            "token": "must not embed credentials"
-        })).is_err());
     }
 }

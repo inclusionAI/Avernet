@@ -295,7 +295,7 @@ dependencies = [
  "bcs-collaboration-template",
  "bcs-config",
  "bcs-config-api",
- "bcs-coordination-client",
+ "bcs-coordination-store",
  "bcs-db-api",
  "bcs-db-local",
  "bcs-db-mysql",
@@ -979,17 +979,18 @@ dependencies = [
 ]
 
 [[package]]
-name = "bcs-coordination-client"
+name = "bcs-coordination-store"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "axum",
+ "bcs-cache-api",
+ "bcs-cache-local",
  "bcs-service-api",
  "bcs-test-support",
- "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

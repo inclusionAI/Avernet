@@ -2,7 +2,7 @@
 
 ## Provides
 
-- Optional coordination resolver HTTP adapter composition and credential loading.
+- Coordination store composition using the selected cache plugin without additional settings.
 - BCS process entrypoint and composition root.
 - Config loading, logging bootstrap, runtime assembly, and adapter registration.
 - Concrete selection of services, plugins, and external clients from validated config.
