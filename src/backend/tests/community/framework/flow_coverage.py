@@ -107,6 +107,13 @@ _RUNTIME_BINDING_EXEMPT_REASON = (
     "in singlebox."
 )
 
+_TOKEN_EXCHANGE_EXEMPT_REASON = (
+    "The neutral token pipeline is intentionally empty in community/singlebox; "
+    "real exchange, Passport, and BaaS append behavior is installed only by the "
+    "corp profile. Covered by pipeline/orchestrator and BaaS HTTP seam tests. "
+    "Drain when singlebox has a real token exchange plugin and BaaS target."
+)
+
 _TASK_FRAMEWORK_EXEMPT_REASON = (
     "Task goal-driven execution framework skeleton (core/task). No HTTP/router or DI surface is wired yet (no adapters/http/openapi_v1/task/, no di/modules/task_module.py), so there is no endpoint for an e2e flow to drive. Covered by domain/unit tests on the graph, planner, dispatcher, runner, and harness as each lands. Drain this when a router + DI provider expose the TaskService facade over a real singlebox stack."
 )
@@ -241,6 +248,7 @@ SINGLEBOX_E2E_EXEMPT: dict[str, str] = {
         "Agent Principal and BaaS outbound-rule calls require remote credentials; "
         "covered by local API/core tests until a singlebox-compatible external seam exists."
     ),
+    "token_exchange": _TOKEN_EXCHANGE_EXEMPT_REASON,
     "common_config": _EXEMPT_REASON,
     "config": _EXEMPT_REASON,
     "config_compose": _EXEMPT_REASON,

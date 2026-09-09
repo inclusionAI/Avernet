@@ -33,6 +33,7 @@ from agentclaw.community.core.runtime_binding.service import RuntimeBindingResol
 from agentclaw.community.core.service_bot.services.baas_service import BaasService
 from agentclaw.community.core.mcp.services.repositories import BotMCPProvider
 from agentclaw.community.core.repository.implementations.identity.caller_identity import CallerIdentityRepository
+from agentclaw.community.core.token_exchange import NoopTokenPluginPipeline, TokenExchangeOrchestrator, TokenPluginPipeline
 from agentclaw.community.plugin_api.auth import AuthPlugin
 from agentclaw.community.plugin_api.passport import PassportPlugin
 
@@ -136,7 +137,7 @@ class CallerIdentityModule(Module):
         runtime_updater: CallerRuntimeUpdater,
         runtime_bindings: RuntimeBindingResolutionService,
         lock_repository: BotCollabLockRepositoryProtocol,
-    ) -> CallerIamTokenServiceProtocol:
+    ) -> CallerIamTokenService:
         return CallerIamTokenService(
             caller_identity=caller_identity,
             auth_plugin=auth_plugin,
@@ -144,4 +145,27 @@ class CallerIdentityModule(Module):
             runtime_updater=runtime_updater,
             runtime_bindings=runtime_bindings,
             lock_repository=lock_repository,
+        )
+
+    @singleton
+    @provider
+    @inject
+    def token_plugin_pipeline(self) -> TokenPluginPipeline:
+        """Community-safe empty pipeline; corp overrides this binding."""
+        return NoopTokenPluginPipeline()
+
+    @singleton
+    @provider
+    @inject
+    def caller_iam_token_service_protocol(
+        self,
+        caller_service: CallerIamTokenService,
+        token_pipeline: TokenPluginPipeline,
+        bot_repository: BotRepository,
+    ) -> CallerIamTokenServiceProtocol:
+        """Expose Caller through a Caller-first independent plugin wrapper."""
+        return TokenExchangeOrchestrator(
+            caller_service=caller_service,
+            token_pipeline=token_pipeline,
+            bot_repository=bot_repository,
         )
