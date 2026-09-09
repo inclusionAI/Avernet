@@ -11,7 +11,7 @@ import NodePropertyPanel from '../components/NodePropertyPanel'
 import WorkflowConfigPanel from '../components/WorkflowConfigPanel'
 import YamlEditor from '../components/YamlEditor'
 import WorkflowHistoryPanel from '../components/WorkflowHistoryPanel'
-import { compactDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
+import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../components/WorkflowVersionDiff'
 import { api } from '@avernet/clawweb-shared/web/api/client'
 import type { WorkflowSpec, DeployHistoryItem, VersionSnapshot } from '@avernet/clawweb-shared/web/types'
 
@@ -47,6 +47,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   const [baselineIsActive, setBaselineIsActive] = useState(false)
   const [activeSnapshot, setActiveSnapshot] = useState<VersionSnapshot | null>(null)
   const [showDeploymentDiff, setShowDeploymentDiff] = useState(false)
+  const [deploymentBaselineRevision, setDeploymentBaselineRevision] = useState(0)
 
   const { spec, isDirty, selectedNodeId, validationErrors, loadSpec, createNew, importYaml, selectNode, markClean } = useEditorStore()
 
@@ -108,7 +109,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
     return () => {
       cancelled = true
     }
-  }, [selectedWorkflowId])
+  }, [selectedWorkflowId, deploymentBaselineRevision])
 
   useEffect(() => {
     if (!selectedWorkflowId || !latestDeploy) {
@@ -130,7 +131,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
   }, [selectedWorkflowId, latestDeploy])
 
   const deployedSpecText = activeSnapshot ? formatSpecForDiff(activeSnapshot.specJson) : ''
-  const savedSpecText = workflowSpec ? stringifyYaml(workflowSpec, { lineWidth: 0 }) : ''
+  const savedSpecText = workflowSpec ? formatCurrentSpecForDiff(workflowSpec) : ''
   const hasUndeployedChanges = Boolean(activeSnapshot && workflowSpec && !specsEqual(deployedSpecText, savedSpecText))
   const deploymentBaselineLabel = baselineIsActive ? '生效' : '最新发布'
   const deploymentDiffLines = useMemo(
@@ -602,6 +603,7 @@ export default function Editor({ embedded = false, initialWorkflowId }: EditorPr
           <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl">
             <WorkflowHistoryPanel
               workflowId={selectedWorkflowId}
+              onActiveVersionChange={() => setDeploymentBaselineRevision((revision) => revision + 1)}
               onClose={() => setShowHistory(false)}
             />
           </div>

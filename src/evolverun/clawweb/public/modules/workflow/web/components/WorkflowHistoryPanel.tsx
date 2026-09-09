@@ -6,6 +6,7 @@ import WorkflowVersionDiff from './WorkflowVersionDiff'
 
 interface WorkflowHistoryPanelProps {
   workflowId: string
+  onActiveVersionChange?: () => void
   onClose?: () => void
 }
 
@@ -39,7 +40,7 @@ function specJsonToText(specJson: string): string {
   }
 }
 
-export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHistoryPanelProps) {
+export default function WorkflowHistoryPanel({ workflowId, onActiveVersionChange, onClose }: WorkflowHistoryPanelProps) {
   const [history, setHistory] = useState<DeployHistoryItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -55,33 +56,37 @@ export default function WorkflowHistoryPanel({ workflowId, onClose }: WorkflowHi
   const [diffToDeploy, setDiffToDeploy] = useState<number | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
 
-  const loadHistory = useCallback(() => {
+  const loadHistory = useCallback(async () => {
     setLoading(true)
     setError(null)
-    api.workflows
-      .getHistory(workflowId, 50, true)
+    try {
+      const r = await api.workflows.getHistory(workflowId, 50, true)
       // `edit` rows are from the old browser-save flow. They have no Git tag and
       // cannot run as a version, so do not present them as release history.
-      .then((r) => setHistory((r.history ?? []).filter((item) => item.action !== 'edit')))
-      .catch((err) => setError(err instanceof Error ? err.message : '加载历史失败'))
-      .finally(() => setLoading(false))
+      setHistory((r.history ?? []).filter((item) => item.action !== 'edit'))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载历史失败')
+    } finally {
+      setLoading(false)
+    }
   }, [workflowId])
 
   useEffect(() => {
-    loadHistory()
+    void loadHistory()
   }, [loadHistory])
 
   const handleActivateVersion = useCallback(async (deployNumber: number, version: number) => {
     setActivating(version)
     try {
       await api.workflows.activateVersion(workflowId, version)
-      loadHistory()
+      await loadHistory()
+      onActiveVersionChange?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : '激活版本失败')
     } finally {
       setActivating(null)
     }
-  }, [workflowId, loadHistory])
+  }, [workflowId, loadHistory, onActiveVersionChange])
 
   // Reset selections on workflow change
   useEffect(() => {

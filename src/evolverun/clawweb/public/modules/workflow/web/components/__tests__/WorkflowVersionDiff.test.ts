@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { compactDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../WorkflowVersionDiff'
+import { compactDiff, formatCurrentSpecForDiff, formatSpecForDiff, specsEqual, unifiedDiff } from '../WorkflowVersionDiff'
 
 describe('WorkflowVersionDiff', () => {
   it('formats JSON snapshots as multiline YAML before calculating the diff', () => {
@@ -35,5 +35,13 @@ describe('WorkflowVersionDiff', () => {
   it('does not flag reordered YAML fields as an undeployed change', () => {
     expect(specsEqual('id: support\ntitle: 支持\nnodes: []\n', 'nodes: []\ntitle: 支持\nid: support\n')).toBe(true)
     expect(specsEqual('id: support\ntitle: 支持\n', 'id: support\ntitle: 新支持\n')).toBe(false)
+  })
+
+  it('removes editor-enriched fields before comparing a release with the current spec', () => {
+    const deployed = formatSpecForDiff(JSON.stringify({ id: 'support', title: '支持', nodes: [], version: 2 }))
+    const current = formatCurrentSpecForDiff({ id: 'support', title: '支持', nodes: [], version: 2, updatedAt: 123, facade: { command: 'support' } })
+
+    expect(specsEqual(deployed, current)).toBe(true)
+    expect(unifiedDiff(deployed, current).filter((line) => line.type === 'add' || line.type === 'del')).toEqual([])
   })
 })

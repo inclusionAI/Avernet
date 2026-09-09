@@ -109,16 +109,32 @@ export function compactDiff(lines: DiffLine[], contextLines = 3): DiffLine[] {
 /** Turn stored JSON (or the legacy { content: yaml } wrapper) into readable YAML.
  * The history API deliberately returns the original snapshot; formatting it here
  * keeps the raw snapshot lossless while making line-level diff useful. */
+function stripSyntheticSpecFields(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const { updatedAt: _updatedAt, version: _version, facade: _facade, ...persistedSpec } = value as Record<string, unknown>
+  return persistedSpec
+}
+
+/**
+ * Format a deploy-history snapshot in the same persisted-spec shape used for
+ * editor comparisons. `updatedAt`, `version`, and `facade` are enriched or
+ * synchronized metadata, not deployable workflow content.
+ */
 export function formatSpecForDiff(specJson: string): string {
   try {
     const parsed = JSON.parse(specJson)
     if (parsed && typeof parsed === 'object' && typeof parsed.content === 'string' && !Array.isArray(parsed.nodes)) {
-      return parsed.content
+      return stringifyYaml(stripSyntheticSpecFields(parseYaml(parsed.content)), { lineWidth: 0 })
     }
-    return stringifyYaml(parsed, { lineWidth: 0 })
+    return stringifyYaml(stripSyntheticSpecFields(parsed), { lineWidth: 0 })
   } catch {
     return specJson
   }
+}
+
+/** Format the current editor value using the same persisted-spec shape as a deploy snapshot. */
+export function formatCurrentSpecForDiff(spec: unknown): string {
+  return stringifyYaml(stripSyntheticSpecFields(spec), { lineWidth: 0 })
 }
 
 function sortSpecValue(value: unknown): unknown {
