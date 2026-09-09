@@ -575,20 +575,23 @@ class BotRunRequestExecutor:
             timeout=timeout_sec,
             attachments=attachments,
         )
+        # 常驻 next 任务：用 asyncio.wait 加 flush 间隔超时等待，
+        # 超时只是返回而不取消 __anext__（wait_for 会 cancel 并关闭
+        # async generator，导致后续 chunk 丢失）。
+        next_task: asyncio.Task[Any] = asyncio.ensure_future(stream_iter.__anext__())
         try:
             while True:
-                try:
-                    # 用 wait_for 给 __anext__ 加 flush 间隔超时：
-                    # 上游卡住时也能按周期 flush，避免 buffer 堆积
-                    chunk = await asyncio.wait_for(
-                        stream_iter.__anext__(),
-                        timeout=self._stream_flush_interval,
-                    )
+                done, _pending = await asyncio.wait(
+                    {next_task}, timeout=self._stream_flush_interval
+                )
+                if done:
+                    try:
+                        chunk = next_task.result()
+                    except StopAsyncIteration:
+                        break
                     _handle_chunk(chunk)
-                except asyncio.TimeoutError:
-                    pass  # 超时无新 chunk，走到下面统一 flush 判断
-                except StopAsyncIteration:
-                    break
+                    next_task = asyncio.ensure_future(stream_iter.__anext__())
+                # 超时无新 chunk 时 done 为空，直接走到下面统一 flush 判断
 
                 # 统一 flush 判断：时间窗口 或 字节阈值
                 if pending and (
@@ -609,6 +612,9 @@ class BotRunRequestExecutor:
             self._cache_plugin.set(cache_key, f"{seq}:error", ttl_seconds=120)
             self._repo.update_error(run.run_id, "stream execution failed")
             return
+        finally:
+            if not next_task.done():
+                next_task.cancel()
 
         # flush 残留 buffer
         _flush_buffers()

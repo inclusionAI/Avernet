@@ -1412,3 +1412,146 @@ async def test_executor_without_eval_id_does_not_write_eval_session_log():
     bot_svc.send_message.assert_awaited_once()
     eval_log.enrich_chat_metadata.assert_called_once()
     eval_log.log_eval_session.assert_not_called()
+
+
+# ----------------------------- stream 定时 flush（上游 stall） -----------------------------
+
+
+async def test_executor_stream_flushes_periodically_when_upstream_stalls():
+    """上游 stall（长时间无新 chunk）时，buffer 按 flush 间隔定时 flush，
+    而不是一直等下一个 chunk 才 flush。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-stall",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    # 第一个 delta 立即产出，随后上游 stall 远超 flush 间隔，最后才给 final。
+    # 若 flush 依赖"下一个 chunk 到达"，则 delta 会被压到 final 才写出；
+    # 定时 flush 应在 stall 期间就把 delta 写出去。
+    flush_interval = 0.05
+    stall_seconds = flush_interval * 6
+
+    async def _stall_stream(*a, **kw):
+        yield StreamChunk(type="delta", content="early")
+        await asyncio.sleep(stall_seconds)
+        yield StreamChunk(type="final", content="done")
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stall_stream
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    cache = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo,
+        plugin,
+        selector,
+        chunk_repo,
+        cache,
+        _api_key_repo(),
+        MagicMock(),
+        stream_flush_interval_seconds=flush_interval,
+    )
+
+    async def _run_exec():
+        await executor.execute(
+            _queue_rec(run_id="r-stall", bot_id="bot-1:ent", session_id="sess-stall")
+        )
+
+    task = asyncio.create_task(_run_exec())
+
+    # 在 stall 期间轮询，delta 应在 final 到达前就被 flush 出去
+    flushed_early = False
+    for _ in range(int(stall_seconds / flush_interval)):
+        await asyncio.sleep(flush_interval)
+        delta_calls = [
+            c
+            for c in chunk_repo.insert_chunk.call_args_list
+            if c[1]["chunk_type"] == "delta"
+        ]
+        if delta_calls:
+            flushed_early = True
+            break
+
+    await task
+
+    assert flushed_early, "delta should be flushed during stall, not wait for final"
+
+    # 最终 delta + final 各一行，seq 递增
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
+    final_calls = [c for c in insert_calls if c[1]["chunk_type"] == "final"]
+    assert len(delta_calls) == 1
+    assert delta_calls[0][1]["content"] == "early"
+    assert len(final_calls) == 1
+    assert delta_calls[0][1]["seq"] < final_calls[0][1]["seq"]
+
+    # watermark 随 flush 推进
+    assert cache.set.called
+    repo.update_result.assert_called_once()
+
+
+async def test_executor_stream_stall_then_normal_end_flushes_residual():
+    """stall 后流正常结束（StopAsyncIteration），残留 buffer 被 flush，结果正常写入。"""
+    repo = MagicMock()
+    plugin = MagicMock()
+    selector = MagicMock()
+
+    repo.get_by_run_id.return_value = _run(
+        run_id="r-stall-end",
+        bot_id="bot-1:ent",
+        metadata={"request_type": "chat", "stream": "true"},
+    )
+    plugin.get_binding = AsyncMock(return_value=_binding_data())
+
+    flush_interval = 0.05
+
+    async def _stall_then_end(*a, **kw):
+        yield StreamChunk(type="delta", content="part1")
+        await asyncio.sleep(flush_interval * 4)
+        yield StreamChunk(type="delta", content="part2")
+        yield StreamChunk(type="final", content="part1part2")
+
+    bot_svc = MagicMock()
+    bot_svc.send_message_stream = _stall_then_end
+    selector.select.return_value = bot_svc
+
+    chunk_repo = MagicMock()
+    executor = BotRunRequestExecutor(
+        repo,
+        plugin,
+        selector,
+        chunk_repo,
+        MagicMock(),
+        _api_key_repo(),
+        MagicMock(),
+        stream_flush_interval_seconds=flush_interval,
+    )
+    await executor.execute(
+        _queue_rec(run_id="r-stall-end", bot_id="bot-1:ent", session_id="sess-se")
+    )
+
+    insert_calls = chunk_repo.insert_chunk.call_args_list
+    delta_calls = [c for c in insert_calls if c[1]["chunk_type"] == "delta"]
+    final_calls = [c for c in insert_calls if c[1]["chunk_type"] == "final"]
+
+    # stall 期间 part1 被定时 flush，part2 随后 flush：delta 拆为 2 行
+    assert len(delta_calls) == 2
+    assert delta_calls[0][1]["content"] == "part1"
+    assert delta_calls[1][1]["content"] == "part2"
+    assert len(final_calls) == 1
+
+    # seq 严格递增
+    seqs = [c[1]["seq"] for c in delta_calls] + [final_calls[0][1]["seq"]]
+    assert seqs == sorted(seqs)
+
+    # 结果正常写入 final content
+    repo.update_result.assert_called_once()
+    assert repo.update_result.call_args[1]["content_long"] == "part1part2"
+    repo.update_error.assert_not_called()
