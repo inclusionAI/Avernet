@@ -4,8 +4,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { cn } from '@/utils/utils';
-import { Check, ChevronDown, Plus } from 'lucide-react';
+import { ChevronDown, Plus } from 'lucide-react';
 import React, { useState } from 'react';
 import type { MessageViewScope } from '../types';
 
@@ -61,11 +60,11 @@ const CreateSessionControl: React.FC<CreateSessionControlProps> = ({
         variant="secondary"
         soft
         size="sm"
-        onClick={() => onCreateSession('full')}
+        onClick={() => onCreateSession()}
         loading={isCreating}
         leftIcon={<Plus className="h-3.5 w-3.5" />}
         className="h-7 gap-1 rounded-r-none pr-2 text-xs"
-        title="以完整视角新建会话"
+        title="按群中您的消息视角新建会话"
       >
         新建会话
       </Button>
@@ -99,14 +98,6 @@ const CreateSessionControl: React.FC<CreateSessionControlProps> = ({
                 }}
                 className="h-auto items-start justify-start gap-2 rounded-md px-2.5 py-2 text-left hover:bg-lavender-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lavender-400"
               >
-                <Check
-                  className={cn(
-                    'mt-0.5 h-3.5 w-3.5 flex-shrink-0',
-                    option.value === 'full'
-                      ? 'text-lavender-500'
-                      : 'text-transparent',
-                  )}
-                />
                 <span className="min-w-0">
                   <span className="block text-xs font-medium text-slate-700">
                     {option.label}
