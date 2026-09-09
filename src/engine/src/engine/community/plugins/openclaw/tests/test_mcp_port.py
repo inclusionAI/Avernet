@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import asyncio
+import time
 
 import pytest
 
@@ -47,6 +49,17 @@ def _seed(cfg_path, servers: dict) -> None:
 async def test_list_empty_when_no_file(impl):
     out = await impl.list_servers()
     assert out == []
+
+
+@pytest.mark.asyncio
+async def test_list_yields_while_configuration_file_is_read(impl, monkeypatch):
+    def slow_load():
+        time.sleep(0.1)
+        return {"mcpServers": {}}, "mcpServers", {}
+
+    monkeypatch.setattr(impl, "_mcp_load", slow_load)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(impl.list_servers(), timeout=0.01)
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,8 @@ canned primitive dicts.  Verifies:
 """
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -198,6 +200,19 @@ async def test_readiness_rejects_invalid_config():
     result = await OpenClawMcpAdapter(port).readiness()
     assert result.status.value == "INVALID"
     assert result.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_readiness_yields_so_outer_deadline_can_cancel_slow_file_read():
+    port = _FakeMcpPort()
+
+    async def slow_list():
+        await asyncio.to_thread(time.sleep, 0.1)
+        return []
+
+    port.list_servers = slow_list
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(OpenClawMcpAdapter(port).readiness(), timeout=0.01)
 
 
 @pytest.mark.asyncio

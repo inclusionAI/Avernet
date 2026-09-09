@@ -1,6 +1,7 @@
 """_McpPortMixin — MCP server management port methods."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
@@ -109,7 +110,7 @@ class _McpPortMixin:
         ``engines/openclaw/mcp.py:OpenClawMCPService.list_servers`` (raw
         extraction only; DTO build moved to adapter).
         """
-        _, _, servers = self._mcp_load()
+        _, _, servers = await asyncio.to_thread(self._mcp_load)
         entries = []
         for code, raw in servers.items():
             entry = dict(raw) if isinstance(raw, dict) else {}
