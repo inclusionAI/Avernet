@@ -115,6 +115,7 @@ export function createInternalDeployHistoryRouter(
       : row.gmt_modified;
     res.json({
       found: true,
+      workflowId,
       packId: row.pack_id,
       deployNumber: row.deploy_number,
       version: row.version,
@@ -184,6 +185,8 @@ export function createInternalDeployHistoryRouter(
       : row.gmt_create;
     res.json({
       found: true,
+      workflowId,
+      packId: row.pack_id,
       deployNumber: row.deploy_number,
       version: row.version,
       tagName: row.tag_name,
